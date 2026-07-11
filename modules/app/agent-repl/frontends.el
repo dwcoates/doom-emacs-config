@@ -18,6 +18,13 @@
 ;; the interrupt commands) resolve through this registry; the workspace
 ;; carries its choice in the `:frontend' plist key (persisted like
 ;; `:backend'), defaulting to `agent-repl-default-frontend'.
+;;
+;; Choosing a frontend for a workspace is ALSO a statement about what
+;; the NEXT workspace should be born with, so both selection commands
+;; route through `agent-repl--frontend-adopt-default': it pins the
+;; existing default-riding workspaces to what they are already showing,
+;; then flips the default forward.  See that function for why the pin
+;; is what keeps the flip from reaching backwards.
 
 ;;; Code:
 
@@ -158,7 +165,50 @@ KIND is `ctrl-c' or `escape' (see the struct docstring)."
 
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
+(declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--state-save "agent-repl-history" (&optional ws))
+(declare-function agent-repl-save-workspace-snapshot "agent-repl-commands" ())
+
+(defun agent-repl--frontend-adopt-default (name)
+  "Make NAME the frontend that NEW workspaces are born with.
+
+Two effects, strictly in this order:
+
+  1. PIN every live workspace still riding `agent-repl-default-frontend'
+     \(i.e. carrying no `:frontend' of its own) to that CURRENT default,
+     persisting each.  Without the pin, step 2 would reach backwards:
+     resolution is lazy (`agent-repl--ws-frontend-name'), so a workspace
+     that never chose a frontend would silently re-present itself under
+     the new one.
+  2. FLIP `agent-repl-default-frontend' to NAME and persist it to the
+     workspace snapshot, the same cross-restart channel
+     `agent-repl-hide-project-dirs-enabled' rides.
+
+The pin is what makes the flip forward-only: workspaces that already
+exist keep the frontend they are already being presented under, and
+only workspaces created afterwards are born under NAME.
+
+Scope is the LIVE roster.  A tombstoned workspace has no presentation
+to preserve, so a later reopen legitimately picks up the new default.
+
+No-op when NAME is already the default."
+  ;; Invariant: the default must always name a REGISTERED frontend.  Every
+  ;; workspace without a `:frontend' resolves through it, so an unregistered
+  ;; default does not fail here — it detonates later, in some unrelated
+  ;; workspace's next open.  Fail at the origin instead.
+  (agent-repl-frontend-get name)
+  (unless (eq name agent-repl-default-frontend)
+    (dolist (ws (agent-repl--live-ws-names))
+      (unless (agent-repl--ws-get ws :frontend)
+        (agent-repl--log ws "adopt-default: pinning ws=%s to %s"
+                         ws agent-repl-default-frontend)
+        (agent-repl--ws-put ws :frontend agent-repl-default-frontend)
+        (agent-repl--state-save ws)))
+    (agent-repl--log nil "adopt-default: %s -> %s"
+                     agent-repl-default-frontend name)
+    (setq agent-repl-default-frontend name)
+    (when (fboundp 'agent-repl-save-workspace-snapshot)
+      (agent-repl-save-workspace-snapshot))))
 
 ;;;###autoload
 (defun agent-repl-select-frontend (set-default)
@@ -170,7 +220,13 @@ Validates the choice against the workspace's backend (the gui drives
 only claude today) and refuses to change a workspace whose current
 frontend has a RUNNING session — use `agent-repl-switch-frontend' for
 a live, conversation-preserving switch.  The choice persists with the
-workspace state, mirroring `agent-repl-select-backend'."
+workspace state, mirroring `agent-repl-select-backend'.
+
+The choice ALSO becomes the default that NEW workspaces are born with,
+via `agent-repl--frontend-adopt-default' — picking a frontend is a
+statement about how you want sessions presented, not just this one.
+Already-existing workspaces are unaffected (that function pins them
+first)."
   (interactive "P")
   (let* ((names (agent-repl--frontend-names))
          (choice (intern (completing-read
@@ -178,7 +234,7 @@ workspace state, mirroring `agent-repl-select-backend'."
                           (mapcar #'symbol-name names) nil t))))
     (if set-default
         (progn
-          (setq agent-repl-default-frontend choice)
+          (agent-repl--frontend-adopt-default choice)
           (message "agent-repl: default frontend -> %s" choice))
       (let ((ws (agent-repl--ws-current-name)))
         (unless ws
@@ -188,7 +244,8 @@ workspace state, mirroring `agent-repl-select-backend'."
           (user-error "agent-repl-select-frontend: %s has a running session — use agent-repl-switch-frontend for a live switch" ws))
         (agent-repl--ws-put ws :frontend choice)
         (agent-repl--state-save ws)
-        (message "agent-repl: %s frontend -> %s" ws choice)))))
+        (agent-repl--frontend-adopt-default choice)
+        (message "agent-repl: %s frontend -> %s (new workspaces too)" ws choice)))))
 
 ;;;###autoload
 (defun agent-repl-switch-frontend ()
@@ -203,6 +260,9 @@ The literal composition of the manual recipe (close, select, open):
      would do, minus its running-session guard).
   3. OPEN the other frontend exactly like `SPC o c': SHOW it when its
      session is somehow still alive from before, else open it fresh.
+  4. ADOPT the target as the default NEW workspaces are born with
+     (`agent-repl--frontend-adopt-default'), leaving every
+     already-existing workspace on the frontend it is presenting now.
 
 With exactly two registered frontends the target is the other one;
 otherwise it is read by completion."
@@ -238,6 +298,12 @@ otherwise it is read by completion."
               (setq step "flip+persist")
               (agent-repl--ws-put ws :frontend to-name)
               (agent-repl--state-save ws)
+              ;; Same step, wider scope: the switch also states what the
+              ;; NEXT workspace should be born with.  Runs AFTER the
+              ;; `:frontend' put above so the pin inside sees this
+              ;; workspace as already-chosen and skips it.
+              (setq step "adopt-default")
+              (agent-repl--frontend-adopt-default to-name)
               (if (funcall (agent-repl-frontend-running-p-fn to) ws)
                   (progn
                     (setq step (format "show %s" to-name))

@@ -3418,6 +3418,68 @@ from the snapshot's `:hide-project-dirs-enabled' key."
             (should (eq agent-repl-hide-project-dirs-enabled t)))
         (delete-file snapshot-file)))))
 
+(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/round-trips-default-frontend ()
+  "A snapshot records the live `agent-repl-default-frontend' and reads it
+back as `:default-frontend'."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (agent-repl-default-frontend 'gui))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (agent-repl-save-workspace-snapshot)
+            (should (eq (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
+                                   :default-frontend)
+                        'gui)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-read-workspace-snapshot/legacy-format-has-no-default-frontend ()
+  "Reading a legacy list-of-entries snapshot reports `:default-frontend' as
+nil — the key predates that format."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
+      (unwind-protect
+          (progn
+            (agent-repl--write-sexp-file snapshot-file
+                                          '(("ws1" :project-dir "/tmp/ws1")))
+            (should-not (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
+                                   :default-frontend)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/restores-default-frontend ()
+  "load-workspace-snapshot restores `agent-repl-default-frontend' from the
+snapshot's `:default-frontend' key, so workspaces created after a restart
+are born under the last-chosen frontend."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (agent-repl-default-frontend 'vterm))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
+                             :nuked-at ,(current-time)))
+               :default-frontend gui))
+            (agent-repl-load-workspace-snapshot)
+            (should (eq agent-repl-default-frontend 'gui)))
+        (delete-file snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/keeps-default-frontend-when-absent ()
+  "A snapshot predating `:default-frontend' leaves the customized
+`agent-repl-default-frontend' alone rather than stomping it with nil."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (agent-repl-default-frontend 'gui))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
+                             :nuked-at ,(current-time)))))
+            (agent-repl-load-workspace-snapshot)
+            (should (eq agent-repl-default-frontend 'gui)))
+        (delete-file snapshot-file)))))
+
 (ert-deftest agent-repl-cmd-test-load-workspace-snapshot/restores-hidden-tombstone-marker ()
   "load-workspace-snapshot carries `:hidden-project-dir' onto the restored
 tombstone so a later unhide can re-establish it."
