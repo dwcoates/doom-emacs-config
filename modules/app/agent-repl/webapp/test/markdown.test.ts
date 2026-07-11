@@ -17,13 +17,42 @@ describe("renderMarkdown blocks", () => {
     expect(renderMarkdown("a\n\nb")).toBe("<p>a</p><p>b</p>");
   });
 
-  it("renders fenced code with a language class", () => {
+  it("syntax-highlights fenced code with a known language tag", () => {
     // Arrange
     const src = "```go\nfunc main() {}\n```";
+    // Act
+    const html = renderMarkdown(src);
+    // Assert — hljs classes present and the language class preserved.
+    expect(html).toContain(`<code class="hljs lang-go">`);
+    expect(html).toContain(`<span class="hljs-keyword">func</span>`);
+  });
+
+  it("falls back to plain escaped text for an unknown language tag", () => {
+    // Arrange
+    const src = "```klingon\n<qapla> & stuff\n```";
+    // Act + Assert — escaped, no hljs token spans.
+    expect(renderMarkdown(src)).toBe(
+      `<pre class="md-code"><code class="hljs lang-klingon">&lt;qapla&gt; &amp; stuff</code></pre>`,
+    );
+  });
+
+  it("renders a language-less fence as plain escaped text", () => {
+    // Arrange
+    const src = "```\n<b>raw</b>\n```";
     // Act + Assert
     expect(renderMarkdown(src)).toBe(
-      `<pre class="md-code"><code class="lang-go">func main() {}</code></pre>`,
+      `<pre class="md-code"><code class="hljs">&lt;b&gt;raw&lt;/b&gt;</code></pre>`,
     );
+  });
+
+  it("escapes HTML inside highlighted code (hljs escape guarantee)", () => {
+    // Arrange — markup-bearing string literal in a highlighted language.
+    const src = "```js\nconst x = \"<img src=x onerror=alert(1)>\";\n```";
+    // Act
+    const html = renderMarkdown(src);
+    // Assert — the markup never appears unescaped.
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
   });
 
   it("keeps markdown syntax literal inside fences", () => {
@@ -33,13 +62,14 @@ describe("renderMarkdown blocks", () => {
     expect(renderMarkdown(src)).toContain("**not bold**");
   });
 
-  it("renders an unterminated fence as a still-open code block (streaming)", () => {
-    // Arrange
+  it("renders an unterminated fence as a still-open highlighted block (streaming)", () => {
+    // Arrange — `py` resolves through hljs's alias table to python.
     const src = "```py\nprint(1)";
-    // Act + Assert
-    expect(renderMarkdown(src)).toBe(
-      `<pre class="md-code"><code class="lang-py">print(1)</code></pre>`,
-    );
+    // Act
+    const html = renderMarkdown(src);
+    // Assert
+    expect(html).toContain(`<code class="hljs lang-py">`);
+    expect(html).toContain(`<span class="hljs-built_in">print</span>`);
   });
 
   it("renders unordered lists", () => {
