@@ -141,6 +141,95 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-perm-allow");
   });
 
+  it("renders AskUserQuestion as an option picker, not allow/deny", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            multiSelect: false,
+            options: [
+              { label: "date-fns", description: "small" },
+              { label: "moment", description: "legacy" },
+            ],
+          },
+        ],
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — options and a disabled submit, no bare Allow button.
+    expect(html).toContain("Which library?");
+    expect(html).toContain(`data-q-req="q1"`);
+    expect(html).toContain(">date-fns</button>");
+    expect(html).toContain(`data-q-submit="q1" disabled`);
+    expect(html).toContain(`data-perm-deny="q1"`);
+    expect(html).not.toContain("data-perm-allow");
+  });
+
+  it("marks picked options selected and enables submit when complete", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            options: [
+              { label: "date-fns", description: "small" },
+              { label: "moment", description: "legacy" },
+            ],
+          },
+        ],
+      },
+    };
+    const selections = new Map([["q1 0", new Set(["date-fns"])]]);
+    // Act
+    const html = renderItem(item, selections);
+    // Assert
+    expect(html).toContain(`class="q-opt selected"`);
+    expect(html).toContain(`data-q-submit="q1">`);
+    expect(html).not.toContain(`data-q-submit="q1" disabled`);
+  });
+
+  it("renders an answered AskUserQuestion as resolved", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            options: [
+              { label: "date-fns", description: "small" },
+              { label: "moment", description: "legacy" },
+            ],
+          },
+        ],
+      },
+      resolution: { decision: "allow" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("answered");
+    expect(html).not.toContain("data-q-submit");
+  });
+
   it("escapes untrusted content in tool output", () => {
     // Arrange
     const item: ToolItem = {

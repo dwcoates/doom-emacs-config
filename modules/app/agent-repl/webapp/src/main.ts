@@ -58,6 +58,15 @@ async function boot(): Promise<void> {
             },
       );
     },
+    answerQuestions: (requestId, updatedInput) => {
+      // AskUserQuestion contract: allow with the tool input echoed back
+      // carrying the `answers` record the user picked.
+      ws.send({
+        type: "permission-decision",
+        request_id: requestId,
+        decision: { behavior: "allow", updated_input: updatedInput },
+      });
+    },
   });
 
   const statusEl = must("conn-status");
