@@ -93,6 +93,16 @@ async function boot(): Promise<void> {
       statusEl.textContent = connected ? "connected" : "disconnected";
       statusEl.classList.toggle("ok", connected);
     },
+    sessionExists: async () => {
+      const resp = await fetch(`${httpBase}/sessions`);
+      if (!resp.ok) throw new Error(`GET /sessions: ${resp.status}`);
+      const body = (await resp.json()) as { sessions: Array<{ session_id: string }> };
+      return body.sessions.some((s) => s.session_id === sessionId);
+    },
+    onGone: () => {
+      statusEl.textContent = "session gone";
+      statusEl.classList.remove("ok");
+    },
   });
   ws.connect();
 

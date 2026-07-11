@@ -183,6 +183,82 @@ func TestSessionLateJoinerHelloCarriesSessionInfoAndCursor(t *testing.T) {
 	}
 }
 
+func TestSessionHelloCarriesRequestedCwdModelBeforeInit(t *testing.T) {
+	// Arrange — CreateOpts-requested values seed the hello mirror.
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		CWD:           "/req/cwd",
+		Model:         "haiku",
+		Retention:     16,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+	})
+	go sess.Run()
+	t.Cleanup(func() {
+		shim.end()
+		<-sess.Done()
+	})
+	c := NewClient()
+	// Act — attach BEFORE any system:init arrives.
+	sess.Attach(c)
+	// Assert
+	hello := recvFrame(t, c)
+	if hello["cwd"] != "/req/cwd" || hello["model"] != "haiku" {
+		t.Errorf("hello = %v", hello)
+	}
+}
+
+func TestSessionInitCapturesClaudeSessionID(t *testing.T) {
+	// Arrange
+	h := newHarness(t, 16)
+	early := NewClient()
+	h.sess.Attach(early)
+	recvFrame(t, early)
+	// Act — system:init carries the CLI session uuid.
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"m","cwd":"/w","permissionMode":"default","session_id":"cli-uuid-1"}}`)
+	recvFrame(t, early)
+	// Assert — Info and a late joiner's hello both expose it.
+	if got := h.sess.Info().ClaudeSessionID; got != "cli-uuid-1" {
+		t.Errorf("Info().ClaudeSessionID = %q", got)
+	}
+	late := NewClient()
+	h.sess.Attach(late)
+	hello := recvFrame(t, late)
+	if hello["claude_session_id"] != "cli-uuid-1" {
+		t.Errorf("hello = %v", hello)
+	}
+}
+
+func TestSessionReplayAllowedOnTerminalSession(t *testing.T) {
+	// Arrange — history exists, then the session ends gracefully.
+	h := newHarness(t, 16)
+	early := NewClient()
+	h.sess.Attach(early)
+	recvFrame(t, early)
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{}}`)
+	recvFrame(t, early)
+	// A graceful sdk_end closed event emits no L2 frame; it just marks
+	// the session terminal once the stream drains.
+	h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","exit_code":0,"reason":"sdk_end"}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Act — a late joiner replays on the now-terminal session.
+	late := NewClient()
+	h.sess.Attach(late)
+	recvFrame(t, late) // hello
+	if err := h.sess.HandleClientFrame(late, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay on terminal session: %v", err)
+	}
+	// Assert — retained history frames stream back.
+	replayed := recvFrame(t, late)
+	if replayed["type"] != "system" || replayed["seq"] != float64(1) {
+		t.Errorf("replayed = %v", replayed)
+	}
+}
+
 // --- broadcast / seq -----------------------------------------------------------
 
 func TestSessionSeqIsStrictlyIncreasingAcrossFrames(t *testing.T) {

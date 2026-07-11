@@ -119,6 +119,54 @@ describe("WsClient", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("stops reconnecting and fires onGone when the session is gone", async () => {
+    // Arrange — the pre-reconnect probe reports the session vanished.
+    let gone = 0;
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      sessionExists: async () => false,
+      onGone: () => {
+        gone++;
+      },
+    });
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    // Act
+    FakeWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(10);
+    // Assert — no second socket, onGone fired exactly once.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(gone).toBe(1);
+  });
+
+  it("keeps reconnecting when the existence probe itself fails", async () => {
+    // Arrange — an unreachable probe counts as unknown, not gone.
+    let gone = 0;
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      sessionExists: async () => {
+        throw new Error("daemon briefly down");
+      },
+      onGone: () => {
+        gone++;
+      },
+    });
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    // Act
+    FakeWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(10);
+    // Assert — reconnect proceeded despite the probe error.
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(gone).toBe(0);
+  });
+
   it("does not reconnect after a user-initiated close", () => {
     // Arrange
     const { client } = newClient();
