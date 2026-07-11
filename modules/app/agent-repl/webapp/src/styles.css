@@ -263,3 +263,15 @@ pre {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* --- streaming tool input indicator --------------------------------------- */
+.tool-input-pending { padding: 0.35em 0.2em; }
+.tool-input-pending .pulse {
+  color: var(--muted);
+  letter-spacing: 0.25em;
+  animation: tool-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tool-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
