@@ -79,6 +79,52 @@ describe("renderItem", () => {
     expect(renderItem(item)).not.toContain("cursor");
   });
 
+  it("renders a thinking block that carries text as an expandable card", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "step one",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("<details");
+    expect(html).toContain("step one");
+  });
+
+  it("shows a pulse instead of an empty card while a textless thinking block streams", () => {
+    // Arrange — adaptive thinking: signature only, no thinking text.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("thinking-pending");
+    expect(html).not.toContain("<details");
+  });
+
+  it("drops a textless thinking block once it closes", () => {
+    // Arrange — nothing to disclose: the API withheld the thinking text.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: true,
+      signature: "sig",
+    };
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
+  });
+
   it("renders known tools with their special card class", () => {
     // Arrange
     const item: ToolItem = {
