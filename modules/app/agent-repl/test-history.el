@@ -497,6 +497,31 @@ new path does not exist but the legacy one does."
               (should (eq (plist-get data :backend) 'codex))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest agent-repl-test-state-save-includes-backend-session-stash ()
+  "state-save serializes `:backend-session-stash' so a prior backend's
+session ids survive restart and switching back still resumes."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :backend-session-stash
+                                 '(claude (:bare-metal "claude-sid"
+                                           :sandbox nil
+                                           :fork-session-id nil)))
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
+            (agent-repl--state-save "ws")
+            (let* ((file (agent-repl--state-file tmpdir))
+                   (data (agent-repl--read-sexp-file file)))
+              (should (equal (plist-get (plist-get
+                                         (plist-get data :backend-session-stash)
+                                         'claude)
+                                        :bare-metal)
+                             "claude-sid"))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest agent-repl-test-state-save-nil-priority ()
   "state-save writes `:priority' nil when no badge is set (no badge == nil)."
   (agent-repl-test--with-clean-state

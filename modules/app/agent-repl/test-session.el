@@ -2443,6 +2443,23 @@ when the saved plist carries none."
     (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
     (should (eq (agent-repl--ws-get "ws1" :backend) 'codex))))
 
+(ert-deftest agent-repl-test-apply-display-state-restores-backend-session-stash ()
+  "apply-display-state hydrates `:backend-session-stash' from the saved plist."
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state
+     "ws1" '(:backend-session-stash (claude (:bare-metal "claude-sid"))))
+    (should (equal (plist-get (plist-get
+                               (agent-repl--ws-get "ws1" :backend-session-stash)
+                               'claude)
+                              :bare-metal)
+                   "claude-sid"))))
+
+(ert-deftest agent-repl-test-apply-display-state-no-backend-session-stash ()
+  "apply-display-state leaves `:backend-session-stash' unset when saved has none."
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    (should-not (agent-repl--ws-get "ws1" :backend-session-stash))))
+
 (ert-deftest agent-repl-test-apply-display-state-restores-repl-state-inactive ()
   "apply-display-state restores a persistable :repl-state (:inactive)."
   (agent-repl-test--with-clean-state

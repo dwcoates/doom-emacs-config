@@ -280,6 +280,151 @@ UUID in place would make the next start run `codex resume <claude-id>'."
                         (agent-repl--ws-get "ws1" :bare-metal))
                        "claude-sid"))))))
 
+;;;; ---- Tests: backend session-id stash (switch round-trip) ----
+
+(ert-deftest agent-repl-test-backend-capture-session-ids-collects-envs-and-fork ()
+  "capture-backend-session-ids snapshots each env's sid plus the fork pointer."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "bm"))
+    (agent-repl--ws-put "ws1" :sandbox
+                         (make-agent-repl-instantiation :session-id "sb"))
+    (agent-repl--ws-put "ws1" :fork-session-id "fk")
+    (let ((snap (agent-repl--capture-backend-session-ids "ws1")))
+      (should (equal (plist-get snap :bare-metal) "bm"))
+      (should (equal (plist-get snap :sandbox) "sb"))
+      (should (equal (plist-get snap :fork-session-id) "fk")))))
+
+(ert-deftest agent-repl-test-backend-capture-session-ids-nil-for-missing-struct ()
+  "capture-backend-session-ids records nil for an env lacking a struct."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "bm"))
+    (let ((snap (agent-repl--capture-backend-session-ids "ws1")))
+      (should (equal (plist-get snap :bare-metal) "bm"))
+      (should (null (plist-get snap :sandbox))))))
+
+(ert-deftest agent-repl-test-backend-apply-session-ids-restores-envs-and-fork ()
+  "apply-backend-session-ids writes the sids and fork back onto the ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
+    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+    (agent-repl--apply-backend-session-ids
+     "ws1" '(:bare-metal "bm" :sandbox "sb" :fork-session-id "fk"))
+    (should (equal (agent-repl-instantiation-session-id
+                    (agent-repl--ws-get "ws1" :bare-metal))
+                   "bm"))
+    (should (equal (agent-repl-instantiation-session-id
+                    (agent-repl--ws-get "ws1" :sandbox))
+                   "sb"))
+    (should (equal (agent-repl--ws-get "ws1" :fork-session-id) "fk"))))
+
+(ert-deftest agent-repl-test-backend-apply-session-ids-nil-clears ()
+  "apply-backend-session-ids with a nil plist clears every sid and the fork."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "bm"))
+    (agent-repl--ws-put "ws1" :fork-session-id "fk")
+    (agent-repl--apply-backend-session-ids "ws1" nil)
+    (should-not (agent-repl-instantiation-session-id
+                 (agent-repl--ws-get "ws1" :bare-metal)))
+    (should-not (agent-repl--ws-get "ws1" :fork-session-id))))
+
+(ert-deftest agent-repl-test-backend-session-ids-present-p-true-for-sid ()
+  "session-ids-present-p is non-nil when an env carries a session id."
+  (should (agent-repl--backend-session-ids-present-p '(:bare-metal "bm"))))
+
+(ert-deftest agent-repl-test-backend-session-ids-present-p-true-for-fork ()
+  "session-ids-present-p is non-nil when only the fork pointer is set."
+  (should (agent-repl--backend-session-ids-present-p '(:fork-session-id "fk"))))
+
+(ert-deftest agent-repl-test-backend-session-ids-present-p-nil-when-empty ()
+  "session-ids-present-p is nil when every slot is nil or the empty string."
+  (should-not (agent-repl--backend-session-ids-present-p
+               '(:bare-metal nil :sandbox "" :fork-session-id nil))))
+
+(ert-deftest agent-repl-test-backend-switch-stashes-outgoing-under-old ()
+  "switch-backend-session-ids stashes the live sids under the OLD backend."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "claude-sid"))
+    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+    (agent-repl--ws-switch-backend-session-ids "ws1" 'claude 'codex)
+    (let ((stash (agent-repl--ws-get "ws1" :backend-session-stash)))
+      (should (equal (plist-get (plist-get stash 'claude) :bare-metal)
+                     "claude-sid")))))
+
+(ert-deftest agent-repl-test-backend-switch-to-fresh-clears-and-returns-nil ()
+  "Switching to a never-used backend clears the live sids and returns nil."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "claude-sid"))
+    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+    (let ((restored (agent-repl--ws-switch-backend-session-ids
+                     "ws1" 'claude 'codex)))
+      (should-not restored)
+      (should-not (agent-repl-instantiation-session-id
+                   (agent-repl--ws-get "ws1" :bare-metal))))))
+
+(ert-deftest agent-repl-test-backend-switch-back-restores-and-returns-t ()
+  "Switching AWAY then BACK restores the prior backend's sids (returns t)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :bare-metal
+                         (make-agent-repl-instantiation :session-id "claude-sid"))
+    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+    (agent-repl--ws-switch-backend-session-ids "ws1" 'claude 'codex)
+    (let ((restored (agent-repl--ws-switch-backend-session-ids
+                     "ws1" 'codex 'claude)))
+      (should restored)
+      (should (equal (agent-repl-instantiation-session-id
+                      (agent-repl--ws-get "ws1" :bare-metal))
+                     "claude-sid")))))
+
+(ert-deftest agent-repl-test-backend-select-switch-back-restores-session-ids ()
+  "select-backend claude->codex->claude restores claude's env session ids.
+This is the bug fix: after switching back to a prior backend, the next
+start must resume (`--continue') rather than start fresh."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-backend 'claude)
+          (target "codex"))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :bare-metal
+                           (make-agent-repl-instantiation :session-id "claude-sid"))
+      (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) target))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        (setq target "codex")
+        (agent-repl-select-backend nil)
+        (should-not (agent-repl-instantiation-session-id
+                     (agent-repl--ws-get "ws1" :bare-metal)))
+        (setq target "claude")
+        (agent-repl-select-backend nil)
+        (should (equal (agent-repl-instantiation-session-id
+                        (agent-repl--ws-get "ws1" :bare-metal))
+                       "claude-sid"))))))
+
+(ert-deftest agent-repl-test-backend-select-switch-back-restores-fork ()
+  "select-backend claude->codex->claude restores claude's fork pointer."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-backend 'claude)
+          (target "codex"))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
+      (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+      (agent-repl--ws-put "ws1" :fork-session-id "fork-1")
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) target))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        (setq target "codex")
+        (agent-repl-select-backend nil)
+        (should-not (agent-repl--ws-get "ws1" :fork-session-id))
+        (setq target "claude")
+        (agent-repl-select-backend nil)
+        (should (equal (agent-repl--ws-get "ws1" :fork-session-id) "fork-1"))))))
+
 ;;;; ---- Tests: transcript seam ----
 
 (defun agent-repl-test--transcript-backend (&rest overrides)
