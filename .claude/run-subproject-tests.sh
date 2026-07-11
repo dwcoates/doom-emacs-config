@@ -2,7 +2,7 @@
 # run-subproject-tests.sh — PostToolUse(Write|Edit) hook.
 #
 # Reads the hook payload on stdin, and when the edited file lives inside
-# one of the claude-repl subprojects (shim/, webapp/, daemon/), runs that
+# one of the agent-repl subprojects (shim/, webapp/, daemon/), runs that
 # subproject's test suite — and only that one. Files outside those trees
 # exit 0 immediately, so the hook is a no-op for the rest of the repo
 # (including the elisp module, which has its own ERT flow).
@@ -16,7 +16,7 @@ payload=$(cat)
 file=$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_response.filePath // empty')
 [ -z "$file" ] && exit 0
 
-root="modules/app/claude-repl"
+root="modules/app/agent-repl"
 case "$file" in
   *"$root/shim/"*)   sub="shim" ;;
   *"$root/webapp/"*) sub="webapp" ;;
