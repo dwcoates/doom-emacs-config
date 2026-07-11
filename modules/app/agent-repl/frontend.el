@@ -42,8 +42,11 @@
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
+(declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
+(declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
+(defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
@@ -158,7 +161,26 @@ window like an ordinary buffer display."
     (agent-repl--hide-panels))
   (let ((win (agent-repl--frontend-main-area-window)))
     (select-window win)
-    (set-window-buffer win buf))
+    (set-window-buffer win buf)
+    ;; Hybrid UI: the classic input panel sits below the webview, with
+    ;; the same window recipe the vterm layout uses (dedicated,
+    ;; height-locked, delete-protected, mini-window-shrink-proof).
+    ;; Focus lands there — typing is the whole point of the panel.
+    (let ((input-buf (agent-repl--ensure-input-buffer ws)))
+      (if (get-buffer-window input-buf)
+          (select-window (get-buffer-window input-buf))
+        (let ((input-win (split-window
+                          win
+                          (round (* (- agent-repl-input-height-fraction)
+                                    (window-total-height win)))
+                          'below)))
+          (set-window-buffer input-win input-buf)
+          (agent-repl-window--harden input-win
+                                     :dedicate       t
+                                     :size-fix       'height
+                                     :delete-protect t
+                                     :preserve-size  'height)
+          (select-window input-win)))))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
@@ -177,7 +199,10 @@ the agent output window."
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (let* ((session-id (agent-repl--frontend-ensure-session ws))
-           (url (agent-repl--frontend-session-url session-id))
+           ;; composer=0: Emacs owns input (the panel below), so the
+           ;; webview hides its own composer and stays output-only.
+           (url (concat (agent-repl--frontend-session-url session-id)
+                        "&composer=0"))
            (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
       (agent-repl--frontend-display-webview ws buf))))
 

@@ -250,6 +250,65 @@ the retry budget on a misleading error."
         ;; Act / Assert
         (should-error (agent-repl--frontend-ensure-session "ws1"))))))
 
+;;;; ---- message / interrupt injection -----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-send-message-posts-content ()
+  "Send-message POSTs the content and returns the daemon's request id."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((request_id . "r_9"))))
+    ;; Act
+    (let ((rid (agent-repl--frontend-send-message "s_1" "hello there")))
+      ;; Assert
+      (should (equal rid "r_9"))
+      (pcase-let ((`(,method ,url ,payload) (car requests)))
+        (should (equal method "POST"))
+        (should (string-suffix-p "/sessions/s_1/message" url))
+        (should (string-match-p "\"content\":\"hello there\"" payload))))))
+
+(ert-deftest agent-repl-test-frontend-send-message-errors-without-request-id ()
+  "A malformed injection response signals instead of returning nil."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((unexpected . "shape"))))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-send-message "s_1" "hi"))))
+
+(ert-deftest agent-repl-test-frontend-interrupt-session-posts-route ()
+  "Interrupt POSTs the session's interrupt route."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 202 ""))
+    ;; Act
+    (agent-repl--frontend-interrupt-session "s_1")
+    ;; Assert
+    (pcase-let ((`(,method ,url ,_) (car requests)))
+      (should (equal method "POST"))
+      (should (string-suffix-p "/sessions/s_1/interrupt" url)))))
+
+(ert-deftest agent-repl-test-frontend-backend-p-tracks-session-binding ()
+  "The backend flag is exactly the presence of :frontend-session-id."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+    ;; Act / Assert
+    (should (agent-repl--frontend-backend-p "ws1")))
+  (agent-repl-test--with-ws "ws2" '(:project-dir "/w")
+    (should-not (agent-repl--frontend-backend-p "ws2"))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-heals-via-ensure ()
+  "Workspace sends resolve the session through ensure (healing staleness)."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_fresh"))
+                ((symbol-function 'agent-repl--frontend-send-message)
+                 (lambda (id text) (setq sent (list id text)) "r_1")))
+        ;; Act
+        (agent-repl--frontend-send-user-message "ws1" "hi")
+        ;; Assert
+        (should (equal sent '("s_fresh" "hi")))))))
+
 ;;;; ---- release on nuke ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-release-deletes-and-clears ()
