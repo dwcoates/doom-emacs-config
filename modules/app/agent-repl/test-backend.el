@@ -241,6 +241,45 @@ chain produced."
       (agent-repl-select-backend t)
       (should (eq agent-repl-default-backend 'codex)))))
 
+(ert-deftest agent-repl-test-backend-select-switch-resets-session-ids ()
+  "An actual backend CHANGE clears env session ids and the fork pointer.
+Session ids are scoped to the CLI that minted them: leaving a claude
+UUID in place would make the next start run `codex resume <claude-id>'."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-backend 'claude))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :fork-session-id "fork-1")
+      (agent-repl--ws-put "ws1" :bare-metal
+                           (make-agent-repl-instantiation :session-id "claude-sid"))
+      (agent-repl--ws-put "ws1" :sandbox
+                           (make-agent-repl-instantiation :session-id "claude-sbx"))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "codex"))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        (agent-repl-select-backend nil)
+        (should-not (agent-repl-instantiation-session-id
+                     (agent-repl--ws-get "ws1" :bare-metal)))
+        (should-not (agent-repl-instantiation-session-id
+                     (agent-repl--ws-get "ws1" :sandbox)))
+        (should-not (agent-repl--ws-get "ws1" :fork-session-id))))))
+
+(ert-deftest agent-repl-test-backend-select-same-backend-keeps-session-ids ()
+  "Re-selecting the CURRENT backend preserves session continuity."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-backend 'claude))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :bare-metal
+                           (make-agent-repl-instantiation :session-id "claude-sid"))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "claude"))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        (agent-repl-select-backend nil)
+        (should (equal (agent-repl-instantiation-session-id
+                        (agent-repl--ws-get "ws1" :bare-metal))
+                       "claude-sid"))))))
+
 ;;;; ---- Tests: transcript seam ----
 
 (defun agent-repl-test--transcript-backend (&rest overrides)

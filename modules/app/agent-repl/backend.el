@@ -119,6 +119,21 @@ workspace name generation, the config-explainer)."
     (maphash (lambda (name _b) (push name names)) agent-repl--backends)
     (nreverse names)))
 
+(defun agent-repl--ws-reset-session-ids (ws)
+  "Clear WS's per-environment session ids and fork pointer.
+Session ids are BACKEND-SCOPED: a claude session UUID means nothing to
+codex and vice versa, so a backend switch must reset them or the next
+start would try to resume a session the new CLI never minted (e.g.
+`codex resume <claude-uuid>').  Clears the session id on every
+environment's instantiation struct plus the `:fork-session-id'
+workspace property."
+  (dolist (env agent-repl--environment-keys)
+    (let ((inst (agent-repl--ws-get ws env)))
+      (when (agent-repl-instantiation-p inst)
+        (setf (agent-repl-instantiation-session-id inst) nil))))
+  (agent-repl--ws-put ws :fork-session-id nil)
+  (agent-repl--log ws "ws-reset-session-ids: cleared for backend switch ws=%s" ws))
+
 (defun agent-repl-select-backend (set-default)
   "Select the agent backend for the current workspace via completion.
 With prefix argument SET-DEFAULT, set `agent-repl-default-backend' (for
@@ -129,7 +144,12 @@ Refuses to change a workspace whose agent is currently running — the
 in-flight session belongs to the old CLI, and the change only takes
 effect at the next agent start anyway.  The choice is persisted with
 the workspace state, so a codex workspace resumes through codex after
-an Emacs restart."
+an Emacs restart.
+
+An actual backend CHANGE also resets the workspace's stored session
+ids (see `agent-repl--ws-reset-session-ids'): they are scoped to the
+CLI that minted them, so conversation continuity intentionally does
+not survive a backend switch."
   (interactive "P")
   (let* ((names (agent-repl--backend-names))
          (choice (intern (completing-read
@@ -144,9 +164,13 @@ an Emacs restart."
           (user-error "agent-repl-select-backend: no current workspace"))
         (when (agent-repl--agent-running-p ws)
           (user-error "agent-repl-select-backend: %s has a running agent — kill it first (the backend applies at the next start)" ws))
-        (agent-repl--ws-put ws :backend choice)
-        (agent-repl--state-save ws)
-        (message "agent-repl: %s backend -> %s" ws choice)))))
+        (let ((changed (not (eq (agent-repl--ws-backend-name ws) choice))))
+          (agent-repl--ws-put ws :backend choice)
+          (when changed
+            (agent-repl--ws-reset-session-ids ws))
+          (agent-repl--state-save ws)
+          (message "agent-repl: %s backend -> %s%s" ws choice
+                   (if changed " (session ids reset — new CLI, new session)" "")))))))
 
 ;;;; ---- Headless command construction --------------------------------------
 
