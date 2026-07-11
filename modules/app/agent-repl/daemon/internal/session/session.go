@@ -272,6 +272,23 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	return nil
 }
 
+// InjectCommand runs a daemon-originated client command (HTTP send /
+// interrupt paths, where the submitter holds no WebSocket) through the
+// exact same pipeline as a WS frame, so broadcasts, retention, and
+// translator state behave identically. CMD must marshal to a §2
+// client-command shape.
+//
+// The nil Client is safe by construction: of HandleClientFrame's
+// branches, only replay-request touches the client, and the injected
+// commands here are never replay-requests.
+func (s *Session) InjectCommand(cmd map[string]any) error {
+	raw, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("session %s: marshal injected command: %w", s.ID, err)
+	}
+	return s.HandleClientFrame(nil, raw)
+}
+
 // Shutdown asks the shim to drain and exit (used by DELETE /sessions/{id}
 // and daemon teardown).
 func (s *Session) Shutdown(reason string) error {
