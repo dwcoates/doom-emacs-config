@@ -34,8 +34,17 @@
                        :supported-backends '(claude)))))
 
 (defmacro agent-repl-test--with-frontend-registry (&rest body)
-  "Run BODY against a scratch copy of the frontend registry."
-  `(let ((agent-repl--frontends (copy-hash-table agent-repl--frontends)))
+  "Run BODY against a scratch copy of the frontend registry.
+
+Also scratch-binds `agent-repl-default-frontend', because the default and
+the registry it indexes into must have the SAME lifetime.  The selection
+commands adopt their choice as the default new workspaces are born with
+\(`agent-repl--frontend-adopt-default'), so a BODY that switches to a
+BODY-local frontend would otherwise leave the global default naming a
+frontend that dies with BODY's registry copy — and every later test whose
+workspace carries no `:frontend' resolves through that global."
+  `(let ((agent-repl--frontends (copy-hash-table agent-repl--frontends))
+         (agent-repl-default-frontend agent-repl-default-frontend))
      ,@body))
 
 ;;;; ---- Registration ----------------------------------------------------------
@@ -155,9 +164,11 @@
 
 (ert-deftest agent-repl-test-frontends-select-sets-and-persists ()
   "Selection stamps :frontend and persists the workspace state."
-  ;; Arrange
+  ;; Arrange — the default is scratch-bound because selection now adopts the
+  ;; choice as the default for new workspaces (a global mutation).
   (agent-repl-test--with-clean-state
-    (let ((saved nil))
+    (let ((saved nil)
+          (agent-repl-default-frontend agent-repl-default-frontend))
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                 ((symbol-function 'completing-read) (lambda (&rest _) "gui"))
                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
@@ -168,6 +179,100 @@
         ;; Assert
         (should (eq (agent-repl--ws-get "ws1" :frontend) 'gui))
         (should saved)))))
+
+;;;; ---- Default adoption (new-workspace inheritance) -------------------------------
+
+(ert-deftest agent-repl-test-frontends-select-adopts-default-for-new-ws ()
+  "Selection flips the default a NEW workspace is born with."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend 'vterm))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'completing-read) (lambda (&rest _) "gui"))
+                ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        ;; Act
+        (agent-repl-select-frontend nil)
+        ;; Assert — a workspace with no :frontend of its own now resolves gui.
+        (should (eq agent-repl-default-frontend 'gui))
+        (should (eq (agent-repl--ws-frontend-name "born-later") 'gui))))))
+
+(ert-deftest agent-repl-test-frontends-select-pins-existing-default-riding-ws ()
+  "Selection pins an existing default-riding workspace so the flip can't
+retroactively re-present it."
+  ;; Arrange — ws2 exists and carries no :frontend of its own.
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend 'vterm))
+      (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'completing-read) (lambda (&rest _) "gui"))
+                ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        ;; Act
+        (agent-repl-select-frontend nil)
+        ;; Assert
+        (should (eq (agent-repl--ws-get "ws2" :frontend) 'vterm))
+        (should (eq (agent-repl--ws-frontend-name "ws2") 'vterm))))))
+
+(ert-deftest agent-repl-test-frontends-select-persists-pinned-existing-ws ()
+  "The pin of an existing workspace is written to its state file."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend 'vterm)
+          (saved nil))
+      (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'completing-read) (lambda (&rest _) "gui"))
+                ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                ((symbol-function 'agent-repl--state-save)
+                 (lambda (&optional ws) (push ws saved))))
+        ;; Act
+        (agent-repl-select-frontend nil)
+        ;; Assert
+        (should (member "ws2" saved))))))
+
+(ert-deftest agent-repl-test-frontends-adopt-default-leaves-explicit-ws-alone ()
+  "Adoption never rewrites a workspace that already chose its own frontend."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'from))
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'to))
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'other))
+     (let ((agent-repl-default-frontend 'from))
+       (agent-repl--ws-put "ws2" :frontend 'other)
+       (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl--frontend-adopt-default 'to)
+         ;; Assert
+         (should (eq (agent-repl--ws-get "ws2" :frontend) 'other)))))))
+
+(ert-deftest agent-repl-test-frontends-adopt-default-noop-when-unchanged ()
+  "Adopting the frontend that is already the default pins nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend 'vterm))
+      (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore))
+        ;; Act
+        (agent-repl--frontend-adopt-default 'vterm)
+        ;; Assert — still riding the default, not pinned.
+        (should-not (agent-repl--ws-get "ws2" :frontend))))))
+
+(ert-deftest agent-repl-test-frontends-select-default-arg-pins-existing-ws ()
+  "The prefix-arg (set-default) path pins existing workspaces too."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend 'vterm))
+      (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "gui"))
+                ((symbol-function 'agent-repl--state-save) #'ignore))
+        ;; Act
+        (agent-repl-select-frontend t)
+        ;; Assert
+        (should (eq agent-repl-default-frontend 'gui))
+        (should (eq (agent-repl--ws-get "ws2" :frontend) 'vterm))))))
 
 ;;;; ---- Switch command -----------------------------------------------------------------
 
@@ -256,6 +361,49 @@ initialized\" trap the old kill-based switch kept hitting."
          ;; Assert
          (should opened)
          (should (>= polls 3)))))))
+
+(ert-deftest agent-repl-test-frontends-switch-adopts-default-for-new-ws ()
+  "The switch flips the default a NEW workspace is born with."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'from :running-p-fn (lambda (_ws) nil)))
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'to :running-p-fn (lambda (_ws) nil)))
+     (let ((agent-repl-default-frontend 'from))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert
+         (should (eq agent-repl-default-frontend 'to))
+         (should (eq (agent-repl--ws-frontend-name "born-later") 'to)))))))
+
+(ert-deftest agent-repl-test-frontends-switch-pins-existing-default-riding-ws ()
+  "The switch pins the OTHER default-riding workspaces to their current
+frontend instead of dragging them along."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'from :running-p-fn (lambda (_ws) nil)))
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'to :running-p-fn (lambda (_ws) nil)))
+     (let ((agent-repl-default-frontend 'from))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert
+         (should (eq (agent-repl--ws-frontend-name "ws2") 'from)))))))
 
 (ert-deftest agent-repl-test-frontends-switch-errors-when-old-never-stops ()
   "A frontend that never stops running fails the switch loudly."

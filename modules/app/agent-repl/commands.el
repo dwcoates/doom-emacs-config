@@ -17,6 +17,12 @@
 ;; toggle so the hidden set survives an Emacs restart.
 (defvar agent-repl-hide-project-dirs-enabled)
 
+;; Forward declaration: defined in frontends.el (loaded after
+;; commands.el).  The snapshot writer/loader persists and restores the
+;; frontend NEW workspaces are born with, so a `SPC o f' / `SPC o F'
+;; choice survives an Emacs restart.
+(defvar agent-repl-default-frontend)
+
 ;;;; Customization — prompts & diff specs
 
 (defcustom agent-repl-branch-diff-spec
@@ -1902,10 +1908,21 @@ without the `:hide-project-dirs-enabled' key)."
     (:plist (plist-get raw :hide-project-dirs-enabled))
     (_ nil)))
 
+(defun agent-repl--snapshot-default-frontend-from-raw (raw)
+  "Return the persisted default-frontend name symbol from RAW.
+RAW is a parsed snapshot sexp.  Returns nil when RAW predates the
+default-frontend persistence (legacy list-of-entries, or a plist
+without the `:default-frontend' key) — the loader leaves
+`agent-repl-default-frontend' at its customized value in that case."
+  (pcase (agent-repl--snapshot-raw-format raw)
+    (:plist (plist-get raw :default-frontend))
+    (_ nil)))
+
 (defun agent-repl--read-workspace-snapshot (file)
   "Read FILE and return a plist with the parsed snapshot contents.
 Returned shape: `(:workspaces ENTRIES :merge-queue QUEUE
-:in-flight-merges IN-FLIGHT :hide-project-dirs-enabled BOOL)'.
+:in-flight-merges IN-FLIGHT :hide-project-dirs-enabled BOOL
+:default-frontend SYMBOL)'.
 
 Normalizes both legacy (`((ws :project-dir dir) ...)') and current
 plist-shaped files into the plist return shape so callers don't need
@@ -1918,7 +1935,9 @@ the sexp is unreadable."
                 :merge-queue (agent-repl--snapshot-merge-queue-from-raw raw)
                 :in-flight-merges (agent-repl--snapshot-in-flight-merges-from-raw raw)
                 :hide-project-dirs-enabled
-                (agent-repl--snapshot-hide-project-dirs-from-raw raw)))
+                (agent-repl--snapshot-hide-project-dirs-from-raw raw)
+                :default-frontend
+                (agent-repl--snapshot-default-frontend-from-raw raw)))
       (error
        (agent-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
                          file err)
@@ -1965,7 +1984,8 @@ insulated from future plist-key additions on the live entries."
 `agent-repl-workspace-snapshot-file' in the plist format
 `(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE
 :in-flight-merges IN-FLIGHT-MERGES
-:hide-project-dirs-enabled BOOL)'.
+:hide-project-dirs-enabled BOOL
+:default-frontend SYMBOL)'.
 
 When MERGE-QUEUE / IN-FLIGHT-MERGES are omitted, defaults to the live
 `agent-repl--merge-queue' / `agent-repl--in-flight-merges' so every
@@ -1974,6 +1994,10 @@ snapshot write captures the live state alongside the roster.
 `:hide-project-dirs-enabled' records the live
 `agent-repl-hide-project-dirs-enabled' toggle so a session restore
 reconstructs the hidden set.
+
+`:default-frontend' records the live `agent-repl-default-frontend' so a
+`SPC o f' / `SPC o F' choice keeps governing the workspaces created
+after an Emacs restart, not just the ones created before it.
 
 Creates the parent directory if missing and archives the previous file
 before overwriting.  Caller is responsible for any pre-write checks
@@ -2014,6 +2038,10 @@ before overwriting.  Caller is responsible for any pre-write checks
       (prin1 (and (boundp 'agent-repl-hide-project-dirs-enabled)
                   agent-repl-hide-project-dirs-enabled
                   t)
+             (current-buffer))
+      (insert "\n :default-frontend ")
+      (prin1 (and (boundp 'agent-repl-default-frontend)
+                  agent-repl-default-frontend)
              (current-buffer))
       (insert ")"))))
 
@@ -2625,7 +2653,8 @@ Returns to the workspace that was active when the load began."
          (snapshot (plist-get parsed :workspaces))
          (saved-mq (plist-get parsed :merge-queue))
          (saved-ifm (plist-get parsed :in-flight-merges))
-         (saved-hide (plist-get parsed :hide-project-dirs-enabled)))
+         (saved-hide (plist-get parsed :hide-project-dirs-enabled))
+         (saved-frontend (plist-get parsed :default-frontend)))
     (unless snapshot
       (user-error "No workspace snapshot at %s" file))
     ;; Restore the hide-project-dirs toggle BEFORE establishing entries —
@@ -2634,6 +2663,14 @@ Returns to the workspace that was active when the load began."
     ;; tombstones), so the runtime flag just needs to agree with it.
     (when (boundp 'agent-repl-hide-project-dirs-enabled)
       (setq agent-repl-hide-project-dirs-enabled (and saved-hide t)))
+    ;; Restore the frontend NEW workspaces are born with.  Only when the
+    ;; snapshot actually carries one: a pre-`:default-frontend' snapshot
+    ;; must leave the customized `agent-repl-default-frontend' alone
+    ;; rather than stomp it with nil.  Restored workspaces themselves are
+    ;; unaffected either way — each carries its own `:frontend' in its
+    ;; per-project state.el.
+    (when (and saved-frontend (boundp 'agent-repl-default-frontend))
+      (setq agent-repl-default-frontend saved-frontend))
     (let* ((normalized (mapcar #'agent-repl--snapshot-entry-normalize snapshot))
            ;; Partition: tombstoned entries (`:nuked-at' present) are
            ;; identity-only records — restore them directly to the hash
