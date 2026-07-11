@@ -787,8 +787,11 @@ the defcustoms.  Returns the list of dests created."
 ;;;; ---- local-skill specific tests ----
 
 (ert-deftest agent-repl-test-managed-local-skills-nonempty ()
-  "Repo-local skills list must include `debug-logs' (regression guard)."
-  (should (member "debug-logs" agent-repl--managed-local-skills)))
+  "Repo-local skills list must include `runtime-eval-code' (regression guard).
+debug-logs is deliberately NOT in the list — it is project-scoped via
+the checked-in `<repo>/.claude/skills/debug-logs' symlink."
+  (should (member "runtime-eval-code" agent-repl--managed-local-skills))
+  (should-not (member "debug-logs" agent-repl--managed-local-skills)))
 
 (ert-deftest agent-repl-test-local-skills-src-dir-default ()
   "Default `agent-repl-local-skills-src-dir' points at this module's
