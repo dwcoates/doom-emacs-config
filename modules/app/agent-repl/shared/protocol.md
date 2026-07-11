@@ -160,8 +160,12 @@ interface ShutdownCmd {
 #### `ready`
 
 Emitted once after the shim has constructed the `query()` iterator and
-is prepared to accept commands. Go must not send any command before
-seeing `ready`.
+is prepared to accept commands. `ready` is the authoritative carrier of
+the handshake metadata (session id, versions, initial permission mode);
+the daemon does not gate command forwarding on it. That is safe because
+the shim constructs its query synchronously at startup, before it
+consumes any stdin line, so every command written to the shim's stdin
+from process start is accepted.
 
 ```ts
 interface ReadyEvt {
@@ -383,10 +387,18 @@ direction is bi-directional but webapp→daemon traffic is limited to
 UI-originated commands (`user-message`, `permission-decision`,
 `interrupt`, `set-permission-mode`) which re-use the Layer-1 command
 shapes verbatim, plus the `replay-request` frame (§2.10), so this
-section otherwise enumerates only **daemon → webapp** frames.
+section otherwise enumerates only **daemon → webapp** frames. A
+client-sent `shutdown` is out of contract: session teardown is
+daemon-owned (`DELETE /sessions/{id}`), and the daemon ignores a
+`shutdown` frame like any other unknown type.
 
 Every frame carries a `seq` (monotonic, per-session) so the SPA store
-can detect drops and request a snapshot replay.
+can detect drops and request a snapshot replay. Exception: `hello` sits
+OUTSIDE the seq stream — it reuses the current watermark without
+consuming a seq and is never retained for replay, because it is
+connection-scoped rather than part of session history (it can also
+reappear mid-connection as the §2.10 eviction fallback). Clients must
+not fold `hello` into their seq-gap accounting.
 
 ### 2.1 Envelope
 
@@ -459,6 +471,11 @@ interface CompactBoundaryFrame extends WsEnvelope {
 
 Daemon-originated; reports an SDK / network retry attempt so the SPA
 can surface a non-modal "retrying…" badge.
+
+> **Status: reserved.** No daemon code path produces this frame yet —
+> Layer 1 carries no retry information, so emitting it needs either a
+> new Layer-1 event or shim-side detection first. Consumers should keep
+> handling it (the webapp already does); producers emit nothing today.
 
 ```ts
 interface RetryFrame extends WsEnvelope {
