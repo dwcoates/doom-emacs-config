@@ -911,7 +911,7 @@ new :done lifecycle."
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function 'message)
                  (lambda (fmt &rest args)
-                   (when (string-match-p "Claude finished" fmt)
+                   (when (string-match-p "Agent finished" fmt)
                      (setq messaged t)))))
         (agent-repl--handle-agent-finished "ws1")
         (should messaged)))))
