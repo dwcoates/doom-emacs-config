@@ -428,8 +428,15 @@ interface HelloFrame extends WsEnvelope {
   permission_mode: PermissionMode;
   model: string;
   cwd: string;
+  claude_session_id?: string;         // durable CLI session uuid; absent until system:init
 }
 ```
+
+`model` and `cwd` start as the session-creation REQUESTED values and are
+overwritten by the authoritative `system:init` payload once the SDK
+reports in. `claude_session_id` is the CLI-assigned uuid captured from
+`system:init` — the DURABLE id usable as a resume target across daemon
+restarts, unlike the ephemeral daemon session id in `session_id`.
 
 #### `result`
 
@@ -770,6 +777,10 @@ interface ReplayRequestFrame {
   daemon instead sends a fresh `hello` whose `resume_from_seq` names the
   earliest retained frame, and the SPA rebuilds its store from that
   point (discarding local state older than the gap).
+- `replay-request` is honored on TERMINAL sessions too (every other
+  client command is rejected once the session ends): a client attaching
+  after the shim exited must still be able to rebuild the retained
+  history instead of staring at an empty feed.
 
 ---
 

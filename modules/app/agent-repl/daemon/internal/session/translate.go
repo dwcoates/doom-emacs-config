@@ -33,10 +33,17 @@ type Translator struct {
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
 
-	// Session-info mirror for hello frames.
+	// Session-info mirror for hello frames. Model and CWD are seeded
+	// with the CreateOpts-requested values and overwritten by the
+	// authoritative system:init payload once the SDK reports in.
 	Model          string
 	CWD            string
 	PermissionMode protocol.PermissionMode
+	// ClaudeSessionID is the CLI-assigned session uuid captured from
+	// system:init. Empty until init arrives. This is the DURABLE id
+	// (usable as CreateOpts.Resume across daemon restarts), unlike the
+	// ephemeral daemon s_<hex> id.
+	ClaudeSessionID string
 }
 
 type openBlock struct {
@@ -544,9 +551,10 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 	switch evt.Subtype {
 	case "init":
 		var init struct {
-			Model          string `json:"model"`
-			CWD            string `json:"cwd"`
-			PermissionMode string `json:"permissionMode"`
+			Model           string `json:"model"`
+			CWD             string `json:"cwd"`
+			PermissionMode  string `json:"permissionMode"`
+			ClaudeSessionID string `json:"session_id"`
 		}
 		if err := json.Unmarshal(evt.Data, &init); err == nil {
 			if init.Model != "" {
@@ -557,6 +565,9 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 			}
 			if protocol.ValidPermissionMode(init.PermissionMode) {
 				t.PermissionMode = protocol.PermissionMode(init.PermissionMode)
+			}
+			if init.ClaudeSessionID != "" {
+				t.ClaudeSessionID = init.ClaudeSessionID
 			}
 		}
 		return []protocol.L2Frame{&protocol.SystemFrame{
