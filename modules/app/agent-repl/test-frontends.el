@@ -274,6 +274,26 @@ retroactively re-present it."
         (should (eq agent-repl-default-frontend 'gui))
         (should (eq (agent-repl--ws-get "ws2" :frontend) 'vterm))))))
 
+(ert-deftest agent-repl-test-frontends-adopt-default-does-not-leak-past-clean-state ()
+  "Adoption's `setq' on the global default does NOT outlive
+`agent-repl-test--with-clean-state'.
+
+The regression guard for the class of cross-file test pollution this
+adoption introduced: a leaked default re-routes frontend resolution for
+every later test whose workspace carries no `:frontend' of its own.  A
+scratch name leaks as a hard error (unregistered); a real name like
+`gui' leaks SILENTLY, which is worse.  Asserted here against the real
+registry so no registry-macro scratch binding can mask it."
+  ;; Arrange
+  (let ((before agent-repl-default-frontend))
+    ;; Act — drive a real adoption inside the clean-state scope.
+    (agent-repl-test--with-clean-state
+      (agent-repl--frontend-adopt-default
+       (if (eq agent-repl-default-frontend 'gui) 'vterm 'gui))
+      (should-not (eq agent-repl-default-frontend before)))
+    ;; Assert — the scope restored it.
+    (should (eq agent-repl-default-frontend before))))
+
 ;;;; ---- Switch command -----------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontends-switch-kills-flips-opens ()
