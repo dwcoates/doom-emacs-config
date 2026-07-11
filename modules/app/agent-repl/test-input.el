@@ -1579,10 +1579,13 @@ mirroring the first send of a freshly-initialized workspace."
 
 ;;;; ---- Tests: do-send frontend backend ----
 
-(ert-deftest agent-repl-test-do-send-frontend-routes-raw-to-daemon ()
-  "Frontend-backed workspaces send RAW (undecorated) via the daemon, not vterm."
+(ert-deftest agent-repl-test-do-send-frontend-routes-input-to-daemon ()
+  "Frontend-backed workspaces send the PREPARED input via the daemon, not vterm.
+INPUT may carry the metaprompt prefix — genuine message content that
+must survive the transport swap."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (agent-repl--ws-put "ws1" :prefix-counter 5)
     (let ((sent nil)
           (vterm-called nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
@@ -1591,9 +1594,54 @@ mirroring the first send of a freshly-initialized workspace."
                  (lambda (&rest _) (setq vterm-called t)))
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
-        (agent-repl--do-send "ws1" "decorated-input" "raw-text"))
-      (should (equal sent '("ws1" "raw-text")))
-      (should-not vterm-called))))
+        (agent-repl--do-send "ws1" "prepared-input" "raw-text"))
+      (should (equal sent '("ws1" "prepared-input")))
+      (should-not vterm-called)
+      ;; The metaprompt periodicity counter matches the vterm backend.
+      (should (= (agent-repl--ws-get "ws1" :prefix-counter) 6)))))
+
+(ert-deftest agent-repl-test-send-frontend-workspace-without-vterm ()
+  "RET-level send works in a frontend workspace with NO vterm buffer.
+The vterm-gated cond previously swallowed every hybrid-UI send."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((sent nil)
+          (committed nil))
+      (cl-letf (((symbol-function 'agent-repl--do-send)
+                 (lambda (_ws input _raw &optional _settle) (setq sent input)))
+                ((symbol-function 'agent-repl--commit-input-buffer)
+                 (lambda (&rest _) (setq committed t)))
+                ;; Decoration (metaprompt prepend) is prepare-input's own
+                ;; concern; this test pins only the ROUTING.
+                ((symbol-function 'agent-repl--prepare-input)
+                 (lambda (_ws raw &optional _force) raw)))
+        (agent-repl--send "hello frontend" "ws1"))
+      (should (equal sent "hello frontend"))
+      (should committed))))
+
+(ert-deftest agent-repl-test-send-frontend-empty-input-is-noop ()
+  "Empty input in a frontend workspace sends nothing (no bare-RET analog)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl--do-send)
+                 (lambda (&rest _) (setq sent t))))
+        (agent-repl--send "   " "ws1"))
+      (should-not sent))))
+
+(ert-deftest agent-repl-test-interrupt-frontend-workspace-without-vterm ()
+  "agent-repl-interrupt reaches the wire for frontend workspaces.
+The vterm-liveness gate previously skipped the interrupt entirely."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((interrupted nil))
+      (cl-letf (((symbol-function 'agent-repl--interrupt-agent)
+                 (lambda (_ws) (setq interrupted t)))
+                ((symbol-function 'run-at-time) #'ignore))
+        (agent-repl-interrupt "ws1"))
+      (should interrupted)
+      ;; Emacs-side state mirrors the vterm branch: turn marked done.
+      (should (eq (agent-repl--ws-agent-state "ws1") :done)))))
 
 (ert-deftest agent-repl-test-do-send-frontend-calls-on-settle ()
   "The frontend branch still honors ON-SETTLE (send is synchronous)."

@@ -1240,14 +1240,25 @@ is the sole observer here."
   (let* ((ws (or ws (agent-repl--ws-current-name)))
          (vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
     (agent-repl--log ws "interrupt")
-    (if (and vterm-buf (buffer-live-p vterm-buf))
-        (progn
-          (agent-repl--send-interrupt-escape ws vterm-buf)
-          (agent-repl--ws-clear-stop-tracking ws)
-          (agent-repl--mark-agent-done ws)
-          (run-at-time agent-repl-interrupt-reinsert-delay nil
-                       #'agent-repl--enter-insert-mode ws))
-      (agent-repl--log ws "interrupt: vterm not live, skipping"))))
+    (cond
+     ;; Web-frontend backend: the wire interrupt (HTTP route) replaces
+     ;; the vterm Escape; the done-marking mirrors the vterm branch —
+     ;; the aborted turn's result frame is the webview's signal, but
+     ;; Emacs-side state must not linger on :thinking either.
+     ((agent-repl--frontend-backend-p ws)
+      (agent-repl--interrupt-agent ws)
+      (agent-repl--ws-clear-stop-tracking ws)
+      (agent-repl--mark-agent-done ws)
+      (run-at-time agent-repl-interrupt-reinsert-delay nil
+                   #'agent-repl--enter-insert-mode ws))
+     ((and vterm-buf (buffer-live-p vterm-buf))
+      (agent-repl--send-interrupt-escape ws vterm-buf)
+      (agent-repl--ws-clear-stop-tracking ws)
+      (agent-repl--mark-agent-done ws)
+      (run-at-time agent-repl-interrupt-reinsert-delay nil
+                   #'agent-repl--enter-insert-mode ws))
+     (t
+      (agent-repl--log ws "interrupt: vterm not live, skipping")))))
 
 (defun agent-repl--agent-process-pid (ws)
   "Return the PID of the `claude' process running in WS's vterm, or nil.
