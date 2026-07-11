@@ -1027,7 +1027,9 @@ Checks input-re first since vterm-re is a superset that also matches inputs."
 (defun agent-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a agent panel buffer whose partner is not visible.
 Ignores single-window frames.  Input buffers are not orphaned while the
-loading placeholder exists (the vterm has not been swapped in yet)."
+loading placeholder exists (the vterm has not been swapped in yet), nor
+while the workspace's frontend WEBVIEW is visible — in the hybrid UI
+the input panel's live partner is the webview, not a vterm."
   (when-let ((id (agent-repl--extract-panel-id name)))
     (let* ((is-input (string-match-p agent-repl--input-buffer-re name))
            (partner (agent-repl--partner-buffer-name name id))
@@ -1035,7 +1037,9 @@ loading placeholder exists (the vterm has not been swapped in yet)."
                         (not (get-buffer-window partner))
                         ;; Input panels are not orphaned while loading placeholder is live
                         (or (not is-input)
-                            (not (get-buffer agent-repl-loading-placeholder-name))))))
+                            (and (not (get-buffer agent-repl-loading-placeholder-name))
+                                 (not (get-buffer-window
+                                       (agent-repl--frontend-webview-buffer-name id))))))))
       (when result
         (agent-repl--log-verbose (agent-repl--ws-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))

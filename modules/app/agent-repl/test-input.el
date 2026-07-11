@@ -1576,6 +1576,59 @@ mirroring the first send of a freshly-initialized workspace."
     (agent-repl--run-send-posthooks "ws1" "/clear")
     (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
+
+;;;; ---- Tests: do-send frontend backend ----
+
+(ert-deftest agent-repl-test-do-send-frontend-routes-raw-to-daemon ()
+  "Frontend-backed workspaces send RAW (undecorated) via the daemon, not vterm."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((sent nil)
+          (vterm-called nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (ws text) (setq sent (list ws text))))
+                ((symbol-function 'agent-repl--send-input-to-vterm)
+                 (lambda (&rest _) (setq vterm-called t)))
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        (agent-repl--do-send "ws1" "decorated-input" "raw-text"))
+      (should (equal sent '("ws1" "raw-text")))
+      (should-not vterm-called))))
+
+(ert-deftest agent-repl-test-do-send-frontend-calls-on-settle ()
+  "The frontend branch still honors ON-SETTLE (send is synchronous)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((settled nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        (agent-repl--do-send "ws1" "input" "raw" (lambda () (setq settled t))))
+      (should settled))))
+
+(ert-deftest agent-repl-test-interrupt-agent-frontend-uses-http ()
+  "Frontend-backed workspaces interrupt over the daemon route, not Ctrl-C."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (let ((interrupted nil)
+          (ctrl-c nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-interrupt-session)
+                 (lambda (id) (setq interrupted id)))
+                ((symbol-function 'agent-repl--vterm-send-raw-ctrl-c)
+                 (lambda () (setq ctrl-c t))))
+        (agent-repl--interrupt-agent "ws1"))
+      (should (equal interrupted "s_1"))
+      (should-not ctrl-c))))
+
+(ert-deftest agent-repl-test-interrupt-agent-vterm-fallback ()
+  "Workspaces without a frontend session keep the raw Ctrl-C path."
+  (agent-repl-test--with-clean-state
+    (let ((ctrl-c nil))
+      (cl-letf (((symbol-function 'agent-repl--vterm-send-raw-ctrl-c)
+                 (lambda () (setq ctrl-c t))))
+        (agent-repl--interrupt-agent "ws1"))
+      (should ctrl-c))))
+
 ;;;; ---- Tests: do-send ----
 
 (ert-deftest agent-repl-test-do-send-increments-counter ()

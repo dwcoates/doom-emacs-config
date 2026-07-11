@@ -121,13 +121,19 @@ show-panels — hiding first sidesteps the whole class."
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
                      (lambda () t))
                     ((symbol-function 'agent-repl--hide-panels)
-                     (lambda () (setq hidden t))))
+                     (lambda () (setq hidden t)))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) (get-buffer-create "*hides-input*")))
+                    ((symbol-function 'agent-repl-window--harden)
+                     (lambda (&rest _) nil)))
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
-            ;; Assert
+            ;; Assert — panels were hidden and the webview is displayed.
             (should hidden)
-            (should (eq (window-buffer (selected-window)) buf)))
-        (kill-buffer buf)))))
+            (should (get-buffer-window buf)))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer "*hides-input*")))))
 
 (ert-deftest agent-repl-test-frontend-display-uses-main-area-window ()
   "Without panels, the webview takes a live main-area window."
@@ -136,12 +142,41 @@ show-panels — hiding first sidesteps the whole class."
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
-                     (lambda () nil)))
+                     (lambda () nil))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) (get-buffer-create "*main-input*")))
+                    ((symbol-function 'agent-repl-window--harden)
+                     (lambda (&rest _) nil)))
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
-            ;; Assert
-            (should (eq (window-buffer (selected-window)) buf)))
-        (kill-buffer buf)))))
+            ;; Assert — the webview occupies a main-area window.
+            (should (get-buffer-window buf)))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer "*main-input*")))))
+
+(ert-deftest agent-repl-test-frontend-display-mounts-input-panel-below ()
+  "Hybrid UI: the classic input buffer splits in below the webview and takes focus."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                     (lambda () nil))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) input-buf))
+                    ((symbol-function 'agent-repl-window--harden)
+                     (lambda (&rest _) nil)))
+            ;; Act
+            (agent-repl--frontend-display-webview "ws1" buf)
+            ;; Assert — both visible, focus on the input window.
+            (should (get-buffer-window buf))
+            (should (get-buffer-window input-buf))
+            (should (eq (window-buffer (selected-window)) input-buf)))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)))))
 
 (ert-deftest agent-repl-test-frontend-main-area-window-skips-side-windows ()
   "The webview host window is never a side window."
@@ -203,7 +238,8 @@ exact failure seen live in the fresh instance."
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (_ws id url)
                    (should (equal id "s_42"))
-                   (should (string-suffix-p "/?session=s_42" url))
+                   ;; composer=0: Emacs owns input in the hybrid UI.
+                   (should (string-suffix-p "/?session=s_42&composer=0" url))
                    'fake-buffer))
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (_ws buf) (setq displayed buf))))

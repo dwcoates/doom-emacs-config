@@ -202,6 +202,40 @@ directory cannot own a session; that is an invariant violation)."
           (agent-repl--log ws "frontend session created: %s (cwd=%s)" id dir)
           id)))))
 
+;;;; ---- Message / interrupt injection ------------------------------------------
+
+(defun agent-repl--frontend-send-message (session-id text)
+  "POST TEXT as a user message to SESSION-ID; return the request id.
+The daemon injects the turn through the same pipeline as a WS submit,
+so every attached tab renders the user-turn echo."
+  (let* ((resp (agent-repl--frontend-api
+                "POST" (format "/sessions/%s/message" session-id)
+                `(("content" . ,text))))
+         (rid (alist-get 'request_id resp)))
+    (unless (and (stringp rid) (not (string-empty-p rid)))
+      (error "agent-repl: message injection returned no request_id: %S" resp))
+    rid))
+
+(defun agent-repl--frontend-interrupt-session (session-id)
+  "Abort SESSION-ID's in-flight turn over HTTP."
+  (agent-repl--frontend-api "POST" (format "/sessions/%s/interrupt" session-id))
+  t)
+
+(defun agent-repl--frontend-backend-p (ws)
+  "Return non-nil when WS's input routes to the web frontend.
+True exactly while a daemon session is bound (`:frontend-session-id',
+set by the panel-open path and cleared on nuke) — the flag input.el's
+send/interrupt seams branch on."
+  (and (agent-repl--ws-get ws :frontend-session-id) t))
+
+(defun agent-repl--frontend-send-user-message (ws text)
+  "Send TEXT as WS's user turn via its bound daemon session.
+Ensures the session first (recreating a stale binding), so a send into
+a dead session heals instead of 404ing."
+  (let ((id (agent-repl--frontend-ensure-session ws)))
+    (agent-repl--log ws "frontend send: session=%s len=%d" id (length text))
+    (agent-repl--frontend-send-message id text)))
+
 (defun agent-repl--frontend-release-workspace-session (ws)
   "Best-effort DELETE of WS's daemon session (for `agent-repl-ws-del-hook').
 Reads `:frontend-session-id' (still present pre-tombstone), DELETEs it,

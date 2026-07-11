@@ -232,7 +232,18 @@ stale accumulated input."
      ((bound-and-true-p agent-repl-slash-input-mode)
       (agent-repl--exit-slash-mode)))
     (unless skip-ctrl-c
-      (agent-repl--vterm-send-raw-ctrl-c))))
+      (agent-repl--interrupt-agent ws))))
+
+(defun agent-repl--interrupt-agent (ws)
+  "Interrupt WS's agent through its active backend.
+Web-frontend workspaces interrupt over the daemon's HTTP route (the
+wire interrupt cancels pending prompts and marks the turn aborted);
+vterm workspaces keep the raw Ctrl-C byte."
+  (if (agent-repl--frontend-backend-p ws)
+      (let ((id (agent-repl--ws-get ws :frontend-session-id)))
+        (agent-repl--log ws "interrupt-agent[frontend]: session=%s" id)
+        (agent-repl--frontend-interrupt-session id))
+    (agent-repl--vterm-send-raw-ctrl-c)))
 
 ;;; Arrow key forwarding (insert-mode terminal navigation)
 
@@ -844,14 +855,26 @@ the Emacs-side send is the only available signal — see
 `agent-repl--note-permission-answered-by-send'.  The owning-workspace
 pin below runs BEFORE the send so the primitive resolves the correct
 workspace from the vterm buffer."
-  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-    (agent-repl--log ws "do-send ws=%s len=%d" ws (length input))
-    (agent-repl--increment-prefix-counter ws)
-    (agent-repl--ws-put ws :last-prompt-time (float-time))
-    (agent-repl--pin-owning-workspace vterm-buf ws)
-    (agent-repl--send-input-to-vterm vterm-buf input on-settle)
-    (agent-repl--run-send-posthooks ws raw)
-    (agent-repl--kickoff-prompt-summary ws raw)))
+  (if (agent-repl--frontend-backend-p ws)
+      ;; Web-frontend backend: RAW (undecorated) goes to the daemon
+      ;; session — prefix decoration and the owning-workspace pin are
+      ;; vterm-output-parsing machinery with no frontend counterpart.
+      ;; Posthooks and prompt summary behave identically to vterm.
+      (progn
+        (agent-repl--log ws "do-send[frontend] ws=%s len=%d" ws (length raw))
+        (agent-repl--ws-put ws :last-prompt-time (float-time))
+        (agent-repl--frontend-send-user-message ws raw)
+        (agent-repl--run-send-posthooks ws raw)
+        (agent-repl--kickoff-prompt-summary ws raw)
+        (when on-settle (funcall on-settle)))
+    (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+      (agent-repl--log ws "do-send ws=%s len=%d" ws (length input))
+      (agent-repl--increment-prefix-counter ws)
+      (agent-repl--ws-put ws :last-prompt-time (float-time))
+      (agent-repl--pin-owning-workspace vterm-buf ws)
+      (agent-repl--send-input-to-vterm vterm-buf input on-settle)
+      (agent-repl--run-send-posthooks ws raw)
+      (agent-repl--kickoff-prompt-summary ws raw))))
 
 (defun agent-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
