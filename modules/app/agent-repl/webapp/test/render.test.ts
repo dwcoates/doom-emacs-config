@@ -246,6 +246,23 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-q-submit");
   });
 
+  it("hides streaming partial input JSON behind a pulse indicator", () => {
+    // Arrange — input still streaming: raw partial JSON must NOT show.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Read",
+      messageId: "m1",
+      inputJson: `{"file_path":"/private/e`,
+      inputDone: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("tool-input-pending");
+    expect(html).not.toContain("file_path");
+  });
+
   it("escapes untrusted content in tool output", () => {
     // Arrange
     const item: ToolItem = {
