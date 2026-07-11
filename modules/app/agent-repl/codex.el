@@ -297,10 +297,14 @@ Code's settings.json).  No matcher entries are needed: codex ignores
 matchers for Stop/UserPromptSubmit and the managed set registers no
 matched events."
   (interactive)
-  (agent-repl--register-hooks-in-settings
-   (agent-repl--codex-hooks-file)
-   agent-repl--codex-managed-hooks
-   nil))
+  (let ((wrote (agent-repl--register-hooks-in-settings
+                (agent-repl--codex-hooks-file)
+                agent-repl--codex-managed-hooks
+                nil)))
+    (message "agent-repl: codex hooks %s in %s"
+             (if wrote "registered" "already registered (no change)")
+             (agent-repl--codex-hooks-file))
+    wrote))
 
 ;;;; ---- Doctor --------------------------------------------------------------
 
