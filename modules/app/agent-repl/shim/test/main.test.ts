@@ -80,3 +80,26 @@ describe("realQueryOptions", () => {
     expect(full.resume).toBe("cli-1");
   });
 });
+
+describe("CLI-era flags", () => {
+  it("accepts permission-mode auto and friends", () => {
+    // Arrange + Act + Assert
+    expect(parseArgs(["--permission-mode", "auto"]).permissionMode).toBe("auto");
+    expect(parseArgs(["--permission-mode", "dontAsk"]).permissionMode).toBe("dontAsk");
+    expect(() => parseArgs(["--permission-mode", "yolo"])).toThrow("invalid");
+  });
+
+  it("threads --claude-bin into pathToClaudeCodeExecutable", () => {
+    // Arrange
+    const noopCanUse = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
+    // Act
+    const withBin = realQueryOptions(
+      parseArgs(["--session-id", "s1", "--claude-bin", "/usr/local/bin/claude"]),
+      noopCanUse,
+    );
+    const withoutBin = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse);
+    // Assert
+    expect(withBin.pathToClaudeCodeExecutable).toBe("/usr/local/bin/claude");
+    expect("pathToClaudeCodeExecutable" in withoutBin).toBe(false);
+  });
+});

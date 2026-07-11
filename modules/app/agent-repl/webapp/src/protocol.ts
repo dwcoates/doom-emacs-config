@@ -10,7 +10,12 @@ export type PermissionMode =
   | "default"
   | "acceptEdits"
   | "bypassPermissions"
-  | "plan";
+  | "plan"
+  // CLI-era modes (claude >= 2.1); validated by the CLI itself.
+  | "auto"
+  | "manual"
+  | "dontAsk"
+  | "delegate";
 
 export interface Usage {
   input_tokens: number;
