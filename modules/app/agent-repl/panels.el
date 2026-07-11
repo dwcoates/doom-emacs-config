@@ -1156,7 +1156,7 @@ this bounce alone is sufficient to keep keyboard nav out of vterm."
               (progn
                 (agent-repl--log-verbose (agent-repl--ws-current-name) "bounce-from-vterm: bouncing to input-win=%s" input-win)
                 (select-window input-win))
-            (message "[agent-repl] keyboard navigation landed in Claude vterm but input panel isn't visible — stuck here until you click out or reopen panels")
+            (message "[agent-repl] keyboard navigation landed in agent vterm but input panel isn't visible — stuck here until you click out or reopen panels")
             (agent-repl--log (agent-repl--ws-current-name) "bounce-from-vterm: no input-win to bounce to (warned)")))
       (agent-repl--log-verbose (agent-repl--ws-current-name) "bounce-from-vterm: skipped vterm-buffer=%s mouse=%s"
                                 (if (agent-repl--agent-buffer-p (window-buffer win)) "yes" "no")
@@ -1274,7 +1274,7 @@ echo-area message below."
               (agent-repl--ws-put ws :prefix-counter 0)
               (agent-repl--enable-hide-overlay)
               (agent-repl--ws-set-agent-state ws :init)
-              (message "Starting Claude... ws=%s ws-id=%s dir=%s cmd=%s"
+              (message "Starting agent... ws=%s ws-id=%s dir=%s cmd=%s"
                        ws (agent-repl--workspace-id) root (or cmd "?"))
               (agent-repl--state-save ws)
               (setq launched t))
@@ -1388,7 +1388,7 @@ workspace that is already hidden / never-started should still mark it
      ((not vterm-running)
       (agent-repl--initialize-agent))
      (session-starting
-      (message "Claude is loading…"))
+      (message "Agent is loading…"))
      (panels-visible
       (funcall close-fn))
      ;; Output window is up but the input window was dropped (e.g. a

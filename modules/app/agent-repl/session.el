@@ -898,7 +898,7 @@ current workspace is different, and drains any deferred-prompt queue
     (agent-repl--refresh-magit-status ws)
     (agent-repl--maybe-notify-finished ws)
     (unless (agent-repl--current-ws-p ws)
-      (message "Claude finished in workspace: %s" ws))
+      (message "Agent finished in workspace: %s" ws))
     (agent-repl--drain-deferred-prompts ws)))
 
 ;;;; Deferred prompt queue
@@ -1054,7 +1054,7 @@ When the vterm buffer has died in the meantime, abandons silently."
     (agent-repl--log ws
                       "deliver-verify: ws=%s GIVING UP after %d retries — prompt may be lost"
                       ws retries)
-    (message "[agent-repl] WARNING: preemptive prompt for ws=%s not acknowledged after %d retries — Claude may not have seen it"
+    (message "[agent-repl] WARNING: preemptive prompt for ws=%s not acknowledged after %d retries — the agent may not have seen it"
              ws retries))))
 
 (defun agent-repl--drain-pending-prompts (ws)
