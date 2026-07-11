@@ -28,7 +28,7 @@ RUN npm install -g @anthropic-ai/claude-code @anthropic-ai/claude-code-linux-x64
 RUN npm install -g @openai/codex
 
 # Go toolchain for the claude-repld daemon (Layer 1 stdio host + Layer 2
-# WebSocket server described in modules/app/claude-repl/shared/protocol.md).
+# WebSocket server described in modules/app/agent-repl/shared/protocol.md).
 # Node 20 above covers the TS shim and the webapp SPA; only the Go daemon
 # lacks a toolchain. The image is always built --platform linux/amd64, so the
 # amd64 tarball is safe to hardcode. `go version` fails the build loudly if the
