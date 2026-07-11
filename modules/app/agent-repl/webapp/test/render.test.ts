@@ -141,6 +141,22 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-perm-allow");
   });
 
+  it("suppresses the tool card for AskUserQuestion", () => {
+    // Arrange — the picker card is the question's UI; the tool card
+    // would only dump the raw questions JSON next to it.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      messageId: "m1",
+      input: { questions: [] },
+      inputJson: `{"questions":[]}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
+  });
+
   it("renders AskUserQuestion as an option picker, not allow/deny", () => {
     // Arrange
     const item: ConversationItem = {
