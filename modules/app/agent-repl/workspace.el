@@ -170,7 +170,7 @@ debug logging on."
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
-    :done-ack-pending :source-ws-name)
+    :done-ack-pending :source-ws-name :frontend-session-id)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
@@ -220,6 +220,14 @@ collide with the real workspace in `agent-repl--ws-for-dir'."
                 (and p (string= canonical (agent-repl--path-canonical p))))))
        (agent-repl--live-ws-names)))))
 
+(defvar agent-repl-ws-del-hook nil
+  "Abnormal hook run with WS just before `agent-repl--ws-del' tombstones it.
+Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
+readable, so consumers can release external resources keyed on them —
+e.g. frontend-client.el deletes the workspace's daemon session using
+`:frontend-session-id'.  Handlers must not signal: a teardown hook that
+errors would abort the nuke midway.")
+
 (defun agent-repl--ws-del (ws)
   "Tombstone workspace WS instead of removing its hash entry.
 Stamps `:nuked-at' with the current time, clears every key in
@@ -247,6 +255,10 @@ log line preserves the pre-existing diagnostic shape."
                  (agent-repl--ws-put peer :source-ws-name nil)))
              agent-repl--workspaces)
     (when had-entry
+      ;; Pre-tombstone hook: runs while the runtime keys are still
+      ;; readable (e.g. frontend-client's session release needs
+      ;; :frontend-session-id before the clear below wipes it).
+      (run-hook-with-args 'agent-repl-ws-del-hook ws)
       (dolist (key agent-repl--ws-runtime-keys)
         (agent-repl--ws-put ws key nil))
       (agent-repl--ws-put ws :last-killed-at (current-time))
