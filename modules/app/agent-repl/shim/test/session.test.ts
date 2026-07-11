@@ -586,9 +586,10 @@ describe("ShimSession SDK message mapping", () => {
     expect(h.eventsOfType("result")[0].subtype).toBe("error_during_execution");
   });
 
-  it("marks the first result after an interrupt command as aborted", async () => {
-    // Arrange
+  it("marks the first result after an in-flight interrupt as aborted", async () => {
+    // Arrange — a turn must be in flight for an interrupt to abort it.
     const h = makeHarness();
+    h.send({ type: "user-message", request_id: "r0", content: "hi" });
     h.send({ type: "interrupt", request_id: "r1" });
     // Act
     await drive(h, {
@@ -604,6 +605,56 @@ describe("ShimSession SDK message mapping", () => {
     });
     // Assert
     expect(h.eventsOfType("result")[0].subtype).toBe("aborted");
+  });
+
+  it("does not mark the next turn aborted after an idle interrupt", async () => {
+    // Arrange — interrupt with NO turn in flight, then start a turn.
+    const h = makeHarness();
+    h.send({ type: "interrupt", request_id: "r1" });
+    h.send({ type: "user-message", request_id: "r2", content: "hi" });
+    // Act
+    await drive(h, {
+      type: "result",
+      uuid: "u7",
+      subtype: "success",
+      duration_ms: 1,
+      duration_api_ms: 1,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      is_error: false,
+      result: "ok",
+    });
+    // Assert — the idle interrupt must not poison the fresh turn.
+    expect(h.eventsOfType("result")[0].subtype).toBe("success");
+  });
+
+  it("treats an interrupt after a completed turn as idle", async () => {
+    // Arrange — first turn completes, so in-flight resets before the interrupt.
+    const h = makeHarness();
+    const result = (uuid: string): SdkMessageLike => ({
+      type: "result",
+      uuid,
+      subtype: "success",
+      duration_ms: 1,
+      duration_api_ms: 1,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      is_error: false,
+      result: "ok",
+    });
+    h.send({ type: "user-message", request_id: "r0", content: "hi" });
+    h.sdkOut.push(result("u1"));
+    await until(() => h.eventsOfType("result").length === 1);
+    h.send({ type: "interrupt", request_id: "r1" });
+    h.send({ type: "user-message", request_id: "r2", content: "again" });
+    // Act
+    h.sdkOut.push(result("u2"));
+    h.sdkOut.end();
+    await h.pump;
+    // Assert — the post-turn interrupt was idle, so turn two is untouched.
+    expect(h.eventsOfType("result")[1].subtype).toBe("success");
   });
 
   it("maps system init messages to system events with subtype init", async () => {
