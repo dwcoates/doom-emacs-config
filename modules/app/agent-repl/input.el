@@ -856,14 +856,17 @@ the Emacs-side send is the only available signal — see
 pin below runs BEFORE the send so the primitive resolves the correct
 workspace from the vterm buffer."
   (if (agent-repl--frontend-backend-p ws)
-      ;; Web-frontend backend: RAW (undecorated) goes to the daemon
-      ;; session — prefix decoration and the owning-workspace pin are
-      ;; vterm-output-parsing machinery with no frontend counterpart.
-      ;; Posthooks and prompt summary behave identically to vterm.
+      ;; Web-frontend backend: INPUT (the prepared text, which may carry
+      ;; the metaprompt prefix — genuine message content) goes to the
+      ;; daemon session. Only the owning-workspace pin is vterm-specific
+      ;; machinery skipped here; the prefix counter still increments so
+      ;; metaprompt periodicity matches the vterm backend. Posthooks and
+      ;; prompt summary key on RAW, identically to vterm.
       (progn
-        (agent-repl--log ws "do-send[frontend] ws=%s len=%d" ws (length raw))
+        (agent-repl--log ws "do-send[frontend] ws=%s len=%d" ws (length input))
+        (agent-repl--increment-prefix-counter ws)
         (agent-repl--ws-put ws :last-prompt-time (float-time))
-        (agent-repl--frontend-send-user-message ws raw)
+        (agent-repl--frontend-send-user-message ws input)
         (agent-repl--run-send-posthooks ws raw)
         (agent-repl--kickoff-prompt-summary ws raw)
         (when on-settle (funcall on-settle)))
@@ -919,6 +922,18 @@ Handles input preparation, sending, history, and persistence."
       (when (and vterm-buf (not (buffer-live-p vterm-buf)))
         (agent-repl--log ws "send: early return -- vterm-buf is dead for ws=%s" ws))
       (cond
+       ;; Web-frontend backend: no vterm exists at all, so this branch
+       ;; must come before the vterm-gated ones (they would otherwise
+       ;; silently swallow every RET in a hybrid workspace). Empty input
+       ;; is a no-op — the vterm bare-RET forward answers terminal
+       ;; menus, which have no frontend counterpart (prompts are webview
+       ;; clicks).
+       ((agent-repl--frontend-backend-p ws)
+        (if raw-empty
+            (agent-repl--log ws "send[frontend]: empty input -- nothing to send")
+          (let ((input (agent-repl--prepare-input ws raw force-metaprompt)))
+            (agent-repl--do-send ws input raw on-settle)
+            (agent-repl--commit-input-buffer ws input-buf raw from-buf))))
        ;; Empty input on live vterm: send a bare RET to the terminal so
        ;; pressing RET always reaches Claude (useful for permission
        ;; prompts, menus, confirmations).  Skip the full send pipeline
