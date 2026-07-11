@@ -457,6 +457,112 @@ overlay.  Tests the workspace-anchored restoration path."
         (let ((text (buffer-substring-no-properties (point-min) (point-max))))
           (should-not (string-match-p "merged into:" text)))))))
 
+;;;; ---- MERGING-section merge-status detail line ----
+
+(ert-deftest agent-repl-drawer-test-merge-status-text-in-flight-label ()
+  "`--merge-status-text' labels an in-flight cherry-pick \"update in progress\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/" :merging t)
+    (should (equal (agent-repl-drawer--merge-status-text "ws")
+                   "update in progress"))))
+
+(ert-deftest agent-repl-drawer-test-merge-status-text-queued-label ()
+  "`--merge-status-text' labels a parked request \"update queued\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/"
+                                       :repl-state :merge-queued)
+    (should (equal (agent-repl-drawer--merge-status-text "ws")
+                   "update queued"))))
+
+(ert-deftest agent-repl-drawer-test-merge-status-text-appends-commit-count ()
+  "`--merge-status-text' appends the cached source-ahead commit count (plural)."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/" :merging t
+                                       :detail-source-ahead 3)
+    (should (equal (agent-repl-drawer--merge-status-text "ws")
+                   "update in progress · 3 commits"))))
+
+(ert-deftest agent-repl-drawer-test-merge-status-text-singular-commit ()
+  "A source-ahead of 1 renders the singular \"1 commit\" (no trailing s)."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/"
+                                       :repl-state :merge-queued
+                                       :detail-source-ahead 1)
+    (should (equal (agent-repl-drawer--merge-status-text "ws")
+                   "update queued · 1 commit"))))
+
+(ert-deftest agent-repl-drawer-test-merge-status-text-nil-for-non-merging ()
+  "`--merge-status-text' returns nil for a non-MERGING workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/"
+                                       :repl-state :merged)
+    (should-not (agent-repl-drawer--merge-status-text "ws"))))
+
+(ert-deftest agent-repl-drawer-test-merging-detail-shows-merge-status ()
+  "An expanded MERGING entry's detail shows the merge-status line."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :merging t
+                                       :detail-source-ahead 2)
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "merge:" text))
+          (should (string-match-p "update in progress · 2 commits" text)))))))
+
+(ert-deftest agent-repl-drawer-test-merge-status-value-has-face ()
+  "The merge-status value carries `agent-repl-drawer-detail-merge-status'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merge-queued)
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let* ((all (buffer-substring-no-properties (point-min) (point-max)))
+               (pos (string-match (regexp-quote "update queued") all))
+               (f (and pos (get-text-property (1+ pos) 'face))))
+          (should (memq 'agent-repl-drawer-detail-merge-status
+                        (if (listp f) f (list f)))))))))
+
+(ert-deftest agent-repl-drawer-test-non-merging-detail-omits-merge-status ()
+  "A non-MERGING entry's expanded detail omits the merge-status line."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-branch "feature/x")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "merge:" text)))))))
+
 (ert-deftest agent-repl-drawer-test-expanded-detail-lists-merged-in-workspaces ()
   "An expanded entry lists every workspace on its `:merged-in-workspaces'."
   (agent-repl-test--with-clean-state

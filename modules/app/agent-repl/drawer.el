@@ -249,6 +249,14 @@ Each entry lists a workspace whose commits were successfully merged
 into this workspace (see `:merged-in-workspaces')."
   :group 'agent-repl)
 
+(defface agent-repl-drawer-detail-merge-status
+  '((t :foreground "cyan" :weight bold))
+  "Face for the merge-status line in an expanded MERGING-section entry.
+Colors the brief phase-plus-count indicator (in-flight vs queued, and
+the number of commits to be cherry-picked) produced by
+`agent-repl-drawer--merge-status-text'."
+  :group 'agent-repl)
+
 ;;;; Mode -------------------------------------------------------------------
 
 (defvar agent-repl-drawer-mode-map
@@ -1691,6 +1699,35 @@ collapse, removes from the expanded set.  Re-renders the drawer."
       (puthash ws t agent-repl-drawer--expanded-set))
     (agent-repl-drawer--render)))
 
+(defun agent-repl-drawer--merge-status-text (ws)
+  "Return a brief merge-status string for WS, or nil when WS is not merging.
+Distinguishes the two MERGING-section render-states via
+`agent-repl--ws-render-status':
+
+  - `:merging'      → \"update in progress\" (worker thread's cherry-pick
+                      is live).
+  - `:merge-queued' → \"update queued\" (parked on the merge queue,
+                      waiting for an in-flight cherry-pick to clear).
+
+When the count of commits the workspace is ahead of its merge source is
+cached in `:detail-source-ahead' (populated by
+`--refresh-detail-cache'), appends it as \"N commit(s)\" so the reader
+sees the size of the merge being cherry-picked.  The count is omitted
+when the cache is empty (e.g. the source worktree is gone) rather than
+guessed.
+
+Returns nil for every non-MERGING render-state, so only MERGING-section
+entries render a status line."
+  (let ((status (agent-repl--ws-render-status ws)))
+    (when (memq status '(:merging :merge-queued))
+      (let ((phase (if (eq status :merging)
+                       "update in progress"
+                     "update queued"))
+            (n (agent-repl--ws-get ws :detail-source-ahead)))
+        (if (and (integerp n) (> n 0))
+            (format "%s · %d commit%s" phase n (if (= n 1) "" "s"))
+          phase)))))
+
 (defun agent-repl-drawer--render-detail-lines (ws depth)
   "Insert detail lines for an expanded WS at DEPTH.
 Reads only cached `:detail-*' fields and existing plist values; never
@@ -1707,6 +1744,7 @@ invokes git.  Caller is `--render-workspace-expanded'."
          (dirty-count  (agent-repl--ws-get ws :detail-dirty-count))
          (last-prompt-time (agent-repl--ws-get ws :last-prompt-time))
          (pending-count (length (agent-repl--ws-get ws :pending-prompts)))
+         (merge-status (agent-repl-drawer--merge-status-text ws))
          (merged-in    (agent-repl--ws-get ws :merged-in-workspaces)))
     (cl-flet ((line (label value face)
                 (insert detail-prefix
@@ -1715,6 +1753,11 @@ invokes git.  Caller is `--render-workspace-expanded'."
                                     'face face
                                     'wrap-prefix detail-prefix)
                         "\n")))
+      ;; Headline status for MERGING-section entries: in-flight vs queued
+      ;; plus the pending commit count.  Rendered first so the merge phase
+      ;; is the first thing the reader sees when the entry auto-expands.
+      (when merge-status
+        (line "merge:" merge-status 'agent-repl-drawer-detail-merge-status))
       (when branch
         (line "branch:" branch 'agent-repl-drawer-detail-branch))
       (when merge-target
