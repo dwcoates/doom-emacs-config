@@ -318,6 +318,26 @@ deadlock the non-interactive nuke hook."
     ;; Assert — killed despite the refusing query fn.
     (should-not (buffer-live-p buf))))
 
+(ert-deftest agent-repl-test-frontend-gui-kill-tears-down-layout-first ()
+  "gui kill hides the webview/input windows BEFORE releasing state.
+`agent-repl-switch-frontend' opens the next frontend right after kill;
+a leftover dedicated input window aborts the vterm launch."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-hide)
+                 (lambda (_ws) (push 'hide order)))
+                ((symbol-function 'agent-repl--frontend-release-workspace-session)
+                 (lambda (_ws) (push 'release-session order)))
+                ((symbol-function 'agent-repl--frontend-release-workspace-webview)
+                 (lambda (_ws) (push 'release-webview order))))
+        ;; Act
+        (agent-repl--gui-kill "ws1")
+        ;; Assert — layout teardown precedes the releases.
+        (should (equal (nreverse order) '(hide release-session release-webview)))
+        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))
+        (should (null (agent-repl--ws-get "ws1" :frontend-buffer-session-id)))))))
+
 (ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
   "The nuke hook kills the webview so the WKWebView never outlives the ws."
   ;; Arrange
