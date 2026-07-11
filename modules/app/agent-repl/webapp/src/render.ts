@@ -117,6 +117,13 @@ function ToolCard(item: ToolItem): string {
 }
 
 function toolInput(item: ToolItem): string {
+  // While the input is still streaming, item.input is unparsed and the
+  // only material is the accumulating RAW partial JSON — flashing that
+  // before the pretty per-tool form renders reads as a glitch. Show a
+  // quiet preparing indicator until tool-use-input-end lands.
+  if (!item.inputDone) {
+    return `<div class="tool-input-pending"><span class="pulse">•••</span></div>`;
+  }
   if (item.toolName === "Bash" && item.input && typeof item.input.command === "string") {
     return `<pre class="cmd">$ ${escapeHtml(item.input.command)}</pre>`;
   }
