@@ -238,9 +238,9 @@ SAVED is a parsed state-file plist (or nil).  Hydrates the
 non-env-struct keys that drive the tabline badge and drawer glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
 `:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
-`:last-prompt-summary', `:last-prompt-summary-at', `:worktree-p', and
-the `:merge-completed' / `:merge-failed' / `:merge-completed-at'
-bookkeeping.
+`:backend-session-stash', `:last-prompt-summary',
+`:last-prompt-summary-at', `:worktree-p', and the `:merge-completed' /
+`:merge-failed' / `:merge-completed-at' bookkeeping.
 
 Shared by `agent-repl--initialize-ws-env' (the agent-start path) and
 `agent-repl--load-display-state' (the `SPC p p' / workspace-creation
@@ -314,6 +314,13 @@ remaining keys are written only when SAVED carries them."
   ;; --fork-session'.  Cleared by `--initialize-agent' once consumed.
   (when-let ((fork (and saved (plist-get saved :fork-session-id))))
     (agent-repl--ws-put ws :fork-session-id fork))
+  ;; Backend session stash: the per-backend session ids captured when the
+  ;; user switched AWAY from a backend, so switching BACK restores that
+  ;; backend's `--continue'/`resume' continuity (see
+  ;; `agent-repl--ws-switch-backend-session-ids').  Survives restart so a
+  ;; switch-back after re-boot still resumes the prior backend's session.
+  (when-let ((stash (and saved (plist-get saved :backend-session-stash))))
+    (agent-repl--ws-put ws :backend-session-stash stash))
   ;; Last prompt summary: the tabline / mode-line uses this to render a
   ;; short "what is this ws working on" hint.  Restore just the summary
   ;; — `:last-prompt-text' and `:last-prompt-summary-pending' are
