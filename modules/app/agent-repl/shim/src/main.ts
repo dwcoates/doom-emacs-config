@@ -94,6 +94,36 @@ function packageVersion(spec: string): string {
   }
 }
 
+/**
+ * Assemble the SDK query options for a real (non-fake) session.
+ * Exported for unit testing (the factory itself needs the live SDK).
+ *
+ * Interactive-CLI parity is deliberate, NOT the SDK's isolation-mode
+ * default:
+ * - The `claude_code` system-prompt preset carries the environment
+ *   block (cwd, platform, home). Without it the model has no idea what
+ *   `~` is and invents paths like /Users/user/... for tilde-phrased
+ *   instructions.
+ * - settingSources loads the user's settings.json (permission
+ *   allowlists, hooks), project settings, and CLAUDE.md — the posture
+ *   every vterm-era workflow assumes.
+ */
+export function realQueryOptions(
+  args: CliArgs,
+  canUseTool: CanUseToolLike,
+): Record<string, unknown> {
+  return {
+    canUseTool: canUseTool as never,
+    includePartialMessages: true,
+    permissionMode: args.permissionMode,
+    systemPrompt: { type: "preset", preset: "claude_code" },
+    settingSources: ["user", "project", "local"],
+    ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
+    ...(args.model !== undefined ? { model: args.model } : {}),
+    ...(args.resume !== undefined ? { resume: args.resume } : {}),
+  };
+}
+
 async function realQueryFactory(
   args: CliArgs,
   prompt: AsyncIterable<SdkUserMessageLike>,
@@ -102,14 +132,7 @@ async function realQueryFactory(
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
   return sdk.query({
     prompt: prompt as never,
-    options: {
-      canUseTool: canUseTool as never,
-      includePartialMessages: true,
-      permissionMode: args.permissionMode,
-      ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
-      ...(args.model !== undefined ? { model: args.model } : {}),
-      ...(args.resume !== undefined ? { resume: args.resume } : {}),
-    },
+    options: realQueryOptions(args, canUseTool) as never,
   }) as unknown as QueryLike;
 }
 
