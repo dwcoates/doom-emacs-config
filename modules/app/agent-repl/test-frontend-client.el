@@ -103,6 +103,29 @@ Captured requests accumulate in the anaphoric variable `requests' as
       (should (string-match-p "\"model\":\"haiku\"" payload))
       (should (string-match-p "\"resume\":\"cli-uuid-9\"" payload)))))
 
+(ert-deftest agent-repl-test-frontend-create-sends-permission-mode ()
+  "Create carries the configured permission mode (vterm-parity default auto)."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((agent-repl-frontend-permission-mode "auto"))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should (string-match-p "\"permission_mode\":\"auto\""
+                              (nth 2 (car requests)))))))
+
+(ert-deftest agent-repl-test-frontend-create-omits-permission-mode-when-nil ()
+  "A nil mode customization omits the field (SDK default)."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((agent-repl-frontend-permission-mode nil))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should-not (string-match-p "permission_mode" (nth 2 (car requests)))))))
+
 (ert-deftest agent-repl-test-frontend-create-requires-cwd ()
   "Create without a cwd signals instead of minting a cwd-less session."
   ;; Act / Assert — no HTTP boundary shadow needed: must fail before I/O.

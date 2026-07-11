@@ -43,7 +43,15 @@ type PermissionMode =
   | "default"
   | "acceptEdits"
   | "bypassPermissions"
-  | "plan";
+  | "plan"
+  // CLI-era modes (claude >= 2.1). The stack passes modes through to
+  // the CLI's own validation rather than gatekeeping a stale subset;
+  // "auto"/"manual" etc. require the daemon to drive a system CLI that
+  // knows them (claude-repld -claude-bin).
+  | "auto"
+  | "manual"
+  | "dontAsk"
+  | "delegate";
 
 interface Usage {
   input_tokens: number;

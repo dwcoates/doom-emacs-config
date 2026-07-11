@@ -46,6 +46,17 @@
   :type 'integer
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-permission-mode "auto"
+  "Permission mode for gui-created sessions (POST /sessions).
+Defaults to `auto' to match the vterm start flags
+(`agent-repl-personal-permission-flag' /
+`agent-repl-managed-permission-flag'), which requires the daemon to
+drive the SYSTEM claude binary (daemon.el's -claude-bin) — the
+SDK-bundled CLI predates the mode.  Set nil to omit the field and use
+the SDK default."
+  :type '(choice (const :tag "SDK default" nil) string)
+  :group 'agent-repl)
+
 (defcustom agent-repl-frontend-ready-attempts 25
   "Poll attempts for `agent-repl--frontend-wait-ready' (0.2s apart)."
   :type 'integer
@@ -143,7 +154,9 @@ passthroughs.  Signals on HTTP failure or a malformed response."
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
   (let* ((payload (append `(("cwd" . ,cwd))
                           (when model `(("model" . ,model)))
-                          (when resume `(("resume" . ,resume)))))
+                          (when resume `(("resume" . ,resume)))
+                          (when agent-repl-frontend-permission-mode
+                            `(("permission_mode" . ,agent-repl-frontend-permission-mode)))))
          (resp (agent-repl--frontend-api "POST" "/sessions" payload))
          (id (alist-get 'session_id resp)))
     (unless (and (stringp id) (not (string-empty-p id)))

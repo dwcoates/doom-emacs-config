@@ -143,12 +143,19 @@ non-zero, so a build failure is never swallowed."
 ;;;; ---- Launch -----------------------------------------------------------
 
 (defun agent-repl--frontend-daemon-command ()
-  "Return the argv list used to launch `claude-repld'."
-  (list agent-repl--frontend-daemon-bin
-        "-addr"   agent-repl-frontend-daemon-addr
-        "-node"   agent-repl-frontend-node-bin
-        "-shim"   agent-repl--frontend-shim-entry
-        "-webapp" agent-repl--frontend-webapp-dir))
+  "Return the argv list used to launch `claude-repld'.
+When the system `claude' binary resolves, it is handed to the daemon
+via -claude-bin so SDK sessions drive the SAME CLI version as vterm
+sessions (and accept its permission modes, e.g. `auto', which the
+SDK-bundled cli.js predates)."
+  (append
+   (list agent-repl--frontend-daemon-bin
+         "-addr"   agent-repl-frontend-daemon-addr
+         "-node"   agent-repl-frontend-node-bin
+         "-shim"   agent-repl--frontend-shim-entry
+         "-webapp" agent-repl--frontend-webapp-dir)
+   (when-let ((claude (executable-find "claude")))
+     (list "-claude-bin" claude))))
 
 (defun agent-repl--frontend-spawn-daemon ()
   "External-boundary wrapper: spawn `claude-repld' via `make-process'.
