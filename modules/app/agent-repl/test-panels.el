@@ -150,6 +150,18 @@
       ;; Non-agent buffers are never orphaned
       (should-not (agent-repl--orphaned-panel-p "*scratch*")))))
 
+(ert-deftest agent-repl-test-panels-input-not-orphaned-under-webview ()
+  "Hybrid UI: an input panel under the workspace's visible webview is a live pair."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
+              ((symbol-function 'get-buffer-window)
+               (lambda (buf) (and (equal buf "*agent-frontend-abcd1234*") 'fake-window)))
+              ((symbol-function 'get-buffer) (lambda (_name) nil)))
+      ;; The input panel is protected by the visible webview...
+      (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*"))
+      ;; ...but the webview does NOT protect a vterm panel.
+      (should (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
+
 (ert-deftest agent-repl-test-panels-orphaned-vterm-one-window ()
   "When one-window-p returns t, no panel is considered orphaned."
   (agent-repl-test--with-clean-state
