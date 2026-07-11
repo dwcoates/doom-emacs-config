@@ -232,7 +232,11 @@ func TestValidPermissionMode(t *testing.T) {
 		{"acceptEdits", true},
 		{"bypassPermissions", true},
 		{"plan", true},
-		{"delegate", false},
+		{"auto", true},
+		{"manual", true},
+		{"dontAsk", true},
+		{"delegate", true},
+		{"yolo", false},
 		{"", false},
 	}
 	for _, tt := range tests {

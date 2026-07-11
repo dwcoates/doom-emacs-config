@@ -17,6 +17,14 @@ const (
 	PermissionModeAcceptEdits       PermissionMode = "acceptEdits"
 	PermissionModeBypassPermissions PermissionMode = "bypassPermissions"
 	PermissionModePlan              PermissionMode = "plan"
+	// CLI-era modes (claude >= 2.1 renames/additions): the daemon
+	// passes modes through to the CLI's own validation, so the enum
+	// tracks the superset the CLI accepts rather than gatekeeping a
+	// stale subset.
+	PermissionModeAuto     PermissionMode = "auto"
+	PermissionModeManual   PermissionMode = "manual"
+	PermissionModeDontAsk  PermissionMode = "dontAsk"
+	PermissionModeDelegate PermissionMode = "delegate"
 )
 
 // ValidPermissionMode reports whether s is a member of the PermissionMode
@@ -24,7 +32,9 @@ const (
 func ValidPermissionMode(s string) bool {
 	switch PermissionMode(s) {
 	case PermissionModeDefault, PermissionModeAcceptEdits,
-		PermissionModeBypassPermissions, PermissionModePlan:
+		PermissionModeBypassPermissions, PermissionModePlan,
+		PermissionModeAuto, PermissionModeManual,
+		PermissionModeDontAsk, PermissionModeDelegate:
 		return true
 	}
 	return false

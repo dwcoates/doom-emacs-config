@@ -23,6 +23,7 @@ func main() {
 	var (
 		addr       = flag.String("addr", "127.0.0.1:8787", "listen address")
 		nodeBin    = flag.String("node", "node", "node binary used to run the shim")
+		claudeBin  = flag.String("claude-bin", "", "path to the claude CLI the SDK drives (empty = SDK-bundled cli.js)")
 		shimScript = flag.String("shim", "", "path to the shim entrypoint (shim/dist/main.js)")
 		fake       = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
 		retention  = flag.Int("retention", 4096, "per-session frame retention window for replay")
@@ -37,6 +38,9 @@ func main() {
 
 	spawn := func(sessionID string, opts server.CreateOpts) (session.ShimHandle, error) {
 		argv := server.ShimArgv(*nodeBin, *shimScript, sessionID, *fake, opts)
+		if *claudeBin != "" {
+			argv = append(argv, "--claude-bin", *claudeBin)
+		}
 		proc, err := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD})
 		if err != nil {
 			return nil, err

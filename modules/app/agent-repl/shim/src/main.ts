@@ -12,6 +12,8 @@
  *   --cwd <dir>               working directory for the SDK session
  *   --model <model>           model override passed to the SDK
  *   --resume <session>        resume an on-disk claude session
+ *   --claude-bin <path>       claude CLI for the SDK to drive (system
+ *                             binary for vterm parity; default: bundled)
  */
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
@@ -34,6 +36,10 @@ interface CliArgs {
   cwd?: string;
   model?: string;
   resume?: string;
+  /** Path to the claude CLI the SDK should drive (system binary for
+   *  version parity with vterm sessions and CLI-era permission modes
+   *  like `auto` that the SDK's bundled cli.js predates). */
+  claudeBin?: string;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -62,7 +68,11 @@ export function parseArgs(argv: string[]): CliArgs {
           mode !== "default" &&
           mode !== "acceptEdits" &&
           mode !== "bypassPermissions" &&
-          mode !== "plan"
+          mode !== "plan" &&
+          mode !== "auto" &&
+          mode !== "manual" &&
+          mode !== "dontAsk" &&
+          mode !== "delegate"
         ) {
           throw new Error(`invalid --permission-mode: ${mode}`);
         }
@@ -77,6 +87,9 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       case "--resume":
         args.resume = next();
+        break;
+      case "--claude-bin":
+        args.claudeBin = next();
         break;
       default:
         throw new Error(`unknown argument: ${arg}`);
@@ -118,6 +131,9 @@ export function realQueryOptions(
     permissionMode: args.permissionMode,
     systemPrompt: { type: "preset", preset: "claude_code" },
     settingSources: ["user", "project", "local"],
+    ...(args.claudeBin !== undefined
+      ? { pathToClaudeCodeExecutable: args.claudeBin }
+      : {}),
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     ...(args.model !== undefined ? { model: args.model } : {}),
     ...(args.resume !== undefined ? { resume: args.resume } : {}),
