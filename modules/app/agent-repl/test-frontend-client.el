@@ -239,16 +239,42 @@ the retry budget on a misleading error."
           (should (equal id "s_fresh"))
           (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_fresh")))))))
 
-(ert-deftest agent-repl-test-frontend-ensure-session-errors-without-project-dir ()
-  "A workspace without :project-dir cannot own a session — hard error."
+(ert-deftest agent-repl-test-frontend-ensure-session-adopts-git-root ()
+  "An unregistered perspective adopts the current git root as its project dir.
+Plain project persps (doom itself, projectile switches) never pass
+through agent-repl workspace creation, so :project-dir is absent — the
+resolver supplies it exactly as creation would."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--resolve-current-git-root)
+               (lambda () "/repo/root/")))
+      (agent-repl-test--with-http
+          (lambda (method &rest _)
+            (if (equal method "GET")
+                (agent-repl-test--json-ok '((sessions . [])))
+              (agent-repl-test--json-ok '((session_id . "s_new")))))
+        ;; Act
+        (let ((id (agent-repl--frontend-ensure-session "ws1")))
+          ;; Assert — session rooted at the adopted dir, dir recorded.
+          (should (equal id "s_new"))
+          (should (equal (agent-repl--ws-get "ws1" :project-dir) "/repo/root/"))
+          (let ((post (car (last requests))))
+            (should (string-match-p "\"cwd\":\"/repo/root/\"" (nth 2 post)))))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-propagates-non-git-error ()
+  "Outside a git repository, the resolver's user-error surfaces unchanged."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--resolve-current-git-root)
+               (lambda () (user-error "not inside a git repository"))))
       (agent-repl-test--with-http
           (lambda (&rest _) (agent-repl-test--json-ok '((sessions . []))))
         ;; Act / Assert
-        (should-error (agent-repl--frontend-ensure-session "ws1"))))))
+        (should-error (agent-repl--frontend-ensure-session "ws1") :type 'user-error)))))
 
 ;;;; ---- message / interrupt injection -----------------------------------------
 
