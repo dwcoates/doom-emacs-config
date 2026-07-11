@@ -198,7 +198,7 @@ func TestSessionSeqIsStrictlyIncreasingAcrossFrames(t *testing.T) {
 	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_stop","index":0}}`)
 	// Assert
 	prev := float64(0)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		frame := recvFrame(t, c)
 		seq := frame["seq"].(float64)
 		if seq != prev+1 {
@@ -382,7 +382,7 @@ func TestSessionReplayResendsRetainedFramesWithOriginalSeq(t *testing.T) {
 	c := NewClient()
 	h.sess.Attach(c)
 	recvFrame(t, c)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{}}`)
 		recvFrame(t, c)
 	}
@@ -404,7 +404,7 @@ func TestSessionReplayOfEvictedSeqSendsFreshHello(t *testing.T) {
 	c := NewClient()
 	h.sess.Attach(c)
 	recvFrame(t, c)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{}}`)
 		recvFrame(t, c)
 	}
