@@ -228,6 +228,20 @@ conversation, and the message says so."
               (setq step (format "kill %s" from-name))
               (agent-repl--log ws "switch-frontend: step=%s" step)
               (funcall (agent-repl-frontend-kill-fn from) ws)
+              ;; Process teardown can be ASYNC (the vterm kill path
+              ;; schedules a SIGKILL fallback ~0.5s out): opening the
+              ;; next frontend while the old one still reads as running
+              ;; trips its already-running guard. Bounded blocking wait,
+              ;; loud on timeout.
+              (setq step (format "await %s stop" from-name))
+              (let ((attempts 0))
+                (while (and (funcall (agent-repl-frontend-running-p-fn from) ws)
+                            (< attempts 30))
+                  (setq attempts (1+ attempts))
+                  (sleep-for 0.1))
+                (when (funcall (agent-repl-frontend-running-p-fn from) ws)
+                  (error "agent-repl-switch-frontend: %s still running %.1fs after kill"
+                         from-name (* attempts 0.1))))
               (setq step "flip+persist")
               (agent-repl--ws-put ws :frontend to-name)
               (agent-repl--state-save ws)

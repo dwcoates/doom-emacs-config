@@ -197,6 +197,50 @@
                         '(kill-from (adopt . "cli-uuid-7") open-to)))
          (should (eq (agent-repl--ws-get "ws1" :frontend) 'to)))))))
 
+(ert-deftest agent-repl-test-frontends-switch-waits-for-old-frontend-stop ()
+  "The switch blocks until the old frontend stops running before opening.
+Process teardown is async (SIGKILL fallback ~0.5s out); opening while
+the old frontend still reads as running trips its already-running guard."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (let ((polls 0)
+           (opened nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'from
+         ;; Still "running" for the first two post-kill polls.
+         :running-p-fn (lambda (_ws) (setq polls (1+ polls)) (< polls 3))))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'to :open-fn (lambda (_ws) (setq opened t))))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore)
+                 ((symbol-function 'sleep-for) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert — opened only after running-p went nil.
+         (should opened)
+         (should (>= polls 3)))))))
+
+(ert-deftest agent-repl-test-frontends-switch-errors-when-old-never-stops ()
+  "A frontend that never stops running fails the switch loudly."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'from :running-p-fn (lambda (_ws) t)))
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'to))
+     (agent-repl--ws-put "ws1" :frontend 'from)
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+               ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+               ((symbol-function 'agent-repl--state-save) #'ignore)
+               ((symbol-function 'sleep-for) #'ignore))
+       ;; Act / Assert
+       (should-error (agent-repl-switch-frontend))))))
+
 (ert-deftest agent-repl-test-frontends-switch-fresh-when-no-durable-id ()
   "A switch without a durable id still happens, as a fresh conversation."
   ;; Arrange
