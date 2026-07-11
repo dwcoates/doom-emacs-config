@@ -52,6 +52,8 @@ export interface HelloFrame extends WsEnvelope {
   permission_mode: PermissionMode;
   model: string;
   cwd: string;
+  /** Durable CLI session uuid (resume target); absent until system:init. */
+  claude_session_id?: string;
 }
 
 export type ResultSubtype =

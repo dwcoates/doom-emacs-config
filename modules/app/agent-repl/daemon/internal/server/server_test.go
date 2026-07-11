@@ -202,6 +202,59 @@ func TestListSessionsIncludesCreatedSession(t *testing.T) {
 	}
 }
 
+func TestListSessionsCarriesIntrospectionFields(t *testing.T) {
+	// Arrange — create with explicit cwd/model, then feed an init that
+	// carries the durable CLI session uuid.
+	h := newHarness(t)
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
+		bytes.NewBufferString(`{"cwd":"/req/cwd","model":"haiku"}`))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var created struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	shim := <-h.shims
+	t.Cleanup(shim.end)
+	// Synchronize WITHOUT sleeping: the translator mutates its mirror
+	// under the session lock BEFORE the frame is broadcast, so once a
+	// WS client has received the init's system frame, the list snapshot
+	// is guaranteed current.
+	conn := h.dial(t, created.SessionID)
+	readFrame(t, conn) // hello
+	shim.pushEvent(t, `{"type":"system","session_id":"`+created.SessionID+`","uuid":"u","subtype":"init","data":{"session_id":"cli-uuid-9"}}`)
+	readFrame(t, conn) // the init system frame: state is now visible
+	// Act
+	listResp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer listResp.Body.Close()
+	var body struct {
+		Sessions []struct {
+			SessionID       string `json:"session_id"`
+			CWD             string `json:"cwd"`
+			Model           string `json:"model"`
+			ClaudeSessionID string `json:"claude_session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	// Assert
+	if len(body.Sessions) != 1 {
+		t.Fatalf("sessions = %+v", body.Sessions)
+	}
+	e := body.Sessions[0]
+	if e.CWD != "/req/cwd" || e.Model != "haiku" || e.ClaudeSessionID != "cli-uuid-9" {
+		t.Errorf("entry = %+v", e)
+	}
+}
+
 func TestDeleteSessionSendsShutdownToShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

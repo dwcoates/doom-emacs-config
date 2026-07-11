@@ -104,6 +104,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		ID:            id,
 		DaemonVersion: s.daemonVersion,
 		Shim:          shim,
+		CWD:           opts.CWD,
+		Model:         opts.Model,
 		Retention:     s.retention,
 		Logf:          s.logf,
 	})
@@ -125,10 +127,22 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	type entry struct {
 		SessionID string `json:"session_id"`
 		Terminal  bool   `json:"terminal"`
+		CWD       string `json:"cwd,omitempty"`
+		Model     string `json:"model,omitempty"`
+		// ClaudeSessionID is the durable CLI session uuid (resume
+		// target); empty until the SDK's system:init has arrived.
+		ClaudeSessionID string `json:"claude_session_id,omitempty"`
 	}
 	list := make([]entry, 0, len(s.sessions))
 	for id, sess := range s.sessions {
-		list = append(list, entry{SessionID: id, Terminal: sess.Terminal()})
+		info := sess.Info()
+		list = append(list, entry{
+			SessionID:       id,
+			Terminal:        info.Terminal,
+			CWD:             info.CWD,
+			Model:           info.Model,
+			ClaudeSessionID: info.ClaudeSessionID,
+		})
 	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")

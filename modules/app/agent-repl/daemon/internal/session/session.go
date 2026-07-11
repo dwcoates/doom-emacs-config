@@ -66,6 +66,11 @@ type Config struct {
 	ID            string
 	DaemonVersion string
 	Shim          ShimHandle
+	// CWD and Model are the CreateOpts-requested values; they seed the
+	// translator's hello mirror so introspection works before the SDK's
+	// system:init overwrites them with authoritative values.
+	CWD   string
+	Model string
 	// Retention is the §2.10 replay window in frames (defaults to 4096).
 	Retention int
 	// Now is the frame-timestamp clock (defaults to time.Now).
@@ -85,16 +90,41 @@ func New(cfg Config) *Session {
 	if cfg.Logf == nil {
 		cfg.Logf = log.Printf
 	}
+	translator := NewTranslator()
+	translator.CWD = cfg.CWD
+	translator.Model = cfg.Model
 	return &Session{
 		ID:            cfg.ID,
 		DaemonVersion: cfg.DaemonVersion,
 		shim:          cfg.Shim,
-		translator:    NewTranslator(),
+		translator:    translator,
 		retention:     cfg.Retention,
 		now:           cfg.Now,
 		logf:          cfg.Logf,
 		clients:       map[*Client]struct{}{},
 		done:          make(chan struct{}),
+	}
+}
+
+// Info is a point-in-time introspection snapshot of a session.
+type Info struct {
+	CWD             string
+	Model           string
+	ClaudeSessionID string
+	Terminal        bool
+}
+
+// Info returns the session's current introspection snapshot: the
+// requested-then-authoritative cwd/model mirror, the durable CLI session
+// id (empty until system:init), and terminality.
+func (s *Session) Info() Info {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Info{
+		CWD:             s.translator.CWD,
+		Model:           s.translator.Model,
+		ClaudeSessionID: s.translator.ClaudeSessionID,
+		Terminal:        s.terminal,
 	}
 }
 
@@ -177,11 +207,12 @@ func (s *Session) helloLocked() []byte {
 			TS:        s.timestamp(),
 			SessionID: s.ID,
 		},
-		DaemonVersion:  s.DaemonVersion,
-		ResumeFromSeq:  resumeFrom,
-		PermissionMode: s.translator.PermissionMode,
-		Model:          s.translator.Model,
-		CWD:            s.translator.CWD,
+		DaemonVersion:   s.DaemonVersion,
+		ResumeFromSeq:   resumeFrom,
+		PermissionMode:  s.translator.PermissionMode,
+		Model:           s.translator.Model,
+		CWD:             s.translator.CWD,
+		ClaudeSessionID: s.translator.ClaudeSessionID,
 	}
 	data, err := json.Marshal(hello)
 	if err != nil {
@@ -202,14 +233,18 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// replay-request works on TERMINAL sessions too: a client attaching
+	// after the shim ended must still be able to rebuild the retained
+	// history instead of staring at an empty feed.
+	if cmd.Type == "replay-request" {
+		s.replayLocked(c, cmd.FromSeq)
+		return nil
+	}
 	if s.terminal {
 		return fmt.Errorf("session %s: command %s on terminal session", s.ID, cmd.Type)
 	}
 
 	switch cmd.Type {
-	case "replay-request":
-		s.replayLocked(c, cmd.FromSeq)
-		return nil
 	case "user-message":
 		s.broadcastLocked([]protocol.L2Frame{s.translator.OnUserMessageCmd(cmd)})
 		return s.shim.SendRaw(ndjson(raw))

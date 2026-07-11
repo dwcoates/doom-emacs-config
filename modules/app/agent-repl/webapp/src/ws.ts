@@ -14,6 +14,15 @@ export interface WsClientOptions {
   wsFactory?: (url: string) => WebSocket;
   /** Reconnect backoff schedule in ms; last entry repeats. */
   backoffMs?: number[];
+  /**
+   * Pre-reconnect probe: resolves false when the session is gone
+   * (e.g. GET /sessions no longer lists it), which stops the reconnect
+   * loop and fires onGone instead of retrying forever against a 404.
+   * A probe failure (network error) counts as "unknown" and retries.
+   */
+  sessionExists?: () => Promise<boolean>;
+  /** Fired once when sessionExists reports the session is gone. */
+  onGone?: () => void;
 }
 
 const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
@@ -58,7 +67,28 @@ export class WsClient {
   private scheduleReconnect(): void {
     const delay = this.backoff[Math.min(this.attempts, this.backoff.length - 1)];
     this.attempts++;
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      void this.reconnectIfSessionExists();
+    }, delay);
+  }
+
+  private async reconnectIfSessionExists(): Promise<void> {
+    if (this.closedByUser) return;
+    if (this.opts.sessionExists) {
+      let exists = true;
+      try {
+        exists = await this.opts.sessionExists();
+      } catch {
+        // Probe unreachable (daemon briefly down?): treat as unknown
+        // and keep retrying — only a definitive "not listed" stops us.
+      }
+      if (this.closedByUser) return;
+      if (!exists) {
+        this.opts.onGone?.();
+        return;
+      }
+    }
+    this.connect();
   }
 
   send(cmd: ClientCommand): boolean {
