@@ -135,6 +135,7 @@ export async function main(): Promise<void> {
         return createFakeQuery(prompt, canUseTool, {
           sessionId: args.sessionId,
           newUuid: randomUUID,
+          ...(args.resume !== undefined ? { resume: args.resume } : {}),
         });
       }
       return lazyQuery(realQueryFactory(args, prompt, canUseTool));

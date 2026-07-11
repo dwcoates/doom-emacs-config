@@ -1,6 +1,6 @@
 // Command claude-repld is the Go daemon between the Emacs/webapp
 // WebSocket clients (Layer 2) and per-session TS shim subprocesses
-// (Layer 1). Wire formats: modules/app/claude-repl/shared/protocol.md.
+// (Layer 1). Wire formats: modules/app/agent-repl/shared/protocol.md.
 package main
 
 import (
@@ -36,22 +36,7 @@ func main() {
 	}
 
 	spawn := func(sessionID string, opts server.CreateOpts) (session.ShimHandle, error) {
-		argv := []string{*nodeBin, *shimScript, "--session-id", sessionID}
-		if *fake || opts.Fake {
-			argv = append(argv, "--fake")
-		}
-		if opts.PermissionMode != "" {
-			argv = append(argv, "--permission-mode", opts.PermissionMode)
-		}
-		if opts.CWD != "" {
-			argv = append(argv, "--cwd", opts.CWD)
-		}
-		if opts.Model != "" {
-			argv = append(argv, "--model", opts.Model)
-		}
-		if opts.Resume != "" {
-			argv = append(argv, "--resume", opts.Resume)
-		}
+		argv := server.ShimArgv(*nodeBin, *shimScript, sessionID, *fake, opts)
 		proc, err := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD})
 		if err != nil {
 			return nil, err
