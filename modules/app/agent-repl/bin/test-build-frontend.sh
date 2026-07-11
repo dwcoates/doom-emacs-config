@@ -58,6 +58,10 @@ make_stubs() {
     cat > "$bindir/npm" <<'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$STUB_LOG"
+# `npm ci` / `npm install` populate node_modules in the cwd (the store entry).
+case "${1:-}" in
+    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp ;;
+esac
 # Emulate `npm run build` producing dist output for whichever project we're in.
 if [ -d src ] && [ -f package.json ]; then
     if [ -d dist ] || mkdir -p dist; then :; fi
@@ -86,9 +90,11 @@ EOF
 }
 
 run_script() {
-    # run_script ROOT [args...] — invoke the copied script with stubs on PATH.
+    # run_script ROOT [args...] — invoke the copied script with stubs on PATH and
+    # the shared dep store pointed at STORE (default: ROOT's own throwaway store).
     local root="$1"; shift
     STUB_LOG="$root/stub.log" \
+        AGENT_REPL_NODE_STORE="${STORE:-$root/store}" \
         PATH="$root/stubs:$PATH" \
         bash "$root/bin/build-frontend.sh" "$@"
 }
@@ -153,10 +159,69 @@ t_force() {
     rm -rf "$root"
 }
 
+# --- Test 5: absent node_modules -> store populated once, symlinked in --------
+t_deps_linked_from_store() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    rm -rf "$root/webapp/node_modules"
+    run_script "$root" deps >/dev/null
+    if [ -L "$root/webapp/node_modules" ] && [ -d "$root/webapp/node_modules" ] &&
+           grep -q "npm install" "$root/stub.log"; then
+        pass "deps: absent node_modules is installed once in the store and symlinked"
+    else
+        fail "deps: node_modules symlinked at store" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 6: a second worktree reuses the store without reinstalling ----------
+t_deps_store_shared_across_worktrees() {
+    local store; store="$(mktemp -d)/store"
+    local first; first="$(mktemp -d)"
+    local second; second="$(mktemp -d)"
+    make_tree "$first"; make_stubs "$first/stubs"; make_fresh_artifacts "$first"
+    make_tree "$second"; make_stubs "$second/stubs"; make_fresh_artifacts "$second"
+    rm -rf "$first/webapp/node_modules" "$second/webapp/node_modules"
+    : > "$first/stub.log"; : > "$second/stub.log"
+    STORE="$store" run_script "$first" deps >/dev/null
+    STORE="$store" run_script "$second" deps >/dev/null
+    if [ -d "$second/webapp/node_modules" ] && ! grep -q "npm" "$second/stub.log"; then
+        pass "deps: second worktree links the populated store, no reinstall"
+    else
+        fail "deps: second worktree reuses store" "stub.log: $(cat "$second/stub.log")"
+    fi
+    rm -rf "$first" "$second" "$store"
+}
+
+# --- Test 7: a lockfile change keys a fresh store entry -----------------------
+t_deps_lockfile_change_rekeys_store() {
+    local store; store="$(mktemp -d)/store"
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    rm -rf "$root/webapp/node_modules"
+    echo '{"lockfileVersion":3,"packages":{}}' > "$root/webapp/package-lock.json"
+    STORE="$store" run_script "$root" deps >/dev/null
+    rm -f "$root/webapp/node_modules"
+    echo '{"lockfileVersion":3,"packages":{"x":{}}}' > "$root/webapp/package-lock.json"
+    : > "$root/stub.log"
+    STORE="$store" run_script "$root" deps >/dev/null
+    if [ "$(find "$store" -maxdepth 1 -name 'webapp-*' | wc -l)" -eq 2 ] &&
+           grep -q "npm ci" "$root/stub.log"; then
+        pass "deps: changed lockfile keys a second store entry"
+    else
+        fail "deps: lockfile change rekeys store" "entries: $(find "$store" -maxdepth 1 -name 'webapp-*')"
+    fi
+    rm -rf "$root" "$store"
+}
+
 t_all_fresh
 t_one_stale
 t_missing_artifact
 t_force
+t_deps_linked_from_store
+t_deps_store_shared_across_worktrees
+t_deps_lockfile_change_rekeys_store
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

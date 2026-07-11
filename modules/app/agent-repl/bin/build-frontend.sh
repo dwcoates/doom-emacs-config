@@ -17,9 +17,17 @@
 #   1  a build step failed (message on stderr)
 #   2  a required toolchain binary is missing (message on stderr)
 #
+# Node dependencies live in a SHARED store outside the checkout
+# ($AGENT_REPL_NODE_STORE, default ~/.cache/agent-repl/node-store), keyed by the
+# hash of the project's lockfile, and each checkout's node_modules is a symlink
+# into it. Every worktree therefore has deps the moment it is created (no
+# per-worktree `npm install`, no per-worktree 100MB tree), and a lockfile change
+# transparently keys a fresh store entry.
+#
 # Usage:
-#   build-frontend.sh [--force] [shim|webapp|daemon ...]
+#   build-frontend.sh [--force] [shim|webapp|daemon|deps ...]
 #     --force            rebuild the selected artifacts unconditionally
+#     deps               only link node_modules at the shared store (no build)
 #     positional targets restrict the run to the named artifacts (default: all)
 
 set -euo pipefail
@@ -31,6 +39,8 @@ SHIM_DIR="$ROOT/shim"
 WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
 
+NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
+
 SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
 WEBAPP_ARTIFACT="$WEBAPP_DIR/dist/index.html"
 DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
@@ -41,9 +51,9 @@ TARGETS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --force) FORCE=1 ;;
-        shim|webapp|daemon) TARGETS+=("$1") ;;
+        shim|webapp|daemon|deps) TARGETS+=("$1") ;;
         -h|--help)
-            sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -113,30 +123,65 @@ collect_sources() {
     done
 }
 
+# store_key DIR — echo a short content hash of DIR's dependency manifest, so a
+# lockfile (or, absent one, package.json) change keys a different store entry.
+store_key() {
+    local manifest="$1/package-lock.json"
+    [ -f "$manifest" ] || manifest="$1/package.json"
+    { shasum -a 256 "$manifest" 2>/dev/null || sha256sum "$manifest"; } | cut -c1-16
+}
+
+# link_node_modules DIR NAME — point DIR/node_modules at the shared store entry
+# for NAME, installing that entry once (for every worktree, forever) when it is
+# not there yet. The store holds only the manifests plus node_modules, so the
+# install is a pure dependency fetch, independent of the checkout it serves.
+# Deps that already resolve (a real directory, or a symlink into a populated
+# store) are left exactly as they are — including a deliberate local install.
+link_node_modules() {
+    local dir="$1" name="$2" entry
+    [ -d "$dir/node_modules" ] && return 0
+    entry="$NODE_STORE/$name-$(store_key "$dir")"
+    if [ ! -d "$entry/node_modules" ]; then
+        require_bin npm "install Node.js"
+        echo "[build-frontend] $name: populating shared dep store $entry"
+        mkdir -p "$entry"
+        cp "$dir/package.json" "$entry/package.json"
+        if [ -f "$dir/package-lock.json" ]; then
+            cp "$dir/package-lock.json" "$entry/package-lock.json"
+            ( cd "$entry" && npm ci )
+        else
+            ( cd "$entry" && npm install )
+        fi
+    fi
+    ln -sfn "$entry/node_modules" "$dir/node_modules"
+    echo "[build-frontend] $name: node_modules -> $entry/node_modules"
+}
+
+build_deps() {
+    link_node_modules "$SHIM_DIR" shim
+    link_node_modules "$WEBAPP_DIR" webapp
+}
+
 build_shim() {
+    link_node_modules "$SHIM_DIR" shim
     if ! is_stale "$SHIM_ARTIFACT" $(collect_sources "$SHIM_DIR"); then
         echo "[build-frontend] shim: fresh, skipping"
         return 0
     fi
     require_bin npm "install Node.js"
     echo "[build-frontend] shim: building..."
-    if [ ! -d "$SHIM_DIR/node_modules" ]; then
-        ( cd "$SHIM_DIR" && npm install )
-    fi
     ( cd "$SHIM_DIR" && npm run build )
     echo "[build-frontend] shim: done"
 }
 
 build_webapp() {
+    link_node_modules "$WEBAPP_DIR" webapp
     if ! is_stale "$WEBAPP_ARTIFACT" $(collect_sources "$WEBAPP_DIR"); then
         echo "[build-frontend] webapp: fresh, skipping"
         return 0
     fi
     require_bin npm "install Node.js"
     echo "[build-frontend] webapp: building..."
-    if [ ! -d "$WEBAPP_DIR/node_modules" ]; then
-        ( cd "$WEBAPP_DIR" && npm install )
-    fi
     ( cd "$WEBAPP_DIR" && npm run build )
     echo "[build-frontend] webapp: done"
 }
@@ -155,6 +200,7 @@ build_daemon() {
 
 for target in "${TARGETS[@]}"; do
     case "$target" in
+        deps)   build_deps ;;
         shim)   build_shim ;;
         webapp) build_webapp ;;
         daemon) build_daemon ;;
