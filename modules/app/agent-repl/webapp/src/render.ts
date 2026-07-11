@@ -87,6 +87,16 @@ function TextStream(item: TextItem): string {
 }
 
 function Thinking(item: ThinkingItem): string {
+  // Adaptive-thinking models withhold the thinking text: the block streams
+  // a signature and no thinking_delta, so item.text stays empty. A
+  // disclosure triangle over an empty <pre> unfolds to nothing, so a
+  // textless block gets a pulse while it is open and disappears once it
+  // closes.
+  if (item.text === "") {
+    return item.done
+      ? ""
+      : `<div class="thinking-pending"><span class="pulse">•••</span> thinking</div>`;
+  }
   const state = item.done ? "" : " (thinking…)";
   return `
     <details class="thinking"${item.done ? "" : " open"}>

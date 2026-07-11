@@ -264,9 +264,15 @@ pre {
   cursor: not-allowed;
 }
 
-/* --- streaming tool input indicator --------------------------------------- */
+/* --- pending indicators (streaming tool input, textless thinking) ---------- */
 .tool-input-pending { padding: 0.35em 0.2em; }
-.tool-input-pending .pulse {
+.thinking-pending {
+  padding: 0.25rem 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.pulse {
   color: var(--muted);
   letter-spacing: 0.25em;
   animation: tool-pulse 1.2s ease-in-out infinite;
@@ -275,3 +281,7 @@ pre {
   0%, 100% { opacity: 0.25; }
   50% { opacity: 0.9; }
 }
+
+/* Items the renderer suppresses (textless thinking, AskUserQuestion's tool
+   card) render as empty nodes: hide them so #feed's gap does not show. */
+.feed-item:empty { display: none; }
