@@ -171,8 +171,8 @@
 
 ;;;; ---- Switch command -----------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontends-switch-hides-flips-opens ()
-  "The switch composes close, select, open: hide old, flip, open new."
+(ert-deftest agent-repl-test-frontends-switch-kills-flips-opens ()
+  "The switch composes kill, select, open: kill old, flip, open new."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-frontend-registry
@@ -180,7 +180,9 @@
      (let ((events nil))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
-         'from :hide-fn (lambda (_ws) (push 'hide-from events))))
+         'from
+         :kill-fn (lambda (_ws) (push 'kill-from events))
+         :running-p-fn (lambda (_ws) nil)))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
          'to
@@ -194,8 +196,8 @@
                  ((symbol-function 'agent-repl--state-save) #'ignore))
          ;; Act
          (agent-repl-switch-frontend)
-         ;; Assert — ordered hide then open; :frontend flipped; no show.
-         (should (equal (nreverse events) '(hide-from open-to)))
+         ;; Assert — ordered kill then open; :frontend flipped; no show.
+         (should (equal (nreverse events) '(kill-from open-to)))
          (should (eq (agent-repl--ws-get "ws1" :frontend) 'to)))))))
 
 (ert-deftest agent-repl-test-frontends-switch-shows-running-target ()
@@ -209,7 +211,9 @@ initialized\" trap the old kill-based switch kept hitting."
      (let ((events nil))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
-         'from :hide-fn (lambda (_ws) (push 'hide-from events))))
+         'from
+         :kill-fn (lambda (_ws) (push 'kill-from events))
+         :running-p-fn (lambda (_ws) nil)))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
          'to
@@ -223,29 +227,51 @@ initialized\" trap the old kill-based switch kept hitting."
          ;; Act
          (agent-repl-switch-frontend)
          ;; Assert
-         (should (equal (nreverse events) '(hide-from show-to))))))))
+         (should (equal (nreverse events) '(kill-from show-to))))))))
 
-(ert-deftest agent-repl-test-frontends-switch-never-kills-sessions ()
-  "The switch composes hide+open only: neither frontend's kill runs."
-  ;; Arrange
+(ert-deftest agent-repl-test-frontends-switch-awaits-async-stop ()
+  "The switch waits out an async teardown before opening the target."
+  ;; Arrange — still \"running\" for the first two post-kill polls.
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-frontend-registry
      (clrhash agent-repl--frontends)
-     (let ((killed nil))
+     (let ((polls 0)
+           (opened nil))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
-         'from :kill-fn (lambda (_ws) (setq killed t))))
+         'from
+         :running-p-fn (lambda (_ws) (setq polls (1+ polls)) (< polls 3))))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
-         'to :kill-fn (lambda (_ws) (setq killed t))))
+         'to
+         :running-p-fn (lambda (_ws) nil)
+         :open-fn (lambda (_ws) (setq opened t))))
        (agent-repl--ws-put "ws1" :frontend 'from)
        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                  ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
-                 ((symbol-function 'agent-repl--state-save) #'ignore))
+                 ((symbol-function 'agent-repl--state-save) #'ignore)
+                 ((symbol-function 'sleep-for) #'ignore))
          ;; Act
          (agent-repl-switch-frontend)
-         ;; Assert — sessions stay alive; continuity is free.
-         (should-not killed))))))
+         ;; Assert
+         (should opened)
+         (should (>= polls 3)))))))
+
+(ert-deftest agent-repl-test-frontends-switch-errors-when-old-never-stops ()
+  "A frontend that never stops running fails the switch loudly."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'from :running-p-fn (lambda (_ws) t)))
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'to))
+     (agent-repl--ws-put "ws1" :frontend 'from)
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+               ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+               ((symbol-function 'agent-repl--state-save) #'ignore)
+               ((symbol-function 'sleep-for) #'ignore))
+       ;; Act / Assert
+       (should-error (agent-repl-switch-frontend))))))
 
 (provide 'test-frontends)
 

@@ -195,14 +195,14 @@ workspace state, mirroring `agent-repl-select-backend'."
   "Switch the current workspace's frontend IN PLACE.
 The literal composition of the manual recipe (close, select, open):
 
-  1. CLOSE the current frontend's view via its hide capability —
-     the session is NOT killed, so nothing async needs awaiting and
-     the conversation is simply there when you switch back.
+  1. KILL the current frontend's session and view (`SPC o C'
+     semantics: close means done), then WAIT (bounded, 3s) for it to
+     actually stop — vterm teardown is async (SIGKILL fallback), and
+     opening early used to trip already-running guards.
   2. FLIP `:frontend' and persist it (what `agent-repl-select-frontend'
-     would do, minus its running-session guard — hiding is the guard).
+     would do, minus its running-session guard).
   3. OPEN the other frontend exactly like `SPC o c': SHOW it when its
-     session is already running (a previous switch left it alive),
-     else open it fresh.
+     session is somehow still alive from before, else open it fresh.
 
 With exactly two registered frontends the target is the other one;
 otherwise it is read by completion."
@@ -219,12 +219,22 @@ otherwise it is read by completion."
       (agent-repl--frontend-validate-pair to-name (agent-repl--ws-backend-name ws))
       (let ((from (agent-repl-frontend-get from-name))
             (to (agent-repl-frontend-get to-name))
-            (step "close"))
+            (step "kill"))
         (agent-repl--log ws "switch-frontend: %s -> %s" from-name to-name)
         (condition-case err
             (progn
-              (agent-repl--log ws "switch-frontend: step=%s %s" step from-name)
-              (funcall (agent-repl-frontend-hide-fn from) ws)
+              (setq step (format "kill %s" from-name))
+              (agent-repl--log ws "switch-frontend: step=%s" step)
+              (funcall (agent-repl-frontend-kill-fn from) ws)
+              (setq step (format "await %s stop" from-name))
+              (let ((attempts 0))
+                (while (and (funcall (agent-repl-frontend-running-p-fn from) ws)
+                            (< attempts 30))
+                  (setq attempts (1+ attempts))
+                  (sleep-for 0.1))
+                (when (funcall (agent-repl-frontend-running-p-fn from) ws)
+                  (error "agent-repl-switch-frontend: %s still running %.1fs after kill"
+                         from-name (* attempts 0.1))))
               (setq step "flip+persist")
               (agent-repl--ws-put ws :frontend to-name)
               (agent-repl--state-save ws)

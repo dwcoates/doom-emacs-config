@@ -1377,13 +1377,22 @@ lays them out full-frame via `agent-repl--show-panels'."
     (agent-repl--show-existing-panels)))
 
 (defun agent-repl--hide-and-preserve-status ()
-  "Hide agent panels with full deprio + tab-bar shuffle (the `SPC o C' path).
-Thin wrapper around `agent-repl--on-close' that enforces the invariant
-that a workspace is active.  See `agent-repl--simple-hide-and-preserve-status'
-for the no-tab-bar-update variant bound to `SPC o c'."
+  "Close-and-KILL with full deprio + tab-bar shuffle (the `SPC o C' path).
+Runs `agent-repl--on-close' (restore layout, hide, deprio bookkeeping)
+and then KILLS the session through the workspace's frontend registry —
+`SPC o C' means \"done with this session\", unlike the plain-close
+`SPC o c' which only puts the view away.  The `:repl-state :hidden'
+marker is re-asserted after the kill (the vterm kill capability resets
+the state axes) so hide-mode's sweep semantics survive.
+
+Deliberately NOT folded into `agent-repl--on-close': its other callers
+(`agent-repl-send-and-hide', the drawer close) hide a session that
+must keep running."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--hide-and-preserve-status: no active workspace"))
-    (agent-repl--on-close ws)))
+    (agent-repl--on-close ws)
+    (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
+    (agent-repl--ws-put ws :repl-state :hidden)))
 
 (defun agent-repl--simple-hide-and-preserve-status ()
   "Hide agent panels with NO tab-bar update (the `SPC o c' path).

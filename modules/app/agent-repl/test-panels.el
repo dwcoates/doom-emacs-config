@@ -1113,7 +1113,16 @@ is on."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
+              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore)
+              ;; SPC o C now also kills through the registry; resolve a
+              ;; probe frontend so no real teardown runs (the struct
+              ;; accessor itself resists cl-letf via its compiler macro).
+              ((symbol-function 'agent-repl--ws-frontend)
+               (lambda (_ws) (agent-repl-frontend-create
+                              :name 'probe :open-fn #'ignore
+                              :kill-fn #'ignore :send-fn #'ignore
+                              :interrupt-fn #'ignore :running-p-fn #'ignore
+                              :supported-backends '(claude)))))
       (agent-repl--hide-and-preserve-status)
       (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
 
@@ -1129,7 +1138,13 @@ is on."
     (let ((on-close-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--on-close)
-                 (lambda (&optional ws) (setq on-close-ws ws))))
+                 (lambda (&optional ws) (setq on-close-ws ws)))
+                ((symbol-function 'agent-repl--ws-frontend)
+               (lambda (_ws) (agent-repl-frontend-create
+                              :name 'probe :open-fn #'ignore
+                              :kill-fn #'ignore :send-fn #'ignore
+                              :interrupt-fn #'ignore :running-p-fn #'ignore
+                              :supported-backends '(claude)))))
         (agent-repl--hide-and-preserve-status)
         (should (equal on-close-ws "test-ws"))))))
 
@@ -2602,6 +2617,51 @@ we at least surface the stuck state so the user knows to click out."
                        (lambda (_ws &optional _s) buf)))
               (should-error (agent-repl--initialize-input-buffer "test-ws"))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-panels-spc-o-C-kills-session ()
+  "hide-and-preserve-status (SPC o C) kills through the frontend registry.
+SPC o C means done-with-this-session; the plain SPC o c close only
+puts the view away."
+  (agent-repl-test--with-clean-state
+    (let ((killed nil)
+          (closed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--on-close)
+                 (lambda (_ws) (setq closed t)))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws) (agent-repl-frontend-create
+                                :name 'probe
+                                :open-fn #'ignore
+                                :kill-fn (lambda (_ws) (setq killed t))
+                                :send-fn #'ignore
+                                :interrupt-fn #'ignore
+                                :running-p-fn #'ignore
+                                :supported-backends '(claude)))))
+        (agent-repl--hide-and-preserve-status)
+        (should closed)
+        (should killed)
+        ;; The hide-mode sweep marker survives the kill's state reset.
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :hidden))))))
+
+(ert-deftest agent-repl-test-panels-on-close-never-kills ()
+  "on-close itself must NOT kill: send-and-hide and the drawer close
+hide sessions that keep running."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((killed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
+                ((symbol-function 'agent-repl--save-tab-index) #'ignore)
+                ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore)
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws) (agent-repl-frontend-create
+                                :name 'probe :open-fn #'ignore
+                                :kill-fn (lambda (_ws) (setq killed t))
+                                :send-fn #'ignore :interrupt-fn #'ignore
+                                :running-p-fn #'ignore
+                                :supported-backends '(claude)))))
+        (agent-repl--on-close "ws1")
+        (should-not killed)))))
 
 ;;;; ---- Tests: kill-stale-vterm ----
 
