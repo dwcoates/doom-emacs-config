@@ -1584,6 +1584,7 @@ mirroring the first send of a freshly-initialized workspace."
 INPUT may carry the metaprompt prefix — genuine message content that
 must survive the transport swap."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (agent-repl--ws-put "ws1" :prefix-counter 5)
     (let ((sent nil)
@@ -1604,6 +1605,7 @@ must survive the transport swap."
   "RET-level send works in a frontend workspace with NO vterm buffer.
 The vterm-gated cond previously swallowed every hybrid-UI send."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent nil)
           (committed nil))
@@ -1622,6 +1624,7 @@ The vterm-gated cond previously swallowed every hybrid-UI send."
 (ert-deftest agent-repl-test-send-frontend-empty-input-is-noop ()
   "Empty input in a frontend workspace sends nothing (no bare-RET analog)."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--do-send)
@@ -1633,10 +1636,11 @@ The vterm-gated cond previously swallowed every hybrid-UI send."
   "agent-repl-interrupt reaches the wire for frontend workspaces.
 The vterm-liveness gate previously skipped the interrupt entirely."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((interrupted nil))
-      (cl-letf (((symbol-function 'agent-repl--interrupt-agent)
-                 (lambda (_ws) (setq interrupted t)))
+      (cl-letf (((symbol-function 'agent-repl--gui-interrupt)
+                 (lambda (_ws _kind) (setq interrupted t) t))
                 ((symbol-function 'run-at-time) #'ignore))
         (agent-repl-interrupt "ws1"))
       (should interrupted)
@@ -1646,6 +1650,7 @@ The vterm-liveness gate previously skipped the interrupt entirely."
 (ert-deftest agent-repl-test-do-send-frontend-calls-on-settle ()
   "The frontend branch still honors ON-SETTLE (send is synchronous)."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((settled nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message) #'ignore)
@@ -1657,6 +1662,7 @@ The vterm-liveness gate previously skipped the interrupt entirely."
 (ert-deftest agent-repl-test-interrupt-agent-frontend-uses-http ()
   "Frontend-backed workspaces interrupt over the daemon route, not Ctrl-C."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend (quote gui))
     (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((interrupted nil)
           (ctrl-c nil))
