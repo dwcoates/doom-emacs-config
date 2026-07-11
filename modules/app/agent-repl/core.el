@@ -801,7 +801,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--signal-process
     agent-repl--cee-agent-reinstall-and-bounce-exit-code
     agent-repl--frontend-run-build-script
-    agent-repl--frontend-spawn-daemon)
+    agent-repl--frontend-spawn-daemon
+    agent-repl--frontend-http-request)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.
