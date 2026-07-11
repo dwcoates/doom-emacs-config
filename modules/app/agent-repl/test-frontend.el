@@ -318,6 +318,64 @@ deadlock the non-interactive nuke hook."
     ;; Assert — killed despite the refusing query fn.
     (should-not (buffer-live-p buf))))
 
+(ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
+  "gui hide restores the pre-panel layout when one was saved.
+Restoring is what removes BOTH gui windows — the vterm close contract."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((restored nil)
+          (closed nil))
+      (cl-letf (((symbol-function 'agent-repl--restore-fullscreen-config)
+                 (lambda (_ws) (setq restored t) t))
+                ((symbol-function 'agent-repl--close-buffer-windows)
+                 (lambda (&rest _) (setq closed t))))
+        ;; Act
+        (agent-repl--gui-hide "ws1")
+        ;; Assert — restore path taken, no per-window closing.
+        (should restored)
+        (should-not closed)))))
+
+(ert-deftest agent-repl-test-frontend-gui-hide-falls-back-to-window-close ()
+  "Without a saved layout, gui hide closes the windows individually,
+resolving the input buffer by name when the plist key is stale nil."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((named (get-buffer-create "*agent-panel-input-ws1*"))
+          (closed nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--restore-fullscreen-config)
+                     (lambda (_ws) nil))
+                    ((symbol-function 'agent-repl--close-buffer-windows)
+                     (lambda (&rest bufs) (setq closed bufs))))
+            ;; Act — :input-buffer is nil; the named buffer must resolve.
+            (agent-repl--gui-hide "ws1")
+            ;; Assert
+            (should (memq named closed)))
+        (kill-buffer named)))))
+
+(ert-deftest agent-repl-test-frontend-display-saves-layout-once ()
+  "The display path saves :fullscreen-config only on a genuine open."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                     (lambda () nil))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) (get-buffer-create "*layout-input*")))
+                    ((symbol-function 'agent-repl-window--harden)
+                     (lambda (&rest _) nil)))
+            ;; Act
+            (agent-repl--frontend-display-webview "ws1" buf)
+            (let ((saved (agent-repl--ws-get "ws1" :fullscreen-config)))
+              ;; Assert — saved on first display, not clobbered on re-show.
+              (should saved)
+              (agent-repl--frontend-display-webview "ws1" buf)
+              (should (eq (agent-repl--ws-get "ws1" :fullscreen-config) saved))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer "*layout-input*")))))
+
 (ert-deftest agent-repl-test-frontend-gui-kill-tears-down-layout-first ()
   "gui kill hides the webview/input windows BEFORE releasing state.
 `agent-repl-switch-frontend' opens the next frontend right after kill;

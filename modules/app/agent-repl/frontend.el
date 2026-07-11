@@ -47,6 +47,8 @@
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
 (declare-function agent-repl--close-buffer-windows "agent-repl-panels" (&rest bufs))
+(declare-function agent-repl--restore-fullscreen-config "agent-repl-panels" (ws))
+(declare-function agent-repl--buffer-name "agent-repl-core" (suffix ws))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
 (declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
@@ -171,6 +173,15 @@ window like an ordinary buffer display."
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
+  ;; Save the pre-panel layout exactly like the vterm show path: the
+  ;; gui hide/close paths restore it, which is what removes BOTH gui
+  ;; windows (deleting them directly is impossible once the input
+  ;; window is the frame's sole survivor). Guarded like show-panels so
+  ;; re-shows never clobber the saved work layout.
+  (unless (or (agent-repl--ws-get ws :fullscreen-config)
+              (let ((webview (agent-repl--ws-get ws :frontend-buffer)))
+                (and (buffer-live-p webview) (get-buffer-window webview))))
+    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration)))
   (let* ((input-buf (agent-repl--ensure-input-buffer ws))
          (stale-input-win (get-buffer-window input-buf)))
     ;; A surviving input window from a previous webview mount (the
@@ -233,10 +244,18 @@ Remounts the live webview (or opens fresh when it died)."
 
 (defun agent-repl--gui-hide (ws)
   "The gui frontend's hide capability (registry `:hide-fn').
-Closes the webview and input windows; buffers and session survive."
-  (agent-repl--close-buffer-windows
-   (agent-repl--ws-get ws :frontend-buffer)
-   (agent-repl--ws-get ws :input-buffer)))
+Restores the pre-panel window layout saved at display time (the same
+contract as the vterm close paths — restoring is what removes BOTH gui
+windows, since the input window cannot be deleted once it is the sole
+survivor).  Buffers and the daemon session survive.  Falls back to
+closing the individual windows when no layout was saved, resolving the
+input buffer by NAME too since the plist key can go stale nil across
+frontend switches while the named buffer stays displayed."
+  (unless (agent-repl--restore-fullscreen-config ws)
+    (agent-repl--close-buffer-windows
+     (agent-repl--ws-get ws :frontend-buffer)
+     (or (agent-repl--ws-get ws :input-buffer)
+         (get-buffer (agent-repl--buffer-name "-input" ws))))))
 
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').
