@@ -9,7 +9,7 @@
 import { PermissionMode } from "./protocol.js";
 import { FeedRenderer } from "./render.js";
 import { ConversationStore } from "./store.js";
-import { WsClient, makeSessionExistsProbe } from "./ws.js";
+import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import "./styles.css";
 
 function must<T extends HTMLElement>(id: string): T {
@@ -110,24 +110,29 @@ async function boot(): Promise<void> {
   });
   ws.connect();
 
-  const input = must<HTMLTextAreaElement>("composer-input");
-  const submit = (): void => {
-    const text = input.value.trim();
-    if (text === "") return;
-    ws.send({
-      type: "user-message",
-      request_id: crypto.randomUUID(),
-      content: text,
+  if (composerEnabled(params)) {
+    const input = must<HTMLTextAreaElement>("composer-input");
+    const submit = (): void => {
+      const text = input.value.trim();
+      if (text === "") return;
+      ws.send({
+        type: "user-message",
+        request_id: crypto.randomUUID(),
+        content: text,
+      });
+      input.value = "";
+    };
+    must<HTMLButtonElement>("send-btn").addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        submit();
+      }
     });
-    input.value = "";
-  };
-  must<HTMLButtonElement>("send-btn").addEventListener("click", submit);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  });
+  } else {
+    // Host-owned input (Emacs hybrid UI): hide the composer entirely.
+    must("composer").style.display = "none";
+  }
 
   must<HTMLButtonElement>("interrupt-btn").addEventListener("click", () => {
     ws.send({ type: "interrupt", request_id: crypto.randomUUID() });
