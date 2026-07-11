@@ -1374,6 +1374,34 @@ without sending again."
         (agent-repl--open-panels-after-ready "ws1")
         (should shown)))))
 
+(ert-deftest agent-repl-test-open-panels-after-ready-visible-no-reshow ()
+  "open-panels-after-ready must NOT re-show already-visible panels.
+Re-running the show path while panels are up can die on window
+dedication mid-layout (input-only frame), so the guard skips it."
+  (agent-repl-test--with-clean-state
+    (let ((panels-opened nil))
+      (cl-letf (((symbol-function 'agent-repl--drain-pending-prompts)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--show-hidden-panels)
+                 (lambda () (setq panels-opened t))))
+        (agent-repl--open-panels-after-ready "ws1")
+        (should-not panels-opened)))))
+
+(ert-deftest agent-repl-test-open-panels-after-ready-pending-visible-no-reshow ()
+  "The pending-prompts branch also skips the re-show when panels are visible."
+  (agent-repl-test--with-clean-state
+    (let ((shown nil))
+      (cl-letf (((symbol-function 'agent-repl--drain-pending-prompts)
+                 (lambda (_ws) '("prompt1")))
+                ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--show-panels-or-defer)
+                 (lambda (_ws) (setq shown t))))
+        (agent-repl--open-panels-after-ready "ws1")
+        (should-not shown)))))
+
 (ert-deftest agent-repl-test-open-panels-after-ready-no-pending-current ()
   "open-panels-after-ready should open panels when no pending prompts and WS is current."
   (agent-repl-test--with-clean-state
