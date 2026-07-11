@@ -27,7 +27,9 @@ import (
 	"claude-repld/internal/shim"
 )
 
-const frameTimeout = 15 * time.Second
+// frameTimeout is a var (not const) so the credential-gated real-SDK
+// test can widen it for live-API latency and restore it after.
+var frameTimeout = 15 * time.Second
 
 func shimScriptPath(t *testing.T) string {
 	t.Helper()
@@ -63,8 +65,12 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		Retention:     256,
 		Logf:          t.Logf,
 		Spawn: func(sessionID string, opts server.CreateOpts) (session.ShimHandle, error) {
+			// Honor CreateOpts (fake, cwd, model, resume, mode) via the
+			// same argv builder production uses — forceFake stays false
+			// so a fake:false body reaches the real SDK.
 			proc, err := shim.Spawn(shim.Options{
-				Argv: []string{node, script, "--fake", "--session-id", sessionID},
+				Argv: server.ShimArgv(node, script, sessionID, false, opts),
+				Dir:  opts.CWD,
 				Logf: t.Logf,
 			})
 			if err != nil {
@@ -86,8 +92,13 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 
 func (h *e2eHarness) createSession(t *testing.T) string {
 	t.Helper()
+	return h.createSessionWithBody(t, `{"fake":true}`)
+}
+
+func (h *e2eHarness) createSessionWithBody(t *testing.T, body string) string {
+	t.Helper()
 	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
-		bytes.NewBufferString(`{"fake":true}`))
+		bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("POST /sessions: %v", err)
 	}
@@ -95,13 +106,13 @@ func (h *e2eHarness) createSession(t *testing.T) string {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	var body struct {
+	var created struct {
 		SessionID string `json:"session_id"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	return body.SessionID
+	return created.SessionID
 }
 
 func (h *e2eHarness) dial(t *testing.T, sessionID string) *websocket.Conn {
@@ -396,5 +407,65 @@ func TestE2EDeleteSessionShutsDownCleanly(t *testing.T) {
 		if strings.Contains(string(data), "shim_died") {
 			t.Fatalf("clean shutdown surfaced shim_died: %s", data)
 		}
+	}
+}
+
+// TestE2EFakeResumeReportsResumedClaudeSessionID pins the resume
+// plumbing offline: POST /sessions {resume} → shim --resume → fake init
+// continuation → translator capture → hello claude_session_id.
+func TestE2EFakeResumeReportsResumedClaudeSessionID(t *testing.T) {
+	// Arrange
+	h := newE2EHarness(t)
+	id := h.createSessionWithBody(t, `{"fake":true,"resume":"cli-uuid-resumed"}`)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello (init may not be consumed yet)
+	// Act — the fake's init system frame arriving proves the translator
+	// has captured the resumed uuid (mirror updates precede broadcast).
+	readUntil(t, conn, "system")
+	late := h.dial(t, id)
+	hello := readFrame(t, late)
+	// Assert
+	if hello["claude_session_id"] != "cli-uuid-resumed" {
+		t.Errorf("hello = %v", hello)
+	}
+}
+
+// TestE2ERealSDKSmoke drives ONE live-API turn through the full stack.
+// Opt-in only: consumes real quota and needs ambient claude credentials.
+//
+//	AGENT_REPL_E2E_REAL=1 go test ./e2e -run TestE2ERealSDKSmoke -v
+func TestE2ERealSDKSmoke(t *testing.T) {
+	if os.Getenv("AGENT_REPL_E2E_REAL") == "" {
+		t.Skip("set AGENT_REPL_E2E_REAL=1 to run against the live API (consumes quota)")
+	}
+	// Arrange — widen the frame deadline for live-API latency.
+	oldTimeout := frameTimeout
+	frameTimeout = 90 * time.Second
+	t.Cleanup(func() { frameTimeout = oldTimeout })
+	h := newE2EHarness(t)
+	scratch := t.TempDir()
+	id := h.createSessionWithBody(t,
+		fmt.Sprintf(`{"fake":false,"model":"haiku","cwd":%q}`, scratch))
+	conn := h.dial(t, id)
+	hello := readFrame(t, conn)
+	if hello["type"] != "hello" {
+		t.Fatalf("hello = %v", hello)
+	}
+	// Act
+	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"Reply with exactly the word: pong"}`)
+	frames := readUntil(t, conn, "result")
+	// Assert — streamed text arrived and the turn succeeded.
+	var finalText string
+	for _, f := range frames {
+		if f["type"] == "text-end" {
+			finalText = f["final_text"].(string)
+		}
+	}
+	if !strings.Contains(strings.ToLower(finalText), "pong") {
+		t.Errorf("final text = %q, want pong", finalText)
+	}
+	last := frames[len(frames)-1]
+	if last["subtype"] != "success" {
+		t.Errorf("result = %v", last)
 	}
 }

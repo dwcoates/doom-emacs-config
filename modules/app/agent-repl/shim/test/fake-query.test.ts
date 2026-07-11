@@ -55,6 +55,22 @@ describe("createFakeQuery", () => {
     expect(msgs[0]).toMatchObject({ type: "system", subtype: "init", model: "fake-model" });
   });
 
+  it("reports the resumed session uuid in init when resuming", async () => {
+    // Arrange — resume continuation mirrors verified real SDK behavior.
+    const input = new AsyncQueue<SdkUserMessageLike>();
+    const query = createFakeQuery(input, async () => ({ behavior: "allow", updatedInput: {} }), {
+      sessionId: "s-new",
+      newUuid: () => "u1",
+      resume: "cli-uuid-resumed",
+    });
+    // Act
+    input.end();
+    const msgs: SdkMessageLike[] = [];
+    for await (const m of query) msgs.push(m);
+    // Assert — init carries the RESUMED uuid, not the shim-assigned id.
+    expect(msgs[0]).toMatchObject({ type: "system", subtype: "init", session_id: "cli-uuid-resumed" });
+  });
+
   it("streams an echoed text turn ending in a success result", async () => {
     // Arrange
     const h = makeFake();

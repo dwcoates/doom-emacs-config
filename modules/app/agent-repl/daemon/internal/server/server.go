@@ -31,6 +31,30 @@ type CreateOpts struct {
 // substitute an in-memory shim.
 type SpawnFunc func(sessionID string, opts CreateOpts) (session.ShimHandle, error)
 
+// ShimArgv assembles the node argv that launches the shim for one
+// session. forceFake forces --fake regardless of opts.Fake (the
+// daemon-wide -fake flag). Shared by cmd/claude-repld and the e2e
+// harness so the two spawn paths cannot drift.
+func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) []string {
+	argv := []string{node, script, "--session-id", sessionID}
+	if forceFake || opts.Fake {
+		argv = append(argv, "--fake")
+	}
+	if opts.PermissionMode != "" {
+		argv = append(argv, "--permission-mode", opts.PermissionMode)
+	}
+	if opts.CWD != "" {
+		argv = append(argv, "--cwd", opts.CWD)
+	}
+	if opts.Model != "" {
+		argv = append(argv, "--model", opts.Model)
+	}
+	if opts.Resume != "" {
+		argv = append(argv, "--resume", opts.Resume)
+	}
+	return argv
+}
+
 // Server routes daemon HTTP traffic.
 type Server struct {
 	daemonVersion string
