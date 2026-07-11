@@ -312,7 +312,10 @@ export function renderItem(item: ConversationItem, selections?: QuestionSelectio
     case "thinking":
       return Thinking(item);
     case "tool":
-      return ToolCard(item);
+      // AskUserQuestion's UI IS the permission picker card — the
+      // generic tool card would just dump the questions JSON (input)
+      // and the "User has answered…" echo (result) alongside it.
+      return item.toolName === "AskUserQuestion" ? "" : ToolCard(item);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
