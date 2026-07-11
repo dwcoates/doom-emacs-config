@@ -136,14 +136,16 @@ webapp title changes never rename it."
 ;;;; ---- Placement ---------------------------------------------------------------
 
 (defun agent-repl--frontend-main-area-window ()
-  "Return a live main-area (non-side) window to host the webview.
+  "Return a live main-area window able to host the webview.
 `window-main-window' can return an INTERNAL window when the main area
 is split, and `select-window' on an internal window errors — so walk
-the frame's live windows and take the first that is not a side window.
-Falls back to the selected window (always live) when everything else is
-a side window."
+the frame's live windows and take the first that is neither a side
+window nor DEDICATED (a dedicated window rejects `set-window-buffer',
+and the workspace's own hardened input panel is exactly such a window).
+Falls back to the selected window (always live) when nothing matches."
   (or (seq-find (lambda (win)
-                  (not (agent-repl-window--side-window-p win)))
+                  (and (not (agent-repl-window--side-window-p win))
+                       (not (window-dedicated-p win))))
                 (window-list nil 'no-minibuffer))
       (selected-window)))
 
@@ -159,28 +161,37 @@ window like an ordinary buffer display."
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
-  (let ((win (agent-repl--frontend-main-area-window)))
-    (select-window win)
-    (set-window-buffer win buf)
-    ;; Hybrid UI: the classic input panel sits below the webview, with
-    ;; the same window recipe the vterm layout uses (dedicated,
-    ;; height-locked, delete-protected, mini-window-shrink-proof).
-    ;; Focus lands there — typing is the whole point of the panel.
-    (let ((input-buf (agent-repl--ensure-input-buffer ws)))
-      (if (get-buffer-window input-buf)
-          (select-window (get-buffer-window input-buf))
-        (let ((input-win (split-window
-                          win
-                          (round (* (- agent-repl-input-height-fraction)
-                                    (window-total-height win)))
-                          'below)))
-          (set-window-buffer input-win input-buf)
-          (agent-repl-window--harden input-win
-                                     :dedicate       t
-                                     :size-fix       'height
-                                     :delete-protect t
-                                     :preserve-size  'height)
-          (select-window input-win)))))
+  (let* ((input-buf (agent-repl--ensure-input-buffer ws))
+         (stale-input-win (get-buffer-window input-buf)))
+    ;; A surviving input window from a previous webview mount (the
+    ;; webview died or was rebound) is dedicated, so it can neither
+    ;; host the webview nor be left to shadow the host search — remove
+    ;; it and rebuild the canonical layout from scratch. When it is
+    ;; the frame's ONLY window it cannot be deleted; reclaim it as the
+    ;; host by lifting its dedication instead.
+    (when (window-live-p stale-input-win)
+      (if (one-window-p)
+          (set-window-dedicated-p stale-input-win nil)
+        (delete-window stale-input-win)))
+    (let ((win (agent-repl--frontend-main-area-window)))
+      (select-window win)
+      (set-window-buffer win buf)
+      ;; Hybrid UI: the classic input panel sits below the webview, with
+      ;; the same window recipe the vterm layout uses (dedicated,
+      ;; height-locked, delete-protected, mini-window-shrink-proof).
+      ;; Focus lands there — typing is the whole point of the panel.
+      (let ((input-win (split-window
+                        win
+                        (round (* (- agent-repl-input-height-fraction)
+                                  (window-total-height win)))
+                        'below)))
+        (set-window-buffer input-win input-buf)
+        (agent-repl-window--harden input-win
+                                   :dedicate       t
+                                   :size-fix       'height
+                                   :delete-protect t
+                                   :preserve-size  'height)
+        (select-window input-win))))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
