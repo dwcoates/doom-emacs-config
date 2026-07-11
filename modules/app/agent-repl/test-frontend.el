@@ -178,6 +178,46 @@ show-panels — hiding first sidesteps the whole class."
         (kill-buffer buf)
         (kill-buffer input-buf)))))
 
+(ert-deftest agent-repl-test-frontend-display-reclaims-stale-input-window ()
+  "Remounting over a surviving dedicated input window must not error.
+The webview died but its input window survived (dedicated): the display
+path removes or reclaims it instead of erroring \"Window is dedicated\"."
+  ;; Arrange — the input window is visible AND dedicated, webview gone.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (input-buf (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) input-buf)
+            (set-window-dedicated-p (selected-window) t)
+            (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                       (lambda () nil))
+                      ((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) input-buf))
+                      ((symbol-function 'agent-repl-window--harden)
+                       (lambda (&rest _) nil)))
+              ;; Act — must not signal.
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert — canonical layout rebuilt: webview + input both visible.
+              (should (get-buffer-window buf))
+              (should (get-buffer-window input-buf))))
+        (set-window-dedicated-p (selected-window) nil)
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-test-frontend-main-area-window-skips-dedicated ()
+  "The host search never returns a dedicated window."
+  ;; Arrange — every window reads as dedicated except none: expect the
+  ;; selected-window fallback rather than a dedicated pick.
+  (cl-letf (((symbol-function 'agent-repl-window--side-window-p)
+             (lambda (_win) nil))
+            ((symbol-function 'window-dedicated-p)
+             (lambda (_win) t)))
+    ;; Act / Assert — falls back to selected-window instead of a
+    ;; dedicated candidate.
+    (should (eq (agent-repl--frontend-main-area-window) (selected-window)))))
+
 (ert-deftest agent-repl-test-frontend-main-area-window-skips-side-windows ()
   "The webview host window is never a side window."
   ;; Arrange — mark every window EXCEPT the selected one as side.
