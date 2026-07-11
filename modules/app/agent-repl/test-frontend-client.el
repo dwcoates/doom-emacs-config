@@ -151,8 +151,10 @@ Captured requests accumulate in the anaphoric variable `requests' as
 (ert-deftest agent-repl-test-frontend-wait-ready-retries-then-succeeds ()
   "Readiness polling retries failed probes until one succeeds."
   ;; Arrange — first two probes fail, third answers.
-  (let ((calls 0))
-    (cl-letf (((symbol-function 'sit-for) #'ignore))
+  (let ((calls 0)
+        (sleeps '()))
+    (cl-letf (((symbol-function 'sleep-for)
+               (lambda (secs) (push secs sleeps))))
       (agent-repl-test--with-http
           (lambda (&rest _)
             (setq calls (1+ calls))
@@ -161,13 +163,33 @@ Captured requests accumulate in the anaphoric variable `requests' as
               (agent-repl-test--json-ok '((sessions . [])))))
         ;; Act / Assert
         (should (agent-repl--frontend-wait-ready))
-        (should (= calls 3))))))
+        (should (= calls 3))
+        ;; Pacing: one 0.2s blocking sleep per FAILED probe, none after
+        ;; the success.
+        (should (equal sleeps '(0.2 0.2)))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-fails-fast-without-daemon ()
+  "A nil daemon-ensure (auto-start off/inhibited) errors immediately.
+Polling readiness against a daemon that was never started would burn
+the retry budget on a misleading error."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((polled nil))
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon)
+                 (lambda (&optional _f) nil))
+                ((symbol-function 'agent-repl--frontend-wait-ready)
+                 (lambda () (setq polled t))))
+        ;; Act
+        (let ((err (should-error (agent-repl--frontend-ensure-session "ws1"))))
+          ;; Assert — loud, immediate, and readiness never polled.
+          (should (string-match-p "not started" (error-message-string err)))
+          (should-not polled))))))
 
 (ert-deftest agent-repl-test-frontend-wait-ready-errors-after-attempts ()
   "Readiness polling gives up loudly after the attempt budget."
   ;; Arrange
   (let ((agent-repl-frontend-ready-attempts 3))
-    (cl-letf (((symbol-function 'sit-for) #'ignore))
+    (cl-letf (((symbol-function 'sleep-for) #'ignore))
       (agent-repl-test--with-http
           (lambda (&rest _) (error "connection refused"))
         ;; Act / Assert
@@ -188,7 +210,7 @@ Captured requests accumulate in the anaphoric variable `requests' as
   "A recorded id still listed live is reused without a POST."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
       (agent-repl-test--with-http
           (lambda (&rest _)
@@ -204,7 +226,7 @@ Captured requests accumulate in the anaphoric variable `requests' as
   "A recorded id the daemon no longer lists is replaced via POST."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_stale" :project-dir "/w/tree")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
       (agent-repl-test--with-http
           (lambda (method &rest _)
@@ -221,7 +243,7 @@ Captured requests accumulate in the anaphoric variable `requests' as
   "A workspace without :project-dir cannot own a session — hard error."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
       (agent-repl-test--with-http
           (lambda (&rest _) (agent-repl-test--json-ok '((sessions . []))))

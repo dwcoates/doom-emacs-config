@@ -122,7 +122,10 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
                  (setq ready t))
         (error
          (setq last-err err)
-         (sit-for 0.2))))
+         ;; sleep-for, NOT sit-for: sit-for returns immediately when
+         ;; input is pending, which would collapse the whole readiness
+         ;; window into back-to-back failed probes while the user types.
+         (sleep-for 0.2))))
     (unless ready
       (error "agent-repl: daemon at %s never became ready (%d attempts): %s"
              agent-repl-frontend-daemon-addr attempt
@@ -179,7 +182,14 @@ daemon.el), waits for readiness, then reuses WS's recorded
 otherwise POSTs a new session rooted at WS's `:project-dir'.
 Signals when WS has no `:project-dir' (a workspace without a project
 directory cannot own a session; that is an invariant violation)."
-  (agent-repl--ensure-frontend-daemon)
+  ;; ensure-frontend-daemon returns nil (without acting) when auto-start
+  ;; is disabled or init is inhibited — polling readiness against a
+  ;; daemon that was never started would burn the whole retry budget to
+  ;; produce a misleading "never became ready" error, so fail fast with
+  ;; the actual cause. A nil return with a LIVE daemon process cannot
+  ;; happen (ensure returns the process in every acting branch).
+  (unless (agent-repl--ensure-frontend-daemon)
+    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
   (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
     (if (and existing (agent-repl--frontend-session-live-p existing))

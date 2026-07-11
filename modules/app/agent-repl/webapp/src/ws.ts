@@ -34,6 +34,14 @@ export class WsClient {
   private attempts = 0;
   private closedByUser = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Connection epoch: bumped by every connect() and close(). Scheduled
+   * reconnects and in-flight existence probes capture the epoch they
+   * were started under and abort when it has moved on — otherwise a
+   * stale probe resuming after a close()+connect() pair would open a
+   * SECOND socket alongside the fresh one.
+   */
+  private epoch = 0;
 
   constructor(opts: WsClientOptions) {
     this.opts = opts;
@@ -41,6 +49,7 @@ export class WsClient {
   }
 
   connect(): void {
+    this.epoch++;
     this.closedByUser = false;
     const factory = this.opts.wsFactory ?? ((url: string) => new WebSocket(url));
     const ws = factory(this.opts.url);
@@ -67,13 +76,14 @@ export class WsClient {
   private scheduleReconnect(): void {
     const delay = this.backoff[Math.min(this.attempts, this.backoff.length - 1)];
     this.attempts++;
+    const epoch = this.epoch;
     this.reconnectTimer = setTimeout(() => {
-      void this.reconnectIfSessionExists();
+      void this.reconnectIfSessionExists(epoch);
     }, delay);
   }
 
-  private async reconnectIfSessionExists(): Promise<void> {
-    if (this.closedByUser) return;
+  private async reconnectIfSessionExists(epoch: number): Promise<void> {
+    if (this.epoch !== epoch || this.closedByUser) return;
     if (this.opts.sessionExists) {
       let exists = true;
       try {
@@ -82,7 +92,10 @@ export class WsClient {
         // Probe unreachable (daemon briefly down?): treat as unknown
         // and keep retrying — only a definitive "not listed" stops us.
       }
-      if (this.closedByUser) return;
+      // Re-check after the await: a close()/connect() during the probe
+      // moves the epoch, and acting on the stale result would open a
+      // duplicate socket (or fire onGone against a fresh connection).
+      if (this.epoch !== epoch || this.closedByUser) return;
       if (!exists) {
         this.opts.onGone?.();
         return;
@@ -100,6 +113,7 @@ export class WsClient {
   }
 
   close(): void {
+    this.epoch++;
     this.closedByUser = true;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
@@ -107,4 +121,23 @@ export class WsClient {
     }
     this.ws?.close();
   }
+}
+
+/**
+ * Build the standard sessionExists probe against GET /sessions.
+ * Extracted from the boot path so the "session gone" detection is unit
+ * testable; throws on a non-2xx response so transport failures count as
+ * "unknown" (retry) rather than "gone".
+ */
+export function makeSessionExistsProbe(
+  httpBase: string,
+  sessionId: string,
+  fetchFn: typeof fetch = fetch,
+): () => Promise<boolean> {
+  return async () => {
+    const resp = await fetchFn(`${httpBase}/sessions`);
+    if (!resp.ok) throw new Error(`GET /sessions: ${resp.status}`);
+    const body = (await resp.json()) as { sessions: Array<{ session_id: string }> };
+    return body.sessions.some((s) => s.session_id === sessionId);
+  };
 }

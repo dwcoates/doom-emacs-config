@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -429,5 +430,43 @@ func TestShutdownAllReachesEverySession(t *testing.T) {
 		case <-time.After(recvTimeout):
 			t.Fatalf("shim%d never received shutdown", i+1)
 		}
+	}
+}
+
+func TestShimArgvAssemblesAllCreateOpts(t *testing.T) {
+	// Arrange
+	cases := []struct {
+		name      string
+		forceFake bool
+		opts      CreateOpts
+		want      []string
+	}{
+		{
+			name: "defaults",
+			opts: CreateOpts{},
+			want: []string{"node", "shim.js", "--session-id", "s1"},
+		},
+		{
+			name:      "force fake wins over opts",
+			forceFake: true,
+			opts:      CreateOpts{Fake: false},
+			want:      []string{"node", "shim.js", "--session-id", "s1", "--fake"},
+		},
+		{
+			name: "full opts",
+			opts: CreateOpts{Fake: true, PermissionMode: "plan", CWD: "/w", Model: "haiku", Resume: "cli-1"},
+			want: []string{"node", "shim.js", "--session-id", "s1", "--fake",
+				"--permission-mode", "plan", "--cwd", "/w", "--model", "haiku", "--resume", "cli-1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := ShimArgv("node", "shim.js", "s1", tc.forceFake, tc.opts)
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("argv = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

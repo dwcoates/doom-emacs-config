@@ -265,8 +265,10 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	// `shutdown` is deliberately NOT forwarded: the §2 preamble limits
 	// webapp→daemon traffic to the four UI commands plus replay-request;
 	// session teardown is daemon-owned via DELETE /sessions/{id}
-	// (Session.Shutdown). A client-sent shutdown falls through here and
-	// is ignored like any other out-of-contract type.
+	// (Session.Shutdown). Note the mechanism differs from a truly
+	// unknown type: DecodeCommand KNOWS shutdown (it is a Layer-1
+	// command) and decodes it, so it reaches this switch and falls
+	// through — it is deliberately dropped here, not filtered upstream.
 	return nil
 }
 
@@ -327,7 +329,18 @@ func (s *Session) broadcastLocked(frames []protocol.L2Frame) {
 // sendToClientLocked queues data on c, dropping the client if its buffer
 // is full (it can reconnect and replay). Reports whether the client is
 // still attached.
+//
+// The membership check is load-bearing, not defensive: Run's shim-death
+// drain closes every attached client's Send channel under the lock, but
+// the server's per-connection reader goroutine can still deliver a
+// replay-request (which the terminal carve-out honors) in the window
+// before the writer tears the socket down. Sending on the closed
+// channel would panic; a client no longer in s.clients has by invariant
+// already had its channel closed, so it is skipped.
 func (s *Session) sendToClientLocked(c *Client, data []byte) bool {
+	if _, attached := s.clients[c]; !attached {
+		return false
+	}
 	select {
 	case c.Send <- data:
 		return true
