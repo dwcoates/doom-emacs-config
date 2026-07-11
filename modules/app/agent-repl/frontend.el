@@ -240,8 +240,14 @@ Closes the webview and input windows; buffers and session survive."
 
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').
-Deletes the daemon session (best-effort) and kills the webview; the
-input buffer survives (it is workspace furniture, not session state)."
+Tears down the LAYOUT first (webview + dedicated input windows), then
+deletes the daemon session (best-effort) and kills the webview.  The
+window teardown is contractual: `agent-repl-switch-frontend' opens the
+next frontend immediately after kill, and a leftover dedicated input
+window aborts the vterm launch mid-initialize (the observed
+\"vterm buffer is null/dead\" cascade).  The input buffer itself
+survives — it is workspace furniture, not session state."
+  (agent-repl--gui-hide ws)
   (agent-repl--frontend-release-workspace-session ws)
   (agent-repl--frontend-release-workspace-webview ws)
   (agent-repl--ws-put ws :frontend-buffer nil)
