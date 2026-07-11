@@ -30,6 +30,7 @@
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-frontend-client.el" dir) nil t)
+  (load (expand-file-name "test-frontend.el" dir) nil t)
   (load (expand-file-name "test-history.el" dir) nil t)
   (load (expand-file-name "test-input.el" dir) nil t)
   (load (expand-file-name "test-keybindings.el" dir) nil t)

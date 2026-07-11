@@ -170,7 +170,8 @@ debug logging on."
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
-    :done-ack-pending :source-ws-name :frontend-session-id)
+    :done-ack-pending :source-ws-name :frontend-session-id
+    :frontend-buffer :frontend-buffer-session-id)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
