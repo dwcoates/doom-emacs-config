@@ -1883,39 +1883,24 @@ format.  Returns nil when RAW carries no entries (or is itself nil)."
     (:legacy raw)
     (_ nil)))
 
-(defun agent-repl--snapshot-merge-queue-from-raw (raw)
-  "Return the persisted merge-queue from RAW (a parsed snapshot sexp).
-Returns nil when RAW is in the legacy list-of-entries format (which
-predates merge-queue persistence) or carries no `:merge-queue' key."
-  (pcase (agent-repl--snapshot-raw-format raw)
-    (:plist (plist-get raw :merge-queue))
-    (_ nil)))
+(defun agent-repl--snapshot-plist-key-from-raw (raw key)
+  "Return KEY's value from RAW when RAW is in the current plist format.
+RAW is a parsed workspace-snapshot sexp.
 
-(defun agent-repl--snapshot-in-flight-merges-from-raw (raw)
-  "Return the persisted in-flight-merges list from RAW (a parsed snapshot sexp).
-Returns nil when RAW predates the in-flight-merge persistence (legacy
-list-of-entries or a plist without `:in-flight-merges')."
-  (pcase (agent-repl--snapshot-raw-format raw)
-    (:plist (plist-get raw :in-flight-merges))
-    (_ nil)))
+Every key EXCEPT `:workspaces' is plist-only: each was added after the
+legacy list-of-entries format, so for those keys `RAW is legacy' and
+`RAW is a plist lacking KEY' collapse to the same answer — nil.  That
+collapse is the whole shape shared by `:merge-queue',
+`:in-flight-merges', `:hide-project-dirs-enabled', and
+`:default-frontend', which is why they read through here rather than
+each restating the pcase.
 
-(defun agent-repl--snapshot-hide-project-dirs-from-raw (raw)
-  "Return the persisted hide-project-dirs toggle state from RAW.
-RAW is a parsed snapshot sexp.  Returns nil when RAW predates the
-hide-project-dirs persistence (legacy list-of-entries, or a plist
-without the `:hide-project-dirs-enabled' key)."
+`agent-repl--snapshot-entries-from-raw' is deliberately NOT one of them:
+`:workspaces' is the one key the legacy format also carries (as the
+entire sexp), so it needs a real `:legacy' branch and keeps its own
+reader."
   (pcase (agent-repl--snapshot-raw-format raw)
-    (:plist (plist-get raw :hide-project-dirs-enabled))
-    (_ nil)))
-
-(defun agent-repl--snapshot-default-frontend-from-raw (raw)
-  "Return the persisted default-frontend name symbol from RAW.
-RAW is a parsed snapshot sexp.  Returns nil when RAW predates the
-default-frontend persistence (legacy list-of-entries, or a plist
-without the `:default-frontend' key) — the loader leaves
-`agent-repl-default-frontend' at its customized value in that case."
-  (pcase (agent-repl--snapshot-raw-format raw)
-    (:plist (plist-get raw :default-frontend))
+    (:plist (plist-get raw key))
     (_ nil)))
 
 (defun agent-repl--read-workspace-snapshot (file)
@@ -1932,12 +1917,14 @@ the sexp is unreadable."
     (condition-case err
         (let ((raw (agent-repl--read-sexp-file file)))
           (list :workspaces (agent-repl--snapshot-entries-from-raw raw)
-                :merge-queue (agent-repl--snapshot-merge-queue-from-raw raw)
-                :in-flight-merges (agent-repl--snapshot-in-flight-merges-from-raw raw)
+                :merge-queue
+                (agent-repl--snapshot-plist-key-from-raw raw :merge-queue)
+                :in-flight-merges
+                (agent-repl--snapshot-plist-key-from-raw raw :in-flight-merges)
                 :hide-project-dirs-enabled
-                (agent-repl--snapshot-hide-project-dirs-from-raw raw)
+                (agent-repl--snapshot-plist-key-from-raw raw :hide-project-dirs-enabled)
                 :default-frontend
-                (agent-repl--snapshot-default-frontend-from-raw raw)))
+                (agent-repl--snapshot-plist-key-from-raw raw :default-frontend)))
       (error
        (agent-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
                          file err)

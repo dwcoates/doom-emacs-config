@@ -3418,6 +3418,26 @@ from the snapshot's `:hide-project-dirs-enabled' key."
             (should (eq agent-repl-hide-project-dirs-enabled t)))
         (delete-file snapshot-file)))))
 
+(ert-deftest agent-repl-cmd-test-snapshot-plist-key-from-raw/reads-key-from-plist ()
+  "The shared plist-key reader returns KEY's value from a plist-shaped raw."
+  ;; Act / Assert
+  (should (eq (agent-repl--snapshot-plist-key-from-raw
+               '(:workspaces nil :default-frontend gui) :default-frontend)
+              'gui)))
+
+(ert-deftest agent-repl-cmd-test-snapshot-plist-key-from-raw/absent-key-is-nil ()
+  "A plist-shaped raw that simply lacks KEY reads as nil."
+  ;; Act / Assert
+  (should-not (agent-repl--snapshot-plist-key-from-raw
+               '(:workspaces nil) :default-frontend)))
+
+(ert-deftest agent-repl-cmd-test-snapshot-plist-key-from-raw/legacy-raw-is-nil ()
+  "A legacy list-of-entries raw reads as nil for any plist-only key —
+`legacy' and `key absent' collapse to the same answer."
+  ;; Act / Assert
+  (should-not (agent-repl--snapshot-plist-key-from-raw
+               '(("ws1" :project-dir "/tmp/ws1")) :default-frontend)))
+
 (ert-deftest agent-repl-cmd-test-write-workspace-snapshot/round-trips-default-frontend ()
   "A snapshot records the live `agent-repl-default-frontend' and reads it
 back as `:default-frontend'."
