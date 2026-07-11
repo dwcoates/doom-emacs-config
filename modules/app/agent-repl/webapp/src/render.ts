@@ -22,6 +22,33 @@ import {
 
 export interface Actions {
   decidePermission(requestId: string, behavior: "allow" | "deny"): void;
+  /**
+   * Answer an AskUserQuestion permission. UPDATED-INPUT is the tool
+   * input echoed back with the `answers` record filled in (question
+   * text → answer string, multi-select comma-separated) — the exact
+   * contract the CLI's permission component expects.
+   */
+  answerQuestions(requestId: string, updatedInput: unknown): void;
+}
+
+/** One AskUserQuestion entry as carried in the tool input. */
+export interface AskQuestion {
+  question: string;
+  header: string;
+  multiSelect?: boolean;
+  options: Array<{ label: string; description: string }>;
+}
+
+/** Selected option labels per question, keyed `${requestId} ${qIdx}`. */
+export type QuestionSelections = ReadonlyMap<string, ReadonlySet<string>>;
+
+/** The item's questions when it is an AskUserQuestion prompt, else null. */
+export function askQuestions(item: PermissionItem): AskQuestion[] | null {
+  if (item.toolName !== "AskUserQuestion") return null;
+  const input = item.input as { questions?: AskQuestion[] } | null;
+  return input && Array.isArray(input.questions) && input.questions.length > 0
+    ? input.questions
+    : null;
 }
 
 /** Tool names the SPA renders specially (§2.6); others use Generic. */
@@ -146,7 +173,9 @@ export function diffHtml(unifiedDiff: string): string {
     .join("\n");
 }
 
-function PermissionPrompt(item: PermissionItem): string {
+function PermissionPrompt(item: PermissionItem, selections?: QuestionSelections): string {
+  const questions = askQuestions(item);
+  if (questions) return QuestionPrompt(item, questions, selections);
   const preview = permissionPreviewHtml(item);
   if (item.resolution) {
     const label =
@@ -168,6 +197,65 @@ function PermissionPrompt(item: PermissionItem): string {
       <div class="perm-actions">
         <button data-perm-allow="${escapeHtml(item.requestId)}">Allow</button>
         <button data-perm-deny="${escapeHtml(item.requestId)}">Deny</button>
+      </div>
+    </div>`;
+}
+
+/**
+ * AskUserQuestion picker: option chips per question (single-select
+ * replaces the pick, multiSelect toggles), a submit enabled once every
+ * question has a selection, and a decline path. Selection state lives
+ * in the RENDERER, not the DOM, so it survives per-delta re-renders.
+ */
+function QuestionPrompt(
+  item: PermissionItem,
+  questions: AskQuestion[],
+  selections?: QuestionSelections,
+): string {
+  if (item.resolution) {
+    const label =
+      item.resolution.decision === "allow"
+        ? "answered"
+        : item.resolution.decision === "cancel"
+          ? "cancelled"
+          : "declined";
+    return `
+      <div class="permission resolved question">
+        <div class="perm-head">Question <span class="badge ${
+          item.resolution.decision === "allow" ? "ok" : "err"
+        }">${label}</span></div>
+        ${questions.map((q) => `<div class="q-text">${escapeHtml(q.question)}</div>`).join("")}
+      </div>`;
+  }
+  const rid = escapeHtml(item.requestId);
+  const blocks = questions.map((q, qi) => {
+    const picked = selections?.get(`${item.requestId} ${qi}`);
+    const opts = q.options
+      .map(
+        (o, oi) =>
+          `<button class="q-opt${picked?.has(o.label) ? " selected" : ""}" data-q-req="${rid}" data-q-idx="${qi}" data-q-opt="${oi}" title="${escapeHtml(
+            o.description,
+          )}">${escapeHtml(o.label)}</button>`,
+      )
+      .join("");
+    return `
+      <div class="q-block">
+        <span class="badge q-chip">${escapeHtml(q.header)}</span>
+        <div class="q-text">${escapeHtml(q.question)}${
+          q.multiSelect ? ` <span class="q-multi">(select all that apply)</span>` : ""
+        }</div>
+        <div class="q-opts">${opts}</div>
+      </div>`;
+  });
+  const complete = questions.every(
+    (_q, qi) => (selections?.get(`${item.requestId} ${qi}`)?.size ?? 0) > 0,
+  );
+  return `
+    <div class="permission pending question">
+      ${blocks.join("")}
+      <div class="perm-actions">
+        <button data-q-submit="${rid}"${complete ? "" : " disabled"}>Answer</button>
+        <button data-perm-deny="${rid}">Decline</button>
       </div>
     </div>`;
 }
@@ -215,7 +303,7 @@ function SystemNote(item: SystemItem): string {
   return `<div class="system-note">system: ${escapeHtml(item.subtype)}</div>`;
 }
 
-export function renderItem(item: ConversationItem): string {
+export function renderItem(item: ConversationItem, selections?: QuestionSelections): string {
   switch (item.kind) {
     case "user-turn":
       return UserTurn(item);
@@ -226,7 +314,7 @@ export function renderItem(item: ConversationItem): string {
     case "tool":
       return ToolCard(item);
     case "permission":
-      return PermissionPrompt(item);
+      return PermissionPrompt(item, selections);
     case "result":
       return ResultChip(item);
     case "compact-boundary":
@@ -263,6 +351,9 @@ export class FeedRenderer {
   private container: HTMLElement;
   private actions: Actions;
   private nodes = new Map<string, { el: HTMLElement; html: string }>();
+  /** AskUserQuestion picks (renderer-owned so re-renders keep them). */
+  private questionSelections = new Map<string, Set<string>>();
+  private lastState: StoreState | null = null;
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -273,10 +364,68 @@ export class FeedRenderer {
       const deny = target.getAttribute("data-perm-deny");
       if (allow) this.actions.decidePermission(allow, "allow");
       if (deny) this.actions.decidePermission(deny, "deny");
+      const qReq = target.getAttribute("data-q-req");
+      if (qReq !== null) {
+        this.toggleQuestionOption(
+          qReq,
+          Number(target.getAttribute("data-q-idx")),
+          Number(target.getAttribute("data-q-opt")),
+        );
+      }
+      const submit = target.getAttribute("data-q-submit");
+      if (submit !== null) this.submitQuestionAnswers(submit);
+    });
+  }
+
+  private pendingQuestionItem(requestId: string): { item: PermissionItem; questions: AskQuestion[] } | null {
+    const item = this.lastState?.items.find(
+      (it): it is PermissionItem => it.kind === "permission" && it.requestId === requestId,
+    );
+    if (!item || item.resolution) return null;
+    const questions = askQuestions(item);
+    return questions ? { item, questions } : null;
+  }
+
+  private toggleQuestionOption(requestId: string, qIdx: number, optIdx: number): void {
+    const found = this.pendingQuestionItem(requestId);
+    const opt = found?.questions[qIdx]?.options[optIdx];
+    if (!found || !opt) return;
+    const key = `${requestId} ${qIdx}`;
+    const set = this.questionSelections.get(key) ?? new Set<string>();
+    if (found.questions[qIdx].multiSelect) {
+      if (set.has(opt.label)) {
+        set.delete(opt.label);
+      } else {
+        set.add(opt.label);
+      }
+    } else {
+      set.clear();
+      set.add(opt.label);
+    }
+    this.questionSelections.set(key, set);
+    if (this.lastState) this.render(this.lastState);
+  }
+
+  private submitQuestionAnswers(requestId: string): void {
+    const found = this.pendingQuestionItem(requestId);
+    if (!found) return;
+    const answers: Record<string, string> = {};
+    for (let qi = 0; qi < found.questions.length; qi++) {
+      const set = this.questionSelections.get(`${requestId} ${qi}`);
+      if (!set || set.size === 0) return; // incomplete (button disabled)
+      answers[found.questions[qi].question] = [...set].join(", ");
+    }
+    for (let qi = 0; qi < found.questions.length; qi++) {
+      this.questionSelections.delete(`${requestId} ${qi}`);
+    }
+    this.actions.answerQuestions(requestId, {
+      questions: found.questions,
+      answers,
     });
   }
 
   render(state: StoreState): void {
+    this.lastState = state;
     const pinned =
       this.container.scrollHeight - this.container.scrollTop -
         this.container.clientHeight < 40;
@@ -284,7 +433,7 @@ export class FeedRenderer {
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
       seen.add(key);
-      const html = renderItem(item);
+      const html = renderItem(item, this.questionSelections);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");
