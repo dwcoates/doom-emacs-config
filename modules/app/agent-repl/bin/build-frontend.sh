@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# build-frontend.sh — build the claude-repl frontend artifacts, but only
+# when they are out of date ("build-if-stale").
+#
+# Three artifacts are managed, each independently:
+#   1. shim    — TypeScript, built with `npm run build` -> shim/dist/main.js
+#   2. webapp  — TypeScript + Vite, built with `npm run build` -> webapp/dist/index.html
+#   3. daemon  — Go, built with `go build` -> daemon/bin/claude-repld
+#
+# Staleness rule (per artifact): rebuild iff the artifact is missing, or any
+# source file under its source set is newer (mtime) than the artifact. This is
+# the same prerequisite-newer-than-target rule `make` uses, done by hand so no
+# Makefile is required and so Emacs can invoke a single entrypoint.
+#
+# Exit codes:
+#   0  every artifact is fresh or was rebuilt successfully
+#   1  a build step failed (message on stderr)
+#   2  a required toolchain binary is missing (message on stderr)
+#
+# Usage:
+#   build-frontend.sh [--force] [shim|webapp|daemon ...]
+#     --force            rebuild the selected artifacts unconditionally
+#     positional targets restrict the run to the named artifacts (default: all)
+
+set -euo pipefail
+
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$THIS_DIR/.." && pwd)"
+
+SHIM_DIR="$ROOT/shim"
+WEBAPP_DIR="$ROOT/webapp"
+DAEMON_DIR="$ROOT/daemon"
+
+SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
+WEBAPP_ARTIFACT="$WEBAPP_DIR/dist/index.html"
+DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
+
+FORCE=0
+TARGETS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --force) FORCE=1 ;;
+        shim|webapp|daemon) TARGETS+=("$1") ;;
+        -h|--help)
+            sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "build-frontend.sh: unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+# Default to all three, in dependency-agnostic order.
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+    TARGETS=(shim webapp daemon)
+fi
+
+require_bin() {
+    # require_bin BIN HUMAN-HINT
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "build-frontend.sh: required binary '$1' not found on PATH ($2)" >&2
+        exit 2
+    fi
+}
+
+# newest_mtime DIR [FILE...] — echo the largest mtime (epoch seconds) among the
+# given files plus every regular file under DIR/src, skipping node_modules.
+# Emits 0 when nothing matches.
+newest_mtime() {
+    local newest=0 f mt
+    for f in "$@"; do
+        [ -e "$f" ] || continue
+        mt="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")"
+        [ "$mt" -gt "$newest" ] && newest="$mt"
+    done
+    echo "$newest"
+}
+
+# artifact_mtime FILE — echo the artifact's mtime, or 0 if it is missing (which
+# forces a rebuild since any source mtime is >= 0).
+artifact_mtime() {
+    if [ -e "$1" ]; then
+        stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
+    else
+        echo 0
+    fi
+}
+
+# is_stale ARTIFACT SOURCE... — return 0 (stale, needs build) when ARTIFACT is
+# missing or older than the newest SOURCE; return 1 (fresh) otherwise.
+is_stale() {
+    local artifact="$1"; shift
+    [ "$FORCE" -eq 1 ] && return 0
+    local a s
+    a="$(artifact_mtime "$artifact")"
+    s="$(newest_mtime "$@")"
+    [ "$s" -ge "$a" ] || [ "$a" -eq 0 ]
+}
+
+# collect_sources DIR — print every regular source file under DIR/src plus the
+# package/build manifests that also invalidate the artifact when they change.
+collect_sources() {
+    local dir="$1"
+    if [ -d "$dir/src" ]; then
+        find "$dir/src" -type f
+    fi
+    for manifest in package.json tsconfig.json vite.config.ts go.mod go.sum; do
+        [ -f "$dir/$manifest" ] && echo "$dir/$manifest"
+    done
+}
+
+build_shim() {
+    if ! is_stale "$SHIM_ARTIFACT" $(collect_sources "$SHIM_DIR"); then
+        echo "[build-frontend] shim: fresh, skipping"
+        return 0
+    fi
+    require_bin npm "install Node.js"
+    echo "[build-frontend] shim: building..."
+    if [ ! -d "$SHIM_DIR/node_modules" ]; then
+        ( cd "$SHIM_DIR" && npm install )
+    fi
+    ( cd "$SHIM_DIR" && npm run build )
+    echo "[build-frontend] shim: done"
+}
+
+build_webapp() {
+    if ! is_stale "$WEBAPP_ARTIFACT" $(collect_sources "$WEBAPP_DIR"); then
+        echo "[build-frontend] webapp: fresh, skipping"
+        return 0
+    fi
+    require_bin npm "install Node.js"
+    echo "[build-frontend] webapp: building..."
+    if [ ! -d "$WEBAPP_DIR/node_modules" ]; then
+        ( cd "$WEBAPP_DIR" && npm install )
+    fi
+    ( cd "$WEBAPP_DIR" && npm run build )
+    echo "[build-frontend] webapp: done"
+}
+
+build_daemon() {
+    if ! is_stale "$DAEMON_ARTIFACT" $(collect_sources "$DAEMON_DIR") $(find "$DAEMON_DIR" -name '*.go'); then
+        echo "[build-frontend] daemon: fresh, skipping"
+        return 0
+    fi
+    require_bin go "install the Go toolchain"
+    echo "[build-frontend] daemon: building..."
+    mkdir -p "$DAEMON_DIR/bin"
+    ( cd "$DAEMON_DIR" && go build -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
+    echo "[build-frontend] daemon: done"
+}
+
+for target in "${TARGETS[@]}"; do
+    case "$target" in
+        shim)   build_shim ;;
+        webapp) build_webapp ;;
+        daemon) build_daemon ;;
+    esac
+done
