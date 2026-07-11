@@ -155,11 +155,38 @@ show-panels — hiding first sidesteps the whole class."
 ;;;; ---- open-panel ------------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-open-panel-errors-without-xwidgets ()
-  "open-panel refuses on an Emacs build without xwidget support."
-  ;; Arrange — batch Emacs genuinely lacks xwidgets, no mocking needed.
-  (should-not (agent-repl--frontend-xwidget-available-p))
-  ;; Act / Assert
-  (should-error (agent-repl-frontend-open-panel) :type 'user-error))
+  "open-panel refuses on an Emacs build without xwidget support.
+The build feature is simulated absent: the test host's batch Emacs may
+itself be an xwidget build (featurep reflects the BUILD, not the
+session), so the no-support branch must be forced."
+  ;; Arrange
+  (cl-letf (((symbol-function 'featurep)
+             (lambda (f &optional _sub) (not (eq f 'xwidget-internal)))))
+    (should-not (agent-repl--frontend-xwidget-available-p))
+    ;; Act / Assert
+    (should-error (agent-repl-frontend-open-panel) :type 'user-error)))
+
+(ert-deftest agent-repl-test-frontend-xwidget-available-requires-before-probe ()
+  "The capability probe loads xwidget.el before the fboundp check.
+The creator fn is not autoloaded, so probing first false-negatives on
+every xwidget-capable build that has not loaded xwidget.el yet — the
+exact failure seen live in the fresh instance."
+  ;; Arrange — simulate an xwidget build where the fn appears only
+  ;; after (require 'xwidget).
+  (let ((required nil))
+    (cl-letf (((symbol-function 'featurep)
+               (lambda (f &optional _sub) (eq f 'xwidget-internal)))
+              ((symbol-function 'require)
+               (lambda (f &optional _file _noerror)
+                 (when (eq f 'xwidget) (setq required t) f)))
+              ((symbol-function 'fboundp)
+               (lambda (sym)
+                 (if (eq sym 'xwidget-webkit--create-new-session-buffer)
+                     required
+                   t))))
+      ;; Act / Assert
+      (should (agent-repl--frontend-xwidget-available-p))
+      (should required))))
 
 (ert-deftest agent-repl-test-frontend-open-panel-wires-session-to-webview ()
   "open-panel threads ensure-session's id into the webview URL and display."

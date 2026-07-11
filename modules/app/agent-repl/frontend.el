@@ -61,8 +61,13 @@ that namespace and the webview must stay outside it."
 ;;;; ---- Capability -----------------------------------------------------------
 
 (defun agent-repl--frontend-xwidget-available-p ()
-  "Return non-nil when this Emacs can host WKWebView xwidgets."
+  "Return non-nil when this Emacs can host WKWebView xwidgets.
+`xwidget-internal' (the C feature) proves build support; the lisp-side
+creator is NOT autoloaded, so xwidget.el must be required BEFORE the
+`fboundp' probe — checking first false-negatives on every xwidget
+build that has not happened to load xwidget.el yet."
   (and (featurep 'xwidget-internal)
+       (require 'xwidget nil t)
        (fboundp 'xwidget-webkit--create-new-session-buffer)))
 
 ;;;; ---- Webview buffer lifecycle ---------------------------------------------
