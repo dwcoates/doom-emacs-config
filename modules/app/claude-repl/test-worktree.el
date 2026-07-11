@@ -6355,6 +6355,25 @@ passing through."
   (should-error (claude-repl--resolve-worktree-base 'bogus)
                 :type 'user-error))
 
+(ert-deftest claude-repl-test-worktree-preemptive-prompt-head ()
+  "BASE = `head' (`SPC TAB n') prompt names the current worktree."
+  (should (equal (claude-repl--worktree-preemptive-prompt 'head)
+                 "Preemptive prompt from current worktree (empty to name plain ws): ")))
+
+(ert-deftest claude-repl-test-worktree-preemptive-prompt-master ()
+  "BASE = `master' (`SPC TAB N') prompt names the main worktree."
+  (should (equal (claude-repl--worktree-preemptive-prompt 'master)
+                 "Preemptive prompt from main worktree (empty to name plain ws): ")))
+
+(ert-deftest claude-repl-test-worktree-preemptive-prompt-differ ()
+  "The `SPC TAB n' and `SPC TAB N' prompts are visibly distinct."
+  (should-not (equal (claude-repl--worktree-preemptive-prompt 'head)
+                     (claude-repl--worktree-preemptive-prompt 'master))))
+
+(ert-deftest claude-repl-test-worktree-preemptive-prompt-unknown-errors ()
+  "An unknown base signals an error rather than a mislabeled prompt."
+  (should-error (claude-repl--worktree-preemptive-prompt 'bogus)))
+
 (ert-deftest claude-repl-test-create-worktree-workspace-head-base ()
   "BASE = `head' branches off HEAD (the current worktree)."
   (claude-repl-test--with-clean-state

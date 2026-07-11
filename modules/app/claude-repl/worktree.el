@@ -1462,6 +1462,21 @@ worktree to a different repository than the ambient workspace's."
   (when current-prefix-arg
     (claude-repl--read-workspace-with-default "Source workspace: ")))
 
+(defun claude-repl--worktree-preemptive-prompt (base)
+  "Return the minibuffer prompt string for a new worktree's preemptive prompt.
+BASE is a symbol key in `claude-repl--worktree-base-commits'.  The prompt
+differentiates where the new worktree branches from so `SPC TAB n' and
+`SPC TAB N' read visibly distinct prompts:
+  `head'   — \"from current worktree\" (`SPC TAB n').
+  `master' — \"from main worktree\" (`SPC TAB N').
+Signals an error for any other BASE so a mislabeled prompt never silently
+reaches the user."
+  (let ((source (pcase base
+                  ('head "current worktree")
+                  ('master "main worktree")
+                  (_ (error "Unknown worktree base %S" base)))))
+    (format "Preemptive prompt from %s (empty to name plain ws): " source)))
+
 (defun claude-repl-create-worktree-workspace (base &optional source-ws)
   "Create a new git worktree and switch to it as a project workspace.
 Prompts ONLY for the preemptive prompt; the workspace/branch name is
@@ -1514,7 +1529,7 @@ the JSON file lands and the file-watcher dispatches it."
          (effective-source-ws (or source-ws (claude-repl--ws-current-name)))
          (source-dir (ignore-errors (claude-repl--ws-dir effective-source-ws)))
          (git-root (or source-dir (claude-repl--resolve-current-git-root)))
-         (raw-prompt (read-string "Preemptive prompt (empty to name a plain worktree): ")))
+         (raw-prompt (read-string (claude-repl--worktree-preemptive-prompt base))))
     (if (string-empty-p (string-trim (or raw-prompt "")))
         ;; No preemptive prompt: skip name-generation, prompt for the
         ;; workspace name directly, and create the worktree exactly as the
