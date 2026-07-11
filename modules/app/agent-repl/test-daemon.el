@@ -1,0 +1,244 @@
+;;; test-daemon.el --- ERT tests for daemon.el -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Tests for the lazy, build-if-stale frontend daemon launcher.
+;;
+;; The two external-boundary wrappers
+;; (`agent-repl--frontend-run-build-script' and
+;; `agent-repl--frontend-spawn-daemon') are shadowed via `cl-letf' in
+;; every test that reaches them, so no real subprocess is ever spawned.
+;; A `agent-repl-test--fake-daemon' struct stands in for the process
+;; object, and the process primitives the module calls (`process-live-p',
+;; `process-id', `delete-process') are shadowed to route through it.
+;;
+;; Run with:
+;;   emacs -batch -Q -l ert -l test-daemon.el -f ert-run-tests-batch-and-exit
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                            (or load-file-name buffer-file-name)))
+      nil t)
+
+(require 'cl-lib)
+
+;;;; ---- Fake daemon process --------------------------------------------------
+
+(cl-defstruct agent-repl-test--fake-daemon
+  live pid)
+
+(defun agent-repl-test--make-live-daemon (&optional pid)
+  "Return a fake daemon process that reports itself live, PID default 4242."
+  (make-agent-repl-test--fake-daemon :live t :pid (or pid 4242)))
+
+(defmacro agent-repl-test--with-daemon-env (&rest body)
+  "Run BODY with daemon process primitives and the init guard shadowed.
+`agent-repl--frontend-init-inhibited-p' returns nil so the real ensure
+path runs under batch; `process-live-p'/`process-id'/`delete-process'
+route through the fake-daemon struct."
+  `(let ((agent-repl-frontend-auto-start t)
+         (agent-repl--frontend-daemon-process nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+                (lambda () nil))
+               ((symbol-function 'process-live-p)
+                (lambda (p) (and (agent-repl-test--fake-daemon-p p)
+                                 (agent-repl-test--fake-daemon-live p))))
+               ((symbol-function 'process-id)
+                (lambda (p) (and (agent-repl-test--fake-daemon-p p)
+                                 (agent-repl-test--fake-daemon-pid p))))
+               ((symbol-function 'delete-process)
+                (lambda (p) (when (agent-repl-test--fake-daemon-p p)
+                              (setf (agent-repl-test--fake-daemon-live p) nil)))))
+       ,@body)))
+
+;;;; ---- build-if-stale: argument shaping ------------------------------------
+
+(ert-deftest agent-repl-test-daemon-build-omits-force-by-default ()
+  "Without FORCE, the build script argv carries only the script path."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-build-if-stale nil)
+      ;; Assert
+      (should (equal captured (list agent-repl--frontend-build-script))))))
+
+(ert-deftest agent-repl-test-daemon-build-passes-force-flag ()
+  "With FORCE, the build script argv appends --force."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-build-if-stale t)
+      ;; Assert
+      (should (equal captured
+                     (list agent-repl--frontend-build-script "--force"))))))
+
+;;;; ---- build-if-stale: failure surfacing -----------------------------------
+
+(ert-deftest agent-repl-test-daemon-build-errors-on-missing-script ()
+  "A missing build script signals an error rather than silently passing."
+  ;; Arrange — point at a genuinely absent path (no `file-exists-p' shadow,
+  ;; which would trip a native-comp trampoline warning; see test-sentinel.el).
+  (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-if-stale nil))))
+
+(ert-deftest agent-repl-test-daemon-build-errors-on-nonzero-exit ()
+  "A non-zero build exit signals an error, never swallowed."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 1))
+            ((symbol-function 'display-buffer) #'ignore))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-if-stale nil))))
+
+(ert-deftest agent-repl-test-daemon-build-returns-zero-on-success ()
+  "A zero build exit returns 0."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 0)))
+    ;; Act / Assert
+    (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
+
+;;;; ---- ensure: gating ------------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-ensure-nil-when-auto-start-disabled ()
+  "Ensure returns nil and does nothing when auto-start is off."
+  ;; Arrange
+  (let ((agent-repl-frontend-auto-start nil)
+        (agent-repl--frontend-daemon-process nil))
+    ;; Act / Assert
+    (should (null (agent-repl--ensure-frontend-daemon)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-nil-when-inhibited ()
+  "Ensure returns nil under the batch/sandbox inhibit guard."
+  ;; Arrange
+  (let ((agent-repl-frontend-auto-start t)
+        (agent-repl--frontend-daemon-process nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+               (lambda () t)))
+      ;; Act / Assert
+      (should (null (agent-repl--ensure-frontend-daemon))))))
+
+;;;; ---- ensure: idempotence and launch --------------------------------------
+
+(ert-deftest agent-repl-test-daemon-ensure-idempotent-when-live ()
+  "Ensure returns the existing live process without building or spawning."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((existing (agent-repl-test--make-live-daemon))
+         (built nil) (spawned nil))
+     (setq agent-repl--frontend-daemon-process existing)
+     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert
+         (should (eq result existing))
+         (should-not built)
+         (should-not spawned))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-builds-then-spawns-when-none ()
+  "Ensure builds-if-stale then spawns when no daemon is running."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   ;; Bind the daemon-bin to a path that genuinely exists (the build script)
+   ;; so `start-daemon's existence check passes without shadowing primitives.
+   (let ((built nil)
+         (fresh (agent-repl-test--make-live-daemon 777))
+         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () fresh)))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert
+         (should built)
+         (should (eq result fresh))
+         (should (eq agent-repl--frontend-daemon-process fresh)))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-force-restarts-live ()
+  "Ensure with FORCE stops the live daemon, rebuilds, and respawns."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let* ((old (agent-repl-test--make-live-daemon 1))
+          (new (agent-repl-test--make-live-daemon 2))
+          (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (setq agent-repl--frontend-daemon-process old)
+     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () new)))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon t)))
+         ;; Assert
+         (should (eq result new))
+         (should-not (agent-repl-test--fake-daemon-live old)))))))
+
+;;;; ---- start-daemon: guard --------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-start-errors-when-binary-missing ()
+  "Starting errors when the built daemon binary is absent."
+  ;; Arrange — bind the bin to an absent path (no `file-exists-p' shadow).
+  (let ((agent-repl--frontend-daemon-bin "/agent-repl-nonexistent/claude-repld"))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-start-daemon))))
+
+;;;; ---- daemon-command shape ------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-command-carries-flags ()
+  "The daemon argv includes -addr, -shim, and -webapp with their values."
+  ;; Arrange
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member "-addr" cmd))
+      (should (member "127.0.0.1:9999" cmd))
+      (should (member agent-repl--frontend-shim-entry
+                      (cdr (member "-shim" cmd))))
+      (should (member agent-repl--frontend-webapp-dir
+                      (cdr (member "-webapp" cmd)))))))
+
+;;;; ---- sentinel and lifecycle ----------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-sentinel-clears-on-death ()
+  "The sentinel nils the tracked process once it is no longer live."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((proc (make-agent-repl-test--fake-daemon :live nil :pid 5)))
+     (setq agent-repl--frontend-daemon-process proc)
+     ;; Act
+     (agent-repl--frontend-daemon-sentinel proc "exited abnormally\n")
+     ;; Assert
+     (should (null agent-repl--frontend-daemon-process)))))
+
+(ert-deftest agent-repl-test-daemon-live-p-nil-without-process ()
+  "The live predicate is nil when no process is tracked."
+  ;; Arrange
+  (let ((agent-repl--frontend-daemon-process nil))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-live-p))))
+
+(ert-deftest agent-repl-test-daemon-stop-deletes-and-clears ()
+  "Stopping deletes the live process and clears the tracker."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((proc (agent-repl-test--make-live-daemon)))
+     (setq agent-repl--frontend-daemon-process proc)
+     ;; Act
+     (agent-repl--frontend-stop-daemon)
+     ;; Assert
+     (should (null agent-repl--frontend-daemon-process))
+     (should-not (agent-repl-test--fake-daemon-live proc)))))
+
+(provide 'test-daemon)
+
+;;; test-daemon.el ends here
