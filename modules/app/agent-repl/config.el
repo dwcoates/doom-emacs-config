@@ -301,6 +301,9 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; (its selection helpers call the `agent-repl--ws-*' accessors) and
 ;; before session.el (whose command assembly resolves the backend).
 (agent-repl--load-module "backend")
+;; WHY: frontends.el defines the presentation-frontend registry that
+;; panels.el (vterm) and frontend.el (gui) register into at load time.
+(agent-repl--load-module "frontends")
 (agent-repl--load-module "install")
 ;; WHY: codex.el registers the codex backend (backend.el must precede
 ;; it) and reuses install.el's hook-registration writer for its

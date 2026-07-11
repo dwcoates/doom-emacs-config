@@ -269,6 +269,7 @@ launches under the same model."
                                 :saved-tab-index ,(agent-repl--ws-get ws :saved-tab-index)
                                 :backend ,(agent-repl--ws-get ws :backend)
                                 :backend-session-stash ,(agent-repl--ws-get ws :backend-session-stash)
+                                :frontend ,(agent-repl--ws-get ws :frontend)
                                 :fork-session-id ,(agent-repl--ws-get ws :fork-session-id)
                                 :last-prompt-summary ,(agent-repl--ws-get ws :last-prompt-summary)
                                 :last-prompt-summary-at ,(agent-repl--ws-get ws :last-prompt-summary-at)

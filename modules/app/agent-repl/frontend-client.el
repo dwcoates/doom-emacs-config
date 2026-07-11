@@ -230,12 +230,63 @@ so every attached tab renders the user-turn echo."
   (agent-repl--frontend-api "POST" (format "/sessions/%s/interrupt" session-id))
   t)
 
-(defun agent-repl--frontend-backend-p (ws)
-  "Return non-nil when WS's input routes to the web frontend.
-True exactly while a daemon session is bound (`:frontend-session-id',
-set by the panel-open path and cleared on nuke) — the flag input.el's
-send/interrupt seams branch on."
+(defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
+  "The gui frontend's send capability (registry `:send-fn').
+INPUT (the prepared text, which may carry the metaprompt prefix —
+genuine message content) goes to the daemon session.  Only the
+owning-workspace pin is vterm-specific machinery skipped here; the
+prefix counter still increments so metaprompt periodicity matches the
+vterm frontend.  Posthooks and prompt summary key on RAW, identically."
+  (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
+  (agent-repl--increment-prefix-counter ws)
+  (agent-repl--ws-put ws :last-prompt-time (float-time))
+  (agent-repl--frontend-send-user-message ws input)
+  (agent-repl--run-send-posthooks ws raw)
+  (agent-repl--kickoff-prompt-summary ws raw)
+  (when on-settle (funcall on-settle)))
+
+(defun agent-repl--gui-interrupt (ws _kind)
+  "The gui frontend's interrupt capability (registry `:interrupt-fn').
+One wire-level interrupt serves both TUI gestures; returns non-nil
+since the HTTP route either delivers or signals."
+  (let ((id (agent-repl--ws-get ws :frontend-session-id)))
+    (agent-repl--log ws "interrupt[gui]: session=%s" id)
+    (agent-repl--frontend-interrupt-session id)
+    t))
+
+(defun agent-repl--gui-running-p (ws)
+  "The gui frontend's liveness capability (registry `:running-p-fn').
+Cheap check: a session binding exists.  Actual daemon liveness is
+probed (and healed) lazily by the send path's ensure."
   (and (agent-repl--ws-get ws :frontend-session-id) t))
+
+(defun agent-repl--gui-durable-session-id (ws)
+  "The gui frontend's durable-id capability.
+Fetches the daemon-captured claude_session_id for WS's bound session;
+nil when unbound, not yet initialized, or the daemon is unreachable
+\(logged — a dead daemon degrades a frontend switch to a fresh
+conversation rather than aborting it)."
+  (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
+    (condition-case err
+        (alist-get 'claude_session_id (agent-repl--frontend-session-entry sid))
+      (error
+       (agent-repl--log ws "gui durable-id fetch FAILED for %s: %s"
+                        sid (error-message-string err))
+       nil))))
+
+(defun agent-repl--gui-adopt-session (ws claude-session-id)
+  "The gui frontend's adopt capability: resume CLAUDE-SESSION-ID.
+Creates a fresh daemon session with resume set and binds it to WS, so
+the subsequent open attaches to the continued conversation."
+  (unless (agent-repl--ensure-frontend-daemon)
+    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
+  (agent-repl--frontend-wait-ready)
+  (let* ((dir (or (agent-repl--ws-get ws :project-dir)
+                  (agent-repl--resolve-current-git-root)))
+         (id (agent-repl--frontend-create-session dir nil claude-session-id)))
+    (agent-repl--ws-put ws :frontend-session-id id)
+    (agent-repl--log ws "gui adopted claude session %s as %s" claude-session-id id)
+    id))
 
 (defun agent-repl--frontend-send-user-message (ws text)
   "Send TEXT as WS's user turn via its bound daemon session.

@@ -235,15 +235,11 @@ stale accumulated input."
       (agent-repl--interrupt-agent ws))))
 
 (defun agent-repl--interrupt-agent (ws)
-  "Interrupt WS's agent through its active backend.
-Web-frontend workspaces interrupt over the daemon's HTTP route (the
-wire interrupt cancels pending prompts and marks the turn aborted);
-vterm workspaces keep the raw Ctrl-C byte."
-  (if (agent-repl--frontend-backend-p ws)
-      (let ((id (agent-repl--ws-get ws :frontend-session-id)))
-        (agent-repl--log ws "interrupt-agent[frontend]: session=%s" id)
-        (agent-repl--frontend-interrupt-session id))
-    (agent-repl--vterm-send-raw-ctrl-c)))
+  "Interrupt WS's agent through its frontend (the `ctrl-c' gesture).
+The vterm frontend sends the raw Ctrl-C byte (clear the TUI prompt
+line); the gui frontend's single wire interrupt cancels pending
+prompts and marks the turn aborted."
+  (agent-repl--frontend-dispatch-interrupt ws 'ctrl-c))
 
 ;;; Arrow key forwarding (insert-mode terminal navigation)
 
@@ -855,29 +851,21 @@ the Emacs-side send is the only available signal — see
 `agent-repl--note-permission-answered-by-send'.  The owning-workspace
 pin below runs BEFORE the send so the primitive resolves the correct
 workspace from the vterm buffer."
-  (if (agent-repl--frontend-backend-p ws)
-      ;; Web-frontend backend: INPUT (the prepared text, which may carry
-      ;; the metaprompt prefix — genuine message content) goes to the
-      ;; daemon session. Only the owning-workspace pin is vterm-specific
-      ;; machinery skipped here; the prefix counter still increments so
-      ;; metaprompt periodicity matches the vterm backend. Posthooks and
-      ;; prompt summary key on RAW, identically to vterm.
-      (progn
-        (agent-repl--log ws "do-send[frontend] ws=%s len=%d" ws (length input))
-        (agent-repl--increment-prefix-counter ws)
-        (agent-repl--ws-put ws :last-prompt-time (float-time))
-        (agent-repl--frontend-send-user-message ws input)
-        (agent-repl--run-send-posthooks ws raw)
-        (agent-repl--kickoff-prompt-summary ws raw)
-        (when on-settle (funcall on-settle)))
-    (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-      (agent-repl--log ws "do-send ws=%s len=%d" ws (length input))
-      (agent-repl--increment-prefix-counter ws)
-      (agent-repl--ws-put ws :last-prompt-time (float-time))
-      (agent-repl--pin-owning-workspace vterm-buf ws)
-      (agent-repl--send-input-to-vterm vterm-buf input on-settle)
-      (agent-repl--run-send-posthooks ws raw)
-      (agent-repl--kickoff-prompt-summary ws raw))))
+  (agent-repl--frontend-dispatch-send ws input raw on-settle))
+
+(defun agent-repl--vterm-send-turn (ws input raw &optional on-settle)
+  "The vterm frontend's send capability (registry `:send-fn').
+Pins the owning workspace on the vterm buffer (output-parsing
+machinery) and delivers INPUT through the terminal; posthooks and
+prompt summary key on RAW."
+  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+    (agent-repl--log ws "do-send ws=%s len=%d" ws (length input))
+    (agent-repl--increment-prefix-counter ws)
+    (agent-repl--ws-put ws :last-prompt-time (float-time))
+    (agent-repl--pin-owning-workspace vterm-buf ws)
+    (agent-repl--send-input-to-vterm vterm-buf input on-settle)
+    (agent-repl--run-send-posthooks ws raw)
+    (agent-repl--kickoff-prompt-summary ws raw)))
 
 (defun agent-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
@@ -922,13 +910,13 @@ Handles input preparation, sending, history, and persistence."
       (when (and vterm-buf (not (buffer-live-p vterm-buf)))
         (agent-repl--log ws "send: early return -- vterm-buf is dead for ws=%s" ws))
       (cond
-       ;; Web-frontend backend: no vterm exists at all, so this branch
-       ;; must come before the vterm-gated ones (they would otherwise
+       ;; GUI frontend: no vterm exists at all, so this branch must
+       ;; come before the vterm-gated ones (they would otherwise
        ;; silently swallow every RET in a hybrid workspace). Empty input
        ;; is a no-op — the vterm bare-RET forward answers terminal
        ;; menus, which have no frontend counterpart (prompts are webview
        ;; clicks).
-       ((agent-repl--frontend-backend-p ws)
+       ((agent-repl--ws-gui-frontend-p ws)
         (if raw-empty
             (agent-repl--log ws "send[frontend]: empty input -- nothing to send")
           (let ((input (agent-repl--prepare-input ws raw force-metaprompt)))

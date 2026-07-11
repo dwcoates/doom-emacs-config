@@ -283,6 +283,11 @@ remaining keys are written only when SAVED carries them."
   (agent-repl--ws-put ws :backend
                        (or (and saved (plist-get saved :backend))
                            (agent-repl--ws-get ws :backend)))
+  ;; Frontend: same restore contract as :backend — a gui workspace
+  ;; reopens through the gui after an Emacs restart.
+  (agent-repl--ws-put ws :frontend
+                       (or (and saved (plist-get saved :frontend))
+                           (agent-repl--ws-get ws :frontend)))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
   ;; already in the plist.  Used by the drawer's detail view to show
   ;; "duration since last user message"; survives Emacs restarts so

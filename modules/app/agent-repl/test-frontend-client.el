@@ -312,14 +312,14 @@ resolver supplies it exactly as creation would."
       (should (equal method "POST"))
       (should (string-suffix-p "/sessions/s_1/interrupt" url)))))
 
-(ert-deftest agent-repl-test-frontend-backend-p-tracks-session-binding ()
-  "The backend flag is exactly the presence of :frontend-session-id."
+(ert-deftest agent-repl-test-gui-running-p-tracks-session-binding ()
+  "The gui liveness capability is exactly the presence of :frontend-session-id."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
     ;; Act / Assert
-    (should (agent-repl--frontend-backend-p "ws1")))
+    (should (agent-repl--gui-running-p "ws1")))
   (agent-repl-test--with-ws "ws2" '(:project-dir "/w")
-    (should-not (agent-repl--frontend-backend-p "ws2"))))
+    (should-not (agent-repl--gui-running-p "ws2"))))
 
 (ert-deftest agent-repl-test-frontend-send-user-message-heals-via-ensure ()
   "Workspace sends resolve the session through ensure (healing staleness)."
