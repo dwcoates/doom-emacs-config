@@ -2623,17 +2623,24 @@ we at least surface the stuck state so the user knows to click out."
         (agent-repl--kill-stale-vterm)
         (should-not (get-buffer "*stale-vterm-test*"))))))
 
-(ert-deftest agent-repl-test-panels-kill-stale-vterm-has-process ()
-  "kill-stale-vterm preserves a buffer that has a live process."
+(ert-deftest agent-repl-test-panels-kill-stale-vterm-zombie-process ()
+  "kill-stale-vterm kills a live-process leftover through the queryless path.
+Callers reach it only after the already-running guard passed, so a
+live process here is a zombie from a failed teardown — preserving it
+(the old behavior) made the next launch die on \"already initialized\"
+behind an interactive kill prompt."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*process-vterm-test*")))
+    (let ((buf (get-buffer-create "*process-vterm-test*"))
+          (killed nil))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--buffer-name)
                      (lambda (&rest _) "*process-vterm-test*"))
-                    ((symbol-function 'get-buffer-process) (lambda (_buf) 'fake-process)))
+                    ((symbol-function 'get-buffer-process) (lambda (_buf) 'fake-process))
+                    ((symbol-function 'agent-repl--kill-vterm-process)
+                     (lambda (b) (setq killed b))))
             (agent-repl--kill-stale-vterm)
-            ;; Buffer should still exist
-            (should (get-buffer "*process-vterm-test*")))
+            ;; Routed through the queryless process-kill wrapper.
+            (should (eq killed buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 ;;;; ---- Tests: kill-vterm-process live buffer without process ----

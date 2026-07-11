@@ -1183,15 +1183,27 @@ Errors if the buffer is already initialized (already in `agent-repl-input-mode')
       (agent-repl--history-restore ws))))
 
 (defun agent-repl--kill-stale-vterm (&optional ws)
-  "Kill the agent vterm buffer for WS if it exists but has no live process.
+  "Kill any leftover agent vterm buffer for WS before a fresh launch.
+Callers reach here only after the already-running guard passed, so an
+existing buffer is a leftover by definition — dead-process buffers are
+plain stale; a LIVE process means a zombie from a failed teardown
+(e.g. an aborted frontend switch), which previously no-op'd here and
+made the subsequent launch die on \"already initialized\" after an
+interactive kill-buffer prompt.  Both cases now go through the
+queryless `agent-repl--kill-vterm-process'.
 WS defaults to the current workspace."
   (let ((existing (get-buffer (agent-repl--buffer-name nil ws))))
-    (if (not existing)
-        (agent-repl--log (agent-repl--ws-current-name) "kill-stale-vterm: no existing buffer")
-      (if (get-buffer-process existing)
-          (agent-repl--log (agent-repl--ws-current-name) "kill-stale-vterm: buf=%s has live process no-op" (buffer-name existing))
-        (agent-repl--log (agent-repl--ws-current-name) "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
-        (kill-buffer existing)))))
+    (cond
+     ((not existing)
+      (agent-repl--log (agent-repl--ws-current-name) "kill-stale-vterm: no existing buffer"))
+     ((get-buffer-process existing)
+      (agent-repl--log (agent-repl--ws-current-name)
+                       "kill-stale-vterm: buf=%s has LIVE process — zombie from failed teardown, killing querylessly"
+                       (buffer-name existing))
+      (agent-repl--kill-vterm-process existing))
+     (t
+      (agent-repl--log (agent-repl--ws-current-name) "kill-stale-vterm: killing stale buf=%s" (buffer-name existing))
+      (kill-buffer existing)))))
 
 ;;;; Panel show/hide strategies
 
@@ -1305,7 +1317,10 @@ path later for pending-prompt draining; its panel-show is idempotent."
             (agent-repl--log ws "initialize-agent: launch aborted, killing orphan buffer ws=%s" ws)
             (when (buffer-live-p vterm-buf)
               (agent-repl--ws-put ws :vterm-buffer nil)
-              (kill-buffer vterm-buf))))))))
+              ;; Queryless: the CLI may already be running inside the
+              ;; orphan (the launch aborted AFTER vterm-send-string), and
+              ;; a raw kill-buffer would block on the process-exit prompt.
+              (agent-repl--kill-vterm-process vterm-buf))))))))
 
 (defun agent-repl--clear-main-area-for-panels ()
   "Delete every non-side window other than the selected one.
