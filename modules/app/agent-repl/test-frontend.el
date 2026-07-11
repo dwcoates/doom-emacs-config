@@ -33,10 +33,15 @@
      (remhash ,ws agent-repl--workspaces)))
 
 (defun agent-repl-test--fake-webview-factory (log)
-  "Return a boundary mock that records URLs in LOG and returns buffers."
+  "Return a boundary mock that records URLs in LOG and returns buffers.
+The buffer carries the `WebKit: ' header-line `xwidget-webkit-mode'
+installs, so the mount path's clearing of it is observable in batch."
   (lambda (url)
     (push url (symbol-value log))
-    (generate-new-buffer "*fake-webview*")))
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (with-current-buffer buf
+        (setq-local header-line-format (list "WebKit: " "claude-repl")))
+      buf)))
 
 ;;;; ---- Buffer naming -------------------------------------------------------
 
@@ -69,6 +74,20 @@
                          "*agent-frontend-ws1*"))
           (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf))
           (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1")))))))
+
+(ert-deftest agent-repl-test-frontend-webview-header-line-cleared ()
+  "The mount clears `xwidget-webkit-mode's \"WebKit: <title>\" header-line."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Assert
+          (should-not (buffer-local-value 'header-line-format buf)))))))
 
 (ert-deftest agent-repl-test-frontend-webview-reused-for-same-session ()
   "A live webview bound to the same session is reused, not recreated."
