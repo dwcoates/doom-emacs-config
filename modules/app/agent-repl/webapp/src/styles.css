@@ -174,3 +174,65 @@ pre {
   font-family: inherit;
 }
 #send-btn { cursor: pointer; }
+
+/* --- Syntax highlighting (highlight.js token classes) -------------------
+   Theme-aware via the same light/dark variable pattern as the chrome:
+   token colors are custom properties so the dark block below only has
+   to restate the palette, not the selectors. */
+:root {
+  --hl-keyword: #9333ea;
+  --hl-string: #15803d;
+  --hl-number: #b45309;
+  --hl-comment: #6b7280;
+  --hl-title: #2563eb;
+  --hl-attr: #0e7490;
+  --hl-meta: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hl-keyword: #c084fc;
+    --hl-string: #4ade80;
+    --hl-number: #fbbf24;
+    --hl-comment: #8b929e;
+    --hl-title: #60a5fa;
+    --hl-attr: #22d3ee;
+    --hl-meta: #fbbf24;
+  }
+}
+
+.md .hljs-keyword,
+.md .hljs-literal,
+.md .hljs-selector-tag,
+.md .hljs-section { color: var(--hl-keyword); }
+
+.md .hljs-string,
+.md .hljs-regexp,
+.md .hljs-addition { color: var(--hl-string); }
+
+.md .hljs-number,
+.md .hljs-symbol,
+.md .hljs-bullet { color: var(--hl-number); }
+
+.md .hljs-comment,
+.md .hljs-quote,
+.md .hljs-deletion { color: var(--hl-comment); font-style: italic; }
+
+.md .hljs-title,
+.md .hljs-name,
+.md .hljs-function .hljs-title,
+.md .hljs-selector-id,
+.md .hljs-selector-class { color: var(--hl-title); }
+
+.md .hljs-attr,
+.md .hljs-attribute,
+.md .hljs-variable,
+.md .hljs-template-variable,
+.md .hljs-type,
+.md .hljs-built_in { color: var(--hl-attr); }
+
+.md .hljs-meta,
+.md .hljs-doctag { color: var(--hl-meta); }
+
+.md .hljs-emphasis { font-style: italic; }
+.md .hljs-strong { font-weight: 700; }
