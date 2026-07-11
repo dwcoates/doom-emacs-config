@@ -134,10 +134,6 @@ async function boot(): Promise<void> {
     must("composer").style.display = "none";
   }
 
-  must<HTMLButtonElement>("interrupt-btn").addEventListener("click", () => {
-    ws.send({ type: "interrupt", request_id: crypto.randomUUID() });
-  });
-
   modeEl.addEventListener("change", () => {
     ws.send({
       type: "set-permission-mode",
