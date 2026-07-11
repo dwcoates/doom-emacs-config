@@ -22,6 +22,13 @@ import {
 export interface FakeQueryOpts {
   sessionId: string;
   newUuid: () => string;
+  /**
+   * Mimic SDK resume: the init message reports this uuid as the
+   * session_id (continuation of the resumed CLI session). Mirrors the
+   * empirically verified real behavior — context restores but NO
+   * history messages are re-emitted through the stream.
+   */
+  resume?: string;
 }
 
 /** Canned reply for the "!md" turn — exercises every markdown construct. */
@@ -60,9 +67,12 @@ export function createFakeQuery(
   let permissionMode: PermissionMode = "default";
   let turn = 0;
 
-  const emit = (msg: Omit<SdkMessageLike, "uuid" | "session_id">): void => {
+  // Defaults first so a message may carry its own session_id (the
+  // resume-continuation init does); everything else inherits the
+  // shim-assigned id.
+  const emit = (msg: Omit<SdkMessageLike, "uuid" | "session_id"> & { session_id?: string }): void => {
     if (out.isEnded) return;
-    out.push({ ...msg, uuid: opts.newUuid(), session_id: opts.sessionId } as SdkMessageLike);
+    out.push({ uuid: opts.newUuid(), session_id: opts.sessionId, ...msg } as SdkMessageLike);
   };
 
   const emitStream = (event: unknown): void => {
@@ -71,7 +81,7 @@ export function createFakeQuery(
 
   const usage = { input_tokens: 7, output_tokens: 11 };
 
-  const emitTextBlock = (messageId: string, index: number, text: string): void => {
+  const emitTextBlock = (_messageId: string, index: number, text: string): void => {
     emitStream({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
     const mid = Math.ceil(text.length / 2);
     for (const chunk of [text.slice(0, mid), text.slice(mid)]) {
@@ -196,6 +206,10 @@ export function createFakeQuery(
       model: "fake-model",
       permissionMode,
       tools: ["Bash"],
+      // Resume continuation: init reports the RESUMED session uuid, as
+      // the real SDK does. No history is re-emitted (verified real
+      // behavior) — context restoration is implicit.
+      ...(opts.resume !== undefined ? { session_id: opts.resume } : {}),
     });
     for await (const userMsg of prompt) {
       turn++;
