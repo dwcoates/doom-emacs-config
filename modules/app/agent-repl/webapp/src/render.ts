@@ -207,12 +207,18 @@ function Thinking(item: ThinkingItem): string {
 
 function ToolCard(item: ToolItem): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
+  // A call whose input has landed but whose result has not is the one card
+  // state with no motion of its own: the input phase already pulses •••,
+  // and a settled card carries done/error. So the running badge grows the
+  // same arc the thinking indicator spins, held invisible for its first
+  // second by CSS (see .tool-spinner), which keeps the sub-second tools —
+  // Edit, Read, most Bash — from flashing it.
   const status = item.result
     ? item.result.isError
       ? `<span class="badge err">error</span>`
       : `<span class="badge ok">done</span>`
     : item.inputDone
-      ? `<span class="badge run">running…</span>`
+      ? `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`
       : `<span class="badge run">streaming input…</span>`;
   const progress = item.progress
     ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>`
