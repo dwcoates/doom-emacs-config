@@ -680,6 +680,62 @@ describe("renderItem", () => {
   });
 });
 
+describe("clear divider", () => {
+  it("draws the boundary rule beneath a /clear prompt", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, "/clear");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<div class="clear-divider"`);
+  });
+
+  it("places the boundary rule after the /clear bubble rather than inside it", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, "/clear");
+    // Act
+    const html = renderItem(item);
+    // Assert — the bubble closes before the rule opens.
+    expect(html).toMatch(/<\/div><div class="clear-divider"[^>]*><\/div>$/);
+  });
+
+  it("draws no boundary rule beneath an ordinary prompt", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, "do the thing");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("clear-divider");
+  });
+
+  it("spots a /clear prompt padded with surrounding whitespace", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, "  /clear\n");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("clear-divider");
+  });
+
+  it("draws no boundary rule for a prompt that merely mentions /clear", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, "run /clear when you are done");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("clear-divider");
+  });
+
+  it("leaves the boundary rule off the system init the /clear produces", () => {
+    // Arrange
+    const item: ConversationItem = { kind: "system", subtype: "init" };
+    // Act
+    const html = renderItem(item);
+    // Assert — the rule hangs off the prompt, so a plain session start has none.
+    expect(html).not.toContain("clear-divider");
+  });
+});
+
 describe("ResultChip", () => {
   /** A result frame item for the given subtype. */
   function resultItem(subtype: ResultItem["subtype"], isError = false): ResultItem {
