@@ -94,7 +94,17 @@ async function boot(): Promise<void> {
     url: `${wsBase}/sessions/${sessionId}/stream`,
     onMessage: (data) => {
       const result = store.applyRaw(data);
-      if (result.changed) rerender();
+      if (result.restored) {
+        // Fresh-join replay complete: tail-first backfill render, so
+        // the newest message is on screen immediately with no scroll.
+        feed.renderRestored(store.state);
+        renderChrome();
+      } else if (result.changed && store.replaying) {
+        // Replay still streaming: defer the feed, keep the chrome live.
+        renderChrome();
+      } else if (result.changed) {
+        rerender();
+      }
       return result.send;
     },
     onStatusChange: (connected) => {
