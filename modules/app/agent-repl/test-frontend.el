@@ -32,16 +32,9 @@
        (when (buffer-live-p buf) (kill-buffer buf)))
      (remhash ,ws agent-repl--workspaces)))
 
-(defun agent-repl-test--fake-webview-factory (log)
-  "Return a boundary mock that records URLs in LOG and returns buffers.
-The buffer carries the `WebKit: ' header-line `xwidget-webkit-mode'
-installs, so the mount path's clearing of it is observable in batch."
-  (lambda (url)
-    (push url (symbol-value log))
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (with-current-buffer buf
-        (setq-local header-line-format (list "WebKit: " "claude-repl")))
-      buf)))
+;; The webview boundary mock (`agent-repl-test--fake-webview-factory')
+;; lives in test-helpers.el — the explain-config popup mounts the same
+;; wrapper, and the two must not drift on what they pretend a webview is.
 
 ;;;; ---- Buffer naming -------------------------------------------------------
 
