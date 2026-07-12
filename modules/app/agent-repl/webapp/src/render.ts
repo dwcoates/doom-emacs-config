@@ -56,6 +56,13 @@ export function askQuestions(item: PermissionItem): AskQuestion[] | null {
 /** Tool names the SPA renders specially (§2.6); others use Generic. */
 const SPECIAL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep", "Task"]);
 
+/**
+ * Tool names whose cards are suppressed entirely: AskUserQuestion's UI
+ * IS the permission picker card, ToolSearch is deferred-tool schema
+ * plumbing, and TaskUpdate is task-list bookkeeping — all feed noise.
+ */
+const SUPPRESSED_TOOLS = new Set(["AskUserQuestion", "ToolSearch", "TaskUpdate"]);
+
 function contentToText(
   content: string | Array<{ type: string; text?: string }>,
 ): string {
@@ -166,7 +173,9 @@ function toolInput(item: ToolItem): string {
     return `<div class="tool-input-pending"><span class="pulse">•••</span></div>`;
   }
   if (item.toolName === "Bash" && item.input && typeof item.input.command === "string") {
-    return `<pre class="cmd">$ ${escapeHtml(item.input.command)}</pre>`;
+    // .bash-input caps the visible command at 5 lines, scrollable
+    // independently of the output's own 5-line cap.
+    return `<pre class="cmd bash-input">$ ${escapeHtml(item.input.command)}</pre>`;
   }
   if (
     (item.toolName === "Read" || item.toolName === "Write" || item.toolName === "Edit") &&
@@ -196,11 +205,15 @@ function toolResult(item: ToolItem): string {
   if (r) {
     switch (r.kind) {
       case "bash":
-        return `<pre class="tool-output">${escapeHtml(r.stdout)}${
+        // .bash-output caps the visible output at 5 lines, scrollable
+        // independently of the command's own 5-line cap.
+        return `<pre class="tool-output bash-output">${escapeHtml(r.stdout)}${
           r.stderr ? `\n<span class="stderr">${escapeHtml(r.stderr)}</span>` : ""
         }</pre>`;
       case "diff":
-        return `<pre class="diff">${diffHtml(r.unified_diff)}</pre>`;
+        // .diff-output caps the visible diff at 10 lines (the Read
+        // preview's cap), scrollable for the rest.
+        return `<pre class="diff diff-output">${diffHtml(r.unified_diff)}</pre>`;
       case "grep":
         return `<pre class="tool-output">${r.matches
           .map((m) => `${escapeHtml(m.file)}:${m.line}: ${escapeHtml(m.text)}`)
@@ -423,10 +436,9 @@ export function renderItem(item: ConversationItem, selections?: QuestionSelectio
       // AskUserQuestion's UI IS the permission picker card — the
       // generic tool card would just dump the questions JSON (input)
       // and the "User has answered…" echo (result) alongside it.
-      // ToolSearch is deferred-tool schema plumbing: pure feed noise.
-      return item.toolName === "AskUserQuestion" || item.toolName === "ToolSearch"
-        ? ""
-        : ToolCard(item);
+      // ToolSearch is deferred-tool schema plumbing and TaskUpdate is
+      // task-list bookkeeping: both pure feed noise.
+      return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
@@ -457,6 +469,26 @@ export function itemKey(item: ConversationItem, index: number): string {
   }
 }
 
+/** Items filled per backfill step during a restored-session render. */
+export const BACKFILL_CHUNK = 40;
+
+/**
+ * Tail-first fill order for a restored session: index groups from the
+ * last item backwards, so the newest content renders first and older
+ * items backfill upwards. Indices within a group stay ascending (fill
+ * order inside one synchronous chunk is invisible).
+ */
+export function backfillChunks(count: number, chunkSize: number): number[][] {
+  const chunks: number[][] = [];
+  for (let end = count; end > 0; end -= chunkSize) {
+    const start = Math.max(0, end - chunkSize);
+    const chunk: number[] = [];
+    for (let i = start; i < end; i++) chunk.push(i);
+    chunks.push(chunk);
+  }
+  return chunks;
+}
+
 /**
  * Feed renderer: reconciles the item list into `container`, reusing
  * nodes by key and only rewriting nodes whose HTML changed.
@@ -468,6 +500,8 @@ export class FeedRenderer {
   /** AskUserQuestion picks (renderer-owned so re-renders keep them). */
   private questionSelections = new Map<string, Set<string>>();
   private lastState: StoreState | null = null;
+  /** Pending bottom-up fill steps from renderRestored, oldest last. */
+  private backfillQueue: Array<() => void> = [];
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -538,7 +572,73 @@ export class FeedRenderer {
     });
   }
 
+  /**
+   * Restored-session render (§2.10 fresh-join replay): builds every
+   * item's shell, fills the NEWEST chunk synchronously, jumps straight
+   * to the bottom, and backfills older items upwards across animation
+   * frames — the latest message is visible immediately with no
+   * top-down build crawl and no scroll animation. Scroll position is
+   * compensated per chunk so the view never moves off the tail.
+   */
+  renderRestored(state: StoreState): void {
+    this.lastState = state;
+    this.backfillQueue = [];
+    this.container.innerHTML = "";
+    this.nodes.clear();
+    const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
+    state.items.forEach((item, i) => {
+      const key = itemKey(item, i);
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = key;
+      this.container.appendChild(el);
+      this.nodes.set(key, { el, html: "" });
+      shells.push({ el, item });
+    });
+    const fillChunk = (indexes: number[]): void => {
+      const before = this.container.scrollHeight;
+      for (const i of indexes) {
+        const { el, item } = shells[i];
+        const html = renderItem(item, this.questionSelections);
+        el.innerHTML = html;
+        const entry = this.nodes.get(el.dataset.key ?? "");
+        if (entry) entry.html = html;
+      }
+      // Content added above the viewport grows scrollHeight; shift
+      // scrollTop by the growth so the tail stays in view.
+      this.container.scrollTop += this.container.scrollHeight - before;
+    };
+    const chunks = backfillChunks(shells.length, BACKFILL_CHUNK);
+    if (chunks.length > 0) fillChunk(chunks[0]);
+    this.container.scrollTop = this.container.scrollHeight;
+    this.backfillQueue = chunks.slice(1).map((c) => () => fillChunk(c));
+    this.scheduleBackfill();
+  }
+
+  private scheduleBackfill(): void {
+    if (this.backfillQueue.length === 0) return;
+    requestAnimationFrame(() => {
+      const step = this.backfillQueue.shift();
+      if (step) step();
+      this.scheduleBackfill();
+    });
+  }
+
+  /**
+   * Complete any in-flight backfill synchronously. render() must
+   * reconcile against fully-materialized nodes — an empty shell's
+   * cached "" html would otherwise re-fill mid-reconcile anyway, just
+   * unpredictably interleaved.
+   */
+  private flushBackfill(): void {
+    while (this.backfillQueue.length > 0) {
+      const step = this.backfillQueue.shift();
+      if (step) step();
+    }
+  }
+
   render(state: StoreState): void {
+    this.flushBackfill();
     this.lastState = state;
     const pinned =
       this.container.scrollHeight - this.container.scrollTop -
