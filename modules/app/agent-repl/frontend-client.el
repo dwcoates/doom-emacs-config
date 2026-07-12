@@ -36,6 +36,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
+(declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 
 (defvar url-http-response-status)
@@ -219,10 +220,18 @@ contract)."
                      (let ((root (agent-repl--resolve-current-git-root)))
                        (agent-repl--log ws "ensure-session: adopting git root %s for unregistered ws %s" root ws)
                        (agent-repl--ws-put ws :project-dir root)
-                       root))))
-        (let ((id (agent-repl--frontend-create-session dir)))
+                       root)))
+            ;; Resume the workspace's durable claude session so a
+            ;; recreated daemon binding (daemon restart, Emacs restart,
+            ;; panel close/reopen, vterm->gui switch) CONTINUES the
+            ;; conversation — the frontend is presentation, the session
+            ;; is the shared backend.  nil (no session ever recorded)
+            ;; starts fresh.
+            (resume (agent-repl--ws-durable-claude-session-id ws)))
+        (let ((id (agent-repl--frontend-create-session dir nil resume)))
           (agent-repl--ws-put ws :frontend-session-id id)
-          (agent-repl--log ws "frontend session created: %s (cwd=%s)" id dir)
+          (agent-repl--log ws "frontend session created: %s (cwd=%s resume=%s)"
+                           id dir (or resume "none"))
           id)))))
 
 ;;;; ---- Message / interrupt injection ------------------------------------------

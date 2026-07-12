@@ -1867,7 +1867,5 @@ actually delivered to a live vterm."
   ;; Durable-resume currency: the hook-captured instantiation session
   ;; id IS the CLI session uuid; adopting one persists it so the next
   ;; initialize resumes through the state file.
-  :durable-session-id-fn (lambda (ws)
-                           (let ((inst (agent-repl--active-inst ws)))
-                             (and inst (agent-repl-instantiation-session-id inst))))
+  :durable-session-id-fn #'agent-repl--ws-durable-claude-session-id
   :adopt-session-fn (lambda (ws id) (agent-repl--set-session-id ws id))))
