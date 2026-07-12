@@ -99,9 +99,17 @@ swallowed, and does not abort the remaining migrations."
             (progn
               (make-directory (file-name-directory (directory-file-name new)) t)
               (rename-file old new)
+              ;; This runs at load time BEFORE the severity ladder below is
+              ;; defined (the `fboundp' guard is exactly that case), so the
+              ;; fallback cannot call `agent-repl--info' / `agent-repl--warn'.
+              ;; The success line is quieted with `inhibit-message' (*Messages*
+              ;; only, never the echo area); the failure line stays a LOUD bare
+              ;; `message', which is already the channel `agent-repl--warn'
+              ;; would have used.
               (if (fboundp 'agent-repl--log)
                   (agent-repl--log nil "migrate-legacy-state: moved %s -> %s" old new)
-                (message "[agent-repl] migrated state %s -> %s" old new)))
+                (let ((inhibit-message t))
+                  (message "[agent-repl] migrated state %s -> %s" old new))))
           (error
            (message "[agent-repl] WARNING: state migration %s -> %s failed: %S"
                     old new err)))))))
@@ -132,8 +140,9 @@ flip at runtime."
 (defcustom agent-repl-log-to-file t
   "Master kill-switch for file-writing of agent-repl log lines.
 When non-nil (the default), every call to `agent-repl--log',
-`agent-repl--do-log', or `agent-repl--error' appends its formatted
-line to `agent-repl-log-file-name' — REGARDLESS of `agent-repl-debug'.
+`agent-repl--info', `agent-repl--warn', `agent-repl--do-log', or
+`agent-repl--error' appends its formatted line to
+`agent-repl-log-file-name' — REGARDLESS of `agent-repl-debug'.
 `agent-repl--log-verbose' is the exception: it ADDITIONALLY requires
 `agent-repl-debug' to be \\='verbose, because its hot-path callers
 (timer ticks, alive predicates) would otherwise spend ~25% of Emacs CPU
@@ -415,6 +424,47 @@ text.  Handles the non-string-FMT bug-capture in one place."
             fmt
             (agent-repl--format-ws-metadata ws))))
 
+;;;; ---- Echo-area (modeline) severity gate ----
+;;
+;; agent-repl has two distinct log sinks and they are NOT the same channel:
+;;
+;;   1. The QUIET sink — the log file plus the *Messages* buffer.  Everything
+;;      goes here.  It is free, durable, greppable, and nobody has to look at
+;;      it unless they are debugging.
+;;
+;;   2. The LOUD sink — the echo area / modeline.  This is the highest-
+;;      sensitivity channel we have: it interrupts the user, it covers the
+;;      minibuffer, and it is the only place a message can be *missed* by
+;;      being drowned out.  It is reserved for things the user MUST act on
+;;      or be aware of: warnings, errors, and direct feedback from a command
+;;      they just invoked.
+;;
+;; `agent-repl--emit-message' is the single chokepoint that decides which
+;; sink a line reaches.  Binding `inhibit-message' suppresses the echo-area
+;; display while STILL logging the line to *Messages' — that is exactly the
+;; bifurcation we want, and it means quieting a line never costs us the log.
+;;
+;; Pick a level, do not reach for `message' directly:
+;;
+;;   `agent-repl--log-verbose'  hot-path chatter   file (verbose only), quiet
+;;   `agent-repl--log'          debug chatter      file always, quiet
+;;   `agent-repl--info'         background notice  file + *Messages*, quiet
+;;   `agent-repl--warn'         user must know     file + *Messages* + ECHO
+;;   `agent-repl--error'        signals an error   file + *Messages* + ECHO
+;;
+;; A bare `message' remains correct for one case only: synchronous feedback
+;; from an interactive command the user just ran ("Copied: <ref>").  Async,
+;; background, progress, and lifecycle chatter must never reach the echo area.
+
+(defun agent-repl--emit-message (text &optional echo)
+  "Emit TEXT via `message', reaching the echo area only when ECHO is non-nil.
+With ECHO nil, `inhibit-message' is bound so TEXT still lands in the
+*Messages* buffer (and, via the caller, the log file) but never flashes
+in the echo area / modeline.  This is the single chokepoint separating
+agent-repl's quiet sink from its loud one."
+  (let ((inhibit-message (not echo)))
+    (message "%s" text)))
+
 (defun agent-repl--do-log (ws fmt args &optional error-p)
   "Unconditional log entry: ALWAYS write to file AND emit to message/error.
 WS is the workspace name for context (or nil).  When ERROR-P is non-nil,
@@ -422,27 +472,29 @@ signals the formatted line via `error' instead of `message' — the
 file-write still happens first so the line is captured before unwinding.
 
 This is the entry point for log calls that MUST be captured regardless
-of `agent-repl-debug' — errors, invariant violations, and the
-STUB-CREATE warnings.  Gated callers (`agent-repl--log',
-`agent-repl--log-verbose') use the file-write path directly and
-conditionally call `message' themselves."
+of `agent-repl-debug' AND must surface in the echo area — errors,
+invariant violations, and the STUB-CREATE warnings.  Callers that want
+the line captured but NOT flashed at the user use `agent-repl--info';
+debug-gated callers (`agent-repl--log', `agent-repl--log-verbose') use
+the file-write path directly and emit quietly."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
     (if error-p
         (error "%s" text)
-      (message "%s" text))))
+      (agent-repl--emit-message text t))))
 
 (defun agent-repl--log (ws fmt &rest args)
   "Log a timestamped message for WS, always to file, conditionally to *Messages*.
 File write happens whenever `agent-repl-log-to-file' is non-nil (the
 default) — REGARDLESS of `agent-repl-debug'.  The `message' call only
-fires when `agent-repl-debug' is non-nil, so the minibuffer stays quiet
-unless the user opts in.
+fires when `agent-repl-debug' is non-nil, and even then it is emitted
+quietly (into *Messages* only, never the echo area), so turning debug
+logging on never turns the modeline into a firehose.
 FMT and ARGS use the same format conventions as `message'."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
     (when agent-repl-debug
-      (message "%s" text))))
+      (agent-repl--emit-message text nil))))
 
 (defun agent-repl--log-verbose (ws fmt &rest args)
   "Log a high-frequency message for WS, gated on verbose-mode for BOTH sinks.
@@ -452,12 +504,44 @@ profiling showed dominated Emacs CPU when this was always-on) and the
 (timer ticks, window changes, resolve-root, async git sentinels) cost
 nothing in the default-off configuration.  The `agent-repl-log-to-file'
 kill-switch still wins — when it is nil, no file write occurs even in
-verbose mode.  Toggle via \\[agent-repl-debug/toggle-logging] with a
-`C-u' prefix."
+verbose mode.  The *Messages* emit is quiet: hot-path chatter never
+reaches the echo area.  Toggle via \\[agent-repl-debug/toggle-logging]
+with a `C-u' prefix."
   (when (eq agent-repl-debug 'verbose)
     (let ((text (agent-repl--build-log-text ws fmt args)))
       (agent-repl--do-log-to-file text)
-      (message "%s" text))))
+      (agent-repl--emit-message text nil))))
+
+(defun agent-repl--info (ws fmt &rest args)
+  "Log an informational line for WS to the QUIET sink, ungated by debug.
+The line ALWAYS reaches the log file and the *Messages* buffer, but it
+never reaches the echo area / modeline.  This is the level for background
+and lifecycle chatter that is valuable to have on the record but that the
+user must not be interrupted by: module loads, worktree creation progress,
+snapshot-load steps, sentinel bookkeeping, agent start/finish notices.
+
+Use `agent-repl--warn' instead when the user genuinely needs to see it."
+  (let ((text (agent-repl--build-log-text ws fmt args)))
+    (agent-repl--do-log-to-file text)
+    (agent-repl--emit-message text nil)))
+
+(defun agent-repl--warn (ws fmt &rest args)
+  "Log a WARNING for WS to the LOUD sink: file, *Messages', and the echo area.
+A `WARNING: ' severity tag is prepended, so call sites pass the bare
+message (no literal \"WARNING:\" prefix of their own).
+
+This is one of only two levels that may interrupt the user (the other
+being `agent-repl--error'), so reserve it for conditions the user must
+actually know about: failed writes, dropped state, broken invariants,
+degraded functionality.  Anything merely informational is `agent-repl--info'."
+  (if (stringp fmt)
+      (agent-repl--do-log ws (concat "WARNING: " fmt) args)
+    ;; A non-string FMT is a caller bug.  Hand it through untouched rather
+    ;; than `concat'-ing it (which would raise a wrong-type-argument here and
+    ;; bury the real culprit): `agent-repl--build-log-text' already captures a
+    ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
+    ;; preserved so nothing about the offending call is lost.
+    (agent-repl--do-log ws fmt args)))
 
 (defun agent-repl--error (ws fmt &rest args)
   "Signal an error with a [agent-repl] tag, timestamp, and workspace metadata.
