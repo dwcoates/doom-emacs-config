@@ -89,6 +89,12 @@ type Server struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session.Session
+	// dormant holds rehydratable registry records from a previous daemon
+	// process, keyed by their ORIGINAL s_ id: the id keeps resolving
+	// across the restart, and the first real access (stream / message /
+	// interrupt) spawns a shim with --resume. A restart never fans out N
+	// shims eagerly.
+	dormant map[string]registry.Record
 }
 
 // Config assembles a Server.
@@ -125,7 +131,7 @@ func New(cfg Config) *Server {
 	if now == nil {
 		now = time.Now
 	}
-	return &Server{
+	s := &Server{
 		daemonVersion: cfg.DaemonVersion,
 		bootID:        newBootID(),
 		retention:     cfg.Retention,
@@ -143,6 +149,55 @@ func New(cfg Config) *Server {
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 		sessions: map[string]*session.Session{},
+		dormant:  map[string]registry.Record{},
+	}
+	// A -fake daemon must leave the registry untouched: fake sessions
+	// have no transcripts, so the prune below would destroy every REAL
+	// record just because the daemon happened to boot offline.
+	if s.registry != nil && !s.forceFake {
+		s.loadDormant()
+	} else if s.registry != nil {
+		s.logf("server: -fake daemon: session registry left untouched (no rehydration)")
+	}
+	return s
+}
+
+// loadDormant registers every rehydratable registry record under its
+// original s_ id and prunes the ones no boot could ever revive: records
+// that never learned their claude_session_id (no resume target exists)
+// and records whose transcript is gone (the same viability gate the
+// create path applies — a --resume against a missing transcript
+// hard-kills the CLI). Runs at construction, before the HTTP surface is
+// up, so no locking is needed.
+func (s *Server) loadDormant() {
+	configDir := session.DefaultClaudeConfigDir()
+	kept, pruned := 0, 0
+	prune := func(rec registry.Record, why string) {
+		s.logf("registry: pruning session %s (%s)", rec.SessionID, why)
+		if err := s.registry.Delete(rec.SessionID); err != nil {
+			s.logf("registry: prune %s FAILED: %v", rec.SessionID, err)
+			return
+		}
+		pruned++
+	}
+	for _, rec := range s.registry.All() {
+		if rec.Terminal {
+			continue
+		}
+		if rec.ClaudeSessionID == "" {
+			prune(rec, "no claude_session_id ever arrived; it cannot be resumed")
+			continue
+		}
+		path := session.TranscriptPath(configDir, rec.CWD, rec.ClaudeSessionID)
+		if _, err := os.Stat(path); err != nil {
+			prune(rec, fmt.Sprintf("transcript %s missing: %v", path, err))
+			continue
+		}
+		s.dormant[rec.SessionID] = rec
+		kept++
+	}
+	if kept > 0 || pruned > 0 {
+		s.logf("server: session registry: %d rehydratable session(s), %d pruned", kept, pruned)
 	}
 }
 
@@ -214,10 +269,10 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "session_id must be non-empty")
 		return
 	}
-	// A session the daemon still serves is not gone, so a remediation
-	// request naming one is a frontend bug: refuse rather than burn an
-	// analyst on a healthy session.
-	if s.lookup(body.SessionID) != nil {
+	// A session the daemon still serves — live or dormant-rehydratable —
+	// is not gone, so a remediation request naming one is a frontend
+	// bug: refuse rather than burn an analyst on a healthy session.
+	if s.known(body.SessionID) {
 		httpError(w, http.StatusConflict, "session is alive; nothing to remediate")
 		return
 	}
@@ -241,7 +296,11 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 // so connected tabs still get the user-turn broadcast and replay
 // retention sees it.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	sess := s.lookup(r.PathValue("id"))
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if sess == nil {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
@@ -278,7 +337,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // C-c C-k path). Same pipeline as a WS interrupt: pending permission
 // prompts cancel and the turn's result arrives as "aborted".
 func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	sess := s.lookup(r.PathValue("id"))
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if sess == nil {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
@@ -420,8 +483,12 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		TurnActive bool `json:"turn_active"`
 		// PendingPermissions lists unresolved permission request ids.
 		PendingPermissions []string `json:"pending_permissions,omitempty"`
+		// Rehydratable marks a cold session carried over from a previous
+		// daemon process: its id resolves, but the shim spawns (with
+		// --resume) only on first real access.
+		Rehydratable bool `json:"rehydratable,omitempty"`
 	}
-	list := make([]entry, 0, len(s.sessions))
+	list := make([]entry, 0, len(s.sessions)+len(s.dormant))
 	for id, sess := range s.sessions {
 		info := sess.Info()
 		list = append(list, entry{
@@ -433,6 +500,15 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			DeathReason:        info.DeathReason,
 			TurnActive:         info.TurnActive,
 			PendingPermissions: info.PendingPermissions,
+		})
+	}
+	for id, rec := range s.dormant {
+		list = append(list, entry{
+			SessionID:       id,
+			CWD:             rec.CWD,
+			Model:           rec.Model,
+			ClaudeSessionID: rec.ClaudeSessionID,
+			Rehydratable:    true,
 		})
 	}
 	s.mu.Unlock()
@@ -447,7 +523,22 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	sess := s.lookup(r.PathValue("id"))
+	id := r.PathValue("id")
+	// Deleting a dormant session needs no shim: drop the record so the
+	// id stops resolving and never rehydrates again.
+	s.mu.Lock()
+	if _, ok := s.dormant[id]; ok {
+		delete(s.dormant, id)
+		s.mu.Unlock()
+		if err := s.registry.Delete(id); err != nil {
+			httpError(w, http.StatusInternalServerError, fmt.Sprintf("registry delete: %v", err))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.mu.Unlock()
+	sess := s.lookup(id)
 	if sess == nil {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
@@ -460,7 +551,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	sess := s.lookup(r.PathValue("id"))
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if sess == nil {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
@@ -513,6 +608,70 @@ func (s *Server) lookup(id string) *session.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sessions[id]
+}
+
+// known reports whether id resolves at all — as a live session or as a
+// dormant rehydratable record.
+func (s *Server) known(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, live := s.sessions[id]; live {
+		return true
+	}
+	_, ok := s.dormant[id]
+	return ok
+}
+
+// resolve returns the live session for id, rehydrating a dormant record
+// into a running --resume session on first access. (nil, nil) means the
+// id is unknown (404). Holding s.mu across the rehydration spawn is
+// deliberate: two tabs racing the first access must resolve to exactly
+// ONE shim, and the spawn is a rare, short, local exec.
+func (s *Server) resolve(id string) (*session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess := s.sessions[id]; sess != nil {
+		return sess, nil
+	}
+	rec, ok := s.dormant[id]
+	if !ok {
+		return nil, nil
+	}
+	return s.rehydrateLocked(rec)
+}
+
+// rehydrateLocked revives one dormant record under its ORIGINAL s_ id —
+// the whole point of the registry: the id a frontend held before the
+// daemon restart keeps resolving after it. The transcript is re-statted
+// (same viability gate as the create path) because it may have vanished
+// since boot; a record that fails the gate is pruned and reports
+// unknown, which routes the client to its own rebind path.
+func (s *Server) rehydrateLocked(rec registry.Record) (*session.Session, error) {
+	path := session.TranscriptPath(session.DefaultClaudeConfigDir(), rec.CWD, rec.ClaudeSessionID)
+	if _, err := os.Stat(path); err != nil {
+		s.logf("session %s: rehydration target %s lost its transcript at %s — pruning: %v",
+			rec.SessionID, rec.ClaudeSessionID, path, err)
+		delete(s.dormant, rec.SessionID)
+		if delErr := s.registry.Delete(rec.SessionID); delErr != nil {
+			s.logf("registry: prune %s FAILED: %v", rec.SessionID, delErr)
+		}
+		return nil, nil
+	}
+	opts := CreateOpts{
+		CWD:            rec.CWD,
+		Model:          rec.Model,
+		PermissionMode: rec.PermissionMode,
+		Resume:         rec.ClaudeSessionID,
+	}
+	sess, err := s.launchSession(rec.SessionID, opts, true)
+	if err != nil {
+		return nil, fmt.Errorf("rehydrate session %s: spawn shim: %w", rec.SessionID, err)
+	}
+	delete(s.dormant, rec.SessionID)
+	s.sessions[rec.SessionID] = sess
+	go sess.Run()
+	s.logf("session %s: rehydrated on first access (resume %s)", rec.SessionID, rec.ClaudeSessionID)
+	return sess, nil
 }
 
 // ShutdownAll asks every live session to drain (daemon teardown).

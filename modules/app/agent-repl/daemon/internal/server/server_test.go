@@ -1002,3 +1002,363 @@ func TestFakeSessionIsNeverRegistered(t *testing.T) {
 		t.Error("fake session was registered; it can never rehydrate")
 	}
 }
+
+// ---- restart rehydration ----------------------------------------------------
+
+// spawnRecorder captures shim spawn invocations for lazy-spawn asserts.
+type spawnRecorder struct {
+	mu    sync.Mutex
+	calls []CreateOpts
+	ids   []string
+}
+
+func (r *spawnRecorder) record(id string, opts CreateOpts) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ids = append(r.ids, id)
+	r.calls = append(r.calls, opts)
+}
+
+func (r *spawnRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+func (r *spawnRecorder) last() (string, CreateOpts) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.calls) == 0 {
+		return "", CreateOpts{}
+	}
+	return r.ids[len(r.ids)-1], r.calls[len(r.calls)-1]
+}
+
+// writeTranscript plants a minimal transcript for uuid rooted at cwd /w
+// inside cfg (the CLAUDE_CONFIG_DIR under test).
+func writeTranscript(t *testing.T, cfg, uuid string) {
+	t.Helper()
+	dir := cfg + "/projects/-w"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","message":{"role":"user","content":"hello from before the restart"}}` + "\n"
+	if err := os.WriteFile(dir+"/"+uuid+".jsonl", []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rehydrationHarness boots a server over a pre-populated registry file,
+// exactly as a restarted daemon would find it.
+func rehydrationHarness(t *testing.T, forceFake bool, records ...registry.Record) (*harness, *registry.Registry, *spawnRecorder) {
+	t.Helper()
+	regPath := filepath.Join(t.TempDir(), "sessions.json")
+	seed := registry.Open(regPath, func(string, ...any) {})
+	for _, rec := range records {
+		if err := seed.Put(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := registry.Open(regPath, func(string, ...any) {})
+	rec := &spawnRecorder{}
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		ForceFake:     forceFake,
+		Spawn: func(sessionID string, opts CreateOpts) (session.ShimHandle, error) {
+			rec.record(sessionID, opts)
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Registry: reg,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}, reg, rec
+}
+
+// awaitShim takes the next spawned fake shim, registering its cleanup.
+func (h *harness) awaitShim(t *testing.T) *fakeShim {
+	t.Helper()
+	select {
+	case shim := <-h.shims:
+		t.Cleanup(shim.end)
+		return shim
+	case <-time.After(recvTimeout):
+		t.Fatal("no shim was spawned")
+		return nil
+	}
+}
+
+func listSessions(t *testing.T, h *harness) []map[string]any {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return body.Sessions
+}
+
+func TestRestartListsDormantSessionUnderItsOriginalID(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	// Act
+	sessions := listSessions(t, h)
+	// Assert — the pre-restart id resolves, flagged as a cold session.
+	if len(sessions) != 1 || sessions[0]["session_id"] != "s_before" || sessions[0]["rehydratable"] != true {
+		t.Fatalf("sessions = %v", sessions)
+	}
+}
+
+func TestRestartSpawnsNoShimBeforeFirstAccess(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	// Act — boot plus a listing are NOT real accesses.
+	listSessions(t, h)
+	// Assert — a restart never fans out shims eagerly.
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d before first access, want 0", n)
+	}
+}
+
+func TestFirstStreamAccessRehydratesWithResume(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", Model: "haiku", PermissionMode: "plan", ClaudeSessionID: "uuid-1"})
+	// Act
+	conn := h.dial(t, "s_before")
+	h.awaitShim(t)
+	// Assert — one shim, resuming the durable uuid with the record's opts.
+	id, opts := spawns.last()
+	if spawns.count() != 1 || id != "s_before" {
+		t.Fatalf("spawns = %d for id %q", spawns.count(), id)
+	}
+	if opts.Resume != "uuid-1" || opts.CWD != "/w" || opts.Model != "haiku" || opts.PermissionMode != "plan" {
+		t.Fatalf("spawn opts = %+v", opts)
+	}
+	hello := readFrame(t, conn)
+	if hello["type"] != "hello" || hello["session_id"] != "s_before" || hello["claude_session_id"] != "uuid-1" {
+		t.Fatalf("hello = %v", hello)
+	}
+}
+
+func TestRehydratedSessionReplaysPreRestartHistory(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	// Act
+	conn := h.dial(t, "s_before")
+	h.awaitShim(t)
+	hello := readFrame(t, conn)
+	req, _ := json.Marshal(map[string]any{"type": "replay-request", "from_seq": hello["resume_from_seq"]})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	// Assert — the transcript-seeded user turn comes back.
+	frame := readFrame(t, conn)
+	if frame["type"] != "user-turn" {
+		t.Fatalf("frame = %v, want the pre-restart user-turn", frame)
+	}
+}
+
+func TestSecondAccessReusesTheRehydratedSession(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	conn1 := h.dial(t, "s_before")
+	h.awaitShim(t)
+	readFrame(t, conn1) // hello
+	// Act — a second tab attaches to the SAME id.
+	conn2 := h.dial(t, "s_before")
+	readFrame(t, conn2) // hello
+	// Assert
+	if n := spawns.count(); n != 1 {
+		t.Fatalf("spawn count = %d after second access, want 1", n)
+	}
+}
+
+func TestFirstMessageAccessRehydrates(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	// Act — the Emacs HTTP send path is a first access too.
+	resp, err := http.Post(h.ts.URL+"/sessions/s_before/message", "application/json",
+		bytes.NewBufferString(`{"content":"still here?"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	h.awaitShim(t)
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if n := spawns.count(); n != 1 {
+		t.Fatalf("spawn count = %d, want 1", n)
+	}
+}
+
+func TestBootPrunesRecordWhoseTranscriptIsGone(t *testing.T) {
+	// Arrange — a registry record whose transcript never made it to disk.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	h, reg, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_gone", CWD: "/w", ClaudeSessionID: "uuid-lost"})
+	// Act / Assert — not listed, and pruned from the registry file.
+	if sessions := listSessions(t, h); len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want none", sessions)
+	}
+	if _, ok := reg.Get("s_gone"); ok {
+		t.Error("record with a missing transcript survived the boot prune")
+	}
+}
+
+func TestBootPrunesRecordWithoutClaudeSessionID(t *testing.T) {
+	// Arrange — a session that died before system:init ever arrived.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	h, reg, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_noinit", CWD: "/w"})
+	// Act / Assert
+	if sessions := listSessions(t, h); len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want none", sessions)
+	}
+	if _, ok := reg.Get("s_noinit"); ok {
+		t.Error("record without a resume target survived the boot prune")
+	}
+}
+
+func TestBootLeavesTerminalRecordsDormantless(t *testing.T) {
+	// Arrange — a conversation that ENDED before the restart.
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-dead")
+	h, reg, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_dead", CWD: "/w", ClaudeSessionID: "uuid-dead",
+			Terminal: true, DeathReason: "shim_died"})
+	// Act / Assert — not rehydratable, but the record is kept (it is
+	// history, not garbage; it prunes once its transcript goes away).
+	if sessions := listSessions(t, h); len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want none", sessions)
+	}
+	if _, ok := reg.Get("s_dead"); !ok {
+		t.Error("terminal record was pruned at boot")
+	}
+}
+
+func TestAccessPrunesWhenTranscriptVanishedSinceBoot(t *testing.T) {
+	// Arrange — viable at boot, transcript deleted afterwards.
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, reg, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	if err := os.Remove(cfg + "/projects/-w/uuid-1.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	// Act — first access re-runs the viability gate.
+	resp, err := http.Post(h.ts.URL+"/sessions/s_before/message", "application/json",
+		bytes.NewBufferString(`{"content":"x"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — 404 (rebind territory), no shim, record pruned.
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d, want 0 (a doomed --resume must not launch)", n)
+	}
+	if _, ok := reg.Get("s_before"); ok {
+		t.Error("record survived the access-time prune")
+	}
+}
+
+func TestDeleteDormantSessionDropsTheRecord(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, reg, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	req, err := http.NewRequest(http.MethodDelete, h.ts.URL+"/sessions/s_before", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	resp, err := http.DefaultClient.Do(req)
+	// Assert
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	if _, ok := reg.Get("s_before"); ok {
+		t.Error("deleted dormant session still has a registry record")
+	}
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d, want 0 (deletion must not rehydrate)", n)
+	}
+}
+
+func TestFakeDaemonLeavesRegistryRecordsUntouched(t *testing.T) {
+	// Arrange — a -fake boot must not prune REAL records just because
+	// their transcripts are invisible to the offline daemon.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	h, reg, _ := rehydrationHarness(t, true,
+		registry.Record{SessionID: "s_real", CWD: "/w", ClaudeSessionID: "uuid-real"})
+	// Act / Assert — not listed (no rehydration), but preserved on disk.
+	if sessions := listSessions(t, h); len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want none under -fake", sessions)
+	}
+	if _, ok := reg.Get("s_real"); !ok {
+		t.Error("-fake boot destroyed a real registry record")
+	}
+}
+
+func TestRemediationRefusesADormantSession(t *testing.T) {
+	// Arrange — a rehydratable session is NOT gone.
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	h.srv.remediator = &fakeRemediator{}
+	// Act
+	resp := h.postRemediation(t, "s_before")
+	// Assert
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for a rehydratable session", resp.StatusCode)
+	}
+}

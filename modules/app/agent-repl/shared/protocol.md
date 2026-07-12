@@ -853,6 +853,35 @@ dropped target. Fake sessions (per-create `fake` or the daemon-wide
 `-fake` flag) skip the gate: the scripted SDK has no transcripts by
 design.
 
+### 2.11 Restart rehydration
+
+Daemon session ids (`s_<hex>`) survive daemon restarts. The daemon
+persists a per-session registry record (`$AGENT_REPL_STATE_DIR/
+claude-repld-sessions.json`, crash-safe write-through) carrying the
+s_ id, cwd, model, permission mode, and the durable
+`claude_session_id`; on boot it re-registers every non-terminal record
+whose transcript still exists as a **rehydratable** session under its
+ORIGINAL s_ id. No shim is spawned at boot — the first real access
+(`GET /sessions/{id}/stream`, `POST /sessions/{id}/message`,
+`POST /sessions/{id}/interrupt`) launches the shim with
+`--resume <claude_session_id>`, seeding the replay ring from the
+transcript exactly as §2.10 describes for created-with-`resume`
+sessions. A client holding a pre-restart id therefore reconnects to
+the same conversation without ever observing "session gone".
+
+Wire surface (documented here despite the HTTP-route non-goal below,
+because clients key off it): entries in the `GET /sessions` listing
+carry `rehydratable: true` while a session is cold — id resolvable,
+shim not yet spawned. The flag is absent/false on warm sessions.
+Records whose transcript has vanished (and records that never learned
+a `claude_session_id`) are pruned rather than rehydrated into a doomed
+`--resume`; their ids then report unknown, which routes clients to
+their own resume-rebind path. Daemon-wide teardown (`SIGTERM`) leaves
+records non-terminal on purpose — only session-scoped ends (DELETE,
+shim death, SDK end) mark a record terminal and stop it rehydrating.
+Fake sessions are never registered, and a `-fake` daemon neither
+rehydrates nor prunes.
+
 ---
 
 ## Agent-state sentinels (daemon → Emacs side channel)
