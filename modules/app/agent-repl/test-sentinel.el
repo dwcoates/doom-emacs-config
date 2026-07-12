@@ -114,6 +114,57 @@ both paths flip the tab to `:permission' through the same gate."
         (should (eq (plist-get dispatched-handler :callback)
                     'agent-repl--on-prompt-submit-event))))))
 
+(ert-deftest agent-repl-test-sentinel-dispatches-suffixed-permission-request ()
+  "A daemon-written permission_request_<sid>_<reqid> file dispatches to the permission handler.
+The daemon suffixes sid/reqid for per-file uniqueness; the entry is
+prefix-matched so the suffixed name must reach the same callback as the
+hook's fixed-name file."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (agent-repl--dispatch-sentinel-file "/dir/permission_request_abc123_req42")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'agent-repl--on-permission-event))))))
+
+(ert-deftest agent-repl-test-sentinel-dispatches-permission-resolved ()
+  "A permission_resolved_<sid>_<reqid> file dispatches to the resolved handler.
+Must NOT be shadowed by the permission_request/permission_prompt
+entries that share the permission_ stem."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (agent-repl--dispatch-sentinel-file "/dir/permission_resolved_abc123_req42")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'agent-repl--on-permission-resolved-event))))))
+
+(ert-deftest agent-repl-test-sentinel-dispatches-session-dead ()
+  "A session_dead_<sid> file dispatches to the session-dead handler.
+Must NOT be shadowed by session_start_ (they diverge at session_d/session_s)."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (agent-repl--dispatch-sentinel-file "/dir/session_dead_abc123")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'agent-repl--on-session-dead-event))))))
+
+(ert-deftest agent-repl-test-sentinel-session-start-not-shadowed-by-dead ()
+  "A session_start_<pid> file still dispatches to the session-start handler.
+Guards the reverse shadowing direction of the new session_dead_ entry."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (agent-repl--dispatch-sentinel-file "/dir/session_start_777")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'agent-repl--on-session-start-event))))))
+
 (ert-deftest agent-repl-test-sentinel-dispatch-returns-nil-for-unknown ()
   "dispatch-sentinel-file should return nil for an unrecognized filename."
   (agent-repl-test--with-clean-state
@@ -516,6 +567,51 @@ is treated as a real permission request; see on-permission-event docstring."
                  (lambda (ws state) (setq set-args (list ws state)))))
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should (equal set-args '("ws1" :permission)))))))
+
+;;;; ---- Tests: on-permission-resolved-event handler ----
+
+(ert-deftest agent-repl-test-on-permission-resolved-flips-to-thinking ()
+  "on-permission-resolved-event flips :permission back to :thinking.
+For gui sessions the user answers in the webview, so the daemon's
+resolved sentinel is the only resolution signal."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :permission)
+    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
+
+(ert-deftest agent-repl-test-on-permission-resolved-noop-from-done ()
+  "on-permission-resolved-event is a no-op when state is not :permission.
+The gate makes turn-end auto-cancel resolutions order-independent
+against the Stop hook's :done."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :done)
+    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
+
+(ert-deftest agent-repl-test-on-permission-resolved-noop-from-nil ()
+  "on-permission-resolved-event is a no-op when no agent-state is set."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
+    (should-not (agent-repl--ws-get "ws1" :agent-state))))
+
+;;;; ---- Tests: on-session-dead-event handler ----
+
+(ert-deftest agent-repl-test-on-session-dead-marks-dead ()
+  "on-session-dead-event sets :repl-state :dead and clears :agent-state."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--on-session-dead-event "ws1" "/some/dir")
+    (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))
+    (should-not (agent-repl--ws-get "ws1" :agent-state))))
+
+(ert-deftest agent-repl-test-on-session-dead-respects-merged ()
+  "on-session-dead-event must not clobber a :merged badge.
+Inherits mark-dead-vterm's precedence guard."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :repl-state :merged)
+    (agent-repl--on-session-dead-event "ws1" "/some/dir")
+    (should (eq (agent-repl--ws-get "ws1" :repl-state) :merged))))
 
 ;;;; ---- Tests: read-sentinel-file ----
 
@@ -1590,6 +1686,56 @@ the module does not manage."
                 (agent-repl--on-session-start-event "ws1" "/some/dir")
                 (should second-called))))
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+
+(ert-deftest agent-repl-test-on-session-start-gui-no-error-spam ()
+  "on-session-start-event must NOT emit the vterm-inconsistency ERROR for gui.
+A gui workspace has no vterm buffer by design, so the structural
+inconsistency branch does not apply."
+  (agent-repl-test--with-clean-state
+    (let ((messages '()))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                ((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+        (agent-repl--on-session-start-event "ws1" "/some/dir")
+        (should-not (cl-find-if (lambda (m) (string-match-p "ERROR" m)) messages))))))
+
+(ert-deftest agent-repl-test-on-session-start-gui-sets-idle ()
+  "on-session-start-event flips a fresh gui workspace to :idle."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+      (agent-repl--on-session-start-event "ws1" "/some/dir")
+      (should (eq (agent-repl--ws-get "ws1" :agent-state) :idle)))))
+
+(ert-deftest agent-repl-test-on-session-start-gui-preserves-in-flight-turn ()
+  "A lagging/re-fired session_start must not clobber a gui turn in flight.
+The :idle flip is gated to nil/:init agent-states."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+      (agent-repl--on-session-start-event "ws1" "/some/dir")
+      (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking)))))
+
+(ert-deftest agent-repl-test-on-session-start-gui-fires-ready-latch ()
+  "on-session-start-event flips the :agent-ready latch bit for gui.
+Without this, gui ws-fully-loaded only ever fired via the watchdog."
+  (agent-repl-test--with-clean-state
+    (let ((latched nil)
+          (hook-called-with nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
+                 (lambda (ws bit) (setq latched (list ws bit)))))
+        (let ((agent-repl-after-ready-functions
+               (list (lambda (ws) (push ws hook-called-with)))))
+          (agent-repl--on-session-start-event "ws1" "/some/dir")
+          (should (equal latched '("ws1" :agent-ready)))
+          (should (equal hook-called-with '("ws1"))))))))
 
 (ert-deftest agent-repl-test-on-session-start-event-no-vterm-warns ()
   "on-session-start-event emits a loud WARNING when no vterm buffer exists.
