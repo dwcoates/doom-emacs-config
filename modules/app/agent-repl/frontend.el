@@ -317,18 +317,40 @@ webview attached to that session, and places it over the input panel."
     (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
   (agent-repl--frontend-validate-pair 'gui (agent-repl--ws-backend-name ws))
   (let* ((session-id (agent-repl--frontend-ensure-session ws))
-         ;; composer=0: Emacs owns input (the panel below), so the
-         ;; webview hides its own composer and stays output-only.
-         ;; parent_ws: the recorded parent worktree's basename (the same
-         ;; source `agent-repl--workspace-mode-line' renders green) —
-         ;; the webapp's status bar shows it for vterm parity.  Omitted
-         ;; when the workspace has no recorded parent.
-         (url (concat (agent-repl--frontend-session-url session-id)
-                      "&composer=0"
-                      (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
-                        (concat "&parent_ws=" (url-hexify-string parent)))))
+         (url (agent-repl--frontend-webview-url ws session-id))
          (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
     (agent-repl--frontend-display-webview ws buf)))
+
+(defun agent-repl--frontend-webview-url (ws session-id)
+  "Return the webapp URL for WS's webview attached to SESSION-ID.
+composer=0: Emacs owns input (the panel below), so the webview hides
+its own composer and stays output-only.  parent_ws: the recorded
+parent worktree's basename (the same source
+`agent-repl--workspace-mode-line' renders green) — the webapp's status
+bar shows it for vterm parity.  Omitted when the workspace has no
+recorded parent."
+  (concat (agent-repl--frontend-session-url session-id)
+          "&composer=0"
+          (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
+            (concat "&parent_ws=" (url-hexify-string parent)))))
+
+(defun agent-repl--frontend-sync-webview (ws session-id)
+  "Remount WS's displayed webview when it is bound to a session other than SESSION-ID.
+The send path heals a dead daemon session by creating a fresh one
+\(`agent-repl--frontend-ensure-session'); without this remount the
+displayed webview keeps rendering the DEAD session while the turn
+streams into the replacement.  No-op when no webview buffer is live
+\(panel closed — the next open mounts fresh anyway) or when the
+binding already matches."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
+        (bound (agent-repl--ws-get ws :frontend-buffer-session-id)))
+    (when (and (buffer-live-p buf) (not (equal bound session-id)))
+      (agent-repl--log ws "sync-webview: displayed webview %s -> %s" bound session-id)
+      (let ((win (get-buffer-window buf t))
+            (new (agent-repl--frontend-ensure-webview-buffer
+                  ws session-id (agent-repl--frontend-webview-url ws session-id))))
+        (when (window-live-p win)
+          (set-window-buffer win new))))))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
