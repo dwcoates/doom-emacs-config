@@ -38,6 +38,7 @@
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
+(declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 
 (defvar url-http-response-status)
@@ -336,6 +337,10 @@ the subsequent open attaches to the continued conversation."
 Ensures the session first (recreating a stale binding), so a send into
 a dead session heals instead of 404ing."
   (let ((id (agent-repl--frontend-ensure-session ws)))
+    ;; The ensure may have HEALED a dead binding into a fresh session —
+    ;; the displayed webview must follow, or the user watches the dead
+    ;; session while the turn streams into the replacement.
+    (agent-repl--frontend-sync-webview ws id)
     (agent-repl--log ws "frontend send: session=%s len=%d" id (length text))
     (agent-repl--frontend-send-message id text)))
 

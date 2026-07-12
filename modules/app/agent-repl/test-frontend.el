@@ -118,6 +118,72 @@
             (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_new"))
             (should (= (length agent-repl-test--urls) 2))))))))
 
+;;;; ---- sync-webview -----------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-webview-url-carries-composer-flag ()
+  "The webview URL always hides the webapp composer (Emacs owns input)."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act / Assert
+    (should (string-match-p "composer=0"
+                            (agent-repl--frontend-webview-url "ws1" "s_1")))))
+
+(ert-deftest agent-repl-test-frontend-webview-url-carries-parent-ws ()
+  "A recorded parent worktree lands in the URL as parent_ws."
+  (agent-repl-test--with-frontend-ws "ws1"
+      '(:project-dir "/w" :source-ws-dir "/repos/parent-tree/")
+    ;; Act / Assert
+    (should (string-match-p "parent_ws=parent-tree"
+                            (agent-repl--frontend-webview-url "ws1" "s_1")))))
+
+(ert-deftest agent-repl-test-frontend-sync-webview-no-op-when-binding-matches ()
+  "sync-webview does not touch a webview already bound to the session."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Act
+          (agent-repl--frontend-sync-webview "ws1" "s_1")
+          ;; Assert — no second mount.
+          (should (buffer-live-p buf))
+          (should (= (length agent-repl-test--urls) 1)))))))
+
+(ert-deftest agent-repl-test-frontend-sync-webview-remounts-on-heal ()
+  "sync-webview remounts the webview onto a healed session's id."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_dead" "http://x/?session=s_dead")))
+          ;; Act
+          (agent-repl--frontend-sync-webview "ws1" "s_fresh")
+          ;; Assert — stale webview replaced, bound to the new session.
+          (should-not (buffer-live-p old))
+          (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id)
+                         "s_fresh"))
+          ;; The factory pushes newest-first; the remount URL is the head.
+          (should (string-match-p "session=s_fresh"
+                                  (car agent-repl-test--urls))))))))
+
+(ert-deftest agent-repl-test-frontend-sync-webview-no-op-without-live-buffer ()
+  "sync-webview does nothing when no webview buffer exists (panel closed)."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (agent-repl--frontend-sync-webview "ws1" "s_1")
+        ;; Assert
+        (should (null agent-repl-test--urls))))))
+
 ;;;; ---- Copy chords ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()

@@ -455,6 +455,22 @@ in-memory instantiation with staler on-disk state."
         ;; Assert
         (should (equal sent '("s_fresh" "hi")))))))
 
+(ert-deftest agent-repl-test-frontend-send-user-message-syncs-webview ()
+  "The send path remounts the webview onto the ensured (possibly healed) session."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((synced nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_healed"))
+                ((symbol-function 'agent-repl--frontend-sync-webview)
+                 (lambda (ws id) (setq synced (list ws id))))
+                ((symbol-function 'agent-repl--frontend-send-message)
+                 (lambda (_id _text) "r_1")))
+        ;; Act
+        (agent-repl--frontend-send-user-message "ws1" "hi")
+        ;; Assert
+        (should (equal synced '("ws1" "s_healed")))))))
+
 ;;;; ---- release on nuke ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-release-deletes-and-clears ()
