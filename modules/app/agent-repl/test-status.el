@@ -377,6 +377,55 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
 
 ;;;; ---- Tests: Tabline rendering ----
 
+(ert-deftest agent-repl-test-tabline-omits-folded-repo-workspaces ()
+  "The tab-bar drops the workspaces of a repo folded in the drawer."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom-ws" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee-ws"   :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("doom-ws" "ee-ws")))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "doom-ws"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      (let ((result (agent-repl--tabline-advice)))
+        (should (string-match-p "doom-ws" result))
+        (should-not (string-match-p "ee-ws" result))))))
+
+(ert-deftest agent-repl-test-tabline-renumbers-after-fold ()
+  "Folding a repo closes up the tab numbers: the survivor after the folded
+workspace takes its index rather than leaving a gap."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
+    (agent-repl--ws-put "doom-b" :group-key "/repos/doom/.git")
+    (agent-repl--ws-set "doom-b" :permission)
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("doom-a" "ee-a" "doom-b")))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "doom-a"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      ;; doom-b is 3rd in the raw list but 2nd once the folded repo drops
+      ;; out, so its label carries index 2.
+      (let ((result (agent-repl--tabline-advice)))
+        (should (string-match-p "2❓" result))))))
+
+(ert-deftest agent-repl-test-tabline-keeps-current-workspace-when-its-repo-folded ()
+  "The current workspace keeps its tab even when its own repo is folded."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ee-a" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--ws-put "ee-b" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+               (lambda () '("ee-a" "ee-b")))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ee-b"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      (let ((result (agent-repl--tabline-advice)))
+        (should (string-match-p "ee-b" result))
+        (should-not (string-match-p "ee-a" result))))))
+
 (ert-deftest agent-repl-test-tabline-thinking-face ()
   "Tabline should apply thinking face for background thinking tabs (panels visible)."
   (agent-repl-test--with-clean-state

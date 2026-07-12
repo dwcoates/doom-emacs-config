@@ -3223,21 +3223,24 @@ name."
 
 (defun agent-repl--workspace-cycle (n)
   "Cycle N workspaces (negative = left, positive = right).
-Reimplements `+workspace/cycle' but iterates the hide-mode-filtered
-visible workspace list (`agent-repl--filter-hidden-names') instead of
-the raw `+workspace-list-names', so closed-REPL workspaces dropped from
-the tabline are also skipped during s-{ / s-}.  Mirrors Doom's
-protected-workspace handling: when current is the nil-persp, switch to
-`+workspaces-main' instead of cycling.  Does NOT flash the destination
-tab — left/right cycling is high-frequency navigation and the flash
-becomes noise; identity-based jumps (`SPC p p', priority change,
-worktree jump) keep the flash since they're discrete attention cues."
+Reimplements `+workspace/cycle' but iterates the visible workspace
+list instead of the raw `+workspace-list-names': first the tab-bar list
+\(`agent-repl--ws-tabline-names', which drops the workspaces of repos
+folded in the drawer), then the hide-mode filter
+\(`agent-repl--filter-hidden-names'), so both folded-repo workspaces and
+closed-REPL workspaces dropped from the tabline are skipped during
+s-{ / s-}.  Mirrors Doom's protected-workspace handling: when current
+is the nil-persp, switch to `+workspaces-main' instead of cycling.
+Does NOT flash the destination tab — left/right cycling is
+high-frequency navigation and the flash becomes noise; identity-based
+jumps (`SPC p p', priority change, worktree jump) keep the flash since
+they're discrete attention cues."
   (let ((current-name (agent-repl--ws-current-name)))
     (if (agent-repl--ws-protected-p current-name)
         (agent-repl--ws-switch (agent-repl--ws-main-name) t)
       (condition-case-unless-debug ex
           (let* ((visible (agent-repl--filter-hidden-names
-                           (agent-repl--ws-list-names) current-name))
+                           (agent-repl--ws-tabline-names) current-name))
                  (perspc (length visible))
                  (index (cl-position current-name visible :test #'equal)))
             (when (= perspc 1)
@@ -3282,10 +3285,15 @@ Drop-in replacement for `+workspace/switch-right' that honors
 ;; named commands below are the only entry points bound to keys.
 
 (defun agent-repl--workspace-switch-by-index (index)
-  "Switch to workspace at zero-based INDEX in `agent-repl--ws-list-names'.
+  "Switch to workspace at zero-based INDEX in `agent-repl--ws-tabline-names'.
 Signals `user-error' if INDEX is out of range.  Pure persp wrapper —
-does not consult `current-prefix-arg' and does not flash the tab."
-  (let* ((names (agent-repl--ws-list-names))
+does not consult `current-prefix-arg' and does not flash the tab.
+
+Indexes the TAB-BAR list (`--ws-tabline-names'), not the raw workspace
+list, so a repo folded in the drawer takes its workspaces out of the
+numbering entirely and the remaining numbers stay contiguous — `SPC 3'
+always lands on the third tab the user can actually see."
+  (let* ((names (agent-repl--ws-tabline-names))
          (dest (nth index names)))
     (unless dest
       (user-error "No workspace at #%s" (1+ index)))
@@ -3385,9 +3393,11 @@ does not consult `current-prefix-arg' and does not flash the tab."
   (agent-repl--workspace-switch-by-index 17))
 
 (defun agent-repl-workspace-switch-to-final ()
-  "Switch to the final (last) workspace.  Thin wrapper, ignores prefix arg."
+  "Switch to the final (last) VISIBLE workspace.  Ignores prefix arg.
+Reads `agent-repl--ws-tabline-names', so the destination is the last
+tab actually rendered — workspaces of a folded repo are not candidates."
   (interactive)
-  (let* ((names (agent-repl--ws-list-names))
+  (let* ((names (agent-repl--ws-tabline-names))
          (dest (car (last names))))
     (unless dest
       (user-error "No workspaces"))

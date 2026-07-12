@@ -1876,5 +1876,102 @@ in the same shape (still leftmost, nil-name still at head)."
         (agent-repl--reorder-workspace-to-front "merge-failed-ws")
         (should (equal captured '("main" "merge-failed-ws" "ws-a" "ws-b")))))))
 
+;;;; ---- Tests: repo grouping + folding ----------------------------------
+
+(ert-deftest agent-repl-test-ws-repo-key-uses-cached-group-key ()
+  "`--ws-repo-key' short-circuits on the cached `:group-key' (no git)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws/")
+    (agent-repl--ws-put "ws" :group-key "/repos/doom/.git")
+    (should (equal (agent-repl--ws-repo-key "ws") "/repos/doom/.git"))))
+
+(ert-deftest agent-repl-test-ws-repo-group-falls-back-to-unknown-sentinel ()
+  "`--ws-repo-group' maps an unresolvable repo onto the `(no repo)' sentinel."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws/")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "")))
+      (should (equal (agent-repl--ws-repo-group "ws")
+                     agent-repl--repo-key-unknown)))))
+
+(ert-deftest agent-repl-test-repo-label-from-key ()
+  "`--repo-label' returns the basename of the parent of KEY."
+  (should (equal (agent-repl--repo-label "/x/y/explanation-engine/.git")
+                 "explanation-engine")))
+
+(ert-deftest agent-repl-test-repo-label-of-unknown-sentinel-is-the-sentinel ()
+  "`--repo-label' passes the `(no repo)' sentinel through as its own label."
+  (should (equal (agent-repl--repo-label agent-repl--repo-key-unknown)
+                 agent-repl--repo-key-unknown)))
+
+(ert-deftest agent-repl-test-repo-label-nil-key ()
+  "`--repo-label' returns nil for a nil KEY."
+  (should (null (agent-repl--repo-label nil))))
+
+(ert-deftest agent-repl-test-toggle-repo-fold-folds ()
+  "`--toggle-repo-fold' on an unfolded repo folds it."
+  (agent-repl-test--with-clean-state
+    (should (agent-repl--toggle-repo-fold "/repos/doom/.git"))
+    (should (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+(ert-deftest agent-repl-test-toggle-repo-fold-unfolds ()
+  "`--toggle-repo-fold' on a folded repo unfolds it."
+  (agent-repl-test--with-clean-state
+    (agent-repl--toggle-repo-fold "/repos/doom/.git")
+    (should-not (agent-repl--toggle-repo-fold "/repos/doom/.git"))
+    (should-not (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+(ert-deftest agent-repl-test-toggle-repo-fold-errors-on-nil-group ()
+  "`--toggle-repo-fold' fails hard on a nil repo group rather than folding nothing."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--toggle-repo-fold nil))))
+
+(ert-deftest agent-repl-test-repo-folded-p-false-for-untouched-repo ()
+  "`--repo-folded-p' is nil for a repo that was never folded."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+(ert-deftest agent-repl-test-folded-repo-keys-sorted ()
+  "`--folded-repo-keys' returns the folded keys in sorted order."
+  (agent-repl-test--with-clean-state
+    (agent-repl--toggle-repo-fold "/b/.git")
+    (agent-repl--toggle-repo-fold "/a/.git")
+    (should (equal (agent-repl--folded-repo-keys) '("/a/.git" "/b/.git")))))
+
+(ert-deftest agent-repl-test-filter-folded-names-drops-folded-repo ()
+  "`--filter-folded-names' drops the workspaces of a folded repo."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (should (equal (agent-repl--filter-folded-names '("doom-a" "ee-a") "doom-a")
+                   '("doom-a")))))
+
+(ert-deftest agent-repl-test-filter-folded-names-retains-current ()
+  "`--filter-folded-names' keeps CURRENT-NAME even when its repo is folded."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ee-a" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--ws-put "ee-b" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (should (equal (agent-repl--filter-folded-names '("ee-a" "ee-b") "ee-b")
+                   '("ee-b")))))
+
+(ert-deftest agent-repl-test-filter-folded-names-identity-when-nothing-folded ()
+  "`--filter-folded-names' returns NAMES untouched when no repo is folded."
+  (agent-repl-test--with-clean-state
+    (let ((names '("a" "b")))
+      (should (eq (agent-repl--filter-folded-names names "a") names)))))
+
+(ert-deftest agent-repl-test-ws-tabline-names-excludes-folded-repo ()
+  "`--ws-tabline-names' is the tab-bar list minus folded repos."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (let ((persp-names-cache '("doom-a" "ee-a")))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "doom-a")))
+        (should (equal (agent-repl--ws-tabline-names) '("doom-a")))))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

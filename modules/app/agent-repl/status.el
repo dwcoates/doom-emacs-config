@@ -1110,11 +1110,15 @@ workspaces at the persp layer (they are killed and leave
 so the raw persp list this renders is already the visible set and the
 1-indexed positions match `SPC <n>'.
 
-When NAMES is not supplied, defaults to `agent-repl--ws-list-names'
-(the persp-mode integration wrapper in `workspace.el') rather than
+When NAMES is not supplied, defaults to `agent-repl--ws-tabline-names'
+(the persp-mode integration wrapper in `workspace.el', minus the
+workspaces of repos folded in the drawer) rather than
 `+workspace-list-names' directly — the tab-bar reflects agent-repl's
-own notion of which workspaces it owns, not persp-mode's raw cache."
-  (let* ((names (if names-supplied-p names (agent-repl--ws-list-names)))
+own notion of which workspaces it owns, not persp-mode's raw cache.
+Folded repos drop out here, and since the index is a 1-based position
+in the surviving list, the visible tab numbers stay contiguous and keep
+matching `SPC <n>' (which indexes the same list)."
+  (let* ((names (if names-supplied-p names (agent-repl--ws-tabline-names)))
          (current-name (agent-repl--ws-current-name)))
     (cl-loop for name in names
              for i from 1
@@ -1297,14 +1301,15 @@ visible glyph is still the faced one.  Size and center rows to
   "Override for `+workspace--tabline' to color tabs by agent status.
 
 The tab-bar reflects every workspace in NAMES (defaulting to
-`agent-repl--ws-list-names' — the persp-mode integration wrapper
+`agent-repl--ws-tabline-names' — the persp-mode integration wrapper
 in `workspace.el', which intersects `persp-names-cache' with
-agent-repl's own registration); no hide-mode filtering is applied
-here.  Hide-mode operates at the persp level — `:hidden' workspaces
+agent-repl's own registration, then drops the workspaces of repos
+folded in the drawer); no hide-mode filtering is applied here.
+Hide-mode operates at the persp level — `:hidden' workspaces
 get persp-killed by `agent-repl--sweep-hidden-workspaces' on the
 next workspace switch and disappear from `persp-names-cache' (and
 therefore the tab-bar) naturally."
-  (let* ((resolved-names (if names-supplied-p names (agent-repl--ws-list-names)))
+  (let* ((resolved-names (if names-supplied-p names (agent-repl--ws-tabline-names)))
          (entries (agent-repl--tabline-rendered-entries resolved-names))
          (current-name (agent-repl--ws-current-name))
          (states (mapcar (lambda (n)
@@ -1350,10 +1355,14 @@ Appends the zero-width cache-buster
 \(`agent-repl--tabline-cache-buster') so the segment's string content
 actually changes across refresh ticks without changing its rendered
 width.  Without the cache-buster, face-only status transitions
-\(e.g. :thinking -> :done) stay invisible until a workspace switch."
+\(e.g. :thinking -> :done) stay invisible until a workspace switch.
+
+Enumerates `agent-repl--ws-tabline-names', so workspaces belonging to
+a repo folded in the drawer are absent from the rendered rows and the
+remaining tabs carry contiguous 1-based numbers."
   (let* ((width (frame-width))
          (line-width (max 1 (1- width)))
-         (names (agent-repl--ws-list-names))
+         (names (agent-repl--ws-tabline-names))
          (entries (agent-repl--tabline-rendered-entries names))
          (current (agent-repl--ws-current-name))
          (cur-pos (and current (cl-position current names :test #'equal)))
