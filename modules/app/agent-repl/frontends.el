@@ -250,17 +250,26 @@ first)."
 ;;;###autoload
 (defun agent-repl-switch-frontend ()
   "Switch the current workspace's frontend IN PLACE.
-The literal composition of the manual recipe (close, select, open):
+The literal composition of the manual recipe (close, select, open),
+carrying the CONVERSATION across — the frontend is presentation, the
+claude session is the shared backend:
 
-  1. KILL the current frontend's session and view (`SPC o C'
+  1. CAPTURE the durable claude session uuid from the current
+     frontend (its `durable-session-id-fn'), BEFORE the kill destroys
+     the session that knows it.
+  2. KILL the current frontend's session and view (`SPC o C'
      semantics: close means done), then WAIT (bounded, 3s) for it to
      actually stop — vterm teardown is async (SIGKILL fallback), and
      opening early used to trip already-running guards.
-  2. FLIP `:frontend' and persist it (what `agent-repl-select-frontend'
+  3. FLIP `:frontend' and persist it (what `agent-repl-select-frontend'
      would do, minus its running-session guard).
-  3. OPEN the other frontend exactly like `SPC o c': SHOW it when its
+  4. ADOPT the captured session uuid into the target frontend (its
+     `adopt-session-fn'), so the open below resumes the conversation
+     rather than starting a fresh one.  Skipped when either side lacks
+     the capability or no session ever ran (nil uuid).
+  5. OPEN the other frontend exactly like `SPC o c': SHOW it when its
      session is somehow still alive from before, else open it fresh.
-  4. ADOPT the target as the default NEW workspaces are born with
+  6. ADOPT the target as the default NEW workspaces are born with
      (`agent-repl--frontend-adopt-default'), leaving every
      already-existing workspace on the frontend it is presenting now.
 
@@ -279,10 +288,18 @@ otherwise it is read by completion."
       (agent-repl--frontend-validate-pair to-name (agent-repl--ws-backend-name ws))
       (let ((from (agent-repl-frontend-get from-name))
             (to (agent-repl-frontend-get to-name))
+            (durable nil)
             (step "kill"))
         (agent-repl--log ws "switch-frontend: %s -> %s" from-name to-name)
         (condition-case err
             (progn
+              ;; Capture the resume currency FIRST: the gui's durable id
+              ;; lives in the daemon session the kill below deletes.
+              (setq step (format "capture durable id from %s" from-name))
+              (when-let ((durable-fn (agent-repl-frontend-durable-session-id-fn from)))
+                (setq durable (funcall durable-fn ws))
+                (agent-repl--log ws "switch-frontend: durable claude session=%s"
+                                 (or durable "none")))
               (setq step (format "kill %s" from-name))
               (agent-repl--log ws "switch-frontend: step=%s" step)
               (funcall (agent-repl-frontend-kill-fn from) ws)
@@ -304,6 +321,14 @@ otherwise it is read by completion."
               ;; workspace as already-chosen and skips it.
               (setq step "adopt-default")
               (agent-repl--frontend-adopt-default to-name)
+              ;; Hand the conversation to the target frontend before the
+              ;; open, so it resumes the captured claude session instead
+              ;; of starting fresh.
+              (when durable
+                (when-let ((adopt-fn (agent-repl-frontend-adopt-session-fn to)))
+                  (setq step (format "adopt session into %s" to-name))
+                  (agent-repl--log ws "switch-frontend: step=%s" step)
+                  (funcall adopt-fn ws durable)))
               (if (funcall (agent-repl-frontend-running-p-fn to) ws)
                   (progn
                     (setq step (format "show %s" to-name))
