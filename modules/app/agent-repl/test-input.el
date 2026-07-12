@@ -1069,16 +1069,16 @@ than inline in input.el."
 
 (ert-deftest agent-repl-test-internal-command-prefix-is-plain-read-directive ()
   "`agent-repl--command-prefix' must be a plain read-the-file instruction.
-The metaprompt body AND its wrapper bookends are now read by the agent from
-`agent-repl-metaprompt-file-symlink'; neither the body nor the wrapper
-markers must be embedded inline in the derived prefix string, and the
-inline prefix must NOT use \"metaprompt\" as a conceptual framing so it
+The metaprompt body is read by the agent from
+`agent-repl-metaprompt-file-symlink'; neither the body nor the retired
+wrapper markers must be embedded inline in the derived prefix string, and
+the inline prefix must NOT use \"metaprompt\" as a conceptual framing so it
 cannot confuse the agent into refusing to read the file (the bare filename
 inside the path is allowed and unavoidable)."
   (should (stringp agent-repl--command-prefix))
   ;; Plain read-directive is present.
   (should (string-match-p "read the file at" agent-repl--command-prefix))
-  ;; Wrapper bookends are NOT present in the derived prefix — they live in the file.
+  ;; The retired wrapper bookends are present nowhere, the prefix included.
   (should-not (string-match-p "start of metaprompt-read-directive"
                               agent-repl--command-prefix))
   (should-not (string-match-p "metaprompt-read-directive over"
@@ -1093,15 +1093,19 @@ inside the path is allowed and unavoidable)."
   (should-not (string-match-p "MECE numbered ASCII tree"
                               agent-repl--command-prefix)))
 
-(ert-deftest agent-repl-test-metaprompt-file-contains-wrapper-bookends ()
-  "The metaprompt .md file must contain the wrapper bookend markers.
-These used to live in the inline prefix template but were moved into the
-file body so the inline prefix can be a plain, metaprompt-free read-the-file
-directive that the agent does not refuse to act on."
-  (should (string-match-p "<<\\*start of metaprompt-read-directive\\*"
-                          agent-repl-command-prefix))
-  (should (string-match-p "\\*metaprompt-read-directive over"
-                          agent-repl-command-prefix)))
+(ert-deftest agent-repl-test-metaprompt-file-carries-the-body ()
+  "`agent-repl-command-prefix' mirrors the metaprompt .md file's body.
+The body is the whole point of the file: the inline prefix is only a
+directive to go read it, so a prefix that does not carry the body means
+the canonical source was never loaded."
+  (should (string-match-p "MECE numbered ASCII tree" agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-metaprompt-file-carries-no-wrapper-bookends ()
+  "The metaprompt .md file carries no `metaprompt-read-directive' bookends.
+The bookends once wrapped the file body (having earlier been moved there out
+of the inline template), and were then removed outright — the file is read
+whole, so it needs no markers delimiting where it starts and ends."
+  (should-not (string-match-p "metaprompt-read-directive" agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-internal-command-prefix-references-symlink ()
   "`agent-repl--command-prefix' must embed `agent-repl-metaprompt-file-symlink'.
