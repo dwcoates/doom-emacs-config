@@ -716,6 +716,12 @@ to, even if another switch raced ahead before the timer fired.
 Also opens panels for workspaces that were created with a preemptive
 prompt, and auto-selects the input window if visible.
 
+Snaps the agent's output to its newest content in BOTH frontends, so a
+switched-to workspace never shows stale middle-of-history output: the
+vterm window jumps to the cursor (`--maybe-autoselect-input'), and a
+gui workspace's webview feed jumps to its last message
+\(`agent-repl--frontend-snap-webview-to-tail').
+
 If the newly-active workspace has `:agent-state :done', stamps
 `:done-acked' to t and `:done-acked-at' to the current time so the
 decay timer can clear :done → :idle once
@@ -754,6 +760,12 @@ pending merge auto-fire."
     (agent-repl--drain-pending-initial-buffers ws)
     (agent-repl--drain-pending-show-panels ws)
     (agent-repl--maybe-autoselect-input ws)
+    ;; The gui half of the same snap `--maybe-autoselect-input' does for
+    ;; vterm: the workspace comes back showing its agent's newest output,
+    ;; never the middle of the history the feed was left scrolled up to.
+    ;; Runs after the show drain, so a webview that just became visible is
+    ;; snapped too.
+    (agent-repl--frontend-snap-webview-to-tail ws)
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
     ;; ws-fully-loaded hook; otherwise we just record the bit and wait

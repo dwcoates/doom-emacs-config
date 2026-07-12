@@ -10,7 +10,7 @@ import { inline, renderMarkdown } from "./markdown.js";
 import { stripMetaSpans } from "./meta.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { Usage } from "./protocol.js";
-import { isPinnedToBottom } from "./scroll.js";
+import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -758,7 +758,7 @@ export class FeedRenderer {
     };
     const chunks = backfillChunks(shells.length, BACKFILL_CHUNK);
     if (chunks.length > 0) fillChunk(chunks[0]);
-    this.container.scrollTop = this.container.scrollHeight;
+    parkAtTail(this.container);
     this.backfillQueue = chunks.slice(1).map((c) => () => fillChunk(c));
     this.scheduleBackfill();
   }
@@ -828,7 +828,7 @@ export class FeedRenderer {
       }
     }
     if (toTail) {
-      this.container.scrollTop = this.container.scrollHeight;
+      parkAtTail(this.container);
     }
   }
 }

@@ -290,6 +290,65 @@ this one and `y' lands on the major mode's aux map instead."
     ;; Assert
     (should (equal kill-ring '("previous kill")))))
 
+;;;; ---- Snapping the feed to its newest message -------------------------------
+
+(ert-deftest agent-repl-test-frontend-snap-to-tail-runs-the-hook ()
+  "The snap evaluates the webapp's tail hook inside the live webview."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+          (calls nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (b script) (push (cons b script) calls))))
+              ;; Act
+              (agent-repl--frontend-snap-webview-to-tail "ws1")
+              ;; Assert
+              (should (equal calls
+                             (list (cons buf
+                                         (concat "window.agentReplParkAtTail && "
+                                                 "window.agentReplParkAtTail();")))))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-snap-to-tail-hook-name-matches-webapp ()
+  "The hook name lisp calls is the one the webapp plants on `window'.
+The two constants are a single cross-language contract: webapp/src/host.ts
+exports `TAIL_HOOK', frontend.el names it in the script it evaluates, and a
+rename on either side silently turns the snap into a no-op."
+  ;; Arrange
+  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
+         (source (progn
+                   (should (file-exists-p host-ts))
+                   (with-temp-buffer
+                     (insert-file-contents host-ts)
+                     (buffer-string)))))
+    ;; Act + Assert
+    (should (string-match-p
+             (regexp-quote (format "export const TAIL_HOOK = \"%s\";"
+                                   agent-repl-frontend-tail-hook))
+             source))))
+
+(ert-deftest agent-repl-test-frontend-snap-to-tail-without-webview-is-noop ()
+  "A workspace with no webview (a vterm one) is never asked to snap.
+The wrapper is left guarded, so any call would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
+    (agent-repl--frontend-snap-webview-to-tail "ws1")))
+
+(ert-deftest agent-repl-test-frontend-snap-to-tail-dead-webview-is-noop ()
+  "A recorded but killed webview is never asked to snap.
+The wrapper is left guarded, so any call would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (kill-buffer buf)
+      ;; Act + Assert — the dead buffer is not reachable by a script.
+      (agent-repl--frontend-snap-webview-to-tail "ws1"))))
+
 ;;;; ---- Placement ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-display-hides-panels-first ()

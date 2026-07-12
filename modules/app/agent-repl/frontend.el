@@ -71,6 +71,7 @@
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
 (declare-function xwidget-webkit-get-selection "xwidget" (proc))
+(declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
@@ -116,6 +117,53 @@ webview).  Body does nothing but the external calls; tests mock via
     (with-current-buffer buf
       (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
     buf))
+
+(defun agent-repl--frontend-webview-execute-script (buf script)
+  "External-boundary wrapper: evaluate SCRIPT inside BUF's webview.
+Evaluating JavaScript against the live document is the ONLY channel
+Emacs has into a mounted webview, so every host-driven action on the
+webapp goes through here.  Body does nothing but the external calls;
+tests mock via `cl-letf'.  Registered in
+`agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (with-current-buffer buf
+    (xwidget-webkit-execute-script (xwidget-webkit-current-session) script))) ;; ALLOW-EXTERNAL-BOUNDARY
+
+;;;; ---- Snapping the feed to its newest message -------------------------------
+
+(defconst agent-repl-frontend-tail-hook "agentReplParkAtTail"
+  "Name of the webapp global that parks the feed at its newest message.
+The webapp plants it on `window' at boot (`TAIL_HOOK' in
+webapp/src/host.ts) — the two names are one contract and MUST match.")
+
+(defun agent-repl--frontend-tail-script ()
+  "Return the JavaScript that snaps the webview's feed to its tail.
+Calls the hook only when the webapp has already planted it: a webview
+mid-navigation has no hook yet, and that is an expected state rather
+than a violated invariant — a page that has not finished booting has
+nothing to snap, and the boot's own restored-session render parks it at
+the tail anyway."
+  (format "window.%s && window.%s();"
+          agent-repl-frontend-tail-hook
+          agent-repl-frontend-tail-hook))
+
+(defun agent-repl--frontend-snap-webview-to-tail (ws)
+  "Snap WS's webview feed to its newest message, with no scroll animation.
+The gui counterpart of the vterm path's
+`agent-repl--snap-vterm-window-to-cursor' (panels.el): switching TO a
+workspace must show its agent's latest output immediately, not the
+middle of the history the user happened to leave the feed scrolled up
+to.  The snap is a scrollTop assignment inside the page, so the tail is
+simply THERE on the next frame.
+
+No-op when WS has no live webview — a vterm workspace has no
+`:frontend-buffer' at all, and a gui workspace whose panel is closed
+mounts a fresh webview (already tail-parked) on its next open."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (agent-repl--log ws "snap-webview-to-tail: buf=%s" (buffer-name buf))
+      (agent-repl--frontend-webview-execute-script
+       buf (agent-repl--frontend-tail-script)))))
 
 (defun agent-repl--frontend-kill-webview (buf)
   "Kill webview BUF without the xwidget kill-query prompt.
