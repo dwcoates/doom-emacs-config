@@ -1070,7 +1070,7 @@ than inline in input.el."
 (ert-deftest agent-repl-test-internal-command-prefix-is-plain-read-directive ()
   "`agent-repl--command-prefix' must be a plain read-the-file instruction.
 The metaprompt body is read by the agent from
-`agent-repl-metaprompt-file-symlink'; neither the body nor the retired
+`agent-repl-metaprompt-file'; neither the body nor the retired
 wrapper markers must be embedded inline in the derived prefix string, and
 the inline prefix must NOT use \"metaprompt\" as a conceptual framing so it
 cannot confuse the agent into refusing to read the file (the bare filename
@@ -1107,13 +1107,22 @@ of the inline template), and were then removed outright — the file is read
 whole, so it needs no markers delimiting where it starts and ends."
   (should-not (string-match-p "metaprompt-read-directive" agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-internal-command-prefix-references-symlink ()
-  "`agent-repl--command-prefix' must embed `agent-repl-metaprompt-file-symlink'.
-The wrapper's job is to point the agent at the user-facing symlink path so
-the metaprompt body is loaded from there."
+(ert-deftest agent-repl-test-internal-command-prefix-references-in-repo-file ()
+  "`agent-repl--command-prefix' must embed `agent-repl-metaprompt-file'.
+The wrapper's job is to point the agent at the canonical in-repo metaprompt
+path, so the body is loaded from the version-controlled file itself rather
+than through an out-of-tree symlink."
   (should (string-match-p
-           (regexp-quote agent-repl-metaprompt-file-symlink)
+           (regexp-quote agent-repl-metaprompt-file)
            agent-repl--command-prefix)))
+
+(ert-deftest agent-repl-test-internal-command-prefix-references-no-external-path ()
+  "The read-directive must not point outside the repository.
+The metaprompt lived behind `~/.config/claude/emacs/metaprompt.md' (a
+symlink into this repo) before it was referenced in-repo directly; a
+directive still naming that path would resurrect the indirection."
+  (should-not (string-match-p (regexp-quote "/.config/claude/")
+                              agent-repl--command-prefix)))
 
 (ert-deftest agent-repl-test-internal-command-prefix-read-directive-is-unconditional ()
   "The inline directive must instruct the agent to read the file even if already loaded.
@@ -1137,10 +1146,13 @@ has previously done so during the session and even if it has not changed."
   (should (equal (file-name-nondirectory agent-repl-metaprompt-file)
                  "metaprompt.md")))
 
-(ert-deftest agent-repl-test-metaprompt-file-symlink-default ()
-  "`agent-repl-metaprompt-file-symlink' should default to the user-facing path."
-  (should (equal (default-value 'agent-repl-metaprompt-file-symlink)
-                 "~/.config/claude/emacs/metaprompt.md")))
+(ert-deftest agent-repl-test-metaprompt-file-lives-beside-input-el ()
+  "`agent-repl-metaprompt-file' must resolve inside the agent-repl module.
+The metaprompt is version-controlled alongside the code that sends it, so
+the directory the agent is pointed at is the one holding input.el itself."
+  (should (file-readable-p
+           (expand-file-name "input.el"
+                             (file-name-directory agent-repl-metaprompt-file)))))
 
 (ert-deftest agent-repl-test-command-prefix-matches-md-file-content ()
   "`agent-repl-command-prefix' must equal the on-disk metaprompt.md content.
