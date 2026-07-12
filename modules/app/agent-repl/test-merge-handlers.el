@@ -435,13 +435,12 @@ path can re-enqueue with :halt-until-human t."
 (defmacro agent-repl-test--with-on-merged-mocks (&rest body)
   "Run BODY with the git/close side effects of `--pr-poll-on-merged' captured.
 Binds `captured' plist with keys :fetch :ff :checkout :close-then
-:close :magit-refresh.  Always mocks `--events-record' to a no-op."
+:close :magit-refresh."
   (declare (indent 0))
   `(let ((captured (list :fetch nil :ff nil :checkout nil :close-then nil
                          :close nil :magit-refresh nil)))
      (cl-letf
-         (((symbol-function 'agent-repl--events-record) (lambda (&rest _) nil))
-          ((symbol-function 'agent-repl--git-exit-code)
+         (((symbol-function 'agent-repl--git-exit-code)
            (lambda (&rest args)
              (plist-put captured :fetch (cons args (plist-get captured :fetch)))
              0))

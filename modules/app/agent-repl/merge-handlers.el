@@ -368,8 +368,6 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
                        (or (and main-dir
                                 (agent-repl--git-branch-of-dir main-dir))
                            agent-repl-master-branch-name))
-  (when (fboundp 'agent-repl--events-record)
-    (agent-repl--events-record ws :merge))
   (agent-repl--ws-put ws :repl-state :merged)
   (agent-repl--ws-put ws :agent-state nil)
   (agent-repl--gns-sockets-close-then

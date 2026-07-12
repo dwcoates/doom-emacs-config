@@ -268,7 +268,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "overlay")
 (agent-repl--load-module "status")
 (agent-repl--load-module "workspace-status-export")
-(agent-repl--load-module "events")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "sentinel")
 (agent-repl--load-module "vterm-freeze")

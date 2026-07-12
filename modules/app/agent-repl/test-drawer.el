@@ -659,6 +659,23 @@ overlay.  Tests the workspace-anchored restoration path."
         (should-not (equal sig-before
                            (agent-repl-drawer--render-signature)))))))
 
+;;;; ---- Events summary removal ----
+
+(ert-deftest agent-repl-drawer-test-no-last-24h-header ()
+  "The drawer renders no \"Last 24h\" events summary above its sections."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws1" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should-not (string-match-p "Last 24h" text))))))
+
+(ert-deftest agent-repl-drawer-test-events-subsystem-removed ()
+  "The workspace event log that fed the \"Last 24h\" summary is gone."
+  (should-not (fboundp 'agent-repl--events-record))
+  (should-not (fboundp 'agent-repl--events-recent))
+  (should-not (fboundp 'agent-repl-drawer--insert-events-header)))
+
 (ert-deftest agent-repl-drawer-test-format-duration ()
   "`--format-duration' produces short human-readable strings."
   (should (equal (agent-repl-drawer--format-duration 30)   "30s ago"))

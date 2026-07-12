@@ -182,16 +182,6 @@ Default is near-black."
   "Face for the rule line beneath a section title."
   :group 'agent-repl)
 
-(defface agent-repl-drawer-events-header
-  '((t :inherit font-lock-comment-face :weight bold))
-  "Face for the events summary header at the top of the drawer."
-  :group 'agent-repl)
-
-(defface agent-repl-drawer-events-line
-  '((t :inherit shadow))
-  "Face for the events summary body line(s) at the top of the drawer."
-  :group 'agent-repl)
-
 (defface agent-repl-drawer-group-label
   '((t :foreground "white" :weight bold :height 1.15))
   "Face for repo group labels in drawer sections.
@@ -1020,39 +1010,6 @@ header."
            (trees (agent-repl-drawer--build-tree workspaces parent-fn)))
       (agent-repl-drawer--render-trees trees current section))))
 
-(defun agent-repl-drawer--format-event-age (seconds)
-  "Format SECONDS as a short relative age (e.g. \"3m\", \"2h\")."
-  (cond
-   ((< seconds 60)   (format "%ds" (max 0 (truncate seconds))))
-   ((< seconds 3600) (format "%dm" (truncate (/ seconds 60))))
-   (t                (format "%dh" (truncate (/ seconds 3600))))))
-
-(defun agent-repl-drawer--insert-events-header ()
-  "Insert a one-block summary of workspace create/merge events from the last 24h.
-No-op when no events are recorded in that window."
-  (when (fboundp 'agent-repl--events-recent)
-    (let* ((now (float-time))
-           (events (agent-repl--events-recent now))
-           (creates (agent-repl--events-count-by-kind events :create))
-           (merges  (agent-repl--events-count-by-kind events :merge)))
-      (when events
-        (insert (propertize " Last 24h\n"
-                            'face 'agent-repl-drawer-events-header))
-        (insert (propertize
-                 (format "   ✨ %d created   🔀 %d merged\n" creates merges)
-                 'face 'agent-repl-drawer-events-line))
-        (dolist (ev (seq-take events 5))
-          (let* ((kind (plist-get ev :kind))
-                 (ws   (plist-get ev :ws))
-                 (ts   (plist-get ev :time))
-                 (glyph (cond ((eq kind :create) "✨")
-                              ((eq kind :merge)  "🔀")
-                              (t "·")))
-                 (age  (agent-repl-drawer--format-event-age (- now (or ts now)))))
-            (insert (propertize
-                     (format "   %s %s  %s\n" glyph age (or ws "?"))
-                     'face 'agent-repl-drawer-events-line))))))))
-
 (defun agent-repl-drawer--insert-content ()
   "Insert the drawer's full content into the current buffer.
 Extracted from `--render' so `--render' can build content in a temp
@@ -1064,7 +1021,6 @@ must set those in the current buffer before calling."
   (let* ((current  (agent-repl-drawer--current-ws))
          (sections (agent-repl-drawer--partition-by-section
                     (agent-repl-drawer--visible-workspace-keys))))
-    (agent-repl-drawer--insert-events-header)
     (insert "\n")
     (let ((mains    (alist-get :main    sections))
           (hiddens  (alist-get :hidden  sections))
@@ -1096,9 +1052,7 @@ always proceeds even if the natural signature happens to be nil.")
 Sorted on workspace names so the result is stable across hash-table
 iteration order.  Captures the same plist values the render helpers
 read (state, git/merge status, priority, summary, group), plus
-marked/expanded sets per ws, current workspace, and the events
-header's formatted age buckets — the latter ensures the header
-updates as ages cross the s/m/h boundaries (`--format-event-age')."
+marked/expanded sets per ws and the current workspace."
   (let (ws-sig)
     (dolist (ws (sort (agent-repl-drawer--visible-workspace-keys) #'string<))
       (push (list ws
@@ -1114,14 +1068,7 @@ updates as ages cross the s/m/h boundaries (`--format-event-age')."
                   (agent-repl-drawer--expanded-p ws))
             ws-sig))
     (list (agent-repl-drawer--current-ws)
-          ws-sig
-          (when (fboundp 'agent-repl--events-recent)
-            (let ((now (float-time)))
-              (mapcar (lambda (ev)
-                        (cons (plist-get ev :kind)
-                              (agent-repl-drawer--format-event-age
-                               (- now (or (plist-get ev :time) now)))))
-                      (seq-take (agent-repl--events-recent now) 5)))))))
+          ws-sig)))
 
 (defun agent-repl-drawer--render ()
   "Render the drawer, skipping the buffer rewrite when content is unchanged.
