@@ -135,6 +135,9 @@ pre {
    output stays reachable by scrolling. */
 .tool-read-output { line-height: 1.4; max-height: calc(10 * 1.4em + 0.35rem + 1px); }
 .tool-read-output .line-no { color: var(--muted); }
+/* Markdown Reads render formatted (no gutter); same capped box, minus
+   the phantom leading gap from the first block's own margin. */
+.tool-read-md > :first-child { margin-top: 0; }
 .tool-progress { color: var(--muted); font-style: italic; }
 .stderr { color: var(--err); }
 
