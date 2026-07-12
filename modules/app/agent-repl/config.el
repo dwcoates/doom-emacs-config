@@ -11,7 +11,43 @@
 
 ;;; Code:
 
-(message "[agent-repl] Loading Agent-Repl package...")
+;;;; ---- Bootstrap-phase emission ----
+;;
+;; config.el is the one file that cannot lean on core.el's log-severity
+;; ladder (`agent-repl--info' / `agent-repl--warn'): it runs BEFORE core.el
+;; is loaded, and it is also the code that REPORTS core.el failing to load.
+;; So it carries its own bootstrap-phase stand-ins, which preserve exactly
+;; the bifurcation the ladder enforces:
+;;
+;;   quiet notices  -> *Messages* only, never the echo area / modeline
+;;   warnings       -> *Messages* AND the echo area
+;;
+;; Once core.el has loaded, both helpers delegate to the real ladder, so
+;; lines emitted after that point still reach the log FILE.  Before it, they
+;; degrade to a bare `message' rather than a void-function crash.
+
+(defun agent-repl--boot-info (fmt &rest args)
+  "Emit a bootstrap-phase notice for FMT and ARGS to the QUIET sink.
+Delegates to `agent-repl--info' once core.el has defined it.  Before then,
+falls back to a `message' quieted with `inhibit-message', so the line still
+lands in *Messages* but never flashes in the echo area."
+  (if (fboundp 'agent-repl--info)
+      (apply #'agent-repl--info nil fmt args)
+    (let ((inhibit-message t))
+      (apply #'message (concat "[agent-repl] " fmt) args))))
+
+(defun agent-repl--boot-warn (fmt &rest args)
+  "Emit a bootstrap-phase WARNING for FMT and ARGS to the LOUD sink.
+Delegates to `agent-repl--warn' once core.el has defined it.  Before then,
+falls back to a bare `message', which already reaches the echo area — the
+same channel `agent-repl--warn' would have used.  The fallback matters:
+core.el is the one module whose load failure leaves the ladder undefined,
+and that failure is precisely what must still be reported."
+  (if (fboundp 'agent-repl--warn)
+      (apply #'agent-repl--warn nil fmt args)
+    (apply #'message (concat "[agent-repl] WARNING: " fmt) args)))
+
+(agent-repl--boot-info "Loading Agent-Repl package...")
 
 (defvar agent-repl--config-file
   (or load-file-name buffer-file-name)
@@ -27,14 +63,19 @@
 (setq agent-repl--load-errors nil)
 
 (defmacro agent-repl--load-module (file)
-  "Load FILE via `load!', recording any error for collective reporting."
+  "Load FILE via `load!', recording any error for collective reporting.
+The per-file success line is background chatter and goes to the quiet sink
+via `agent-repl--boot-info'; a load FAILURE is loud, via
+`agent-repl--boot-warn'.  Both use the bootstrap helpers rather than the
+core.el ladder directly because the very first expansion of this macro is
+what loads core.el."
   `(condition-case err
        (progn
          (load! ,file)
-         (message "[agent-repl] %s.el loaded." ,file))
+         (agent-repl--boot-info "%s.el loaded." ,file))
      (error
       (push (cons ,file err) agent-repl--load-errors)
-      (message "[agent-repl] FAILED to load %s.el: %S" ,file err))))
+      (agent-repl--boot-warn "FAILED to load %s.el: %S" ,file err))))
 
 ;; ---- Early orphan cherry-pick recovery ----
 ;;
@@ -141,8 +182,11 @@ recovered source workspaces appended to `:merge-queue' for retry."
                  (in-flight (and (consp raw) (keywordp (car raw))
                                  (plist-get raw :in-flight-merges))))
             (when in-flight
-              (message "[agent-repl] early-recovery: scanning %d in-flight merge entries"
-                       (length in-flight))
+              ;; Early recovery runs pre-core.el, so it emits through the
+              ;; bootstrap helpers: progress lines are quiet, dropped/failed
+              ;; entries are loud.
+              (agent-repl--boot-info "early-recovery: scanning %d in-flight merge entries"
+                                     (length in-flight))
               (let ((recovered nil))
                 (dolist (entry in-flight)
                   (let* ((source-ws (plist-get entry :source-ws))
@@ -154,19 +198,19 @@ recovered source workspaces appended to `:merge-queue' for retry."
                     ;; entry's stale path.
                     (cond
                      ((or (null source-ws) (null target-dir))
-                      (message "[agent-repl] early-recovery: malformed entry %S — skipping"
-                               entry))
+                      (agent-repl--boot-warn "early-recovery: malformed entry %S — skipping"
+                                             entry))
                      (t
                       (let ((cp-head (agent-repl--early-cherry-pick-head-at target-dir)))
                         (cond
                          (cp-head
                           (let ((exit-code (agent-repl--early-abort-cherry-pick target-dir)))
-                            (message "[agent-repl] early-recovery: ws=%s aborted cherry-pick in %s (exit=%d) — re-enqueueing"
-                                     source-ws target-dir exit-code)
+                            (agent-repl--boot-info "early-recovery: ws=%s aborted cherry-pick in %s (exit=%d) — re-enqueueing"
+                                                   source-ws target-dir exit-code)
                             (push recovered-entry recovered)))
                          (t
-                          (message "[agent-repl] early-recovery: ws=%s no orphan CHERRY_PICK_HEAD at %s — clearing bookkeeping"
-                                   source-ws target-dir))))))))
+                          (agent-repl--boot-info "early-recovery: ws=%s no orphan CHERRY_PICK_HEAD at %s — clearing bookkeeping"
+                                                 source-ws target-dir))))))))
                 ;; Rewrite the snapshot: clear :in-flight-merges and
                 ;; append recovered entries to :merge-queue.
                 (let* ((workspaces (plist-get raw :workspaces))
@@ -193,10 +237,10 @@ recovered source workspaces appended to `:merge-queue' for retry."
                     (let ((print-length nil)
                           (print-level nil))
                       (prin1 new-raw (current-buffer))))
-                  (message "[agent-repl] early-recovery: snapshot rewritten — merge-queue=%d in-flight=0 recovered=%d"
-                           (length new-queue) (length recovered))))))
+                  (agent-repl--boot-info "early-recovery: snapshot rewritten — merge-queue=%d in-flight=0 recovered=%d"
+                                         (length new-queue) (length recovered))))))
         (error
-         (message "[agent-repl] early-recovery: failed err=%S" err))))))
+         (agent-repl--boot-warn "early-recovery: failed err=%S" err))))))
 
 (agent-repl--early-recover-orphan-cherry-picks)
 
@@ -295,12 +339,15 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 
 (if agent-repl--load-errors
     (progn
-      (message "[agent-repl] Loaded with %d ERROR(S):" (length agent-repl--load-errors))
+      ;; `agent-repl--boot-warn', not `agent-repl--warn': this branch is
+      ;; reached precisely when a module failed, and core.el is a module —
+      ;; so the real ladder may not exist to report its own absence.
+      (agent-repl--boot-warn "Loaded with %d ERROR(S):" (length agent-repl--load-errors))
       (dolist (pair (nreverse agent-repl--load-errors))
-        (message "[agent-repl]   %s.el: %S" (car pair) (cdr pair)))
+        (agent-repl--boot-warn "  %s.el: %S" (car pair) (cdr pair)))
       (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
              (length agent-repl--load-errors)))
-  (message "[agent-repl] Loaded Agent-Repl package."))
+  (agent-repl--info nil "Loaded Agent-Repl package."))
 
 ;; Snapshot restore is wired to `emacs-startup-hook' through an idle
 ;; timer (`agent-repl-snapshot-startup-load-delay' seconds).  The
