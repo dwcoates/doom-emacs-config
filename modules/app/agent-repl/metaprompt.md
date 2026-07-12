@@ -111,6 +111,19 @@
 
 I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y broken?' do not infer that I want a fix; just answer.
 
+### Markdown inline code for every code-like reference
+
+- Every code-like reference in the response MUST be wrapped in markdown inline code (a single backtick on each side).
+  - Code symbols are code-like references (function, variable, type, class, and any other identifier name).
+  - Keybindings are code-like references (e.g. `SPC j h c`, `C-c C-k`).
+  - Filenames, directories, and paths are code-like references (e.g. `input.el`, `modules/app/agent-repl/metaprompt.md`), as are `file:line` anchors.
+  - Shell commands, flags, and literal values are code-like references (e.g. `git stash -u`, `--one-shot`, `nil`).
+- This section is the SINGLE home of the inline-code directive, and it governs the WHOLE response.
+  - It applies to every bullet of the TLDR tree at every depth, and to the response header line.
+  - No other section of this metaprompt restates it, so this rule alone covers every code-like reference anywhere.
+- Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
+  - Inline code marks a literal, typeable token, not the idea that token names.
+
 ### The response IS a single TLDR tree
 
 - The ENTIRE response should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.

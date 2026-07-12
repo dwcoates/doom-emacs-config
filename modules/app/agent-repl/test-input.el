@@ -975,9 +975,72 @@ metaprompt must NOT carry the old main-body emoji restriction."
   (should-not (string-match-p "Do NOT prefix top-level bullets with emojis"
                               agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-command-prefix-omits-inline-code-formatting-directive ()
-  "The inline-code-formatting directive was dropped because it confused the agent,
-so the metaprompt must NOT carry it any longer."
+(defun agent-repl-test--count-matches (regexp string)
+  "Return how many non-overlapping times REGEXP case-sensitively matches STRING."
+  (let ((case-fold-search nil)
+        (count 0)
+        (start 0))
+    (while (string-match regexp string start)
+      (setq count (1+ count)
+            start (max (match-end 0) (1+ (match-beginning 0)))))
+    count))
+
+(ert-deftest agent-repl-test-command-prefix-mandates-markdown-inline-code ()
+  "The metaprompt must mandate wrapping every code-like reference in markdown inline code."
+  (should (string-match-p
+           "Every code-like reference in the response MUST be wrapped in markdown inline code"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-covers-symbols ()
+  "The inline-code directive must name code symbols as code-like references."
+  (should (string-match-p
+           "Code symbols are code-like references"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-covers-keybindings ()
+  "The inline-code directive must name keybindings as code-like references."
+  (should (string-match-p
+           "Keybindings are code-like references"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-covers-filenames ()
+  "The inline-code directive must name filenames and paths as code-like references."
+  (should (string-match-p
+           "Filenames, directories, and paths are code-like references"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-covers-commands-and-literals ()
+  "The inline-code directive must name shell commands, flags, and literals as code-like references."
+  (should (string-match-p
+           "Shell commands, flags, and literal values are code-like references"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-governs-whole-response ()
+  "The inline-code directive must govern the whole response, tree bullets and header line alike."
+  (should (string-match-p
+           "governs the WHOLE response"
+           agent-repl-command-prefix))
+  (should (string-match-p
+           "every bullet of the TLDR tree at every depth, and to the response header line"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-directive-lives-in-one-place ()
+  "The inline-code directive must be stated in exactly one section, with no restatement elsewhere."
+  (should (= 1 (agent-repl-test--count-matches
+                "^### Markdown inline code for every code-like reference$"
+                agent-repl-command-prefix)))
+  (should (= 1 (agent-repl-test--count-matches
+                "markdown inline code"
+                agent-repl-command-prefix))))
+
+(ert-deftest agent-repl-test-command-prefix-inline-code-forbids-escaped-backticks ()
+  "The inline-code directive must forbid escaping backticks and wrapping plain-english concepts."
+  (should (string-match-p
+           "Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-command-prefix-omits-confusing-inline-code-phrasing ()
+  "The old, confusing inline-code phrasing must not return alongside the new directive."
   (should-not (string-match-p
                "standard markdown inline code spawns"
                agent-repl-command-prefix))
