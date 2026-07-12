@@ -5,7 +5,8 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
-import { renderMarkdown } from "./markdown.js";
+import { inline, renderMarkdown } from "./markdown.js";
+import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { Usage } from "./protocol.js";
 import {
   CompactBoundaryItem,
@@ -121,6 +122,15 @@ function UserTurn(item: UserTurnItem): string {
 
 function TextStream(item: TextItem): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
+  // A bare metaprompt TLDR tree (no code fence — fenced trees are the
+  // markdown fence handler's job) renders as hanging-indent tree lines;
+  // the markdown pipeline would shear its wrapped branches to column 0.
+  if (!item.text.includes("```") && isMetapromptTree(item.text)) {
+    return `<div class="bubble assistant md"><div class="mp-tree">${renderTreeHtml(
+      item.text,
+      inline,
+    )}</div>${cursor}</div>`;
+  }
   return `<div class="bubble assistant md">${renderMarkdown(item.text)}${cursor}</div>`;
 }
 

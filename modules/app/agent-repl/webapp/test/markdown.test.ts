@@ -142,3 +142,40 @@ describe("renderMarkdown safety", () => {
     expect(renderMarkdown("# <b>h</b>\n- <i>x</i>")).not.toMatch(/<[bi]>/);
   });
 });
+
+describe("metaprompt trees in fences", () => {
+  it("renders a plain fence carrying a tree as hanging-indent lines", () => {
+    // Arrange
+    const text = [
+      "```",
+      "1 🔧 Fixed the thing",
+      "├── 1.1 Detail one",
+      "└── 1.2 Detail two",
+      "```",
+    ].join("\n");
+    // Act
+    const html = renderMarkdown(text);
+    // Assert
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
+    expect(html).not.toContain("md-code");
+  });
+
+  it("keeps a language-tagged fence on the code path even if tree-shaped", () => {
+    // Arrange — an explicit language wins over the tree heuristic.
+    const text = "```text\n1 🔧 A\n├── 1.1 B\n```";
+    // Act
+    const html = renderMarkdown(text);
+    // Assert
+    expect(html).toContain("md-code");
+    expect(html).not.toContain("mp-tree");
+  });
+
+  it("keeps a plain non-tree fence on the code path", () => {
+    // Act
+    const html = renderMarkdown("```\nplain code\nmore code\n```");
+    // Assert
+    expect(html).toContain("md-code");
+    expect(html).not.toContain("mp-tree");
+  });
+});
