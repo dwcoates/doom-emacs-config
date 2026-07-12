@@ -136,17 +136,20 @@ pre {
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
 .tool-output { max-height: 16rem; overflow-y: auto; border-top: 1px dashed var(--border); margin-top: 0.35rem; padding-top: 0.35rem; }
-/* Read preview: cap at 10 visible lines (line-height × 10, plus the
-   padding and dashed divider inherited from .tool-output); the full
-   output stays reachable by scrolling. */
-.tool-read-output { line-height: 1.4; max-height: calc(10 * 1.4em + 0.35rem + 1px); }
-/* Bash: command and output each cap at 5 visible lines, independently
-   scrollable (the output's extra allowance covers the .tool-output
-   divider padding it inherits). */
-.bash-input { line-height: 1.4; max-height: calc(5 * 1.4em); overflow-y: auto; }
-.bash-output { line-height: 1.4; max-height: calc(5 * 1.4em + 0.35rem + 1px); }
-/* Edit diffs: the Read preview's 10-line cap, scrollable for the rest. */
-.diff-output { line-height: 1.4; max-height: calc(10 * 1.4em); overflow-y: auto; }
+/* N-line preview caps, one shared mechanic: --cap-lines is the visible
+   line budget (Read and Edit diffs get 10, Bash command and output get
+   5 each, independently scrollable) and --cap-extra absorbs the
+   .tool-output dashed-divider padding where inherited. Everything past
+   the cap stays reachable by scrolling. */
+.tool-read-output, .bash-input, .bash-output, .diff-output {
+  line-height: 1.4;
+  overflow-y: auto;
+  max-height: calc(var(--cap-lines) * 1.4em + var(--cap-extra, 0px));
+}
+.tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
+.bash-input { --cap-lines: 5; }
+.bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
+.diff-output { --cap-lines: 10; }
 .tool-read-output .line-no { color: var(--muted); }
 /* Markdown Reads render formatted (no gutter); same capped box, minus
    the phantom leading gap from the first block's own margin. */
