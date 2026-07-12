@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
@@ -60,6 +61,7 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 type Server struct {
 	daemonVersion string
 	retention     int
+	forceFake     bool
 	spawn         SpawnFunc
 	logf          func(format string, args ...any)
 	upgrader      websocket.Upgrader
@@ -76,6 +78,10 @@ type Config struct {
 	Retention     int
 	Spawn         SpawnFunc
 	Logf          func(format string, args ...any)
+	// ForceFake mirrors the daemon-wide -fake flag: every session runs
+	// the offline scripted SDK. The resume viability gate skips fake
+	// sessions (they have no on-disk transcripts by design).
+	ForceFake bool
 	// Sentinel receives agent-state side-channel notifications for every
 	// session; nil disables sentinel writes.
 	Sentinel session.SentinelSink
@@ -90,6 +96,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		daemonVersion: cfg.DaemonVersion,
 		retention:     cfg.Retention,
+		forceFake:     cfg.ForceFake,
 		spawn:         cfg.Spawn,
 		logf:          logf,
 		sentinel:      cfg.Sentinel,
@@ -186,6 +193,25 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := newSessionID()
+	// Resume viability gate: the CLI hard-exits (fatal_error) when asked
+	// to --resume a session id with no transcript in this daemon's
+	// config dir — e.g. an id minted inside the Docker sandbox or under
+	// another CLAUDE_CONFIG_DIR. Spawning anyway yields a session that
+	// dies within seconds and a client-side death loop (every send
+	// recreates another doomed session). Start FRESH instead and tell
+	// the webapp why in-band; nothing about this is silent.
+	var droppedResume string
+	var droppedPath string
+	if opts.Resume != "" && !opts.Fake && !s.forceFake {
+		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
+		if _, statErr := os.Stat(path); statErr != nil {
+			s.logf("session %s: resume target %s has no transcript at %s — starting fresh instead of a doomed --resume: %v",
+				id, opts.Resume, path, statErr)
+			droppedResume = opts.Resume
+			droppedPath = path
+			opts.Resume = ""
+		}
+	}
 	shim, err := s.spawn(id, opts)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, fmt.Sprintf("spawn shim: %v", err))
@@ -212,6 +238,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.logf("session %s: replay seeded from %s", id, path)
 		}
+	}
+	if droppedResume != "" {
+		sess.NoteResumeUnavailable(droppedResume, droppedPath)
 	}
 	s.mu.Lock()
 	s.sessions[id] = sess

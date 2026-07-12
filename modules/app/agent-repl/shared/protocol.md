@@ -518,7 +518,16 @@ Daemon-level error surfaced to the SPA. Distinct from a `result` with
 ```ts
 interface ErrorFrame extends WsEnvelope {
   type: "error";
-  code: "shim_died" | "sdk_error" | "transport" | "internal";
+  code:
+    | "shim_died"
+    | "sdk_error"
+    | "transport"
+    | "internal"
+    // create-time resume drop: the requested resume target had no
+    // transcript in the daemon's config dir (the CLI would hard-exit
+    // on --resume), so the session started as a FRESH conversation.
+    // Always recoverable; retained so late attachers see it.
+    | "resume_unavailable";
   message: string;
   recoverable: boolean;
 }
@@ -813,6 +822,17 @@ the hello instead of leaving them empty until the first live turn.
 Sidechain (subagent) and meta transcript entries are skipped; a
 missing or unreadable transcript degrades to the old blank-history
 behavior and is logged, never fatal.
+
+**Resume viability gate.** Before spawning the shim, the create path
+stats the resume target's transcript. When it is absent (an id minted
+inside the Docker sandbox, under another `CLAUDE_CONFIG_DIR`, or
+otherwise foreign), the `--resume` flag is DROPPED — the CLI would
+hard-exit `fatal_error` on it, producing a dead session and a
+client-side death loop — and the session starts fresh with a retained
+recoverable `error` frame (`code: "resume_unavailable"`) naming the
+dropped target. Fake sessions (per-create `fake` or the daemon-wide
+`-fake` flag) skip the gate: the scripted SDK has no transcripts by
+design.
 
 ---
 
