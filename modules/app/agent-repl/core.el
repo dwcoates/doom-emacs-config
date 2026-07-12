@@ -1029,6 +1029,45 @@ BUF may be a buffer object or a name string."
 BUFFERS may be buffer objects or name strings."
   (cl-remove-if #'agent-repl--non-user-buffer-p buffers))
 
+;;; Harness-injected (meta) prompt spans
+;;
+;; Every prompt agent-repl sends carries text the USER never typed: the
+;; periodic read-directive pointing at the metaprompt file (input.el), the
+;; autonomous-execution preamble, and the one-shot wrap-up gate
+;; (worktree.el).  The agent must receive all of it verbatim, but a human
+;; reading the conversation wants only their own words back.
+;;
+;; So each injected span is bracketed with inert HTML-comment markers at
+;; the point it is composed.  The markers are the ONE source of truth for
+;; "this text is harness-injected": the gui frontend (webapp) hides marked
+;; spans from the user-turn bubble, and the vterm frontend strips the
+;; markers (keeping their text) before pasting into the terminal, so the
+;; TUI echo reads exactly as it did before markers existed.
+
+(defconst agent-repl--meta-open "<!--agent-repl:meta-->"
+  "Opening marker bracketing a harness-injected span of a sent prompt.
+Paired with `agent-repl--meta-close'.  Kept in sync with the webapp's
+`META_OPEN' (webapp/src/meta.ts) and documented in shared/protocol.md.")
+
+(defconst agent-repl--meta-close "<!--/agent-repl:meta-->"
+  "Closing marker bracketing a harness-injected span of a sent prompt.
+Paired with `agent-repl--meta-open'.")
+
+(defun agent-repl--meta-wrap (text)
+  "Bracket TEXT as a harness-injected span with the meta markers.
+TEXT reaches the agent verbatim; the markers only tell a frontend that
+the span was injected rather than typed by the user."
+  (concat agent-repl--meta-open text agent-repl--meta-close))
+
+(defun agent-repl--meta-unmark (text)
+  "Remove every meta marker from TEXT, keeping the text they bracket.
+The vterm frontend's terminal echo shows the prompt raw, so the markers
+(meaningless to a human) are dropped there while the injected spans they
+bracket stay, exactly as the agent must receive them."
+  (replace-regexp-in-string
+   (regexp-opt (list agent-repl--meta-open agent-repl--meta-close))
+   "" text t t))
+
 ;;; Workspace and vterm helpers
 
 (defun agent-repl--current-ws-p (ws)
