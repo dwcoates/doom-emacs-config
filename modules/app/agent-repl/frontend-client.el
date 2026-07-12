@@ -37,6 +37,7 @@
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
+(declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 
 (defvar url-http-response-status)
@@ -220,15 +221,26 @@ contract)."
                      (let ((root (agent-repl--resolve-current-git-root)))
                        (agent-repl--log ws "ensure-session: adopting git root %s for unregistered ws %s" root ws)
                        (agent-repl--ws-put ws :project-dir root)
-                       root)))
-            ;; Resume the workspace's durable claude session so a
-            ;; recreated daemon binding (daemon restart, Emacs restart,
-            ;; panel close/reopen, vterm->gui switch) CONTINUES the
-            ;; conversation — the frontend is presentation, the session
-            ;; is the shared backend.  nil (no session ever recorded)
-            ;; starts fresh.
-            (resume (agent-repl--ws-durable-claude-session-id ws)))
-        (let ((id (agent-repl--frontend-create-session dir nil resume)))
+                       root))))
+        ;; Env restore: after an Emacs restart the workspace plist has no
+        ;; :active-env and no instantiation structs, so the durable-id
+        ;; lookup below resolves nil and the created session silently
+        ;; starts a BLANK conversation (observed as "SPC o c doesn't
+        ;; restore the gui session").  The vterm boot restores env from
+        ;; the persisted state file via `agent-repl--initialize-ws-env'
+        ;; in `agent-repl--initialize-agent'; a gui-first open must do
+        ;; the same.  Env presence also heals the sentinel handlers,
+        ;; which error on a nil :active-env.
+        (unless (agent-repl--ws-get ws :active-env)
+          (agent-repl--initialize-ws-env ws dir))
+        ;; Resume the workspace's durable claude session so a
+        ;; recreated daemon binding (daemon restart, Emacs restart,
+        ;; panel close/reopen, vterm->gui switch) CONTINUES the
+        ;; conversation — the frontend is presentation, the session
+        ;; is the shared backend.  nil (no session ever recorded)
+        ;; starts fresh.
+        (let* ((resume (agent-repl--ws-durable-claude-session-id ws))
+               (id (agent-repl--frontend-create-session dir nil resume)))
           (agent-repl--ws-put ws :frontend-session-id id)
           (agent-repl--log ws "frontend session created: %s (cwd=%s resume=%s)"
                            id dir (or resume "none"))

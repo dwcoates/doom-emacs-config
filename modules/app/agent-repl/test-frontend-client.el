@@ -250,7 +250,8 @@ the retry budget on a misleading error."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_stale" :project-dir "/w/tree")
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil)))
       (agent-repl-test--with-http
           (lambda (method &rest _)
             (if (equal method "GET")
@@ -271,6 +272,7 @@ resolver supplies it exactly as creation would."
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil))
               ((symbol-function 'agent-repl--resolve-current-git-root)
                (lambda () "/repo/root/")))
       (agent-repl-test--with-http
@@ -314,7 +316,8 @@ conversation instead of starting over."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil)))
       (agent-repl-test--with-http
           (lambda (method &rest _)
             (if (equal method "GET")
@@ -325,6 +328,60 @@ conversation instead of starting over."
         ;; Assert
         (let ((post (car (last requests))))
           (should-not (string-match-p "resume" (or (nth 2 post) ""))))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-restores-env-when-missing ()
+  "A nil :active-env triggers env restore, and the restored durable id resumes.
+After an Emacs restart the workspace plist carries no :active-env; the
+gui open must restore it from the persisted state (as the vterm boot
+does) BEFORE resolving the resume uuid, or the created session starts a
+blank conversation."
+  ;; Arrange: the stubbed initializer simulates a state-file restore.
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
+    (let ((init-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--initialize-ws-env)
+                 (lambda (ws &optional dir env-hint)
+                   (push (list ws dir env-hint) init-calls)
+                   (agent-repl--ws-put ws :active-env :bare-metal)
+                   (agent-repl--ws-put ws :bare-metal
+                                       (make-agent-repl-instantiation :session-id "restored-uuid")))))
+        (agent-repl-test--with-http
+            (lambda (method &rest _)
+              (if (equal method "GET")
+                  (agent-repl-test--json-ok '((sessions . [])))
+                (agent-repl-test--json-ok '((session_id . "s_restored")))))
+          ;; Act
+          (agent-repl--frontend-ensure-session "ws1")
+          ;; Assert — restore ran for ws1 with its dir, and the POST
+          ;; resumes the uuid the restore installed.
+          (should (equal init-calls '(("ws1" "/w" nil))))
+          (let ((post (car (last requests))))
+            (should (string-match-p "\"resume\":\"restored-uuid\"" (nth 2 post)))))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-skips-env-restore-when-present ()
+  "An already-initialized workspace must not be re-initialized.
+Re-running the initializer while a session is live would clobber the
+in-memory instantiation with staler on-disk state."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1"
+      (list :frontend-session-id nil :project-dir "/w"
+            :active-env :bare-metal
+            :bare-metal (make-agent-repl-instantiation :session-id "live-uuid"))
+    (let ((init-calls 0))
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--initialize-ws-env)
+                 (lambda (&rest _args) (cl-incf init-calls))))
+        (agent-repl-test--with-http
+            (lambda (method &rest _)
+              (if (equal method "GET")
+                  (agent-repl-test--json-ok '((sessions . [])))
+                (agent-repl-test--json-ok '((session_id . "s_new")))))
+          ;; Act
+          (agent-repl--frontend-ensure-session "ws1")
+          ;; Assert
+          (should (= init-calls 0)))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-propagates-non-git-error ()
   "Outside a git repository, the resolver's user-error surfaces unchanged."
