@@ -109,11 +109,38 @@ Used for registered-but-not-yet-started workspaces (agent-state nil)."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-drawer-group-label-format " ▸ %s\n"
-  "Format string for repo group labels (separators) in drawer sections.
+(defcustom agent-repl-drawer-group-label-format "%s\n"
+  "Format string for the repo group label text in drawer sections.
 Within a section, entries are partitioned by their workspace's git
 common-dir (each top-level repo / its worktree set is one group).
-Groups are separated by a blank line and labeled with this format."
+Groups are separated by a blank line and labeled with this format.
+
+The label is rendered AFTER the static gutter and the fold glyph
+\(`agent-repl-drawer-group-expanded-glyph' /
+`agent-repl-drawer-group-folded-glyph'), so this format carries only
+the label text and its terminating newline."
+  :type 'string
+  :group 'agent-repl)
+
+;; Force-apply on reload — the format lost its leading \" ▸ \" when the
+;; fold glyph took over that column, and `defcustom' only initializes
+;; unbound symbols, so a live Emacs would otherwise keep the old value.
+(setq agent-repl-drawer-group-label-format
+      (eval (car (get 'agent-repl-drawer-group-label-format 'standard-value))))
+
+(defcustom agent-repl-drawer-group-expanded-glyph "▾ "
+  "Fold glyph shown on an UNFOLDED repo group header.
+Rendered between the gutter and the repo label.  Its width must match
+`agent-repl-drawer-group-folded-glyph' so folding a repo does not shift
+the label column."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-drawer-group-folded-glyph "▸ "
+  "Fold glyph shown on a FOLDED repo group header.
+A folded repo renders its header only: every workspace beneath it is
+hidden from the drawer AND from the tab-bar (see
+`agent-repl--filter-folded-names')."
   :type 'string
   :group 'agent-repl)
 
@@ -288,31 +315,60 @@ the number of commits to be cherry-picked) produced by
   "Overlay that draws the current-entry arrow over the static gutter.
 Repositioned by `agent-repl-drawer--post-command' to follow point.")
 
-(defvar-local agent-repl-drawer--last-post-command-ws 'unset
-  "Workspace at point on the previous `--post-command' tick.
-Used to short-circuit the per-keystroke overlay refresh + recenter
-when navigation did not cross an entry boundary.  `recenter' forces a
-window redisplay, so gating it on entry change saves noticeable cost
-on no-op commands and intra-entry motion.  Sentinel value `unset' (not
-nil) so the first tick always runs even when point starts on a non-
-workspace line.")
+(defvar-local agent-repl-drawer--last-post-command-entry 'unset
+  "Entry at point on the previous `--post-command' tick.
+An entry is either a workspace or a repo group header (see
+`agent-repl-drawer--entry-at').  Used to short-circuit the
+per-keystroke overlay refresh + recenter when navigation did not cross
+an entry boundary.  `recenter' forces a window redisplay, so gating it
+on entry change saves noticeable cost on no-op commands and intra-entry
+motion.  Sentinel value `unset' (not nil) so the first tick always runs
+even when point starts on a non-entry line.")
+
+(defun agent-repl-drawer--entry-at (pos)
+  "Return the navigable drawer entry at POS, or nil.
+Two kinds of entry are navigable, and both are selection targets for
+`j'/`k':
+
+  - `(:workspace . WS)' — a workspace block (header + summary + any
+    expanded detail lines), carrying the `agent-repl-drawer-workspace'
+    text property.
+  - `(:repo . KEY)' — a repo group header, carrying the
+    `agent-repl-drawer-repo' text property whose value is the repo key
+    \(see `agent-repl--ws-repo-group').
+
+Returns nil on section headers, rules, blank lines, and the empty-
+section placeholder."
+  (or (when-let ((ws (get-text-property pos 'agent-repl-drawer-workspace)))
+        (cons :workspace ws))
+      (when-let ((repo (get-text-property pos 'agent-repl-drawer-repo)))
+        (cons :repo repo))))
+
+(defun agent-repl-drawer--entry-at-point ()
+  "Return the navigable drawer entry at point, or nil.
+See `agent-repl-drawer--entry-at' for the entry shape."
+  (agent-repl-drawer--entry-at (point)))
+
+(defun agent-repl-drawer--repo-at-point ()
+  "Return the repo key of the group header at point, or nil."
+  (let ((entry (agent-repl-drawer--entry-at-point)))
+    (and (eq (car-safe entry) :repo) (cdr entry))))
 
 (defun agent-repl-drawer--entry-bounds-at-point ()
-  "Return (START . END) of the workspace block at point, or nil."
-  (let ((ws (agent-repl-drawer--workspace-at-point)))
-    (when ws
+  "Return (START . END) of the entry block at point, or nil.
+Works for both workspace blocks and repo group headers — the block is
+the maximal run of buffer positions whose `--entry-at' equals the entry
+at point."
+  (let ((entry (agent-repl-drawer--entry-at-point)))
+    (when entry
       (save-excursion
         (let (start end)
           (while (and (not (bobp))
-                      (equal (get-text-property (1- (point))
-                                                'agent-repl-drawer-workspace)
-                             ws))
+                      (equal (agent-repl-drawer--entry-at (1- (point))) entry))
             (forward-char -1))
           (setq start (point))
           (while (and (not (eobp))
-                      (equal (get-text-property (point)
-                                                'agent-repl-drawer-workspace)
-                             ws))
+                      (equal (agent-repl-drawer--entry-at (point)) entry))
             (forward-char 1))
           (setq end (point))
           (cons start end))))))
@@ -321,9 +377,11 @@ workspace line.")
   "Move the current-entry arrow overlay onto the entry containing point.
 Covers the static gutter region (chars [START, START+gutter-width)) of
 the entry's first line with a `display' override that renders the
-arrow.  Removes the overlay when point is not on a workspace entry,
-or when the entry is marked (the red `●' takes precedence so the
-cursor's identity is folded into the marked set)."
+arrow.  Applies to repo group headers as well as workspace blocks —
+both are navigable entries and both reserve the same leading gutter.
+Removes the overlay when point is not on an entry, or when the entry is
+a marked workspace (the red `●' takes precedence so the cursor's
+identity is folded into the marked set)."
   (let ((bounds (agent-repl-drawer--entry-bounds-at-point))
         (ws-at-point (agent-repl-drawer--workspace-at-point))
         (gutter-len (length agent-repl-drawer-gutter)))
@@ -369,18 +427,19 @@ there's content off-screen\" behavior."
 (defun agent-repl-drawer--post-command ()
   "Refresh the current-entry overlay and cursor visibility.
 Runs after every command in the drawer buffer.  Short-circuits the
-overlay rebuild and the `recenter' call when the workspace at point
-has not changed since the previous tick — the overlay and scroll
-position are entry-granularity artifacts, and `--render' already
-re-establishes overlay state after mark/expand mutations.  The cursor
-visibility flip is always-on because column position can shift
-within the same entry (e.g. via in-line search)."
+overlay rebuild and the `recenter' call when the entry at point
+\(workspace or repo header) has not changed since the previous tick —
+the overlay and scroll position are entry-granularity artifacts, and
+`--render' already re-establishes overlay state after
+mark/expand/fold mutations.  The cursor visibility flip is always-on
+because column position can shift within the same entry (e.g. via
+in-line search)."
   (agent-repl-drawer--update-cursor)
-  (let ((ws (agent-repl-drawer--workspace-at-point)))
-    (unless (equal ws agent-repl-drawer--last-post-command-ws)
+  (let ((entry (agent-repl-drawer--entry-at-point)))
+    (unless (equal entry agent-repl-drawer--last-post-command-entry)
       (agent-repl-drawer--update-current-entry-overlay)
       (agent-repl-drawer--center-selection)
-      (setq agent-repl-drawer--last-post-command-ws ws))))
+      (setq agent-repl-drawer--last-post-command-entry entry))))
 
 (defvar-local agent-repl-drawer--background-remap-cookie nil
   "Cookie returned by `face-remap-add-relative' for the drawer background.
@@ -909,76 +968,102 @@ caller's responsibility."
 
 (defun agent-repl-drawer--workspace-group-key (ws)
   "Return a stable group key for WS based on git common-dir.
-Cached on the workspace plist as `:group-key' so each workspace runs
-git at most once.  Returns nil when git fails on WS's project-dir —
-e.g. the worktree directory was deleted out from under the workspace.
-Such workspaces fall into the unlabeled `(no repo)' bucket.
+Thin drawer-side alias for `agent-repl--ws-repo-key' (workspace.el),
+which owns repo identity now that the tab-bar and the indexed
+switchers read it too.  Returns nil when git fails on WS's project-dir
+— e.g. the worktree directory was deleted out from under the
+workspace.  Such workspaces fall into the `(no repo)' bucket via
+`agent-repl--ws-repo-group'.
 
 Project-dir-less stubs never reach this function: they are filtered
 upstream by `agent-repl-drawer--visible-workspace-keys', so `(no repo)'
 is now reachable only for a real workspace whose repo genuinely cannot
 be resolved, never for Doom's default \"main\" persp."
-  (or (agent-repl--ws-get ws :group-key)
-      (when-let* ((dir (ignore-errors (agent-repl--ws-dir ws)))
-                  (raw (agent-repl--git-string-quiet
-                        "-C" dir "rev-parse" "--git-common-dir")))
-        (when (and raw (not (string-empty-p raw))
-                   (not (string-prefix-p "fatal" raw)))
-          (let* ((abs (if (file-name-absolute-p raw) raw
-                        (expand-file-name raw dir)))
-                 (key (agent-repl--path-canonical abs)))
-            (agent-repl--ws-put ws :group-key key)
-            key)))))
+  (agent-repl--ws-repo-key ws))
 
 (defun agent-repl-drawer--group-label (key)
   "Derive a human-readable group label from KEY (a canonical .git path).
+Thin drawer-side alias for `agent-repl--repo-label' (workspace.el).
 Returns the basename of KEY's parent directory — i.e. the project
 name, since git's common-dir is conventionally `<project>/.git'."
-  (when key
-    (let ((parent (file-name-directory key)))
-      (when parent
-        (file-name-nondirectory (directory-file-name parent))))))
+  (agent-repl--repo-label key))
 
 (defun agent-repl-drawer--group-trees-by-repo (trees)
-  "Partition TREES into (LABEL . TREES-IN-GROUP) buckets by repo.
-Bucket keys are derived from each tree root's `:group-key' via
-`--workspace-group-key' and `--group-label'.  Insertion order of the
-returned alist matches the first-encounter order in TREES, so groups
-appear in the order their first root appeared after sorting."
+  "Partition TREES into (KEY LABEL . TREES-IN-GROUP) buckets by repo.
+Bucket keys are each tree root's repo key (`agent-repl--ws-repo-group',
+the total variant that folds an unresolvable repo onto the
+`(no repo)' sentinel), and LABEL is that key rendered for display.
+
+Buckets key on the repo KEY rather than its LABEL so two distinct
+repos that share a basename stay distinct groups — and so a fold,
+which is recorded against the key, addresses exactly one group.
+
+Insertion order of the returned list matches the first-encounter order
+in TREES, so groups appear in the order their first root appeared after
+sorting."
   (let ((order nil)
         (buckets (make-hash-table :test 'equal)))
     (dolist (tree trees)
-      (let* ((root  (car tree))
-             (key   (agent-repl-drawer--workspace-group-key root))
-             (label (or (agent-repl-drawer--group-label key) "(no repo)")))
-        (unless (gethash label buckets)
-          (push label order))
-        (puthash label
-                 (append (gethash label buckets) (list tree))
+      (let* ((root (car tree))
+             (key  (agent-repl--ws-repo-group root)))
+        (unless (gethash key buckets)
+          (push key order))
+        (puthash key
+                 (append (gethash key buckets) (list tree))
                  buckets)))
-    (mapcar (lambda (label) (cons label (gethash label buckets)))
+    (mapcar (lambda (key)
+              (cons key (cons (agent-repl--repo-label key)
+                              (gethash key buckets))))
             (nreverse order))))
+
+(defun agent-repl-drawer--render-group-header (key label folded)
+  "Insert the repo group header for repo KEY, displayed as LABEL.
+FOLDED selects the fold glyph.  The header is a navigable entry: it
+carries the `agent-repl-drawer-repo' text property (value KEY), so
+`j'/`k' stop on it and `TAB' toggles its fold.  Rendered after the
+static gutter so the current-entry arrow overlay lands in the same
+column as it does on workspace blocks."
+  (let ((start (point))
+        (glyph (if folded
+                   agent-repl-drawer-group-folded-glyph
+                 agent-repl-drawer-group-expanded-glyph)))
+    (insert agent-repl-drawer-gutter
+            (propertize
+             (concat glyph
+                     (format agent-repl-drawer-group-label-format label))
+             'face 'agent-repl-drawer-group-label))
+    (add-text-properties
+     start (point)
+     (list 'agent-repl-drawer-repo key
+           'help-echo (format "Repo: %s (TAB to %s)"
+                              label (if folded "unfold" "fold"))))))
 
 (defun agent-repl-drawer--render-trees (trees current section)
   "Render TREES (forest) grouped by top-level repo.
 Within a group, root subtrees render contiguously with a blank line
-between siblings.  Between groups, a labeled separator (plus blank
-line) marks the boundary so multi-repo drawers stay scannable."
+between siblings.  Between groups, a labeled header (plus blank line)
+marks the boundary so multi-repo drawers stay scannable.
+
+A FOLDED repo renders its header and nothing else — every workspace in
+the group is omitted from the buffer (and, via
+`agent-repl--filter-folded-names', from the tab-bar)."
   (let ((groups (agent-repl-drawer--group-trees-by-repo trees))
         (first-group t))
     (dolist (group groups)
-      (let ((label       (car group))
-            (group-trees (cdr group)))
+      (let* ((key         (car group))
+             (label       (cadr group))
+             (group-trees (cddr group))
+             (folded      (agent-repl--repo-folded-p key)))
         (unless first-group
           (insert "\n"))
-        (insert (propertize (format agent-repl-drawer-group-label-format label)
-                            'face 'agent-repl-drawer-group-label))
-        (let ((tree-rest group-trees))
-          (while tree-rest
-            (agent-repl-drawer--render-subtree (car tree-rest) 0
-                                                current section)
-            (when (cdr tree-rest) (insert "\n"))
-            (setq tree-rest (cdr tree-rest))))
+        (agent-repl-drawer--render-group-header key label folded)
+        (unless folded
+          (let ((tree-rest group-trees))
+            (while tree-rest
+              (agent-repl-drawer--render-subtree (car tree-rest) 0
+                                                  current section)
+              (when (cdr tree-rest) (insert "\n"))
+              (setq tree-rest (cdr tree-rest)))))
         (setq first-group nil)))))
 
 (defun agent-repl-drawer--parent-fn-for-section (workspaces section)
@@ -1052,7 +1137,10 @@ always proceeds even if the natural signature happens to be nil.")
 Sorted on workspace names so the result is stable across hash-table
 iteration order.  Captures the same plist values the render helpers
 read (state, git/merge status, priority, summary, group), plus
-marked/expanded sets per ws and the current workspace."
+marked/expanded sets per ws, the folded-repo set, and the current
+workspace.  The folded set is global (not per-ws), so it is captured
+once via `agent-repl--folded-repo-keys' — without it, a fold toggled
+outside the drawer would not invalidate the cached render."
   (let (ws-sig)
     (dolist (ws (sort (agent-repl-drawer--visible-workspace-keys) #'string<))
       (push (list ws
@@ -1068,6 +1156,7 @@ marked/expanded sets per ws and the current workspace."
                   (agent-repl-drawer--expanded-p ws))
             ws-sig))
     (list (agent-repl-drawer--current-ws)
+          (agent-repl--folded-repo-keys)
           ws-sig)))
 
 (defun agent-repl-drawer--render ()
@@ -1093,13 +1182,15 @@ characters its LCS happens to match — leaving stale workspace text
 properties pointing at a workspace whose visible text is gone.  A
 string-equality check + clean erase-and-reinsert avoids that pitfall.
 
-Anchors cursor restoration by workspace identity, not just line
-number: line numbers shift when an entry above the cursor
-expands/collapses or appears/disappears between polls, and
-`forward-line saved-line' can then land on a non-workspace line
-(detail line, blank, section header), which causes
+Anchors cursor restoration by entry identity, not just line number:
+line numbers shift when an entry above the cursor expands/collapses,
+appears/disappears, or has its repo folded between polls, and
+`forward-line saved-line' can then land on a non-entry line (detail
+line, blank, section header), which causes
 `--update-current-entry-overlay' to delete the arrow.  Nested
-children sit deeper in the buffer and so are most affected.
+children sit deeper in the buffer and so are most affected.  A repo
+group header is an entry too, so a cursor parked on one survives the
+re-render that its own fold toggle triggers.
 
 Wrapped in `--with-dir-map' so every `--source-ws-name' lookup during
 this render (signature compute, partition, tree build, max-depth, …)
@@ -1116,7 +1207,7 @@ adding indentation noise to every line."
     (unless (equal sig agent-repl-drawer--last-render-signature)
       (let* ((saved-line   (line-number-at-pos))
              (saved-col    (current-column))
-             (saved-ws     (agent-repl-drawer--workspace-at-point))
+             (saved-entry  (agent-repl-drawer--entry-at-point))
              (marked-set   agent-repl-drawer--marked-set)
              (expanded-set agent-repl-drawer--expanded-set)
              (new-content
@@ -1133,8 +1224,8 @@ adding indentation noise to every line."
           (let ((inhibit-read-only t))
             (erase-buffer)
             (insert new-content))
-          (unless (and saved-ws
-                       (agent-repl-drawer--goto-workspace-line saved-ws))
+          (unless (and saved-entry
+                       (agent-repl-drawer--goto-entry saved-entry))
             (goto-char (point-min))
             (forward-line (1- saved-line))
             (move-to-column saved-col))))
@@ -1151,55 +1242,64 @@ adding indentation noise to every line."
   "Return the workspace name at point, or nil."
   (get-text-property (point) 'agent-repl-drawer-workspace))
 
-(defun agent-repl-drawer--goto-workspace-line (ws)
-  "Move point to the start of the line for workspace WS, if present.
+(defun agent-repl-drawer--goto-entry (entry)
+  "Move point to the start of ENTRY's first line, if present.
+ENTRY is a `--entry-at' cell: `(:workspace . WS)' or `(:repo . KEY)'.
 Returns non-nil on success."
   (let ((target nil))
     (save-excursion
       (goto-char (point-min))
       (while (and (not target) (not (eobp)))
-        (when (equal (get-text-property (point) 'agent-repl-drawer-workspace) ws)
+        (when (equal (agent-repl-drawer--entry-at-point) entry)
           (setq target (point)))
         (forward-line 1)))
     (when target
       (goto-char target)
       t)))
 
+(defun agent-repl-drawer--goto-workspace-line (ws)
+  "Move point to the start of the line for workspace WS, if present.
+Returns non-nil on success."
+  (agent-repl-drawer--goto-entry (cons :workspace ws)))
+
+(defun agent-repl-drawer--goto-repo-line (key)
+  "Move point to the start of repo KEY's group header, if present.
+Returns non-nil on success."
+  (agent-repl-drawer--goto-entry (cons :repo key)))
+
 (defun agent-repl-drawer-next ()
-  "Move point to the next workspace entry."
+  "Move point to the next entry (workspace or repo group header)."
   (interactive)
-  (let ((current (agent-repl-drawer--workspace-at-point))
+  (let ((current (agent-repl-drawer--entry-at-point))
         (start   (point))
         (found   nil))
     (forward-line 1)
     (while (and (not found) (not (eobp)))
-      (let ((ws (agent-repl-drawer--workspace-at-point)))
-        (if (and ws (not (equal ws current)))
+      (let ((entry (agent-repl-drawer--entry-at-point)))
+        (if (and entry (not (equal entry current)))
             (setq found t)
           (forward-line 1))))
     (unless found
       (goto-char start))))
 
 (defun agent-repl-drawer-prev ()
-  "Move point to the previous workspace entry."
+  "Move point to the previous entry (workspace or repo group header)."
   (interactive)
-  (let ((current (agent-repl-drawer--workspace-at-point))
+  (let ((current (agent-repl-drawer--entry-at-point))
         (start   (point))
         (found   nil))
     (forward-line -1)
     (while (and (not found) (not (bobp)))
-      (let ((ws (agent-repl-drawer--workspace-at-point)))
-        (if (and ws (not (equal ws current)))
+      (let ((entry (agent-repl-drawer--entry-at-point)))
+        (if (and entry (not (equal entry current)))
             (setq found t)
           (forward-line -1))))
     (when found
-      ;; Snap to the start of the workspace block (handles the summary
+      ;; Snap to the start of the entry block (handles the summary
       ;; subtitle line being the first one we land on when moving up).
-      (let ((ws (agent-repl-drawer--workspace-at-point)))
+      (let ((entry (agent-repl-drawer--entry-at-point)))
         (while (and (not (bobp))
-                    (equal (get-text-property (1- (point))
-                                              'agent-repl-drawer-workspace)
-                           ws))
+                    (equal (agent-repl-drawer--entry-at (1- (point))) entry))
           (forward-line -1))))
     (unless found
       (goto-char start))))
@@ -1653,18 +1753,42 @@ in place when the underlying command errors or returns empty."
    ((< seconds 86400) (format "%.1fh ago" (/ seconds 3600.0)))
    (t                 (format "%.1fd ago" (/ seconds 86400.0)))))
 
+(defun agent-repl-drawer--toggle-repo-fold (key)
+  "Fold or unfold repo KEY, then re-render the drawer and the tab-bar.
+Folding is global state (`agent-repl--folded-repos'), so the tab-bar
+must repaint too: a folded repo's workspaces leave the tab-bar and the
+survivors' 1-based numbers close up.  `agent-repl--force-tab-bar-redraw'
+is what makes that visible immediately rather than on the next 1Hz
+poll."
+  (agent-repl--toggle-repo-fold key)
+  (agent-repl-drawer--render)
+  (agent-repl--force-tab-bar-redraw))
+
 (defun agent-repl-drawer-toggle-expand ()
-  "Toggle the expanded detail view for the entry at point.
-On expand, refreshes the detail cache (synchronous git calls); on
-collapse, removes from the expanded set.  Re-renders the drawer."
+  "Toggle the entry at point.
+
+Dispatches on the entry kind (see `agent-repl-drawer--entry-at'):
+
+  - Repo group header → fold/unfold the repo.  A folded repo hides its
+    workspaces from the drawer AND from the tab-bar, and the tab-bar's
+    selection numbers close up over the remaining workspaces.
+  - Workspace → toggle its expanded detail view.  On expand, refreshes
+    the detail cache (synchronous git calls); on collapse, removes it
+    from the expanded set.
+
+Re-renders the drawer either way."
   (interactive)
-  (let ((ws (agent-repl-drawer--require-ws-at-point)))
-    (agent-repl-drawer--ensure-expanded-set)
-    (if (gethash ws agent-repl-drawer--expanded-set)
-        (remhash ws agent-repl-drawer--expanded-set)
-      (agent-repl-drawer--refresh-detail-cache ws)
-      (puthash ws t agent-repl-drawer--expanded-set))
-    (agent-repl-drawer--render)))
+  (pcase (agent-repl-drawer--entry-at-point)
+    (`(:repo . ,key)
+     (agent-repl-drawer--toggle-repo-fold key))
+    (`(:workspace . ,ws)
+     (agent-repl-drawer--ensure-expanded-set)
+     (if (gethash ws agent-repl-drawer--expanded-set)
+         (remhash ws agent-repl-drawer--expanded-set)
+       (agent-repl-drawer--refresh-detail-cache ws)
+       (puthash ws t agent-repl-drawer--expanded-set))
+     (agent-repl-drawer--render))
+    (_ (user-error "No entry at point"))))
 
 (defun agent-repl-drawer--merge-status-text (ws)
   "Return a brief merge-status string for WS, or nil when WS is not merging.
@@ -1949,18 +2073,19 @@ hiding genuinely wants to delete a side window."
   "Call FN with the drawer buffer current; sync window-point + overlay
 afterward without selecting the drawer window.
 
-When PRESERVE-CURSOR is non-nil, snapshots the workspace at point
-before FN runs and re-positions the cursor onto that same workspace
-afterward.  Without this, side effects of FN can move the drawer
-cursor off the user's navigated entry: `+workspace-switch' triggers
+When PRESERVE-CURSOR is non-nil, snapshots the entry at point (a
+workspace or a repo group header) before FN runs and re-positions the
+cursor onto that same entry afterward.  Without this, side effects of
+FN can move the drawer cursor off the user's navigated entry:
+`+workspace-switch' triggers
 `--sync-cursor-to-current-ws' which snaps to the newly-active ws;
 persp's window-config restoration can install a fresh drawer window
 with a stale `window-point' from the saved config; a re-render whose
-`saved-ws' anchor is no longer present in the buffer falls back to a
+`saved-entry' anchor is no longer present in the buffer falls back to a
 line-number heuristic that may land outside any entry.  Preservation
 makes all non-navigational C-S-<key> dispatchers (visit, nuke, kill,
 toggle-hidden, …) keep the drawer cursor where the user pointed it.
-When the snapshot workspace no longer exists in the buffer after FN
+When the snapshot entry no longer exists in the buffer after FN
 (e.g. after `agent-repl-drawer-nuke'), the cursor is left wherever
 FN naturally placed it.
 
@@ -1987,11 +2112,11 @@ the drawer open with `SPC o d' first."
   (let ((buf (or (get-buffer agent-repl-drawer-buffer-name)
                  (user-error "Drawer not open — `SPC o d' first"))))
     (with-current-buffer buf
-      (let ((pre-ws (and preserve-cursor
-                         (agent-repl-drawer--workspace-at-point))))
+      (let ((pre-entry (and preserve-cursor
+                            (agent-repl-drawer--entry-at-point))))
         (funcall fn)
-        (when pre-ws
-          (agent-repl-drawer--goto-workspace-line pre-ws)))
+        (when pre-entry
+          (agent-repl-drawer--goto-entry pre-entry)))
       (agent-repl-drawer--post-command)
       ;; Re-query the drawer window after FN: persp's window-config
       ;; restoration during a workspace switch can replace it with a
