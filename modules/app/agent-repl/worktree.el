@@ -208,6 +208,47 @@ the exit code, or 124 when
           124)
       status)))
 
+(defun agent-repl--git-exit-code-streaming (root filter &rest args)
+  "Run git in ROOT with ARGS, streaming its output through FILTER; return exit code.
+This IS an external-boundary wrapper — tests mock it via `cl-letf'
+\(see `agent-repl--external-boundary-functions' in core.el).
+
+Differs from `agent-repl--git-exit-code' in exactly one way: that
+function discards the child's output entirely (nil destination) and
+keeps only the exit code, whereas this one hands every chunk to FILTER
+as git emits it.  Git flushes incrementally, so a caller watching a
+long-running subcommand observes its progress live rather than only
+after it exits — this is what lets the drawer render per-commit
+cherry-pick progress.
+
+`call-process' cannot stream, so the child runs asynchronously on BOTH
+threads; `agent-repl--wait-for-process-exit' then picks the correct wait
+strategy for the calling thread (worker: sentinel + condvar; main:
+`accept-process-output').  Note that FILTER runs on whichever thread
+pumps the event loop, NOT necessarily the caller's, so it must confine
+itself to plain-Lisp state and never touch UI.
+
+Returns the exit code, or 124 on timeout, exactly as
+`agent-repl--git-exit-code' does."
+  (let ((proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
+                     "agent-repl-git-stream" nil "git" "-C" root args)))
+    (set-process-query-on-exit-flag proc nil)
+    ;; `start-process' mixes stderr into stdout when no :stderr is given, so
+    ;; FILTER sees git's `error: could not apply ...' lines too, not just the
+    ;; `[branch SHA] subject' lines on stdout.
+    (set-process-filter proc filter)
+    (let ((status (agent-repl--wait-for-process-exit
+                   proc agent-repl--git-exit-code-worker-timeout-seconds
+                   nil nil)))
+      (if (eq status 'timeout)
+          (progn
+            (agent-repl--log nil
+                              "git-exit-code-streaming: TIMEOUT after %ss git -C %s %S"
+                              agent-repl--git-exit-code-worker-timeout-seconds
+                              root args)
+            124)
+        status))))
+
 (defun agent-repl--git-branch-exists-p (root branch)
   "Return non-nil if BRANCH exists in git repo at ROOT."
   (let ((result (= 0 (agent-repl--git-exit-code root "rev-parse" "--verify" branch))))
@@ -3332,7 +3373,15 @@ surface depends on SILENT:
      (t
       (agent-repl--log target-ws "cherry-pick-commits target-ws=%s target-branch=%s base=%s range=%s auto-resolve=%s"
                         target-ws target-branch base-branch range (if auto-resolve "t" "nil"))
-      (let ((exit-code (agent-repl--git-exit-code root "cherry-pick" "-x" range)))
+      ;; Seed the progress record with the commits git is about to apply, then
+      ;; stream the pick so the filter can advance through them.  Purely
+      ;; observational: the git invocation is the same one as before, with an
+      ;; output destination instead of none.
+      (agent-repl--merge-progress-begin
+       target-ws (agent-repl--range-commits root base-branch target-branch))
+      (let ((exit-code (agent-repl--git-exit-code-streaming
+                        root (agent-repl--make-cherry-pick-filter target-ws)
+                        "cherry-pick" "-x" range)))
         (agent-repl--log target-ws "cherry-pick-commits exit-code=%s" exit-code)
         ;; Auto-resolution loop: while a CHERRY_PICK_HEAD lingers, try
         ;; to clear it via `--auto-resolve-cherry-pick-conflict' + `git
@@ -4020,6 +4069,8 @@ the caller to run `git cherry-pick --continue'."
         (agent-repl--log target-ws
                           "auto-resolve: target-ws=%s commit=%s files=%S — invoking claude -p"
                           target-ws conflicting-commit files)
+        (agent-repl--merge-progress-put target-ws :resolver-phase 'resolving)
+        (agent-repl--merge-progress-put target-ws :resolver-started-at (float-time))
         (let ((result (agent-repl--invoke-auto-resolve-agent
                        root prompt target-ws)))
           (agent-repl--log target-ws
@@ -4040,6 +4091,7 @@ the caller to run `git cherry-pick --continue'."
             (agent-repl--log target-ws
                               "auto-resolve: target-ws=%s all markers cleared — verifying"
                               target-ws)
+            (agent-repl--merge-progress-put target-ws :resolver-phase 'verifying)
             (agent-repl--auto-resolve-verify-passes-p target-ws root))
            (t
             (agent-repl--log target-ws
@@ -4059,6 +4111,15 @@ the `-x' annotation that the parent cherry-pick was invoked with."
   (agent-repl--log target-ws
                     "continue-cherry-pick-after-resolve: ENTER target-ws=%s root=%s"
                     target-ws root)
+  ;; The conflict is resolved and the pick is resuming, so retire the conflict
+  ;; state before git starts emitting boundaries again.  Left in place, the
+  ;; drawer would keep showing 💥 on a commit that is no longer stuck.
+  (agent-repl--merge-progress-put target-ws :conflict-sha nil)
+  (agent-repl--merge-progress-put target-ws :conflict-subject nil)
+  (agent-repl--merge-progress-put target-ws :conflict-files nil)
+  (agent-repl--merge-progress-put target-ws :resolver-phase nil)
+  (agent-repl--merge-progress-put target-ws :resolver-started-at nil)
+  (agent-repl--merge-progress-put target-ws :commit-started-at (float-time))
   (let* ((add-started (float-time))
          (add-ec (agent-repl--git-exit-code root "add" "-u"))
          (_ (agent-repl--log target-ws
@@ -4069,8 +4130,15 @@ the `-x' annotation that the parent cherry-pick was invoked with."
          ;; (cherry picked from commit SHA) annotation that `-x' added
          ;; survives the auto-resolution.  Without it git would open
          ;; $EDITOR, which has no terminal in a headless merge.
-         (continue-ec (agent-repl--git-exit-code
-                       root "-c" "core.editor=true"
+         ;;
+         ;; Streamed for the same reason the original pick is: `--continue'
+         ;; finishes the conflicted commit AND applies every remaining commit
+         ;; in the range, emitting a `[branch SHA]' line for each.  Running it
+         ;; unstreamed would strand `:commit-index' at the conflicted commit
+         ;; for the rest of the merge.
+         (continue-ec (agent-repl--git-exit-code-streaming
+                       root (agent-repl--make-cherry-pick-filter target-ws)
+                       "-c" "core.editor=true"
                        "cherry-pick" "--continue" "--no-edit")))
     (agent-repl--log target-ws
                       "continue-cherry-pick-after-resolve: EXIT target-ws=%s add-exit=%d continue-exit=%d continue-time=%.2fs"
@@ -4574,6 +4642,161 @@ side-effect of asynchronous ancestry polling."
 ;; serialization point for a second merge into the same target; a second
 ;; merge into a different target proceeds in parallel.
 
+;;;; Merge progress ----------------------------------------------------------
+;;
+;; Git-action-level observability for an in-flight cherry-pick, so the drawer's
+;; MERGE QUEUE section can render WHICH commit git is applying, for HOW LONG,
+;; and WHAT IS BEHIND IT — rather than just "this workspace is merging".
+;;
+;; The data comes from git itself.  `git cherry-pick -x BASE..BRANCH' emits one
+;; `[branch SHA] subject' line per commit it applies and FLUSHES it as it goes,
+;; and on conflict it emits `error: could not apply SHA... subject' plus a
+;; `CONFLICT (...): ... in FILE' line per conflicted path.  We previously threw
+;; all of that away: `--git-exit-code' runs the child with a nil output
+;; destination and keeps only the exit code.  `--git-exit-code-streaming' plus
+;; the filter below simply stop discarding it.
+;;
+;; Nothing here is persisted.  Merge progress is high-churn and ephemeral, and
+;; the workspace plist is snapshot-persisted on every mutation — a commit clock
+;; has no business in a snapshot.
+
+(defvar agent-repl--merge-progress (make-hash-table :test 'equal)
+  "Workspace name -> progress plist for that workspace's in-flight cherry-pick.
+
+Keys:
+  :commits            ordered ((SHA . SUBJECT) ...) for the whole pick range
+  :commit-index       index into :commits of the commit git is applying NOW
+  :commit-started-at  float-time, reset at each commit boundary — the clock
+  :conflict-sha       short SHA of the commit that conflicted, if any
+  :conflict-subject   its subject
+  :conflict-files     conflicted paths, in the order git reported them
+  :resolver-phase     `spawned' / `waiting' / `verifying' / `continuing'
+  :resolver-started-at float-time the auto-resolver began
+
+Entries are created by `agent-repl--merge-progress-begin' and removed by
+`agent-repl--clear-in-flight-merge', so this hash never outlives the
+in-flight set.")
+
+(defvar agent-repl--merge-progress-seq 0
+  "Monotonic counter, incremented on every write to `agent-repl--merge-progress'.
+
+The drawer folds this into `agent-repl-drawer--render-signature'.  That
+signature short-circuits the render when unchanged, so without a counter
+here every new progress field would have to be enumerated in the
+signature or silently fail to redraw.  One counter covers all of them.")
+
+(defvar agent-repl--merge-lookahead (make-hash-table :test 'equal)
+  "Workspace name -> plist (:target-head SHA :commits ((SHA . SUBJECT) ...)).
+
+The commits a QUEUED (not yet started) merge will pick, so the drawer can
+show what is behind the commit currently being applied — including commits
+belonging to a different project than the one in flight.
+
+An estimate, deliberately: the real base is resolved by
+`agent-repl--cherry-pick-base' against the target's HEAD at the moment the
+pick actually starts, and the target moves as earlier merges land.  Hence
+`:target-head', and hence the refresh on every queue mutation and every
+drain.  The commit being applied right now is always exact; only the
+lookahead is projected.")
+
+(defun agent-repl--merge-progress-get (ws)
+  "Return the merge-progress plist for WS, or nil."
+  (gethash ws agent-repl--merge-progress))
+
+(defun agent-repl--merge-progress-put (ws key value)
+  "Set KEY to VALUE in WS's merge-progress plist and bump the render counter."
+  (puthash ws
+           (plist-put (gethash ws agent-repl--merge-progress) key value)
+           agent-repl--merge-progress)
+  (setq agent-repl--merge-progress-seq (1+ agent-repl--merge-progress-seq)))
+
+(defun agent-repl--merge-progress-clear (ws)
+  "Drop WS's merge-progress entry and bump the render counter."
+  (remhash ws agent-repl--merge-progress)
+  (setq agent-repl--merge-progress-seq (1+ agent-repl--merge-progress-seq)))
+
+(defun agent-repl--merge-progress-begin (ws commits)
+  "Start tracking WS's cherry-pick of COMMITS (oldest-first (SHA . SUBJECT)).
+
+`:commit-index' is 0 because git is applying the FIRST commit the moment
+the child starts — the filter advances the index only once git reports
+that commit finished."
+  (puthash ws
+           (list :commits commits
+                 :commit-index 0
+                 :commit-started-at (float-time))
+           agent-repl--merge-progress)
+  (setq agent-repl--merge-progress-seq (1+ agent-repl--merge-progress-seq)))
+
+(defun agent-repl--range-commits (root base-rev target-rev)
+  "Return ((SHA . SUBJECT) ...) for BASE-REV..TARGET-REV in ROOT, oldest first.
+
+Oldest-first because that is the order cherry-pick applies them, so the
+list indexes directly by `:commit-index'."
+  (let ((out (agent-repl--git-string-quiet
+              "-C" root "log" "--reverse" "--pretty=format:%h\t%s"
+              (format "%s..%s" base-rev target-rev))))
+    (when (and out (not (string-empty-p out)))
+      (delq nil
+            (mapcar (lambda (line)
+                      (when (string-match "\\`\\([^\t]+\\)\t\\(.*\\)\\'" line)
+                        (cons (match-string 1 line) (match-string 2 line))))
+                    (split-string out "\n" t))))))
+
+(defconst agent-repl--cherry-pick-applied-re
+  "\\`\\[[^]]+ \\([0-9a-f]\\{7,40\\}\\)\\]"
+  "Match git's per-commit cherry-pick line, e.g. `[master a1b2c3d] fix: thing'.
+Emitted and flushed as each commit lands, so it is our commit boundary.")
+
+(defconst agent-repl--cherry-pick-conflict-commit-re
+  "\\`error: could not apply \\([0-9a-f]+\\)\\.\\.\\.[ ]*\\(.*\\)\\'"
+  "Match git's conflict line naming the commit that could not be applied.")
+
+(defconst agent-repl--cherry-pick-conflict-file-re
+  "\\`CONFLICT ([^)]*): .* in \\(.+\\)\\'"
+  "Match git's per-file conflict line, capturing the conflicted path.")
+
+(defun agent-repl--cherry-pick-filter-line (ws line)
+  "Fold one line of cherry-pick output LINE into WS's merge progress.
+
+Unrecognized lines are ignored rather than disturbing state: git emits
+plenty of chatter (`Auto-merging', hints, `Recorded preimage') that
+carries no progress signal."
+  (cond
+   ((string-match agent-repl--cherry-pick-applied-re line)
+    ;; A commit finished, so git has moved on to the next one.  Advance the
+    ;; index and restart the clock, which is what makes the clock measure the
+    ;; commit currently being applied rather than the merge as a whole.
+    (let ((prog (agent-repl--merge-progress-get ws)))
+      (agent-repl--merge-progress-put
+       ws :commit-index (1+ (or (plist-get prog :commit-index) 0)))
+      (agent-repl--merge-progress-put ws :commit-started-at (float-time))))
+   ((string-match agent-repl--cherry-pick-conflict-commit-re line)
+    (agent-repl--merge-progress-put ws :conflict-sha (match-string 1 line))
+    (agent-repl--merge-progress-put ws :conflict-subject (match-string 2 line)))
+   ((string-match agent-repl--cherry-pick-conflict-file-re line)
+    (let* ((file (match-string 1 line))
+           (files (plist-get (agent-repl--merge-progress-get ws)
+                             :conflict-files)))
+      (unless (member file files)
+        (agent-repl--merge-progress-put ws :conflict-files
+                                        (append files (list file))))))))
+
+(defun agent-repl--make-cherry-pick-filter (ws)
+  "Return a process filter recording cherry-pick progress for WS.
+
+Buffers partial lines.  A process filter is handed arbitrary chunks, not
+whole lines, so a `[master abc1234] ...' boundary can arrive split across
+two calls; matching per-chunk would silently drop commits and desync the
+index."
+  (let ((pending ""))
+    (lambda (_proc chunk)
+      (setq pending (concat pending chunk))
+      (while (string-match "\n" pending)
+        (let ((line (substring pending 0 (match-beginning 0))))
+          (setq pending (substring pending (match-end 0)))
+          (agent-repl--cherry-pick-filter-line ws line))))))
+
 (defvar agent-repl--merge-queue nil
   "Per-target+repo FIFO queue of deferred merge requests.
 A flat list partitioned into independent sub-queues by the canonical
@@ -4600,6 +4823,43 @@ Distinct from `agent-repl--ws-merge-queued-p', which reads the
 rather than by a marker that may drift from the list."
   (seq-some (lambda (entry) (equal (plist-get entry :source-ws) ws))
             agent-repl--merge-queue))
+
+(defun agent-repl--merge-lookahead-refresh-all ()
+  "Recompute the commit lookahead for every queued merge.
+
+Called on every queue mutation and after every drain — precisely the
+moments the projection can change — so the render path never runs git.
+
+Deferred to the main thread when called from a worker.  The body shells
+out through `agent-repl--git-string-quiet', and a `call-process' on a
+worker thread holds the global Lisp lock for the child's entire runtime,
+freezing every other thread including the UI.  That is the same hazard
+`agent-repl--git-exit-code' routes around, and it is live here because
+`agent-repl--enqueue-merge' is reached from the merge worker."
+  (if (eq (current-thread) main-thread)
+      (agent-repl--merge-lookahead-refresh-all--now)
+    (agent-repl--defer-to-main-thread
+     #'agent-repl--merge-lookahead-refresh-all--now)))
+
+(defun agent-repl--merge-lookahead-refresh-all--now ()
+  "Main-thread body of `agent-repl--merge-lookahead-refresh-all'."
+  (clrhash agent-repl--merge-lookahead)
+  (dolist (entry agent-repl--merge-queue)
+    (let* ((ws         (plist-get entry :source-ws))
+           (target-dir (plist-get entry :target-dir))
+           (ws-dir     (ignore-errors (agent-repl--ws-dir ws))))
+      (when (and ws-dir target-dir (file-directory-p target-dir))
+        (let ((target-branch (agent-repl--git-string-quiet
+                              "-C" target-dir "rev-parse" "--abbrev-ref" "HEAD"))
+              (target-head   (agent-repl--git-string-quiet
+                              "-C" target-dir "rev-parse" "HEAD")))
+          (when (and target-branch (not (string-empty-p target-branch)))
+            (puthash ws
+                     (list :target-head target-head
+                           :commits (agent-repl--range-commits
+                                     ws-dir target-branch "HEAD"))
+                     agent-repl--merge-lookahead))))))
+  (setq agent-repl--merge-progress-seq (1+ agent-repl--merge-progress-seq)))
 
 (defun agent-repl--enqueue-merge (source-ws silent auto-resolve target-dir)
   "Park a merge request for SOURCE-WS onto `agent-repl--merge-queue'.
@@ -4642,6 +4902,7 @@ the pending merges (a restart used to lose them silently)."
                       source-ws (if silent "t" "nil") (if auto-resolve "t" "nil")
                       (or target-dir "nil")
                       (length agent-repl--merge-queue))
+    (agent-repl--merge-lookahead-refresh-all)
     (agent-repl--persist-merge-queue)))
 
 (defun agent-repl--dequeue-merge (source-ws)
@@ -4672,6 +4933,7 @@ resurrect the dequeued entry."
     (agent-repl--log source-ws
                       "merge-queue: dequeued ws=%s on switch queue-len=%d"
                       source-ws (length agent-repl--merge-queue))
+    (agent-repl--merge-lookahead-refresh-all)
     (agent-repl--persist-merge-queue)
     t))
 
@@ -4741,8 +5003,14 @@ dir before pushing)."
 No-op when SOURCE-WS has no entry — both the success and failure
 paths call this, and one of them is redundant on any given run.
 Persists unconditionally so the on-disk file matches the in-memory
-state even after the no-op case."
+state even after the no-op case.
+
+Also drops SOURCE-WS's `agent-repl--merge-progress' entry, which is what
+keeps that hash from outliving the in-flight set: the two are created and
+destroyed together, so the drawer can never render commit progress for a
+merge that is no longer running."
   (when source-ws
+    (agent-repl--merge-progress-clear source-ws)
     (let ((before (length agent-repl--in-flight-merges)))
       (setq agent-repl--in-flight-merges
             (cl-remove-if (lambda (e)
@@ -4880,6 +5148,9 @@ dispatching.  Eligibility is re-checked inside the per-target dispatch, so
 the re-entrant drains fired by `agent-repl--workspace-merge-do' on
 completion cannot double-dispatch a bucket this outer pass already
 advanced.  No-op on an empty queue."
+  ;; A drain runs right after a merge landed, so every still-queued entry's
+  ;; projected commit list is now stale — its target advanced underneath it.
+  (agent-repl--merge-lookahead-refresh-all)
   (dolist (target-dir (agent-repl--merge-queue-target-dirs))
     (agent-repl--drain-merge-queue-for-target target-dir)))
 
