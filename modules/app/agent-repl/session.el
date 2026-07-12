@@ -905,7 +905,7 @@ current workspace is different, and drains any deferred-prompt queue
     (agent-repl--refresh-magit-status ws)
     (agent-repl--maybe-notify-finished ws)
     (unless (agent-repl--current-ws-p ws)
-      (message "Agent finished in workspace: %s" ws))
+      (agent-repl--info ws "Agent finished in workspace: %s" ws))
     (agent-repl--drain-deferred-prompts ws)))
 
 ;;;; Deferred prompt queue
@@ -1061,8 +1061,9 @@ When the vterm buffer has died in the meantime, abandons silently."
     (agent-repl--log ws
                       "deliver-verify: ws=%s GIVING UP after %d retries — prompt may be lost"
                       ws retries)
-    (message "[agent-repl] WARNING: preemptive prompt for ws=%s not acknowledged after %d retries — the agent may not have seen it"
-             ws retries))))
+    (agent-repl--warn ws
+                      "preemptive prompt for ws=%s not acknowledged after %d retries — the agent may not have seen it"
+                      ws retries))))
 
 (defun agent-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after the agent becomes ready.
@@ -1228,7 +1229,7 @@ the moment it appears, or cancels and opens panels once the agent is ready."
      ((agent-repl--session-starting-p ws) nil)
      (t
       (agent-repl--cancel-ready-timer ws)
-      (message "[agent-repl] ready-timer catch-all for ws=%s (session no longer starting)" ws)
+      (agent-repl--info ws "ready-timer catch-all for ws=%s (session no longer starting)" ws)
       (agent-repl--log ws "ready-timer: catch-all branch hit for ws=%s — not starting but not timed out" ws)
       (when (agent-repl--current-ws-p ws)
         (agent-repl))))))

@@ -178,7 +178,7 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
        (agent-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)
       (error
-       (message "[agent-repl] WARNING: sentinel file read error for %s: %S" fname err)
+       (agent-repl--warn nil "sentinel file read error for %s: %S" fname err)
        (agent-repl--log nil "read-sentinel-file: ERROR file=%s err=%S" fname err)
        nil))))
 
@@ -224,8 +224,8 @@ name and the directory."
     (condition-case err
         (delete-file file)
       (error
-       (message "[agent-repl] WARNING: could not delete sentinel file %s: %S"
-                (file-name-nondirectory file) err)))
+       (agent-repl--warn ws "could not delete sentinel file %s: %S"
+                         (file-name-nondirectory file) err)))
     (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
                       (plist-get handler :name) (file-name-nondirectory file) dir session-id ws)
     (cond
@@ -397,7 +397,7 @@ waiting on them are never stalled by a swallowed duplicate."
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
     (cond
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
-      (message "[agent-repl] ERROR: session_start for ws=%s but vterm buffer is null/dead" ws)
+      (agent-repl--warn ws "session_start for ws=%s but vterm buffer is null/dead" ws)
       (agent-repl--log ws
                         "on-session-start-event: ERROR ws=%s vterm buffer is null/dead — structural inconsistency"
                         ws))
@@ -566,7 +566,7 @@ Returns non-nil if a handler was found and called."
         (progn
           (agent-repl--process-sentinel-file file handler)
           t)
-      (message "[agent-repl] WARNING: no handler for sentinel file %s" name)
+      (agent-repl--warn nil "no handler for sentinel file %s" name)
       (agent-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s (tried prefixes: %S)"
                         name (mapcar #'car agent-repl--sentinel-dispatch-alist))
       nil)))
