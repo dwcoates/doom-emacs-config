@@ -1,11 +1,81 @@
 import { describe, expect, it } from "vitest";
-import { diffHtml, escapeHtml, itemKey, renderItem } from "../src/render.js";
+import { diffHtml, itemKey, renderItem, sessionInfoHtml } from "../src/render.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 
-describe("escapeHtml", () => {
-  it("escapes markup-significant characters", () => {
+describe("sessionInfoHtml", () => {
+  it("renders the parent workspace datapoint from parent_ws", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("my-feature", "claude-fable-5", null);
+    // Assert
+    expect(html).toContain(`parent workspace: <span class="info-ws">my-feature</span>`);
+  });
+
+  it("omits the parent workspace datapoint when parent_ws is absent", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml(null, "claude-fable-5", null);
+    // Assert — no dangling label or leading delimiter.
+    expect(html).not.toContain("parent workspace");
+    expect(html.startsWith("model:")).toBe(true);
+  });
+
+  it("omits the parent workspace datapoint when parent_ws is empty", () => {
     // Arrange + Act + Assert
-    expect(escapeHtml(`<b a="x">&`)).toBe("&lt;b a=&quot;x&quot;&gt;&amp;");
+    expect(sessionInfoHtml("", "claude-fable-5", null)).not.toContain("parent workspace");
+  });
+
+  it("escapes markup in the parent workspace name", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml("<b>ws", "m", null)).not.toContain("<b>");
+  });
+
+  it("joins the datapoints with the dot separator", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", "m", null);
+    // Assert
+    expect(html).toContain("</span> · model:");
+    expect(html).toContain("</span> · tokens:");
+  });
+
+  it("omits the model datapoint before hello delivers one", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml(null, "", null)).not.toContain("model:");
+  });
+
+  it("sums input and cache tokens with thousands separators", () => {
+    // Arrange
+    const usage = {
+      input_tokens: 1200,
+      output_tokens: 5,
+      cache_read_input_tokens: 100000,
+      cache_creation_input_tokens: 22256,
+    };
+    // Act + Assert
+    expect(sessionInfoHtml(null, "m", usage)).toContain(
+      `tokens: <span class="info-tokens">123,456</span>`,
+    );
+  });
+
+  it("treats missing cache fields as zero", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml(null, "m", { input_tokens: 5, output_tokens: 1 })).toContain(
+      `tokens: <span class="info-tokens">5</span>`,
+    );
+  });
+
+  it("shows zero tokens before any usage arrives", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml(null, "m", null)).toContain(
+      `tokens: <span class="info-tokens">0</span>`,
+    );
+  });
+
+  it("no longer renders the in/out counter or the cost estimate", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", "m", { input_tokens: 3, output_tokens: 7 });
+    // Assert
+    expect(html).not.toContain("in/");
+    expect(html).not.toContain("out");
+    expect(html).not.toContain("$");
   });
 });
 
@@ -154,6 +224,21 @@ describe("renderItem", () => {
     expect(renderItem(item)).toContain("tool-generic");
   });
 
+  it("renders the tool title inside the styled tool-name span", () => {
+    // Arrange — .tool-name is the CSS hook the purple title color
+    // (--tool-title) hangs off; the class must stay on the header.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Edit",
+      messageId: "m1",
+      inputJson: "{}",
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="tool-name">Edit</span>`);
+  });
+
   it("renders pending permissions with decision buttons", () => {
     // Arrange
     const item: ConversationItem = {
@@ -201,6 +286,75 @@ describe("renderItem", () => {
     };
     // Act + Assert
     expect(renderItem(item)).toBe("");
+  });
+
+  it("suppresses the tool card for ToolSearch", () => {
+    // Arrange — deferred-tool schema loading is harness plumbing, not
+    // conversation content.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "ToolSearch",
+      messageId: "m1",
+      input: { query: "select:SendMessage" },
+      inputJson: `{"query":"select:SendMessage"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
+  });
+
+  it("renders SendMessage as its recipient and summary only", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "SendMessage",
+      messageId: "m1",
+      input: { to: "researcher", summary: "assign task 1", message: "start on task #1" },
+      inputJson: `{"to":"researcher","summary":"assign task 1","message":"start on task #1"}`,
+      inputDone: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the preview summary shows, the message body does not.
+    expect(html).toContain("→ researcher: assign task 1");
+    expect(html).not.toContain("start on task #1");
+  });
+
+  it("suppresses successful SendMessage result bodies", () => {
+    // Arrange — the delivery echo adds nothing over the summary line.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "SendMessage",
+      messageId: "m1",
+      input: { to: "researcher", summary: "assign task 1", message: "go" },
+      inputJson: "",
+      inputDone: true,
+      result: { isError: false, content: "Message delivered to researcher" },
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("delivered");
+  });
+
+  it("keeps SendMessage error results visible", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "SendMessage",
+      messageId: "m1",
+      input: { to: "ghost", summary: "assign task 1", message: "go" },
+      inputJson: "",
+      inputDone: true,
+      result: { isError: true, content: "no such agent: ghost" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("no such agent: ghost");
+    expect(html).toContain("stderr");
   });
 
   it("renders AskUserQuestion as an option picker, not allow/deny", () => {
@@ -323,6 +477,100 @@ describe("renderItem", () => {
     };
     // Act + Assert
     expect(renderItem(item)).not.toContain("<script>");
+  });
+
+  describe("Read results", () => {
+    const readItem = (
+      filePath: string | undefined,
+      content: string,
+      isError = false,
+    ): ToolItem => ({
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Read",
+      messageId: "m1",
+      inputJson: "",
+      input: filePath === undefined ? {} : { file_path: filePath },
+      inputDone: true,
+      result: { isError, content },
+    });
+
+    it("syntax-highlights the preview for a known file extension", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/app.ts", "     1\tconst x = 1;"));
+      // Assert
+      expect(html).toContain(`<span class="hljs-keyword">const</span>`);
+    });
+
+    it("renders the preview plain for an unknown extension", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/notes.xyz", "     1\tconst x = 1;"));
+      // Assert — no token spans (the bare .hljs wrapper is fine).
+      expect(html).not.toContain(`class="hljs-`);
+    });
+
+    it("renders the preview plain when file_path is missing", () => {
+      // Arrange + Act
+      const html = renderItem(readItem(undefined, "     1\tconst x = 1;"));
+      // Assert — no language, but the numbering still gets styled.
+      expect(html).not.toContain(`class="hljs-`);
+      expect(html).toContain("line-no");
+    });
+
+    it("lifts cat -n number prefixes into line-no spans", () => {
+      // Arrange + Act
+      const html = renderItem(
+        readItem("/w/app.ts", "     1\tconst x = 1;\n     2\tlet y = 2;"),
+      );
+      // Assert
+      expect(html).toContain(`<span class="line-no">     1\t</span>`);
+      expect(html).toContain(`<span class="line-no">     2\t</span>`);
+    });
+
+    it("keeps the number prefix out of the highlighted code", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/app.ts", "    12\tconst x = 1;"));
+      // Assert — the keyword span starts right after the prefix span.
+      expect(html).toContain(`\t</span><span class="hljs-keyword">const</span>`);
+    });
+
+    it("highlights non-numbered content as-is", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/app.ts", "const x = 1;"));
+      // Assert
+      expect(html).toContain(`<span class="hljs-keyword">const</span>`);
+      expect(html).not.toContain("line-no");
+    });
+
+    it("tolerates a blank trailing line in numbered output", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/app.ts", "     1\tconst x = 1;\n"));
+      // Assert
+      expect(html).toContain(`<span class="line-no">     1\t</span>`);
+      expect(html).toContain(`<span class="hljs-keyword">const</span>`);
+    });
+
+    it("applies the 10-line preview cap class", () => {
+      // Arrange + Act + Assert
+      expect(renderItem(readItem("/w/app.ts", "     1\tconst x = 1;"))).toContain(
+        "tool-read-output",
+      );
+    });
+
+    it("escapes markup in the preview", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/page.xyz", "     1\t<script>alert(1)</script>"));
+      // Assert
+      expect(html).not.toContain("<script>");
+    });
+
+    it("renders Read errors through the plain error output", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/nope.ts", "File does not exist.", true));
+      // Assert
+      expect(html).toContain("stderr");
+      expect(html).not.toContain("tool-read-output");
+    });
   });
 });
 

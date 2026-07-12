@@ -5,9 +5,10 @@
  *   ?daemon=host:port   daemon address (default: current host)
  *   ?session=<id>       join an existing session (else one is created)
  *   ?fake=1             create the session against the offline fake SDK
+ *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
 import { PermissionMode } from "./protocol.js";
-import { FeedRenderer } from "./render.js";
+import { FeedRenderer, sessionInfoHtml } from "./render.js";
 import { ConversationStore } from "./store.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import "./styles.css";
@@ -70,17 +71,15 @@ async function boot(): Promise<void> {
   });
 
   const statusEl = must("conn-status");
-  const chipEl = must("usage-chip");
+  const infoEl = must("session-info");
   const modeEl = must<HTMLSelectElement>("mode-select");
   const spinnerEl = must("spinner");
+  const parentWs = params.get("parent_ws");
 
   const renderChrome = (): void => {
     const s = store.state;
-    chipEl.textContent = s.usage
-      ? `${s.usage.input_tokens}in/${s.usage.output_tokens}out${
-          s.costUsd !== null ? ` · $${s.costUsd.toFixed(4)}` : ""
-        }`
-      : "";
+    // sessionInfoHtml escapes every value it interpolates.
+    infoEl.innerHTML = sessionInfoHtml(parentWs, s.model, s.usage);
     if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
