@@ -633,6 +633,103 @@ wrapper to an error-on-call lambda."
   "compute-config-dir with nil project-dir should signal an error."
   (should-error (agent-repl--compute-config-dir nil) :type 'error))
 
+;;;; ---- Tests: agent-repl-doom-multi-repo-mode ----
+
+(ert-deftest agent-repl-test-doom-config-tree-p-canonical-root ()
+  "doom-config-tree-p accepts the canonical doom config checkout itself."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom"))
+    (should (agent-repl--doom-config-tree-p "/home/user/.config/doom"))))
+
+(ert-deftest agent-repl-test-doom-config-tree-p-under-root ()
+  "doom-config-tree-p accepts a directory nested inside the doom config checkout."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom"))
+    (should (agent-repl--doom-config-tree-p "/home/user/.config/doom/modules/app"))))
+
+(ert-deftest agent-repl-test-doom-config-tree-p-worktree ()
+  "doom-config-tree-p accepts a generated worktree of the doom config checkout."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom"))
+    (should (agent-repl--doom-config-tree-p "/home/user/.config/doom-worktrees/feature-x"))))
+
+(ert-deftest agent-repl-test-doom-config-tree-p-sibling-name-prefix ()
+  "doom-config-tree-p rejects a sibling directory that merely shares the name prefix."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom"))
+    (should-not (agent-repl--doom-config-tree-p "/home/user/.config/doomsday/proj"))))
+
+(ert-deftest agent-repl-test-doom-config-tree-p-unrelated ()
+  "doom-config-tree-p rejects a project outside the doom config tree."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom"))
+    (should-not (agent-repl--doom-config-tree-p "/home/user/workspace/other"))))
+
+(ert-deftest agent-repl-test-compute-config-dir-doom-mode-off ()
+  "compute-config-dir leaves the doom checkout on the default account with the mode off."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (agent-repl-doom-multi-repo-mode nil)
+        (agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil))
+    (should-not (agent-repl--compute-config-dir "/home/user/.config/doom"))))
+
+(ert-deftest agent-repl-test-compute-config-dir-doom-mode-on-root ()
+  "compute-config-dir returns the multi-repo config dir for the doom checkout with the mode on."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (agent-repl-doom-multi-repo-mode t)
+        (agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil))
+    (should (equal (agent-repl--compute-config-dir "/home/user/.config/doom")
+                   (expand-file-name agent-repl-multi-repo-config-dir)))))
+
+(ert-deftest agent-repl-test-compute-config-dir-doom-mode-on-worktree ()
+  "compute-config-dir returns the multi-repo config dir for a doom worktree with the mode on."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (agent-repl-doom-multi-repo-mode t)
+        (agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil))
+    (should (equal (agent-repl--compute-config-dir "/home/user/.config/doom-worktrees/ws1")
+                   (expand-file-name agent-repl-multi-repo-config-dir)))))
+
+(ert-deftest agent-repl-test-compute-config-dir-doom-mode-on-spares-other-projects ()
+  "compute-config-dir keeps non-doom projects on the default account with the mode on."
+  (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+        (agent-repl-doom-multi-repo-mode t)
+        (agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil))
+    (should-not (agent-repl--compute-config-dir "/home/user/workspace/other"))))
+
+(ert-deftest agent-repl-test-compute-config-dir-doom-mode-on-env-unset ()
+  "compute-config-dir honors the doom mode even when the root env var is unset."
+  (let ((process-environment (copy-sequence process-environment))
+        (agent-repl-doom-multi-repo-mode t)
+        (agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil))
+    (setenv "MULTI_REPO_ROOT" nil)
+    (should (equal (agent-repl--compute-config-dir "/home/user/.config/doom")
+                   (expand-file-name agent-repl-multi-repo-config-dir)))))
+
+(ert-deftest agent-repl-test-doom-multi-repo-mode-enable-switches-config-dir ()
+  "Enabling the mode interactively switches the doom checkout to the multi-repo config dir."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil)
+        (was agent-repl-doom-multi-repo-mode))
+    (unwind-protect
+        (progn
+          (agent-repl-doom-multi-repo-mode 1)
+          (should agent-repl-doom-multi-repo-mode)
+          (should (equal (agent-repl--compute-config-dir "/home/user/.config/doom")
+                         (expand-file-name agent-repl-multi-repo-config-dir))))
+      (agent-repl-doom-multi-repo-mode (if was 1 -1)))))
+
+(ert-deftest agent-repl-test-doom-multi-repo-mode-disable-restores-config-dir ()
+  "Disabling the mode interactively returns the doom checkout to the default account."
+  (let ((agent-repl-doom-config-root "/home/user/.config/doom")
+        (agent-repl-default-config-dir nil)
+        (was agent-repl-doom-multi-repo-mode))
+    (unwind-protect
+        (progn
+          (agent-repl-doom-multi-repo-mode 1)
+          (agent-repl-doom-multi-repo-mode -1)
+          (should-not agent-repl-doom-multi-repo-mode)
+          (should-not (agent-repl--compute-config-dir "/home/user/.config/doom")))
+      (agent-repl-doom-multi-repo-mode (if was 1 -1)))))
+
 ;;;; ---- Tests: Workspace mode-line ----
 
 (ert-deftest agent-repl-test-workspace-mode-line-with-parent-no-merge ()
