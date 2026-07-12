@@ -57,6 +57,13 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 	return argv
 }
 
+// Remediator dispatches the headless analyst for a session that has
+// vanished from the daemon. Start reports whether this call is the one
+// that launched it (a repeat for an already-dispatched id is a no-op).
+type Remediator interface {
+	Start(sessionID string) (bool, error)
+}
+
 // Server routes daemon HTTP traffic.
 type Server struct {
 	daemonVersion string
@@ -66,7 +73,8 @@ type Server struct {
 	logf          func(format string, args ...any)
 	upgrader      websocket.Upgrader
 
-	sentinel session.SentinelSink
+	sentinel   session.SentinelSink
+	remediator Remediator
 
 	mu       sync.Mutex
 	sessions map[string]*session.Session
@@ -85,6 +93,9 @@ type Config struct {
 	// Sentinel receives agent-state side-channel notifications for every
 	// session; nil disables sentinel writes.
 	Sentinel session.SentinelSink
+	// Remediator dispatches the "session gone" analyst; nil makes
+	// POST /remediation report the capability as unconfigured.
+	Remediator Remediator
 }
 
 // New builds a Server.
@@ -100,6 +111,7 @@ func New(cfg Config) *Server {
 		spawn:         cfg.Spawn,
 		logf:          logf,
 		sentinel:      cfg.Sentinel,
+		remediator:    cfg.Remediator,
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -119,7 +131,46 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
+	mux.HandleFunc("POST /remediation", s.handleRemediate)
 	return mux
+}
+
+// handleRemediate dispatches the "session gone" analyst. The frontend
+// calls it the moment its existence probe reports the daemon no longer
+// knows the session it is holding — the id is by definition absent from
+// the session map, so this route is daemon-scoped rather than
+// session-scoped.
+func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if body.SessionID == "" {
+		httpError(w, http.StatusBadRequest, "session_id must be non-empty")
+		return
+	}
+	// A session the daemon still serves is not gone, so a remediation
+	// request naming one is a frontend bug: refuse rather than burn an
+	// analyst on a healthy session.
+	if s.lookup(body.SessionID) != nil {
+		httpError(w, http.StatusConflict, "session is alive; nothing to remediate")
+		return
+	}
+	if s.remediator == nil {
+		httpError(w, http.StatusServiceUnavailable, "remediation is not configured")
+		return
+	}
+	started, err := s.remediator.Start(body.SessionID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]bool{"started": started})
 }
 
 // handleSendMessage injects a user turn over HTTP — the send path for

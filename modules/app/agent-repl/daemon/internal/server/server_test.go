@@ -78,6 +78,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessWith(t, nil)
+}
+
+// newHarnessWith builds a harness whose daemon dispatches "session gone"
+// remediation through remediator (nil = the capability is unconfigured).
+func newHarnessWith(t *testing.T, remediator Remediator) *harness {
+	t.Helper()
 	shims := make(chan *fakeShim, 8)
 	srv := New(Config{
 		DaemonVersion: "0.1.0-test",
@@ -88,10 +95,47 @@ func newHarness(t *testing.T) *harness {
 			shims <- shim
 			return shim, nil
 		},
+		Remediator: remediator,
 	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &harness{ts: ts, srv: srv, shims: shims}
+}
+
+// fakeRemediator records the ids remediation was dispatched for.
+type fakeRemediator struct {
+	mu   sync.Mutex
+	ids  []string
+	err  error
+	stop bool // report the dedupe no-op instead of a launch
+}
+
+func (f *fakeRemediator) Start(sessionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return false, f.err
+	}
+	f.ids = append(f.ids, sessionID)
+	return !f.stop, nil
+}
+
+func (f *fakeRemediator) dispatched() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.ids)
+}
+
+// postRemediation asks the daemon to remediate sessionID.
+func (h *harness) postRemediation(t *testing.T, sessionID string) *http.Response {
+	t.Helper()
+	body := fmt.Sprintf(`{"session_id":%q}`, sessionID)
+	resp, err := http.Post(h.ts.URL+"/remediation", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /remediation: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
 }
 
 func (h *harness) createSession(t *testing.T) (string, *fakeShim) {
@@ -670,5 +714,90 @@ func TestCreateSessionKeepsResumableResume(t *testing.T) {
 	hello := readFrame(t, conn)
 	if hello["claude_session_id"] != "uuid-1" {
 		t.Fatalf("hello claude_session_id = %v, want uuid-1", hello["claude_session_id"])
+	}
+}
+
+// ---- POST /remediation ("session gone" analyst dispatch) ------------------
+
+func TestRemediationDispatchesForAVanishedSession(t *testing.T) {
+	// Arrange — an id the daemon has never heard of, exactly as the
+	// webapp's existence probe reports when it goes "session gone".
+	rem := &fakeRemediator{}
+	h := newHarnessWith(t, rem)
+	// Act
+	resp := h.postRemediation(t, "s_ghost")
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if got := rem.dispatched(); !slices.Equal(got, []string{"s_ghost"}) {
+		t.Fatalf("dispatched = %v, want [s_ghost]", got)
+	}
+}
+
+func TestRemediationReportsWhetherItLaunchedTheAnalyst(t *testing.T) {
+	// Arrange — a repeat request for an already-dispatched session.
+	rem := &fakeRemediator{stop: true}
+	h := newHarnessWith(t, rem)
+	// Act
+	resp := h.postRemediation(t, "s_ghost")
+	// Assert
+	var body struct {
+		Started bool `json:"started"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Started {
+		t.Fatal("started = true, want false for the dedupe no-op")
+	}
+}
+
+func TestRemediationRefusesALiveSession(t *testing.T) {
+	// Arrange — a session the daemon still serves is not gone.
+	rem := &fakeRemediator{}
+	h := newHarnessWith(t, rem)
+	id, _ := h.createSession(t)
+	// Act
+	resp := h.postRemediation(t, id)
+	// Assert
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if got := rem.dispatched(); len(got) != 0 {
+		t.Fatalf("dispatched = %v, want no analyst for a live session", got)
+	}
+}
+
+func TestRemediationRejectsAnEmptySessionId(t *testing.T) {
+	// Arrange
+	h := newHarnessWith(t, &fakeRemediator{})
+	// Act
+	resp := h.postRemediation(t, "")
+	// Assert
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestRemediationSurfacesADispatchFailure(t *testing.T) {
+	// Arrange
+	h := newHarnessWith(t, &fakeRemediator{err: fmt.Errorf("claude not on PATH")})
+	// Act
+	resp := h.postRemediation(t, "s_ghost")
+	// Assert
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestRemediationReportsAnUnconfiguredRunner(t *testing.T) {
+	// Arrange — no Remediator wired into the daemon.
+	h := newHarness(t)
+	// Act
+	resp := h.postRemediation(t, "s_ghost")
+	// Assert
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
 }
