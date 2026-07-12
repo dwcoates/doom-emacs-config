@@ -118,6 +118,112 @@
             (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_new"))
             (should (= (length agent-repl-test--urls) 2))))))))
 
+;;;; ---- Copy chords ------------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
+  "The mount arms `agent-repl-frontend-webview-mode' on the webview."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Assert
+          (should (buffer-local-value 'agent-repl-frontend-webview-mode buf)))))))
+
+(ert-deftest agent-repl-test-frontend-copy-chord-y ()
+  "`y' copies the webview's highlight (the vim reflex)."
+  ;; Arrange + Act + Assert
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "y"))
+              #'agent-repl-frontend-copy-selection)))
+
+(ert-deftest agent-repl-test-frontend-copy-chord-c-c ()
+  "`C-c' copies the webview's highlight (the terminal reflex)."
+  ;; Arrange + Act + Assert
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C-c"))
+              #'agent-repl-frontend-copy-selection)))
+
+(ert-deftest agent-repl-test-frontend-copy-mode-normalizes-evil-keymaps ()
+  "Enabling the mode rebuilds evil's keymap list, or the chords never win.
+Evil ignores a minor-mode map's per-state auxiliary keymaps until
+`evil-normalize-keymaps' has run in the buffer, and enabling a minor mode
+does not itself trigger it — unnormalized, evil's own maps still outrank
+this one and `y' lands on the major mode's aux map instead."
+  ;; Arrange — batch has no evil, so the call is observed through a stub.
+  (let ((normalized 0))
+    (cl-letf (((symbol-function 'evil-normalize-keymaps)
+               (lambda (&optional _state) (cl-incf normalized))))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl-frontend-webview-mode 1)
+        ;; Assert
+        (should (= normalized 1))))))
+
+(ert-deftest agent-repl-test-frontend-copy-mode-survives-a-non-evil-emacs ()
+  "The mode enables cleanly where evil is absent (a plain Emacs, batch)."
+  ;; Arrange
+  (should-not (fboundp 'evil-normalize-keymaps))
+  (with-temp-buffer
+    ;; Act
+    (agent-repl-frontend-webview-mode 1)
+    ;; Assert
+    (should agent-repl-frontend-webview-mode)))
+
+(ert-deftest agent-repl-test-frontend-copy-selection-reads-the-webview ()
+  "The copy command asks the webview for its selection and kills the answer."
+  ;; Arrange
+  (let ((kill-ring nil)
+        (interprogram-cut-function nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-selection)
+               (lambda (callback) (funcall callback "highlighted text"))))
+      ;; Act
+      (agent-repl-frontend-copy-selection)
+      ;; Assert
+      (should (equal (car kill-ring) "highlighted text")))))
+
+(ert-deftest agent-repl-test-frontend-yank-selection-kills-the-text ()
+  "A real selection lands on the kill ring verbatim, whitespace included."
+  ;; Arrange
+  (let ((kill-ring nil)
+        (interprogram-cut-function nil))
+    ;; Act
+    (agent-repl--frontend-yank-selection "  indented\n")
+    ;; Assert
+    (should (equal (car kill-ring) "  indented\n"))))
+
+(ert-deftest agent-repl-test-frontend-yank-selection-empty-never-clobbers ()
+  "An empty selection leaves the kill ring alone (a stray click kills nothing)."
+  ;; Arrange
+  (let ((kill-ring '("previous kill"))
+        (interprogram-cut-function nil))
+    ;; Act
+    (agent-repl--frontend-yank-selection "")
+    ;; Assert
+    (should (equal kill-ring '("previous kill")))))
+
+(ert-deftest agent-repl-test-frontend-yank-selection-blank-never-clobbers ()
+  "A whitespace-only selection is nothing highlighted, so nothing is killed."
+  ;; Arrange
+  (let ((kill-ring '("previous kill"))
+        (interprogram-cut-function nil))
+    ;; Act
+    (agent-repl--frontend-yank-selection " \n ")
+    ;; Assert
+    (should (equal kill-ring '("previous kill")))))
+
+(ert-deftest agent-repl-test-frontend-yank-selection-nil-never-clobbers ()
+  "A nil selection (no answer from the webview) kills nothing."
+  ;; Arrange
+  (let ((kill-ring '("previous kill"))
+        (interprogram-cut-function nil))
+    ;; Act
+    (agent-repl--frontend-yank-selection nil)
+    ;; Assert
+    (should (equal kill-ring '("previous kill")))))
+
 ;;;; ---- Placement ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-display-hides-panels-first ()

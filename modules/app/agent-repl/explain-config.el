@@ -48,6 +48,7 @@
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl--frontend-send-message "agent-repl-frontend-client" (session-id text))
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
+(declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name))
 (declare-function agent-repl--frontend-kill-webview "agent-repl-frontend" (buf))
 (declare-function agent-repl--frontend-xwidget-available-p "agent-repl-frontend" ())
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -406,10 +407,10 @@ follow-up-question surface."
 Reuses the existing webview only while it is live AND still bound to
 SESSION-ID; a session change kills the stale webview and mounts a
 fresh one, since an xwidget session cannot be retargeted reliably from
-outside.  The buffer's name is pinned via buffer-local
-`xwidget-webkit-buffer-name-format' so webapp title changes never
-rename it, and `xwidget-webkit-mode's \"WebKit: <title>\" header-line
-is cleared — the popup is chrome, not a browser."
+outside.  The fresh buffer is handed to the shared
+`agent-repl--frontend-adopt-webview-buffer' (frontend.el), which pins
+its name, drops the browser header-line, and arms the copy chords — the
+popup is chrome, not a browser."
   (unless (agent-repl--frontend-xwidget-available-p)
     (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
   (let ((existing (get-buffer agent-repl-explain-config-buffer-name)))
@@ -420,13 +421,10 @@ is cleared — the popup is chrome, not a browser."
         (agent-repl--log nil "explain-config webview rebind: session %s -> %s (killing stale webview)"
                          agent-repl--explain-config-webview-session-id session-id)
         (agent-repl--frontend-kill-webview existing))
-      (let ((buf (agent-repl--frontend-make-webview-buffer
-                  (agent-repl--explain-config-webview-url session-id)))
-            (name agent-repl-explain-config-buffer-name))
-        (with-current-buffer buf
-          (setq-local xwidget-webkit-buffer-name-format name)
-          (setq-local header-line-format nil)
-          (rename-buffer name t))
+      (let* ((buf (agent-repl--frontend-make-webview-buffer
+                   (agent-repl--explain-config-webview-url session-id)))
+             (name agent-repl-explain-config-buffer-name))
+        (agent-repl--frontend-adopt-webview-buffer buf name)
         (setq agent-repl--explain-config-webview-session-id session-id)
         (agent-repl--log nil "explain-config webview mounted: %s -> %s"
                          name (agent-repl--explain-config-webview-url session-id))
