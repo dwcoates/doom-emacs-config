@@ -402,6 +402,27 @@ resolver supplies it exactly as creation would."
   (should (memq #'agent-repl--frontend-release-workspace-session
                 agent-repl-ws-del-hook)))
 
+;;;; ---- gui-send-turn ------------------------------------------------------------
+
+(ert-deftest agent-repl-test-gui-send-turn-sets-thinking-before-send ()
+  "gui-send-turn sets :thinking optimistically BEFORE the HTTP send.
+The prompt_submit hook remains the authoritative confirmation, but a
+permission request can beat a lagging hook and on-permission-event
+gates on :thinking, so the optimistic write must precede the wire."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (let ((state-at-send nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (ws _input)
+                   (setq state-at-send (agent-repl--ws-get ws :agent-state))))
+                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        ;; Act
+        (agent-repl--gui-send-turn "ws1" "prepared input" "raw input")
+        ;; Assert
+        (should (eq state-at-send :thinking))))))
+
 ;;;; ---- session-url ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-url-shape ()
