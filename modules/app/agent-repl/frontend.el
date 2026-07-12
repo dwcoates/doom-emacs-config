@@ -66,6 +66,9 @@
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
+(declare-function xwidget-webkit-get-selection "xwidget" (proc))
+(declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
+(declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
 (defvar xwidget-webkit-buffer-name-format)
 
@@ -120,16 +123,102 @@ place it deadlocks non-interactive callers like the nuke hook."
   (let ((kill-buffer-query-functions nil))
     (kill-buffer buf)))
 
+;;;; ---- Copying the webview's highlighted text --------------------------------
+
+(defun agent-repl--frontend-webview-selection (callback)
+  "External-boundary wrapper: hand WebKit's current selection to CALLBACK.
+Runs `window.getSelection()' inside the current buffer's webview, so the
+answer arrives asynchronously.  Body does nothing but the external call;
+tests mock via `cl-letf'.  Registered in
+`agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (xwidget-webkit-get-selection callback)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--frontend-yank-selection (text)
+  "Put the webview's selected TEXT on the kill ring, reporting what happened.
+The kill ring is the system clipboard's Emacs end (`select-enable-clipboard'),
+so a killed selection is pasteable outside Emacs too.  An empty or
+whitespace-only TEXT means nothing was highlighted, and is NOT killed —
+clobbering the kill ring with a stray click's empty selection would be a
+silent data loss."
+  (if (or (null text) (string-empty-p (string-trim text)))
+      (message "agent-repl: nothing highlighted in the webview")
+    (kill-new text)
+    (message "agent-repl: copied %d chars from the webview" (length text))))
+
+;;;###autoload
+(defun agent-repl-frontend-copy-selection ()
+  "Copy the webview's highlighted text to the kill ring and system clipboard.
+Bound to `C-c' and `y' (the vim reflex) in the webview panel, since the
+WKWebView has no menu bar of its own to copy a mouse-made highlight with."
+  (interactive)
+  (agent-repl--frontend-webview-selection #'agent-repl--frontend-yank-selection))
+
+(defvar agent-repl-frontend-webview-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "y") #'agent-repl-frontend-copy-selection)
+    (define-key map (kbd "C-c") #'agent-repl-frontend-copy-selection)
+    map)
+  "Keymap of `agent-repl-frontend-webview-mode'.
+`C-c' shadows the mode-specific prefix in webview buffers, which host no
+`C-c' bindings of their own — the webview is chrome, not an editor.")
+
+;;;###autoload
+(define-minor-mode agent-repl-frontend-webview-mode
+  "Minor mode giving agent-repl webview buffers their copy chords.
+Enabled on every webview the module mounts (the workspace's gui panel
+and the explain-config popup alike), so `C-c' / `y' copy the highlight
+there and nowhere else — plain `xwidget-webkit-mode' browsing keeps its
+own bindings."
+  :lighter nil
+  :keymap agent-repl-frontend-webview-mode-map
+  ;; Evil only consults a minor-mode map's auxiliary (per-state) keymaps
+  ;; once `evil-normalize-keymaps' has rebuilt `evil-mode-map-alist' for
+  ;; the buffer, and merely ENABLING a minor mode does not trigger that.
+  ;; Unnormalized, evil's own maps still outrank this one and the chords
+  ;; land elsewhere: `y' on the major mode's evil aux map (where `y y'
+  ;; copies the page URL) and `C-c' on the global mode-specific prefix.
+  (when (fboundp 'evil-normalize-keymaps)
+    (evil-normalize-keymaps)))
+
+;; Evil binds `y' (`evil-yank') in normal/visual state, and its state maps
+;; outrank a minor-mode map — so the chord must be planted in this map's
+;; evil auxiliary maps too, or `y' would start an Emacs-region yank
+;; operator over a buffer that holds no text at all.
+(when (fboundp 'evil-define-key*)
+  (dolist (state '(normal motion visual insert emacs))
+    (evil-define-key* state agent-repl-frontend-webview-mode-map
+                      (kbd "y") #'agent-repl-frontend-copy-selection
+                      (kbd "C-c") #'agent-repl-frontend-copy-selection)))
+
+;;;; ---- Webview buffer adoption ----------------------------------------------
+
+(defun agent-repl--frontend-adopt-webview-buffer (buf name)
+  "Make webview BUF an agent-repl panel called NAME, and return it.
+Every mount site (the workspace gui panel, the explain-config popup)
+adopts its webview through here, so the three properties that make a
+webview OURS never drift apart:
+  - the buffer name is pinned via the buffer-local
+    `xwidget-webkit-buffer-name-format' (itself the fixed NAME, with no
+    %-constructs), so the webapp's `document.title' changes never rename it;
+  - `xwidget-webkit-mode's \"WebKit: <title>\" header-line is cleared,
+    since the webview is a panel, not a browser;
+  - `agent-repl-frontend-webview-mode' arms the copy chords."
+  (with-current-buffer buf
+    (setq-local xwidget-webkit-buffer-name-format name)
+    (setq-local header-line-format nil)
+    (agent-repl-frontend-webview-mode 1)
+    (rename-buffer name t))
+  buf)
+
 (defun agent-repl--frontend-ensure-webview-buffer (ws session-id url)
   "Return a live webview buffer for WS attached to SESSION-ID at URL.
 Reuses the recorded `:frontend-buffer' only while it is live AND still
 bound to SESSION-ID (`:frontend-buffer-session-id'); a session change
 kills the stale webview and mounts a fresh one, since an xwidget
-session cannot be retargeted reliably from outside.  The new buffer's
-name is pinned via buffer-local `xwidget-webkit-buffer-name-format' so
-webapp title changes never rename it, and `xwidget-webkit-mode's
-\"WebKit: <title>\" header-line is cleared — the webview is the
-workspace's agent output panel, not a browser."
+session cannot be retargeted reliably from outside.  The fresh buffer
+is handed to `agent-repl--frontend-adopt-webview-buffer', which pins its
+name, drops the browser header-line, and arms the copy chords."
   (let ((existing (agent-repl--ws-get ws :frontend-buffer))
         (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
     (if (and (buffer-live-p existing) (equal bound-to session-id))
@@ -138,16 +227,9 @@ workspace's agent output panel, not a browser."
         (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
                           bound-to session-id)
         (agent-repl--frontend-kill-webview existing))
-      (let ((buf (agent-repl--frontend-make-webview-buffer url))
-            (name (agent-repl--frontend-webview-buffer-name ws)))
-        (with-current-buffer buf
-          ;; Pin BOTH the live name and the format xwidget uses on
-          ;; title-change renames; the format is the fixed name itself
-          ;; (no %-constructs), so every "rename" is a no-op.
-          (setq-local xwidget-webkit-buffer-name-format name)
-          ;; Drop the mode's "WebKit: <document title>" header-line.
-          (setq-local header-line-format nil)
-          (rename-buffer name t))
+      (let* ((buf (agent-repl--frontend-make-webview-buffer url))
+             (name (agent-repl--frontend-webview-buffer-name ws)))
+        (agent-repl--frontend-adopt-webview-buffer buf name)
         (agent-repl--ws-put ws :frontend-buffer buf)
         (agent-repl--ws-put ws :frontend-buffer-session-id session-id)
         (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
