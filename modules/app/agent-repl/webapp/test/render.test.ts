@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { backfillChunks, diffHtml, itemKey, renderItem, sessionInfoHtml } from "../src/render.js";
+import {
+  backfillChunks,
+  diffHtml,
+  formatTurnTime,
+  itemKey,
+  renderItem,
+  sessionInfoHtml,
+} from "../src/render.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
+
+/** A user-turn item whose prompt was sent at the given local wall-clock time. */
+function userTurnAt(hour: number, minute: number, text = "do the thing"): ConversationItem {
+  return {
+    kind: "user-turn",
+    requestId: "r1",
+    content: [{ type: "text", text }],
+    ts: new Date(2026, 4, 24, hour, minute).toISOString(),
+  };
+}
+
+describe("formatTurnTime", () => {
+  it("renders the envelope ts as local 24-hour HH:MM", () => {
+    // Arrange
+    const ts = new Date(2026, 4, 24, 14, 32).toISOString();
+    // Act + Assert
+    expect(formatTurnTime(ts)).toBe("14:32");
+  });
+
+  it("zero-pads a single-digit hour", () => {
+    // Arrange
+    const ts = new Date(2026, 4, 24, 9, 5).toISOString();
+    // Act + Assert
+    expect(formatTurnTime(ts)).toBe("09:05");
+  });
+});
 
 describe("sessionInfoHtml", () => {
   it("renders the parent workspace datapoint from parent_ws", () => {
@@ -93,6 +126,22 @@ describe("diffHtml", () => {
 });
 
 describe("renderItem", () => {
+  it("stamps a user prompt bubble with its send time", () => {
+    // Arrange
+    const item = userTurnAt(14, 32);
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="turn-ts">14:32</span>`);
+  });
+
+  it("keeps the prompt text alongside its send-time stamp", () => {
+    // Arrange
+    const item = userTurnAt(14, 32, "do the thing");
+    // Act
+    const html = renderItem(item);
+    // Assert — the stamp trails the prompt inside the same bubble.
+    expect(html).toContain(`<div class="bubble user"><pre>do the thing</pre><span class="turn-ts">`);
+  });
+
   it("renders a streaming text block with a cursor", () => {
     // Arrange
     const item: ConversationItem = {

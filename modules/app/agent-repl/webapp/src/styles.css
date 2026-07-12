@@ -95,7 +95,23 @@ pre {
 /* No max-width: every feed section spans the full feed width, matching
    the tool cards, so nothing renders narrower than its neighbors. */
 .bubble { padding: 0.6rem 0.9rem; border-radius: 8px; }
-.bubble.user { background: var(--user); align-self: flex-end; }
+/* Prompt text and its send-time stamp share one row: the stamp is pinned
+   to the bubble's top-right corner, baseline-aligned with the prompt's
+   first line, and never shrinks the way the wrapping prompt does. */
+.bubble.user {
+  background: var(--user);
+  align-self: flex-end;
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+}
+.bubble.user > pre { flex: 1; min-width: 0; }
+.turn-ts {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
 .bubble.assistant { background: var(--assistant); }
 .cursor { animation: pulse 1s infinite; color: var(--accent); }
 

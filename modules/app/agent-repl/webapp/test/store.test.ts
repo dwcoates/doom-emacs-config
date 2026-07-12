@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ConversationStore, PermissionItem, TextItem, ToolItem } from "../src/store.js";
+import {
+  ConversationStore,
+  PermissionItem,
+  TextItem,
+  ToolItem,
+  UserTurnItem,
+} from "../src/store.js";
 
 let autoSeq = 0;
 
@@ -243,6 +249,25 @@ describe("ConversationStore permissions", () => {
 });
 
 describe("ConversationStore turn lifecycle", () => {
+  it("records the envelope ts on the user turn", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(
+      JSON.stringify({
+        type: "user-turn",
+        seq: 1,
+        ts: "2026-05-24T12:34:56.789Z",
+        session_id: "s1",
+        request_id: "r1",
+        content: [{ type: "text", text: "hi" }],
+      }),
+    );
+    // Assert
+    const item = store.state.items[0] as UserTurnItem;
+    expect(item.ts).toBe("2026-05-24T12:34:56.789Z");
+  });
+
   it("turns the spinner on at user-turn and off at result", () => {
     // Arrange
     const store = newStore();
