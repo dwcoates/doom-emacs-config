@@ -58,6 +58,10 @@ type Session struct {
 	ring     []retained
 	clients  map[*Client]struct{}
 	terminal bool
+	// deathReason classifies HOW a terminal session ended: the shim's
+	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
+	// for a hard death without a closed event. Empty while alive.
+	deathReason string
 
 	done chan struct{}
 }
@@ -127,19 +131,31 @@ type Info struct {
 	Model           string
 	ClaudeSessionID string
 	Terminal        bool
+	// DeathReason classifies a terminal session's end (closed reason or
+	// "shim_died"); empty while alive.
+	DeathReason string
+	// TurnActive reports whether a user turn is in flight.
+	TurnActive bool
+	// PendingPermissions lists unresolved permission request ids, sorted.
+	PendingPermissions []string
 }
 
 // Info returns the session's current introspection snapshot: the
 // requested-then-authoritative cwd/model mirror, the durable CLI session
-// id (empty until system:init), and terminality.
+// id (empty until system:init), terminality, and the reconcile fields
+// (death reason, turn activity, pending permissions) that let a
+// level-triggered poller re-derive agent state from daemon truth.
 func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Info{
-		CWD:             s.translator.CWD,
-		Model:           s.translator.Model,
-		ClaudeSessionID: s.translator.ClaudeSessionID,
-		Terminal:        s.terminal,
+		CWD:                s.translator.CWD,
+		Model:              s.translator.Model,
+		ClaudeSessionID:    s.translator.ClaudeSessionID,
+		Terminal:           s.terminal,
+		DeathReason:        s.deathReason,
+		TurnActive:         s.translator.TurnActive(),
+		PendingPermissions: s.translator.PendingPermissionIDs(),
 	}
 }
 
@@ -153,6 +169,7 @@ func (s *Session) Run() {
 		s.broadcastLocked(frames)
 		if evt.Type == "closed" {
 			s.terminal = true
+			s.deathReason = evt.Reason
 		}
 		s.mu.Unlock()
 	}
@@ -163,6 +180,7 @@ func (s *Session) Run() {
 		// death) so no tab is left with a live prompt for a dead shim,
 		// then surface the error frame.
 		s.terminal = true
+		s.deathReason = "shim_died"
 		s.broadcastLocked(s.translator.OnShimDeath())
 		s.broadcastLocked([]protocol.L2Frame{&protocol.ErrorFrame{
 			Envelope:    protocol.Envelope{Type: "error"},
