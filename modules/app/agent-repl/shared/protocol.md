@@ -794,6 +794,43 @@ interface ReplayRequestFrame {
 
 ---
 
+## Agent-state sentinels (daemon → Emacs side channel)
+
+Not part of the NDJSON wire: a file-based side channel through which
+the daemon feeds the Emacs tab-bar state machine for gui sessions. It
+piggybacks on the sentinel-file contract the Claude Code hook scripts
+already use, so the Emacs consumer (file-notify watcher + 1 Hz poll
+fallback + filename-prefix dispatch) is unchanged machinery.
+
+- **Directory**: `$AGENT_REPL_STATE_DIR/workspace-notifications`,
+  defaulting to `~/.claude-emacs/workspace-notifications`. The daemon
+  resolves this from its **inherited environment** (it is spawned by
+  Emacs), which is the same resolution the hook scripts perform —
+  daemon and hooks therefore always agree on the directory.
+- **File format**: byte-identical to the hook scripts' output — two
+  `\n`-terminated lines: the session `cwd`, then the durable claude
+  session id (may be empty before `system:init`).
+- **Write strategy**: a single direct `write()` to the final filename.
+  A same-directory tmp+rename is forbidden: the Emacs watcher runs on
+  kqueue where the rename arrives as an ignored `renamed` action, and
+  the tmp file's own creation event would dispatch a partial file.
+- **Daemon-written events** — exactly the set no hook ever produces
+  for SDK sessions (dedup with hooks is by disjoint event sets):
+
+  | filename | trigger (Layer-2 frame at the broadcast tap) |
+  |---|---|
+  | `permission_request_<sid>_<reqid>` | `permission-request` |
+  | `permission_resolved_<sid>_<reqid>` | `permission-resolved` (webapp decision or turn-end/interrupt/close/death auto-cancel) |
+  | `session_dead_<sid>` | `error` with `code: "shim_died"` (both abnormal death paths; never on clean shutdown) |
+
+  Everything else (`prompt_submit_*`, `stop_*`, `subagent_*`,
+  `stop_failure_*`, `session_start_*`) keeps coming from the real
+  global hooks, which fire for SDK sessions.
+- **Consumer gates**: the Emacs handlers are state-gated and
+  idempotent (`permission_request` acts only from `:thinking`,
+  `permission_resolved` only from `:permission`), which makes
+  duplicate delivery and hook/daemon interleavings order-independent.
+
 ## Versioning & forward compatibility
 
 - Each layer's frame discriminator (`type`) is a closed enum at any

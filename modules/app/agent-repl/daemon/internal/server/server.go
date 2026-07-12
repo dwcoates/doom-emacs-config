@@ -64,6 +64,8 @@ type Server struct {
 	logf          func(format string, args ...any)
 	upgrader      websocket.Upgrader
 
+	sentinel session.SentinelSink
+
 	mu       sync.Mutex
 	sessions map[string]*session.Session
 }
@@ -74,6 +76,9 @@ type Config struct {
 	Retention     int
 	Spawn         SpawnFunc
 	Logf          func(format string, args ...any)
+	// Sentinel receives agent-state side-channel notifications for every
+	// session; nil disables sentinel writes.
+	Sentinel session.SentinelSink
 }
 
 // New builds a Server.
@@ -87,6 +92,7 @@ func New(cfg Config) *Server {
 		retention:     cfg.Retention,
 		spawn:         cfg.Spawn,
 		logf:          logf,
+		sentinel:      cfg.Sentinel,
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -193,6 +199,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Model:         opts.Model,
 		Retention:     s.retention,
 		Logf:          s.logf,
+		Sentinel:      s.sentinel,
 	})
 	s.mu.Lock()
 	s.sessions[id] = sess

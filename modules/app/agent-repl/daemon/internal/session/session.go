@@ -51,6 +51,7 @@ type Session struct {
 	retention  int
 	now        func() time.Time
 	logf       func(format string, args ...any)
+	sentinel   SentinelSink
 
 	mu       sync.Mutex
 	seq      int64
@@ -59,6 +60,16 @@ type Session struct {
 	terminal bool
 
 	done chan struct{}
+}
+
+// SentinelSink receives agent-state notifications for the Emacs
+// sentinel-file side channel (see internal/sentinel and the
+// "Agent-state sentinels" section of shared/protocol.md). Optional: a
+// nil sink disables the side channel (tests, embedded use).
+type SentinelSink interface {
+	PermissionRequested(cwd, sid, reqID string)
+	PermissionResolved(cwd, sid, reqID string)
+	SessionDead(cwd, sid string)
 }
 
 // Config carries session construction parameters.
@@ -77,6 +88,9 @@ type Config struct {
 	Now func() time.Time
 	// Logf receives supervision noise (defaults to log.Printf).
 	Logf func(format string, args ...any)
+	// Sentinel receives agent-state side-channel notifications; nil
+	// disables the sentinel writes.
+	Sentinel SentinelSink
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -101,6 +115,7 @@ func New(cfg Config) *Session {
 		retention:     cfg.Retention,
 		now:           cfg.Now,
 		logf:          cfg.Logf,
+		sentinel:      cfg.Sentinel,
 		clients:       map[*Client]struct{}{},
 		done:          make(chan struct{}),
 	}
@@ -318,8 +333,27 @@ func (s *Session) replayLocked(c *Client, fromSeq int64) {
 }
 
 // broadcastLocked stamps, retains and fans out frames. Callers hold s.mu.
+//
+// It is also the single choke point every authoritative frame passes
+// through exactly once (replay re-sends retained bytes and never
+// re-enters here), which makes it the tap for the Emacs sentinel side
+// channel: permission lifecycle and shim death map to sentinel writes.
+// The sink only enqueues onto a buffered channel (I/O happens on the
+// writer's own goroutine), so the tap does not hold s.mu across disk.
 func (s *Session) broadcastLocked(frames []protocol.L2Frame) {
 	for _, frame := range frames {
+		if s.sentinel != nil {
+			switch f := frame.(type) {
+			case *protocol.PermissionRequestFrame:
+				s.sentinel.PermissionRequested(s.translator.CWD, s.translator.ClaudeSessionID, f.RequestID)
+			case *protocol.PermissionResolvedFrame:
+				s.sentinel.PermissionResolved(s.translator.CWD, s.translator.ClaudeSessionID, f.RequestID)
+			case *protocol.ErrorFrame:
+				if f.Code == "shim_died" {
+					s.sentinel.SessionDead(s.translator.CWD, s.translator.ClaudeSessionID)
+				}
+			}
+		}
 		s.seq++
 		env := frame.Env()
 		env.Seq = s.seq
