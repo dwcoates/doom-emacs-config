@@ -2796,16 +2796,26 @@ buffer-string, not a trimmed view."
       (agent-repl-input-mode))
     ;; Header line should be set
     (should (stringp header-line-format))
-    ;; Match on "send" rather than a specific keybinding glyph (e.g. "RET")
+    ;; Match on "history" rather than a specific keybinding glyph (e.g. "C-r")
     ;; so the assertion stays decoupled from the chord chosen — the structural
-    ;; invariant is that the header advertises how to send.
-    (should (string-match-p "send" header-line-format))
+    ;; invariant is that the header advertises the history recall.
+    (should (string-match-p "history" header-line-format))
     ;; Visual line mode should be enabled
     (should visual-line-mode)
     ;; pre-command-hook should include slash-intercept-backspace
     (should (memq #'agent-repl--slash-intercept-backspace pre-command-hook))
     ;; after-change-functions should include history-on-change
     (should (memq #'agent-repl--history-on-change after-change-functions))))
+
+(ert-deftest agent-repl-test-agent-repl-input-mode-header-omits-direct-send ()
+  "The header line no longer advertises the direct-send chords.
+The `(ins) <slash>/<digit>/<up>/<down>: direct send' segment was dropped from
+the info panel, so the header carries no \"direct send\" advertisement even
+though the underlying insert-state passthrough bindings remain live."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-header*"
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
+      (agent-repl-input-mode))
+    (should-not (string-match-p "direct send" header-line-format))))
 
 ;;; agent-repl-input-mode: visual-line evil integration
 
