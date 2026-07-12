@@ -9,6 +9,7 @@
  */
 import { installCopyKeys } from "./copy.js";
 import { PermissionMode } from "./protocol.js";
+import { remediationNotice, requestRemediation } from "./remediation.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
@@ -40,13 +41,16 @@ async function boot(): Promise<void> {
   const httpBase = `${location.protocol === "https:" ? "https" : "http"}://${daemon}`;
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
 
-  let sessionId = params.get("session");
-  if (!sessionId) {
-    sessionId = await createSession(httpBase, params.get("fake") === "1");
+  let joined = params.get("session");
+  if (!joined) {
+    joined = await createSession(httpBase, params.get("fake") === "1");
     const url = new URL(location.href);
-    url.searchParams.set("session", sessionId);
+    url.searchParams.set("session", joined);
     history.replaceState(null, "", url.toString());
   }
+  // Rebound as a const so the callbacks below (which close over it) see the
+  // narrowed string rather than the widened `string | null`.
+  const sessionId: string = joined;
 
   const store = new ConversationStore();
   const feedEl = must("feed");
@@ -82,6 +86,7 @@ async function boot(): Promise<void> {
   const infoEl = must("session-info");
   const modeEl = must<HTMLSelectElement>("mode-select");
   const spinnerEl = must("spinner");
+  const remediationEl = must("remediation");
   const parentWs = params.get("parent_ws");
 
   const renderChrome = (): void => {
@@ -123,6 +128,21 @@ async function boot(): Promise<void> {
     onGone: () => {
       statusEl.textContent = "session gone";
       statusEl.classList.remove("ok");
+      // The turn-in-flight tick becomes a red/orange alarm: a lost session
+      // is not a quiet state, and the dot is what the eye lands on.
+      spinnerEl.classList.add("alarm");
+      remediationEl.textContent = remediationNotice("devising");
+      void requestRemediation(httpBase, sessionId)
+        .then((phase) => {
+          remediationEl.textContent = remediationNotice(phase);
+        })
+        .catch((err: unknown) => {
+          // A remediation that never launched must say so: silently
+          // leaving "devising remediation plan" up would claim a recovery
+          // effort that does not exist.
+          remediationEl.textContent = remediationNotice("failed");
+          console.error("remediation dispatch failed", err);
+        });
     },
   });
   ws.connect();

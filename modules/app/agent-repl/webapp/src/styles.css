@@ -31,6 +31,10 @@
   /* Composer well: a grey darker than --card, so the box you type into reads as
      sunken against the feed rather than as one more card floating on it. */
   --composer-bg: #e4e7eb;
+  /* Remediation notice ("devising remediation plan"): a true yellow, sitting
+     between the --err red and the --thinking orange the alarm dot alternates
+     between, so the topbar reads as one escalating band. */
+  --remediation: #ca8a04;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -50,6 +54,7 @@
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
+    --remediation: #facc15;
   }
 }
 
@@ -79,6 +84,19 @@ body {
 .spinner { color: var(--muted); opacity: 0; transition: opacity 0.2s; }
 .spinner.on { opacity: 1; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
+
+/* Session lost: the dot stops being a quiet grey turn-in-flight tick and
+   becomes an alarm, beating between the error red and the thinking orange.
+   Declared after .spinner.on so it wins on equal specificity whether or not
+   a turn happened to be in flight when the session vanished. */
+.spinner.alarm { opacity: 1; animation: gone-alarm 1s ease-in-out infinite; }
+@keyframes gone-alarm {
+  0%, 100% { color: var(--err); }
+  50% { color: var(--thinking); }
+}
+
+/* The remediation notice sits immediately right of the alarm dot. */
+#remediation { color: var(--remediation); }
 
 #session-info { color: var(--muted); margin-left: auto; }
 #session-info .info-ws { color: var(--info-ws); }

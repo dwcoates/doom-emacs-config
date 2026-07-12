@@ -73,6 +73,56 @@ describe("composer input", () => {
   });
 });
 
+const alarmDot = blockAfter(css, ".spinner.alarm");
+const alarmKeyframes = blockAfter(css, "@keyframes gone-alarm");
+
+describe("session-gone alarm dot", () => {
+  it("beats the dot between the error red and the thinking orange", () => {
+    // Arrange / Act — the gone-alarm keyframes.
+    // Assert
+    expect(alarmKeyframes).toMatch(/0%,\s*100%\s*{\s*color:\s*var\(--err\)/);
+    expect(alarmKeyframes).toMatch(/50%\s*{\s*color:\s*var\(--thinking\)/);
+  });
+
+  it("keeps the dot blinking endlessly rather than settling", () => {
+    // Arrange / Act — the .spinner.alarm rule.
+    // Assert
+    expect(alarmDot).toMatch(/animation:\s*gone-alarm\s+[\d.]+s\s+[a-z-]+\s+infinite/);
+  });
+
+  it("shows the dot even when no turn was in flight when the session vanished", () => {
+    // Arrange / Act — .spinner is opacity 0 until .on; .alarm must not need it.
+    // Assert
+    expect(alarmDot).toMatch(/opacity:\s*1/);
+  });
+
+  it("wins over the quiet .on pulse by being declared after it", () => {
+    // Arrange / Act — equal specificity, so source order decides.
+    // Assert
+    expect(css.indexOf(".spinner.alarm")).toBeGreaterThan(css.indexOf(".spinner.on"));
+  });
+});
+
+describe("remediation notice", () => {
+  it("paints the notice in the remediation yellow", () => {
+    // Arrange / Act — the #remediation rule.
+    // Assert
+    expect(blockAfter(css, "#remediation")).toMatch(/color:\s*var\(--remediation\)/);
+  });
+
+  it("defines the yellow token for the light theme", () => {
+    // Arrange / Act — the :root palette.
+    // Assert
+    expect(blockAfter(css, ":root")).toMatch(/--remediation:\s*#[0-9a-f]{6}/i);
+  });
+
+  it("defines a brighter yellow token for the dark theme", () => {
+    // Arrange / Act — the dark-scheme palette override.
+    // Assert
+    expect(darkTheme).toMatch(/--remediation:\s*#[0-9a-f]{6}/i);
+  });
+});
+
 describe("turn-complete chip", () => {
   it("washes the completed turn's chip in the muted-yellow token", () => {
     // Arrange / Act — the .result.done rule.
