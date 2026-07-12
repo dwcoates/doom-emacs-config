@@ -1231,8 +1231,6 @@ session.  When nil, the session falls back to
             (agent-repl--ws-put ws :parent-branch-name parent-branch))))
       (agent-repl--reorder-workspace-by-priority ws)
       (agent-repl--setup-worktree-session ws-id path ws force-sandbox no-agent)
-      (when (fboundp 'agent-repl--events-record)
-        (agent-repl--events-record ws :create))
       (message "Worktree '%s' ready." dirname)))
   ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only
   ;; production caller (`agent-repl--worktree-creation-switch-callback')
@@ -4281,8 +4279,6 @@ off so the user resolves in magit directly."
               ;; list every workspace merged into it.  PROJECT-ROOT is
               ;; the cherry-pick destination worktree (parent or master).
               (agent-repl--record-merged-in-workspace project-root target-ws)
-              (when (fboundp 'agent-repl--events-record)
-                (agent-repl--events-record target-ws :merge))
               ;; Flip the repl-state so the 🔀 badge survives the
               ;; post-nuke poll cycle that would otherwise mark the
               ;; (now-vterm-less) preserved hash entry `:dead'.
