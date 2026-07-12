@@ -660,3 +660,191 @@ func TestSessionDetachIsIdempotent(t *testing.T) {
 	h.sess.Detach(c)
 	h.sess.Detach(c)
 }
+
+// ---------------------------------------------------------------------------
+// Sentinel side-channel tap (broadcastLocked -> SentinelSink)
+// ---------------------------------------------------------------------------
+
+// recordingSink is a thread-safe SentinelSink that records calls.
+type recordingSink struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *recordingSink) record(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, s)
+}
+
+func (r *recordingSink) PermissionRequested(cwd, sid, reqID string) {
+	r.record("requested " + cwd + " " + sid + " " + reqID)
+}
+
+func (r *recordingSink) PermissionResolved(cwd, sid, reqID string) {
+	r.record("resolved " + cwd + " " + sid + " " + reqID)
+}
+
+func (r *recordingSink) SessionDead(cwd, sid string) {
+	r.record("dead " + cwd + " " + sid)
+}
+
+func (r *recordingSink) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
+}
+
+func newSinkHarness(t *testing.T) (*harness, *recordingSink) {
+	t.Helper()
+	shim := newFakeShim()
+	sink := &recordingSink{}
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     16,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+		Sentinel:      sink,
+	})
+	go sess.Run()
+	t.Cleanup(func() {
+		shim.end()
+		<-sess.Done()
+	})
+	return &harness{shim: shim, sess: sess}, sink
+}
+
+// initAndPermission drives the session through system:init (seeding
+// cwd/sid) and one permission request.
+func initAndPermission(t *testing.T, h *harness) {
+	t.Helper()
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"m","cwd":"/w","permissionMode":"default","session_id":"cli-uuid-1"}}`)
+	h.shim.pushEvent(t, `{"type":"permission-request","session_id":"sess-1","request_id":"p1","tool_use_id":"t1","tool_name":"Bash","input":{"command":"ls"}}`)
+}
+
+func TestSentinelTapPermissionRequested(t *testing.T) {
+	// Arrange
+	h, sink := newSinkHarness(t)
+	// Act
+	initAndPermission(t, h)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — cwd/sid come from the translator's post-init mirror.
+	calls := sink.snapshot()
+	if len(calls) == 0 || calls[0] != "requested /w cli-uuid-1 p1" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestSentinelTapWebappResolution(t *testing.T) {
+	// Arrange
+	h, sink := newSinkHarness(t)
+	c := NewClient()
+	h.sess.Attach(c)
+	initAndPermission(t, h)
+	// Wait for the request frame so the decision is not racing the event.
+	for {
+		f := recvFrame(t, c)
+		if f["type"] == "permission-request" {
+			break
+		}
+	}
+	// Act — webapp decision through the client-command path.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"permission-decision","request_id":"p1","decision":{"behavior":"allow"}}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	calls := sink.snapshot()
+	want := "resolved /w cli-uuid-1 p1"
+	found := false
+	for _, c := range calls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing %q in calls %v", want, calls)
+	}
+}
+
+func TestSentinelTapTurnEndAutoCancel(t *testing.T) {
+	// Arrange — pending permission, then the turn's result frame.
+	h, sink := newSinkHarness(t)
+	initAndPermission(t, h)
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+	// Act
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — the auto-cancel resolution reaches the sink.
+	calls := sink.snapshot()
+	found := false
+	for _, c := range calls {
+		if c == "resolved /w cli-uuid-1 p1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing turn-end cancel in calls %v", calls)
+	}
+}
+
+func TestSentinelTapHardShimDeath(t *testing.T) {
+	// Arrange — stdout closes WITHOUT a closed event.
+	h, sink := newSinkHarness(t)
+	initAndPermission(t, h)
+	// Act
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — cancel for the pending prompt AND a session-dead write.
+	calls := sink.snapshot()
+	foundDead := false
+	for _, c := range calls {
+		if c == "dead /w cli-uuid-1" {
+			foundDead = true
+		}
+	}
+	if !foundDead {
+		t.Fatalf("missing session-dead in calls %v", calls)
+	}
+}
+
+func TestSentinelTapFatalErrorClose(t *testing.T) {
+	// Arrange — graceful closed event with reason fatal_error.
+	h, sink := newSinkHarness(t)
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"m","cwd":"/w","permissionMode":"default","session_id":"cli-uuid-1"}}`)
+	h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","reason":"fatal_error","exit_code":3}`)
+	// Act
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	calls := sink.snapshot()
+	found := false
+	for _, c := range calls {
+		if c == "dead /w cli-uuid-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing session-dead in calls %v", calls)
+	}
+}
+
+func TestSentinelTapCleanShutdownNoDead(t *testing.T) {
+	// Arrange — graceful closed with a non-fatal reason (clean DELETE).
+	h, sink := newSinkHarness(t)
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"m","cwd":"/w","permissionMode":"default","session_id":"cli-uuid-1"}}`)
+	h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","reason":"shutdown","exit_code":0}`)
+	// Act
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — no session-dead write for a deliberate teardown.
+	for _, c := range sink.snapshot() {
+		if strings.HasPrefix(c, "dead") {
+			t.Fatalf("unexpected session-dead on clean shutdown: %v", sink.snapshot())
+		}
+	}
+}

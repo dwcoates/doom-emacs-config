@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
 	"claude-repld/internal/shim"
@@ -53,10 +54,19 @@ func main() {
 		return proc, nil
 	}
 
+	// Agent-state sentinel side channel (daemon -> Emacs), resolved from
+	// the inherited AGENT_REPL_STATE_DIR exactly like the hook scripts.
+	sentinelWriter, err := sentinel.NewWriter(log.Printf)
+	if err != nil {
+		log.Fatalf("claude-repld: %v", err)
+	}
+	defer sentinelWriter.Close()
+
 	srv := server.New(server.Config{
 		DaemonVersion: daemonVersion,
 		Retention:     *retention,
 		Spawn:         spawn,
+		Sentinel:      sentinelWriter,
 	})
 
 	mux := http.NewServeMux()
