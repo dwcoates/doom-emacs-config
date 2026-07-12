@@ -11,6 +11,7 @@ import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
 import { PermissionMode } from "./protocol.js";
+import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
@@ -50,9 +51,14 @@ async function boot(): Promise<void> {
     url.searchParams.set("session", joined);
     history.replaceState(null, "", url.toString());
   }
-  // Rebound as a const so the callbacks below (which close over it) see the
-  // narrowed string rather than the widened `string | null`.
-  const sessionId: string = joined;
+  // Mutable on purpose: the "session gone" rebind swaps the live view
+  // onto a successor session id; every closure below reads the current
+  // binding.
+  let activeSessionId: string = joined;
+  // The claude_session_id already persisted for activeSessionId, so the
+  // per-frame hook below only touches localStorage on actual change.
+  let rememberedClaudeId = "";
+  let ws: WsClient;
 
   const store = new ConversationStore();
   const feedEl = must("feed");
@@ -111,48 +117,97 @@ async function boot(): Promise<void> {
     renderChrome();
   };
 
-  const ws = new WsClient({
-    url: `${wsBase}/sessions/${sessionId}/stream`,
-    onMessage: (data) => {
-      const result = store.applyRaw(data);
-      if (result.restored) {
-        // Fresh-join replay complete: tail-first backfill render, so
-        // the newest message is on screen immediately with no scroll.
-        feed.renderRestored(store.state);
-        renderChrome();
-      } else if (result.changed && store.replaying) {
-        // Replay still streaming: defer the feed, keep the chrome live.
-        renderChrome();
-      } else if (result.changed) {
-        rerender();
-      }
-      return result.send;
-    },
-    onStatusChange: (connected) => {
-      statusEl.textContent = connected ? "connected" : "disconnected";
-      statusEl.classList.toggle("ok", connected);
-    },
-    sessionExists: makeSessionExistsProbe(httpBase, sessionId),
-    onGone: () => {
-      statusEl.textContent = "session gone";
-      statusEl.classList.remove("ok");
-      // The turn-in-flight tick becomes a red/orange alarm: a lost session
-      // is not a quiet state, and the dot is what the eye lands on.
-      spinnerEl.classList.add("alarm");
-      remediationEl.textContent = remediationNotice("devising");
-      void requestRemediation(httpBase, sessionId)
-        .then((phase) => {
-          remediationEl.textContent = remediationNotice(phase);
-        })
-        .catch((err: unknown) => {
-          // A remediation that never launched must say so: silently
-          // leaving "devising remediation plan" up would claim a recovery
-          // effort that does not exist.
-          remediationEl.textContent = remediationNotice("failed");
-          console.error("remediation dispatch failed", err);
-        });
-    },
-  });
+  // swapTo rebinds the live view onto a successor session id (the
+  // client-side twin of the Emacs sync-webview rebind): fresh store,
+  // fresh socket, URL param updated so a reload lands on the successor.
+  const swapTo = (next: string): void => {
+    console.warn(`session rebind: ${activeSessionId} -> ${next}`);
+    ws.close();
+    activeSessionId = next;
+    rememberedClaudeId = "";
+    store.reset();
+    const url = new URL(location.href);
+    url.searchParams.set("session", next);
+    history.replaceState(null, "", url.toString());
+    spinnerEl.classList.remove("alarm");
+    remediationEl.textContent = "";
+    ws = makeClient(next);
+    ws.connect();
+  };
+
+  // remediate dispatches the headless analyst — the LAST resort, reached
+  // only once daemon-side rehydration (the probe already failed) and the
+  // client-side rebind above have both come up empty.
+  const remediate = (sessionId: string): void => {
+    remediationEl.textContent = remediationNotice("devising");
+    void requestRemediation(httpBase, sessionId)
+      .then((phase) => {
+        remediationEl.textContent = remediationNotice(phase);
+      })
+      .catch((err: unknown) => {
+        // A remediation that never launched must say so: silently
+        // leaving "devising remediation plan" up would claim a recovery
+        // effort that does not exist.
+        remediationEl.textContent = remediationNotice("failed");
+        console.error("remediation dispatch failed", err);
+      });
+  };
+
+  const makeClient = (sessionId: string): WsClient =>
+    new WsClient({
+      url: `${wsBase}/sessions/${sessionId}/stream`,
+      onMessage: (data) => {
+        const result = store.applyRaw(data);
+        if (store.state.claudeSessionId !== "" && store.state.claudeSessionId !== rememberedClaudeId) {
+          // The hello supplied (or updated) the durable CLI uuid: persist
+          // it so a future "session gone" can rebind this conversation.
+          rememberedClaudeId = store.state.claudeSessionId;
+          rememberResumeKeys(localStorage, sessionId, {
+            claudeSessionId: store.state.claudeSessionId,
+            cwd: store.state.cwd,
+          });
+        }
+        if (result.restored) {
+          // Fresh-join replay complete: tail-first backfill render, so
+          // the newest message is on screen immediately with no scroll.
+          feed.renderRestored(store.state);
+          renderChrome();
+        } else if (result.changed && store.replaying) {
+          // Replay still streaming: defer the feed, keep the chrome live.
+          renderChrome();
+        } else if (result.changed) {
+          rerender();
+        }
+        return result.send;
+      },
+      onStatusChange: (connected) => {
+        statusEl.textContent = connected ? "connected" : "disconnected";
+        statusEl.classList.toggle("ok", connected);
+      },
+      sessionExists: makeSessionExistsProbe(httpBase, sessionId),
+      onGone: () => {
+        statusEl.textContent = "session gone";
+        statusEl.classList.remove("ok");
+        // The turn-in-flight tick becomes a red/orange alarm: a lost session
+        // is not a quiet state, and the dot is what the eye lands on.
+        spinnerEl.classList.add("alarm");
+        remediationEl.textContent = "rebinding session";
+        void rebindSession(httpBase, sessionId, localStorage)
+          .then((next) => {
+            if (next !== null) {
+              swapTo(next);
+              return;
+            }
+            // Nothing durable was ever stored for this id: remediate.
+            remediate(sessionId);
+          })
+          .catch((err: unknown) => {
+            console.error("session rebind failed", err);
+            remediate(sessionId);
+          });
+      },
+    });
+  ws = makeClient(activeSessionId);
   ws.connect();
 
   if (composerEnabled(params)) {
