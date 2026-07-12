@@ -749,3 +749,50 @@ describe("backfillChunks", () => {
     expect(backfillChunks(0, 40)).toEqual([]);
   });
 });
+
+describe("TextStream metaprompt trees", () => {
+  it("renders a bare tree message as hanging-indent tree lines", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain(`<span class="mp-prefix">└── 1.2 </span>`);
+  });
+
+  it("routes a fenced tree message through the markdown pipeline", () => {
+    // Arrange — the fence handler owns tree detection inside fences.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Response (✏️)\n\n```\n1 🔧 Fixed it\n├── 1.1 Detail\n```",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — tree html present, produced via the fence path.
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain(`class="bubble assistant md"`);
+  });
+
+  it("keeps non-tree text on the markdown path", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Just **prose** here.\nSecond line.",
+      done: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("mp-tree");
+  });
+});
