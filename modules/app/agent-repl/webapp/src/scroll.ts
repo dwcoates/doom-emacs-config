@@ -12,10 +12,17 @@
  *
  * installEdgeScroll is the only DOM-facing piece; every decision it
  * makes lives in the pure helpers above it.
+ *
+ * The feed's own tail-following metric (isPinnedToBottom) lives here too:
+ * it is the other half of the same question of who owns the scroll
+ * position, the user or the feed.
  */
 
 /** Width of the left/right gutters that arm a section's own scrolling. */
 export const EDGE_PX = 32;
+
+/** Slack below which the feed still counts as parked at its tail. */
+export const PIN_PX = 40;
 
 /** Wheel deltaMode units (WheelEvent.DOM_DELTA_*). */
 const DELTA_LINE = 1;
@@ -34,6 +41,22 @@ export interface ScrollMetrics {
   scrollHeight: number;
   clientHeight: number;
   overflowY: string;
+}
+
+/** Where a scroll box currently sits along its own scrollable height. */
+export interface ScrollPosition {
+  scrollHeight: number;
+  scrollTop: number;
+  clientHeight: number;
+}
+
+/**
+ * True when the box is parked at its tail (within PIN_PX of the bottom).
+ * A pinned feed follows new content; an unpinned one holds the user's
+ * place, so this is what a render consults before moving scrollTop.
+ */
+export function isPinnedToBottom(pos: ScrollPosition, pinPx: number = PIN_PX): boolean {
+  return pos.scrollHeight - pos.scrollTop - pos.clientHeight < pinPx;
 }
 
 /** True when the element both clips its content and scrolls it vertically. */

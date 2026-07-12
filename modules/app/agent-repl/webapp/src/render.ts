@@ -8,6 +8,7 @@ import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { Usage } from "./protocol.js";
+import { isPinnedToBottom } from "./scroll.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -494,6 +495,38 @@ export function itemKey(item: ConversationItem, index: number): string {
   }
 }
 
+/**
+ * Request id of the newest user turn in the feed, or null when there is
+ * none. A change in this id between renders means a prompt was just
+ * sent — from the webapp composer or from the Emacs host's input buffer
+ * alike, since both reach the feed as the daemon's `user-turn`
+ * broadcast — which is what re-pins a scrolled-up feed to its tail.
+ */
+export function lastUserTurnId(items: readonly ConversationItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user-turn") return item.requestId;
+  }
+  return null;
+}
+
+/**
+ * Whether a render must land the feed on its tail.
+ *
+ * A feed already parked at the bottom keeps following new content, as
+ * ever. The addition: a user turn the previous render had not seen means
+ * a prompt was JUST sent, and a sender wants to watch the answer — so the
+ * feed jumps to the tail even from a scrolled-up position.
+ */
+export function repinsToTail(opts: {
+  prevTurnId: string | null;
+  nextTurnId: string | null;
+  pinned: boolean;
+}): boolean {
+  if (opts.nextTurnId !== null && opts.nextTurnId !== opts.prevTurnId) return true;
+  return opts.pinned;
+}
+
 /** Items filled per backfill step during a restored-session render. */
 export const BACKFILL_CHUNK = 40;
 
@@ -527,6 +560,8 @@ export class FeedRenderer {
   private lastState: StoreState | null = null;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
+  /** Newest user turn seen by a render, so the next one spots a fresh send. */
+  private lastUserTurn: string | null = null;
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -607,6 +642,10 @@ export class FeedRenderer {
    */
   renderRestored(state: StoreState): void {
     this.lastState = state;
+    // Replayed history's newest prompt is old news: banking it here keeps
+    // the next render from reading it as a fresh send and yanking a feed
+    // the user has meanwhile scrolled up.
+    this.lastUserTurn = lastUserTurnId(state.items);
     this.backfillQueue = [];
     this.container.innerHTML = "";
     this.nodes.clear();
@@ -665,9 +704,13 @@ export class FeedRenderer {
   render(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
-    const pinned =
-      this.container.scrollHeight - this.container.scrollTop -
-        this.container.clientHeight < 40;
+    const turnId = lastUserTurnId(state.items);
+    const toTail = repinsToTail({
+      prevTurnId: this.lastUserTurn,
+      nextTurnId: turnId,
+      pinned: isPinnedToBottom(this.container),
+    });
+    this.lastUserTurn = turnId;
     const seen = new Set<string>();
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
@@ -693,7 +736,7 @@ export class FeedRenderer {
         this.nodes.delete(key);
       }
     }
-    if (pinned) {
+    if (toTail) {
       this.container.scrollTop = this.container.scrollHeight;
     }
   }
