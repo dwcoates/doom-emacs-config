@@ -6,6 +6,7 @@
  */
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
+import { stripMetaSpans } from "./meta.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { Usage } from "./protocol.js";
 import { isPinnedToBottom } from "./scroll.js";
@@ -126,11 +127,20 @@ export function formatTurnTime(ts: string): string {
   return `${hh}:${mm}`;
 }
 
-/** A user turn's prompt text, non-text blocks standing in as `[kind]`. */
+/**
+ * A user turn's prompt text, non-text blocks standing in as `[kind]`.
+ *
+ * The host's injected spans (the metaprompt read-directive, the
+ * workspace-generation preamble and wrap-up gate) are marked at their
+ * injection site and dropped here: a user turn reads as the user's own
+ * words, both in the bubble and to `isClearTurn`.
+ */
 function userTurnText(item: UserTurnItem): string {
-  return item.content
-    .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
-    .join("\n");
+  return stripMetaSpans(
+    item.content
+      .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
+      .join("\n"),
+  );
 }
 
 /**
@@ -144,12 +154,13 @@ export function isClearTurn(item: UserTurnItem): boolean {
 }
 
 function UserTurn(item: UserTurnItem): string {
+  // A turn that was nothing BUT injected spans has no bubble at all.
+  const text = userTurnText(item);
+  if (text === "") return "";
   const divider = isClearTurn(item)
     ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
     : "";
-  return `<div class="bubble user"><pre>${escapeHtml(
-    userTurnText(item),
-  )}</pre><span class="turn-ts">${escapeHtml(
+  return `<div class="bubble user"><pre>${escapeHtml(text)}</pre><span class="turn-ts">${escapeHtml(
     formatTurnTime(item.ts),
   )}</span></div>${divider}`;
 }
