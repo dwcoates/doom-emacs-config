@@ -425,6 +425,86 @@ frontend instead of dragging them along."
          ;; Assert
          (should (eq (agent-repl--ws-frontend-name "ws2") 'from)))))))
 
+(ert-deftest agent-repl-test-frontends-switch-hands-durable-session-to-target ()
+  "The switch captures the durable claude uuid BEFORE the kill destroys
+the session that knows it, and adopts it into the target before the
+open — the conversation carries across the frontend flip."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (let ((events nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'from
+         :durable-session-id-fn (lambda (_ws) (push 'capture events) "cli-uuid-3")
+         :kill-fn (lambda (_ws) (push 'kill events))
+         :running-p-fn (lambda (_ws) nil)))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'to
+         :adopt-session-fn (lambda (_ws id) (push (cons 'adopt id) events))
+         :open-fn (lambda (_ws) (push 'open events))
+         :running-p-fn (lambda (_ws) nil)))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert — capture precedes kill; adopt precedes open.
+         (should (equal (nreverse events)
+                        '(capture kill (adopt . "cli-uuid-3") open))))))))
+
+(ert-deftest agent-repl-test-frontends-switch-skips-adopt-without-durable-id ()
+  "No durable session (nil uuid) means the target opens fresh — no adopt."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (let ((adopted nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'from
+         :durable-session-id-fn (lambda (_ws) nil)
+         :running-p-fn (lambda (_ws) nil)))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'to
+         :adopt-session-fn (lambda (_ws _id) (setq adopted t))
+         :running-p-fn (lambda (_ws) nil)))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert
+         (should-not adopted))))))
+
+(ert-deftest agent-repl-test-frontends-switch-tolerates-missing-capability-fns ()
+  "Frontends without the durable-id/adopt capabilities still switch cleanly."
+  ;; Arrange — neither side defines the optional slots.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (clrhash agent-repl--frontends)
+     (let ((opened nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend 'from :running-p-fn (lambda (_ws) nil)))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'to
+         :open-fn (lambda (_ws) (setq opened t))
+         :running-p-fn (lambda (_ws) nil)))
+       (agent-repl--ws-put "ws1" :frontend 'from)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl--ws-backend-name) (lambda (_ws) 'claude))
+                 ((symbol-function 'agent-repl--state-save) #'ignore))
+         ;; Act
+         (agent-repl-switch-frontend)
+         ;; Assert
+         (should opened))))))
+
 (ert-deftest agent-repl-test-frontends-switch-errors-when-old-never-stops ()
   "A frontend that never stops running fails the switch loudly."
   (agent-repl-test--with-clean-state
