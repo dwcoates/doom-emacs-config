@@ -402,6 +402,38 @@
         (agent-repl--drain-pending-magit "test-ws")
         (should (equal magit-call-count 1))))))
 
+(ert-deftest agent-repl-test-panels-drain-pending-magit-windowless-when-panels-pending ()
+  "drain-pending-magit leaves the window tree untouched when panels are pending.
+The panels drain (which runs after this one) opens the fullscreen
+layout as the sole main-area display, so the magit buffer must be
+created without a window."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :pending-magit t)
+    (agent-repl--ws-put "test-ws" :pending-show-panels t)
+    (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((windows-before (length (window-list))))
+      (cl-letf (((symbol-function 'magit-status)
+                 (lambda (_path) (split-window)))
+                ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
+        (agent-repl--drain-pending-magit "test-ws")
+        (should (equal (length (window-list)) windows-before))))))
+
+(ert-deftest agent-repl-test-panels-drain-pending-magit-displays-without-panels-pending ()
+  "drain-pending-magit still displays magit when no panel show is pending.
+The no-agent `SPC TAB n' path has no fullscreen panels coming, so magit
+remains the workspace's visible main buffer."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :pending-magit t)
+    (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
+    (let ((windows-before (length (window-list))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'magit-status)
+                     (lambda (_path) (split-window)))
+                    ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
+            (agent-repl--drain-pending-magit "test-ws")
+            (should (equal (length (window-list)) (1+ windows-before))))
+        (delete-other-windows)))))
+
 (ert-deftest agent-repl-test-panels-drain-pending-magit-no-project-dir ()
   "drain-pending-magit clears the flag but skips magit-status when :project-dir is missing.
 Defensive: :project-dir is always written by setup-worktree-session before
@@ -4615,6 +4647,42 @@ was never recorded."
       (cl-letf (((symbol-function 'agent-repl--show-panels)
                  (lambda () (setq show-called t))))
         (agent-repl--reclaim-frame-fullscreen "my-ws")
+        (should-not show-called)))))
+
+(ert-deftest agent-repl-test-panels-reclaim-fullscreen-gui-shows-webview ()
+  "reclaim-frame-fullscreen reclaims a gui workspace through its frontend.
+The vterm buffer-liveness path must not run — a gui workspace has no
+vterm buffer, and the old vterm-only check silently skipped the
+reclaim, stranding foreign leftovers in the frame."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched nil)
+          (webview (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "my-ws" :frontend 'gui)
+            (agent-repl--ws-put "my-ws" :frontend-buffer webview)
+            (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
+                       (lambda (ws) (setq dispatched ws)))
+                      ((symbol-function 'agent-repl--show-panels)
+                       (lambda () (error "vterm path must not run for a gui ws"))))
+              (agent-repl--reclaim-frame-fullscreen "my-ws")
+              (should (equal dispatched "my-ws"))))
+        (kill-buffer webview)))))
+
+(ert-deftest agent-repl-test-panels-reclaim-fullscreen-gui-dead-webview-skips ()
+  "reclaim-frame-fullscreen skips a gui workspace whose webview is dead.
+No view exists to reclaim the frame with, so the layout is left as-is
+rather than booting a session as a side effect."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched nil)
+          (show-called nil))
+      (agent-repl--ws-put "my-ws" :frontend 'gui)
+      (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq dispatched t)))
+                ((symbol-function 'agent-repl--show-panels)
+                 (lambda () (setq show-called t))))
+        (agent-repl--reclaim-frame-fullscreen "my-ws")
+        (should-not dispatched)
         (should-not show-called)))))
 
 (ert-deftest agent-repl-test-panels-reclaim-fullscreen-shows-panels ()
