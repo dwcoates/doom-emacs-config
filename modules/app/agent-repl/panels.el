@@ -412,13 +412,26 @@ there."
 (defun agent-repl--drain-pending-magit (ws)
   "Open `magit-status' for WS if it was created with `:pending-magit' set.
 Reads the worktree path from `:project-dir', clears the flag, and removes
-the Doom dashboard so magit is the sole main buffer in the new workspace."
+the Doom dashboard so magit is the sole main buffer in the new workspace.
+
+When WS is also about to show its agent panels (`:pending-show-panels'
+still set — this drain runs before that one in
+`agent-repl--on-workspace-switch'), the magit buffer is created WITHOUT
+a window (`save-window-excursion'): the panels open filling the frame
+as the sole main-area display, so a magit window would only flash and
+be wiped (vterm) or linger beside the panels (gui) — the
+extra-windows-on-first-switch bug.  A workspace with no pending panel
+show (the no-agent `SPC TAB n' path) still displays magit as before."
   (if (agent-repl--ws-get ws :pending-magit)
-      (let ((path (agent-repl--ws-get ws :project-dir)))
-        (agent-repl--log ws "drain-pending-magit: ws=%s branch=had-pending path=%s draining" ws path)
+      (let ((path (agent-repl--ws-get ws :project-dir))
+            (windowless (and (agent-repl--ws-get ws :pending-show-panels) t)))
+        (agent-repl--log ws "drain-pending-magit: ws=%s branch=had-pending path=%s windowless=%s draining"
+                          ws path windowless)
         (agent-repl--ws-put ws :pending-magit nil)
         (when path
-          (magit-status path)
+          (if windowless
+              (save-window-excursion (magit-status path))
+            (magit-status path))
           (agent-repl--remove-doom-dashboard)))
     (agent-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
 
@@ -576,20 +589,30 @@ replaced by WS's own panels, namely either:
 - a lone agent output window (see `agent-repl--lone-output-window')
   remained, whether or not it belonged to WS.
 
-Shows WS's own input+output panels via `agent-repl--show-panels',
-which clears the frame's main area (deleting every non-panel window,
-including any foreign output window left over from another workspace)
-and lays out the panels filling the frame.
+Reclaims through WS's own frontend: a gui workspace with a live
+webview re-displays it via `agent-repl--frontend-dispatch-show' (the
+webview + input layout, which clears the main area itself), a vterm
+workspace shows its input+output panels via `agent-repl--show-panels'
+\(which clears the frame's main area — deleting every non-panel
+window, including any foreign output window left over from another
+workspace — and lays out the panels filling the frame).
 
-No-op when WS has no live panel buffers to show — there is nothing to
-reclaim the frame with, so the existing layout is left as-is."
-  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer))
-        (input-buf (agent-repl--ws-get ws :input-buffer)))
-    (if (not (and vterm-buf (buffer-live-p vterm-buf)
-                  input-buf (buffer-live-p input-buf)))
-        (agent-repl--log ws "reclaim-frame-fullscreen: no live panel buffers for ws=%s, skipping" ws)
-      (agent-repl--log ws "reclaim-frame-fullscreen: showing own panels for ws=%s" ws)
-      (agent-repl--show-panels))))
+No-op when WS has no live view to reclaim the frame with (no live
+webview for a gui workspace, no live panel buffers for a vterm one),
+so the existing layout is left as-is."
+  (cond
+   ((and (agent-repl--ws-gui-frontend-p ws)
+         (buffer-live-p (agent-repl--ws-get ws :frontend-buffer)))
+    (agent-repl--log ws "reclaim-frame-fullscreen: showing gui view for ws=%s" ws)
+    (agent-repl--frontend-dispatch-show ws))
+   ((let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer))
+          (input-buf (agent-repl--ws-get ws :input-buffer)))
+      (and vterm-buf (buffer-live-p vterm-buf)
+           input-buf (buffer-live-p input-buf)))
+    (agent-repl--log ws "reclaim-frame-fullscreen: showing own panels for ws=%s" ws)
+    (agent-repl--show-panels))
+   (t
+    (agent-repl--log ws "reclaim-frame-fullscreen: no live view for ws=%s, skipping" ws))))
 
 (defun agent-repl--ensure-own-panels-on-persp-switch (ws)
   "Reconcile panel visibility with workspace ownership after a persp switch.
