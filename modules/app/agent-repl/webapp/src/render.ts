@@ -421,9 +421,10 @@ function permissionPreviewHtml(item: PermissionItem): string {
 }
 
 function ResultChip(item: ResultItem): string {
-  const label = item.subtype === "success" ? "turn complete" : item.subtype;
+  const done = item.subtype === "success";
+  const label = done ? "turn complete" : item.subtype;
   return `
-    <div class="result ${item.isError ? "err" : "ok"}">
+    <div class="result ${item.isError ? "err" : "ok"}${done ? " done" : ""}">
       ${escapeHtml(label)} · ${item.durationMs}ms ·
       ${item.usage.input_tokens}in/${item.usage.output_tokens}out ·
       $${item.totalCostUsd.toFixed(4)}

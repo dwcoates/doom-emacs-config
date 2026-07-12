@@ -7,7 +7,7 @@ import {
   renderItem,
   sessionInfoHtml,
 } from "../src/render.js";
-import { ConversationItem, ToolItem } from "../src/store.js";
+import { ConversationItem, ResultItem, ToolItem } from "../src/store.js";
 
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
 function userTurnAt(hour: number, minute: number, text = "do the thing"): ConversationItem {
@@ -675,6 +675,49 @@ describe("renderItem", () => {
       expect(html).toContain("stderr");
       expect(html).not.toContain("tool-read-output");
     });
+  });
+});
+
+describe("ResultChip", () => {
+  /** A result frame item for the given subtype. */
+  function resultItem(subtype: ResultItem["subtype"], isError = false): ResultItem {
+    return {
+      kind: "result",
+      subtype,
+      durationMs: 12,
+      numTurns: 1,
+      totalCostUsd: 0.5,
+      usage: { input_tokens: 3, output_tokens: 4 },
+      isError,
+    };
+  }
+
+  it("marks a successful turn's chip with the muted-yellow done class", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).toContain(`class="result ok done"`);
+  });
+
+  it("still labels a successful turn's chip 'turn complete'", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).toContain("turn complete");
+  });
+
+  it("withholds the done class from an aborted turn's chip", () => {
+    // Arrange — aborted is not an error, so its chip is .ok but not complete.
+    const html = renderItem(resultItem("aborted"));
+    // Assert
+    expect(html).toContain(`class="result ok"`);
+  });
+
+  it("withholds the done class from a failed turn's chip", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("error_during_execution", true));
+    // Assert
+    expect(html).toContain(`class="result err"`);
   });
 });
 
