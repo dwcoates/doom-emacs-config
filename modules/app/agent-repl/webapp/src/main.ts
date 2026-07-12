@@ -9,6 +9,7 @@
  */
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
+import { HostGlobal, installHostTailHook } from "./host.js";
 import { PermissionMode } from "./protocol.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
@@ -63,6 +64,9 @@ async function boot(): Promise<void> {
   installClickExpand(feedEl);
   // The webview has no menu bar, so `C-c` / `y` are what copy a highlight.
   installCopyKeys(document);
+  // The Emacs host snaps the feed to its newest message through this hook
+  // whenever the user switches to the workspace holding this webview.
+  installHostTailHook(window as unknown as HostGlobal, feedEl);
   const feed = new FeedRenderer(feedEl, {
     decidePermission: (requestId, behavior) => {
       ws.send(

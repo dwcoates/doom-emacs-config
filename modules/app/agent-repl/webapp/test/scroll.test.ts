@@ -7,6 +7,7 @@ import {
   innerScrollerAt,
   isPinnedToBottom,
   isScrollBox,
+  parkAtTail,
   redirectsToFeed,
   sectionFor,
   wheelAction,
@@ -347,5 +348,34 @@ describe("isPinnedToBottom", () => {
     const pos = { scrollHeight: 900, scrollTop: 600 - (PIN_PX - 1), clientHeight: 300 };
     // Act + Assert
     expect(isPinnedToBottom(pos)).toBe(isPinnedToBottom(pos, PIN_PX));
+  });
+});
+
+describe("parkAtTail", () => {
+  it("jumps a scrolled-up box straight to its tail", () => {
+    // Arrange
+    const box = { scrollTop: 120, scrollHeight: 900 };
+    // Act
+    parkAtTail(box);
+    // Assert — one assignment, so the tail is there on the next frame.
+    expect(box.scrollTop).toBe(900);
+  });
+
+  it("leaves a box already at its tail untouched", () => {
+    // Arrange
+    const box = { scrollTop: 900, scrollHeight: 900 };
+    // Act
+    parkAtTail(box);
+    // Assert
+    expect(box.scrollTop).toBe(900);
+  });
+
+  it("parks a box too short to scroll at zero", () => {
+    // Arrange — an empty feed: scrollHeight is the viewport, scrollTop stays 0.
+    const box = { scrollTop: 0, scrollHeight: 0 };
+    // Act
+    parkAtTail(box);
+    // Assert
+    expect(box.scrollTop).toBe(0);
   });
 });

@@ -2188,6 +2188,47 @@ merge request is pulled from the queue on activation."
         (agent-repl--on-workspace-switch "ws1")
         (should (equal dequeued "ws1"))))))
 
+(ert-deftest agent-repl-test-panels-on-workspace-switch-snaps-webview-to-tail ()
+  "Switching to a workspace snaps its gui webview feed to the newest message,
+the gui counterpart of the vterm window's snap to the cursor."
+  (agent-repl-test--with-clean-state
+    (let (snapped)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
+                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
+                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
+                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
+                 (lambda (ws) (setq snapped ws))))
+        (agent-repl--on-workspace-switch "ws1")
+        (should (equal snapped "ws1"))))))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-snaps-after-show-drain ()
+  "The webview snap runs AFTER the pending-show drain, so a webview that
+just became visible on the switch is snapped to its tail too."
+  (agent-repl-test--with-clean-state
+    (let (order)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
+                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
+                ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-show-panels)
+                 (lambda (_ws) (push 'show order)))
+                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
+                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
+                 (lambda (_ws) (push 'snap order))))
+        (agent-repl--on-workspace-switch "ws1")
+        (should (equal (nreverse order) '(show snap)))))))
+
 (ert-deftest agent-repl-test-panels-on-workspace-switch-done-stamps-acked-at ()
   "Switching to a workspace in :done sets :done-acked t and stamps
 :done-acked-at with the current time so the focus-dwell countdown
