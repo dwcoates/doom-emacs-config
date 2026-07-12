@@ -331,6 +331,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
 (agent-repl--load-module "panels")
+;; WHY: explain-config.el mounts the SAME webkit GUI the workspace
+;; frontend uses, so it needs frontend.el (the webview boundary wrapper)
+;; and frontend-client.el (session CRUD + message injection) already
+;; registered, plus window.el's `--delete-buffer-windows' for the popup's
+;; hide path.  It registers a persp-activated hook at load time, so
+;; workspace.el must precede it too — every one of those is loaded above.
+(agent-repl--load-module "explain-config")
 (agent-repl--load-module "merge-handlers")
 (agent-repl--load-module "worktree")
 (agent-repl--load-module "rename")
