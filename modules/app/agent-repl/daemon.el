@@ -90,6 +90,17 @@ if it is not already running.  Set to nil to require the user to run
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-stop-grace-seconds 3.0
+  "Seconds to wait for `claude-repld' to exit after SIGTERM.
+The daemon's TERM handler drains its sessions and flushes the session
+registry; only when the process outlives this window does
+`agent-repl--frontend-stop-daemon' fall back to `delete-process'
+\(SIGKILL).  The registry is write-through crash-safe, so the fallback
+loses nothing durable — the grace window just lets sessions drain
+cleanly."
+  :type 'number
+  :group 'agent-repl)
+
 (defcustom agent-repl-frontend-remediate-lost-sessions t
   "When non-nil, `claude-repld' remediates a session it has lost.
 A frontend whose session has vanished from the daemon shows \"session
@@ -268,17 +279,39 @@ inhibited (batch/sandbox)."
     (agent-repl--frontend-start-daemon))))
 
 (defun agent-repl--frontend-stop-daemon (&optional force)
-  "Kill the tracked `claude-repld' process if it is running.
+  "Stop the tracked `claude-repld' process, gracefully first.
 Refuses while any daemon session reports an in-flight turn — stopping
 then would kill a live conversation mid-generation (the repeated
 daemon-bounce incidents) — unless FORCE is non-nil.  An unreachable
-daemon has nothing to protect, so the turn probe treats it as idle."
+daemon has nothing to protect, so the turn probe treats it as idle.
+
+The stop itself signals SIGTERM so the daemon runs its shutdown path
+\(draining its sessions and flushing the session registry), waits up to
+`agent-repl-frontend-stop-grace-seconds' for the process to exit, and
+only then falls back to `delete-process' (SIGKILL).  The old
+delete-process-first behavior SIGKILLed the daemon on every routine
+restart, which is exactly the restart class the session registry exists
+to survive — the registry makes that survivable either way, and the
+graceful window additionally lets shims exit cleanly instead of by
+inherited-pipe EOF."
   (when (agent-repl--frontend-daemon-live-p)
     (unless force
       (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
         (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
                busy)))
-    (delete-process agent-repl--frontend-daemon-process))
+    (let ((proc agent-repl--frontend-daemon-process))
+      (signal-process proc 'TERM)
+      (let ((deadline (+ (float-time) agent-repl-frontend-stop-grace-seconds)))
+        (while (and (process-live-p proc) (< (float-time) deadline))
+          ;; sleep-for, NOT sit-for: sit-for returns immediately on
+          ;; pending input, which would collapse the grace window while
+          ;; the user types (same rationale as the readiness poll in
+          ;; frontend-client.el).
+          (sleep-for 0.05)))
+      (when (process-live-p proc)
+        (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
+                         agent-repl-frontend-stop-grace-seconds)
+        (delete-process proc))))
   (setq agent-repl--frontend-daemon-process nil))
 
 ;;;; ---- Interactive commands ---------------------------------------------

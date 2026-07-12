@@ -136,6 +136,13 @@ func main() {
 		sig := <-sigCh
 		log.Printf("claude-repld: %v received, shutting down sessions", sig)
 		srv.ShutdownAll()
+		// Belt-and-suspenders: the registry is write-through crash-safe
+		// (SIGKILL loses nothing), so this flush is an optimization that
+		// re-asserts the on-disk state after the drain, never the
+		// mechanism durability depends on.
+		if err := sessionRegistry.Flush(); err != nil {
+			log.Printf("claude-repld: registry flush on shutdown: %v", err)
+		}
 		if err := httpServer.Close(); err != nil {
 			log.Printf("claude-repld: http close: %v", err)
 		}
