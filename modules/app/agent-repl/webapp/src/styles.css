@@ -24,6 +24,10 @@
   --info-ws: #15803d;
   --info-model: #0e7490;
   --info-tokens: #b45309;
+  /* "turn complete" chip wash: the --info-tokens amber dialed down to a muted
+     background tint, so the end of a turn reads at a glance. */
+  --turn-complete-bg: #fbf0d2;
+  --turn-complete-border: #e6d190;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -40,6 +44,8 @@
     --info-ws: #4ade80;
     --info-model: #22d3ee;
     --info-tokens: #fbbf24;
+    --turn-complete-bg: #3a3116;
+    --turn-complete-border: #6b5a22;
   }
 }
 
@@ -228,6 +234,10 @@ pre {
   padding: 0.1rem 0.75rem;
 }
 .result.err { color: var(--err); }
+.result.done {
+  background: var(--turn-complete-bg);
+  border-color: var(--turn-complete-border);
+}
 
 .compact-divider, .system-note, .retry-badge {
   align-self: center;
