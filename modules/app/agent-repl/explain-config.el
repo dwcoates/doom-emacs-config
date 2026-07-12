@@ -33,13 +33,18 @@
 ;; session CRUD + message injection (frontend-client.el), and the
 ;; webview boundary wrapper (frontend.el).  This module owns only the
 ;; global session/webview binding and the popup's window placement.
+;;
+;; The SESSION is global (one conversation shared everywhere), but the
+;; popup WINDOW is strictly per-workspace: `SPC j h c' shows it in the
+;; invoking workspace only, a workspace switch never re-creates it
+;; elsewhere, and quitting the window (via `q', window deletion, or the
+;; close command) is permanent until the next explicit show.
 
 ;;; Code:
 
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--ws-add-activated-hook "agent-repl-workspace" (fn))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--frontend-wait-ready "agent-repl-frontend-client" ())
 (declare-function agent-repl--frontend-create-session "agent-repl-frontend-client" (cwd &optional model resume))
@@ -167,16 +172,6 @@ session change forces a fresh webview mount.")
 Reset whenever a new session is created, so the first turn of every
 conversation carries the contract and no later turn repeats it.")
 
-(defvar agent-repl--explain-config-global-visible-p nil
-  "Non-nil when the explain-config popup should appear in every persp.
-Set by `agent-repl--explain-config-show', cleared by
-`agent-repl--explain-config-hide'.  The persp-activated hook
-(`agent-repl--explain-config-ensure-visible-on-persp-switch')
-consults this flag and re-displays the popup in newly-activated
-workspaces so it feels like a frame-level UI element rather than a
-per-workspace artifact — mirrors the drawer's own
-`--global-visible-p' pattern.")
-
 (defvar agent-repl--explain-config-replaced-window nil
   "When the popup has taken over the agent output window, holds (WIN . PREV-BUF).
 WIN is the live agent output window the popup took over; PREV-BUF
@@ -208,8 +203,7 @@ host frame's width."
 Used only when the agent output window is not visible to take
 over — when it is, `--show' reuses it directly via
 `set-window-buffer' and bypasses `display-buffer' entirely.  The
-drawer is never touched.  Reconciled across workspace switches via
-the persp-activated hook.")
+drawer is never touched.")
 
 (defun agent-repl--explain-config-apply-width (window)
   "Resize WINDOW to the configured explain-config width.
@@ -267,10 +261,12 @@ restored window matches its original recipe."
           (agent-repl--configure-vterm-window win))))))
 
 (defun agent-repl--explain-config-show ()
-  "Display the explain-config webview.
-Sets the global visible-flag so the popup follows the user across
-workspace switches.  No-op when the webview doesn't exist (nothing
-to show yet).
+  "Display the explain-config webview in the current workspace.
+The popup is strictly per-workspace: nothing re-displays it in other
+workspaces on a switch, and deleting its window (by `q', `C-x 0', the
+close command, or any other route) is permanent until the next
+explicit show.  No-op when the webview doesn't exist (nothing to
+show yet).
 
 Display priority:
 
@@ -286,7 +282,6 @@ Display priority:
 The drawer is never touched in any branch — its visibility is its
 own concern.  Returns the displayed window or nil."
   (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
-    (setq agent-repl--explain-config-global-visible-p t)
     (let ((existing (get-buffer-window buf t)))
       (cond
        ((window-live-p existing)
@@ -304,47 +299,19 @@ own concern.  Returns the displayed window or nil."
           win))))))
 
 (defun agent-repl--explain-config-hide ()
-  "Hide the explain-config webview.
-Clears the global visible-flag so the popup no longer auto-appears
-on workspace switches.  Keeps the webview (and therefore the daemon
-session and the whole conversation) alive — only its visibility is
-toggled.
+  "Hide the explain-config webview in the current workspace.
+Keeps the webview (and therefore the daemon session and the whole
+conversation) alive — only its visibility is toggled.  Hiding is
+permanent: nothing re-displays the popup on a later workspace
+switch.
 
 If `--show' took over the agent output window, restores the prior
 buffer in that window via `--restore-replaced-window'.  Any
 remaining windows still displaying the explain-config webview (e.g.
 side-window fallbacks) are deleted.  The drawer is never touched."
-  (setq agent-repl--explain-config-global-visible-p nil)
   (agent-repl--explain-config-restore-replaced-window)
   (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
     (agent-repl-window--delete-buffer-windows buf)))
-
-(defun agent-repl--explain-config-ensure-visible-on-persp-switch (&rest _)
-  "Reconcile explain-config visibility with the global state on workspace switch.
-Mirrors `agent-repl-drawer--ensure-visible-on-persp-switch' — when
-the flag says show but the popup is missing in the activated persp,
-re-display it via `agent-repl--explain-config-show' (which will
-take over the new persp's agent output window if visible, else
-fall back to the side-window display action).  When the flag says
-hide but persp-mode restored a stale window, delete it.
-
-Drops a stale `--replaced-window' whose target window is no longer
-live before re-showing — the cell belongs to the persp we left, not
-the one we just activated."
-  (let* ((buf (get-buffer agent-repl-explain-config-buffer-name))
-         (win (and buf (get-buffer-window buf))))
-    (cond
-     ((and agent-repl--explain-config-global-visible-p buf (not win))
-      (when (and agent-repl--explain-config-replaced-window
-                 (not (window-live-p
-                       (car agent-repl--explain-config-replaced-window))))
-        (setq agent-repl--explain-config-replaced-window nil))
-      (agent-repl--explain-config-show))
-     ((and (not agent-repl--explain-config-global-visible-p) win)
-      (agent-repl-window--delete-buffer-windows buf)))))
-
-(agent-repl--ws-add-activated-hook
- #'agent-repl--explain-config-ensure-visible-on-persp-switch)
 
 ;;;; ---- Session ---------------------------------------------------------------
 
@@ -494,10 +461,10 @@ clarification and explanation only."
 
 ;;;###autoload
 (defun agent-repl-explain-config-close ()
-  "Close the explain-config popup everywhere.
-Deletes every visible explain-config window in the current frame and
-clears the global visible-flag so the popup will not reappear on
-workspace switch.  The conversation is preserved — re-running
+  "Close the explain-config popup in the current workspace.
+Deletes every visible explain-config window in the current frame; the
+close is permanent — nothing re-displays the popup on a workspace
+switch.  The conversation is preserved — re-running
 `agent-repl-explain-config' shows the same webview again with the full
 history and the new question appended."
   (interactive)

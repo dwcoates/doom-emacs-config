@@ -1285,10 +1285,10 @@ drawer truly global so hiding in one workspace hides in all."
 ;;;; ---- Drawer ⊥ explain-config decoupling ----
 ;;
 ;; The explain-config buffer (SPC j h c output) is a standalone
-;; bottom-side popup, fully decoupled from the drawer (which lives
-;; on the left).  Drawer show/hide/persp-reconcile must NOT touch
-;; the explain-config window — it has its own visibility lifecycle
-;; (see `agent-repl--explain-config-global-visible-p').
+;; popup, fully decoupled from the drawer (which lives on the
+;; left).  Drawer show/hide/persp-reconcile must NOT touch the
+;; explain-config window — it has its own strictly per-workspace
+;; visibility lifecycle (see `agent-repl--explain-config-show').
 
 (ert-deftest agent-repl-drawer-test-show-does-not-touch-explain-config ()
   "`agent-repl-drawer-show' must not call `--explain-config-show' —
