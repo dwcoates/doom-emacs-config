@@ -1757,6 +1757,62 @@ gate-tweak is needed here."
         (agent-repl--update-all-workspace-states)
         (should (equal dead-ws "ws1"))))))
 
+(ert-deftest agent-repl-test-update-one-gui-never-marks-dead ()
+  "update-one-workspace-state never marks a gui workspace dead.
+A gui workspace has no vterm process, so the vterm-liveness check is
+meaningless and the daemon owns death via session_dead_* sentinels."
+  (agent-repl-test--with-clean-state
+    (let ((dead-ws nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--update-ws-state) #'ignore)
+                ((symbol-function 'agent-repl--mark-dead-vterm)
+                 (lambda (ws) (setq dead-ws ws))))
+        (agent-repl--update-one-workspace-state "ws1" nil)
+        (should-not dead-ws)))))
+
+(ert-deftest agent-repl-test-update-one-gui-runs-decay ()
+  "update-one-workspace-state still runs the :done->:idle decay for gui.
+`agent-repl--update-ws-state' is frontend-agnostic and must keep
+firing so gui tabs decay like vterm tabs."
+  (agent-repl-test--with-clean-state
+    (let ((decayed-ws nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--update-ws-state)
+                 (lambda (ws) (setq decayed-ws ws))))
+        (agent-repl--update-one-workspace-state "ws1" nil)
+        (should (equal decayed-ws "ws1"))))))
+
+(ert-deftest agent-repl-test-update-one-gui-preserves-sentinel-state ()
+  "The poll must not clobber sentinel-driven agent-state on a gui workspace.
+Runs the REAL mark-dead-vterm: the gui branch must prevent it from
+ever being reached, keeping :thinking intact and :repl-state un-dead."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--update-ws-state) #'ignore))
+      (agent-repl--update-one-workspace-state "ws1" nil)
+      (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
+      (should-not (eq (agent-repl--ws-get "ws1" :repl-state) :dead)))))
+
+(ert-deftest agent-repl-test-update-one-vterm-still-marks-dead ()
+  "update-one-workspace-state still marks a vterm workspace dead.
+The gui branch must not weaken the vterm liveness check (default
+:frontend is vterm)."
+  (agent-repl-test--with-clean-state
+    (let ((dead-ws nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--mark-dead-vterm)
+                 (lambda (ws) (setq dead-ws ws))))
+        (agent-repl--update-one-workspace-state "ws1" nil)
+        (should (equal dead-ws "ws1"))))))
+
 (ert-deftest agent-repl-test-update-all-calls-poll ()
   "update-all-workspace-states should call poll-workspace-notifications."
   (agent-repl-test--with-clean-state
