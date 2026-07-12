@@ -148,10 +148,29 @@ export interface ApplyResult {
   send?: ReplayRequestCmd;
   /** Whether visible state changed (render needed). */
   changed: boolean;
+  /**
+   * Set on the frame that completes a fresh-join history replay: the
+   * feed should now render restored (tail-first backfill) instead of
+   * incrementally.
+   */
+  restored?: boolean;
 }
 
 export class ConversationStore {
   state: StoreState = initialState();
+
+  /**
+   * Fresh-join replay watermark: the hello's seq when a full history
+   * replay was requested, null outside a replay. While set, frames are
+   * applied silently (no per-frame feed render) and the feed renders
+   * once, restored, when lastSeq catches up.
+   */
+  private replayTarget: number | null = null;
+
+  /** Whether a fresh-join history replay is still streaming in. */
+  get replaying(): boolean {
+    return this.replayTarget !== null;
+  }
 
   /** Apply one raw WebSocket text message. */
   applyRaw(data: string): ApplyResult {
@@ -184,11 +203,16 @@ export class ConversationStore {
       };
     }
     this.state.lastSeq = envelope.seq;
+    const restored =
+      this.replayTarget !== null && envelope.seq >= this.replayTarget;
+    if (restored) this.replayTarget = null;
     if (frame === null) {
-      return { changed: false }; // unknown type: cursor advanced, nothing to render
+      // unknown type: cursor advanced, nothing to render — but a replay
+      // that ends on an unknown frame still has a backlog to show.
+      return restored ? { changed: true, restored } : { changed: false };
     }
     this.applyKnown(frame);
-    return { changed: true };
+    return restored ? { changed: true, restored } : { changed: true };
   }
 
   private applyHello(hello: HelloFrame): ApplyResult {
@@ -220,11 +244,15 @@ export class ConversationStore {
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
     if (hello.resume_from_seq > 0 && hello.seq >= hello.resume_from_seq) {
+      // Full-history replay incoming: render nothing per-frame and
+      // restore (tail-first) once lastSeq reaches the hello watermark.
+      this.replayTarget = hello.seq;
       return {
         changed: true,
         send: { type: "replay-request", from_seq: hello.resume_from_seq },
       };
     }
+    this.replayTarget = null;
     return { changed: true };
   }
 

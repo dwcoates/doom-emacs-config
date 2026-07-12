@@ -307,3 +307,76 @@ describe("ConversationStore turn lifecycle", () => {
     expect(store.state.items.at(-1)).toMatchObject({ kind: "error", code: "shim_died" });
   });
 });
+
+describe("ConversationStore fresh-join replay phases", () => {
+  it("enters replaying mode when a fresh join requests full history", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    // Act — daemon retains 1..3.
+    store.applyRaw(hello({ seq: 3, resume_from_seq: 1 }));
+    // Assert
+    expect(store.replaying).toBe(true);
+  });
+
+  it("stays quiet-changed while replay frames stream in", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 3, resume_from_seq: 1 }));
+    // Act — first two of three replayed frames.
+    const r1 = store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    const r2 = store.applyRaw(frame("system", { subtype: "init", data: {} }, 2));
+    // Assert — applied but not yet restored.
+    expect(r1).toMatchObject({ changed: true });
+    expect(r1.restored).toBeUndefined();
+    expect(r2.restored).toBeUndefined();
+    expect(store.replaying).toBe(true);
+  });
+
+  it("reports restored exactly on the frame reaching the hello watermark", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 2, resume_from_seq: 1 }));
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    // Act
+    const result = store.applyRaw(frame("system", { subtype: "init", data: {} }, 2));
+    // Assert
+    expect(result.restored).toBe(true);
+    expect(store.replaying).toBe(false);
+  });
+
+  it("reports restored on an unknown frame type at the watermark", () => {
+    // Arrange — the replay backlog must render even when the last
+    // retained frame is a type this client version cannot parse.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    // Act
+    const result = store.applyRaw(frame("frame-from-the-future", {}, 1));
+    // Assert
+    expect(result).toMatchObject({ changed: true, restored: true });
+  });
+
+  it("does not enter replaying mode on a reconnect within retention", () => {
+    // Arrange — store already has 1..2 applied.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    store.applyRaw(frame("system", { subtype: "init", data: {} }, 2));
+    // Act — reconnect; daemon is at 6, retains from 1.
+    store.applyRaw(hello({ seq: 6, resume_from_seq: 1 }));
+    // Assert — tail fill is incremental, not a restore.
+    expect(store.replaying).toBe(false);
+  });
+
+  it("does not enter replaying mode on an empty fresh session", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    // Act
+    store.applyRaw(hello({ seq: 0, resume_from_seq: 0 }));
+    // Assert
+    expect(store.replaying).toBe(false);
+  });
+});

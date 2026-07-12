@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffHtml, itemKey, renderItem, sessionInfoHtml } from "../src/render.js";
+import { backfillChunks, diffHtml, itemKey, renderItem, sessionInfoHtml } from "../src/render.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 
 describe("sessionInfoHtml", () => {
@@ -626,5 +626,96 @@ describe("itemKey", () => {
     };
     // Act + Assert
     expect(itemKey(item, 5)).toBe("result:5");
+  });
+});
+
+describe("renderItem tool previews", () => {
+  it("suppresses the tool card for TaskUpdate", () => {
+    // Arrange — task-list bookkeeping is feed noise, not conversation.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "TaskUpdate",
+      messageId: "m1",
+      input: { task_id: "1", status: "completed" },
+      inputJson: `{"task_id":"1"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
+  });
+
+  it("caps the Bash command behind the bash-input preview class", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      input: { command: "ls -la" },
+      inputJson: `{"command":"ls -la"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="cmd bash-input"`);
+  });
+
+  it("caps the Bash output behind the bash-output preview class", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      input: { command: "ls" },
+      inputJson: `{"command":"ls"}`,
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "file.txt",
+        render: { kind: "bash", stdout: "file.txt", stderr: "" },
+      },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="tool-output bash-output"`);
+  });
+
+  it("caps diff results behind the diff-output preview class", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Edit",
+      messageId: "m1",
+      input: { file_path: "/tmp/a.ts" },
+      inputJson: `{"file_path":"/tmp/a.ts"}`,
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "ok",
+        render: { kind: "diff", file_path: "/tmp/a.ts", unified_diff: "@@ -1 +1 @@\n-a\n+b" },
+      },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="diff diff-output"`);
+  });
+});
+
+describe("backfillChunks", () => {
+  it("orders chunks tail-first", () => {
+    // Act
+    const chunks = backfillChunks(7, 3);
+    // Assert — newest indexes first, oldest chunk last.
+    expect(chunks).toEqual([[4, 5, 6], [1, 2, 3], [0]]);
+  });
+
+  it("returns a single chunk when everything fits", () => {
+    // Act + Assert
+    expect(backfillChunks(3, 40)).toEqual([[0, 1, 2]]);
+  });
+
+  it("returns no chunks for an empty feed", () => {
+    // Act + Assert
+    expect(backfillChunks(0, 40)).toEqual([]);
   });
 });
