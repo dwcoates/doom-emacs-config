@@ -897,6 +897,21 @@ both must be initialized by `agent-repl--initialize-ws-env' before this is calle
         (error "agent-repl--active-inst: no instantiation struct for ws=%s env=%s (initialize-ws-env not called?)" ws env))
       inst)))
 
+(declare-function agent-repl-instantiation-session-id "workspace")
+
+(defun agent-repl--ws-durable-claude-session-id (ws)
+  "Return WS's durable claude session uuid, or nil when none is recorded.
+Reads the active instantiation's `session-id' — the hook-captured CLI
+session uuid both frontends share as their resume currency: the vterm
+frontend resumes it via `--continue'/`--resume' at the next launch, the
+gui frontend via POST /sessions' `resume' field.  Unlike
+`agent-repl--active-inst' this returns nil instead of signaling when WS
+has no `:active-env' or no instantiation struct yet — a workspace that
+never booted a session legitimately has no durable id."
+  (when-let* ((env (agent-repl--ws-get ws :active-env))
+              (inst (agent-repl--ws-get ws env)))
+    (agent-repl-instantiation-session-id inst)))
+
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.
 Set when the user sends a message; used to correctly target workspace
