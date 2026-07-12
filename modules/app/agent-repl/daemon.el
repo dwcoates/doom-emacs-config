@@ -29,6 +29,8 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
+(declare-function agent-repl--frontend-api "agent-repl-frontend-client" (method path &optional payload-alist))
+(declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 
 ;;;; ---- Paths ------------------------------------------------------------
 
@@ -230,26 +232,52 @@ Assumes the artifacts are already built; call
 
 ;;;; ---- Entry point ------------------------------------------------------
 
+(defun agent-repl--frontend-daemon-port-responsive-p ()
+  "Return non-nil when a daemon answers GET /sessions on the configured addr.
+Detects a daemon this Emacs does not track — one bounced into place by
+an agent, or surviving from a previous Emacs.  Unreachable or erroring
+daemons count as absent."
+  (condition-case nil
+      (progn (agent-repl--frontend-api "GET" "/sessions") t)
+    (error nil)))
+
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
 Idempotent: returns the live process immediately when one exists (unless
-FORCE).  Otherwise builds any stale artifact and launches `claude-repld'.
-Returns nil without acting when `agent-repl-frontend-auto-start' is nil
-or automatic init is inhibited (batch/sandbox)."
+FORCE).  A daemon already answering on the port that this Emacs does
+NOT track is ADOPTED (returns t): spawning next to it would only
+bind-fail and die — the orphan-daemon failure mode.  Otherwise builds
+any stale artifact and launches `claude-repld'.  FORCE skips adoption:
+an explicit restart wants a fresh process (a foreign daemon cannot be
+stopped from here — only its owner can).  Returns nil without acting
+when `agent-repl-frontend-auto-start' is nil or automatic init is
+inhibited (batch/sandbox)."
   (cond
    ((not agent-repl-frontend-auto-start) nil)
    ((agent-repl--frontend-init-inhibited-p) nil)
    ((and (not force) (agent-repl--frontend-daemon-live-p))
     agent-repl--frontend-daemon-process)
+   ((and (not force) (agent-repl--frontend-daemon-port-responsive-p))
+    (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
+                      agent-repl-frontend-daemon-addr)
+    t)
    (t
     (when (and force (agent-repl--frontend-daemon-live-p))
       (agent-repl--frontend-stop-daemon))
     (agent-repl--frontend-build-if-stale force)
     (agent-repl--frontend-start-daemon))))
 
-(defun agent-repl--frontend-stop-daemon ()
-  "Kill the tracked `claude-repld' process if it is running."
+(defun agent-repl--frontend-stop-daemon (&optional force)
+  "Kill the tracked `claude-repld' process if it is running.
+Refuses while any daemon session reports an in-flight turn — stopping
+then would kill a live conversation mid-generation (the repeated
+daemon-bounce incidents) — unless FORCE is non-nil.  An unreachable
+daemon has nothing to protect, so the turn probe treats it as idle."
   (when (agent-repl--frontend-daemon-live-p)
+    (unless force
+      (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
+        (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
+               busy)))
     (delete-process agent-repl--frontend-daemon-process))
   (setq agent-repl--frontend-daemon-process nil))
 
@@ -265,15 +293,17 @@ so a user can force initialization on demand."
     (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                (lambda () nil)))
       (let ((proc (agent-repl--ensure-frontend-daemon)))
+        ;; PROC is t for an adopted foreign daemon (no process object).
         (message "claude-repld running (pid %s) on %s"
-                 (and proc (process-id proc))
+                 (if (processp proc) (process-id proc) "foreign/adopted")
                  agent-repl-frontend-daemon-addr)))))
 
 ;;;###autoload
-(defun agent-repl-frontend-daemon-stop ()
-  "Stop the running frontend daemon."
-  (interactive)
-  (agent-repl--frontend-stop-daemon)
+(defun agent-repl-frontend-daemon-stop (&optional force)
+  "Stop the running frontend daemon.
+Refuses while a turn is in flight; with prefix arg FORCE, stops anyway."
+  (interactive "P")
+  (agent-repl--frontend-stop-daemon (and force t))
   (message "claude-repld stopped."))
 
 ;;;###autoload

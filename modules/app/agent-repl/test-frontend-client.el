@@ -471,6 +471,166 @@ in-memory instantiation with staler on-disk state."
         ;; Assert
         (should (equal synced '("ws1" "s_healed")))))))
 
+;;;; ---- turn-active probe ------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
+  "Sessions with turn_active true are returned, idle ones skipped."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _)
+        (agent-repl-test--json-ok
+         `((sessions . [,(list '(session_id . "s_busy") '(turn_active . t))
+                        ,(list '(session_id . "s_idle") '(turn_active . :json-false))]))))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy")))))
+
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-nil-when-unreachable ()
+  "An unreachable daemon reads as no turns (nothing to protect)."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (error "connection refused"))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-turn-active-sessions)))))
+
+;;;; ---- reattach loop -----------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-reattach-check-no-op-when-listed ()
+  "A binding the daemon still lists is left alone and its markers clear."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+                                    :reattach-failures 2 :project-dir "/w")
+    (let ((reattached nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
+                 (lambda () '(((session_id . "s_1")))))
+                ((symbol-function 'agent-repl--frontend-reattach-ws)
+                 (lambda (&rest args) (push args reattached))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (null reattached))
+        (should-not (agent-repl--ws-get "ws1" :reattach-failed))
+        (should-not (agent-repl--ws-get "ws1" :reattach-failures))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-reattaches-vanished ()
+  "A binding missing from the daemon's list triggers a reattach."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
+    (let ((reattached nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
+                 (lambda () '(((session_id . "s_other")))))
+                ((symbol-function 'agent-repl--frontend-reattach-ws)
+                 (lambda (ws stale) (push (list ws stale) reattached))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (equal reattached '(("ws1" "s_gone"))))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-skips-given-up-workspaces ()
+  "A workspace marked :reattach-failed is not retried."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :reattach-failed t
+                                    :project-dir "/w")
+    (let ((reattached nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
+                 (lambda () '()))
+                ((symbol-function 'agent-repl--frontend-reattach-ws)
+                 (lambda (&rest args) (push args reattached))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (null reattached))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-ensures-daemon-when-unreachable ()
+  "Unreachable daemon with live bindings triggers a daemon ensure."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (let ((ensured nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
+                 (lambda () (error "connection refused")))
+                ((symbol-function 'agent-repl--ensure-frontend-daemon)
+                 (lambda (&optional _f) (setq ensured t))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should ensured)))))
+
+(ert-deftest agent-repl-test-frontend-reattach-ws-success-remounts ()
+  "A successful reattach re-ensures, remounts, and clears counters."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
+                                    :reattach-failures 2 :project-dir "/w")
+    (let ((synced nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_new"))
+                ((symbol-function 'agent-repl--frontend-sync-webview)
+                 (lambda (ws id) (setq synced (list ws id)))))
+        ;; Act
+        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
+        ;; Assert
+        (should (equal synced '("ws1" "s_new")))
+        (should-not (agent-repl--ws-get "ws1" :reattach-failures))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-ws-failure-restores-binding ()
+  "A failed reattach restores the stale binding and counts the failure."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+               (lambda (_ws) (error "boom"))))
+      ;; Act
+      (agent-repl--frontend-reattach-ws "ws1" "s_gone")
+      ;; Assert — binding restored so the next sweep retries.
+      (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_gone"))
+      (should (= (agent-repl--ws-get "ws1" :reattach-failures) 1))
+      (should-not (agent-repl--ws-get "ws1" :reattach-failed)))))
+
+(ert-deftest agent-repl-test-frontend-reattach-ws-gives-up-at-cap ()
+  "Reaching the failure cap sets :reattach-failed and warns."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" (list :frontend-session-id "s_gone"
+                                        :reattach-failures
+                                        (1- agent-repl-frontend-reattach-max-failures)
+                                        :project-dir "/w")
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) (error "boom")))
+                ((symbol-function 'display-warning)
+                 (lambda (type msg &rest _) (setq warned (cons type msg)))))
+        ;; Act
+        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
+        ;; Assert
+        (should (agent-repl--ws-get "ws1" :reattach-failed))
+        (should (eq (car warned) 'agent-repl))
+        (should (string-match-p "ws1" (cdr warned)))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-timer-inhibited-in-batch ()
+  "The sweep timer does not start when init is inhibited."
+  ;; Arrange
+  (let ((agent-repl--frontend-reattach-timer nil)
+        (armed nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p) (lambda () t))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _args) (setq armed t) 'fake-timer)))
+      ;; Act
+      (agent-repl--frontend-reattach-timer-start)
+      ;; Assert
+      (should-not armed)
+      (should-not agent-repl--frontend-reattach-timer))))
+
+(ert-deftest agent-repl-test-frontend-reattach-timer-starts-once ()
+  "The sweep timer arms exactly once across repeated starts."
+  ;; Arrange
+  (let ((agent-repl--frontend-reattach-timer nil)
+        (armed 0))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p) (lambda () nil))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _args) (cl-incf armed) 'fake-timer)))
+      ;; Act
+      (agent-repl--frontend-reattach-timer-start)
+      (agent-repl--frontend-reattach-timer-start)
+      ;; Assert
+      (should (= armed 1))
+      (should (eq agent-repl--frontend-reattach-timer 'fake-timer)))))
+
 ;;;; ---- release on nuke ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-release-deletes-and-clears ()

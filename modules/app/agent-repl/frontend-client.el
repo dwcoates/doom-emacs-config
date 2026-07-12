@@ -39,6 +39,8 @@
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
+(declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
+(declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 
 (defvar url-http-response-status)
@@ -186,6 +188,20 @@ passthroughs.  Signals on HTTP failure or a malformed response."
   (let ((entry (agent-repl--frontend-session-entry id)))
     (and entry (eq (alist-get 'terminal entry) :false))))
 
+(defun agent-repl--frontend-turn-active-sessions ()
+  "Return session ids the daemon reports mid-turn; nil when unreachable.
+The daemon-stop guard keys on this: an unreachable daemon has nothing
+to protect, so unreachability reads as \"no turns\" (loudly logged)."
+  (condition-case err
+      (let (busy)
+        (dolist (s (agent-repl--frontend-list-sessions) (nreverse busy))
+          (when (eq (alist-get 'turn_active s) t)
+            (push (alist-get 'session_id s) busy))))
+    (error
+     (agent-repl--log nil "turn-active-sessions: daemon unreachable (%s) — treating as none"
+                       (error-message-string err))
+     nil)))
+
 ;;;; ---- Workspace binding ---------------------------------------------------
 
 (defun agent-repl--frontend-session-url (session-id)
@@ -243,9 +259,111 @@ contract)."
         (let* ((resume (agent-repl--ws-durable-claude-session-id ws))
                (id (agent-repl--frontend-create-session dir nil resume)))
           (agent-repl--ws-put ws :frontend-session-id id)
+          (agent-repl--ws-put ws :reattach-failed nil)
+          (agent-repl--ws-put ws :reattach-failures nil)
+          (agent-repl--frontend-reattach-timer-start)
           (agent-repl--log ws "frontend session created: %s (cwd=%s resume=%s)"
                            id dir (or resume "none"))
           id)))))
+
+;;;; ---- Daemon-bounce resilience: the reattach loop -----------------------
+;;
+;; The daemon may be bounced at ANY time by agents deploying builds —
+;; that is policy, not an accident (see AGENTS.md "Daemon bounce
+;; policy").  Sessions are daemon-memory-resident, so after a bounce
+;; every recorded `:frontend-session-id' names a session the new
+;; instance has never heard of.  This loop is the client half of the
+;; contract: notice, re-ensure (resume + transcript replay brings the
+;; conversation back), remount the webview — and when reattach REPEATEDLY
+;; fails against a daemon that answers (the breaking-API case), stop
+;; retrying and surface the failure loudly instead of spinning forever.
+
+(defcustom agent-repl-frontend-reattach-interval 15
+  "Seconds between reattach sweeps over gui workspace session bindings."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-frontend-reattach-max-failures 3
+  "Consecutive reattach failures after which a workspace gives up.
+A give-up sets `:reattach-failed', surfaces a warning naming the likely
+cause (client/daemon version mismatch), and stops retrying until a
+successful ensure or a manual panel open clears the marker."
+  :type 'integer
+  :group 'agent-repl)
+
+(defvar agent-repl--frontend-reattach-timer nil
+  "Repeating timer driving `agent-repl--frontend-reattach-check', or nil.")
+
+(defun agent-repl--frontend-reattach-timer-start ()
+  "Idempotently start the reattach sweep timer.
+No-op in batch/sandbox (`agent-repl--frontend-init-inhibited-p') —
+the same environments that never auto-start the daemon."
+  (when (and (not agent-repl--frontend-reattach-timer)
+             (not (agent-repl--frontend-init-inhibited-p)))
+    (setq agent-repl--frontend-reattach-timer
+          (run-with-timer agent-repl-frontend-reattach-interval
+                          agent-repl-frontend-reattach-interval
+                          #'agent-repl--frontend-reattach-check))))
+
+(defun agent-repl--frontend-reattach-check ()
+  "Reattach gui workspaces whose bound session vanished from the daemon.
+A binding missing from GET /sessions while the daemon answers means a
+new daemon instance (or a deleted session) — either way the workspace
+re-ensures and remounts.  When the daemon is unreachable but bindings
+exist, ensure it (spawn or adopt) so the next sweep can reattach."
+  (let ((listed (condition-case nil
+                    (mapcar (lambda (s) (alist-get 'session_id s))
+                            (agent-repl--frontend-list-sessions))
+                  (error :unreachable))))
+    (if (eq listed :unreachable)
+        (when (cl-some (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
+                       (agent-repl--live-ws-names))
+          (agent-repl--log nil "reattach: daemon unreachable with bound sessions — ensuring")
+          (condition-case err
+              (agent-repl--ensure-frontend-daemon)
+            (error
+             (agent-repl--log nil "reattach: daemon ensure failed: %s"
+                               (error-message-string err)))))
+      (dolist (ws (agent-repl--live-ws-names))
+        (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
+          (cond
+           ((member bound listed)
+            (agent-repl--ws-put ws :reattach-failed nil)
+            (agent-repl--ws-put ws :reattach-failures nil))
+           ((agent-repl--ws-get ws :reattach-failed) nil)
+           (t (agent-repl--frontend-reattach-ws ws bound))))))))
+
+(defun agent-repl--frontend-reattach-ws (ws stale-id)
+  "Re-ensure WS's daemon session after STALE-ID vanished; remount webview.
+On failure the stale binding is RESTORED so the next sweep retries;
+after `agent-repl-frontend-reattach-max-failures' consecutive failures
+the workspace is marked `:reattach-failed' and a warning surfaces."
+  (condition-case err
+      (progn
+        (agent-repl--log ws "reattach: session %s vanished — re-ensuring ws=%s" stale-id ws)
+        (agent-repl--ws-put ws :frontend-session-id nil)
+        (let ((id (agent-repl--frontend-ensure-session ws)))
+          (agent-repl--frontend-sync-webview ws id)
+          (agent-repl--ws-put ws :reattach-failures nil)
+          (agent-repl--log ws "reattach: ws=%s recovered as %s" ws id)))
+    (error
+     (let ((n (1+ (or (agent-repl--ws-get ws :reattach-failures) 0))))
+       ;; Restore the vanished binding: it is the marker the next sweep
+       ;; keys the retry on.
+       (agent-repl--ws-put ws :frontend-session-id stale-id)
+       (agent-repl--ws-put ws :reattach-failures n)
+       (agent-repl--log ws "reattach: ws=%s attempt %d/%d failed: %s"
+                         ws n agent-repl-frontend-reattach-max-failures
+                         (error-message-string err))
+       (when (>= n agent-repl-frontend-reattach-max-failures)
+         (agent-repl--ws-put ws :reattach-failed t)
+         (display-warning
+          'agent-repl
+          (format (concat "workspace %s failed to reattach to the new daemon instance "
+                          "after %d attempts (%s) — likely a client/daemon version "
+                          "mismatch; rebuild/reload, then reopen the panel")
+                  ws n (error-message-string err))
+          :error))))))
 
 ;;;; ---- Message / interrupt injection ------------------------------------------
 

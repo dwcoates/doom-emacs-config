@@ -153,7 +153,9 @@ route through the fake-daemon struct."
    (let ((built nil)
          (fresh (agent-repl-test--make-live-daemon 777))
          (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
-     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
@@ -172,7 +174,9 @@ route through the fake-daemon struct."
           (new (agent-repl-test--make-live-daemon 2))
           (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
      (setq agent-repl--frontend-daemon-process old)
-     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () new)))
@@ -181,6 +185,90 @@ route through the fake-daemon struct."
          ;; Assert
          (should (eq result new))
          (should-not (agent-repl-test--fake-daemon-live old)))))))
+
+;;;; ---- Foreign-daemon adoption + stop guard ---------------------------------
+
+(ert-deftest agent-repl-test-daemon-ensure-adopts-foreign-daemon ()
+  "A daemon answering on the port that this Emacs does not track is adopted."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((built nil) (spawned nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert — adopted (non-nil, no process object), nothing spawned.
+         (should (eq result t))
+         (should-not built)
+         (should-not spawned))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-force-skips-adoption ()
+  "FORCE ignores a responsive foreign daemon and builds/spawns fresh."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((built nil)
+         (fresh (agent-repl-test--make-live-daemon 9))
+         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () fresh)))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon t)))
+         ;; Assert
+         (should built)
+         (should (eq result fresh)))))))
+
+(ert-deftest agent-repl-test-daemon-stop-refuses-during-turn ()
+  "Stopping is refused while any daemon session has a turn in flight."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((live (agent-repl-test--make-live-daemon)))
+     (setq agent-repl--frontend-daemon-process live)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () '("s_busy"))))
+       ;; Act / Assert
+       (let ((err (should-error (agent-repl--frontend-stop-daemon))))
+         (should (string-match-p "turn in flight" (error-message-string err))))
+       ;; The daemon survives the refusal.
+       (should (agent-repl-test--fake-daemon-live live))
+       (should (eq agent-repl--frontend-daemon-process live))))))
+
+(ert-deftest agent-repl-test-daemon-stop-force-bypasses-turn-guard ()
+  "FORCE stops the daemon without consulting the turn probe."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((live (agent-repl-test--make-live-daemon))
+         (probed nil))
+     (setq agent-repl--frontend-daemon-process live)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () (setq probed t) '("s_busy"))))
+       ;; Act
+       (agent-repl--frontend-stop-daemon t)
+       ;; Assert
+       (should-not probed)
+       (should-not (agent-repl-test--fake-daemon-live live))
+       (should-not agent-repl--frontend-daemon-process)))))
+
+(ert-deftest agent-repl-test-daemon-stop-proceeds-when-idle ()
+  "Stopping proceeds normally when no turn is in flight."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((live (agent-repl-test--make-live-daemon)))
+     (setq agent-repl--frontend-daemon-process live)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () nil)))
+       ;; Act
+       (agent-repl--frontend-stop-daemon)
+       ;; Assert
+       (should-not (agent-repl-test--fake-daemon-live live))
+       (should-not agent-repl--frontend-daemon-process)))))
 
 ;;;; ---- start-daemon: guard --------------------------------------------------
 
