@@ -55,11 +55,15 @@ func TranscriptPath(configDir, cwd, claudeSessionID string) string {
 }
 
 // transcriptEntry is the subset of one transcript JSONL line the replay
-// builder inspects.
+// builder inspects. Timestamp is the CLI's ISO8601 stamp for the entry;
+// it rides through onto the replayed user-turn envelope so the webapp
+// renders each historical prompt at the time it was actually sent
+// rather than at resume time.
 type transcriptEntry struct {
 	Type        string          `json:"type"`
 	IsSidechain bool            `json:"isSidechain"`
 	IsMeta      bool            `json:"isMeta"`
+	Timestamp   string          `json:"timestamp"`
 	Message     json.RawMessage `json:"message"`
 }
 
@@ -139,7 +143,7 @@ func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *tra
 		}
 		return t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
 	case "user":
-		return replayUserFrames(t, entry.Message, replaySeq)
+		return replayUserFrames(t, entry.Message, entry.Timestamp, replaySeq)
 	default:
 		return nil
 	}
@@ -149,7 +153,7 @@ func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *tra
 // blocks become tool-use-result frames (through the Translator, so
 // render hints fire for tools it has seen), and the remaining content
 // becomes one §2.3 user-turn frame.
-func replayUserFrames(t *Translator, message json.RawMessage, replaySeq *int) []protocol.L2Frame {
+func replayUserFrames(t *Translator, message json.RawMessage, ts string, replaySeq *int) []protocol.L2Frame {
 	var msg transcriptUserMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
 		return nil
@@ -160,7 +164,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, replaySeq *int) []
 			return nil
 		}
 		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": text}})
-		return []protocol.L2Frame{replayUserTurn(norm, replaySeq)}
+		return []protocol.L2Frame{replayUserTurn(norm, ts, replaySeq)}
 	}
 	var rawBlocks []json.RawMessage
 	if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
@@ -186,18 +190,20 @@ func replayUserFrames(t *Translator, message json.RawMessage, replaySeq *int) []
 	}
 	if len(turnBlocks) > 0 {
 		content, _ := json.Marshal(turnBlocks)
-		frames = append(frames, replayUserTurn(content, replaySeq))
+		frames = append(frames, replayUserTurn(content, ts, replaySeq))
 	}
 	return frames
 }
 
 // replayUserTurn builds the §2.3 user-turn frame for replayed content.
 // The request id is synthetic: replayed turns never had a daemon-issued
-// user-message command.
-func replayUserTurn(content json.RawMessage, replaySeq *int) protocol.L2Frame {
+// user-message command. The envelope is pre-stamped with the transcript
+// entry's own timestamp so the hub keeps it (§2.1) instead of stamping
+// resume time; an entry without one falls through to the hub's stamp.
+func replayUserTurn(content json.RawMessage, ts string, replaySeq *int) protocol.L2Frame {
 	*replaySeq++
 	return &protocol.UserTurnFrame{
-		Envelope:  protocol.Envelope{Type: "user-turn"},
+		Envelope:  protocol.Envelope{Type: "user-turn", TS: ts},
 		RequestID: replayRequestID(*replaySeq),
 		Content:   content,
 	}
