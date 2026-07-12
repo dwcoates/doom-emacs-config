@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   backfillChunks,
   diffHtml,
+  finalResponseBlockIds,
   formatTurnTime,
   itemKey,
   lastUserTurnId,
@@ -223,6 +224,51 @@ describe("renderItem", () => {
     };
     // Act + Assert
     expect(renderItem(item)).not.toContain("cursor");
+  });
+
+  it("green-borders a text block flagged as a turn's final response", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "done",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, true);
+    // Assert
+    expect(html).toContain(`class="bubble assistant md final-response"`);
+  });
+
+  it("withholds the green border from a text block that is not a final response", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "working on it",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, false);
+    // Assert
+    expect(html).not.toContain("final-response");
+  });
+
+  it("green-borders a final response rendered as a metaprompt tree", () => {
+    // Arrange — the tree path builds its own bubble, so it needs the class too.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Response (👀 no changes made)\n\n1 👀 Answer\n├── 1.1 First\n└── 1.2 Second",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, true);
+    // Assert
+    expect(html).toContain(`class="bubble assistant md final-response"`);
   });
 
   it("renders a thinking block that carries text as an expandable card", () => {
@@ -801,6 +847,127 @@ describe("ResultChip", () => {
     const html = renderItem(resultItem("error_during_execution", true));
     // Assert
     expect(html).toContain(`class="result err"`);
+  });
+});
+
+describe("finalResponseBlockIds", () => {
+  /** A text block item carrying the given id. */
+  function text(blockId: string): ConversationItem {
+    return { kind: "text", blockId, messageId: "m1", text: "hi", done: true };
+  }
+
+  /** A result frame closing a turn with the given subtype. */
+  function result(subtype: ResultItem["subtype"] = "success"): ConversationItem {
+    return {
+      kind: "result",
+      subtype,
+      durationMs: 12,
+      numTurns: 1,
+      totalCostUsd: 0.5,
+      usage: { input_tokens: 3, output_tokens: 4 },
+      isError: subtype === "error_during_execution",
+    };
+  }
+
+  /** A tool card item, standing in for work between two text blocks. */
+  function tool(): ConversationItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "Bash",
+      inputJson: "{}",
+      input: {},
+      inputDone: true,
+    };
+  }
+
+  it("marks the last text block of a completed turn", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), result()];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect([...finals]).toEqual(["b1"]);
+  });
+
+  it("leaves a completed turn's earlier text block unmarked", () => {
+    // Arrange — commentary, then a tool call, then the answer.
+    const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2"), result()];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.has("b1")).toBe(false);
+  });
+
+  it("marks the text block that follows a completed turn's last tool call", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2"), result()];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.has("b2")).toBe(true);
+  });
+
+  it("leaves a still-streaming turn's text unmarked until its result lands", () => {
+    // Arrange — no result frame yet, so the next block could still continue it.
+    const items = [userTurnAt(9, 0), text("b1")];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.size).toBe(0);
+  });
+
+  it("leaves an aborted turn's last text unmarked", () => {
+    // Arrange — an interrupted turn never reached the answer it worked toward.
+    const items = [userTurnAt(9, 0), text("b1"), result("aborted")];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.size).toBe(0);
+  });
+
+  it("leaves a failed turn's last text unmarked", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), result("error_during_execution")];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.size).toBe(0);
+  });
+
+  it("marks the final text of every completed turn in the feed", () => {
+    // Arrange
+    const items = [
+      userTurnAt(9, 0),
+      text("b1"),
+      result(),
+      userTurnAt(9, 5),
+      text("b2"),
+      result(),
+    ];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect([...finals]).toEqual(["b1", "b2"]);
+  });
+
+  it("marks nothing for a completed turn that produced no text at all", () => {
+    // Arrange — a turn that only ran tools.
+    const items = [userTurnAt(9, 0), tool(), result()];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.size).toBe(0);
+  });
+
+  it("never lets a resultless turn's text be claimed by the next turn's result", () => {
+    // Arrange — turn one never closed; turn two ran tools only and completed.
+    const items = [userTurnAt(9, 0), text("b1"), userTurnAt(9, 5), tool(), result()];
+    // Act
+    const finals = finalResponseBlockIds(items);
+    // Assert
+    expect(finals.size).toBe(0);
   });
 });
 

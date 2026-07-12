@@ -38,6 +38,10 @@
   /* The rule a /clear draws under its prompt: red, the loudest thing in the
      palette, because everything above it is context the session no longer has. */
   --clear-divider: #dc2626;
+  /* The border around a turn's final response: green, the palette's success
+     hue, so the answer a turn actually landed on is findable at a glance among
+     the commentary bubbles the agent emitted between its tool calls. */
+  --final-response: #16a34a;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -59,6 +63,7 @@
     --composer-bg: #0c0e12;
     --remediation: #facc15;
     --clear-divider: #ef4444;
+    --final-response: #4ade80;
   }
 }
 
@@ -125,8 +130,11 @@ pre {
 }
 
 /* No max-width: every feed section spans the full feed width, matching
-   the tool cards, so nothing renders narrower than its neighbors. */
-.bubble { padding: 0.6rem 0.9rem; border-radius: 8px; }
+   the tool cards, so nothing renders narrower than its neighbors. Every
+   bubble reserves its border box up front, so a turn's final response
+   gaining the green border on completion recolors 2px that were already
+   laid out rather than reflowing the feed under a reader mid-sentence. */
+.bubble { padding: 0.6rem 0.9rem; border-radius: 8px; border: 2px solid transparent; }
 /* Prompt text and its send-time stamp share one row: the stamp is pinned
    to the bubble's top-right corner, baseline-aligned with the prompt's
    first line, and never shrinks the way the wrapping prompt does. */
@@ -145,6 +153,8 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 .bubble.assistant { background: var(--assistant); }
+/* The answer the turn landed on, as against the commentary above it. */
+.bubble.assistant.final-response { border-color: var(--final-response); }
 .cursor { animation: pulse 1s infinite; color: var(--accent); }
 
 /* Markdown-rendered assistant text */
