@@ -1,7 +1,20 @@
 # Design: MERGE QUEUE drawer section
 
-Status: **design only — not implemented.**
-Scope: `modules/app/agent-repl/` (`drawer.el`, `worktree.el`, `status.el`).
+Status: **implemented.**
+Scope: `modules/app/agent-repl/` (`drawer.el`, `worktree.el`, `core.el`).
+
+As built, rendering a real cherry-pick:
+
+```
+ MERGE QUEUE (4)
+ ────────────
+ ▸ doom
+  ⟳ 82e4583 feat: commit number 1  0:05
+    cfa90c5 feat: commit number 2
+    424babc feat: commit number 3
+ ▸ services
+    3c4d5e6 fix(ceac): debounce the state poll
+```
 
 ---
 
@@ -228,27 +241,22 @@ on the merge worker. That is fine and in fact desirable: the filter only mutates
 progress hash (plain Lisp) and bumps a counter. It must never touch UI — the
 existing `--defer-to-main-thread` discipline (`worktree.el:1833`) is unchanged.
 
-### 5.2 The in-flight lookahead is free — `.git/sequencer/todo`
+### 5.2 Considered and rejected: `.git/sequencer/todo`
 
-For a multi-commit pick, git maintains `.git/sequencer/todo`, which is exactly the
-list of remaining picks, already carrying SHA and subject:
+For a multi-commit pick, git maintains `.git/sequencer/todo` — the remaining picks,
+with SHA and subject, shrinking by one at each commit boundary (verified). It is
+tempting: a plain file read, no subprocess.
 
-```
-pick dec4a97 feat: one          <- current (still listed while it is being applied)
-pick 4078f49 feat: two
-pick 437e2f3 feat: three
-```
+It is **not used**, because it is strictly dominated by the filter:
 
-This is a **plain file on disk**. Reading it costs no subprocess, no `rev-list`, and
-no worker round-trip — it *is* the "next three commits" for the in-flight pick,
-verbatim.
+- **A single-commit pick creates no sequencer directory at all.** That is the most
+  common workspace merge, and `todo` would go blind on exactly that case.
+- Given `:commits` (captured once at pick start) plus the filter's `:commit-index`,
+  the remaining commits are already known. `todo` would be a second, redundant source
+  of the same truth — and two sources that can disagree is worse than one.
 
-Two caveats, both benign:
-
-- A single-commit pick does not use the sequencer, so `.git/sequencer/` is absent.
-  Fall back to the filter's own `:commits` knowledge (there is only one).
-- The directory is removed when the pick finishes, which is precisely the signal that
-  the in-flight portion of the stream is empty.
+The in-flight lookahead therefore comes from `:commits` + `:commit-index`, and only
+*queued* (not-yet-started) merges need the projection in §5.4.
 
 ### 5.3 Progress record
 
@@ -331,97 +339,111 @@ The `seq` counter means one `progress-put` forces exactly one redraw, and a fiel
 added later cannot silently fail to render — which is the bug the current signature
 already has for `:merging`.
 
-### 6.2 Cadence
+### 6.2 Cadence — no new timer
 
-The global poll is 1Hz (`status.el:67-70`, timer at `status.el:1748`). That is
-enough for the clock (rendered at `M:SS`) but not for a spinner. Add a dedicated
-timer, `agent-repl-merge-progress-tick` (default 0.5s), that runs **only** while
-`agent-repl--in-flight-merges` is non-empty, calls
-`agent-repl-drawer--refresh-if-visible` and nothing else, and self-cancels when the
-in-flight set empties. Raising the *global* rate instead would multiply the
-per-workspace state work (`status.el:1610-1643`) for no reason.
+An earlier draft proposed a dedicated 0.5s timer to animate a spinner. **Dropped.**
+The clock renders at `M:SS`, so one-second resolution is all it can express, and the
+existing 1Hz poll (`status.el:67-70`, timer at `status.el:1748`) already ends in
+`agent-repl-drawer--refresh-if-visible`. The `(floor (float-time))` term above is
+what makes that poll actually redraw while a merge runs, and it contributes nothing
+to the signature when the queue is idle. No new timer, no spinner, no extra churn.
 
 ### 6.3 The render is pure
 
 `--insert-merge-queue-section` takes `(stream, now)` and returns text. No git, no
-I/O. Stream construction takes `(queue, in-flight, progress-hash, lookahead-hash,
-todo-lines)` and is likewise pure — the one impure step, reading
-`.git/sequencer/todo`, is a single `insert-file-contents` hoisted to the caller. This
-is what makes §8 tractable.
+I/O. `--merge-stream` is a pure function of the four merge globals. This is what
+makes every test in §8 a plain data-in/text-out assertion.
+
+### 6.4 Thread safety
+
+The filter runs on whichever thread pumps the event loop — in practice the main
+thread, not the merge worker (verified: a filter on a process started *by* a worker
+still fires, incrementally, while that worker blocks on its condvar). It therefore
+touches nothing but the progress hash and the counter.
+
+The one place this bites is `--merge-lookahead-refresh-all`, which shells out to git
+and is reached from `--enqueue-merge` on the merge worker. A `call-process` on a
+worker thread holds the global Lisp lock for the child's entire runtime and freezes
+the UI — the hazard `--git-exit-code` already routes around. So the refresh defers
+its body to the main thread.
 
 ---
 
-## 7. Actions on commit rows
+## 7. Actions on commit rows — not built
 
-Commit rows are informational, but two actions are nearly free and high-value:
-
-| Key | Current commit | Upcoming commit |
-|---|---|---|
-| `RET` | `magit-show-commit` the SHA in the target repo | same |
-| `RET` (conflict) | pop `*agent-repl-merge-resolver-<ws>*` (`worktree.el:3621`) | — |
-
-The resolver buffer already exists and is already kept alive (`:keep-buffer`,
-`worktree.el:3901`). Today nothing points the user at it.
+Commit rows are informational only. `RET` on a commit could `magit-show-commit` it,
+and `RET` on a conflict row could pop the resolver buffer
+(`*agent-repl-merge-resolver-<ws>*`, `worktree.el:3621`) that already exists, is
+already kept alive (`:keep-buffer`, `worktree.el:3901`), and that nothing currently
+points the user at. Deliberately left out of this pass: the section is a display, and
+the keymap is workspace-oriented. Worth adding if the display proves useful.
 
 ---
 
-## 8. Testing plan
+## 8. Tests
 
-Per `CLAUDE.md`: one test file per source module, one edge case per test.
+Per `CLAUDE.md`: one test file per source module, one edge case per test. Because the
+stream builder, the renderer, and the filter are all pure, none of these touch git.
 
-**`test-drawer.el`** — the stream builder and the renderer are both pure, so every
-case is a synthetic input asserted against output:
+**`test-drawer.el`** — synthetic merge state in, buffer text out:
 
 - idle queue → section omitted entirely
-- current commit at 1.2s elapsed → **no** clock rendered
-- current commit at 4.5s elapsed → clock rendered as `0:04`
+- the commit at `:commit-index` is `current`; commits already applied are gone
+- commits behind it in the same pick are `pending`
+- a recorded conflict SHA flips the current commit to `conflict`
+- queued commits follow the in-flight ones, which is what lets a lookahead cross projects
+- a halted queue entry's commits are flagged `halted`
+- elapsed at 1.2s → **no** clock; at 4.5s → `0:04`; at 67s → `1:07`
 - current + 1 same-project + 2 other-project → **exactly the §3.2 layout**
-- a run of 4 commits in one project → exactly one separator
-- fewer than 3 commits behind the current → renders what exists, no padding
-- more than 3 behind → truncated at 3
-- two concurrent in-flight projects → both current commits shown, lookahead budget split
-- conflict on the current commit → conflict line + resolver line
+- a run of commits in one project → exactly one separator
+- fewer commits than the budget → renders what exists, no padding
+- more than the budget → truncated
+- two concurrent in-flight projects, budget 0 → **both** current commits still shown
+- conflict → unmerged-file count and resolver phase rendered
 - commit rows carry `agent-repl-drawer-commit`, never `agent-repl-drawer-workspace`
-- `j`/`k` navigation skips commit rows
-- a `:merging` workspace still renders in `MERGING`, unchanged
 - `--render-signature` changes when `--merge-progress-seq` is bumped
-- `--render-signature` ticks once per second while in-flight, and does not while idle
 
-**`test-worktree.el`** — the filter is a pure string→plist transform, so it tests
-without git at all:
+**`test-worktree.el`** — the filter is a pure string→plist fold:
 
 - `[master ba94789] feat: one` → `:commit-index` advances, `:commit-started-at` resets
+- a line split across two filter calls is **buffered, not dropped** — the classic
+  process-filter bug, and the one that would silently desync the index
+- a line with no newline yet is held back rather than counted early
+- two boundaries in one chunk both count
 - `error: could not apply dec4a97... feat: one` → `:conflict-sha` / `:conflict-subject`
-- `CONFLICT (content): Merge conflict in f.txt` → pushed onto `:conflict-files`
-- a line split across two filter calls (git may deliver a partial line) is buffered,
-  not dropped — **the classic process-filter bug, and the one that will bite**
-- an unrecognized line is ignored rather than corrupting state
-- `--git-exit-code-streaming` returns the same exit code as `--git-exit-code`
-- the progress entry is removed by `--clear-in-flight-merge`
-- `.git/sequencer/todo` parses to `((sha . subject) ...)`
-- a **missing** `.git/sequencer/` (single-commit pick) degrades to the filter's own state
-- lookahead is keyed by target HEAD and recomputed when the target advances
-- lookahead is computed only for the entries the 3-commit budget reaches
+- `CONFLICT (content): Merge conflict in f.txt` → appended to `:conflict-files`, deduped
+- git chatter (`Auto-merging`, `hint:`) leaves the record untouched
+- the pick seeds `:commits` with the range git is about to apply
+- progress starts at index 0, and `--clear-in-flight-merge` removes the entry
+- `--range-commits` parses the log, handles an empty range, and keeps tabs in subjects
+
+Beyond ERT, the whole path was driven end-to-end against a **real** git repo: real
+`rev-list`, real `git cherry-pick -x master..feat` through the real streaming wrapper
+and the real filter, rendering the real section. The filter tracked 3 of 3 commits.
 
 ---
 
-## 9. Empirically established (git 2.45.1)
+## 9. Empirically established (git 2.45.1, Emacs threads)
 
-Everything in §5.1–5.2 was verified against real git, not assumed. Recorded here
-because the first draft of this design got it wrong in the expensive direction.
+Everything load-bearing here was verified against the real thing, not assumed —
+recorded because the first draft of this design got it wrong in the expensive
+direction and would have rewritten the merge hot path for nothing.
 
 1. **The range cherry-pick streams per-commit lines and flushes them incrementally.**
-   Boundaries arrive staggered, before process exit. A process filter sees them live.
+   Boundaries arrived staggered (t=0.08 / 0.15 / 0.22), well before process exit.
 2. **Conflicts stream too**: the stuck SHA and subject on stderr, the conflicted files
-   on stdout.
-3. **`.git/sequencer/todo` exists during a multi-commit pick** and lists the remaining
-   picks with SHA and subject. Free lookahead, no subprocess.
-4. **`cherry-pick` runs `post-commit` but NOT `pre-commit`.**
-   Worth flagging against the stated premise that slow cherry-picks are caused by
-   "commit hooks": if the slow hook is a `pre-commit` hook, it does **not** run during
-   a cherry-pick, and the slowness is coming from somewhere else. Note also that
-   `~/.gitconfig` sets `core.hooksPath` to `~/.config/git/hooks` globally, so the
-   hooks that do run are the ones there, not any repo's `.git/hooks`.
+   on stdout. `start-process` mixes stderr into stdout, so one filter sees both.
+3. **A process filter fires for a process started on a worker thread**, incrementally,
+   while that worker blocks on its condvar — which is exactly the shape of
+   `--wait-for-process-exit--worker`. This is what makes the whole approach viable.
+4. **`.git/sequencer/todo` shrinks by one at each commit boundary** and is removed when
+   the pick ends. True, but unused — see §5.2.
+5. **`cherry-pick` runs `post-commit` but NOT `pre-commit`.**
+   Worth flagging against the premise that slow cherry-picks come from "commit hooks":
+   a slow `pre-commit` hook does **not** run during a cherry-pick, so slowness from
+   that direction is coming from somewhere else. Note also that `~/.gitconfig` sets
+   `core.hooksPath` globally to `~/.config/git/hooks`, so the hooks that do run are
+   the ones there, not any repo's `.git/hooks`.
 
 ---
 
@@ -429,17 +451,17 @@ because the first draft of this design got it wrong in the expensive direction.
 
 1. **Should an upcoming commit show which workspace it comes from?**
    Within one project, consecutive queue entries are different workspaces, and the
-   section would not distinguish them. A dimmed trailing `ws-name` is possible but
-   the drawer is only 20% of the frame wide.
+   section does not currently distinguish them. A dimmed trailing `ws-name` is
+   possible but the drawer is only 20% of the frame wide.
 
 2. **Is the 3-commit lookahead a global budget or per-project?**
-   §4.1 proposes global, which reproduces the user's example exactly. Per-project
-   would show more during concurrent merges but grows unboundedly with project count.
+   Built as global (§4.1), which reproduces the requested layout exactly. Per-project
+   would show more during concurrent merges but grows with project count.
 
 3. **Should the section linger for a beat after the queue empties?**
-   Otherwise the final commit of a fast merge vanishes the instant it lands and the
+   As built, the final commit of a fast merge vanishes the instant it lands, so the
    user never sees it complete.
 
 4. **`⛔ halted` entries** (`:halt-until-human`, `worktree.el:1979`) block their whole
-   bucket (`worktree.el:4832`). Should their commits appear in the stream (greyed,
-   flagged) or be omitted, given they are not actually "up next"?
+   bucket. Their commits currently appear in the stream, flagged. Arguably they should
+   not, since they are not really "up next".
