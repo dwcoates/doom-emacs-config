@@ -3010,6 +3010,23 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
              ((symbol-function 'agent-repl--workspace-id) (lambda () "id")))
      ,@body))
 
+(ert-deftest agent-repl-test-panels-initialize-agent-stamps-vterm-frontend ()
+  "initialize-agent stamps :frontend 'vterm — the function IS the vterm boot.
+A workspace created while `agent-repl-default-frontend' is gui (the
+workspace-generation dispatch path) would otherwise resolve to the gui
+branch of `agent-repl--on-session-start-event', which never marks the
+vterm ready nor drains the dispatched initial prompt."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
+    (let ((agent-repl-default-frontend 'gui)
+          (vterm-buf (generate-new-buffer " *init-agent-stamp*")))
+      (unwind-protect
+          (agent-repl-test--initialize-agent-stubs vterm-buf
+            (agent-repl--initialize-agent "test-ws")
+            (should (eq (agent-repl--ws-get "test-ws" :frontend) 'vterm))
+            (should-not (agent-repl--ws-gui-frontend-p "test-ws")))
+        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
+
 (ert-deftest agent-repl-test-panels-initialize-agent-opens-panels-at-launch ()
   "initialize-agent opens panels immediately for the current workspace.
 Pins the 2026-07 gate change: blocking first-run screens (trust

@@ -1249,6 +1249,14 @@ path later for pending-prompt draining; its panel-show is idempotent."
     (when (agent-repl--agent-running-p ws)
       (error "agent-repl--initialize-agent: already running ws=%s" ws))
     (agent-repl--log ws "initialize-agent: starting new session for ws=%s" ws)
+    ;; This function IS the vterm boot, so the workspace's presentation is
+    ;; vterm from here on — stamp it before the session_start sentinel can
+    ;; race the lazy `:frontend' resolution.  Without the stamp, a workspace
+    ;; created while `agent-repl-default-frontend' is `gui' (e.g. the
+    ;; workspace-generation dispatch path) resolves to the gui branch of
+    ;; `agent-repl--on-session-start-event', which never marks the vterm
+    ;; ready nor drains `:pending-prompts' — stranding its initial prompt.
+    (agent-repl--ws-put ws :frontend 'vterm)
     (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
     (let* ((root (agent-repl--ws-dir ws))
            (default-directory root))
