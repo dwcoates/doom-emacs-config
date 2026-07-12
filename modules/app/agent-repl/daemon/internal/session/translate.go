@@ -30,6 +30,12 @@ type Translator struct {
 	tools map[string]*toolMeta
 	// pending permission request_id → metadata.
 	pendingPerms map[string]*permMeta
+
+	// turnActive mirrors whether a user turn is in flight: set on the
+	// accepted user-message command, cleared by the turn's result frame
+	// (every turn ends in one, §2.4). Introspection-only (GET /sessions
+	// turn_active) — no frame carries it.
+	turnActive bool
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
 
@@ -128,6 +134,7 @@ func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame 
 		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": s}})
 		content = norm
 	}
+	t.turnActive = true
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
@@ -160,6 +167,20 @@ func (t *Translator) OnPermissionDecisionCmd(cmd *protocol.L1Command) (protocol.
 // OnInterruptCmd invalidates pending permission prompts (§2.7 "cancel").
 func (t *Translator) OnInterruptCmd() []protocol.L2Frame {
 	return t.cancelPendingPermissions("interrupted")
+}
+
+// TurnActive reports whether a user turn is currently in flight.
+func (t *Translator) TurnActive() bool { return t.turnActive }
+
+// PendingPermissionIDs returns the request ids of unresolved permission
+// prompts, sorted for deterministic introspection output.
+func (t *Translator) PendingPermissionIDs() []string {
+	ids := make([]string, 0, len(t.pendingPerms))
+	for id := range t.pendingPerms {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // OnShimDeath invalidates pending permission prompts when the shim's
@@ -491,6 +512,7 @@ func (t *Translator) onToolResult(evt *protocol.L1Event) []protocol.L2Frame {
 func (t *Translator) onResult(evt *protocol.L1Event) []protocol.L2Frame {
 	// §2.4 block-closure invariant: every open block closes before the
 	// result frame, including interrupted or failed turns.
+	t.turnActive = false
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("turn ended")...)
 	usage := protocol.Usage{}

@@ -224,16 +224,26 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// ClaudeSessionID is the durable CLI session uuid (resume
 		// target); empty until the SDK's system:init has arrived.
 		ClaudeSessionID string `json:"claude_session_id,omitempty"`
+		// DeathReason classifies a terminal session's end (closed
+		// reason or "shim_died"); absent while alive.
+		DeathReason string `json:"death_reason,omitempty"`
+		// TurnActive reports whether a user turn is in flight.
+		TurnActive bool `json:"turn_active"`
+		// PendingPermissions lists unresolved permission request ids.
+		PendingPermissions []string `json:"pending_permissions,omitempty"`
 	}
 	list := make([]entry, 0, len(s.sessions))
 	for id, sess := range s.sessions {
 		info := sess.Info()
 		list = append(list, entry{
-			SessionID:       id,
-			Terminal:        info.Terminal,
-			CWD:             info.CWD,
-			Model:           info.Model,
-			ClaudeSessionID: info.ClaudeSessionID,
+			SessionID:          id,
+			Terminal:           info.Terminal,
+			CWD:                info.CWD,
+			Model:              info.Model,
+			ClaudeSessionID:    info.ClaudeSessionID,
+			DeathReason:        info.DeathReason,
+			TurnActive:         info.TurnActive,
+			PendingPermissions: info.PendingPermissions,
 		})
 	}
 	s.mu.Unlock()

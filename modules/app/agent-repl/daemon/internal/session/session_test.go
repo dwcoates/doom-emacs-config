@@ -848,3 +848,102 @@ func TestSentinelTapCleanShutdownNoDead(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Info reconcile fields (death_reason, turn_active, pending_permissions)
+// ---------------------------------------------------------------------------
+
+func TestInfoTurnActiveLifecycle(t *testing.T) {
+	// Arrange
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	if h.sess.Info().TurnActive {
+		t.Fatal("turn_active before any user message")
+	}
+	// Act — user message starts a turn.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"u1","content":"hi"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	// Assert
+	if !h.sess.Info().TurnActive {
+		t.Fatal("turn_active should be true after user-message")
+	}
+	// Act — the result frame ends the turn.
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+	waitForFrameType(t, c, "result")
+	// Assert
+	if h.sess.Info().TurnActive {
+		t.Fatal("turn_active should be false after result")
+	}
+}
+
+func TestInfoPendingPermissions(t *testing.T) {
+	// Arrange
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	h.shim.pushEvent(t, `{"type":"permission-request","session_id":"sess-1","request_id":"p1","tool_use_id":"t1","tool_name":"Bash","input":{}}`)
+	waitForFrameType(t, c, "permission-request")
+	// Assert — pending while unresolved.
+	if got := h.sess.Info().PendingPermissions; len(got) != 1 || got[0] != "p1" {
+		t.Fatalf("pending = %v, want [p1]", got)
+	}
+	// Act — resolve it.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"permission-decision","request_id":"p1","decision":{"behavior":"allow"}}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	// Assert — cleared.
+	if got := h.sess.Info().PendingPermissions; len(got) != 0 {
+		t.Fatalf("pending after resolve = %v, want empty", got)
+	}
+}
+
+func TestInfoDeathReasonHardDeath(t *testing.T) {
+	// Arrange
+	h := newHarness(t, 16)
+	// Act — stdout closes without a closed event.
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	if got := h.sess.Info().DeathReason; got != "shim_died" {
+		t.Fatalf("death_reason = %q, want shim_died", got)
+	}
+}
+
+func TestInfoDeathReasonGracefulClose(t *testing.T) {
+	// Arrange — table over closed reasons.
+	tests := []struct {
+		reason string
+	}{
+		{reason: "shutdown"},
+		{reason: "fatal_error"},
+		{reason: "sdk_end"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.reason, func(t *testing.T) {
+			h := newHarness(t, 16)
+			// Act
+			h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","reason":"`+tt.reason+`","exit_code":0}`)
+			h.endShim()
+			<-h.sess.Done()
+			// Assert
+			if got := h.sess.Info().DeathReason; got != tt.reason {
+				t.Fatalf("death_reason = %q, want %q", got, tt.reason)
+			}
+		})
+	}
+}
+
+// waitForFrameType receives frames until one of the given type arrives.
+func waitForFrameType(t *testing.T, c *Client, typ string) map[string]any {
+	t.Helper()
+	for {
+		f := recvFrame(t, c)
+		if f["type"] == typ {
+			return f
+		}
+	}
+}
