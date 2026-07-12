@@ -214,7 +214,7 @@ pre {
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
-.badge.run { color: var(--accent); }
+.badge.run { color: var(--accent); display: inline-flex; align-items: center; gap: 0.3rem; }
 .cmd { color: var(--accent); }
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
@@ -452,12 +452,42 @@ pre {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+/* A tool call still awaiting its result spins the same arc, one size down,
+   inside its running badge. Two animations run on it: the endless rotation,
+   and a fade-in whose 1s delay is the whole mechanic — the arc is invisible
+   for the call's first second, so only a call the user actually waits on
+   ever shows it. The box is laid out from the start (opacity, not display),
+   so the badge does not jump when the arc fades in. A tool-use-progress
+   update rewrites the card and so restarts the delay, which is harmless: a
+   fresh progress line is itself the liveness signal the arc stands in for. */
+.tool-spinner {
+  flex: none;
+  width: 0.7em;
+  height: 0.7em;
+  border: 2px solid color-mix(in srgb, var(--thinking) 25%, transparent);
+  border-top-color: var(--thinking);
+  border-radius: 50%;
+  opacity: 0;
+  animation:
+    thinking-spin 0.8s linear infinite,
+    tool-run-appear 0.2s linear 1s forwards;
+}
+@keyframes tool-run-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 /* Reduced motion: the sweep of the arc IS the progress signal, so it never
    degrades to a pulse (a pulse in place reads as a stalled spinner) — the
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
   .thinking-spinner {
     animation-duration: 1.4s;
+  }
+  /* Per-animation durations, in the order the base rule declares them: the
+     slowed rotation, then the unchanged fade-in (whose 1s delay, declared
+     in the shorthand, survives this override). */
+  .tool-spinner {
+    animation-duration: 1.4s, 0.2s;
   }
 }
 .pulse {
