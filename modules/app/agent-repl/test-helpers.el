@@ -15,6 +15,31 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+;;;; ---- Batch-only contract ----
+;;
+;; This file is BATCH-ONLY scaffolding (`emacs -batch -Q -l ert ...').
+;; Loaded into a live interactive Emacs — e.g. by a blanket hot-reload
+;; of touched .el files — its load-time side effects would poison the
+;; running session: every external-boundary wrapper replaced with an
+;; error guard, `AGENT_REPL_STATE_DIR' pointed at a throwaway temp dir,
+;; file logging disabled, the whole module reloaded under a stubbed
+;; `file-notify-add-watch' (killing live watchers), and async merge
+;; dispatch forced synchronous.  That exact incident occurred: the web
+;; frontend died with "daemon never became ready: EXTERNAL BOUNDARY
+;; UNMOCKED" after test-helpers.el was hot-loaded into the main Emacs.
+;;
+;; Every such side effect below is therefore gated on `noninteractive'.
+;; In an interactive session this file loads as an inert no-op (the
+;; fboundp/boundp-guarded stubs aside) and announces itself instead.
+(unless noninteractive
+  (display-warning
+   'agent-repl-test
+   (concat "test-helpers.el loaded in an INTERACTIVE session — "
+           "batch-only test scaffolding skipped (boundary guards, "
+           "state-dir redirect, module reload, log/merge/defer "
+           "overrides).  Run the suite via `emacs -batch' instead.")
+   :warning))
+
 ;;;; ---- Stub layer ----
 ;; Provide no-op stubs for Doom/vterm/evil/persp APIs so we can load
 ;; config.el in a vanilla Emacs -Q environment.
@@ -264,15 +289,18 @@ advice's effect would be invisible)."
 (unless (boundp '+doom-dashboard-buffer-name)
   (defvar +doom-dashboard-buffer-name "*doom*" "Stub."))
 
-;; filenotify stub (prevent side effects at load time)
+;; filenotify stub (prevent side effects at load time).  Batch-gated:
+;; stubbing `file-notify-add-watch' in a live session would silently
+;; kill every watcher registered while the stub is active.
 (require 'filenotify)
-(unless (fboundp 'file-notify-add-watch--orig)
-  ;; Save original and replace with no-op during test loading
-  (defalias 'file-notify-add-watch--orig #'file-notify-add-watch)
-  (defun file-notify-add-watch--test-stub (_dir _flags _callback)
-    "Stub: no-op for tests."
-    nil)
-  (advice-add 'file-notify-add-watch :override #'file-notify-add-watch--test-stub))
+(when noninteractive
+  (unless (fboundp 'file-notify-add-watch--orig)
+    ;; Save original and replace with no-op during test loading
+    (defalias 'file-notify-add-watch--orig #'file-notify-add-watch)
+    (defun file-notify-add-watch--test-stub (_dir _flags _callback)
+      "Stub: no-op for tests."
+      nil)
+    (advice-add 'file-notify-add-watch :override #'file-notify-add-watch--test-stub)))
 
 ;; `string-search' is an Emacs 28.1 built-in; the batch Emacs used to run
 ;; the suite may be older (e.g. 27.1), where several test-status.el tabline
@@ -320,24 +348,29 @@ from START (default 0), or nil when NEEDLE does not occur."
 ;; run, would otherwise block the one-time legacy migration on the next
 ;; interactive reload.  Individual tests that assert specific state-dir
 ;; paths rebind `process-environment' locally and are unaffected.
-(setenv "AGENT_REPL_STATE_DIR"
-        (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
-                          temporary-file-directory))
+;; Batch-gated: in a live session this redirect would send every state
+;; write (workspace snapshot, logs, status export) to the temp dir, and
+;; the module reload below would re-bake load-time path constants from
+;; it — both halves of the observed live-session poisoning.
+(when noninteractive
+  (setenv "AGENT_REPL_STATE_DIR"
+          (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
+                            temporary-file-directory))
 
-;; Suppress timers at load time
-(defvar agent-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
-(advice-add 'run-with-timer :override (lambda (&rest _) nil))
+  ;; Suppress timers at load time
+  (defvar agent-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
+  (advice-add 'run-with-timer :override (lambda (&rest _) nil))
 
-;; Load the module
-(load (expand-file-name "config.el" (file-name-directory
-                                      (or load-file-name buffer-file-name)))
-      nil t)
+  ;; Load the module
+  (load (expand-file-name "config.el" (file-name-directory
+                                        (or load-file-name buffer-file-name)))
+        nil t)
 
-;; Restore run-with-timer after loading
-(advice-remove 'run-with-timer (lambda (&rest _) nil))
+  ;; Restore run-with-timer after loading
+  (advice-remove 'run-with-timer (lambda (&rest _) nil))
 
-;; Restore file-notify-add-watch after loading
-(advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub)
+  ;; Restore file-notify-add-watch after loading
+  (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub))
 
 ;; Make `agent-repl--workspace-merge-async' synchronous in tests.  In
 ;; production the wrapper closes the workspace UI, spawns a worker thread
@@ -350,14 +383,17 @@ from START (default 0), or nil when NEEDLE does not occur."
 ;;   (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
 ;;              agent-repl-test--orig-workspace-merge-async))
 ;;     ...)
-(defvar agent-repl-test--orig-workspace-merge-async
-  (symbol-function 'agent-repl--workspace-merge-async)
-  "Real `agent-repl--workspace-merge-async' captured before the fixture's
+;; Batch-gated: this advice persists across module reloads, so in a
+;; live session it would permanently force merges synchronous.
+(when noninteractive
+  (defvar agent-repl-test--orig-workspace-merge-async
+    (symbol-function 'agent-repl--workspace-merge-async)
+    "Real `agent-repl--workspace-merge-async' captured before the fixture's
 sync-stub advice.  Tests that need to exercise the actual async wrapper
 behavior can rebind via `cl-letf'.")
-(advice-add 'agent-repl--workspace-merge-async :override
-            (lambda (ws repo-root &optional onto-master)
-              (agent-repl--dispatch-merge-handler ws repo-root onto-master)))
+  (advice-add 'agent-repl--workspace-merge-async :override
+              (lambda (ws repo-root &optional onto-master)
+                (agent-repl--dispatch-merge-handler ws repo-root onto-master))))
 
 ;; Make `agent-repl--defer-to-main-thread' synchronous in tests.  In
 ;; production the helper schedules its thunk via `run-at-time' so the work
@@ -368,15 +404,18 @@ behavior can rebind via `cl-letf'.")
 ;; observe the resulting state.  Individual tests that specifically need to
 ;; verify deferral semantics (rather than the deferred work itself) can
 ;; rebind via `cl-letf' to capture the thunk without invoking it.
-(advice-add 'agent-repl--defer-to-main-thread :override
-            (lambda (thunk) (funcall thunk)))
+;; Batch-gated for the same reload-surviving-advice reason as the
+;; merge-async override above.
+(when noninteractive
+  (advice-add 'agent-repl--defer-to-main-thread :override
+              (lambda (thunk) (funcall thunk))))
 
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
 ;; test-emitted line to the user's real `~/.claude-emacs/doom-agent-repl.log'.
 ;; Tests that specifically exercise the file-write path bind this back
 ;; locally and redirect `agent-repl-log-file-name' to a temp path.
-(when (boundp 'agent-repl-log-to-file)
+(when (and noninteractive (boundp 'agent-repl-log-to-file))
   (setq agent-repl-log-to-file nil))
 
 ;;;; ---- External-boundary guards ----
@@ -410,7 +449,15 @@ with a guard that errors if invoked.  Captures the original function
 of each symbol into `agent-repl-test--external-original-functions'
 so the install can be verified after the fact by
 `agent-repl-test--verify-external-guards-installed' (proves the
-`fset' actually took for every registry entry)."
+`fset' actually took for every registry entry).
+
+Refuses to run outside batch: the `fset's would replace the LIVE
+session's external wrappers, breaking every path that shells out or
+talks HTTP (the \"daemon never became ready\" incident)."
+  (unless noninteractive
+    (error (concat "agent-repl-test--install-external-guards: refusing in an "
+                   "interactive session — the guards would clobber the live "
+                   "session's external-boundary wrappers")))
   (unless agent-repl-test--external-guards-installed
     (when (boundp 'agent-repl--external-boundary-functions)
       (dolist (sym agent-repl--external-boundary-functions)
@@ -422,28 +469,44 @@ so the install can be verified after the fact by
         (let ((fn-name sym))
           (fset sym
                 (lambda (&rest args)
-                  (error
-                   (concat
-                    "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
-                    "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
-                    "every external-boundary wrapper MUST be stubbed via `cl-letf'\n"
-                    "before the production code under test reaches it.\n"
-                    "\n"
-                    "REQUIRED REMEDIATION (one of these two; no other option exists):\n"
-                    "  (a) Add the stub: `((symbol-function '%s)\n"
-                    "                      (lambda (&rest _args) <fixture>))`\n"
-                    "      to the failing test's `cl-letf' bindings.\n"
-                    "  (b) Delete the test if its only purpose is to exercise the\n"
-                    "      external boundary itself (per AGENTS.md \"We test lisp,\n"
-                    "      not external code\" — such tests do not belong in ERT).\n"
-                    "\n"
-                    "BYPASSING IS FORBIDDEN.  Do NOT route around this guard via\n"
-                    "`--no-verify', `ignore-errors', `condition-case' that swallows\n"
-                    "the signal, restoring the original `symbol-function' inside the\n"
-                    "test, advice that no-ops the guard, or any other technique.\n"
-                    "If you find yourself reasoning \"just this once\", stop and\n"
-                    "apply remediation (a) or (b) instead.")
-                   fn-name args fn-name))))))
+                  ;; Fail-open OUTSIDE batch: a guard reaching a live
+                  ;; interactive session is a harness leak (install
+                  ;; refuses outside batch, so this should be
+                  ;; impossible), and erroring there breaks the user's
+                  ;; editor.  Warn loudly and delegate to the captured
+                  ;; original so the session keeps working.  Inside
+                  ;; batch the guard errors exactly as before.
+                  (if (not noninteractive)
+                      (let ((orig (cdr (assq fn-name agent-repl-test--external-original-functions))))
+                        (unless orig
+                          (error "agent-repl test guard: `%s' invoked in an interactive session with no captured original to delegate to" fn-name))
+                        (display-warning
+                         'agent-repl-test
+                         (format "external-boundary guard for `%s' invoked in an interactive session — delegating to the real implementation (harness leak; report this)" fn-name)
+                         :warning)
+                        (apply orig args))
+                    (error
+                     (concat
+                      "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
+                      "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
+                      "every external-boundary wrapper MUST be stubbed via `cl-letf'\n"
+                      "before the production code under test reaches it.\n"
+                      "\n"
+                      "REQUIRED REMEDIATION (one of these two; no other option exists):\n"
+                      "  (a) Add the stub: `((symbol-function '%s)\n"
+                      "                      (lambda (&rest _args) <fixture>))`\n"
+                      "      to the failing test's `cl-letf' bindings.\n"
+                      "  (b) Delete the test if its only purpose is to exercise the\n"
+                      "      external boundary itself (per AGENTS.md \"We test lisp,\n"
+                      "      not external code\" — such tests do not belong in ERT).\n"
+                      "\n"
+                      "BYPASSING IS FORBIDDEN.  Do NOT route around this guard via\n"
+                      "`--no-verify', `ignore-errors', `condition-case' that swallows\n"
+                      "the signal, restoring the original `symbol-function' inside the\n"
+                      "test, advice that no-ops the guard, or any other technique.\n"
+                      "If you find yourself reasoning \"just this once\", stop and\n"
+                      "apply remediation (a) or (b) instead.")
+                     fn-name args fn-name)))))))
     (setq agent-repl-test--external-guards-installed t)))
 
 (defun agent-repl-test--verify-external-guards-installed ()
@@ -478,12 +541,15 @@ shell out to the real binary."
         "silently shell out to real external binaries.")
        missed))))
 
-(agent-repl-test--install-external-guards)
-;; Eager verification: if the install missed anything, abort BEFORE any
-;; test gets a chance to silently shell out.  Failure here means a
-;; bug in the install loop, the registry, or someone clobbered the
-;; guards between install and now.
-(agent-repl-test--verify-external-guards-installed)
+;; Batch-gated: installing the guards is the single most destructive
+;; side effect this file has when leaked into a live session.
+(when noninteractive
+  (agent-repl-test--install-external-guards)
+  ;; Eager verification: if the install missed anything, abort BEFORE any
+  ;; test gets a chance to silently shell out.  Failure here means a
+  ;; bug in the install loop, the registry, or someone clobbered the
+  ;; guards between install and now.
+  (agent-repl-test--verify-external-guards-installed))
 
 ;;;; ---- Test utilities ----
 
@@ -649,7 +715,10 @@ that shells out to git from the cwd."
 (defvar agent-repl-test--AAA-test-registered nil
   "Non-nil once the AAA sanity ert-deftest below has been registered.")
 
-(unless agent-repl-test--AAA-test-registered
+;; Batch-gated alongside the install itself: registering this test in a
+;; live session would only plant a false alarm in a later `M-x ert' run
+;; (the guards are — correctly — not installed there).
+(when (and noninteractive (not agent-repl-test--AAA-test-registered))
   (setq agent-repl-test--AAA-test-registered t)
   (ert-deftest agent-repl-test-AAA-external-guards-installed-globally ()
     "Every symbol in `agent-repl--external-boundary-functions' must be

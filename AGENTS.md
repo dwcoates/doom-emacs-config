@@ -272,6 +272,14 @@ There IS one secondary safety net, but it covers a DIFFERENT failure mode:
 
 `modules/app/agent-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
 
+**test-helpers.el is batch-only.** Every dangerous load-time side effect in it (guard install, `AGENT_REPL_STATE_DIR` redirect, module reload under stubbed `file-notify-add-watch`, log/merge/defer overrides) is gated on `noninteractive`:
+
+- Loading test-helpers.el in an interactive session is an inert no-op that announces itself via `display-warning` — hot-reloading test files into a live Emacs is safe.
+- `agent-repl-test--install-external-guards' refuses (signals) outside batch.
+- If a guard nevertheless leaks into an interactive session, invoking it warns and delegates to the captured original instead of erroring, so the live session keeps working; in batch it errors exactly as documented above.
+- Motivating incident: test-helpers.el hot-loaded into the main Emacs replaced the live wrappers, and the web frontend failed with "daemon at 127.0.0.1:8787 never became ready: EXTERNAL BOUNDARY UNMOCKED".
+- Coverage for the gating lives in `test-test-helpers.el`.
+
 This catches: a test that exercises a code path reaching a registered wrapper without mocking it. The test sees a loud error pointing at exactly which wrapper needs the `cl-letf` binding.
 
 This does NOT catch: a raw `(shell-command-to-string "git ...")` in production code that bypasses every registered wrapper. That class of bug is the agent's audit step's responsibility, and there is no automated tripwire.
