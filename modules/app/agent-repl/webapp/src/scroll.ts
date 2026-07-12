@@ -73,6 +73,24 @@ export function isPinnedToBottom(pos: ScrollPosition, pinPx: number = PIN_PX): b
   return pos.scrollHeight - pos.scrollTop - pos.clientHeight < pinPx;
 }
 
+/** The one mutable field parking a box at its tail touches. */
+export interface ScrollTail {
+  scrollTop: number;
+  scrollHeight: number;
+}
+
+/**
+ * Put a scroll box at its tail in a single jump. Assigning scrollTop is
+ * what makes it a jump rather than an animation: the tail is simply THERE
+ * on the next frame, with no crawl down the history to watch. Every site
+ * that wants the newest content on screen goes through here — the
+ * restored-session render, the tail-following render, and the Emacs
+ * host's workspace-switch snap (host.ts).
+ */
+export function parkAtTail(box: ScrollTail): void {
+  box.scrollTop = box.scrollHeight;
+}
+
 /** True when the element both clips its content and scrolls it vertically. */
 export function isScrollBox(m: ScrollMetrics): boolean {
   if (m.overflowY !== "auto" && m.overflowY !== "scroll") return false;
