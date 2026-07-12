@@ -7,361 +7,304 @@ Scope: `modules/app/agent-repl/` (`drawer.el`, `worktree.el`, `status.el`).
 
 ## 1. Motivation
 
-The drawer's `MERGING` section (`drawer.el:1036-1037`) is a flat list of workspace
-names. During an actual merge it tells the user nothing: no queue position, no
-target, no progress, no idea whether git is picking commit 1 of 12 or whether a
-`claude -p` resolver has been chewing on a conflict for ninety seconds.
+The drawer today answers *which workspaces are merging* and nothing else. It cannot
+answer *what git is doing right now*. During a real merge the user stares at a name
+with a `⇄` next to it for a minute or more — commit hooks can make a single
+cherry-pick take a long time — with no way to tell whether progress is being made,
+which commit is stuck, or what is behind it in line.
 
-Meanwhile the merge machinery is genuinely rich. It has per-target-dir FIFO
-sub-queues that drain concurrently (`worktree.el:4576-4585`), an in-flight set with
-start timestamps (`worktree.el:4690-4710`), a conflict/auto-resolve loop
-(`worktree.el:3344-3366`), and a commit range whose size is computed and then thrown
-away (`range-count`, `worktree.el:3324`).
-
-**Goal:** a top-of-drawer section that renders merge activity at the *git action*
-level — which commit, of how many, into which target, how long, and what git or the
-resolver is doing right now.
+**Goal:** a top-of-drawer section that renders the merge queue at the level of
+*individual commits*: the commit git is applying right now, how long it has been
+applying it, and the next few commits behind it.
 
 ---
 
-## 2. Placement and section replacement
+## 2. Two sections, two ontologies
 
-### 2.1 Position
+`MERGE QUEUE` is **in addition to** `MERGING`. They are not alternatives and they do
+not overlap in what they say.
 
-New section `MERGE QUEUE`, inserted in `agent-repl-drawer--insert-content`
-(`drawer.el:1013-1040`) **before** `MAIN`. Final order:
+| Section | Unit of a row | Answers |
+|---|---|---|
+| `MERGING` (existing, unchanged) | **workspace** | *Which workspaces are queued or merging?* |
+| `MERGE QUEUE` (new, top) | **commit** | *Which commit is being cherry-picked, for how long, and what is next?* |
+
+Because `MERGE QUEUE` rows are commits, they carry a new
+`agent-repl-drawer-commit` text property rather than
+`agent-repl-drawer-workspace`. Nothing in the drawer's row-identity machinery
+(`--goto-workspace-line`, `drawer.el:1154-1166`; `--entry-bounds-at-point`,
+`drawer.el:300-318`; the marked/expanded sets, `drawer.el:1303-1306`) sees a
+workspace twice, so the duplicate-row hazard that would exist between two
+*workspace* sections simply does not arise. Workspace navigation (`j`/`k`) skips
+commit rows exactly the way it already skips headers and rules.
+
+### 2.1 Section order
 
 ```
-MERGE QUEUE   (new, top)
+MERGE QUEUE   (new, top — omitted entirely when the queue is idle)
 MAIN
 HIDDEN        (omitted when empty)
-MERGED
+MERGING       (unchanged)
+MERGED        (unchanged)
 ```
 
-### 2.2 MERGING is replaced, not supplemented
-
-`MERGING` is deleted. This is not an aesthetic call — it is required for
-correctness.
-
-Drawer rows are identified by a bare `agent-repl-drawer-workspace` text property
-(`drawer.el:872-874`), and `--goto-workspace-line` (`drawer.el:1154-1166`) returns the
-*first* match scanning from `point-min`. A workspace rendered in two sections would:
-
-- break cursor restore after every redraw (point yanked to the top section),
-- render marks and expansion in both places simultaneously
-  (`drawer.el:1303-1306`, `1589-1592`).
-
-Fortunately the swap is exactly 1:1. `--workspace-section` (`drawer.el:575-583`)
-buckets into `:merging` precisely the workspaces whose `--ws-render-status` is
-`:merging` or `:merge-queued` (`workspace.el:521-554`). `:merge-conflict` and
-`:merge-failed` already bucket to `MERGED`. So `MERGE QUEUE` covers the same set
-`MERGING` covered, with strictly more information, and no workspace is ever
-rendered twice.
-
-**Exception worth taking:** `:merge-conflict` workspaces should *move* into
-`MERGE QUEUE` too. A conflict is a merge that is stuck, not a merge that is done —
-burying it in `MERGED` is the current behavior's worst wart. `:merge-failed` and
-`:merged` stay in `MERGED`.
-
-So the section's membership predicate is:
-
-```
-render-status ∈ { :merging, :merge-queued, :merge-conflict }
-```
-
-### 2.3 Visibility when empty
-
-Omit the section entirely when empty, following `HIDDEN`'s precedent
-(`drawer.el:1032-1035`). Drawer width is a fixed 20% of the frame
-(`drawer.el:28-41`) and vertical space is the scarce resource; a permanent
-`MERGE QUEUE (0) / (none)` block costs three lines forever to communicate nothing.
+`MERGE QUEUE` is omitted, not stubbed with `(none)`, when nothing is in flight and
+nothing is queued. Drawer width is a fixed 20% of the frame (`drawer.el:28-41`) and
+vertical space is the scarce resource.
 
 ---
 
-## 3. Visual specification
+## 3. What the section renders
 
-### 3.1 Grouping
+### 3.1 Content
 
-The queue is bucketed by `:target-dir` (`worktree.el:4770`), and buckets drain
-concurrently. That maps exactly onto the existing repo-group label mechanism
-(`--render-trees`, `drawer.el:962-982`; face `agent-repl-drawer-group-label`,
-`drawer.el:185-191`). Reuse it, with the label extended to name the target branch:
+- The commit currently being cherry-picked, with an **elapsed clock shown only once
+  it exceeds a threshold** (`agent-repl-drawer-merge-slow-commit-threshold`,
+  default **3.0s**). Below the threshold the clock is absent, so a fast queue stays
+  quiet and a slow commit announces itself.
+- The **next three commits** behind it.
+- **Project separators interleaved into that stream**, emitted at every project
+  boundary — not as a fixed outer grouping.
+
+### 3.2 The interleaving rule (the user's example, verbatim)
+
+Current pick is project A, the next commit is also project A, and the two after that
+are project B:
 
 ```
- ▸ doom → master
+ MERGE QUEUE
+ ───────────
+ ▸ doom
+   ⟳ a1b2c3d  fix(drawer): guard nil ws          0:07
+     9f8e7d6  feat(drawer): merge-queue section
+ ▸ services
+     3c4d5e6  fix(ceac): debounce the state poll
+     7a8b9c0  test(ceac): cover the debounce
 ```
 
-Label text = `<repo-basename> → <target-branch>`, where the branch comes from the
-already-cached `:merge-target-name` (`worktree.el:5193`).
+A separator is emitted when, and only when, the project of commit *N* differs from
+the project of commit *N-1*. A run of commits in one project gets one header.
 
-### 3.2 Row anatomy
+The same fast queue with a sub-threshold current commit and only one commit behind it:
 
 ```
- MERGE QUEUE (5)
- ────────────
- ▸ doom → master
-   ⟳ drawer-nil-guard              0:12
-     cherry-pick  3/7  ▰▰▰▱▱▱▱
-     a1b2c3d fix(drawer): guard nil ws
-   💥 vterm-freeze-repro           1:47  ⚠
-     conflict at 9f8e7d6 · 2 files unmerged
-     resolver: verifying           0:31
-   ⏸ merge-queue-design            #1
-   ⏸ codex-backend-swap            #2  ⛔ halted
- ▸ services → master
-   ⟳ ceac-timeout-fix              0:03
-     computing base
+ MERGE QUEUE
+ ───────────
+ ▸ doom
+   ⟳ a1b2c3d  fix(drawer): guard nil ws
+     9f8e7d6  feat(drawer): merge-queue section
 ```
 
-Line-by-line:
+Separator label reuses the existing repo-group mechanism
+(`--group-label`, `drawer.el:933-940`; face `agent-repl-drawer-group-label`,
+`drawer.el:185-191`), so it is visually identical to the repo headers the user
+already reads elsewhere in the drawer.
 
-| Line | Content | Shown when |
+### 3.3 Row anatomy
+
+| Column | Current commit | Upcoming commit |
 |---|---|---|
-| **header** | glyph + ws name + elapsed-or-position + flags | always |
-| **progress** | phase name + `M/N` + bar | in-flight |
-| **detail** | short SHA + commit subject | in-flight, picking |
-| **conflict** | conflicting SHA + unmerged file count | conflict |
-| **resolver** | resolver sub-phase + its own elapsed | conflict, auto-resolving |
+| glyph | `⟳` (spinner, animated) | none |
+| sha | short, `agent-repl-drawer-merge-commit` | short, dimmed |
+| subject | truncated to fit | truncated, dimmed |
+| clock | `M:SS`, **only when > 3.0s** | none |
 
-Queued rows are a single line: glyph, name, `#N` position, optional halt flag.
-Only the *front* entry of each bucket is a candidate to start, so `#1` is
-meaningful.
+Conflict is a state of the *current* commit, so it renders in place rather than as
+its own section:
 
-The header keeps the existing 2-line block's `wrap-prefix` conventions
-(`drawer.el:863-870`) so soft-wrap still aligns. Sub-lines are indented one level
-past the name.
-
-### 3.3 Glyphs
-
-Extend `agent-repl-drawer-state-icons` (`drawer.el:56-94`):
-
-| Glyph | Meaning |
-|---|---|
-| `⟳` | in-flight (animated: `⟳ ⟲` alternating, see §6.2) |
-| `⏸` | queued |
-| `⛔` | queued + `:halt-until-human` |
-| `💥` | conflict (existing) |
-
-### 3.4 Progress bar
-
-`▰`/`▱`, width 7, derived from `commit-index / commit-total`. It is a plain string,
-so it costs nothing and survives the temp-buffer/string-compare render path
-(`drawer.el:1131-1135`).
-
-### 3.5 New faces
-
-Follow the `agent-repl-drawer-detail-*` naming already in place
-(`drawer.el:198-245`):
-
-| Face | Style |
-|---|---|
-| `agent-repl-drawer-merge-phase` | cyan |
-| `agent-repl-drawer-merge-progress` | spring green, bold |
-| `agent-repl-drawer-merge-elapsed` | shadow |
-| `agent-repl-drawer-merge-commit` | medium orchid |
-| `agent-repl-drawer-merge-halted` | tomato, bold |
+```
+ ▸ doom
+   💥 a1b2c3d  fix(drawer): guard nil ws          1:42
+      2 files unmerged · resolver: verifying      0:31
+```
 
 ---
 
-## 4. The observability gap
+## 4. The commit stream (core model)
 
-This is the crux. Almost none of the above is currently readable from outside the
-merge worker thread.
+Everything in §3 is a rendering of one ordered list. Building that list is the
+whole job.
 
-### 4.1 What exists today
+```
+stream := [ remaining commits of each in-flight pick ]
+       ++ [ commits of each queued entry, in bucket FIFO order ]
+```
 
-| Datum | Where |
+Then: take the current commit(s) plus the next three, and walk the result emitting a
+separator whenever `project` changes.
+
+Each stream element:
+
+| Field | Source |
 |---|---|
-| Queue membership + FIFO order | `agent-repl--merge-queue` (`worktree.el:4576`) |
-| Per-bucket target dir | `:target-dir` on each entry |
-| `:halt-until-human` | on re-enqueued entries (`worktree.el:1979`) |
-| In-flight set | `agent-repl--in-flight-merges` (`worktree.el:4690`) |
-| **Merge start time** | `:started-at` (`worktree.el:4731`) — the one free win |
-| Target branch name | `:merge-target-name` on the ws plist (`worktree.el:5193`) |
+| `:sha` / `:subject` | `git rev-list`/`git log` over the entry's pick range |
+| `:project` | the entry's `:target-dir` bucket (`worktree.el:4770`) → repo label |
+| `:source-ws` | the queue entry's `:source-ws` |
+| `:state` | `current` / `pending` / `conflict` |
+| `:started-at` | set only for `current`, feeds the >3s clock |
 
-### 4.2 What does not exist
+### 4.1 Concurrency
 
-| Datum | Currently |
-|---|---|
-| Total commits in range | local `range-count`, computed then discarded (`worktree.el:3324`) |
-| **Current commit index** | *does not exist* — the pick is one range invocation (`worktree.el:3335`) |
-| Current commit SHA / subject | never known to elisp |
-| Current git subcommand | not tracked; `--git-exit-code` returns only an int (`worktree.el:174`) |
-| git stdout/stderr | **discarded** — `start-process` with a nil buffer (`worktree.el:196`) |
-| Conflicted file list | local `files` (`worktree.el:4007`) |
-| Resolver sub-phase | implicit in control flow (`worktree.el:3988-4048`) |
-| Conflict-loop iteration | local `cpc-iter` (`worktree.el:3343`) |
+Buckets are per-`:target-dir` and drain **concurrently** (`worktree.el:4549-4574`),
+so in the general case there is more than one current commit — one per active
+project. The rule that keeps this consistent with §3.2:
+
+- **Every in-flight project's current commit is always shown**, regardless of budget.
+- The **lookahead budget of 3 is global**, consumed in project order (active projects
+  first, then queued buckets in `--merge-queue-target-dirs` first-appearance order,
+  `worktree.el:4770`).
+
+In the single-merge case this degenerates to exactly the user's example.
 
 ---
 
-## 5. Proposed instrumentation
+## 5. Instrumentation: what has to be built
 
-### 5.1 A merge-progress record
+### 5.1 The blocker — the pick is a single range invocation
 
-Do **not** scatter these onto the workspace plist. Merge progress is high-churn,
-worker-thread-written, and ephemeral; the ws plist is snapshot-persisted on every
-mutation (`worktree.el:4677`) and we do not want to serialize a progress bar.
-
-New in `worktree.el`:
-
-```elisp
-(defvar agent-repl--merge-progress (make-hash-table :test 'equal)
-  "ws-name → progress plist for merges currently in flight.")
-
-(defvar agent-repl--merge-progress-seq 0
-  "Monotonic counter bumped on every progress write.")
-```
-
-Progress plist:
-
-| Key | Value |
-|---|---|
-| `:phase` | closed set (§5.2) |
-| `:commit-index` | integer, commits picked so far |
-| `:commit-total` | integer, `range-count` |
-| `:commit-sha` | short SHA currently being applied |
-| `:commit-subject` | its `%s` |
-| `:conflict-files` | list of paths (`--diff-filter=U`) |
-| `:resolver-phase` | `spawned` / `waiting` / `verifying` / `continuing` |
-| `:resolver-started-at` | float-time |
-| `:git-last-line` | last stderr line from the running git process |
-
-Entries are cleared alongside `--clear-in-flight-merge` (`worktree.el:4738`), so the
-hash never outlives the in-flight set.
-
-### 5.2 Phase enum
-
-Mirrors the actual code path in `--workspace-merge-do` (`worktree.el:4155`):
-
-```
-resolving-target → checking-clean → computing-base → picking
-   → [conflict → resolving → verifying → continuing → picking]*
-   → tagging → finalizing
-```
-
-Roughly ten `agent-repl--merge-progress-put` calls at the anchors already
-enumerated in §4.2. These all run on the worker thread; that is safe, because the
-progress hash is plain Lisp and only *UI* operations need
-`--defer-to-main-thread` (`worktree.el:1833`).
-
-### 5.3 Per-commit progress requires unrolling the range pick
-
-`worktree.el:3335` is a single invocation:
+`worktree.el:3335`:
 
 ```elisp
 (agent-repl--git-exit-code root "cherry-pick" "-x" range)   ; range = "BASE..BRANCH"
 ```
 
 Git applies the commits one at a time internally, but **elisp never sees the
-boundaries**, so `3/7` is unobtainable without a change here. Two options:
+boundaries**. There is therefore no current commit, no index, and no per-commit start
+time anywhere in the system today. `range-count` (`worktree.el:3324`) is computed and
+immediately discarded.
 
-**Option A — poll the target's HEAD (no merge-path change).**
-On each drawer tick, for each in-flight merge, run
-`git rev-list --count <base>..HEAD` in the target and derive the index.
-- Pro: zero risk to the merge path.
-- Con: a git subprocess per tick per in-flight merge, on the *main* thread. That is
-  exactly the kind of synchronous git the drawer already confines to explicit
-  `TAB`/`g` actions (`--refresh-detail-cache`, `drawer.el:1605-1646`). Also yields
-  no SHA/subject and no `:git-last-line`.
-
-**Option B — replace the range pick with a per-SHA loop (recommended).**
+**The range pick must be unrolled into a per-SHA loop.** This is no longer an
+optional optimization — a per-commit clock is unobtainable without it.
 
 ```
-rev-list BASE..BRANCH  →  for each SHA (oldest first):
-    progress-put :commit-sha/:commit-subject/:commit-index
+commits := git rev-list --reverse BASE..BRANCH   (+ subjects)
+for each SHA:
+    progress-put :commit-index, :commit-sha, :commit-subject, :commit-started-at
     git cherry-pick -x <SHA>
-    if CHERRY_PICK_HEAD → existing conflict/auto-resolve loop
+    if CHERRY_PICK_HEAD → the existing conflict/auto-resolve loop, unchanged
 ```
 
-- Semantically equivalent: `git cherry-pick -x A..B` *is* a per-commit apply that
-  halts at the first conflict, and `-x` annotates each commit identically either way.
-- The existing conflict loop (`worktree.el:3344-3366`) already handles "a subsequent
-  commit in the range conflicts again", so re-entering it per commit is not new logic.
-- One difference to handle deliberately: after a resolved conflict, `cherry-pick
-  --continue` in the range case auto-proceeds through the remainder. In the unrolled
-  loop, `--continue` finishes only the current commit and *we* drive the rest. That is
-  strictly more observable and arguably more controllable.
-- Cost: one extra `git` process per commit. Negligible against a `claude -p` resolver.
-- The `unwind-protect` abort (`worktree.el:3384-3389`) is unchanged and still
-  unconditional.
+Notes on why this is safe:
 
-**Recommend B.** The entire point of the ask is git-action-level resolution, and A
-cannot deliver the SHA, the subject, or the live git output.
+- `git cherry-pick -x A..B` *is* a per-commit apply that halts at the first conflict.
+  `-x` annotates each commit identically either way, so `--cherry-pick-base`'s
+  `-x`-annotation scan (`worktree.el:3217-3257`) keeps working unchanged.
+- **The commit-hook cost does not change.** Hooks already run once per commit inside
+  the range pick. Unrolling adds one `git` *process* per commit, which is noise next
+  to a hook — and next to the `claude -p` resolver.
+- The existing conflict loop (`worktree.el:3344-3366`) already handles "a later commit
+  in the range conflicts too", so re-entering it per commit is not new logic.
+- After a resolved conflict, `cherry-pick --continue` finishes only the current
+  commit and the loop drives the rest — strictly more observable than letting git
+  auto-proceed through the remainder.
+- The `unwind-protect` unconditional abort (`worktree.el:3384-3389`) is untouched.
+  No error path anywhere in this design is removed or weakened.
 
-### 5.4 Capturing git output
+### 5.2 Progress record
 
-Add `agent-repl--git-exit-code-capturing`, a sibling of `--git-exit-code`
-(`worktree.el:174`) that attaches a **process filter** retaining the last line of
-stderr into `:git-last-line`. Used by the per-commit pick only.
+Progress is high-churn, worker-thread-written, and ephemeral. It must **not** go on
+the workspace plist, which is snapshot-persisted on every mutation
+(`worktree.el:4677`) — we are not serializing a spinner.
 
-This is a strict addition. `--git-exit-code` keeps its current signature and every
-existing caller and error path is untouched — no error-handling coverage is removed
-or weakened anywhere in this design.
+```elisp
+(defvar agent-repl--merge-progress (make-hash-table :test 'equal)
+  "ws-name → progress plist, for merges currently in flight.")
+
+(defvar agent-repl--merge-progress-seq 0
+  "Monotonic counter bumped on every progress write.")
+```
+
+| Key | Meaning |
+|---|---|
+| `:commits` | ordered `((sha . subject) ...)` for the whole pick range |
+| `:commit-index` | index into `:commits` of the commit being applied |
+| `:commit-started-at` | float-time, **reset on every commit** — this is the >3s clock |
+| `:conflict-files` | from `git diff --name-only --diff-filter=U` (`worktree.el:3543`) |
+| `:resolver-phase` | `spawned` / `waiting` / `verifying` / `continuing` |
+| `:resolver-started-at` | float-time |
+
+Cleared alongside `--clear-in-flight-merge` (`worktree.el:4738`), so it never
+outlives the in-flight set. Written from the worker thread, which is safe: the hash
+is plain Lisp, and only *UI* calls need `--defer-to-main-thread`
+(`worktree.el:1833`).
+
+### 5.3 Lookahead for queued entries
+
+The commits of a *queued* entry are not known either, and computing them means
+running git. That must never happen on the main thread at poll cadence — the drawer
+already confines synchronous git to explicit `TAB`/`g` actions
+(`--refresh-detail-cache`, `drawer.el:1605-1646`).
+
+```elisp
+(defvar agent-repl--merge-lookahead (make-hash-table :test 'equal)
+  "ws-name → (:target-head SHA :commits ((sha . subject) ...)).")
+```
+
+- Computed **on a worker thread**, one `git rev-list --reverse <target-branch>..<ws-branch>`
+  per entry.
+- Computed **only for as many front-of-bucket entries as the 3-commit budget needs** —
+  never for the whole queue.
+- Keyed by the target's HEAD SHA. When the target advances (i.e. a merge lands), the
+  entry is stale and recomputed.
+- It is an **estimate**: the real base is resolved by `--cherry-pick-base`
+  (`worktree.el:3223`) against the target's HEAD at the moment the pick actually
+  starts, which will have moved. Good enough for a lookahead; the current row is
+  always exact.
 
 ---
 
 ## 6. Render integration
 
-### 6.1 The render signature must sample progress
+### 6.1 The render signature must sample this
 
 `agent-repl-drawer--render-signature` (`drawer.el:1050-1071`) is the load-bearing
-short-circuit: when the signature is unchanged, the 1Hz poll skips the render
-entirely (`drawer.el:1116`). It currently samples neither `:merging` nor
-`:merge-completed`, and knows nothing of the queue lists.
-
-Rather than enumerate every new field, append the two cheap globals:
+short-circuit: an unchanged signature skips the render entirely (`drawer.el:1116`).
+It currently samples neither `:merging` nor the queue lists, so this is a
+prerequisite, not polish.
 
 ```elisp
 (list (agent-repl-drawer--current-ws)
       ws-sig
-      agent-repl--merge-progress-seq        ; any progress write invalidates
-      (length agent-repl--merge-queue)      ; enqueue/dequeue invalidates
-      (length agent-repl--in-flight-merges))
+      agent-repl--merge-progress-seq             ; any progress write invalidates
+      (length agent-repl--merge-queue)
+      (length agent-repl--in-flight-merges)
+      (when agent-repl--in-flight-merges         ; make the clock tick
+        (floor (float-time))))
 ```
 
-The `seq` counter means a single `progress-put` forces exactly one redraw, with no
-risk of a field being added later and silently failing to render — the failure mode
-the current signature already has for `:merging`.
+The `seq` counter means one `progress-put` forces exactly one redraw, and a field
+added later cannot silently fail to render — which is the bug the current signature
+already has for `:merging`.
 
-### 6.2 Cadence: a merge-only fast timer
+### 6.2 Cadence
 
-The global poll is 1Hz (`status.el:67-70`, timer at `status.el:1748`). That is fine
-for phase and commit-index changes, but too coarse for a spinner and a live clock,
-and raising the global rate would multiply the per-workspace state work
-(`status.el:1610-1643`) for no reason.
+The global poll is 1Hz (`status.el:67-70`, timer at `status.el:1748`). That is
+enough for the clock (rendered at `M:SS`) but not for a spinner. Add a dedicated
+timer, `agent-repl-merge-progress-tick` (default 0.5s), that runs **only** while
+`agent-repl--in-flight-merges` is non-empty, calls
+`agent-repl-drawer--refresh-if-visible` and nothing else, and self-cancels when the
+in-flight set empties. Raising the *global* rate instead would multiply the
+per-workspace state work (`status.el:1610-1643`) for no reason.
 
-Add a dedicated timer, period `agent-repl-merge-progress-tick` (default 0.25s), that:
+### 6.3 The render is pure
 
-- runs **only** while `agent-repl--in-flight-merges` is non-empty,
-- calls `agent-repl-drawer--refresh-if-visible` and nothing else,
-- self-cancels when the in-flight set empties.
-
-The spinner frame and the elapsed clock derive from `(float-time)` at render, so
-they need no state.
-
-### 6.3 Rendering is a pure function
-
-`--insert-merge-queue-section` takes `(queue, in-flight, progress-hash, now)` and
-returns text. No git, no I/O, no globals read at render time beyond those three.
-This is what makes §8 tractable.
+`--insert-merge-queue-section` takes `(stream, now)` and returns text. No git, no
+I/O. Stream construction takes `(queue, in-flight, progress-hash, lookahead-hash)`
+and is likewise pure. This is what makes §8 tractable.
 
 ---
 
-## 7. Row actions
+## 7. Actions on commit rows
 
-Rows carry the standard `agent-repl-drawer-workspace` property, so `RET`, marks,
-and navigation work with zero new keymap wiring (`drawer.el:255-285`). Three
-overrides make sense inside this section:
+Commit rows are informational, but two actions are nearly free and high-value:
 
-| Key | Queued row | In-flight row | Conflict row |
-|---|---|---|---|
-| `RET` | visit workspace (existing) | `magit-status` on target dir | pop `*agent-repl-merge-resolver-<ws>*` (`worktree.el:3621`) |
-| `d` | `agent-repl--dequeue-merge` (`worktree.el:4646`) | — | — |
-| `D` | — | — | `agent-repl-drain-merge-queue` (`commands.el:2751`), clearing `:halt-until-human` |
+| Key | Current commit | Upcoming commit |
+|---|---|---|
+| `RET` | `magit-show-commit` the SHA in the target repo | same |
+| `RET` (conflict) | pop `*agent-repl-merge-resolver-<ws>*` (`worktree.el:3621`) | — |
 
-The resolver buffer already exists and is already kept alive
-(`:keep-buffer`, `worktree.el:3901`) — today nothing points the user at it. `RET` on
-a conflict row is the single highest-value action in this design and is free.
+The resolver buffer already exists and is already kept alive (`:keep-buffer`,
+`worktree.el:3901`). Today nothing points the user at it.
 
 ---
 
@@ -369,43 +312,52 @@ a conflict row is the single highest-value action in this design and is free.
 
 Per `CLAUDE.md`: one test file per source module, one edge case per test.
 
-**`test-drawer.el`** — the render is pure, so every case is a synthetic
-`(queue, in-flight, progress)` triple asserted against buffer text:
+**`test-drawer.el`** — the stream builder and the renderer are both pure, so every
+case is a synthetic input asserted against output:
 
-- empty queue + empty in-flight → section omitted entirely
-- one queued entry → `#1`, `⏸`, no progress line
-- queued + `:halt-until-human` → `⛔ halted`
-- in-flight, `:phase picking`, 3/7 → bar `▰▰▰▱▱▱▱`, SHA + subject line
-- in-flight, `:phase computing-base` → phase line, **no** bar (no totals yet)
-- conflict + resolver `verifying` → conflict line + resolver line with its own clock
-- two target dirs → two group labels, correct bucketing
-- a `:merging` workspace appears in `MERGE QUEUE` and **not** in `MAIN`/`MERGED`
+- idle queue → section omitted entirely
+- current commit at 1.2s elapsed → **no** clock rendered
+- current commit at 4.5s elapsed → clock rendered as `0:04`
+- current + 1 same-project + 2 other-project → **exactly the §3.2 layout**
+- a run of 4 commits in one project → exactly one separator
+- fewer than 3 commits behind the current → renders what exists, no padding
+- more than 3 behind → truncated at 3
+- two concurrent in-flight projects → both current commits shown, lookahead budget split
+- conflict on the current commit → conflict line + resolver line
+- commit rows carry `agent-repl-drawer-commit`, never `agent-repl-drawer-workspace`
+- `j`/`k` navigation skips commit rows
+- a `:merging` workspace still renders in `MERGING`, unchanged
 - `--render-signature` changes when `--merge-progress-seq` is bumped
+- `--render-signature` ticks once per second while in-flight, and does not while idle
 
 **`test-worktree.el`**:
 
-- per-SHA loop picks commits oldest-first and writes `:commit-index` monotonically
-- `:commit-total` equals `rev-list --count` of the range
-- a conflict on commit 2 of 4 leaves `:phase conflict` and `:commit-index 1`
-- progress entry is removed by `--clear-in-flight-merge`
-- `--git-exit-code-capturing` returns the same exit code as `--git-exit-code`
+- the per-SHA loop picks commits oldest-first (`--reverse`)
+- `:commit-index` advances monotonically and `:commit-started-at` resets per commit
+- `:commits` length equals `rev-list --count` of the range
+- a conflict on commit 2 of 4 leaves `:commit-index 1` and the conflict files populated
+- the progress entry is removed by `--clear-in-flight-merge`
 - the `unwind-protect` abort still runs on the unrolled loop's error path
+- lookahead is keyed by target HEAD and recomputed when the target advances
+- lookahead is computed only for the entries the 3-commit budget reaches
 
 ---
 
 ## 9. Open questions
 
-1. **Should `:merge-conflict` move out of `MERGED` into `MERGE QUEUE`?**
-   Recommended (§2.2), but it changes where users currently look for a stuck merge.
+1. **Should an upcoming commit show which workspace it comes from?**
+   Within one project, consecutive queue entries are different workspaces, and the
+   section would not distinguish them. A dimmed trailing `ws-name` is possible but
+   the drawer is only 20% of the frame wide.
 
-2. **Option A (poll HEAD) or Option B (unroll the range pick)?**
-   Recommended B (§5.3). B touches the merge hot path; A cannot deliver SHA,
-   subject, or live git output. This is the one decision that materially changes the
-   implementation's blast radius.
+2. **Is the 3-commit lookahead a global budget or per-project?**
+   §4.1 proposes global, which reproduces the user's example exactly. Per-project
+   would show more during concurrent merges but grows unboundedly with project count.
 
-3. **Should a completed merge linger for a few seconds with a `✓` before vanishing?**
-   Otherwise a fast merge flashes and disappears, and the user learns nothing.
+3. **Should the section linger for a beat after the queue empties?**
+   Otherwise the final commit of a fast merge vanishes the instant it lands and the
+   user never sees it complete.
 
-4. **Halted entries: surface a persistent banner?**
-   A `⛔` on row `#2` of a collapsed bucket is easy to miss, and a halted bucket
-   blocks every merge behind it (`worktree.el:4832`).
+4. **`⛔ halted` entries** (`:halt-until-human`, `worktree.el:1979`) block their whole
+   bucket (`worktree.el:4832`). Should their commits appear in the stream (greyed,
+   flagged) or be omitted, given they are not actually "up next"?
