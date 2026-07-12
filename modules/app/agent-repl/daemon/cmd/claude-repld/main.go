@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
 	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
@@ -79,6 +80,18 @@ func main() {
 	}
 	defer sentinelWriter.Close()
 
+	// Persistent session registry: the in-memory session map dies with
+	// the process, so this write-through record store is what lets a
+	// restarted daemon keep resolving the s_<hex> ids its frontends
+	// still hold. A daemon that cannot even resolve WHERE the registry
+	// lives must fail loudly at startup; a registry that fails to LOAD
+	// starts empty and logs (inside Open), never refuses to boot.
+	registryPath, err := registry.DefaultPath()
+	if err != nil {
+		log.Fatalf("claude-repld: %v", err)
+	}
+	sessionRegistry := registry.Open(registryPath, log.Printf)
+
 	// "session gone" remediation: the frontend can only report the loss,
 	// so the daemon owns the analyst that diagnoses it and opens the
 	// resilience workspace. Disabled when no checkout is nominated.
@@ -104,6 +117,7 @@ func main() {
 		Spawn:         spawn,
 		Sentinel:      sentinelWriter,
 		Remediator:    remediator,
+		Registry:      sessionRegistry,
 	})
 
 	mux := http.NewServeMux()
