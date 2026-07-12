@@ -126,13 +126,32 @@ export function formatTurnTime(ts: string): string {
   return `${hh}:${mm}`;
 }
 
-function UserTurn(item: UserTurnItem): string {
-  const text = item.content
+/** A user turn's prompt text, non-text blocks standing in as `[kind]`. */
+function userTurnText(item: UserTurnItem): string {
+  return item.content
     .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
     .join("\n");
-  return `<div class="bubble user"><pre>${escapeHtml(text)}</pre><span class="turn-ts">${escapeHtml(
+}
+
+/**
+ * Whether a user turn is the `/clear` command — the prompt that drops the
+ * CLI's context and re-inits the session. Its bubble carries the context
+ * boundary rule beneath it, splitting the discarded conversation above from
+ * the re-initialized one (`system: init`, then a contextless reply) below.
+ */
+export function isClearTurn(item: UserTurnItem): boolean {
+  return userTurnText(item).trim() === "/clear";
+}
+
+function UserTurn(item: UserTurnItem): string {
+  const divider = isClearTurn(item)
+    ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
+    : "";
+  return `<div class="bubble user"><pre>${escapeHtml(
+    userTurnText(item),
+  )}</pre><span class="turn-ts">${escapeHtml(
     formatTurnTime(item.ts),
-  )}</span></div>`;
+  )}</span></div>${divider}`;
 }
 
 function TextStream(item: TextItem): string {

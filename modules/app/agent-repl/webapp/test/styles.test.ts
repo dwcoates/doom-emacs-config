@@ -33,6 +33,13 @@ const doneChip = blockAfter(css, ".result.done");
 const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
 const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
+const clearDivider = blockAfter(css, ".clear-divider");
+
+/** Whether a `#rrggbb` literal reads as red: its red channel dominates both others. */
+function isRed(hex: string): boolean {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return r > 2 * g && r > 2 * b;
+}
 
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
 function luminance(hex: string): number {
@@ -120,6 +127,48 @@ describe("remediation notice", () => {
     // Arrange / Act — the dark-scheme palette override.
     // Assert
     expect(darkTheme).toMatch(/--remediation:\s*#[0-9a-f]{6}/i);
+  });
+});
+
+describe("clear divider", () => {
+  it("paints the /clear boundary rule with its own token", () => {
+    // Arrange / Act — the .clear-divider rule.
+    // Assert
+    expect(clearDivider).toMatch(/background:\s*var\(--clear-divider\)/);
+  });
+
+  it("draws the boundary rule thick enough to read as a break", () => {
+    // Arrange
+    const height = clearDivider.match(/height:\s*(\d+)px/);
+    // Act / Assert
+    expect(Number(height?.[1])).toBeGreaterThanOrEqual(3);
+  });
+
+  it("sizes the boundary rule to the feed column rather than the window", () => {
+    // Arrange / Act — the .clear-divider rule claims no width of its own, so the
+    // block fills exactly the bubble column that contains it.
+    // Assert
+    expect(clearDivider).not.toMatch(/\bwidth:/);
+  });
+
+  it("keeps the boundary rule inside the feed column's padding", () => {
+    // Arrange / Act — no negative margin bleeds the rule out to the window edges.
+    // Assert
+    expect(clearDivider).not.toMatch(/margin[^:]*:[^;]*-\d/);
+  });
+
+  it("defines a red boundary token for the light theme", () => {
+    // Arrange / Act
+    const red = isRed(token(lightTheme, "--clear-divider"));
+    // Assert
+    expect(red).toBe(true);
+  });
+
+  it("defines a red boundary token for the dark theme", () => {
+    // Arrange / Act
+    const red = isRed(token(darkTheme, "--clear-divider"));
+    // Assert
+    expect(red).toBe(true);
   });
 });
 
