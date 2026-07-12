@@ -9,6 +9,7 @@ import {
   repinsToTail,
   sessionInfoHtml,
 } from "../src/render.js";
+import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { ConversationItem, ResultItem, ToolItem } from "../src/store.js";
 
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
@@ -142,6 +143,30 @@ describe("renderItem", () => {
     const html = renderItem(item);
     // Assert — the stamp trails the prompt inside the same bubble.
     expect(html).toContain(`<div class="bubble user"><pre>do the thing</pre><span class="turn-ts">`);
+  });
+
+  it("hides the host's injected spans from the user bubble", () => {
+    // Arrange — a workspace-generation first send: read-directive and
+    // autonomous preamble bracketed as meta, the typed task in between.
+    const item = userTurnAt(
+      14,
+      32,
+      `${META_OPEN}read the file at /repo/metaprompt.md${META_CLOSE}\n\n` +
+        `${META_OPEN}Do not wait for further instructions. Here is the task:\n\n${META_CLOSE}` +
+        `move the metaprompt into the repo`,
+    );
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<pre>move the metaprompt into the repo</pre>`);
+    expect(html).not.toContain("read the file at");
+  });
+
+  it("renders no bubble for a turn that is nothing but injected spans", () => {
+    // Arrange
+    const item = userTurnAt(14, 32, `${META_OPEN}read the file${META_CLOSE}`);
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
   });
 
   it("renders a streaming text block with a cursor", () => {
