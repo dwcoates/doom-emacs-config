@@ -8,6 +8,7 @@
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
 import { installCopyKeys } from "./copy.js";
+import { installClickExpand } from "./expand.js";
 import { PermissionMode } from "./protocol.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
@@ -57,6 +58,9 @@ async function boot(): Promise<void> {
   // Sections only take the wheel in their left/right gutters, so wheeling
   // over one scrolls the feed past it instead of scrolling it.
   installEdgeScroll(feedEl);
+  // A click on a capped section drops its N-line cap and lays it out at
+  // full length; the next click on it restores the preview.
+  installClickExpand(feedEl);
   // The webview has no menu bar, so `C-c` / `y` are what copy a highlight.
   installCopyKeys(document);
   const feed = new FeedRenderer(feedEl, {
