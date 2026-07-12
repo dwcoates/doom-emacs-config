@@ -58,6 +58,26 @@ export function splitTreeLine(line: string): { prefix: string; content: string }
 }
 
 /**
+ * Character columns of PREFIX whose vertical rail must repaint on a
+ * wrapped branch's continuation lines: every leading `│`, plus the
+ * connector column when the connector is `├` (its rail continues down
+ * to the next sibling). A `└` connector ENDS its rail, so it
+ * contributes nothing — without this distinction a wrapped `├──`
+ * branch visually severs from the sibling below it.
+ *
+ * Columns are ch offsets: every character preceding a rail char is a
+ * space or `│`, single-width in the tree's monospace font.
+ */
+export function railOffsets(prefix: string): number[] {
+  const cols: number[] = [];
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (ch === "│" || ch === "├") cols.push(i);
+  }
+  return cols;
+}
+
+/**
  * Render TEXT as mp-line flex rows. INLINE post-processes the escaped
  * content span (markdown.ts's inline pass — injected rather than
  * imported so this module never depends back on markdown.ts); pass the
@@ -72,9 +92,15 @@ export function renderTreeHtml(
     .map((line) => {
       if (line.trim() === "") return `<div class="mp-line mp-blank"></div>`;
       const { prefix, content } = splitTreeLine(line);
+      // Rail hairlines: painted from the row's second visual line down
+      // (glyphs cover the first), centered in their ch cell. A row that
+      // never wraps gives them zero height — invisible.
+      const rails = railOffsets(prefix)
+        .map((col) => `<i class="mp-rail" style="left:${col + 0.5}ch"></i>`)
+        .join("");
       return `<div class="mp-line"><span class="mp-prefix">${escapeHtml(
         prefix,
-      )}</span><span class="mp-content">${inline(escapeHtml(content))}</span></div>`;
+      )}${rails}</span><span class="mp-content">${inline(escapeHtml(content))}</span></div>`;
     })
     .join("");
 }
