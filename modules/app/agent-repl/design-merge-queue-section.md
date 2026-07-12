@@ -137,7 +137,7 @@ Each stream element:
 
 | Field | Source |
 |---|---|
-| `:sha` / `:subject` | `git rev-list`/`git log` over the entry's pick range |
+| `:sha` / `:subject` | in-flight: `.git/sequencer/todo` (§5.2). queued: `rev-list` (§5.4) |
 | `:project` | the entry's `:target-dir` bucket (`worktree.el:4770`) → repo label |
 | `:source-ws` | the queue entry's `:source-ws` |
 | `:state` | `current` / `pending` / `conflict` |
@@ -160,47 +160,97 @@ In the single-merge case this degenerates to exactly the user's example.
 
 ## 5. Instrumentation: what has to be built
 
-### 5.1 The blocker — the pick is a single range invocation
+### 5.1 There is no blocker — git already streams the boundaries
 
-`worktree.el:3335`:
+An earlier draft of this design claimed the range cherry-pick made per-commit
+progress unobtainable, and concluded the pick had to be unrolled into a per-SHA
+loop. **That claim was wrong, and it was checked empirically rather than assumed.**
+
+The current invocation (`worktree.el:3335`) is:
 
 ```elisp
 (agent-repl--git-exit-code root "cherry-pick" "-x" range)   ; range = "BASE..BRANCH"
 ```
 
-Git applies the commits one at a time internally, but **elisp never sees the
-boundaries**. There is therefore no current commit, no index, and no per-commit start
-time anywhere in the system today. `range-count` (`worktree.el:3324`) is computed and
-immediately discarded.
-
-**The range pick must be unrolled into a per-SHA loop.** This is no longer an
-optional optimization — a per-commit clock is unobtainable without it.
+Probing real `git` (2.45.1) with a live pipe reader — exactly what an Emacs process
+filter sees — shows git emits a per-commit line and **flushes it incrementally**:
 
 ```
-commits := git rev-list --reverse BASE..BRANCH   (+ subjects)
-for each SHA:
-    progress-put :commit-index, :commit-sha, :commit-subject, :commit-started-at
-    git cherry-pick -x <SHA>
-    if CHERRY_PICK_HEAD → the existing conflict/auto-resolve loop, unchanged
+  t(s)  | line arriving on the pipe
+--------+--------------------------------------------------
+   0.08 | [master ba94789] feat: commit number 1
+   0.15 | [master a398aa4] feat: commit number 2
+   0.22 | [master 8abdfaa] feat: commit number 3
+   0.22 | <process exit 0>
 ```
 
-Notes on why this is safe:
+The boundaries are staggered and arrive **before** process exit. On conflict, git
+additionally emits, live:
 
-- `git cherry-pick -x A..B` *is* a per-commit apply that halts at the first conflict.
-  `-x` annotates each commit identically either way, so `--cherry-pick-base`'s
-  `-x`-annotation scan (`worktree.el:3217-3257`) keeps working unchanged.
-- **The commit-hook cost does not change.** Hooks already run once per commit inside
-  the range pick. Unrolling adds one `git` *process* per commit, which is noise next
-  to a hook — and next to the `claude -p` resolver.
-- The existing conflict loop (`worktree.el:3344-3366`) already handles "a later commit
-  in the range conflicts too", so re-entering it per commit is not new logic.
-- After a resolved conflict, `cherry-pick --continue` finishes only the current
-  commit and the loop drives the rest — strictly more observable than letting git
-  auto-proceed through the remainder.
-- The `unwind-protect` unconditional abort (`worktree.el:3384-3389`) is untouched.
-  No error path anywhere in this design is removed or weakened.
+```
+stdout:  Auto-merging f.txt
+stdout:  CONFLICT (content): Merge conflict in f.txt
+stderr:  error: could not apply dec4a97... feat: one
+```
 
-### 5.2 Progress record
+So the conflicting SHA, its subject, and the conflicted file list are all in the
+stream too.
+
+**Elisp does not see any of this today for one reason only: we throw it away.**
+`--git-exit-code--worker` calls `start-process` with a **nil** output destination
+(`worktree.el:196-197`) and keeps only the integer exit code. The information was
+always there.
+
+**Therefore: do not unroll the pick.** Attach a **process filter** to the existing
+range invocation. This is strictly additive — git's semantics, the commit sequence,
+the `-x` annotations, the conflict loop, and the unconditional `unwind-protect`
+abort (`worktree.el:3384-3389`) are all untouched, and no error path anywhere is
+removed or weakened. Unrolling would have rewritten the merge hot path to obtain
+something git was already handing us.
+
+New in `worktree.el`, a sibling of `--git-exit-code` that leaves the original and
+all its callers alone:
+
+```elisp
+(defun agent-repl--git-exit-code-streaming (root filter &rest args) ...)
+```
+
+The filter parses three patterns and does nothing else:
+
+| Pattern | Effect |
+|---|---|
+| `^\[.+ \([0-9a-f]+\)\] \(.*\)$` | commit applied → advance `:commit-index`, reset `:commit-started-at` |
+| `^error: could not apply \([0-9a-f]+\)\.\.\. \(.*\)$` | → `:conflict-sha`, `:conflict-subject` |
+| `^CONFLICT (.*): .* in \(.*\)$` | → push onto `:conflict-files` |
+
+**Thread note.** Process filters run on whichever thread pumps the event loop, not
+on the merge worker. That is fine and in fact desirable: the filter only mutates the
+progress hash (plain Lisp) and bumps a counter. It must never touch UI — the
+existing `--defer-to-main-thread` discipline (`worktree.el:1833`) is unchanged.
+
+### 5.2 The in-flight lookahead is free — `.git/sequencer/todo`
+
+For a multi-commit pick, git maintains `.git/sequencer/todo`, which is exactly the
+list of remaining picks, already carrying SHA and subject:
+
+```
+pick dec4a97 feat: one          <- current (still listed while it is being applied)
+pick 4078f49 feat: two
+pick 437e2f3 feat: three
+```
+
+This is a **plain file on disk**. Reading it costs no subprocess, no `rev-list`, and
+no worker round-trip — it *is* the "next three commits" for the in-flight pick,
+verbatim.
+
+Two caveats, both benign:
+
+- A single-commit pick does not use the sequencer, so `.git/sequencer/` is absent.
+  Fall back to the filter's own `:commits` knowledge (there is only one).
+- The directory is removed when the pick finishes, which is precisely the signal that
+  the in-flight portion of the stream is empty.
+
+### 5.3 Progress record
 
 Progress is high-churn, worker-thread-written, and ephemeral. It must **not** go on
 the workspace plist, which is snapshot-persisted on every mutation
@@ -214,21 +264,26 @@ the workspace plist, which is snapshot-persisted on every mutation
   "Monotonic counter bumped on every progress write.")
 ```
 
-| Key | Meaning |
-|---|---|
-| `:commits` | ordered `((sha . subject) ...)` for the whole pick range |
-| `:commit-index` | index into `:commits` of the commit being applied |
-| `:commit-started-at` | float-time, **reset on every commit** — this is the >3s clock |
-| `:conflict-files` | from `git diff --name-only --diff-filter=U` (`worktree.el:3543`) |
-| `:resolver-phase` | `spawned` / `waiting` / `verifying` / `continuing` |
-| `:resolver-started-at` | float-time |
+Every field below is written **by the process filter of §5.1**, from git's own output.
+Nothing is inferred and nothing needs a probe subprocess.
+
+| Key | Written by | Meaning |
+|---|---|---|
+| `:commit-index` | filter, on each `[branch sha]` line | how many commits have landed |
+| `:commit-started-at` | filter, reset on each boundary | float-time — **this is the >3s clock** |
+| `:conflict-sha` / `:conflict-subject` | filter, on `error: could not apply` | the commit that is stuck |
+| `:conflict-files` | filter, on each `CONFLICT (...)` line | conflicted paths |
+| `:resolver-phase` | merge worker | `spawned` / `waiting` / `verifying` / `continuing` |
+| `:resolver-started-at` | merge worker | float-time |
+
+The **current commit** is `.git/sequencer/todo`'s head (§5.2); `:commit-index` orders
+the stream and drives the clock reset. The two agree, and the todo file is
+authoritative for identity.
 
 Cleared alongside `--clear-in-flight-merge` (`worktree.el:4738`), so it never
-outlives the in-flight set. Written from the worker thread, which is safe: the hash
-is plain Lisp, and only *UI* calls need `--defer-to-main-thread`
-(`worktree.el:1833`).
+outlives the in-flight set.
 
-### 5.3 Lookahead for queued entries
+### 5.4 Lookahead for queued entries
 
 The commits of a *queued* entry are not known either, and computing them means
 running git. That must never happen on the main thread at poll cadence — the drawer
@@ -289,8 +344,10 @@ per-workspace state work (`status.el:1610-1643`) for no reason.
 ### 6.3 The render is pure
 
 `--insert-merge-queue-section` takes `(stream, now)` and returns text. No git, no
-I/O. Stream construction takes `(queue, in-flight, progress-hash, lookahead-hash)`
-and is likewise pure. This is what makes §8 tractable.
+I/O. Stream construction takes `(queue, in-flight, progress-hash, lookahead-hash,
+todo-lines)` and is likewise pure — the one impure step, reading
+`.git/sequencer/todo`, is a single `insert-file-contents` hoisted to the caller. This
+is what makes §8 tractable.
 
 ---
 
@@ -330,20 +387,45 @@ case is a synthetic input asserted against output:
 - `--render-signature` changes when `--merge-progress-seq` is bumped
 - `--render-signature` ticks once per second while in-flight, and does not while idle
 
-**`test-worktree.el`**:
+**`test-worktree.el`** — the filter is a pure string→plist transform, so it tests
+without git at all:
 
-- the per-SHA loop picks commits oldest-first (`--reverse`)
-- `:commit-index` advances monotonically and `:commit-started-at` resets per commit
-- `:commits` length equals `rev-list --count` of the range
-- a conflict on commit 2 of 4 leaves `:commit-index 1` and the conflict files populated
+- `[master ba94789] feat: one` → `:commit-index` advances, `:commit-started-at` resets
+- `error: could not apply dec4a97... feat: one` → `:conflict-sha` / `:conflict-subject`
+- `CONFLICT (content): Merge conflict in f.txt` → pushed onto `:conflict-files`
+- a line split across two filter calls (git may deliver a partial line) is buffered,
+  not dropped — **the classic process-filter bug, and the one that will bite**
+- an unrecognized line is ignored rather than corrupting state
+- `--git-exit-code-streaming` returns the same exit code as `--git-exit-code`
 - the progress entry is removed by `--clear-in-flight-merge`
-- the `unwind-protect` abort still runs on the unrolled loop's error path
+- `.git/sequencer/todo` parses to `((sha . subject) ...)`
+- a **missing** `.git/sequencer/` (single-commit pick) degrades to the filter's own state
 - lookahead is keyed by target HEAD and recomputed when the target advances
 - lookahead is computed only for the entries the 3-commit budget reaches
 
 ---
 
-## 9. Open questions
+## 9. Empirically established (git 2.45.1)
+
+Everything in §5.1–5.2 was verified against real git, not assumed. Recorded here
+because the first draft of this design got it wrong in the expensive direction.
+
+1. **The range cherry-pick streams per-commit lines and flushes them incrementally.**
+   Boundaries arrive staggered, before process exit. A process filter sees them live.
+2. **Conflicts stream too**: the stuck SHA and subject on stderr, the conflicted files
+   on stdout.
+3. **`.git/sequencer/todo` exists during a multi-commit pick** and lists the remaining
+   picks with SHA and subject. Free lookahead, no subprocess.
+4. **`cherry-pick` runs `post-commit` but NOT `pre-commit`.**
+   Worth flagging against the stated premise that slow cherry-picks are caused by
+   "commit hooks": if the slow hook is a `pre-commit` hook, it does **not** run during
+   a cherry-pick, and the slowness is coming from somewhere else. Note also that
+   `~/.gitconfig` sets `core.hooksPath` to `~/.config/git/hooks` globally, so the
+   hooks that do run are the ones there, not any repo's `.git/hooks`.
+
+---
+
+## 10. Open questions
 
 1. **Should an upcoming commit show which workspace it comes from?**
    Within one project, consecutive queue entries are different workspaces, and the
