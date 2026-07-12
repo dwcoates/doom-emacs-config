@@ -485,15 +485,6 @@ shell out to the real binary."
 ;; guards between install and now.
 (agent-repl-test--verify-external-guards-installed)
 
-;; Redirect the events log to a throwaway temp path so any test that
-;; exercises a code path which records workspace lifecycle events does
-;; not clobber the user's real `~/.claude-emacs/events.el'.  Per-test
-;; isolation still uses the `--with-clean-state' rebinding below.
-(when (boundp 'agent-repl-events-file)
-  (setq agent-repl-events-file
-        (expand-file-name (format "agent-events-test-%d.el" (emacs-pid))
-                          temporary-file-directory)))
-
 ;;;; ---- Test utilities ----
 
 (defmacro agent-repl-test--with-clean-state (&rest body)
@@ -513,10 +504,6 @@ user's real snapshot during ERT runs."
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
          (agent-repl--restored-workspaces nil)
-         (agent-repl-events-file
-          (expand-file-name (format "agent-events-%s.el" (random)) temporary-file-directory))
-         (agent-repl--events-cache nil)
-         (agent-repl--events-cache-loaded t)
          ;; Reset workspace-state update timer state so each test starts
          ;; from a clean slate: counter at 0, no chain in flight, async
          ;; spread disabled (tests want synchronous iteration so they
@@ -528,8 +515,6 @@ user's real snapshot during ERT runs."
          (progn ,@body)
        (when (file-exists-p agent-repl-workspace-snapshot-file)
          (delete-file agent-repl-workspace-snapshot-file))
-       (when (file-exists-p agent-repl-events-file)
-         (delete-file agent-repl-events-file))
        (let ((archive-dir (agent-repl--workspace-snapshot-archive-dir)))
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
