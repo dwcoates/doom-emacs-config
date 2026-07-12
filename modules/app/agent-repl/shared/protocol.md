@@ -792,6 +792,22 @@ interface ReplayRequestFrame {
   after the shim exited must still be able to rebuild the retained
   history instead of staring at an empty feed.
 
+**Transcript seeding (resumed sessions).** A session created with
+`resume` pre-populates its retention window before the shim runs: the
+daemon reads the resumed session's transcript JSONL
+(`$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<uuid>.jsonl`, default config
+dir `~/.claude`) and translates its user/assistant entries into the
+ordinary §2.3–§2.6 frames, closing with one §2.8 `usage` frame carrying
+the last assistant message's usage. Rationale: the CLI restores context
+on `--resume` but re-emits no history through the stream, so without
+seeding every binding recreation (daemon restart, Emacs restart,
+vterm→gui frontend switch) attaches to a blank conversation. The seed
+also stamps `claude_session_id` (the resume target) and `model` into
+the hello instead of leaving them empty until the first live turn.
+Sidechain (subagent) and meta transcript entries are skipped; a
+missing or unreadable transcript degrades to the old blank-history
+behavior and is logged, never fatal.
+
 ---
 
 ## Agent-state sentinels (daemon → Emacs side channel)

@@ -1,0 +1,235 @@
+// Transcript replay: seed a resumed session's retained-frame ring with
+// the prior conversation so attaching webapp clients render history
+// immediately.
+//
+// The CLI restores context on --resume but re-emits NOTHING through the
+// stream (empirically verified; see shim/src/fake-query.ts), and a new
+// session's §2.10 replay window starts empty — without this seeding, a
+// resumed session renders as a blank conversation (and a zero token
+// counter) until its first live turn. That bites every binding
+// recreation: daemon restart, Emacs restart, vterm→gui frontend switch.
+//
+// The seed is built from the resumed session's transcript JSONL under
+// the Claude config dir (~/.claude/projects/<cwd-slug>/<uuid>.jsonl),
+// translated through the session's own Translator so the frames are
+// exactly what the live stream would have produced (§2.3–§2.6), plus a
+// trailing §2.8 usage frame so the webapp's token counter reflects the
+// resumed context size.
+
+package session
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+
+	"claude-repld/internal/protocol"
+)
+
+// DefaultClaudeConfigDir returns the Claude CLI config root: the
+// CLAUDE_CONFIG_DIR override when set, else ~/.claude.
+func DefaultClaudeConfigDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
+}
+
+var transcriptSlugRe = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// TranscriptPath returns the transcript JSONL path for claudeSessionID
+// rooted at cwd, mirroring the CLI's project-dir encoding (every
+// non-alphanumeric byte of the absolute cwd becomes "-").
+func TranscriptPath(configDir, cwd, claudeSessionID string) string {
+	slug := transcriptSlugRe.ReplaceAllString(cwd, "-")
+	return filepath.Join(configDir, "projects", slug, claudeSessionID+".jsonl")
+}
+
+// transcriptEntry is the subset of one transcript JSONL line the replay
+// builder inspects.
+type transcriptEntry struct {
+	Type        string          `json:"type"`
+	IsSidechain bool            `json:"isSidechain"`
+	IsMeta      bool            `json:"isMeta"`
+	Message     json.RawMessage `json:"message"`
+}
+
+// transcriptUserMessage decodes a user entry's message envelope.
+type transcriptUserMessage struct {
+	Content json.RawMessage `json:"content"`
+}
+
+// transcriptUserBlock is one block of a user message's array-form
+// content. Tool results carry ToolUseID/Content/IsError; every other
+// block type passes through raw.
+type transcriptUserBlock struct {
+	Type      string          `json:"type"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+	IsError   bool            `json:"is_error"`
+}
+
+// transcriptAssistantMeta is the assistant message metadata the builder
+// lifts (the content blocks themselves go through the Translator's
+// assistant-message path verbatim).
+type transcriptAssistantMeta struct {
+	ID    string          `json:"id"`
+	Model string          `json:"model"`
+	Usage *protocol.Usage `json:"usage"`
+}
+
+// BuildReplayFrames translates the transcript JSONL on r into the L2
+// frames the live stream would have produced, mutating t exactly as
+// live translation would (block ids, tool metadata for render hints,
+// model). Sidechain (subagent) and meta entries are skipped; malformed
+// lines are skipped without aborting the remainder. The trailing usage
+// frame mirrors the last assistant message's usage so the webapp's
+// token counter shows the resumed context size.
+func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
+	var frames []protocol.L2Frame
+	var lastMeta transcriptAssistantMeta
+	reader := bufio.NewReader(r)
+	replaySeq := 0
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			frames = append(frames, replayEntryFrames(t, line, &replaySeq, &lastMeta)...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	if lastMeta.Model != "" {
+		t.Model = lastMeta.Model
+	}
+	if lastMeta.Usage != nil {
+		frames = append(frames, &protocol.UsageFrame{
+			Envelope:  protocol.Envelope{Type: "usage"},
+			MessageID: lastMeta.ID,
+			Usage:     *lastMeta.Usage,
+		})
+	}
+	return frames
+}
+
+// replayEntryFrames translates one transcript line; unusable lines
+// yield no frames.
+func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *transcriptAssistantMeta) []protocol.L2Frame {
+	var entry transcriptEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return nil
+	}
+	if entry.IsSidechain || entry.IsMeta {
+		return nil
+	}
+	switch entry.Type {
+	case "assistant":
+		var meta transcriptAssistantMeta
+		if err := json.Unmarshal(entry.Message, &meta); err == nil {
+			*lastMeta = meta
+		}
+		return t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
+	case "user":
+		return replayUserFrames(t, entry.Message, replaySeq)
+	default:
+		return nil
+	}
+}
+
+// replayUserFrames maps one user transcript entry to frames: tool_result
+// blocks become tool-use-result frames (through the Translator, so
+// render hints fire for tools it has seen), and the remaining content
+// becomes one §2.3 user-turn frame.
+func replayUserFrames(t *Translator, message json.RawMessage, replaySeq *int) []protocol.L2Frame {
+	var msg transcriptUserMessage
+	if err := json.Unmarshal(message, &msg); err != nil {
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(msg.Content, &text); err == nil {
+		if text == "" {
+			return nil
+		}
+		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": text}})
+		return []protocol.L2Frame{replayUserTurn(norm, replaySeq)}
+	}
+	var rawBlocks []json.RawMessage
+	if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
+		return nil
+	}
+	var frames []protocol.L2Frame
+	var turnBlocks []json.RawMessage
+	for _, raw := range rawBlocks {
+		var block transcriptUserBlock
+		if err := json.Unmarshal(raw, &block); err != nil {
+			continue
+		}
+		if block.Type == "tool_result" {
+			frames = append(frames, t.OnEvent(&protocol.L1Event{
+				Type:      "tool-result",
+				ToolUseID: block.ToolUseID,
+				IsError:   block.IsError,
+				Content:   block.Content,
+			})...)
+			continue
+		}
+		turnBlocks = append(turnBlocks, raw)
+	}
+	if len(turnBlocks) > 0 {
+		content, _ := json.Marshal(turnBlocks)
+		frames = append(frames, replayUserTurn(content, replaySeq))
+	}
+	return frames
+}
+
+// replayUserTurn builds the §2.3 user-turn frame for replayed content.
+// The request id is synthetic: replayed turns never had a daemon-issued
+// user-message command.
+func replayUserTurn(content json.RawMessage, replaySeq *int) protocol.L2Frame {
+	*replaySeq++
+	return &protocol.UserTurnFrame{
+		Envelope:  protocol.Envelope{Type: "user-turn"},
+		RequestID: replayRequestID(*replaySeq),
+		Content:   content,
+	}
+}
+
+func replayRequestID(n int) string {
+	return "replay-" + strconv.Itoa(n)
+}
+
+// SeedFromTranscript stamps the resumed identity onto the session and
+// retains the transcript's replay frames so clients attaching later see
+// the prior conversation (§2.10). Call before Run so live frames land
+// after the seed. The claudeSessionID stamp happens even when the
+// transcript cannot be read — the resume target is authoritative
+// regardless — and the open/read failure is returned for the caller to
+// surface (the session itself stays fully usable, only history
+// rendering is degraded).
+func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
+	f, err := os.Open(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if claudeSessionID != "" {
+		s.translator.ClaudeSessionID = claudeSessionID
+	}
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
+			s.logf("session %s: close transcript %s: %v", s.ID, path, cerr)
+		}
+	}()
+	s.broadcastLocked(BuildReplayFrames(s.translator, f))
+	return nil
+}

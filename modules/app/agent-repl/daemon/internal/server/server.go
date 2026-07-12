@@ -201,6 +201,18 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Logf:          s.logf,
 		Sentinel:      s.sentinel,
 	})
+	// Resumed sessions seed their replay ring from the durable
+	// transcript BEFORE Run: the CLI re-emits no history on --resume,
+	// so without this every rebind (daemon restart, frontend switch)
+	// attaches to a blank conversation.
+	if opts.Resume != "" {
+		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
+		if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
+			s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
+		} else {
+			s.logf("session %s: replay seeded from %s", id, path)
+		}
+	}
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
