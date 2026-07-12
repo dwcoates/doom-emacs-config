@@ -33,6 +33,20 @@ func NewClient() *Client {
 	return &Client{Send: make(chan []byte, 256)}
 }
 
+// NewReplayClient returns a client whose outbound buffer can absorb
+// this session's ENTIRE retained ring in one burst. replayLocked
+// enqueues the full ring on the handler goroutine far faster than the
+// socket writer drains it, so a fixed 256-frame buffer drops any
+// client replaying a ring bigger than that — which transcript seeding
+// (§2.10) makes the norm, not the edge case. The slack beyond
+// retention covers live frames broadcast while the replay burst is
+// still flushing.
+func (s *Session) NewReplayClient() *Client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &Client{Send: make(chan []byte, s.retention+256)}
+}
+
 type retained struct {
 	seq  int64
 	data []byte
