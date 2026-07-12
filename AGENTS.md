@@ -302,6 +302,20 @@ When you wrap a new external binary `X`:
 
 5. Re-run the agent audit step (mandatory step 1 above) on the final diff before committing, including the new files you just wrote.
 
+## Daemon bounce policy (claude-repld)
+
+Agents may bounce the resident claude-repld to deploy a rebuilt binary — clients are expected to reconnect — under these rules:
+
+- **Never bounce while a turn is in flight.** `agent-repl--frontend-stop-daemon' (and therefore `agent-repl-frontend-daemon-restart') refuses with "turn in flight" when any session reports `turn_active`; retry when idle. Do not work around the refusal with a direct `kill` — if you must kill directly (Emacs unavailable), check `GET /sessions` for `turn_active` yourself first.
+
+- **Prefer the Emacs restart path** (`agent-repl-frontend-daemon-restart` via emacsclient): it serializes concurrent bounces, runs build-if-stale, and its refusal semantics are the policy.
+
+- **Never hand-spawn a daemon on the configured addr.** Emacs owns the resident daemon's lifecycle and now ADOPTS a foreign daemon it finds answering on the port; a second spawn just bind-fails and dies.
+
+- **Verify against an ephemeral daemon, not the resident one**: spin up your build on a random port with a scratch state dir (the e2e suite works this way), test, kill. The resident daemon is the user's.
+
+- After any bounce, the client-side reattach loop (`agent-repl--frontend-reattach-check`) re-ensures vanished sessions (resume + transcript replay) and remounts webviews; repeated reattach failure against an answering daemon surfaces as a version-mismatch warning rather than retrying forever.
+
 ## Paren Checking
 
 To verify parenthesis balance in an `.el` file (skipping strings and comments):
