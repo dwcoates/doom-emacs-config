@@ -393,3 +393,41 @@ describe("running-tool spinner", () => {
     expect(reducedToolSpinner).not.toMatch(/animation:/);
   });
 });
+
+const runBadge = blockAfter(css, ".badge.run");
+
+describe("running badge", () => {
+  it("tints the badge with the thinking orange rather than the accent", () => {
+    // Arrange / Act — the .badge.run rule.
+    // Assert
+    expect(runBadge).toMatch(/color:\s*var\(--thinking\)/);
+    expect(runBadge).not.toMatch(/color:\s*var\(--accent\)/);
+  });
+
+  it("keeps the badge's orange the same token the thinking spinner spins in", () => {
+    // Arrange
+    const badgeColor = runBadge.match(/color:\s*var\((--[a-z-]+)\)/)?.[1];
+    // Act
+    const spinnerColor = spinner.match(/border-top-color:\s*var\((--[a-z-]+)\)/)?.[1];
+    // Assert
+    expect(badgeColor).toBe(spinnerColor);
+  });
+
+  it("keeps the light-theme thinking token orange so the badge reads orange", () => {
+    // Arrange
+    const orange = token(lightTheme, "--thinking");
+    // Act
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(orange.slice(i, i + 2), 16));
+    // Assert
+    expect(r > g && g > b).toBe(true);
+  });
+
+  it("keeps the dark-theme thinking token orange so the badge reads orange", () => {
+    // Arrange
+    const orange = token(darkTheme, "--thinking");
+    // Act
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(orange.slice(i, i + 2), 16));
+    // Assert
+    expect(r > g && g > b).toBe(true);
+  });
+});
