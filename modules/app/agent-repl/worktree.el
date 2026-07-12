@@ -7,6 +7,8 @@
 (require 'profiler)
 
 (declare-function agent-repl--ws-set-agent-state "status")
+(declare-function agent-repl--frontend-boot-session "frontends" (ws &optional project-dir-hint active-env-hint))
+(declare-function agent-repl--ws-frontend-name "frontends" (ws))
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -548,27 +550,36 @@ otherwise crash the sentinel as an opaque \"error in process sentinel\"."
 
 (defun agent-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-agent)
   "Register WS as a worktree at PATH and start its agent session.
-Passes PATH and the desired environment as hints to `initialize-agent',
-which threads them into `initialize-ws-env' (the sole writer of
-`:project-dir', `:active-env', and per-env instantiation structs).
+
+The session boots through WS's OWN FRONTEND
+\(`agent-repl--frontend-boot-session'), not through the vterm boot
+directly: a workspace born here is born under `agent-repl-default-frontend'
+like any other, so the generated / hand-created worktree comes up in the
+gui when the gui is the default.  PATH and the desired environment are
+passed as hints, which the boot threads into `initialize-ws-env' (the
+sole writer of `:project-dir', `:active-env', and per-env instantiation
+structs) BEFORE resolving the frontend — FORCE-SANDBOX is precisely one
+of the things that resolution depends on, since only the vterm can run a
+sandboxed session.
 
 When NO-AGENT is non-nil, the worktree is still registered as a
 worktree workspace but the agent is NOT booted: only the env state is
-hydrated via `initialize-ws-env' (the same hints `initialize-agent'
-would have threaded through), mirroring `agent-repl--new-workspace'.
-This is the `SPC TAB n/N' empty-preemptive-prompt path — a worktree
-created exactly as usual, minus the auto-started agent session."
+hydrated via `initialize-ws-env' (the same hints the boot would have
+threaded through), mirroring `agent-repl--new-workspace'.  This is the
+`SPC TAB n/N' empty-preemptive-prompt path — a worktree created exactly
+as usual, minus the auto-started agent session."
   (agent-repl--register-worktree-ws ws-id ws)
-  (let ((default-directory (file-name-as-directory path)))
+  (let ((default-directory (file-name-as-directory path))
+        (env-hint (if force-sandbox :sandbox :bare-metal)))
     (if no-agent
         (progn
-          (agent-repl--initialize-ws-env ws path (if force-sandbox :sandbox :bare-metal))
-          (agent-repl--log ws "worktree NOT starting Claude (no-agent) ws=%s" ws))
+          (agent-repl--initialize-ws-env ws path env-hint)
+          (agent-repl--log ws "worktree NOT starting agent (no-agent) ws=%s" ws))
       (condition-case err
           (progn
-            (agent-repl--initialize-agent ws path (if force-sandbox :sandbox :bare-metal))
-            (agent-repl--log ws "worktree pre-started Claude ws=%s cmd=%s"
-                              ws (agent-repl-instantiation-start-cmd (agent-repl--active-inst ws))))
+            (agent-repl--frontend-boot-session ws path env-hint)
+            (agent-repl--log ws "worktree pre-started agent ws=%s frontend=%s"
+                              ws (agent-repl--ws-frontend-name ws)))
         ;; Runs from `agent-repl--async-git-sentinel'; a non-local exit here
         ;; would crash the sentinel as an opaque "error in process sentinel".
         ;; Surface it loudly and modeline-visibly instead of letting it escape.

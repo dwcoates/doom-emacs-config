@@ -15,11 +15,21 @@
 ;; validates the pair loudly instead of launching a broken hybrid.
 ;;
 ;; Dispatch points that previously hand-branched on the gui (do-send,
-;; the interrupt commands) resolve through this registry; the workspace
-;; carries its choice in the `:frontend' plist key (persisted like
-;; `:backend'), defaulting to `agent-repl-default-frontend' — which is
-;; the gui: the web view is the out-of-the-box presentation, and vterm
-;; is the opt-in.
+;; the interrupt commands, and — via `agent-repl--frontend-boot-session'
+;; — the paths that BIRTH a workspace) resolve through this registry.
+;; A workspace carries its frontend in the `:frontend' plist key,
+;; defaulting to `agent-repl-default-frontend' — which is the gui: the
+;; web view is the out-of-the-box presentation for every workspace
+;; (generated, hand-created, restored), and vterm is the opt-in.
+;;
+;; `:frontend' is written two ways, and only one of them persists:
+;; DELIBERATELY (`agent-repl--ws-choose-frontend', which also marks
+;; `:frontend-explicit'), or INCIDENTALLY (the vterm boot stamps the
+;; key so the session_start handler cannot race the lazy resolution).
+;; Only a deliberate choice is restored across a restart; an incidental
+;; one re-resolves from the default, which is what keeps a workspace
+;; that merely happened to boot a vterm once from being pinned to vterm
+;; forever.
 ;;
 ;; Choosing a frontend for a workspace is ALSO a statement about what
 ;; the NEXT workspace should be born with, so both selection commands
@@ -35,6 +45,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
+(declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 
 ;;;; ---- Struct ---------------------------------------------------------------
 
@@ -47,6 +58,14 @@ NAME is the identifying symbol (e.g. `vterm', `gui').
 
 OPEN-FN (WS): open/start the frontend for WS — launch whatever the
 frontend needs (vterm process, daemon session + webview) and show it.
+BOOT-FN (WS PROJECT-DIR-HINT ACTIVE-ENV-HINT): start WS's session
+WITHOUT showing it — the headless half of OPEN-FN, used by the birth
+and restore paths (worktree creation, snapshot restore), which run in
+the CALLER's frame and must not mount the new workspace's view into
+it.  The hints are `agent-repl--initialize-ws-env' hints (the creation
+paths know the worktree path and environment before any state file
+exists).  The view follows later, when the user actually switches to
+WS (`:pending-show-panels').
 KILL-FN (WS): destroy WS's session AND its view.
 SEND-FN (WS INPUT RAW ON-SETTLE): deliver one prepared user turn.
 INPUT is the decorated text actually sent; RAW the undecorated
@@ -64,6 +83,14 @@ RESTART-FN (WS): hard-restart the session.
 SUPPORTED-BACKENDS is the list of backend name symbols this frontend
 can drive; selection validates the pair against it.
 
+SUPPORTED-ENVS is the same idea on the environment axis: the list of
+`agent-repl--environment-keys' values this frontend can run a session
+in.  The gui drives the daemon, which spawns the agent on the HOST —
+it cannot run a `:sandbox' session, and a workspace that asked for one
+must never be silently presented (and re-launched) outside its
+sandbox.  Resolution (`agent-repl--frontend-default-for-ws') and
+validation (`agent-repl--frontend-validate-pair') both honor it.
+
 DURABLE-SESSION-ID-FN (WS): the DURABLE claude session uuid of WS's
 live session on this frontend, or nil — the cross-frontend resume
 currency `agent-repl-switch-frontend' hands from one frontend to the
@@ -73,6 +100,7 @@ Both optional: a frontend without them simply cannot carry
 conversations across a switch."
   name
   open-fn
+  boot-fn
   kill-fn
   send-fn
   interrupt-fn
@@ -81,6 +109,7 @@ conversations across a switch."
   hide-fn
   restart-fn
   supported-backends
+  supported-envs
   durable-session-id-fn
   adopt-session-fn)
 
@@ -96,8 +125,8 @@ required slot is missing — a partially-defined frontend is a bug, not
 a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
-  (dolist (slot '(name open-fn kill-fn send-fn interrupt-fn running-p-fn
-                  supported-backends))
+  (dolist (slot '(name open-fn boot-fn kill-fn send-fn interrupt-fn running-p-fn
+                  supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
       (error "agent-repl-register-frontend: frontend %S is missing slot %s"
              (agent-repl-frontend-name frontend) slot)))
@@ -121,23 +150,78 @@ silently fall back to a different presentation."
 (defcustom agent-repl-default-frontend 'gui
   "Name of the frontend used for workspaces without a `:frontend' override.
 
-The web GUI is the out-of-the-box presentation: new workspaces are born
-under it, and `SPC o c' opens a webview over the input panel rather than
-a vterm TUI.
+The web GUI is the out-of-the-box presentation for EVERY workspace,
+however it comes into being: generated (the workspace-generation
+dispatch), hand-created (`SPC TAB n'), restored from a snapshot or a
+state file, or opened cold with `SPC o c'.  vterm is the opt-in.
 
-The gui drives only the claude backend (`agent-repl-frontend'
-SUPPORTED-BACKENDS), so a codex workspace must carry an explicit vterm
-`:frontend' — `agent-repl--gui-open' rejects the pair loudly rather than
-launching a broken hybrid.  Set this to `vterm' to restore the TUI as
-the birth frontend."
+The default is CAPABILITY-CONSTRAINED, not absolute: a workspace whose
+backend or environment the gui cannot drive (a codex workspace, a
+`:sandbox' workspace) resolves to the frontend that can — see
+`agent-repl--frontend-default-for-ws'.  Set this to `vterm' to restore
+the TUI as the universal presentation."
   :type 'symbol
   :group 'agent-repl)
 
+(defun agent-repl--frontend-supports-ws-p (fe backend env)
+  "Return non-nil when frontend FE can drive BACKEND in ENV.
+ENV nil (the workspace's `:active-env' is not hydrated yet) constrains
+nothing — the environment axis only rules a frontend out once the
+workspace has actually declared one."
+  (and (memq backend (agent-repl-frontend-supported-backends fe))
+       (or (null env)
+           (memq env (agent-repl-frontend-supported-envs fe)))))
+
+(defun agent-repl--frontend-default-for-ws (ws)
+  "Return the frontend name a workspace WS with no `:frontend' is presented under.
+
+`agent-repl-default-frontend' when it can drive WS's backend and
+environment; otherwise the first registered frontend that can.
+
+The second clause is capability RESOLUTION, not a fallback that papers
+over an error: a codex workspace has no gui to be presented under, and
+a `:sandbox' workspace's session must run inside its container, so for
+those the default names a presentation that does not exist.  Picking
+the frontend that CAN present them is the only correct reading of
+\"the default\"; there is no failure here to swallow.  When NO
+registered frontend can drive the pair, that IS a failure, and it
+signals."
+  (let* ((backend (agent-repl--ws-backend-name ws))
+         (env (agent-repl--ws-get ws :active-env))
+         (default (agent-repl-frontend-get agent-repl-default-frontend)))
+    (if (agent-repl--frontend-supports-ws-p default backend env)
+        (agent-repl-frontend-name default)
+      (let ((capable (seq-find (lambda (name)
+                                 (agent-repl--frontend-supports-ws-p
+                                  (agent-repl-frontend-get name) backend env))
+                               (agent-repl--frontend-names))))
+        (unless capable
+          (error "agent-repl: no registered frontend can drive backend `%s' in env `%s' (ws=%s)"
+                 backend env ws))
+        (agent-repl--log ws "default-for-ws: %s cannot drive %s/%s — resolving to %s"
+                         agent-repl-default-frontend backend env capable)
+        capable))))
+
 (defun agent-repl--ws-frontend-name (ws)
   "Return the frontend name symbol for workspace WS.
-The workspace's `:frontend' property wins; otherwise
-`agent-repl-default-frontend'."
-  (or (agent-repl--ws-get ws :frontend) agent-repl-default-frontend))
+The workspace's `:frontend' property wins; otherwise the
+capability-constrained default (`agent-repl--frontend-default-for-ws')."
+  (or (agent-repl--ws-get ws :frontend)
+      (agent-repl--frontend-default-for-ws ws)))
+
+(defun agent-repl--ws-choose-frontend (ws name)
+  "Record NAME as WS's DELIBERATE frontend choice.
+
+Two writes, and the second is the point: `:frontend' is the resolution
+key (also written incidentally by the vterm boot — see
+`agent-repl--initialize-agent'), while `:frontend-explicit' marks the
+value as CHOSEN rather than merely arrived-at.  Only a chosen frontend
+is restored across an Emacs restart (`agent-repl--apply-display-state');
+an incidental one is re-resolved from the default, which is what lets a
+workspace that only ever rode the default follow the default forward
+instead of being pinned to whatever it happened to boot under once."
+  (agent-repl--ws-put ws :frontend name)
+  (agent-repl--ws-put ws :frontend-explicit t))
 
 (defun agent-repl--ws-frontend (ws)
   "Return the resolved frontend struct for workspace WS.
@@ -149,16 +233,33 @@ registered."
   "Return non-nil when WS's frontend is the web GUI."
   (eq (agent-repl--ws-frontend-name ws) 'gui))
 
-(defun agent-repl--frontend-validate-pair (frontend-name backend-name)
-  "Signal `user-error' unless FRONTEND-NAME can drive BACKEND-NAME.
-Returns t when the pair is valid."
+(defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env)
+  "Signal `user-error' unless FRONTEND-NAME can drive BACKEND-NAME in ENV.
+ENV, when non-nil, is the workspace's `:active-env': the gui cannot run
+a `:sandbox' session (the daemon spawns the agent on the host), and
+silently presenting a sandboxed workspace outside its container is
+exactly the downgrade this check exists to prevent.
+Returns t when the combination is valid."
   (let ((fe (agent-repl-frontend-get frontend-name)))
     (unless (memq backend-name (agent-repl-frontend-supported-backends fe))
       (user-error "agent-repl: the %s frontend cannot drive the %s backend (supported: %s)"
                   frontend-name backend-name
                   (mapconcat #'symbol-name
                              (agent-repl-frontend-supported-backends fe) ", ")))
+    (when (and env (not (memq env (agent-repl-frontend-supported-envs fe))))
+      (user-error "agent-repl: the %s frontend cannot run a %s session (supported: %s)"
+                  frontend-name env
+                  (mapconcat #'symbol-name
+                             (agent-repl-frontend-supported-envs fe) ", ")))
     t))
+
+(defun agent-repl--frontend-validate-for-ws (frontend-name ws)
+  "Signal `user-error' unless FRONTEND-NAME can present workspace WS.
+The ws-shaped form of `agent-repl--frontend-validate-pair': validates
+both capability axes (WS's backend and its `:active-env')."
+  (agent-repl--frontend-validate-pair frontend-name
+                                      (agent-repl--ws-backend-name ws)
+                                      (agent-repl--ws-get ws :active-env)))
 
 ;;;; ---- Dispatch helpers ----------------------------------------------------------
 
@@ -173,6 +274,45 @@ KIND is `ctrl-c' or `escape' (see the struct docstring)."
   (funcall (agent-repl-frontend-interrupt-fn (agent-repl--ws-frontend ws))
            ws kind))
 
+(defun agent-repl--frontend-dispatch-show (ws)
+  "Make WS's already-running session visible through its frontend."
+  (funcall (agent-repl-frontend-show-fn (agent-repl--ws-frontend ws)) ws))
+
+(defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)
+  "Start WS's agent session under WS's own frontend, WITHOUT showing it.
+
+The single boot door for every path that brings a workspace into
+existence or back from disk — worktree creation
+\(`agent-repl--setup-worktree-session') and snapshot / project restore
+\(`agent-repl--establish-workspace') — so all of them agree on which
+frontend a workspace is born under, instead of each hard-wiring the
+vterm boot and stranding the gui default.
+
+Order matters: the environment is hydrated (PROJECT-DIR-HINT and
+ACTIVE-ENV-HINT are `agent-repl--initialize-ws-env' hints) BEFORE the
+booting frontend is picked, because `:active-env' is one of the two
+axes the frontend resolves against — a `:sandbox' workspace must be
+recognized as sandboxed before its frontend is chosen, or the gui would
+boot it on the host, outside its container.
+
+No-op when WS's frontend already has a live session — the restore path
+re-establishes workspaces that may already be running.  The
+already-running check runs BEFORE the hydration, because
+`agent-repl--initialize-ws-env' must never run against a live session
+\(it would clobber the instantiation structs' session ids).  A running
+workspace always carries the `:active-env' its own boot hydrated, so
+the pre-hydration resolution below sees the same frontend the running
+session is on."
+  (let ((running (agent-repl--ws-frontend ws)))
+    (if (funcall (agent-repl-frontend-running-p-fn running) ws)
+        (agent-repl--log ws "boot-session: ws=%s already running on %s — skipping"
+                         ws (agent-repl-frontend-name running))
+      (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
+      (let ((fe (agent-repl--ws-frontend ws)))
+        (agent-repl--log ws "boot-session: ws=%s booting on %s"
+                         ws (agent-repl-frontend-name fe))
+        (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))))
+
 ;;;; ---- Selection & switching commands ----------------------------------------
 
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -186,12 +326,19 @@ KIND is `ctrl-c' or `escape' (see the struct docstring)."
 
 Two effects, strictly in this order:
 
-  1. PIN every live workspace still riding `agent-repl-default-frontend'
-     \(i.e. carrying no `:frontend' of its own) to that CURRENT default,
-     persisting each.  Without the pin, step 2 would reach backwards:
-     resolution is lazy (`agent-repl--ws-frontend-name'), so a workspace
-     that never chose a frontend would silently re-present itself under
-     the new one.
+  1. PIN every live workspace still riding the default (i.e. carrying no
+     `:frontend' of its own) to the frontend it CURRENTLY RESOLVES to,
+     persisting each as a deliberate choice
+     \(`agent-repl--ws-choose-frontend').  Without the pin, step 2 would
+     reach backwards: resolution is lazy (`agent-repl--ws-frontend-name'),
+     so a workspace that never chose a frontend would silently
+     re-present itself under the new one.  The pinned value is the
+     RESOLVED name rather than `agent-repl-default-frontend' itself,
+     because the two diverge for a workspace the default cannot drive
+     (a codex or `:sandbox' workspace already resolves to vterm — see
+     `agent-repl--frontend-default-for-ws'), and pinning such a
+     workspace to the raw default would hand it a presentation it
+     cannot have.
   2. FLIP `agent-repl-default-frontend' to NAME and persist it to the
      workspace snapshot, the same cross-restart channel
      `agent-repl-hide-project-dirs-enabled' rides.
@@ -212,10 +359,10 @@ No-op when NAME is already the default."
   (unless (eq name agent-repl-default-frontend)
     (dolist (ws (agent-repl--live-ws-names))
       (unless (agent-repl--ws-get ws :frontend)
-        (agent-repl--log ws "adopt-default: pinning ws=%s to %s"
-                         ws agent-repl-default-frontend)
-        (agent-repl--ws-put ws :frontend agent-repl-default-frontend)
-        (agent-repl--state-save ws)))
+        (let ((resolved (agent-repl--frontend-default-for-ws ws)))
+          (agent-repl--log ws "adopt-default: pinning ws=%s to %s" ws resolved)
+          (agent-repl--ws-choose-frontend ws resolved)
+          (agent-repl--state-save ws))))
     (agent-repl--log nil "adopt-default: %s -> %s"
                      agent-repl-default-frontend name)
     (setq agent-repl-default-frontend name)
@@ -234,11 +381,13 @@ This remains for internal callers and tests.
 With prefix argument SET-DEFAULT, set `agent-repl-default-frontend'
 \(for workspaces without a `:frontend' override) instead.
 
-Validates the choice against the workspace's backend (the gui drives
-only claude today) and refuses to change a workspace whose current
-frontend has a RUNNING session — use `agent-repl-switch-frontend' for
-a live, conversation-preserving switch.  The choice persists with the
-workspace state, mirroring `agent-repl-select-backend'.
+Validates the choice against the workspace's backend and environment
+\(the gui drives only claude, and only outside the sandbox) and refuses
+to change a workspace whose current frontend has a RUNNING session —
+use `agent-repl-switch-frontend' for a live, conversation-preserving
+switch.  The choice is recorded as DELIBERATE
+\(`agent-repl--ws-choose-frontend'), so it alone survives a restart
+while an incidentally-resolved frontend re-resolves from the default.
 
 The choice ALSO becomes the default that NEW workspaces are born with,
 via `agent-repl--frontend-adopt-default' — picking a frontend is a
@@ -257,10 +406,10 @@ first)."
       (let ((ws (agent-repl--ws-current-name)))
         (unless ws
           (user-error "agent-repl-select-frontend: no current workspace"))
-        (agent-repl--frontend-validate-pair choice (agent-repl--ws-backend-name ws))
+        (agent-repl--frontend-validate-for-ws choice ws)
         (when (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ws)) ws)
           (user-error "agent-repl-select-frontend: %s has a running session — use agent-repl-switch-frontend for a live switch" ws))
-        (agent-repl--ws-put ws :frontend choice)
+        (agent-repl--ws-choose-frontend ws choice)
         (agent-repl--state-save ws)
         (agent-repl--frontend-adopt-default choice)
         (message "agent-repl: %s frontend -> %s (new workspaces too)" ws choice)))))
@@ -279,8 +428,9 @@ claude session is the shared backend:
      semantics: close means done), then WAIT (bounded, 3s) for it to
      actually stop — vterm teardown is async (SIGKILL fallback), and
      opening early used to trip already-running guards.
-  3. FLIP `:frontend' and persist it (what `agent-repl-select-frontend'
-     would do, minus its running-session guard).
+  3. FLIP `:frontend' as a DELIBERATE choice and persist it (what
+     `agent-repl-select-frontend' would do, minus its running-session
+     guard) — deliberate is what makes it outlive a restart.
   4. ADOPT the captured session uuid into the target frontend (its
      `adopt-session-fn'), so the open below resumes the conversation
      rather than starting a fresh one.  Skipped when either side lacks
@@ -303,7 +453,7 @@ otherwise it is read by completion."
                         (car others)
                       (intern (completing-read "Switch frontend to: "
                                                (mapcar #'symbol-name others) nil t)))))
-      (agent-repl--frontend-validate-pair to-name (agent-repl--ws-backend-name ws))
+      (agent-repl--frontend-validate-for-ws to-name ws)
       (let ((from (agent-repl-frontend-get from-name))
             (to (agent-repl-frontend-get to-name))
             (durable nil)
@@ -331,7 +481,7 @@ otherwise it is read by completion."
                   (error "agent-repl-switch-frontend: %s still running %.1fs after kill"
                          from-name (* attempts 0.1))))
               (setq step "flip+persist")
-              (agent-repl--ws-put ws :frontend to-name)
+              (agent-repl--ws-choose-frontend ws to-name)
               (agent-repl--state-save ws)
               ;; Same step, wider scope: the switch also states what the
               ;; NEXT workspace should be born with.  Runs AFTER the

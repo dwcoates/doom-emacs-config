@@ -5094,43 +5094,107 @@ receives nil so the workspace uses bare-metal by default."
 
 ;;;; ---- Tests: setup-worktree-session no-agent branch ----
 
-(ert-deftest agent-repl-test-setup-worktree-session-boots-claude-by-default ()
-  "Without NO-AGENT, setup starts the agent via `initialize-agent'."
-  (let ((init-agent-called nil)
-        (init-env-called nil))
-    (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
-               (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-agent)
-               (lambda (&rest _) (setq init-agent-called t)))
-              ((symbol-function 'agent-repl--initialize-ws-env)
-               (lambda (&rest _) (setq init-env-called t)))
-              ((symbol-function 'agent-repl--active-inst)
-               (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
+(defmacro agent-repl-test--with-worktree-boot-stubs (bindings &rest body)
+  "Run BODY with the worktree boot's collaborators stubbed, plus BINDINGS.
+
+Stubs the env hydration faithfully — the real
+`agent-repl--initialize-ws-env' is the sole writer of `:active-env',
+and `agent-repl--frontend-boot-session' RESOLVES THE FRONTEND against
+that value, so a stub that dropped it would hand every test a
+bare-metal workspace and quietly defeat the sandbox cases.
+
+BINDINGS are extra `cl-letf' bindings and are spliced in FIRST, ahead
+of the defaults: when one `cl-letf' binds the same place twice, the
+EARLIER binding is the one in force for the body, so a caller's
+override must precede the default it replaces."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (cl-letf (,@bindings
+               ((symbol-function 'agent-repl--register-worktree-ws)
+                (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--initialize-ws-env)
+                (lambda (ws &optional _dir env)
+                  (agent-repl--ws-put ws :active-env (or env :bare-metal))))
+               ((symbol-function 'agent-repl--initialize-agent)
+                (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--gui-boot)
+                (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--active-inst)
+                (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-setup-worktree-session-boots-through-the-default-frontend ()
+  "Without NO-AGENT, a new worktree boots under `agent-repl-default-frontend' (gui)."
+  ;; Arrange
+  (let ((gui-booted nil)
+        (vterm-booted nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--gui-boot)
+          (lambda (ws &rest _) (setq gui-booted ws)))
+         ((symbol-function 'agent-repl--initialize-agent)
+          (lambda (&rest _) (setq vterm-booted t))))
+      ;; Act
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
-      (should init-agent-called)
-      (should-not init-env-called))))
+      ;; Assert — the generated workspace is born in the gui, not the vterm.
+      (should (equal gui-booted "ws"))
+      (should-not vterm-booted))))
+
+(ert-deftest agent-repl-test-setup-worktree-session-boots-vterm-for-a-vterm-workspace ()
+  "A workspace that chose vterm boots the vterm, not the default gui."
+  ;; Arrange
+  (let ((vterm-booted nil)
+        (gui-booted nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--initialize-agent)
+          (lambda (ws &rest _) (setq vterm-booted ws)))
+         ((symbol-function 'agent-repl--gui-boot)
+          (lambda (&rest _) (setq gui-booted t))))
+      (agent-repl--ws-choose-frontend "ws" 'vterm)
+      ;; Act
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
+      ;; Assert
+      (should (equal vterm-booted "ws"))
+      (should-not gui-booted))))
+
+(ert-deftest agent-repl-test-setup-worktree-session-force-sandbox-boots-vterm ()
+  "A force-sandbox worktree boots the vterm even though the gui is the default.
+The gui daemon spawns the agent on the host, so presenting a sandboxed
+workspace through it would run it outside the container it asked for."
+  ;; Arrange
+  (let ((vterm-booted nil)
+        (gui-booted nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--initialize-agent)
+          (lambda (ws &rest _) (setq vterm-booted ws)))
+         ((symbol-function 'agent-repl--gui-boot)
+          (lambda (&rest _) (setq gui-booted t))))
+      ;; Act — force-sandbox = t.
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
+      ;; Assert
+      (should (equal vterm-booted "ws"))
+      (should-not gui-booted))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-does-not-escape ()
-  "An `initialize-agent' failure (e.g. sandbox image not built) is caught,
+  "A boot failure (e.g. sandbox image not built) is caught,
 so it cannot escape and crash the `--async-git-sentinel' that calls this."
-  (cl-letf (((symbol-function 'agent-repl--register-worktree-ws) (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--initialize-agent)
-             (lambda (&rest _) (user-error "Sandbox image not built")))
-            ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
-            ((symbol-function 'message) (lambda (&rest _) nil)))
+  (agent-repl-test--with-worktree-boot-stubs
+      (((symbol-function 'agent-repl--gui-boot)
+        (lambda (&rest _) (user-error "Sandbox image not built")))
+       ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
+       ((symbol-function 'message) (lambda (&rest _) nil)))
     ;; Returns normally rather than signaling.
     (should (progn (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil) t))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-marks-start-failed ()
-  "A caught `initialize-agent' failure sets :agent-state :start-failed so
+  "A caught boot failure sets :agent-state :start-failed so
 the tab/drawer surface the failure instead of it vanishing silently."
   (let ((recorded nil))
-    (cl-letf (((symbol-function 'agent-repl--register-worktree-ws) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-agent)
-               (lambda (&rest _) (user-error "Sandbox image not built")))
-              ((symbol-function 'agent-repl--ws-set-agent-state)
-               (lambda (ws state) (setq recorded (cons ws state))))
-              ((symbol-function 'message) (lambda (&rest _) nil)))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--gui-boot)
+          (lambda (&rest _) (user-error "Sandbox image not built")))
+         ((symbol-function 'agent-repl--ws-set-agent-state)
+          (lambda (ws state) (setq recorded (cons ws state))))
+         ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
       (should (equal recorded '("ws" . :start-failed))))))
 
@@ -5463,56 +5527,70 @@ from `default-directory' via `agent-repl--git-root'."
 ;;;; ---- Tests: setup-worktree-session ----
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()
-  "When force-sandbox is t, initialize-agent receives :sandbox as the env hint."
-  (agent-repl-test--with-clean-state
-    (let ((captured-env nil))
-      (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
-                 (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws &optional _dir env) (setq captured-env env)))
-                ((symbol-function 'agent-repl--active-inst)
-                 (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
-        (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
-        (should (eq captured-env :sandbox))))))
+  "When force-sandbox is t, the env hydration receives :sandbox as the env hint."
+  ;; Arrange
+  (let ((captured-env nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--initialize-ws-env)
+          (lambda (ws &optional _dir env)
+            (setq captured-env env)
+            (agent-repl--ws-put ws :active-env env))))
+      ;; Act
+      (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
+      ;; Assert
+      (should (eq captured-env :sandbox)))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-bare-metal-hint-by-default ()
-  "When force-sandbox is nil, initialize-agent receives :bare-metal as the env hint."
-  (agent-repl-test--with-clean-state
-    (let ((captured-env nil))
-      (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
-                 (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws &optional _dir env) (setq captured-env env)))
-                ((symbol-function 'agent-repl--active-inst)
-                 (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
-        (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
-        (should (eq captured-env :bare-metal))))))
+  "When force-sandbox is nil, the env hydration receives :bare-metal as the env hint."
+  ;; Arrange
+  (let ((captured-env nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--initialize-ws-env)
+          (lambda (ws &optional _dir env)
+            (setq captured-env env)
+            (agent-repl--ws-put ws :active-env env))))
+      ;; Act
+      (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
+      ;; Assert
+      (should (eq captured-env :bare-metal)))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-passes-path-hint ()
-  "initialize-agent receives the worktree PATH as the project-dir hint."
-  (agent-repl-test--with-clean-state
-    (let ((captured-dir-hint nil))
-      (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
-                 (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws &optional dir _env) (setq captured-dir-hint dir)))
-                ((symbol-function 'agent-repl--active-inst)
-                 (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
-        (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
-        (should (equal captured-dir-hint "/tmp/my-worktree"))))))
+  "The env hydration receives the worktree PATH as the project-dir hint."
+  ;; Arrange
+  (let ((captured-dir-hint nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--initialize-ws-env)
+          (lambda (ws &optional dir env)
+            (setq captured-dir-hint dir)
+            (agent-repl--ws-put ws :active-env (or env :bare-metal)))))
+      ;; Act
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      ;; Assert
+      (should (equal captured-dir-hint "/tmp/my-worktree")))))
+
+(ert-deftest agent-repl-test-setup-worktree-session-passes-path-hint-to-the-frontend-boot ()
+  "The frontend's boot capability receives the worktree PATH as its hint."
+  ;; Arrange
+  (let ((captured-dir-hint nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--gui-boot)
+          (lambda (_ws &optional dir _env) (setq captured-dir-hint dir))))
+      ;; Act
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      ;; Assert
+      (should (equal captured-dir-hint "/tmp/my-worktree")))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-binds-default-directory ()
-  "During initialize-agent, default-directory is bound to the worktree path."
-  (agent-repl-test--with-clean-state
-    (let ((captured-dir nil))
-      (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
-                 (lambda (_ws-id &optional _ws) nil))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws &optional _dir _env) (setq captured-dir default-directory)))
-                ((symbol-function 'agent-repl--active-inst)
-                 (lambda (_ws) (make-agent-repl-instantiation :start-cmd "claude"))))
-        (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
-        (should (equal captured-dir "/tmp/my-worktree/"))))))
+  "During the boot, default-directory is bound to the worktree path."
+  ;; Arrange
+  (let ((captured-dir nil))
+    (agent-repl-test--with-worktree-boot-stubs
+        (((symbol-function 'agent-repl--gui-boot)
+          (lambda (&rest _) (setq captured-dir default-directory))))
+      ;; Act
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      ;; Assert
+      (should (equal captured-dir "/tmp/my-worktree/")))))
 
 ;;;; ---- Tests: async-git-sentinel ----
 

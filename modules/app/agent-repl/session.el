@@ -240,7 +240,8 @@ SAVED is a parsed state-file plist (or nil).  Hydrates the
 non-env-struct keys that drive the tabline badge and drawer glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
 `:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
-`:backend-session-stash', `:last-prompt-summary',
+`:backend-session-stash', `:frontend' (only when the save marked it a
+deliberate choice — see below), `:last-prompt-summary',
 `:last-prompt-summary-at', `:worktree-p', and the `:merge-completed' /
 `:merge-failed' / `:merge-completed-at' bookkeeping.
 
@@ -285,11 +286,22 @@ remaining keys are written only when SAVED carries them."
   (agent-repl--ws-put ws :backend
                        (or (and saved (plist-get saved :backend))
                            (agent-repl--ws-get ws :backend)))
-  ;; Frontend: same restore contract as :backend — a gui workspace
-  ;; reopens through the gui after an Emacs restart.
-  (agent-repl--ws-put ws :frontend
-                       (or (and saved (plist-get saved :frontend))
-                           (agent-repl--ws-get ws :frontend)))
+  ;; Frontend: restored ONLY when the saved plist marks it as a
+  ;; DELIBERATE choice (`:frontend-explicit', written by
+  ;; `agent-repl--ws-choose-frontend' — `SPC o F' and friends).  Anything
+  ;; else in the saved `:frontend' is an INCIDENTAL stamp left by a vterm
+  ;; boot (`agent-repl--initialize-agent'), and honoring it would pin
+  ;; every workspace that ever booted a vterm — i.e. every workspace
+  ;; predating the gui — to vterm forever, so a restored workspace could
+  ;; never follow `agent-repl-default-frontend' forward.  Left unset, the
+  ;; frontend re-resolves from the default (constrained by the workspace's
+  ;; backend and env — see `agent-repl--frontend-default-for-ws', which is
+  ;; what still brings a codex or `:sandbox' workspace back up in vterm).
+  (when (and saved (plist-get saved :frontend-explicit))
+    (agent-repl--ws-put ws :frontend-explicit t)
+    (agent-repl--ws-put ws :frontend
+                         (or (plist-get saved :frontend)
+                             (agent-repl--ws-get ws :frontend))))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
   ;; already in the plist.  Used by the drawer's detail view to show
   ;; "duration since last user message"; survives Emacs restarts so

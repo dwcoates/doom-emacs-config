@@ -54,7 +54,10 @@
 (declare-function agent-repl--restore-fullscreen-config "agent-repl-panels" (ws))
 (declare-function agent-repl--buffer-name "agent-repl-core" (suffix ws))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
-(declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name))
+(declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name &optional env))
+(declare-function agent-repl--frontend-validate-for-ws "agent-repl-frontends" (frontend-name ws))
+(declare-function agent-repl--ws-choose-frontend "agent-repl-frontends" (ws name))
+(declare-function agent-repl--ws-set-agent-state "agent-repl-status" (ws state))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
 (declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw &optional on-settle))
@@ -309,17 +312,48 @@ window like an ordinary buffer display."
 
 (defun agent-repl--gui-open (ws)
   "The gui frontend's open capability (registry `:open-fn').
-The lazy end-to-end trigger: validates the backend pair and xwidget
-capability, ensures the daemon (built if stale, launched if absent),
-ensures WS's daemon session (rooted at its worktree), mounts the
-webview attached to that session, and places it over the input panel."
+The lazy end-to-end trigger: validates the backend/env capability and
+xwidget support, ensures the daemon (built if stale, launched if
+absent), ensures WS's daemon session (rooted at its worktree), mounts
+the webview attached to that session, and places it over the input
+panel."
   (unless (agent-repl--frontend-xwidget-available-p)
     (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
-  (agent-repl--frontend-validate-pair 'gui (agent-repl--ws-backend-name ws))
+  (agent-repl--frontend-validate-for-ws 'gui ws)
   (let* ((session-id (agent-repl--frontend-ensure-session ws))
          (url (agent-repl--frontend-webview-url ws session-id))
          (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
     (agent-repl--frontend-display-webview ws buf)))
+
+(defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
+  "The gui frontend's boot capability (registry `:boot-fn').
+Starts WS's daemon session in the BACKGROUND — no daemon is asked for a
+webview and no window is touched, because the birth and restore paths
+run in the CALLER's frame (a newly generated workspace is not the
+current one, and mounting its webview here would evict the user's
+windows).  The view arrives later, when the user switches to WS and the
+`:pending-show-panels' drain shows it through the frontend.
+
+Booting the session eagerly (rather than lazily at first open) is what
+gives a generated gui workspace the same contract the vterm boot has:
+the agent starts immediately, its `session_start' hook fires, and the
+`:pending-prompts' queued by the workspace-generation dispatch drain
+into it (`agent-repl--on-session-start-event').
+
+Writes `:agent-state :init' before the session exists — the same
+documented lifecycle exception `agent-repl--initialize-agent' takes (no
+hook fires between \"the session is being created\" and session_start,
+so Emacs is the only observer of it).  Without it a generated gui
+workspace would render NO state in the tab and drawer until its agent
+answered, where the vterm-born one showed a loading badge; the gui
+branch of `agent-repl--on-session-start-event' flips `:init' to `:idle'.
+
+The hints are unused: `agent-repl--frontend-boot-session' has already
+hydrated the environment with them, and the gui reads WS's
+`:project-dir' from the plist (`agent-repl--frontend-ensure-session')."
+  (agent-repl--frontend-validate-for-ws 'gui ws)
+  (agent-repl--ws-set-agent-state ws :init)
+  (agent-repl--frontend-ensure-session ws))
 
 (defun agent-repl--frontend-webview-url (ws session-id)
   "Return the webapp URL for WS's webview attached to SESSION-ID.
@@ -402,6 +436,7 @@ survives — it is workspace furniture, not session state."
  (agent-repl-frontend-create
   :name 'gui
   :open-fn #'agent-repl--gui-open
+  :boot-fn #'agent-repl--gui-boot
   :kill-fn #'agent-repl--gui-kill
   :send-fn #'agent-repl--gui-send-turn
   :interrupt-fn #'agent-repl--gui-interrupt
@@ -414,21 +449,29 @@ survives — it is workspace furniture, not session state."
   ;; The gui drives sessions through the claude Agent SDK; a codex
   ;; shim does not exist (yet), so the pair validation fails loudly.
   :supported-backends '(claude)
+  ;; The daemon spawns the agent on the HOST — there is no docker
+  ;; wrapper on this path (`agent-repl--build-start-cmd', the vterm's
+  ;; sandbox launcher, has no counterpart here).  A `:sandbox'
+  ;; workspace therefore cannot be presented by the gui: doing so would
+  ;; quietly re-launch it outside the container it asked for.
+  :supported-envs '(:bare-metal)
   :durable-session-id-fn #'agent-repl--gui-durable-session-id
   :adopt-session-fn #'agent-repl--gui-adopt-session))
 
 ;;;###autoload
 (defun agent-repl-frontend-open-panel ()
   "Open the web frontend for the current workspace's session.
-Stamps the workspace's `:frontend' choice to `gui' (the unified
-command surface — `SPC o c' and friends — then routes here through the
-frontend registry) and dispatches the gui open capability."
+Records `gui' as the workspace's DELIBERATE frontend choice (asking for
+the web panel by name is a choice, so it outlives a restart) and
+dispatches the gui open capability.  The unified command surface —
+`SPC o c' and friends — reaches the same place through the frontend
+registry."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
-    (agent-repl--frontend-validate-pair 'gui (agent-repl--ws-backend-name ws))
-    (agent-repl--ws-put ws :frontend 'gui)
+    (agent-repl--frontend-validate-for-ws 'gui ws)
+    (agent-repl--ws-choose-frontend ws 'gui)
     (agent-repl--gui-open ws)))
 
 ;;;###autoload
