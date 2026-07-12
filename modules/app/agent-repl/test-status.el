@@ -305,6 +305,32 @@ The post-merge poll otherwise clobbers the 🔀 badge with ❌."
     (agent-repl--mark-dead-vterm "ws1")
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :merged))))
 
+(ert-deftest agent-repl-test-mark-dead-vterm-already-dead-clears-stale-agent-state ()
+  "A death event on an already-:dead workspace still clears :agent-state.
+A gui send into a dead binding optimistically marks :thinking; if the
+healed session also dies, the death event fires with :repl-state
+already :dead and must not leave the tab spinning :thinking forever."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :repl-state :dead)
+    (agent-repl--ws-put "ws1" :agent-state :thinking)
+    ;; Act
+    (agent-repl--mark-dead-vterm "ws1")
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :agent-state))
+    (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))))
+
+(ert-deftest agent-repl-test-mark-dead-vterm-already-dead-init-grace-preserved ()
+  "The :init grace outranks the stale-state sweep on a :dead workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :repl-state :dead)
+    (agent-repl--ws-put "ws1" :agent-state :init)
+    ;; Act
+    (agent-repl--mark-dead-vterm "ws1")
+    ;; Assert — :init survives; the session-start hook owns the transition.
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :init))))
+
 ;;;; ---- Tests: Workspace state accessors (ws-set, ws-clear, ws-state) ----
 
 (ert-deftest agent-repl-test-ws-set-and-state ()
@@ -1859,13 +1885,19 @@ redundant `directory-files' scan to each."
     (should-not (agent-repl--ws-agent-state "ws1"))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-idempotent ()
-  "mark-dead-vterm is a no-op when :repl-state is already :dead."
+  "A second death observation leaves an already-clean :dead workspace unchanged.
+Stale :agent-state residue on a :dead workspace is NOT preserved
+anymore — that was the stuck-:thinking bug — so idempotence means the
+fully-transitioned state (:dead, nil agent-state) is a fixed point."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :repl-state :dead)
-    (agent-repl--ws-put "ws1" :agent-state :done)  ; simulate stale residue
+    ;; Arrange: first observation performs the full transition.
+    (agent-repl--ws-put "ws1" :agent-state :done)
     (agent-repl--mark-dead-vterm "ws1")
-    ;; Second call must not re-run the clear — agent-state stays as-is.
-    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
+    ;; Act
+    (agent-repl--mark-dead-vterm "ws1")
+    ;; Assert — fixed point.
+    (should (eq (agent-repl--ws-repl-state "ws1") :dead))
+    (should-not (agent-repl--ws-agent-state "ws1"))))
 
 (ert-deftest agent-repl-test-mark-dead-vterm-display-state ()
   "mark-dead-vterm results in :dead display state (❌ badge) when panels visible."
