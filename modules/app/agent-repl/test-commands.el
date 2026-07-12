@@ -511,7 +511,14 @@ directory as the workspace's daemon session."
 (defmacro agent-repl-cmd-test--with-establish-stubs (&rest body)
   "Run BODY with `agent-repl--establish-workspace's side effects stubbed.
 Leaves only the ws-plist writes and the final agent-boot branch live so
-tests can observe which frontend boot fired."
+tests can observe which frontend boot fired.
+
+The env hydration is stubbed but kept FAITHFUL: the boot
+\(`agent-repl--frontend-boot-session') hydrates before it resolves the
+frontend, and `:active-env' is one of the axes it resolves against, so
+a stub that wrote nothing would misrepresent a restored sandbox
+workspace as bare-metal.  Stubbing it also keeps the restore path from
+writing a state file into the fake project dir."
   (declare (indent 0))
   `(cl-letf (((symbol-function 'agent-repl--ws-create) #'ignore)
              ((symbol-function 'agent-repl--ws-frame-switch) #'ignore)
@@ -519,6 +526,9 @@ tests can observe which frontend boot fired."
              ((symbol-function 'agent-repl--ws-register-project) #'ignore)
              ((symbol-function 'agent-repl--ws-run-switch-project-function) #'ignore)
              ((symbol-function 'agent-repl--most-recent-project-file) (lambda (_d) nil))
+             ((symbol-function 'agent-repl--initialize-ws-env)
+              (lambda (ws &optional _dir env)
+                (agent-repl--ws-put ws :active-env (or env :bare-metal))))
              ((symbol-function 'agent-repl--hydrate-and-reorder-on-open) #'ignore))
      ,@body))
 
@@ -561,9 +571,52 @@ silently undoing the user's frontend choice on every restart."
                    (lambda (ws) (setq ensured ws)))
                   ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                   ((symbol-function 'agent-repl--initialize-agent)
-                   (lambda (ws) (setq init-ws ws))))
+                   (lambda (ws &optional _dir _env) (setq init-ws ws))))
           (agent-repl--establish-workspace "ws-vt" "/tmp/ws-vt")
           (should (equal init-ws "ws-vt"))
+          (should-not ensured))))))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/no-choice-restores-under-default ()
+  "A restored workspace with no DELIBERATE frontend choice comes up in the gui.
+This is the old-workspace case: every workspace predating the gui carries
+an incidental `:frontend vterm' stamp in its state file, which the restore
+deliberately ignores — so it follows `agent-repl-default-frontend' forward
+rather than staying pinned to the vterm it happened to boot once."
+  (let (ensured init-called)
+    (agent-repl-test--with-clean-state
+      ;; Arrange — no :frontend at all (what the restore leaves behind for a
+      ;; workspace whose save carried no :frontend-explicit marker).
+      (agent-repl-cmd-test--with-establish-stubs
+        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (ws) (setq ensured ws)))
+                  ((symbol-function 'agent-repl--initialize-agent)
+                   (lambda (&rest _) (setq init-called t))))
+          ;; Act
+          (agent-repl--establish-workspace "ws-old" "/tmp/ws-old")
+          ;; Assert
+          (should (equal ensured "ws-old"))
+          (should-not init-called))))))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/sandbox-restores-under-vterm ()
+  "A restored :sandbox workspace boots the vterm despite the gui default.
+The gui cannot run a sandboxed session, so resolving it to the default
+would re-launch the workspace outside its container."
+  (let (init-ws ensured)
+    (agent-repl-test--with-clean-state
+      (agent-repl-cmd-test--with-establish-stubs
+        (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
+                   ;; The state file said :sandbox; hydration is what surfaces it.
+                   (lambda (ws &optional _dir _env)
+                     (agent-repl--ws-put ws :active-env :sandbox)))
+                  ((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (ws) (setq ensured ws)))
+                  ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                  ((symbol-function 'agent-repl--initialize-agent)
+                   (lambda (ws &optional _dir _env) (setq init-ws ws))))
+          ;; Act
+          (agent-repl--establish-workspace "ws-sb" "/tmp/ws-sb")
+          ;; Assert
+          (should (equal init-ws "ws-sb"))
           (should-not ensured))))))
 
 ;;;; ---- agent-repl-explain ----

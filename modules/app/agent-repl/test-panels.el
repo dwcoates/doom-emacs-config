@@ -304,6 +304,7 @@
 (ert-deftest agent-repl-test-panels-drain-pending-when-set-and-ready ()
   "drain-pending-show-panels shows panels and clears the flag when the agent is ready."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
     (let ((called nil))
       (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) nil))
@@ -313,9 +314,31 @@
         (should called)
         (should-not (agent-repl--ws-get "test-ws" :pending-show-panels))))))
 
+(ert-deftest agent-repl-test-panels-drain-pending-shows-gui-frontend ()
+  "drain-pending-show-panels shows a GUI workspace through the gui show capability."
+  (agent-repl-test--with-clean-state
+    ;; Arrange — a generated gui workspace: session booted headlessly, view
+    ;; deferred to the first switch, which is where this drain runs.
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (agent-repl--ws-put "test-ws" :pending-show-panels t)
+    (let ((shown nil)
+          (vterm-panels nil))
+      (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--gui-show)
+                 (lambda (ws) (setq shown ws)))
+                ((symbol-function 'agent-repl--show-hidden-panels)
+                 (lambda () (setq vterm-panels t))))
+        ;; Act
+        (agent-repl--drain-pending-show-panels "test-ws")
+        ;; Assert
+        (should (equal shown "test-ws"))
+        (should-not vterm-panels)
+        (should-not (agent-repl--ws-get "test-ws" :pending-show-panels))))))
+
 (ert-deftest agent-repl-test-panels-drain-pending-when-set-but-starting ()
   "drain-pending-show-panels defers (leaves flag set, no show) when session is starting."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
     (let ((called nil))
       (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) t))
@@ -1394,10 +1417,17 @@ whole layout (which would duplicate the already-visible output window)."
         (should-not shown-hidden)))))
 
 ;;;; ---- Tests: validate-env-switch ----
+;;
+;; Environment switching is vterm machinery, so every case below pins
+;; the workspace to the vterm frontend: without the pin the workspace
+;; rides `agent-repl-default-frontend' (the gui), and the gui guard
+;; would be the thing that errors — passing these tests for a reason
+;; that has nothing to do with the precondition each one is about.
 
 (ert-deftest agent-repl-test-panels-validate-env-switch-no-worktree ()
   "validate-env-switch errors when not a worktree workspace."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (should-error
      (agent-repl--validate-env-switch "test-ws" :sandbox nil "session-123")
      :type 'user-error)))
@@ -1405,6 +1435,7 @@ whole layout (which would duplicate the already-visible output window)."
 (ert-deftest agent-repl-test-panels-validate-env-switch-no-session-id ()
   "validate-env-switch errors when no session ID is available."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (should-error
      (agent-repl--validate-env-switch "test-ws" :sandbox t nil)
      :type 'user-error)))
@@ -1412,6 +1443,7 @@ whole layout (which would duplicate the already-visible output window)."
 (ert-deftest agent-repl-test-panels-validate-env-switch-thinking ()
   "validate-env-switch errors when the agent is thinking."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (agent-repl--ws-put "test-ws" :thinking t)
     (should-error
      (agent-repl--validate-env-switch "test-ws" :sandbox t "session-123")
@@ -1420,15 +1452,27 @@ whole layout (which would duplicate the already-visible output window)."
 (ert-deftest agent-repl-test-panels-validate-env-switch-no-sandbox-config ()
   "validate-env-switch errors when switching to sandbox with no config."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (cl-letf (((symbol-function 'agent-repl--resolve-sandbox-config) (lambda (_) nil))
               ((symbol-function 'agent-repl--git-root) (lambda (_) "/tmp")))
       (should-error
        (agent-repl--validate-env-switch "test-ws" :sandbox t "session-123")
        :type 'user-error))))
 
+(ert-deftest agent-repl-test-panels-validate-env-switch-gui-frontend ()
+  "validate-env-switch refuses a gui workspace: env switching is vterm-only."
+  (agent-repl-test--with-clean-state
+    ;; Arrange — a gui workspace that satisfies every OTHER precondition.
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    ;; Act / Assert
+    (should-error
+     (agent-repl--validate-env-switch "test-ws" :bare-metal t "session-123")
+     :type 'user-error)))
+
 (ert-deftest agent-repl-test-panels-validate-env-switch-bare-metal-ok ()
   "validate-env-switch succeeds for bare-metal switch with valid args."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     ;; Should not error
     (agent-repl--validate-env-switch "test-ws" :bare-metal t "session-123")))
 
@@ -4768,5 +4812,26 @@ needs a separate enter-fullscreen step."
               ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))
+
+;;;; ---- Tests: vterm frontend registration ----
+
+(ert-deftest agent-repl-test-panels-vterm-declares-both-environments ()
+  "The vterm frontend declares both environments: it is the only sandbox-capable one."
+  ;; Act / Assert
+  (should (equal (agent-repl-frontend-supported-envs (agent-repl-frontend-get 'vterm))
+                 '(:bare-metal :sandbox))))
+
+(ert-deftest agent-repl-test-panels-vterm-boot-threads-the-creation-hints ()
+  "The vterm boot capability passes the project-dir and env hints to initialize-agent."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((got nil))
+      (cl-letf (((symbol-function 'agent-repl--initialize-agent)
+                 (lambda (ws &optional dir env) (setq got (list ws dir env)))))
+        ;; Act
+        (funcall (agent-repl-frontend-boot-fn (agent-repl-frontend-get 'vterm))
+                 "ws1" "/tmp/wt" :sandbox)
+        ;; Assert
+        (should (equal got '("ws1" "/tmp/wt" :sandbox)))))))
 
 ;;; test-panels.el ends here

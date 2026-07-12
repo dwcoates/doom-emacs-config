@@ -13,6 +13,7 @@
 (declare-function agent-repl--merge-queue-front-for-target "worktree")
 (declare-function agent-repl--ws-gui-frontend-p "frontends")
 (declare-function agent-repl--frontend-dispatch-send "frontends")
+(declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
@@ -1431,10 +1432,10 @@ Each call:
     entries in saved tab-bar order and per-entry priority reseating
     would shuffle them back into priority order, defeating
     `agent-repl--collect-snapshot-entries' order preservation,
-- starts claude unless already running — via
-  `agent-repl--initialize-agent' for vterm workspaces, or a background
-  daemon session (`agent-repl--frontend-ensure-session', resuming the
-  durable claude session) for gui workspaces."
+- starts the agent unless already running, through the workspace's own
+  frontend (`agent-repl--frontend-boot-session') — the vterm process for
+  a vterm workspace, a background daemon session (resuming the durable
+  claude session) for a gui one."
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
     ;; `SPC p p' to DIR matches this workspace; see --ws-create for the
@@ -1488,20 +1489,17 @@ Each call:
     ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
     ;; (see `agent-repl--hydrate-and-reorder-on-open').
     (agent-repl--hydrate-and-reorder-on-open ws dir)
-    ;; Boot the agent through the workspace's own frontend.  The vterm
-    ;; branch is the classic pre-start; the gui branch ensures a daemon
+    ;; Boot the agent through the workspace's own frontend — the same
+    ;; door worktree creation uses, so a restored workspace and a
+    ;; freshly generated one agree on what they come up as.  The vterm
+    ;; boot is the classic pre-start; the gui boot ensures a daemon
     ;; session (background — no webview until the user opens the panel)
-    ;; which resumes the workspace's durable claude session, so a
-    ;; restored gui workspace continues its conversation instead of
-    ;; being silently re-presented (and re-stamped) as vterm.
-    (if (agent-repl--ws-gui-frontend-p ws)
-        (unless (agent-repl--ws-get ws :frontend-session-id)
-          (agent-repl--log ws "establish-workspace: ensuring background gui session ws=%s" ws)
-          (agent-repl--frontend-ensure-session ws))
-      (when (and (fboundp 'agent-repl--initialize-agent)
-                 (fboundp 'agent-repl--agent-running-p)
-                 (not (agent-repl--agent-running-p ws)))
-        (agent-repl--initialize-agent ws)))))
+    ;; that resumes the workspace's durable claude session, so a restored
+    ;; gui workspace continues its conversation.  A workspace with no
+    ;; DELIBERATE frontend choice (`:frontend-explicit') restores under
+    ;; the current default rather than under whatever it happened to boot
+    ;; last time.
+    (agent-repl--frontend-boot-session ws)))
 
 (defvar agent-repl--snapshot-load-state nil
   "Plist describing an in-progress recursive snapshot load, or nil.
