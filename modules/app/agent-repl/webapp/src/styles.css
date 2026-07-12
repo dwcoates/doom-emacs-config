@@ -139,9 +139,18 @@ pre {
 .mp-tree { font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-line { display: flex; }
-.mp-prefix { white-space: pre; flex: none; }
+.mp-prefix { white-space: pre; flex: none; position: relative; }
 .mp-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .mp-blank { height: 0.7em; }
+/* Continuation rails: a wrapped branch's overflow lines must repaint
+   the tree's vertical rails (every leading │, and the connector column
+   when the connector is ├ — a └ ends its rail), or the wrap visually
+   severs the branch from the sibling below it. Each rail is a hairline
+   from the row's SECOND visual line (the first line's glyphs cover
+   line one) to the row's bottom, centered in its ch cell via the
+   inline left offset the renderer computes. Rows that never wrap give
+   the rail zero height, so it paints nothing. */
+.mp-rail { position: absolute; top: 1lh; bottom: 0; border-left: 1px solid currentColor; }
 
 .thinking {
   border-left: 3px solid var(--border);

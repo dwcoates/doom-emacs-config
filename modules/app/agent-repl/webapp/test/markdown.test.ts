@@ -157,7 +157,7 @@ describe("metaprompt trees in fences", () => {
     const html = renderMarkdown(text);
     // Assert
     expect(html).toContain(`class="mp-tree"`);
-    expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
+    expect(html).toContain(`<span class="mp-prefix">├── 1.1 <i class="mp-rail"`);
     expect(html).not.toContain("md-code");
   });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isMetapromptTree,
+  railOffsets,
   renderTreeHtml,
   splitTreeLine,
 } from "../src/metaprompt-tree.js";
@@ -90,13 +91,60 @@ describe("splitTreeLine", () => {
   });
 });
 
+describe("railOffsets", () => {
+  it("gives a ├ connector a rail at its own column", () => {
+    // Act + Assert
+    expect(railOffsets("├── 1.1 ")).toEqual([0]);
+  });
+
+  it("gives a └ connector no rail — it ends the line", () => {
+    // Act + Assert
+    expect(railOffsets("└── 1.2 ")).toEqual([]);
+  });
+
+  it("keeps a leading vertical bar's rail through a └ branch", () => {
+    // Act + Assert
+    expect(railOffsets("│   └── 1.1.1 ")).toEqual([0]);
+  });
+
+  it("stacks leading-bar and ├ connector rails", () => {
+    // Act + Assert
+    expect(railOffsets("│   ├── 1.1.1 ")).toEqual([0, 4]);
+  });
+
+  it("gives an emoji root no rails", () => {
+    // Act + Assert
+    expect(railOffsets("1 🔧 ")).toEqual([]);
+  });
+});
+
 describe("renderTreeHtml", () => {
   it("renders each line as a prefix/content flex pair", () => {
     // Act
     const html = renderTreeHtml("├── 1.1 Detail", identity);
     // Assert
-    expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
+    expect(html).toContain(`<span class="mp-prefix">├── 1.1 `);
     expect(html).toContain(`<span class="mp-content">Detail</span>`);
+  });
+
+  it("paints a continuation rail inside a ├ branch's prefix", () => {
+    // Act
+    const html = renderTreeHtml("├── 1.1 Detail", identity);
+    // Assert — centered in the connector's ch cell.
+    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i></span>`);
+  });
+
+  it("paints no continuation rail for a └ branch", () => {
+    // Act + Assert
+    expect(renderTreeHtml("└── 1.2 Detail", identity)).not.toContain("mp-rail");
+  });
+
+  it("paints one rail per continuing column on nested branches", () => {
+    // Act
+    const html = renderTreeHtml("│   ├── 1.1.1 Deep detail", identity);
+    // Assert
+    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i>`);
+    expect(html).toContain(`<i class="mp-rail" style="left:4.5ch"></i>`);
   });
 
   it("renders blank lines as spacer rows", () => {
