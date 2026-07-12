@@ -36,10 +36,19 @@
   "Run BODY with daemon process primitives and the init guard shadowed.
 `agent-repl--frontend-init-inhibited-p' returns nil so the real ensure
 path runs under batch; `process-live-p'/`process-id'/`delete-process'
-route through the fake-daemon struct."
+route through the fake-daemon struct.
+
+`agent-repl--frontend-turn-active-sessions' is stubbed IDLE, which makes
+this env hermetic: the real probe HTTP-GETs whatever `claude-repld' is
+running on the developer's machine, so an unstubbed daemon test silently
+keys on the developer's own live sessions and fails whenever one of them
+happens to be mid-turn.  Tests wanting a busy probe re-stub it with their
+own `cl-letf', which shadows this one for the extent of that form."
   `(let ((agent-repl-frontend-auto-start t)
          (agent-repl--frontend-daemon-process nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+                (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
                ((symbol-function 'process-live-p)
                 (lambda (p) (and (agent-repl-test--fake-daemon-p p)
@@ -364,6 +373,15 @@ route through the fake-daemon struct."
   (let ((agent-repl--frontend-daemon-process nil))
     ;; Act / Assert
     (should-not (agent-repl--frontend-daemon-live-p))))
+
+(ert-deftest agent-repl-test-daemon-env-turn-probe-is-idle-by-default ()
+  "The daemon test env reports no in-flight turns without a per-test stub.
+Regression guard: the unstubbed probe queries the developer's live
+`claude-repld' over HTTP, which made every unstubbed daemon test fail
+whenever a real session happened to be mid-turn."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-daemon-env
+   (should-not (agent-repl--frontend-turn-active-sessions))))
 
 (ert-deftest agent-repl-test-daemon-stop-deletes-and-clears ()
   "Stopping deletes the live process and clears the tracker."
