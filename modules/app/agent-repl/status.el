@@ -1788,16 +1788,30 @@ No-op in four cases:
 - `:agent-state' is `:init' — the agent is starting, the vterm process
   may not have reached running state yet, and observing no process
   does not mean dead.  The session-start hook will transition away
-  from `:init' shortly; until then the timer leaves things alone."
-  (unless (or (eq (agent-repl--ws-repl-state ws) :dead)
-              (eq (agent-repl--ws-repl-state ws) :merged)
-              (eq (agent-repl--ws-repl-state ws) :merge-failed)
-              (eq (agent-repl--ws-agent-state ws) :init))
+  from `:init' shortly; until then the timer leaves things alone.
+
+An already-`:dead' workspace is idempotent for `:repl-state' but NOT
+for `:agent-state': a gui send into a dead binding optimistically
+marks `:thinking' before the heal, and when the healed session also
+dies the death event must still clear it — otherwise the tab spins
+`:thinking' forever (observed in the resume-death-loop incident)."
+  (cond
+   ((or (eq (agent-repl--ws-repl-state ws) :merged)
+        (eq (agent-repl--ws-repl-state ws) :merge-failed)
+        (eq (agent-repl--ws-agent-state ws) :init))
+    nil)
+   ((eq (agent-repl--ws-repl-state ws) :dead)
+    (when (agent-repl--ws-agent-state ws)
+      (agent-repl--log ws "mark-dead-vterm: ws=%s already :dead — clearing stale agent-state=%s"
+                        ws (agent-repl--ws-agent-state ws))
+      (agent-repl--ws-put ws :agent-state nil)
+      (force-mode-line-update t)))
+   (t
     (agent-repl--log ws "mark-dead-vterm: ws=%s agent-state=%s -> :dead"
                       ws (agent-repl--ws-agent-state ws))
     (agent-repl--ws-put ws :repl-state :dead)
     (agent-repl--ws-put ws :agent-state nil)
-    (force-mode-line-update t)))
+    (force-mode-line-update t))))
 
 ;;; Frame focus handler -------------------------------------------------------
 
