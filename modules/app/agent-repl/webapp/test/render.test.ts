@@ -534,6 +534,31 @@ describe("renderItem", () => {
       expect(html).toContain(`\t</span><span class="hljs-keyword">const</span>`);
     });
 
+    it("renders a numbered markdown Read as formatted markdown without a gutter", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/README.md", "     1\t# Title\n     2\t**bold**"));
+      // Assert — rendered blocks, no line-no spans, capped container.
+      expect(html).toContain("<h1>Title</h1>");
+      expect(html).toContain("<strong>bold</strong>");
+      expect(html).not.toContain("line-no");
+      expect(html).toContain(`class="tool-output tool-read-output tool-read-md"`);
+    });
+
+    it("renders a non-numbered markdown Read as formatted markdown", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/notes.markdown", "# Heading"));
+      // Assert
+      expect(html).toContain("<h1>Heading</h1>");
+    });
+
+    it("keeps markdown Read errors on the plain stderr path", () => {
+      // Arrange + Act
+      const html = renderItem(readItem("/w/README.md", "# not rendered", true));
+      // Assert
+      expect(html).toContain("stderr");
+      expect(html).not.toContain("<h1>");
+    });
+
     it("highlights non-numbered content as-is", () => {
       // Arrange + Act
       const html = renderItem(readItem("/w/app.ts", "const x = 1;"));

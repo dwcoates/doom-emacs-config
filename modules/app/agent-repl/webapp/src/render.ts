@@ -228,8 +228,11 @@ function toolResult(item: ToolItem): string {
  * prefix lifted into a muted .line-no span so only the code text is
  * syntax-highlighted (language from the file_path extension, plain
  * escaped text when it is unknown); non-numbered content is
- * highlighted whole. .tool-read-output caps the visible height at 10
- * lines — the rest stays reachable by scrolling.
+ * highlighted whole. Markdown files render as formatted markdown
+ * instead of highlighted source — the number gutter is dropped there,
+ * since rendered blocks have no line correspondence. In every form
+ * .tool-read-output caps the visible height — the rest stays
+ * reachable by scrolling.
  */
 function readResultHtml(item: ToolItem, text: string): string {
   const path =
@@ -241,6 +244,10 @@ function readResultHtml(item: ToolItem, text: string): string {
   // trailing line from a final newline doesn't break the format).
   const numbered =
     parts.some((p) => p !== null) && parts.every((p, i) => p !== null || lines[i] === "");
+  if (lang === "markdown") {
+    const md = numbered ? parts.map((p, i) => (p ? p[2] : lines[i])).join("\n") : text;
+    return `<div class="tool-output tool-read-output tool-read-md">${renderMarkdown(md)}</div>`;
+  }
   if (!numbered) {
     return `<pre class="tool-output tool-read-output"><code class="hljs">${highlightCode(text, lang)}</code></pre>`;
   }
