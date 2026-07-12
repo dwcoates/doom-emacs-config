@@ -365,12 +365,15 @@ pre {
   animation: thinking-spin 0.8s linear infinite;
 }
 @keyframes thinking-spin {
+  from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-/* Reduced motion: keep the ring, trade the rotation for a gentle pulse. */
+/* Reduced motion: the sweep of the arc IS the progress signal, so it never
+   degrades to a pulse (a pulse in place reads as a stalled spinner) — the
+   rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
   .thinking-spinner {
-    animation: tool-pulse 1.2s ease-in-out infinite;
+    animation-duration: 1.4s;
   }
 }
 .pulse {
