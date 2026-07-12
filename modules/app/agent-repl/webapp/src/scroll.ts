@@ -17,6 +17,7 @@
  * it is the other half of the same question of who owns the scroll
  * position, the user or the feed.
  */
+import { ancestorMatching } from "./dom.js";
 
 /** Width of the left/right gutters that arm a section's own scrolling. */
 export const EDGE_PX = 32;
@@ -143,10 +144,7 @@ export function innerScrollerAt<T extends { parentElement: T | null }>(
   feed: T,
   metrics: (node: T) => ScrollMetrics,
 ): T | null {
-  for (let node = start; node && node !== feed; node = node.parentElement) {
-    if (isScrollBox(metrics(node))) return node;
-  }
-  return null;
+  return ancestorMatching(start, feed, (node) => isScrollBox(metrics(node)));
 }
 
 /**
