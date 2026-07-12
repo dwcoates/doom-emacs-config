@@ -214,7 +214,10 @@ pre {
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
-.badge.run { color: var(--accent); display: inline-flex; align-items: center; gap: 0.3rem; }
+/* In-flight badge: the same orange the thinking indicator uses, so a call still
+   running reads as the same "model is busy" signal wherever it appears (and it
+   matches the arc spinning inside the badge, which is already --thinking). */
+.badge.run { color: var(--thinking); display: inline-flex; align-items: center; gap: 0.3rem; }
 .cmd { color: var(--accent); }
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
