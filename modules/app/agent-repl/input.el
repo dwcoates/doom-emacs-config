@@ -59,9 +59,9 @@ without re-reading the file."
   "Template instructing Claude to read the metaprompt file before acting.
 Must contain a single %s placeholder, filled at load time with
 `agent-repl-metaprompt-file-symlink'.  Intentionally avoids any
-\"metaprompt\" terminology in the inline prefix itself — the wrapper
-bookends and directive framing live inside the .md file rather than
-here, so the inline prefix is a plain instruction to read the file."
+\"metaprompt\" terminology in the inline prefix itself — the directive
+framing lives inside the .md file rather than here, so the inline prefix
+is a plain instruction to read the file."
   :type 'string
   :group 'agent-repl)
 
@@ -71,8 +71,8 @@ here, so the inline prefix is a plain instruction to read the file."
   "Formatted read-directive prepended before every periodic user input.
 Active when `agent-repl-skip-permissions' is non-nil, subject to
 `agent-repl-prefix-period'.  A plain instruction to read the file at
-`agent-repl-metaprompt-file-symlink' — the metaprompt body and its
-wrapper bookends live inside that file, not here.")
+`agent-repl-metaprompt-file-symlink' — the metaprompt body lives inside
+that file, not here.")
 
 ;; `defcustom' and `defvar' only initialize their values on first load;
 ;; reloading the file (e.g. via `agent-repl-reload-config' or
