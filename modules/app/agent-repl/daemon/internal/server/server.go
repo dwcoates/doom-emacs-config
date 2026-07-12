@@ -13,10 +13,13 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"claude-repld/internal/protocol"
+	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 )
 
@@ -72,10 +75,17 @@ type Server struct {
 	forceFake     bool
 	spawn         SpawnFunc
 	logf          func(format string, args ...any)
+	now           func() time.Time
 	upgrader      websocket.Upgrader
 
 	sentinel   session.SentinelSink
 	remediator Remediator
+	registry   *registry.Registry
+	// draining marks a daemon-wide teardown (ShutdownAll): the session
+	// deaths it causes are NOT conversation deaths, so the registrar
+	// must leave their records non-terminal for the next boot to
+	// rehydrate.
+	draining atomic.Bool
 
 	mu       sync.Mutex
 	sessions map[string]*session.Session
@@ -87,6 +97,9 @@ type Config struct {
 	Retention     int
 	Spawn         SpawnFunc
 	Logf          func(format string, args ...any)
+	// Now is the clock used to stamp registry records (defaults to
+	// time.Now); injected for tests.
+	Now func() time.Time
 	// ForceFake mirrors the daemon-wide -fake flag: every session runs
 	// the offline scripted SDK. The resume viability gate skips fake
 	// sessions (they have no on-disk transcripts by design).
@@ -97,6 +110,9 @@ type Config struct {
 	// Remediator dispatches the "session gone" analyst; nil makes
 	// POST /remediation report the capability as unconfigured.
 	Remediator Remediator
+	// Registry persists session records across daemon restarts; nil
+	// disables persistence (tests, embedded use).
+	Registry *registry.Registry
 }
 
 // New builds a Server.
@@ -105,6 +121,10 @@ func New(cfg Config) *Server {
 	if logf == nil {
 		logf = log.Printf
 	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Server{
 		daemonVersion: cfg.DaemonVersion,
 		bootID:        newBootID(),
@@ -112,8 +132,10 @@ func New(cfg Config) *Server {
 		forceFake:     cfg.ForceFake,
 		spawn:         cfg.Spawn,
 		logf:          logf,
+		now:           now,
 		sentinel:      cfg.Sentinel,
 		remediator:    cfg.Remediator,
+		registry:      cfg.Registry,
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -121,6 +143,44 @@ func New(cfg Config) *Server {
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 		sessions: map[string]*session.Session{},
+	}
+}
+
+// registrar bridges session durable-state transitions into the
+// persistent registry. A separate type keeps the session.Registrar
+// methods off the Server API.
+type registrar struct{ s *Server }
+
+func (r registrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
+	r.s.updateRegistry(sessionID, "claude_session_id", func(rec *registry.Record) {
+		rec.ClaudeSessionID = claudeSessionID
+	})
+}
+
+func (r registrar) SessionTerminal(sessionID, deathReason string) {
+	// A daemon-wide drain is not a conversation death: the registry
+	// exists precisely so these sessions rehydrate on the next boot, so
+	// the drain must leave their records non-terminal.
+	if r.s.draining.Load() {
+		return
+	}
+	r.s.updateRegistry(sessionID, "terminal transition", func(rec *registry.Record) {
+		rec.Terminal = true
+		rec.DeathReason = deathReason
+	})
+}
+
+// updateRegistry applies fn to id's registry record. Only sessions the
+// create path registered carry a registrar, so a missing record is
+// unexpected and logged, never silently dropped.
+func (s *Server) updateRegistry(id, what string, fn func(*registry.Record)) {
+	found, err := s.registry.Update(id, fn)
+	if err != nil {
+		s.logf("session %s: registry write (%s) FAILED — the session may not survive a daemon restart: %v", id, what, err)
+		return
+	}
+	if !found {
+		s.logf("session %s: registry write (%s) found no record — the session was never registered", id, what)
 	}
 }
 
@@ -265,33 +325,27 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			opts.Resume = ""
 		}
 	}
-	shim, err := s.spawn(id, opts)
+	// Register BEFORE launch: transcript seeding fires the registrar's
+	// claude_session_id write-through, which updates this record. Fake
+	// sessions are never registered — they have no durable transcript,
+	// so a record could only ever rehydrate into a doomed --resume.
+	registrable := s.registry != nil && !opts.Fake && !s.forceFake
+	if registrable {
+		if err := s.registry.Put(registry.Record{
+			SessionID:       id,
+			CWD:             opts.CWD,
+			Model:           opts.Model,
+			PermissionMode:  opts.PermissionMode,
+			ClaudeSessionID: opts.Resume,
+			CreatedAt:       s.now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			s.logf("session %s: registry write on create FAILED — the session will not survive a daemon restart: %v", id, err)
+		}
+	}
+	sess, err := s.launchSession(id, opts, registrable)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, fmt.Sprintf("spawn shim: %v", err))
 		return
-	}
-	sess := session.New(session.Config{
-		ID:            id,
-		DaemonVersion: s.daemonVersion,
-		BootID:        s.bootID,
-		Shim:          shim,
-		CWD:           opts.CWD,
-		Model:         opts.Model,
-		Retention:     s.retention,
-		Logf:          s.logf,
-		Sentinel:      s.sentinel,
-	})
-	// Resumed sessions seed their replay ring from the durable
-	// transcript BEFORE Run: the CLI re-emits no history on --resume,
-	// so without this every rebind (daemon restart, frontend switch)
-	// attaches to a blank conversation.
-	if opts.Resume != "" {
-		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
-		if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
-			s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
-		} else {
-			s.logf("session %s: replay seeded from %s", id, path)
-		}
 	}
 	if droppedResume != "" {
 		sess.NoteResumeUnavailable(droppedResume, droppedPath)
@@ -307,6 +361,46 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		"session_id": id,
 		"stream_url": fmt.Sprintf("/sessions/%s/stream", id),
 	})
+}
+
+// launchSession spawns the shim for id and assembles its session hub,
+// seeding the replay ring from the resumed transcript when opts.Resume
+// is set. Shared by the create path and the restart-rehydration path so
+// the two cannot drift. The caller registers the session in the map and
+// starts Run.
+func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*session.Session, error) {
+	shim, err := s.spawn(id, opts)
+	if err != nil {
+		return nil, err
+	}
+	cfg := session.Config{
+		ID:            id,
+		DaemonVersion: s.daemonVersion,
+		BootID:        s.bootID,
+		Shim:          shim,
+		CWD:           opts.CWD,
+		Model:         opts.Model,
+		Retention:     s.retention,
+		Logf:          s.logf,
+		Sentinel:      s.sentinel,
+	}
+	if registrable {
+		cfg.Registrar = registrar{s}
+	}
+	sess := session.New(cfg)
+	// Resumed sessions seed their replay ring from the durable
+	// transcript BEFORE Run: the CLI re-emits no history on --resume,
+	// so without this every rebind (daemon restart, frontend switch)
+	// attaches to a blank conversation.
+	if opts.Resume != "" {
+		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
+		if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
+			s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
+		} else {
+			s.logf("session %s: replay seeded from %s", id, path)
+		}
+	}
+	return sess, nil
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
@@ -423,6 +517,11 @@ func (s *Server) lookup(id string) *session.Session {
 
 // ShutdownAll asks every live session to drain (daemon teardown).
 func (s *Server) ShutdownAll() {
+	// Flag the drain FIRST: the terminal transitions it triggers must
+	// not mark registry records terminal, or nothing would rehydrate on
+	// the next boot and every routine daemon restart would strand its
+	// frontends ("session gone").
+	s.draining.Store(true)
 	s.mu.Lock()
 	sessions := make([]*session.Session, 0, len(s.sessions))
 	for _, sess := range s.sessions {
