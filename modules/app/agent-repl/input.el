@@ -150,7 +150,7 @@ Runs as a buffer-local `pre-command-hook'."
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for Agent REPL input buffer."
   (setq-local header-line-format
-              (concat "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history | (ins) <slash>/<digit>/<up>/<down>: direct send"))
+              "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history")
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
   (agent-repl--set-buffer-background agent-repl-input-background-shade)
   (visual-line-mode 1)
