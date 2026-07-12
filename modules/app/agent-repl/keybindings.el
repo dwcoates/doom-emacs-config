@@ -951,7 +951,8 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        (:prefix ("h" . "help/debug")
         :desc "Dump workspace state"     "p" #'agent-repl-debug/dump-workspace
         :desc "Explain config (read-only Q&A)" "c" #'agent-repl-explain-config
-        :desc "Close explain-config popup"     "C" #'agent-repl-explain-config-close)
+        :desc "Close explain-config popup"     "C" #'agent-repl-explain-config-close
+        :desc "New explain-config conversation" "n" #'agent-repl-explain-config-reset)
        (:prefix ("e" . "explain")
         :desc "line/region/hunk (prompt)" "e" #'agent-repl-explain-prompt
         :desc "line/region/hunk (canned)" "E" #'agent-repl-explain
