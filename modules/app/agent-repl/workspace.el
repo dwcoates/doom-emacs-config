@@ -146,9 +146,13 @@ Internally uses plist-put (which returns a new list) threaded into puthash.
 
 Emits an unconditional log line (via `agent-repl--do-log', bypassing
 `agent-repl-debug') when this call CREATES a fresh hash entry whose
-plist will lack `:project-dir' — the shape that leaks workspaces into
-the drawer's `(no repo)' bucket.  Includes a caller trace so the
-producer can be identified without first turning debug logging on."
+plist will lack `:project-dir' — the non-workspace stub shape (a plain
+persp such as Doom's default \"main\" auto-vivified by a persp hook).
+The drawer filters that shape out of its render entirely
+\(`agent-repl-drawer--visible-workspace-keys'), so the log line is a
+producer diagnostic rather than a user-visible-bug warning.  Includes a
+caller trace so the producer can be identified without first turning
+debug logging on."
   (let ((stub-create (and (null (gethash ws agent-repl--workspaces))
                           (not (eq key :project-dir)))))
     (puthash ws (plist-put (gethash ws agent-repl--workspaces) key val)
@@ -158,7 +162,7 @@ producer can be identified without first turning debug logging on."
                        "<trace-failed>")))
         (agent-repl--do-log
          ws
-         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (will appear under drawer \"(no repo)\" bucket). caller-trace=%s"
+         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (non-workspace stub; filtered out of the drawer render). caller-trace=%s"
          (list ws key val trace))))))
 
 (defconst agent-repl--ws-runtime-keys
