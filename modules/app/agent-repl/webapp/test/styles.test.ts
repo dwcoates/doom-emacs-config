@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import css from "../src/styles.css?raw";
 
 /** Body of the first brace-balanced block introduced by `marker`. */
@@ -219,6 +220,56 @@ describe("edge-scroll bars", () => {
     // Assert
     expect(scrollZoneBox).toMatch(/cursor:\s*ns-resize/);
     expect(scrollZone).not.toMatch(/cursor/);
+  });
+});
+
+const expanded = blockAfter(css, `.${EXPANDED_CLASS} {`);
+/** Selector list of the rule that puts the click affordance on the capped sections. */
+const zoomSelector = css.match(/([^};/]+)\{\s*cursor:\s*zoom-in/)?.[1] ?? "";
+
+describe("click-to-expand", () => {
+  it("lifts the height cap of an expanded section", () => {
+    // Arrange / Act — the .expanded rule.
+    // Assert
+    expect(expanded).toMatch(/max-height:\s*none/);
+  });
+
+  it("drops the inner scrollbar of an expanded section, which has nothing left to scroll", () => {
+    // Arrange / Act — the .expanded rule.
+    // Assert
+    expect(expanded).toMatch(/overflow-y:\s*visible/);
+  });
+
+  it("wins over every cap rule by being declared after them", () => {
+    // Arrange — equal specificity (one class each), so source order decides.
+    const lastCap = Math.max(...CAPPED_CLASSES.map((c) => css.lastIndexOf(`.${c} {`)));
+    // Act / Assert
+    expect(css.indexOf(`.${EXPANDED_CLASS} {`)).toBeGreaterThan(lastCap);
+  });
+
+  it("beats the cap without reaching for !important", () => {
+    // Arrange / Act — the .expanded rule.
+    // Assert
+    expect(expanded).not.toContain("!important");
+  });
+
+  it("offers the click on every capped section the expander knows", () => {
+    // Arrange / Act — the cursor rule's selector list.
+    // Assert
+    for (const cls of CAPPED_CLASSES) expect(zoomSelector).toContain(`.${cls}`);
+  });
+
+  it("names the click's next move once the section is open", () => {
+    // Arrange / Act — the .expanded rule.
+    // Assert
+    expect(expanded).toMatch(/cursor:\s*zoom-out/);
+  });
+
+  it("keeps the armed box's scroll cursor over the expander's zoom cursor", () => {
+    // Arrange / Act — .scroll-zone-box must out-order both zoom cursors at equal specificity.
+    // Assert
+    expect(css.indexOf(".scroll-zone-box")).toBeGreaterThan(css.indexOf("cursor: zoom-in"));
+    expect(css.indexOf(".scroll-zone-box")).toBeGreaterThan(css.indexOf(`.${EXPANDED_CLASS} {`));
   });
 });
 

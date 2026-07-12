@@ -4,6 +4,7 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
+import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { stripMetaSpans } from "./meta.js";
@@ -756,7 +757,13 @@ export class FeedRenderer {
         this.nodes.set(key, entry);
       }
       if (entry.html !== html) {
+        // A section the user clicked open outlives the re-render of the
+        // item that carries it: a running tool card rewrites its whole
+        // body when its result lands, which would otherwise re-cap a
+        // command the user had just expanded.
+        const open = expandedIndexes(sectionsIn(entry.el));
         entry.el.innerHTML = html;
+        applyExpanded(sectionsIn(entry.el), open);
         entry.html = html;
       }
     });
