@@ -405,3 +405,36 @@ describe("ConversationStore fresh-join replay phases", () => {
     expect(store.replaying).toBe(false);
   });
 });
+
+describe("ConversationStore rebind support", () => {
+  it("adopts claude_session_id from hello", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    // Act
+    store.applyRaw(hello({ claude_session_id: "uuid-7" }));
+    // Assert
+    expect(store.state.claudeSessionId).toBe("uuid-7");
+  });
+
+  it("leaves claudeSessionId empty on a pre-init hello", () => {
+    // Arrange + Act
+    const store = newStore();
+    // Assert
+    expect(store.state.claudeSessionId).toBe("");
+  });
+
+  it("reset discards all state so a successor hello is a fresh join", () => {
+    // Arrange — history applied, cursor advanced.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    // Act
+    store.reset();
+    // Assert — a stale lastSeq would make the successor's replay look
+    // like a gap-fill and splice two conversations together.
+    expect(store.state.lastSeq).toBe(0);
+    expect(store.state.items).toHaveLength(0);
+    expect(store.state.sessionId).toBe("");
+    expect(store.replaying).toBe(false);
+  });
+});
