@@ -441,6 +441,132 @@ environments without notification tools (terminal-notifier or osascript)."
         (agent-repl--log-verbose nil "test")
         (should message-called)))))
 
+;;;; ---- Tests: echo-area (modeline) severity gate ----
+;;
+;; The invariant under test: the log file and *Messages* are the QUIET sink
+;; and take everything; the echo area / modeline is the LOUD sink and takes
+;; only warnings and errors.  `inhibit-message' is what separates them — when
+;; it is non-nil at the moment `message' runs, the line reaches *Messages*
+;; but never the echo area.  So "did this line reach the modeline?" is
+;; exactly "was `inhibit-message' nil inside the `message' call?".
+
+(defun agent-repl-test--capture-emission (thunk)
+  "Run THUNK with `message' stubbed and report what it emitted, and how loudly.
+Returns a plist (:text TEXT :echoed BOOL :called BOOL), where :echoed is
+non-nil only when `inhibit-message' was nil at `message' time — i.e. only
+when the line actually reached the echo area / modeline.  File writes are
+suppressed so the suite never touches the real logfile."
+  (let ((text nil) (echoed nil) (called nil))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+              ((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (setq called t
+                       text (apply #'format fmt args)
+                       echoed (not inhibit-message)))))
+      (funcall thunk))
+    (list :text text :echoed echoed :called called)))
+
+(ert-deftest agent-repl-test-emit-message-echo-nil-suppresses-echo-area ()
+  "`agent-repl--emit-message' with ECHO nil binds `inhibit-message'."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--emit-message "quiet line" nil)))))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-emit-message-echo-nil-still-reaches-messages ()
+  "`agent-repl--emit-message' with ECHO nil still calls `message' (so *Messages* gets it)."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--emit-message "quiet line" nil)))))
+    (should (plist-get res :called))
+    (should (equal "quiet line" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-emit-message-echo-t-reaches-echo-area ()
+  "`agent-repl--emit-message' with ECHO non-nil leaves `inhibit-message' unbound."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--emit-message "loud line" t)))))
+    (should (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-info-never-reaches-echo-area ()
+  "`agent-repl--info' is the quiet sink: it must NOT reach the echo area."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--info nil "background chatter")))))
+    (should (plist-get res :called))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-info-emits-when-debug-off ()
+  "`agent-repl--info' is ungated by `agent-repl-debug' — it always records."
+  (let* ((agent-repl-debug nil)
+         (res (agent-repl-test--capture-emission
+               (lambda () (agent-repl--info nil "recorded anyway")))))
+    (should (plist-get res :called))
+    (should (string-match-p "recorded anyway" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-info-writes-to-file ()
+  "`agent-repl--info' always writes to the logfile."
+  (let ((written nil))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+               (lambda (text) (setq written text)))
+              ((symbol-function 'message) #'ignore))
+      (agent-repl--info nil "on the record")
+      (should (string-match-p "on the record" written)))))
+
+(ert-deftest agent-repl-test-warn-reaches-echo-area ()
+  "`agent-repl--warn' is the loud sink: it MUST reach the echo area."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--warn nil "something broke")))))
+    (should (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-warn-prepends-severity-tag ()
+  "`agent-repl--warn' prepends a `WARNING: ' tag so call sites need not."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--warn nil "disk on fire")))))
+    (should (string-match-p "WARNING: disk on fire" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-warn-expands-format-args ()
+  "`agent-repl--warn' takes &rest ARGS and expands them into FMT."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--warn nil "failed %s after %d tries" "sync" 3)))))
+    (should (string-match-p "WARNING: failed sync after 3 tries" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-warn-non-string-fmt-preserves-args ()
+  "A non-string FMT is a caller bug: `agent-repl--warn' must route it to the
+existing bug-capture path WITHOUT dropping ARGS on the floor."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda ()
+                (cl-letf (((symbol-function 'agent-repl--log-format-capture-bug) #'ignore))
+                  (agent-repl--warn nil 'not-a-string "kept"))))))
+    (should (string-match-p "BUG non-string-fmt" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-warn-writes-to-file ()
+  "`agent-repl--warn' always writes to the logfile."
+  (let ((written nil))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+               (lambda (text) (setq written text)))
+              ((symbol-function 'message) #'ignore))
+      (agent-repl--warn nil "wrote this")
+      (should (string-match-p "WARNING: wrote this" written)))))
+
+(ert-deftest agent-repl-test-log-never-reaches-echo-area-when-debug-on ()
+  "Turning debug logging on must not turn the modeline into a firehose."
+  (let* ((agent-repl-debug t)
+         (res (agent-repl-test--capture-emission
+               (lambda () (agent-repl--log nil "debug chatter")))))
+    (should (plist-get res :called))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-log-verbose-never-reaches-echo-area ()
+  "Verbose hot-path chatter must not reach the echo area either."
+  (let* ((agent-repl-debug 'verbose)
+         (res (agent-repl-test--capture-emission
+               (lambda () (agent-repl--log-verbose nil "hot path")))))
+    (should (plist-get res :called))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-do-log-reaches-echo-area ()
+  "`agent-repl--do-log' is loud by design — it must still reach the echo area."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--do-log nil "invariant violated" nil)))))
+    (should (plist-get res :echoed))))
+
 (ert-deftest agent-repl-test-log-verbose-includes-timestamp ()
   "`agent-repl--log-verbose' output should include timestamp prefix."
   (let ((captured-msg nil))
