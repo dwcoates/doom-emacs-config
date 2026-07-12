@@ -19,9 +19,11 @@
  */
 
 import { escapeHtml, highlightCode } from "./highlight.js";
+import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
-/** Inline markup within one already-escaped line. */
-function inline(escaped: string): string {
+/** Inline markup within one already-escaped line. Exported for the
+ * metaprompt-tree renderer, which injects it into content spans. */
+export function inline(escaped: string): string {
   // Lift code spans out first so emphasis/link rules cannot touch their
   // contents; NUL sentinels cannot occur in escaped text.
   const codeSpans: string[] = [];
@@ -80,9 +82,17 @@ export function renderMarkdown(src: string): string {
   };
   const flushFence = (): void => {
     if (fence !== null) {
+      const body = fence.lines.join("\n");
+      // A plain fence carrying a metaprompt TLDR tree renders as
+      // hanging-indent tree lines instead of a wrapping code block.
+      if (fence.lang === "" && isMetapromptTree(body)) {
+        out.push(`<div class="mp-tree">${renderTreeHtml(body, inline)}</div>`);
+        fence = null;
+        return;
+      }
       // highlightCode escapes in both branches (hljs escapes its own
       // output), so the escape-first guarantee holds.
-      const html = highlightCode(fence.lines.join("\n"), fence.lang);
+      const html = highlightCode(body, fence.lang);
       const langClass = fence.lang === "" ? "" : ` lang-${escapeHtml(fence.lang)}`;
       out.push(`<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`);
       fence = null;

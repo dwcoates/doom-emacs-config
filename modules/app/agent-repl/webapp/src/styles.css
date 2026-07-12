@@ -115,6 +115,18 @@ pre {
 .md a { color: var(--accent); }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 
+/* Metaprompt TLDR trees: each line is a flex row of a fixed bullet
+   prefix (connectors + dotted label + root emoji) and a flexing
+   content span, so a branch longer than the feed wraps INSIDE the
+   content column — a hanging indent at the first non-bullet character,
+   with no width measurement anywhere. */
+.mp-tree { font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; }
+.md .mp-tree { margin: 0.5em 0; }
+.mp-line { display: flex; }
+.mp-prefix { white-space: pre; flex: none; }
+.mp-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.mp-blank { height: 0.7em; }
+
 .thinking {
   border-left: 3px solid var(--border);
   padding: 0.25rem 0.75rem;
