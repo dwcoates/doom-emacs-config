@@ -16,6 +16,9 @@
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
   --tool-title: #9370db;
+  /* Textless-thinking progress indicator: orange, distinct from every other
+     status color in the palette. */
+  --thinking: #ea580c;
   /* Topbar session datapoint values (parent workspace / model / tokens):
      the same green/cyan/amber light–dark pairs as the syntax palette. */
   --info-ws: #15803d;
@@ -33,6 +36,7 @@
     --card: #1a1d24;
     --user: #1e2a44;
     --assistant: #292040;
+    --thinking: #fb923c;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
     --info-tokens: #fbbf24;
@@ -307,11 +311,33 @@ pre {
 
 /* --- pending indicators (streaming tool input, textless thinking) ---------- */
 .tool-input-pending { padding: 0.35em 0.2em; }
+/* Textless thinking: an orange spinner, with no quote bar, so the "model is
+   working" beat reads as progress rather than as quoted content. */
 .thinking-pending {
-  padding: 0.25rem 0.75rem;
-  border-left: 3px solid var(--border);
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  color: var(--thinking);
   font-size: 0.85rem;
+}
+.thinking-spinner {
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid color-mix(in srgb, var(--thinking) 25%, transparent);
+  border-top-color: var(--thinking);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
+@keyframes thinking-spin {
+  to { transform: rotate(360deg); }
+}
+/* Reduced motion: keep the ring, trade the rotation for a gentle pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .thinking-spinner {
+    animation: tool-pulse 1.2s ease-in-out infinite;
+  }
 }
 .pulse {
   color: var(--muted);
