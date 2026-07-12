@@ -7,6 +7,7 @@
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
+import { installCopyKeys } from "./copy.js";
 import { PermissionMode } from "./protocol.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
@@ -52,6 +53,8 @@ async function boot(): Promise<void> {
   // Sections only take the wheel in their left/right gutters, so wheeling
   // over one scrolls the feed past it instead of scrolling it.
   installEdgeScroll(feedEl);
+  // The webview has no menu bar, so `C-c` / `y` are what copy a highlight.
+  installCopyKeys(document);
   const feed = new FeedRenderer(feedEl, {
     decidePermission: (requestId, behavior) => {
       ws.send(
