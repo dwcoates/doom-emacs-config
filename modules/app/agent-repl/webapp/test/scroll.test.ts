@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   EDGE_PX,
+  PIN_PX,
   inEdgeZone,
   innerScrollerAt,
+  isPinnedToBottom,
   isScrollBox,
   redirectsToFeed,
   wheelAction,
@@ -226,5 +228,41 @@ describe("innerScrollerAt", () => {
     const feed = node("feed", { scrollHeight: 900, clientHeight: 300, overflowY: "auto" });
     // Act + Assert
     expect(innerScrollerAt(null, feed, metrics)).toBeNull();
+  });
+});
+
+describe("isPinnedToBottom", () => {
+  it("pins a feed sitting exactly at its bottom", () => {
+    // Arrange + Act + Assert
+    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 600, clientHeight: 300 })).toBe(true);
+  });
+
+  it("pins a feed within the slack of its bottom", () => {
+    // Arrange — 20px of unread tail, inside the 40px slack.
+    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 580, clientHeight: 300 })).toBe(true);
+  });
+
+  it("unpins a feed the user scrolled up past the slack", () => {
+    // Arrange — 300px of unread tail, well beyond the slack.
+    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 300, clientHeight: 300 })).toBe(false);
+  });
+
+  it("pins a feed too short to scroll at all", () => {
+    // Arrange + Act + Assert
+    expect(isPinnedToBottom({ scrollHeight: 300, scrollTop: 0, clientHeight: 300 })).toBe(true);
+  });
+
+  it("honors a caller-supplied slack over PIN_PX", () => {
+    // Arrange — 20px of tail: pinned at the default slack, not at 10px.
+    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 580, clientHeight: 300 }, 10)).toBe(
+      false,
+    );
+  });
+
+  it("defaults its slack to PIN_PX", () => {
+    // Arrange — one pixel short of PIN_PX of unread tail.
+    const pos = { scrollHeight: 900, scrollTop: 600 - (PIN_PX - 1), clientHeight: 300 };
+    // Act + Assert
+    expect(isPinnedToBottom(pos)).toBe(isPinnedToBottom(pos, PIN_PX));
   });
 });

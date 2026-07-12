@@ -4,7 +4,9 @@ import {
   diffHtml,
   formatTurnTime,
   itemKey,
+  lastUserTurnId,
   renderItem,
+  repinsToTail,
   sessionInfoHtml,
 } from "../src/render.js";
 import { ConversationItem, ResultItem, ToolItem } from "../src/store.js";
@@ -886,5 +888,70 @@ describe("TextStream metaprompt trees", () => {
     };
     // Act + Assert
     expect(renderItem(item)).not.toContain("mp-tree");
+  });
+});
+
+describe("lastUserTurnId", () => {
+  /** A user turn carrying the given request id. */
+  const turn = (requestId: string): ConversationItem => ({
+    kind: "user-turn",
+    requestId,
+    content: [{ type: "text", text: "hi" }],
+    ts: new Date(2026, 4, 24, 10, 0).toISOString(),
+  });
+  /** An assistant text item: the noise a user turn is picked out from. */
+  const text = (blockId: string): ConversationItem => ({
+    kind: "text",
+    blockId,
+    messageId: "m1",
+    text: "answering",
+    done: true,
+  });
+
+  it("returns the newest user turn's request id", () => {
+    // Arrange + Act + Assert
+    expect(lastUserTurnId([turn("r1"), text("b1"), turn("r2")])).toBe("r2");
+  });
+
+  it("returns the user turn's id across the items answering it", () => {
+    // Arrange — a send stays the newest user turn under its own replies.
+    expect(lastUserTurnId([turn("r1"), text("b1"), text("b2")])).toBe("r1");
+  });
+
+  it("returns null for a feed carrying no user turn", () => {
+    // Arrange + Act + Assert
+    expect(lastUserTurnId([text("b1")])).toBeNull();
+  });
+
+  it("returns null for an empty feed", () => {
+    // Arrange + Act + Assert
+    expect(lastUserTurnId([])).toBeNull();
+  });
+});
+
+describe("repinsToTail", () => {
+  it("jumps a scrolled-up feed to the tail when a prompt was just sent", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false })).toBe(true);
+  });
+
+  it("jumps to the tail on the feed's very first prompt", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: "r1", pinned: false })).toBe(true);
+  });
+
+  it("leaves a scrolled-up feed alone while the same turn streams its answer", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: false })).toBe(false);
+  });
+
+  it("leaves a scrolled-up feed alone when no prompt was ever sent", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: null, pinned: false })).toBe(false);
+  });
+
+  it("keeps a pinned feed following its tail", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true })).toBe(true);
   });
 });
