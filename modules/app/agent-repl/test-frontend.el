@@ -362,6 +362,34 @@ show-panels — hiding first sidesteps the whole class."
         (kill-buffer buf)
         (kill-buffer input-buf)))))
 
+(ert-deftest agent-repl-test-frontend-display-clears-other-main-windows ()
+  "display-webview wipes pre-existing main-area windows (fullscreen layout).
+Whatever the frame carried before the mount (magit, the dashboard,
+another workspace's leftovers) must not survive beside the webview +
+input panels — the extra-windows-on-first-switch bug."
+  ;; Arrange — a second main-area window shows an unrelated buffer.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (leftover (generate-new-buffer "*leftover*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (split-window) leftover)
+            (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                       (lambda () nil))
+                      ((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) (get-buffer-create "*clears-input*")))
+                      ((symbol-function 'agent-repl-window--harden)
+                       (lambda (&rest _) nil)))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert — the leftover window is gone; the webview is up.
+              (should-not (get-buffer-window leftover))
+              (should (get-buffer-window buf))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer leftover)
+        (kill-buffer "*clears-input*")))))
+
 (ert-deftest agent-repl-test-frontend-display-reclaims-stale-input-window ()
   "Remounting over a surviving dedicated input window must not error.
 The webview died but its input window survived (dedicated): the display
