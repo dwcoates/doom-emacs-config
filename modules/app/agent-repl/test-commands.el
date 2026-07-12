@@ -486,6 +486,84 @@
                 (should (equal sent-text "hello claude"))))
           (kill-buffer fake-vterm-buf))))))
 
+(ert-deftest agent-repl-cmd-test-send-to-agent/gui-routes-through-frontend ()
+  "send-to-agent on a gui workspace dispatches via the frontend registry.
+Booting a vterm here would put a second claude process on the same
+directory as the workspace's daemon session."
+  (let (init-called dispatched)
+    (agent-repl-test--with-clean-state
+      (agent-repl--ws-put "test-ws" :frontend 'gui)
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'agent-repl--initialize-agent)
+                 (lambda (_ws) (setq init-called t)))
+                ((symbol-function 'agent-repl--frontend-dispatch-send)
+                 (lambda (ws input raw &optional _on-settle)
+                   (setq dispatched (list ws input raw)))))
+        (agent-repl--send-to-agent "hello claude")
+        (should-not init-called)
+        (should (equal dispatched '("test-ws" "hello claude" "hello claude")))))))
+
+;;;; ---- agent-repl--establish-workspace frontend routing ----
+
+(defmacro agent-repl-cmd-test--with-establish-stubs (&rest body)
+  "Run BODY with `agent-repl--establish-workspace's side effects stubbed.
+Leaves only the ws-plist writes and the final agent-boot branch live so
+tests can observe which frontend boot fired."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--ws-create) #'ignore)
+             ((symbol-function 'agent-repl--ws-frame-switch) #'ignore)
+             ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore)
+             ((symbol-function 'agent-repl--ws-register-project) #'ignore)
+             ((symbol-function 'agent-repl--ws-run-switch-project-function) #'ignore)
+             ((symbol-function 'agent-repl--most-recent-project-file) (lambda (_d) nil))
+             ((symbol-function 'agent-repl--hydrate-and-reorder-on-open) #'ignore))
+     ,@body))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/gui-ensures-daemon-session ()
+  "Restoring a gui workspace ensures a background daemon session.
+Booting a vterm would re-present (and re-stamp) the workspace as vterm,
+silently undoing the user's frontend choice on every restart."
+  (let (ensured init-called)
+    (agent-repl-test--with-clean-state
+      (agent-repl--ws-put "ws-gui" :frontend 'gui)
+      (agent-repl-cmd-test--with-establish-stubs
+        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (ws) (setq ensured ws)))
+                  ((symbol-function 'agent-repl--initialize-agent)
+                   (lambda (&rest _) (setq init-called t))))
+          (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
+          (should (equal ensured "ws-gui"))
+          (should-not init-called))))))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/gui-skips-ensure-when-bound ()
+  "A gui workspace already holding a daemon binding is not re-ensured."
+  (let (ensured)
+    (agent-repl-test--with-clean-state
+      (agent-repl--ws-put "ws-gui" :frontend 'gui)
+      (agent-repl--ws-put "ws-gui" :frontend-session-id "s_live")
+      (agent-repl-cmd-test--with-establish-stubs
+        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (ws) (setq ensured ws)))
+                  ((symbol-function 'agent-repl--initialize-agent) #'ignore))
+          (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
+          (should-not ensured))))))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/vterm-boots-agent ()
+  "Restoring a vterm workspace still pre-starts claude via initialize-agent."
+  (let (init-ws ensured)
+    (agent-repl-test--with-clean-state
+      (agent-repl--ws-put "ws-vt" :frontend 'vterm)
+      (agent-repl-cmd-test--with-establish-stubs
+        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (ws) (setq ensured ws)))
+                  ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                  ((symbol-function 'agent-repl--initialize-agent)
+                   (lambda (ws) (setq init-ws ws))))
+          (agent-repl--establish-workspace "ws-vt" "/tmp/ws-vt")
+          (should (equal init-ws "ws-vt"))
+          (should-not ensured))))))
+
 ;;;; ---- agent-repl-explain ----
 
 (ert-deftest agent-repl-cmd-test-explain/sends-context-reference ()
