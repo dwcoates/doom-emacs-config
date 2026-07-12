@@ -56,6 +56,13 @@ Anchors the frontend build script and artifact locations.")
   (expand-file-name "daemon/bin/claude-repld" agent-repl--frontend-root)
   "Built `claude-repld' binary produced by the build script.")
 
+(defconst agent-repl--frontend-repo-root
+  (expand-file-name "../../../" agent-repl--frontend-root)
+  "Checkout containing this module (`modules/app/agent-repl/' is three deep).
+Handed to `claude-repld' via -remediation-dir: it is the tree the
+\"session gone\" analyst diagnoses and opens its resilience workspace
+against.")
+
 ;;;; ---- Customization ----------------------------------------------------
 
 (defcustom agent-repl-frontend-auto-start t
@@ -79,6 +86,31 @@ if it is not already running.  Set to nil to require the user to run
 (defcustom agent-repl-frontend-node-bin "node"
   "Node binary `claude-repld' uses to run the shim (its --node flag)."
   :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-frontend-remediate-lost-sessions t
+  "When non-nil, `claude-repld' remediates a session it has lost.
+A frontend whose session has vanished from the daemon shows \"session
+gone\", and the daemon answers by dispatching a headless Claude analyst
+against `agent-repl--frontend-repo-root': it diagnoses the termination
+and opens a workspace that makes the system resilient to that failure
+class.  Set to nil to leave the daemon reporting the loss and nothing
+more (the -remediation-dir flag is then omitted)."
+  :type 'boolean
+  :group 'agent-repl)
+
+(defcustom agent-repl-frontend-remediation-permission-mode "bypassPermissions"
+  "Permission mode the lost-session analyst runs under.
+The analyst is headless, so nobody is at the keyboard to answer a
+permission prompt: under the CLI default every tool call it makes is
+auto-denied, and it can then only narrate a diagnosis into the daemon
+log.  Reading the logs, running git, and driving the workspace-creation
+skill all require it to be ungated, which is what the default here buys.
+Set to nil to hand the analyst no --permission-mode at all."
+  :type '(choice (const :tag "Ungated (can actually remediate)" "bypassPermissions")
+                 (const :tag "Edits only" "acceptEdits")
+                 (const :tag "CLI default (report-only)" nil)
+                 string)
   :group 'agent-repl)
 
 ;;;; ---- State ------------------------------------------------------------
@@ -147,13 +179,20 @@ non-zero, so a build failure is never swallowed."
 When the system `claude' binary resolves, it is handed to the daemon
 via -claude-bin so SDK sessions drive the SAME CLI version as vterm
 sessions (and accept its permission modes, e.g. `auto', which the
-SDK-bundled cli.js predates)."
+SDK-bundled cli.js predates).  The same binary drives the headless
+\"session gone\" analyst the daemon dispatches from -remediation-dir."
   (append
    (list agent-repl--frontend-daemon-bin
          "-addr"   agent-repl-frontend-daemon-addr
          "-node"   agent-repl-frontend-node-bin
          "-shim"   agent-repl--frontend-shim-entry
          "-webapp" agent-repl--frontend-webapp-dir)
+   (when agent-repl-frontend-remediate-lost-sessions
+     (append
+      (list "-remediation-dir" agent-repl--frontend-repo-root)
+      (when agent-repl-frontend-remediation-permission-mode
+        (list "-remediation-permission-mode"
+              agent-repl-frontend-remediation-permission-mode))))
    (when-let ((claude (executable-find "claude")))
      (list "-claude-bin" claude))))
 
