@@ -1599,8 +1599,18 @@ every tick so transitions like `:done' -> `:idle' stay snappy.
 DO-GIT-P gates the expensive git refreshes
 \(`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged') so they fire only on the
-mod-N tick selected by `agent-repl-state-git-tick-modulus'."
-  (if (agent-repl--agent-running-p ws)
+mod-N tick selected by `agent-repl-state-git-tick-modulus'.
+
+A gui-frontend workspace has no vterm process to observe, so the
+vterm-liveness check is meaningless there: without the gui branch it
+would take the dead path once and permanently mask every
+sentinel-driven agent-state behind `:repl-state :dead' (the render
+precedence puts `:dead' above all agent-states, and nothing on the
+gui path ever clears it).  For gui workspaces liveness/death is owned
+exclusively by the daemon (`session_dead_*' sentinels), so the poll
+runs only the frontend-agnostic decay + git refresh."
+  (if (or (agent-repl--ws-gui-frontend-p ws)
+          (agent-repl--agent-running-p ws))
       (progn
         (agent-repl--update-ws-state ws)
         (when do-git-p
