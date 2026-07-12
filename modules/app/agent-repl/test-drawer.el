@@ -3704,6 +3704,209 @@ under the `or'-fall-through model."
       (agent-repl-drawer--render)
       (goto-char (point-min))
       (should-error (agent-repl-drawer-toggle-expand) :type 'user-error))))
+;;;; ---- Tests: MERGE QUEUE section ----
+;;
+;; The stream builder and the renderer are pure functions of the merge globals,
+;; so none of these touch git.
+
+(defun agent-repl-test--in-flight (ws dir commits index &optional conflict-sha)
+  "Register WS as an in-flight merge into DIR over COMMITS, applying INDEX."
+  (push (list :source-ws ws :target-dir dir :started-at 0.0)
+        agent-repl--in-flight-merges)
+  (agent-repl--merge-progress-begin ws commits)
+  (agent-repl--merge-progress-put ws :commit-index index)
+  (when conflict-sha
+    (agent-repl--merge-progress-put ws :conflict-sha conflict-sha)))
+
+(defun agent-repl-test--queued (ws dir commits &optional halted)
+  "Register WS as a queued merge into DIR with a COMMITS lookahead."
+  (setq agent-repl--merge-queue
+        (append agent-repl--merge-queue
+                (list (list :source-ws ws :target-dir dir
+                            :halt-until-human halted))))
+  (puthash ws (list :commits commits) agent-repl--merge-lookahead))
+
+(ert-deftest agent-repl-test-merge-stream-empty-when-idle ()
+  "No queue and nothing in flight yields an empty stream, so the section is omitted."
+  (agent-repl-test--with-merge-state
+    (should (null (agent-repl-drawer--merge-stream)))))
+
+(ert-deftest agent-repl-test-merge-stream-current-commit-is-index ()
+  "The commit at `:commit-index' is the one being applied."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight
+     "ws" "/r/doom" '(("a" . "1") ("b" . "2") ("c" . "3")) 1)
+    (let ((first (car (agent-repl-drawer--merge-stream))))
+      (should (equal "b" (plist-get first :sha)))
+      (should (eq 'current (plist-get first :state))))))
+
+(ert-deftest agent-repl-test-merge-stream-already-applied-excluded ()
+  "Commits git already applied are not shown."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight
+     "ws" "/r/doom" '(("a" . "1") ("b" . "2") ("c" . "3")) 1)
+    (should-not (member "a" (mapcar (lambda (e) (plist-get e :sha))
+                                    (agent-repl-drawer--merge-stream))))))
+
+(ert-deftest agent-repl-test-merge-stream-rest-of-range-is-pending ()
+  "Commits behind the current one in the same pick are `pending'."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1") ("b" . "2")) 0)
+    (should (eq 'pending (plist-get (nth 1 (agent-repl-drawer--merge-stream))
+                                    :state)))))
+
+(ert-deftest agent-repl-test-merge-stream-conflict-state ()
+  "A recorded conflict SHA puts the current commit in the `conflict' state."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1")) 0 "a")
+    (should (eq 'conflict (plist-get (car (agent-repl-drawer--merge-stream))
+                                     :state)))))
+
+(ert-deftest agent-repl-test-merge-stream-queued-follows-in-flight ()
+  "Queued commits come after the in-flight pick's, which is what lets a
+lookahead cross into another project."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "a" "/r/doom" '(("a1" . "1")) 0)
+    (agent-repl-test--queued "b" "/r/services" '(("b1" . "2")))
+    (should (equal '("a1" "b1")
+                   (mapcar (lambda (e) (plist-get e :sha))
+                           (agent-repl-drawer--merge-stream))))))
+
+(ert-deftest agent-repl-test-merge-stream-halted-state ()
+  "A halted queue entry's commits are flagged `halted'."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--queued "ws" "/r/doom" '(("a" . "1")) t)
+    (should (eq 'halted (plist-get (car (agent-repl-drawer--merge-stream))
+                                   :state)))))
+
+(ert-deftest agent-repl-test-merge-stream-project-from-target-dir ()
+  "A commit's project is the basename of its merge target."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1")) 0)
+    (should (equal "doom" (plist-get (car (agent-repl-drawer--merge-stream))
+                                     :project)))))
+
+(ert-deftest agent-repl-test-merge-visible-budget-limits-pending ()
+  "The lookahead budget caps how many pending commits are shown."
+  (agent-repl-test--with-merge-state
+    (let ((agent-repl-drawer-merge-lookahead 3))
+      (agent-repl-test--in-flight
+       "ws" "/r/doom"
+       '(("a" . "1") ("b" . "2") ("c" . "3") ("d" . "4") ("e" . "5")) 0)
+      (should (= 4 (length (agent-repl-drawer--merge-stream-visible
+                            (agent-repl-drawer--merge-stream))))))))
+
+(ert-deftest agent-repl-test-merge-visible-keeps-every-current ()
+  "Every in-flight project's current commit survives the budget: buckets drain
+concurrently, so hiding one would hide a merge that is actually running."
+  (agent-repl-test--with-merge-state
+    (let ((agent-repl-drawer-merge-lookahead 0))
+      (agent-repl-test--in-flight "a" "/r/doom" '(("a1" . "1")) 0)
+      (agent-repl-test--in-flight "b" "/r/services" '(("b1" . "2")) 0)
+      (should (= 2 (length (agent-repl-drawer--merge-stream-visible
+                            (agent-repl-drawer--merge-stream))))))))
+
+(ert-deftest agent-repl-test-merge-visible-under-budget-not-padded ()
+  "Fewer commits than the budget renders what exists, with no padding."
+  (agent-repl-test--with-merge-state
+    (let ((agent-repl-drawer-merge-lookahead 3))
+      (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1")) 0)
+      (should (= 1 (length (agent-repl-drawer--merge-stream-visible
+                            (agent-repl-drawer--merge-stream))))))))
+
+(ert-deftest agent-repl-test-merge-elapsed-hidden-below-threshold ()
+  "A commit under the slow threshold shows no clock, so a fast queue stays quiet."
+  (let ((agent-repl-drawer-merge-slow-commit-threshold 3.0))
+    (should (null (agent-repl-drawer--merge-elapsed-string 100.0 101.2)))))
+
+(ert-deftest agent-repl-test-merge-elapsed-shown-above-threshold ()
+  "A commit over the slow threshold shows an M:SS clock."
+  (let ((agent-repl-drawer-merge-slow-commit-threshold 3.0))
+    (should (equal "0:04" (agent-repl-drawer--merge-elapsed-string 100.0 104.5)))))
+
+(ert-deftest agent-repl-test-merge-elapsed-formats-minutes ()
+  "Past a minute the clock rolls over rather than counting seconds forever."
+  (let ((agent-repl-drawer-merge-slow-commit-threshold 3.0))
+    (should (equal "1:07" (agent-repl-drawer--merge-elapsed-string 0.0 67.0)))))
+
+(ert-deftest agent-repl-test-merge-subject-truncated ()
+  "An over-long subject is ellipsized: a wrapped line costs the narrow drawer dearly."
+  (should (equal "abcd…" (agent-repl-drawer--merge-truncate "abcdefgh" 5))))
+
+(ert-deftest agent-repl-test-merge-section-interleaves-project-separators ()
+  "The section emits a separator only where the project changes.
+
+This is the exact case from the request: the current pick is project A, the
+next commit is also project A, and the two behind those are project B."
+  (agent-repl-test--with-merge-state
+    (let ((agent-repl-drawer-merge-lookahead 3))
+      (agent-repl-test--in-flight "a" "/r/doom" '(("a1" . "one") ("a2" . "two")) 0)
+      (agent-repl-test--queued "b" "/r/services" '(("b1" . "three") ("b2" . "four")))
+      (with-temp-buffer
+        (agent-repl-drawer--insert-merge-queue-section
+         (agent-repl-drawer--merge-stream-visible (agent-repl-drawer--merge-stream))
+         0.0)
+        (let ((lines (seq-remove #'string-empty-p
+                                 (split-string (buffer-string) "\n"))))
+          ;; header, rule, ▸doom, a1, a2, ▸services, b1, b2
+          (should (string-match-p "MERGE QUEUE (4)" (nth 0 lines)))
+          (should (string-match-p "doom"      (nth 2 lines)))
+          (should (string-match-p "a1"         (nth 3 lines)))
+          (should (string-match-p "a2"         (nth 4 lines)))
+          (should (string-match-p "services" (nth 5 lines)))
+          (should (string-match-p "b1"         (nth 6 lines)))
+          (should (string-match-p "b2"         (nth 7 lines))))))))
+
+(ert-deftest agent-repl-test-merge-section-one-separator-per-run ()
+  "A run of commits in one project carries exactly one separator."
+  (agent-repl-test--with-merge-state
+    (let ((agent-repl-drawer-merge-lookahead 3))
+      (agent-repl-test--in-flight
+       "a" "/r/doom" '(("a1" . "1") ("a2" . "2") ("a3" . "3")) 0)
+      (with-temp-buffer
+        (agent-repl-drawer--insert-merge-queue-section
+         (agent-repl-drawer--merge-stream-visible (agent-repl-drawer--merge-stream))
+         0.0)
+        (should (= 1 (cl-count-if
+                      (lambda (l) (string-match-p "\\`\\s-*[▾▸]\\s-*doom\\'" l))
+                      (split-string (buffer-string) "\n"))))))))
+
+(ert-deftest agent-repl-test-merge-section-conflict-detail-line ()
+  "A conflicted commit renders its unmerged-file count and resolver phase."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1")) 0 "a")
+    (agent-repl--merge-progress-put "ws" :conflict-files '("f.txt" "g.txt"))
+    (agent-repl--merge-progress-put "ws" :resolver-phase 'verifying)
+    (with-temp-buffer
+      (agent-repl-drawer--insert-merge-queue-section
+       (agent-repl-drawer--merge-stream) 0.0)
+      (should (string-match-p "2 files unmerged" (buffer-string)))
+      (should (string-match-p "resolver: verifying" (buffer-string))))))
+
+(ert-deftest agent-repl-test-merge-rows-are-not-workspace-rows ()
+  "Commit rows carry `agent-repl-drawer-commit', never the workspace property.
+This is what keeps j/k navigation, marks, expansion, and cursor restore from
+ever seeing a commit row — and what makes it safe for MERGE QUEUE and MERGING
+to coexist without rendering a workspace twice."
+  (agent-repl-test--with-merge-state
+    (agent-repl-test--in-flight "ws" "/r/doom" '(("a" . "1")) 0)
+    (with-temp-buffer
+      (agent-repl-drawer--insert-merge-queue-section
+       (agent-repl-drawer--merge-stream) 0.0)
+      (goto-char (point-max))
+      (forward-line -1)
+      (should (equal "a" (get-text-property (point) 'agent-repl-drawer-commit)))
+      (should (null (get-text-property (point) 'agent-repl-drawer-workspace))))))
+
+(ert-deftest agent-repl-test-merge-progress-invalidates-render-signature ()
+  "A progress write changes the render signature, so the 1Hz poll cannot
+short-circuit the redraw."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-merge-state
+      (agent-repl-drawer-test--with-buffer
+        (let ((before (agent-repl-drawer--render-signature)))
+          (agent-repl--merge-progress-put "ws" :commit-index 1)
+          (should-not (equal before (agent-repl-drawer--render-signature))))))))
 
 (provide 'test-drawer)
 ;;; test-drawer.el ends here
