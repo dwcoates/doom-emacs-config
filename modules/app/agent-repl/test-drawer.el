@@ -25,9 +25,28 @@
            ,@body)
        (when (buffer-live-p buf) (kill-buffer buf)))))
 
+(defconst agent-repl-drawer-test--project-dir "/tmp/agent-repl-test-repo/ws"
+  "Default `:project-dir' seeded by `agent-repl-drawer-test--register'.")
+
+(defconst agent-repl-drawer-test--group-key "/tmp/agent-repl-test-repo/.git"
+  "Default `:group-key' seeded by `agent-repl-drawer-test--register'.")
+
 (defun agent-repl-drawer-test--register (ws &rest props)
-  "Register WS in `agent-repl--workspaces' with PROPS plist."
-  (puthash ws (copy-sequence props) agent-repl--workspaces))
+  "Register WS in `agent-repl--workspaces' with PROPS plist.
+Seeds `:project-dir' and `:group-key' when PROPS omits them, mirroring
+production: every real workspace carries a `:project-dir' from birth, and
+the drawer renders only such workspaces (project-dir-less stubs are
+filtered by `agent-repl-drawer--visible-workspace-keys').  Seeding
+`:group-key' too keeps render tests from shelling out to git.
+Use `puthash' directly to register a project-dir-less stub."
+  (let ((plist (copy-sequence props)))
+    (unless (plist-member plist :project-dir)
+      (setq plist (plist-put plist :project-dir
+                             agent-repl-drawer-test--project-dir)))
+    (unless (plist-member plist :group-key)
+      (setq plist (plist-put plist :group-key
+                             agent-repl-drawer-test--group-key)))
+    (puthash ws plist agent-repl--workspaces)))
 
 ;;;; ---- Multi-select ----
 
@@ -2013,6 +2032,51 @@ This is the success path for an explicit merge command."
                 (setq found-none t))
               (forward-line 1))
             (should-not found-none)))))))
+
+;;;; ---- Project-dir-less stub filter ----
+
+(ert-deftest agent-repl-drawer-test-visible-keys-filters-project-dir-less-stub ()
+  "`--visible-workspace-keys' drops a live entry that has no `:project-dir'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "real" :priority "p1")
+    ;; Shape written by a persp hook onto Doom's default "main" persp.
+    (puthash "main" '(:ws-loaded t :repl-state :dead) agent-repl--workspaces)
+    (let ((keys (agent-repl-drawer--visible-workspace-keys)))
+      (should (member "real" keys))
+      (should-not (member "main" keys)))))
+
+(ert-deftest agent-repl-drawer-test-visible-keys-keeps-project-dir-workspace ()
+  "`--visible-workspace-keys' keeps an entry whose `:project-dir' is set."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "real" :project-dir "/repo/ws")
+    (should (member "real" (agent-repl-drawer--visible-workspace-keys)))))
+
+(ert-deftest agent-repl-drawer-test-render-omits-no-repo-group ()
+  "Render emits no `(no repo)' group when a project-dir-less stub is registered."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "real" :priority "p1")
+    (puthash "main" '(:ws-loaded t :repl-state :dead) agent-repl--workspaces)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "real" text))
+        (should-not (string-match-p "(no repo)" text))))))
+
+(ert-deftest agent-repl-drawer-test-render-omits-stub-workspace-entry ()
+  "Render surfaces no workspace entry for a project-dir-less stub."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "real" :priority "p1")
+    (puthash "main" '(:ws-loaded t :repl-state :dead) agent-repl--workspaces)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (goto-char (point-min))
+      (let (found-stub)
+        (while (and (not found-stub) (not (eobp)))
+          (when (equal (get-text-property (point) 'agent-repl-drawer-workspace)
+                       "main")
+            (setq found-stub t))
+          (forward-line 1))
+        (should-not found-stub)))))
 
 ;;;; ---- Render ----
 

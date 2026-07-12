@@ -475,16 +475,26 @@ windows."
 ;;;; Sorting + selection helpers --------------------------------------------
 
 (defun agent-repl-drawer--visible-workspace-keys ()
-  "Return live workspace keys from `agent-repl--workspaces' minus the nil persp.
-Filters any key whose name (or bare name) equals `persp-nil-name'
-\(default \"none\") so the persp-mode sentinel never surfaces in the
-drawer.  Workspace creation already refuses bare names that collide
-with `persp-nil-name', but the sentinel can still leak in via stray
-status syncs — this is the drawer-side safety net so it never renders.
+  "Return the live agent-repl workspaces to render, from `agent-repl--workspaces'.
 
-Also filters out tombstoned entries (`:nuked-at' set) so nuked
-workspaces don't linger as drawer ghosts despite their identity
-records surviving in the hash.
+Filters three classes of key that are present in the hash but are not
+agent-repl workspaces the drawer should show:
+
+- Project-dir-less stubs.  Every real workspace carries `:project-dir'
+  from birth (seeded at the `agent-repl--ws-create' boundary) and keeps
+  it across tombstoning, so a live entry WITHOUT `:project-dir' is never
+  a workspace — it is a plain persp (notably Doom's default \"main\")
+  auto-vivified into the hash by a persp hook writing panel/repl
+  bookkeeping onto whatever persp happens to be current.  Such stubs are
+  what used to populate the drawer's `(no repo)' group.
+
+- The persp-mode sentinel: any key whose name (or bare name) equals
+  `persp-nil-name' (default \"none\").  Workspace creation already
+  refuses bare names that collide with it, but the sentinel can still
+  leak in via stray status syncs.
+
+- Tombstoned entries (`:nuked-at' set), so nuked workspaces don't linger
+  as drawer ghosts despite their identity records surviving in the hash.
 
 hide-project-dirs needs no special handling here: that mode kills
 matching workspaces (`agent-repl-toggle-hide-project-dirs'), so they
@@ -493,9 +503,10 @@ from the drawer."
   (let ((nil-name (agent-repl--ws-nil-name)))
     (cl-remove-if
      (lambda (ws)
-       (and nil-name
-            (or (equal ws nil-name)
-                (equal (agent-repl--bare-workspace-name ws) nil-name))))
+       (or (null (agent-repl--ws-get ws :project-dir))
+           (and nil-name
+                (or (equal ws nil-name)
+                    (equal (agent-repl--bare-workspace-name ws) nil-name)))))
      (agent-repl--live-ws-names))))
 
 (defun agent-repl-drawer--workspace-hidden-p (ws)
@@ -909,8 +920,14 @@ caller's responsibility."
 (defun agent-repl-drawer--workspace-group-key (ws)
   "Return a stable group key for WS based on git common-dir.
 Cached on the workspace plist as `:group-key' so each workspace runs
-git at most once.  Returns nil when WS has no project-dir or git
-fails — such workspaces fall into the unlabeled `(no repo)' bucket."
+git at most once.  Returns nil when git fails on WS's project-dir —
+e.g. the worktree directory was deleted out from under the workspace.
+Such workspaces fall into the unlabeled `(no repo)' bucket.
+
+Project-dir-less stubs never reach this function: they are filtered
+upstream by `agent-repl-drawer--visible-workspace-keys', so `(no repo)'
+is now reachable only for a real workspace whose repo genuinely cannot
+be resolved, never for Doom's default \"main\" persp."
   (or (agent-repl--ws-get ws :group-key)
       (when-let* ((dir (ignore-errors (agent-repl--ws-dir ws)))
                   (raw (agent-repl--git-string-quiet
