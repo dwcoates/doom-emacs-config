@@ -18,20 +18,13 @@ The prefix is sent on the first prompt and every Nth prompt thereafter."
 (defvar agent-repl-metaprompt-file
   (expand-file-name "metaprompt.md"
                     (file-name-directory (or load-file-name buffer-file-name)))
-  "Absolute path to the canonical metaprompt source file in the emacs repo.
+  "Absolute path to the canonical metaprompt source file in this repository.
 This is the .md data file extracted out of input.el so that the
 metaprompt body lives as plain text, edited and version-controlled
-alongside the code.  Captured at file-load time because `load-file-name'
-is only bound during load.")
-
-(defcustom agent-repl-metaprompt-file-symlink
-  "~/.config/claude/emacs/metaprompt.md"
-  "User-facing symlink path embedded in the metaprompt wrapper template.
-Points to `agent-repl-metaprompt-file' and is the path Claude is
-instructed to read (or re-read) at each metaprompt injection so the
-directive is loaded from the canonical source file on every send."
-  :type 'string
-  :group 'agent-repl)
+alongside the code.  It is ALSO the path the agent is told to read: the
+in-repo file is the single canonical location, with no out-of-tree
+symlink standing between the agent and the source of truth.  Captured at
+file-load time because `load-file-name' is only bound during load.")
 
 (defcustom agent-repl-command-prefix
   (with-temp-buffer
@@ -40,7 +33,7 @@ directive is loaded from the canonical source file on every send."
   "Canonical metaprompt content, loaded from `agent-repl-metaprompt-file'.
 Not sent inline to Claude — the wrapper template at
 `agent-repl-command-prefix-template' instead instructs Claude to read
-`agent-repl-metaprompt-file-symlink' directly, so the body stays in one
+`agent-repl-metaprompt-file' directly, so the body stays in one
 canonical place on disk.  This variable mirrors the file's content for
 tests and tooling that need to assert against the canonical metaprompt
 without re-reading the file."
@@ -58,7 +51,7 @@ without re-reading the file."
           "prompts, obey precisely the guidelines that you just read for answering, and without failure.")
   "Template instructing Claude to read the metaprompt file before acting.
 Must contain a single %s placeholder, filled at load time with
-`agent-repl-metaprompt-file-symlink'.  Intentionally avoids any
+`agent-repl-metaprompt-file'.  Intentionally avoids any
 \"metaprompt\" terminology in the inline prefix itself — the directive
 framing lives inside the .md file rather than here, so the inline prefix
 is a plain instruction to read the file."
@@ -67,12 +60,12 @@ is a plain instruction to read the file."
 
 (defvar agent-repl--command-prefix
   (format agent-repl-command-prefix-template
-          agent-repl-metaprompt-file-symlink)
+          agent-repl-metaprompt-file)
   "Formatted read-directive prepended before every periodic user input.
 Active when `agent-repl-skip-permissions' is non-nil, subject to
 `agent-repl-prefix-period'.  A plain instruction to read the file at
-`agent-repl-metaprompt-file-symlink' — the metaprompt body lives inside
-that file, not here.")
+`agent-repl-metaprompt-file' — the metaprompt body lives inside that
+in-repo file, not here.")
 
 ;; `defcustom' and `defvar' only initialize their values on first load;
 ;; reloading the file (e.g. via `agent-repl-reload-config' or
@@ -88,7 +81,7 @@ that file, not here.")
       (eval (car (get 'agent-repl-command-prefix-template 'standard-value))))
 (setq agent-repl--command-prefix
       (format agent-repl-command-prefix-template
-              agent-repl-metaprompt-file-symlink))
+              agent-repl-metaprompt-file))
 
 (defcustom agent-repl-send-postfix "\n what do you think? do NOT code, just analyze."
   "String appended to input when sending via `agent-repl-send-with-postfix'."
