@@ -50,6 +50,7 @@
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
+(declare-function agent-repl--clear-main-area-for-panels "agent-repl-panels" ())
 (declare-function agent-repl--close-buffer-windows "agent-repl-panels" (&rest bufs))
 (declare-function agent-repl--restore-fullscreen-config "agent-repl-panels" (ws))
 (declare-function agent-repl--buffer-name "agent-repl-core" (suffix ws))
@@ -255,14 +256,20 @@ Falls back to the selected window (always live) when nothing matches."
       (selected-window)))
 
 (defun agent-repl--frontend-display-webview (ws buf)
-  "Display BUF as the workspace's frontend view in the frame's main area.
+  "Display BUF as the workspace's frontend view filling the frame's main area.
 When the vterm/input panels are visible they are HIDDEN first through
 the module's own path (`agent-repl--hide-panels') rather than swapped
 under: replacing the buffer of the strongly-dedicated output window
 would (a) leave the input panel orphaned for the sync-panels sweep to
 reap and (b) break the next `agent-repl--show-panels' against the
 still-dedicated window.  The webview then takes a live main-area
-window like an ordinary buffer display."
+window, and — exactly like the vterm layout, for which fullscreen is
+the sole display format — every OTHER main-area window is cleared
+\(`agent-repl--clear-main-area-for-panels', drawer excluded), so the
+webview + input panels end up the only main-area windows.  Without
+the clear, whatever the frame carried before the mount (magit, the
+dashboard, a previous workspace's leftovers) stayed up beside the
+panels — the extra-windows-on-first-switch bug."
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
@@ -289,6 +296,7 @@ window like an ordinary buffer display."
         (delete-window stale-input-win)))
     (let ((win (agent-repl--frontend-main-area-window)))
       (select-window win)
+      (agent-repl--clear-main-area-for-panels)
       (set-window-buffer win buf)
       ;; Hybrid UI: the classic input panel sits below the webview, with
       ;; the same window recipe the vterm layout uses (dedicated,
