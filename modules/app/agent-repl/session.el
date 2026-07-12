@@ -7,6 +7,10 @@
 (declare-function agent-repl--ws-gui-frontend-p "frontends" (ws))
 (declare-function agent-repl--gui-running-p "frontend-client" (ws))
 
+;; Defined in worktree.el, which may load after this file; referenced only
+;; at call time by `agent-repl--doom-config-tree-p'.
+(defvar agent-repl-worktree-dir-suffix)
+
 (defconst agent-repl--start-failure-marker "AGENT_REPL_START_FAILURE:"
   "Marker a start command (e.g. `claude-sandbox') prints to its vterm when it
 cannot launch — Docker daemon down, image missing, etc.  The start command
@@ -80,6 +84,14 @@ default ~/.claude, i.e. the dodge.w.coates@gmail.com account.  When a
 string, that directory is used explicitly."
   :type '(choice (const :tag "Use Claude's default (~/.claude)" nil)
                  (directory :tag "Explicit config dir"))
+  :group 'agent-repl)
+
+(defcustom agent-repl-doom-config-root "~/.config/doom"
+  "Canonical doom config checkout used by `agent-repl-doom-multi-repo-mode'.
+The mode treats this directory, everything under it, and every worktree
+of it (the sibling `<root>`+`agent-repl-worktree-dir-suffix' directory)
+as lying under the multi-repo root for agent-config selection."
+  :type 'directory
   :group 'agent-repl)
 
 (defcustom agent-repl-startup-prefix "clear && "
@@ -613,29 +625,81 @@ whenever MODEL denotes Haiku."
                         (if managed "managed" "personal") model flag)
       flag)))
 
+(defun agent-repl--under-dir-p (dir project-dir)
+  "Non-nil when PROJECT-DIR is DIR or lies beneath it.
+Both paths are expanded and slash-terminated before the prefix test, so
+`/a/bc' never counts as living under `/a/b'."
+  (string-prefix-p (file-name-as-directory (expand-file-name dir))
+                   (file-name-as-directory (expand-file-name project-dir))))
+
+(defun agent-repl--doom-config-tree-p (project-dir)
+  "Non-nil when PROJECT-DIR belongs to the doom config tree.
+The tree is `agent-repl-doom-config-root' itself plus the sibling
+worktrees directory agent-repl creates for it (`~/.config/doom' and
+`~/.config/doom-worktrees/'), so a workspace generated off the doom
+config counts exactly like the canonical checkout."
+  (let* ((root (expand-file-name agent-repl-doom-config-root))
+         (worktrees (concat (directory-file-name root)
+                            agent-repl-worktree-dir-suffix)))
+    (or (agent-repl--under-dir-p root project-dir)
+        (agent-repl--under-dir-p worktrees project-dir))))
+
+;;;###autoload
+(define-minor-mode agent-repl-doom-multi-repo-mode
+  "Global mode putting the doom config tree under the multi-repo root's purview.
+Off (the default), only projects beneath the directory named by the
+`agent-repl-multi-repo-root-env' environment variable resolve to
+`agent-repl-multi-repo-config-dir'; the doom config checkout resolves to
+`agent-repl-default-config-dir' like any other personal project.  On,
+`agent-repl--doom-config-tree-p' projects resolve to the multi-repo
+config dir too, so agent sessions rooted in the doom config (or one of
+its generated worktrees) run under the multi-repo account.
+
+The mode is read at session-START time, so toggling it does not
+re-point an already-running agent session at another config dir — kill
+and restart the session for the new account to take effect."
+  :global t
+  :init-value nil
+  :group 'agent-repl
+  (let ((dir (agent-repl--compute-config-dir agent-repl-doom-config-root)))
+    (agent-repl--log nil "doom-multi-repo-mode: %s doom-config-dir=%s"
+                     (if agent-repl-doom-multi-repo-mode "enabled" "disabled")
+                     (or dir "<claude default ~/.claude>"))
+    (message "agent-repl: doom config tree %s the multi-repo root — config dir %s"
+             (if agent-repl-doom-multi-repo-mode "counts as under" "is outside")
+             (or dir "~/.claude (Claude default)"))))
+
+(defun agent-repl--under-multi-repo-p (project-dir)
+  "Non-nil when PROJECT-DIR counts as living under the multi-repo root.
+True when PROJECT-DIR lies under the directory named by the
+`agent-repl-multi-repo-root-env' environment variable, and also when
+`agent-repl-doom-multi-repo-mode' is on and PROJECT-DIR belongs to the
+doom config tree (see `agent-repl--doom-config-tree-p')."
+  (let ((root (getenv agent-repl-multi-repo-root-env)))
+    (or (and root
+             (> (length root) 0)
+             (agent-repl--under-dir-p root project-dir))
+        (and agent-repl-doom-multi-repo-mode
+             (agent-repl--doom-config-tree-p project-dir)))))
+
 (defun agent-repl--compute-config-dir (project-dir)
   "Return the CLAUDE_CONFIG_DIR to use for PROJECT-DIR, or nil.
-When PROJECT-DIR lies under the directory named by the
-`agent-repl-multi-repo-root-env' environment variable, returns the
-expanded `agent-repl-multi-repo-config-dir' (the dodge@chess.com
-account).  Otherwise returns the expanded `agent-repl-default-config-dir',
-or nil when that is nil so the CLI falls back to its default ~/.claude
-(the dodge.w.coates@gmail.com account).  Signals an error when
-PROJECT-DIR is nil, since account selection cannot be resolved without
-it."
+When PROJECT-DIR counts as under the multi-repo root (see
+`agent-repl--under-multi-repo-p'), returns the expanded
+`agent-repl-multi-repo-config-dir' (the dodge@chess.com account).
+Otherwise returns the expanded `agent-repl-default-config-dir', or nil
+when that is nil so the CLI falls back to its default ~/.claude (the
+dodge.w.coates@gmail.com account).  Signals an error when PROJECT-DIR is
+nil, since account selection cannot be resolved without it."
   (unless project-dir
     (error "agent-repl--compute-config-dir: project-dir is nil — cannot determine account"))
-  (let* ((root (getenv agent-repl-multi-repo-root-env))
-         (under-multi-repo
-          (and root
-               (> (length root) 0)
-               (string-prefix-p (file-name-as-directory (expand-file-name root))
-                                (file-name-as-directory (expand-file-name project-dir)))))
+  (let* ((under-multi-repo (agent-repl--under-multi-repo-p project-dir))
          (dir (if under-multi-repo
                   agent-repl-multi-repo-config-dir
                 agent-repl-default-config-dir)))
-    (agent-repl--log nil "compute-config-dir: project-dir=%s root=%s branch=%s dir=%s"
-                      project-dir root
+    (agent-repl--log nil "compute-config-dir: project-dir=%s root=%s doom-mode=%s branch=%s dir=%s"
+                      project-dir (getenv agent-repl-multi-repo-root-env)
+                      agent-repl-doom-multi-repo-mode
                       (if under-multi-repo "multi-repo" "default") dir)
     (and dir (expand-file-name dir))))
 
