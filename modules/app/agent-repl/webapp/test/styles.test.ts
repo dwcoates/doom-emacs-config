@@ -44,6 +44,12 @@ function isRed(hex: string): boolean {
   return r > 2 * g && r > 2 * b;
 }
 
+/** Whether a `#rrggbb` literal reads as green: its green channel dominates both others. */
+function isGreen(hex: string): boolean {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return g > 1.5 * r && g > 1.5 * b;
+}
+
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -172,6 +178,51 @@ describe("clear divider", () => {
     const red = isRed(token(darkTheme, "--clear-divider"));
     // Assert
     expect(red).toBe(true);
+  });
+});
+
+describe("final-response border", () => {
+  const bubble = blockAfter(css, ".bubble ");
+  const finalBubble = blockAfter(css, ".bubble.assistant.final-response");
+
+  it("borders a turn's final response with the final-response token", () => {
+    // Arrange / Act — the .bubble.assistant.final-response rule.
+    // Assert
+    expect(finalBubble).toMatch(/border-color:\s*var\(--final-response\)/);
+  });
+
+  it("reserves the border box on every bubble so the green border never reflows the feed", () => {
+    // Arrange / Act — the shared .bubble rule lays the 2px out up front, and the
+    // final-response rule only recolors it.
+    // Assert
+    expect(bubble).toMatch(/border:\s*2px\s+solid\s+transparent/);
+    expect(finalBubble).not.toMatch(/border:\s/);
+  });
+
+  it("defines a green border token for the light theme", () => {
+    // Arrange / Act
+    const green = isGreen(token(lightTheme, "--final-response"));
+    // Assert
+    expect(green).toBe(true);
+  });
+
+  it("defines a green border token for the dark theme", () => {
+    // Arrange / Act
+    const green = isGreen(token(darkTheme, "--final-response"));
+    // Assert
+    expect(green).toBe(true);
+  });
+
+  it("brightens the dark-theme border token above the light-theme one", () => {
+    // Arrange
+    const [dark, light] = [
+      token(darkTheme, "--final-response"),
+      token(lightTheme, "--final-response"),
+    ];
+    // Act
+    const brighter = luminance(dark) > luminance(light);
+    // Assert
+    expect(brighter).toBe(true);
   });
 });
 

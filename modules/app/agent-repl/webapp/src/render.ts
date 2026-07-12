@@ -166,18 +166,24 @@ function UserTurn(item: UserTurnItem): string {
   )}</span></div>${divider}`;
 }
 
-function TextStream(item: TextItem): string {
+/**
+ * A turn's FINAL response gets the green border (§2.4): the answer the
+ * turn actually landed on, set apart from the running commentary the
+ * agent emits between its tool calls.
+ */
+function TextStream(item: TextItem, isFinal: boolean): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
+  const cls = `bubble assistant md${isFinal ? " final-response" : ""}`;
   // A bare metaprompt TLDR tree (no code fence — fenced trees are the
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
   if (!item.text.includes("```") && isMetapromptTree(item.text)) {
-    return `<div class="bubble assistant md"><div class="mp-tree">${renderTreeHtml(
+    return `<div class="${cls}"><div class="mp-tree">${renderTreeHtml(
       item.text,
       inline,
     )}</div>${cursor}</div>`;
   }
-  return `<div class="bubble assistant md">${renderMarkdown(item.text)}${cursor}</div>`;
+  return `<div class="${cls}">${renderMarkdown(item.text)}${cursor}</div>`;
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -452,8 +458,41 @@ function permissionPreviewHtml(item: PermissionItem): string {
   }
 }
 
+/**
+ * Whether a result ends its turn normally: an aborted or errored turn was
+ * cut off partway, so it never reached the answer it was working toward.
+ */
+function isTurnComplete(item: ResultItem): boolean {
+  return item.subtype === "success";
+}
+
+/**
+ * Block ids of the text bubbles that CONCLUDE a completed turn — the
+ * agent's final response to a prompt, as against the commentary it emits
+ * between tool calls. A turn's final response is its last text block
+ * before the `result`, and only a turn that ran to completion has one: an
+ * aborted or errored turn's last text is a severed thought, not an answer.
+ * A turn still streaming has no final response either, since its next
+ * block could always continue it.
+ */
+export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<string> {
+  const finals = new Set<string>();
+  let lastText: string | null = null;
+  for (const item of items) {
+    if (item.kind === "user-turn") {
+      lastText = null;
+    } else if (item.kind === "text") {
+      lastText = item.blockId;
+    } else if (item.kind === "result") {
+      if (lastText !== null && isTurnComplete(item)) finals.add(lastText);
+      lastText = null;
+    }
+  }
+  return finals;
+}
+
 function ResultChip(item: ResultItem): string {
-  const done = item.subtype === "success";
+  const done = isTurnComplete(item);
   const label = done ? "turn complete" : item.subtype;
   return `
     <div class="result ${item.isError ? "err" : "ok"}${done ? " done" : ""}">
@@ -481,12 +520,16 @@ function SystemNote(item: SystemItem): string {
   return `<div class="system-note">system: ${escapeHtml(item.subtype)}</div>`;
 }
 
-export function renderItem(item: ConversationItem, selections?: QuestionSelections): string {
+export function renderItem(
+  item: ConversationItem,
+  selections?: QuestionSelections,
+  isFinal = false,
+): string {
   switch (item.kind) {
     case "user-turn":
       return UserTurn(item);
     case "text":
-      return TextStream(item);
+      return TextStream(item, isFinal);
     case "thinking":
       return Thinking(item);
     case "tool":
@@ -645,6 +688,15 @@ export class FeedRenderer {
     if (this.lastState) this.render(this.lastState);
   }
 
+  /** One item's HTML, green-bordered when FINALS marks it a turn's answer. */
+  private itemHtml(item: ConversationItem, finals: ReadonlySet<string>): string {
+    return renderItem(
+      item,
+      this.questionSelections,
+      item.kind === "text" && finals.has(item.blockId),
+    );
+  }
+
   private submitQuestionAnswers(requestId: string): void {
     const found = this.pendingQuestionItem(requestId);
     if (!found) return;
@@ -680,6 +732,7 @@ export class FeedRenderer {
     this.backfillQueue = [];
     this.container.innerHTML = "";
     this.nodes.clear();
+    const finals = finalResponseBlockIds(state.items);
     const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
@@ -694,7 +747,7 @@ export class FeedRenderer {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
         const { el, item } = shells[i];
-        const html = renderItem(item, this.questionSelections);
+        const html = this.itemHtml(item, finals);
         el.innerHTML = html;
         const entry = this.nodes.get(el.dataset.key ?? "");
         if (entry) entry.html = html;
@@ -742,11 +795,12 @@ export class FeedRenderer {
       pinned: isPinnedToBottom(this.container),
     });
     this.lastUserTurn = turnId;
+    const finals = finalResponseBlockIds(state.items);
     const seen = new Set<string>();
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
       seen.add(key);
-      const html = renderItem(item, this.questionSelections);
+      const html = this.itemHtml(item, finals);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");
