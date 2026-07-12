@@ -815,8 +815,13 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
       :desc "Switch sandbox/bare-metal" "o s" #'agent-repl-switch-environment
-      :desc "Select frontend (vterm/gui)" "o f" #'agent-repl-select-frontend
-      :desc "Switch frontend live (keep conversation)" "o F" #'agent-repl-switch-frontend
+      ;; `agent-repl-select-frontend' is deliberately UNBOUND: flipping a
+      ;; workspace's presentation without killing its session invites two
+      ;; agent processes on one directory.  `SPC o F' (kill-then-open,
+      ;; conversation carried via the durable session id) is the only
+      ;; user-facing frontend switch; select-frontend remains available
+      ;; to internal callers.
+      :desc "Switch frontend (kill + carry conversation)" "o F" #'agent-repl-switch-frontend
       :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'agent-repl-toggle-hide-mode
       :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'agent-repl-toggle-hide-project-dirs
       :desc "Toggle workspace drawer" "o d" #'agent-repl-drawer-toggle)
