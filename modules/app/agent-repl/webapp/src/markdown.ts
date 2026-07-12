@@ -7,7 +7,7 @@
  * rules, paragraphs.
  *
  * Fenced code blocks with a KNOWN language tag are syntax-highlighted
- * via highlight.js (core build + a lean language set); hljs emits its
+ * via the shared highlight.js helper (highlight.ts); hljs emits its
  * own escaped HTML, so the escape-first guarantee holds. Unknown or
  * absent language tags fall back to plain escaped text — no
  * auto-detection, so rendering stays deterministic and cheap under
@@ -18,52 +18,7 @@
  * than erroring, so it can re-render on every text-delta.
  */
 
-import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
-import c from "highlight.js/lib/languages/c";
-import cpp from "highlight.js/lib/languages/cpp";
-import css from "highlight.js/lib/languages/css";
-import diff from "highlight.js/lib/languages/diff";
-import go from "highlight.js/lib/languages/go";
-import java from "highlight.js/lib/languages/java";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import lisp from "highlight.js/lib/languages/lisp";
-import python from "highlight.js/lib/languages/python";
-import ruby from "highlight.js/lib/languages/ruby";
-import rust from "highlight.js/lib/languages/rust";
-import shell from "highlight.js/lib/languages/shell";
-import sql from "highlight.js/lib/languages/sql";
-import typescript from "highlight.js/lib/languages/typescript";
-import xml from "highlight.js/lib/languages/xml";
-import yaml from "highlight.js/lib/languages/yaml";
-
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("c", c);
-hljs.registerLanguage("cpp", cpp);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("diff", diff);
-hljs.registerLanguage("go", go);
-hljs.registerLanguage("java", java);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("lisp", lisp);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("ruby", ruby);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("shell", shell);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("yaml", yaml);
-
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
+import { escapeHtml, highlightCode } from "./highlight.js";
 
 /** Inline markup within one already-escaped line. */
 function inline(escaped: string): string {
@@ -125,13 +80,9 @@ export function renderMarkdown(src: string): string {
   };
   const flushFence = (): void => {
     if (fence !== null) {
-      const code = fence.lines.join("\n");
-      const known = fence.lang !== "" && hljs.getLanguage(fence.lang) !== undefined;
-      // hljs.highlight escapes its input itself, so BOTH branches emit
-      // only escaped text — the escape-first guarantee holds.
-      const html = known
-        ? hljs.highlight(code, { language: fence.lang }).value
-        : escapeHtml(code);
+      // highlightCode escapes in both branches (hljs escapes its own
+      // output), so the escape-first guarantee holds.
+      const html = highlightCode(fence.lines.join("\n"), fence.lang);
       const langClass = fence.lang === "" ? "" : ` lang-${escapeHtml(fence.lang)}`;
       out.push(`<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`);
       fence = null;

@@ -4,7 +4,9 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
+import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { renderMarkdown } from "./markdown.js";
+import { Usage } from "./protocol.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -54,14 +56,6 @@ export function askQuestions(item: PermissionItem): AskQuestion[] | null {
 /** Tool names the SPA renders specially (§2.6); others use Generic. */
 const SPECIAL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep", "Task"]);
 
-export function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
 function contentToText(
   content: string | Array<{ type: string; text?: string }>,
 ): string {
@@ -70,6 +64,43 @@ function contentToText(
     .filter((b) => b.type === "text")
     .map((b) => b.text ?? "")
     .join("\n");
+}
+
+// --- topbar chrome ------------------------------------------------------------
+
+/** Context usage for the topbar: input + cache read + cache creation. */
+function contextTokens(usage: Usage | null): number {
+  if (!usage) return 0;
+  return (
+    usage.input_tokens +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  );
+}
+
+/**
+ * Topbar session datapoints: `parent workspace: <ws> · model: <m> ·
+ * tokens: <n>` (the vterm modeline's context mirror). The parent
+ * workspace entry is omitted entirely when PARENT-WS is absent or
+ * empty, as is model before hello delivers one; each value gets its
+ * own color via the info-* classes.
+ */
+export function sessionInfoHtml(
+  parentWs: string | null,
+  model: string,
+  usage: Usage | null,
+): string {
+  const parts: string[] = [];
+  if (parentWs) {
+    parts.push(`parent workspace: <span class="info-ws">${escapeHtml(parentWs)}</span>`);
+  }
+  if (model !== "") {
+    parts.push(`model: <span class="info-model">${escapeHtml(model)}</span>`);
+  }
+  parts.push(
+    `tokens: <span class="info-tokens">${contextTokens(usage).toLocaleString("en-US")}</span>`,
+  );
+  return parts.join(" · ");
 }
 
 // --- per-item components ------------------------------------------------------
@@ -150,6 +181,12 @@ function toolInput(item: ToolItem): string {
   if (item.toolName === "Task" && item.input && typeof item.input.description === "string") {
     return `<div class="file-path">${escapeHtml(item.input.description)}</div>`;
   }
+  // SendMessage renders summary-only: the UI-preview summary (plus the
+  // recipient), never the full message body.
+  if (item.toolName === "SendMessage" && item.input && typeof item.input.summary === "string") {
+    const to = typeof item.input.to === "string" ? `→ ${item.input.to}: ` : "";
+    return `<div class="file-path">${escapeHtml(`${to}${item.input.summary}`)}</div>`;
+  }
   return `<pre class="tool-input">${escapeHtml(item.inputJson)}</pre>`;
 }
 
@@ -172,9 +209,56 @@ function toolResult(item: ToolItem): string {
         return `<pre class="tool-output">${escapeHtml(r.summary)}</pre>`;
     }
   }
+  if (item.toolName === "Read" && !item.result.isError) {
+    return readResultHtml(item, contentToText(item.result.content));
+  }
+  // SendMessage is summary-only: the successful delivery echo adds
+  // nothing over the summary line. Errors still fall through below so
+  // failures stay loud.
+  if (item.toolName === "SendMessage" && !item.result.isError) {
+    return "";
+  }
   return `<pre class="tool-output${item.result.isError ? " stderr" : ""}">${escapeHtml(
     contentToText(item.result.content),
   )}</pre>`;
+}
+
+/**
+ * Read result preview. cat -n numbered output has each line's number
+ * prefix lifted into a muted .line-no span so only the code text is
+ * syntax-highlighted (language from the file_path extension, plain
+ * escaped text when it is unknown); non-numbered content is
+ * highlighted whole. .tool-read-output caps the visible height at 10
+ * lines — the rest stays reachable by scrolling.
+ */
+function readResultHtml(item: ToolItem, text: string): string {
+  const path =
+    item.input && typeof item.input.file_path === "string" ? item.input.file_path : "";
+  const lang = languageForPath(path) ?? "";
+  const lines = text.split("\n");
+  const parts = lines.map((l) => l.match(/^(\s*\d+\t)(.*)$/));
+  // Numbered when every line carries the cat -n prefix (a blank
+  // trailing line from a final newline doesn't break the format).
+  const numbered =
+    parts.some((p) => p !== null) && parts.every((p, i) => p !== null || lines[i] === "");
+  if (!numbered) {
+    return `<pre class="tool-output tool-read-output"><code class="hljs">${highlightCode(text, lang)}</code></pre>`;
+  }
+  const code = parts.map((p, i) => (p ? p[2] : lines[i])).join("\n");
+  // hljs preserves newlines, so the highlighted HTML splits back into
+  // the same number of lines; if that invariant ever breaks, keep the
+  // prefixes but fall back to unhighlighted code.
+  let codeLines = highlightCode(code, lang).split("\n");
+  if (codeLines.length !== lines.length) {
+    codeLines = parts.map((p, i) => escapeHtml(p ? p[2] : lines[i]));
+  }
+  const body = codeLines
+    .map((h, i) => {
+      const p = parts[i];
+      return p ? `<span class="line-no">${escapeHtml(p[1])}</span>${h}` : h;
+    })
+    .join("\n");
+  return `<pre class="tool-output tool-read-output"><code class="hljs">${body}</code></pre>`;
 }
 
 export function diffHtml(unifiedDiff: string): string {
@@ -332,7 +416,10 @@ export function renderItem(item: ConversationItem, selections?: QuestionSelectio
       // AskUserQuestion's UI IS the permission picker card — the
       // generic tool card would just dump the questions JSON (input)
       // and the "User has answered…" echo (result) alongside it.
-      return item.toolName === "AskUserQuestion" ? "" : ToolCard(item);
+      // ToolSearch is deferred-tool schema plumbing: pure feed noise.
+      return item.toolName === "AskUserQuestion" || item.toolName === "ToolSearch"
+        ? ""
+        : ToolCard(item);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":

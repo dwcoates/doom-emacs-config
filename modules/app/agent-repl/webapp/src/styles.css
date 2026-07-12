@@ -9,6 +9,15 @@
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
+  /* Tool card titles: matches the Emacs modeline "Agent Input" ai-title
+     purple (X11 medium purple); mid-lightness, so one shade reads fine
+     in both themes. */
+  --tool-title: #9370db;
+  /* Topbar session datapoint values (parent workspace / model / tokens):
+     the same green/cyan/amber light–dark pairs as the syntax palette. */
+  --info-ws: #15803d;
+  --info-model: #0e7490;
+  --info-tokens: #b45309;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -20,6 +29,9 @@
     --border: #2a2e37;
     --card: #1a1d24;
     --user: #1e2a44;
+    --info-ws: #4ade80;
+    --info-model: #22d3ee;
+    --info-tokens: #fbbf24;
   }
 }
 
@@ -50,7 +62,10 @@ body {
 .spinner.on { opacity: 1; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
-#usage-chip { color: var(--muted); margin-left: auto; }
+#session-info { color: var(--muted); margin-left: auto; }
+#session-info .info-ws { color: var(--info-ws); }
+#session-info .info-model { color: var(--info-model); }
+#session-info .info-tokens { color: var(--info-tokens); }
 
 #feed {
   flex: 1;
@@ -106,7 +121,7 @@ pre {
   font-size: 0.85rem;
 }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
-.tool-name { font-weight: 600; }
+.tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
@@ -115,6 +130,11 @@ pre {
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
 .tool-output { max-height: 16rem; overflow-y: auto; border-top: 1px dashed var(--border); margin-top: 0.35rem; padding-top: 0.35rem; }
+/* Read preview: cap at 10 visible lines (line-height × 10, plus the
+   padding and dashed divider inherited from .tool-output); the full
+   output stays reachable by scrolling. */
+.tool-read-output { line-height: 1.4; max-height: calc(10 * 1.4em + 0.35rem + 1px); }
+.tool-read-output .line-no { color: var(--muted); }
 .tool-progress { color: var(--muted); font-style: italic; }
 .stderr { color: var(--err); }
 
@@ -176,9 +196,11 @@ pre {
 #send-btn { cursor: pointer; }
 
 /* --- Syntax highlighting (highlight.js token classes) -------------------
-   Theme-aware via the same light/dark variable pattern as the chrome:
-   token colors are custom properties so the dark block below only has
-   to restate the palette, not the selectors. */
+   Scoped under .hljs (the <code> wrapper both markdown fences and Read
+   previews emit) so one rule set colors both. Theme-aware via the same
+   light/dark variable pattern as the chrome: token colors are custom
+   properties so the dark block below only has to restate the palette,
+   not the selectors. */
 :root {
   --hl-keyword: #9333ea;
   --hl-string: #15803d;
@@ -201,41 +223,41 @@ pre {
   }
 }
 
-.md .hljs-keyword,
-.md .hljs-literal,
-.md .hljs-selector-tag,
-.md .hljs-section { color: var(--hl-keyword); }
+.hljs .hljs-keyword,
+.hljs .hljs-literal,
+.hljs .hljs-selector-tag,
+.hljs .hljs-section { color: var(--hl-keyword); }
 
-.md .hljs-string,
-.md .hljs-regexp,
-.md .hljs-addition { color: var(--hl-string); }
+.hljs .hljs-string,
+.hljs .hljs-regexp,
+.hljs .hljs-addition { color: var(--hl-string); }
 
-.md .hljs-number,
-.md .hljs-symbol,
-.md .hljs-bullet { color: var(--hl-number); }
+.hljs .hljs-number,
+.hljs .hljs-symbol,
+.hljs .hljs-bullet { color: var(--hl-number); }
 
-.md .hljs-comment,
-.md .hljs-quote,
-.md .hljs-deletion { color: var(--hl-comment); font-style: italic; }
+.hljs .hljs-comment,
+.hljs .hljs-quote,
+.hljs .hljs-deletion { color: var(--hl-comment); font-style: italic; }
 
-.md .hljs-title,
-.md .hljs-name,
-.md .hljs-function .hljs-title,
-.md .hljs-selector-id,
-.md .hljs-selector-class { color: var(--hl-title); }
+.hljs .hljs-title,
+.hljs .hljs-name,
+.hljs .hljs-function .hljs-title,
+.hljs .hljs-selector-id,
+.hljs .hljs-selector-class { color: var(--hl-title); }
 
-.md .hljs-attr,
-.md .hljs-attribute,
-.md .hljs-variable,
-.md .hljs-template-variable,
-.md .hljs-type,
-.md .hljs-built_in { color: var(--hl-attr); }
+.hljs .hljs-attr,
+.hljs .hljs-attribute,
+.hljs .hljs-variable,
+.hljs .hljs-template-variable,
+.hljs .hljs-type,
+.hljs .hljs-built_in { color: var(--hl-attr); }
 
-.md .hljs-meta,
-.md .hljs-doctag { color: var(--hl-meta); }
+.hljs .hljs-meta,
+.hljs .hljs-doctag { color: var(--hl-meta); }
 
-.md .hljs-emphasis { font-style: italic; }
-.md .hljs-strong { font-weight: 700; }
+.hljs .hljs-emphasis { font-style: italic; }
+.hljs .hljs-strong { font-weight: 700; }
 
 /* --- AskUserQuestion picker ---------------------------------------------- */
 .q-block { margin: 0.4em 0 0.7em; }
