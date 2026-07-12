@@ -487,6 +487,24 @@ shell out to the real binary."
 
 ;;;; ---- Test utilities ----
 
+(defun agent-repl-test--fake-webview-factory (log-sym)
+  "Return a boundary mock for `agent-repl--frontend-make-webview-buffer'.
+Records each mounted URL onto the (special) variable LOG-SYM and hands
+back an ordinary buffer — batch Emacs has no xwidget support, so no
+webview can actually be created.  The buffer carries the \"WebKit: \"
+header-line that `xwidget-webkit-mode' installs, so any mount path's
+clearing of it is observable.
+
+Shared by every webview consumer's tests (the workspace frontend and
+the explain-config popup mount the same wrapper), so the two cannot
+drift apart in what they pretend a webview is."
+  (lambda (url)
+    (push url (symbol-value log-sym))
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (with-current-buffer buf
+        (setq-local header-line-format (list "WebKit: " "claude-repl")))
+      buf)))
+
 (defmacro agent-repl-test--with-clean-state (&rest body)
   "Execute BODY with fresh agent-repl global state.
 Also redirects `agent-repl-workspace-snapshot-file' to a throwaway
