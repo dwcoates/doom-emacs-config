@@ -9,6 +9,7 @@
  */
 import { PermissionMode } from "./protocol.js";
 import { FeedRenderer, sessionInfoHtml } from "./render.js";
+import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import "./styles.css";
@@ -47,7 +48,11 @@ async function boot(): Promise<void> {
   }
 
   const store = new ConversationStore();
-  const feed = new FeedRenderer(must("feed"), {
+  const feedEl = must("feed");
+  // Sections only take the wheel in their left/right gutters, so wheeling
+  // over one scrolls the feed past it instead of scrolling it.
+  installEdgeScroll(feedEl);
+  const feed = new FeedRenderer(feedEl, {
     decidePermission: (requestId, behavior) => {
       ws.send(
         behavior === "allow"
