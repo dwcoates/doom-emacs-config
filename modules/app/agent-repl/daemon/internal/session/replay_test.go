@@ -428,3 +428,33 @@ func TestSeedFromTranscriptSetsModelInHello(t *testing.T) {
 		t.Fatalf("Model = %q, want claude-fable-5", got)
 	}
 }
+
+func TestNoteResumeUnavailableRingsRecoverableError(t *testing.T) {
+	// Arrange
+	shim := newFakeShim()
+	sess := New(Config{ID: "s_test", Shim: shim, Logf: func(string, ...any) {}})
+	// Act
+	sess.NoteResumeUnavailable("uuid-gone", "/cfg/projects/-w/uuid-gone.jsonl")
+	// Assert: the frame is retained for later attachers, not just live ones.
+	client := NewClient()
+	sess.Attach(client)
+	<-client.Send // hello
+	if err := sess.HandleClientFrame(client, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	var frame struct {
+		Type        string `json:"type"`
+		Code        string `json:"code"`
+		Message     string `json:"message"`
+		Recoverable bool   `json:"recoverable"`
+	}
+	if err := json.Unmarshal(<-client.Send, &frame); err != nil {
+		t.Fatalf("bad frame: %v", err)
+	}
+	if frame.Type != "error" || frame.Code != "resume_unavailable" || !frame.Recoverable {
+		t.Fatalf("frame = %+v, want recoverable resume_unavailable error", frame)
+	}
+	if !strings.Contains(frame.Message, "uuid-gone") {
+		t.Fatalf("message %q does not name the resume target", frame.Message)
+	}
+}

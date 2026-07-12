@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -568,5 +569,106 @@ func TestInterruptRouteForwardsToShim(t *testing.T) {
 		}
 	case <-time.After(recvTimeout):
 		t.Fatal("interrupt not forwarded to shim")
+	}
+}
+
+// --- resume viability gate ---------------------------------------------------
+
+// resumeGateHarness is a harness whose spawn captures CreateOpts, for
+// asserting what the shim would actually be launched with.
+func resumeGateHarness(t *testing.T) (*harness, *CreateOpts) {
+	t.Helper()
+	shims := make(chan *fakeShim, 8)
+	var captured CreateOpts
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		Spawn: func(sessionID string, opts CreateOpts) (session.ShimHandle, error) {
+			captured = opts
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}, &captured
+}
+
+func postCreate(t *testing.T, h *harness, body string) string {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	select {
+	case shim := <-h.shims:
+		t.Cleanup(shim.end)
+	case <-time.After(recvTimeout):
+		t.Fatal("spawn was not invoked")
+	}
+	return out.SessionID
+}
+
+func TestCreateSessionDropsUnresumableResume(t *testing.T) {
+	// Arrange: a config dir with no transcript for the resume target.
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	h, captured := resumeGateHarness(t)
+	// Act
+	id := postCreate(t, h, `{"cwd":"/w","resume":"uuid-gone"}`)
+	// Assert: the shim was spawned WITHOUT the doomed --resume.
+	if captured.Resume != "" {
+		t.Fatalf("spawn opts.Resume = %q, want dropped (empty)", captured.Resume)
+	}
+	// And the drop is visible in-band as a recoverable error frame.
+	conn := h.dial(t, id)
+	hello := readFrame(t, conn)
+	if hello["claude_session_id"] != nil && hello["claude_session_id"] != "" {
+		t.Fatalf("hello claude_session_id = %v, want empty for a fresh session", hello["claude_session_id"])
+	}
+	req, _ := json.Marshal(map[string]any{"type": "replay-request", "from_seq": hello["resume_from_seq"]})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	frame := readFrame(t, conn)
+	if frame["type"] != "error" || frame["code"] != "resume_unavailable" || frame["recoverable"] != true {
+		t.Fatalf("frame = %v, want recoverable resume_unavailable error", frame)
+	}
+}
+
+func TestCreateSessionKeepsResumableResume(t *testing.T) {
+	// Arrange: a config dir WITH the resume target's transcript.
+	cfg := t.TempDir()
+	dir := cfg + "/projects/-w"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(dir+"/uuid-1.jsonl", []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	h, captured := resumeGateHarness(t)
+	// Act
+	id := postCreate(t, h, `{"cwd":"/w","resume":"uuid-1"}`)
+	// Assert: resume passed through and identity stamped.
+	if captured.Resume != "uuid-1" {
+		t.Fatalf("spawn opts.Resume = %q, want uuid-1", captured.Resume)
+	}
+	conn := h.dial(t, id)
+	hello := readFrame(t, conn)
+	if hello["claude_session_id"] != "uuid-1" {
+		t.Fatalf("hello claude_session_id = %v, want uuid-1", hello["claude_session_id"])
 	}
 }

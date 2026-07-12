@@ -66,7 +66,7 @@ type RetryFrame struct {
 
 type ErrorFrame struct {
 	Envelope
-	Code        string `json:"code"` // shim_died | sdk_error | transport | internal
+	Code        string `json:"code"` // shim_died | sdk_error | transport | internal | resume_unavailable
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable"`
 }
