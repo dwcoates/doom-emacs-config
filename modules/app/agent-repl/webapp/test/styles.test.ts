@@ -31,6 +31,47 @@ const reducedSpinner = blockAfter(
 
 const doneChip = blockAfter(css, ".result.done");
 const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
+const lightTheme = blockAfter(css, ":root");
+const composerInput = blockAfter(css, "#composer-input");
+
+/** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
+function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** The `#rrggbb` value bound to `token` inside a palette block. */
+function token(block: string, name: string): string {
+  const hit = block.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i"));
+  if (!hit) throw new Error(`palette block has no ${name}`);
+  return hit[1];
+}
+
+describe("composer input", () => {
+  it("fills the composer well with its own token rather than the card grey", () => {
+    // Arrange / Act — the #composer-input rule.
+    // Assert
+    expect(composerInput).toMatch(/background:\s*var\(--composer-bg\)/);
+  });
+
+  it("sinks the light-theme composer below the card grey", () => {
+    // Arrange
+    const [composer, card] = [token(lightTheme, "--composer-bg"), token(lightTheme, "--card")];
+    // Act
+    const darker = luminance(composer) < luminance(card);
+    // Assert
+    expect(darker).toBe(true);
+  });
+
+  it("sinks the dark-theme composer below the card grey", () => {
+    // Arrange
+    const [composer, card] = [token(darkTheme, "--composer-bg"), token(darkTheme, "--card")];
+    // Act
+    const darker = luminance(composer) < luminance(card);
+    // Assert
+    expect(darker).toBe(true);
+  });
+});
 
 describe("turn-complete chip", () => {
   it("washes the completed turn's chip in the muted-yellow token", () => {
