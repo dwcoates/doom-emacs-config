@@ -371,8 +371,10 @@ route through the fake-daemon struct."
   (agent-repl-test--with-daemon-env
    (let ((proc (agent-repl-test--make-live-daemon)))
      (setq agent-repl--frontend-daemon-process proc)
-     ;; Act
-     (agent-repl--frontend-stop-daemon)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () nil)))
+       ;; Act
+       (agent-repl--frontend-stop-daemon))
      ;; Assert
      (should (null agent-repl--frontend-daemon-process))
      (should-not (agent-repl-test--fake-daemon-live proc)))))
