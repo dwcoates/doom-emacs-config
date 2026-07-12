@@ -6735,6 +6735,65 @@ with the \"The font hasn't been resized\" message."
                     :type 'user-error)
       (should-not switched))))
 
+;;;; ---- Tests: indexed switchers vs. folded repos ----
+;;
+;; A repo folded in the drawer takes its workspaces out of the tab-bar,
+;; and the indexed switchers index the SAME list — so the visible tab
+;; numbers stay contiguous.  These pin that contract.
+
+(ert-deftest agent-repl-cmd-test-switch-by-index/skips-folded-repo ()
+  "switch-by-index numbers the VISIBLE tabs: a folded repo's workspaces
+are not counted, so index 1 lands on the next unfolded workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a"  :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--ws-put "b"  :group-key "/repos/doom/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (let ((switched (list)))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("a" "ee" "b")))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "a"))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto-create) (push name switched))))
+        (agent-repl--workspace-switch-by-index 1)
+        (should (equal switched '("b")))))))
+
+(ert-deftest agent-repl-cmd-test-switch-to-final/skips-folded-repo ()
+  "switch-to-final lands on the last VISIBLE workspace, not a folded one."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a"  :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (let ((switched (list)))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("a" "ee")))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "a"))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto-create) (push name switched))))
+        (agent-repl-workspace-switch-to-final)
+        (should (equal switched '("a")))))))
+
+(ert-deftest agent-repl-cmd-test-workspace-cycle/skips-folded-repo ()
+  "Left/right cycling skips the workspaces of a folded repo."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a"  :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "ee" :group-key "/repos/explanation-engine/.git")
+    (agent-repl--ws-put "b"  :group-key "/repos/doom/.git")
+    (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
+    (let ((switched (list)))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("a" "ee" "b")))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-protected-p)
+                 (lambda (_ws) nil))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto-create) (push name switched))))
+        (agent-repl--workspace-cycle +1)
+        (should (equal switched '("b")))))))
+
 (ert-deftest agent-repl-cmd-test-switch-to-N/is-interactive ()
   "Each indexed switcher is an interactive command — required for keymap
 binding to invoke it via key press."
