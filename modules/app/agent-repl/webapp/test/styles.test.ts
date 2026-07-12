@@ -29,6 +29,29 @@ const reducedSpinner = blockAfter(
   ".thinking-spinner",
 );
 
+const doneChip = blockAfter(css, ".result.done");
+const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
+
+describe("turn-complete chip", () => {
+  it("washes the completed turn's chip in the muted-yellow token", () => {
+    // Arrange / Act — the .result.done rule.
+    // Assert
+    expect(doneChip).toMatch(/background:\s*var\(--turn-complete-bg\)/);
+  });
+
+  it("defines the muted-yellow token for the light theme", () => {
+    // Arrange / Act — the :root palette.
+    // Assert
+    expect(blockAfter(css, ":root")).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
+  });
+
+  it("defines a darker muted-yellow token for the dark theme", () => {
+    // Arrange / Act — the dark-scheme palette override.
+    // Assert
+    expect(darkTheme).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
+  });
+});
+
 describe("thinking spinner", () => {
   it("drives the ring with an endless linear rotation", () => {
     // Arrange / Act — the base .thinking-spinner rule.
