@@ -1985,34 +1985,58 @@ values are `t' (presence is the signal).")
   (and agent-repl-drawer--expanded-set
        (gethash ws agent-repl-drawer--expanded-set)))
 
+(defun agent-repl-drawer--unmerged-ahead-count (dir upstream)
+  "Return how many of DIR's HEAD commits UPSTREAM does not already carry.
+Counts by patch-id equivalence (`git rev-list --cherry-pick
+--right-only UPSTREAM...HEAD'), never by SHA ancestry.
+
+Ancestry is the wrong measure here because `SPC TAB M' lands a
+workspace by CHERRY-PICKING its commits into the target: the copies on
+UPSTREAM carry fresh SHAs, so the SHA-ancestry range `UPSTREAM..HEAD'
+keeps reporting every already-landed commit as still ahead.  That is
+what produced the drawer's self-contradicting \"merged into: master\"
++ \"ahead master: 58\" pair.  `--cherry-pick' drops commits whose patch
+already exists upstream, so a fully-landed workspace reads 0.
+
+Returns nil when git prints nothing (unknown UPSTREAM, unreadable
+worktree), leaving the caller's cache entry unset rather than
+reporting a guessed count."
+  (let ((out (agent-repl--git-string-quiet
+              "-C" dir "rev-list" "--count" "--right-only" "--cherry-pick"
+              (concat upstream "...HEAD"))))
+    (and out (not (string-empty-p out))
+         (string-to-number out))))
+
 (defun agent-repl-drawer--refresh-detail-cache (ws)
   "Populate WS's `:detail-*' plist fields with synchronous git calls.
 Called from TAB-toggle (when expanding) and `g'-refresh.  Avoids
 running git every poll cycle.  All values are best-effort: nil left
-in place when the underlying command errors or returns empty."
+in place when the underlying command errors or returns empty.
+
+The two ahead-counts go through `--unmerged-ahead-count', so commits
+already cherry-picked onto the trunk or onto the source branch do not
+count as ahead of it."
   (when-let ((dir (ignore-errors (agent-repl--ws-dir ws))))
     (let* ((branch (agent-repl--git-string-quiet
                     "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))
       (agent-repl--ws-put ws :detail-branch
                            (and branch (not (string-empty-p branch)) branch)))
-    (let ((ahead (agent-repl--git-string-quiet
-                  "-C" dir "rev-list" "--count"
-                  (concat agent-repl-master-branch-name "..HEAD"))))
-      (agent-repl--ws-put ws :detail-master-ahead
-                           (and ahead (not (string-empty-p ahead))
-                                (string-to-number ahead))))
+    (agent-repl--ws-put ws :detail-master-ahead
+                         (agent-repl-drawer--unmerged-ahead-count
+                          dir agent-repl-master-branch-name))
     (when-let* ((src-dir (agent-repl--ws-get ws :source-ws-dir))
                 ((file-directory-p src-dir))
                 (src-branch (agent-repl--git-string-quiet
                              "-C" src-dir "rev-parse" "--abbrev-ref" "HEAD")))
       (when (and src-branch (not (string-empty-p src-branch))
                  (not (string-prefix-p "fatal" src-branch)))
-        (let ((ahead (agent-repl--git-string-quiet
-                      "-C" dir "rev-list" "--count"
-                      (concat src-branch "..HEAD"))))
-          (agent-repl--ws-put ws :detail-source-ahead
-                               (and ahead (not (string-empty-p ahead))
-                                    (string-to-number ahead))))))
+        ;; Cached alongside the count so the detail line can name the
+        ;; branch it is counting against ("ahead DWC/foo:") instead of
+        ;; the anonymous "ahead source:".
+        (agent-repl--ws-put ws :detail-source-branch src-branch)
+        (agent-repl--ws-put ws :detail-source-ahead
+                             (agent-repl-drawer--unmerged-ahead-count
+                              dir src-branch))))
     (let ((subj (agent-repl--git-string-quiet
                  "-C" dir "log" "-1" "--pretty=format:%s")))
       (agent-repl--ws-put ws :detail-last-commit
@@ -2112,6 +2136,7 @@ invokes git.  Caller is `--render-workspace-expanded'."
          (merge-target (and (eq (agent-repl-drawer--workspace-section ws) :merged)
                             (agent-repl--ws-get ws :merge-target-name)))
          (master-ahead (agent-repl--ws-get ws :detail-master-ahead))
+         (source-branch (agent-repl--ws-get ws :detail-source-branch))
          (source-ahead (agent-repl--ws-get ws :detail-source-ahead))
          (last-commit  (agent-repl--ws-get ws :detail-last-commit))
          (last-commit-time (agent-repl--ws-get ws :detail-last-commit-time))
@@ -2138,10 +2163,16 @@ invokes git.  Caller is `--render-workspace-expanded'."
         (line "merged into:" merge-target
               'agent-repl-drawer-detail-merge-target))
       (when master-ahead
-        (line "ahead master:" (format "%d" master-ahead)
+        (line (format "ahead %s:" agent-repl-master-branch-name)
+              (format "%d" master-ahead)
               'agent-repl-drawer-detail-ahead-master))
-      (when source-ahead
-        (line "ahead source:" (format "%d" source-ahead)
+      ;; Named after the actual source branch ("ahead DWC/foo:"), never
+      ;; the anonymous "ahead source:".  Suppressed entirely when the
+      ;; source branch IS the trunk, since the line would then restate
+      ;; the "ahead <master>" line above verbatim.
+      (when (and source-ahead source-branch
+                 (not (string= source-branch agent-repl-master-branch-name)))
+        (line (format "ahead %s:" source-branch) (format "%d" source-ahead)
               'agent-repl-drawer-detail-ahead-source))
       (when last-commit
         (line "last commit:"

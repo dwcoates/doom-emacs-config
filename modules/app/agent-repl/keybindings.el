@@ -69,7 +69,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
       :merge-parent-dir :branch-merged :branch-merged-last-check
       :detail-branch :detail-dirty-count :detail-last-commit
       :detail-last-commit-time :detail-master-ahead :detail-source-ahead
-      :git-clean :git-proc))
+      :detail-source-branch :git-clean :git-proc))
     ("🧠 Session"
      (:session-id :fork-session-id :vterm-buffer :active-env
       :sandbox :bare-metal :agent-ready :ws-loaded :ready-timer))

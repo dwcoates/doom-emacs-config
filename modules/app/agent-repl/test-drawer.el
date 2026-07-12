@@ -476,6 +476,132 @@ overlay.  Tests the workspace-anchored restoration path."
         (let ((text (buffer-substring-no-properties (point-min) (point-max))))
           (should-not (string-match-p "merged into:" text)))))))
 
+;;;; ---- Ahead-counts (patch-id equivalence) ----
+
+(ert-deftest agent-repl-drawer-test-unmerged-ahead-count-uses-cherry-pick ()
+  "`--unmerged-ahead-count' counts the symmetric range with `--cherry-pick'."
+  (agent-repl-test--with-clean-state
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest args) (setq seen args) "4")))
+        (should (equal (agent-repl-drawer--unmerged-ahead-count "/tmp/ws" "master")
+                       4))
+        (should (equal seen
+                       '("-C" "/tmp/ws" "rev-list" "--count"
+                         "--right-only" "--cherry-pick" "master...HEAD")))))))
+
+(ert-deftest agent-repl-drawer-test-unmerged-ahead-count-nil-on-git-failure ()
+  "`--unmerged-ahead-count' returns nil when git prints nothing."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "")))
+      (should-not (agent-repl-drawer--unmerged-ahead-count "/tmp/ws" "master")))))
+
+(ert-deftest agent-repl-drawer-test-refresh-detail-cache-cherry-picked-not-ahead ()
+  "A cherry-picked-into-master workspace caches 0 ahead, not its SHA-ancestry count."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,_ "rev-parse" "--abbrev-ref" "HEAD") "feature/x")
+                   ;; SHA-ancestry would still see all 58 commits.
+                   (`("-C" ,_ "rev-list" "--count" "master..HEAD") "58")
+                   ;; Patch-id equivalence sees them all landed.
+                   (`("-C" ,_ "rev-list" "--count" "--right-only"
+                      "--cherry-pick" "master...HEAD") "0")
+                   (_ "")))))
+      (agent-repl-drawer--refresh-detail-cache "ws")
+      (should (equal (agent-repl--ws-get "ws" :detail-master-ahead) 0)))))
+
+(ert-deftest agent-repl-drawer-test-refresh-detail-cache-caches-source-branch ()
+  "`--refresh-detail-cache' caches the source worktree's branch name."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :project-dir "/tmp/"
+                                       :source-ws-dir "/tmp")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" "/tmp" "rev-parse" "--abbrev-ref" "HEAD")
+                    "DWC/parent-branch")
+                   (`("-C" ,_ "rev-parse" "--abbrev-ref" "HEAD") "feature/x")
+                   (_ "2")))))
+      (agent-repl-drawer--refresh-detail-cache "ws")
+      (should (equal (agent-repl--ws-get "ws" :detail-source-branch)
+                     "DWC/parent-branch")))))
+
+;;;; ---- Ahead-count detail lines ----
+
+(ert-deftest agent-repl-drawer-test-detail-ahead-source-names-the-branch ()
+  "The source ahead-count line is labelled with the source branch's name."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-source-branch "DWC/parent-branch"
+                                       :detail-source-ahead 3)
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "ahead DWC/parent-branch: 3" text))
+          (should-not (string-match-p "ahead source:" text)))))))
+
+(ert-deftest agent-repl-drawer-test-detail-ahead-source-omitted-when-source-is-master ()
+  "The source ahead-count line is omitted when the source branch is the trunk."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-master-ahead 5
+                                       :detail-source-branch "master"
+                                       :detail-source-ahead 5)
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+               (count 0)
+               (start 0))
+          (while (string-match "ahead master:" text start)
+            (setq count (1+ count)
+                  start (match-end 0)))
+          (should (= count 1)))))))
+
+(ert-deftest agent-repl-drawer-test-detail-ahead-master-uses-trunk-branch-name ()
+  "The trunk ahead-count line follows `agent-repl-master-branch-name'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-master-ahead 2)
+    (let ((agent-repl-master-branch-name "main"))
+      (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest args)
+                   (pcase args
+                     (`("-C" ,dir "rev-parse" "--git-common-dir")
+                      (concat (file-name-as-directory dir) ".git"))
+                     (_ (error "unmocked git-string-quiet: %S" args))))))
+        (agent-repl-drawer-test--with-buffer
+          (agent-repl-drawer--ensure-expanded-set)
+          (puthash "ws" t agent-repl-drawer--expanded-set)
+          (agent-repl-drawer--render)
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "ahead main: 2" text))))))))
+
 ;;;; ---- MERGING-section merge-status detail line ----
 
 (ert-deftest agent-repl-drawer-test-merge-status-text-in-flight-label ()
