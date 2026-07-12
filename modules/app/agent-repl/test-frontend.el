@@ -301,6 +301,46 @@ exact failure seen live in the fresh instance."
         (should (equal ensured "ws1"))
         (should (eq displayed 'fake-buffer))))))
 
+(ert-deftest agent-repl-test-frontend-open-carries-parent-ws-param ()
+  "gui-open appends parent_ws (url-encoded :source-ws-dir basename) to the URL.
+The webapp status bar renders it for vterm mode-line parity."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1"
+      '(:project-dir "/w" :source-ws-dir "/repos/parent dir/")
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-ensure-session)
+               (lambda (_ws) "s_42"))
+              ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+               (lambda (_ws _id url)
+                 ;; Assert — encoded basename rides after composer=0.
+                 (should (string-suffix-p "&composer=0&parent_ws=parent%20dir" url))
+                 'fake-buffer))
+              ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
+      ;; Act
+      (agent-repl--gui-open "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-open-omits-parent-ws-when-absent ()
+  "gui-open leaves parent_ws off the URL when no parent was recorded."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-ensure-session)
+               (lambda (_ws) "s_42"))
+              ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+               (lambda (_ws _id url)
+                 (should-not (string-match-p "parent_ws" url))
+                 'fake-buffer))
+              ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
+      ;; Act
+      (agent-repl--gui-open "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-parent-ws-name-empty-string-is-nil ()
+  "An empty :source-ws-dir yields nil, not an empty parent name."
+  (agent-repl-test--with-frontend-ws "ws1" '(:source-ws-dir "")
+    (should-not (agent-repl--frontend-parent-ws-name "ws1"))))
+
 ;;;; ---- close-panel ------------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-close-panel-kills-and-clears ()
