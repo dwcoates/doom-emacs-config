@@ -42,13 +42,13 @@ Same fallback semantics as `agent-repl--legacy-history-filename'.")
 
 (defmacro agent-repl--with-error-logging (label &rest body)
   "Execute BODY, logging any error with LABEL prefix.
-Catches errors and displays a user-visible warning via `message',
-then logs the full error via `agent-repl--log'."
+Catches errors and displays a user-visible warning via
+`agent-repl--warn', then logs the full error via `agent-repl--log'."
   (declare (indent 1) (debug (stringp body)))
   `(condition-case err
        (progn ,@body)
      (error
-      (message "[agent-repl] %s error: %S" ,label err)
+      (agent-repl--warn nil "%s error: %S" ,label err)
       (agent-repl--log nil (concat ,label " error: %S") err))))
 
 ;;;; File I/O helpers

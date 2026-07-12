@@ -503,7 +503,7 @@ otherwise crash the sentinel as an opaque \"error in process sentinel\"."
   (let ((msg (error-message-string err)))
     (agent-repl--log ws "mark-start-failed ws=%s err=%s" ws msg)
     (when ws (agent-repl--ws-set-agent-state ws :start-failed))
-    (message "Claude failed to start for %s — %s" ws msg)))
+    (agent-repl--warn ws "Claude failed to start for %s — %s" ws msg)))
 
 (defun agent-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-agent)
   "Register WS as a worktree at PATH and start its agent session.
@@ -1026,8 +1026,8 @@ truncated per `agent-repl-workspace-generation-stdout-log-cap'
 before logging.
 
 On non-zero/non-numeric STATUS:
-  - Surfaces a `message' to the user that includes GEN-ID so it can
-    be cross-referenced in the log.
+  - Surfaces a warning (via `agent-repl--warn') to the user that
+    includes GEN-ID so it can be cross-referenced in the log.
   - When GIT-ROOT resolves to an oneshot flavor (pinned doom-config
     or explanation-engine dir), eagerly clears that flavor's
     `:generating' sentinel + amended-prompts queue via
@@ -1043,8 +1043,8 @@ On non-zero/non-numeric STATUS:
                       (if raw-out (length raw-out) "nil")
                       snippet)
     (unless (and (numberp status) (zerop status))
-      (message "[agent-repl] workspace-generation[%s] failed (status=%s); see *Messages* / agent-repl log"
-               gen-id status)
+      (agent-repl--warn nil "workspace-generation[%s] failed (status=%s); see *Messages* / agent-repl log"
+                        gen-id status)
       (when-let ((flavor (agent-repl--oneshot-flavor-for-git-root git-root)))
         (agent-repl--oneshot-clear-flavor-on-failure flavor :agent-p-failed)))))
 
@@ -1231,7 +1231,7 @@ session.  When nil, the session falls back to
             (agent-repl--ws-put ws :parent-branch-name parent-branch))))
       (agent-repl--reorder-workspace-by-priority ws)
       (agent-repl--setup-worktree-session ws-id path ws force-sandbox no-agent)
-      (message "Worktree '%s' ready." dirname)))
+      (agent-repl--info ws "Worktree '%s' ready." dirname)))
   ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only
   ;; production caller (`agent-repl--worktree-creation-switch-callback')
   ;; deliberately switches to the new workspace; wrapping it would
@@ -1258,7 +1258,7 @@ per-workspace agent model alias)."
          path dirname preemptive-prompt
          priority fork-session-id force-sandbox callback source-dir no-agent model))
     (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
-    (message "git worktree add failed: %s" output)))
+    (agent-repl--warn dirname "git worktree add failed: %s" output)))
 
 (defun agent-repl--async-worktree-add (git-root branch-name path base-commit
                                               fork-session-id
@@ -1387,7 +1387,7 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
                                    dirname preemptive-prompt
                                    priority force-sandbox callback source-dir
                                    no-agent model)))
-      (message "Creating worktree '%s' from %s..." dirname base-commit)
+      (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
         (funcall add-fn))
@@ -1548,8 +1548,8 @@ the JSON file lands and the file-watcher dispatches it."
       (let ((prefixed-prompt (concat agent-repl--autonomous-prompt-prefix raw-prompt)))
         (agent-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
                           base base-commit (or source-ws "nil") git-root)
-        (message "Generating workspace name via `claude -p --model %s'..."
-                 agent-repl-workspace-generation-model)
+        (agent-repl--info nil "Generating workspace name via `claude -p --model %s'..."
+                          agent-repl-workspace-generation-model)
         (agent-repl--spawn-workspace-generation
          raw-prompt prefixed-prompt git-root base-commit nil)))))
 
@@ -1644,8 +1644,8 @@ JSON command as `\"force_sandbox\": true')."
       ;; rather than the previous one's workspace.
       (agent-repl--oneshot-reset-flavor
        (agent-repl--oneshot-flavor-for-git-root git-root))
-      (message "Generating %s workspace name via `claude -p --model %s'..."
-               tag agent-repl-workspace-generation-model)
+      (agent-repl--info nil "Generating %s workspace name via `claude -p --model %s'..."
+                        tag agent-repl-workspace-generation-model)
       (agent-repl--spawn-workspace-generation
        raw-prompt prefixed-prompt git-root base-commit nil force-sandbox))))
 
@@ -1755,8 +1755,8 @@ SOURCE-WS from the persp workspace list."
       (let ((prefixed-prompt (concat agent-repl--autonomous-prompt-prefix raw-prompt)))
         (agent-repl--log fork-ws "fork-worktree-workspace: fork-ws=%s git-root=%s"
                           fork-ws git-root)
-        (message "Generating workspace name via `claude -p --model %s'..."
-                 agent-repl-workspace-generation-model)
+        (agent-repl--info fork-ws "Generating workspace name via `claude -p --model %s'..."
+                          agent-repl-workspace-generation-model)
         (agent-repl--spawn-workspace-generation
          raw-prompt prefixed-prompt git-root "HEAD" fork-ws)))))
 
@@ -1894,7 +1894,7 @@ it is normalized to the dirname before lookup."
     (agent-repl--log ws "finish-workspace: removing worktree worktree-p=%s project-dir=%s" worktree-p project-dir)
     (when (and worktree-p project-dir (file-directory-p project-dir))
       (agent-repl--remove-git-worktree project-dir))
-    (message "Finished workspace: %s" ws)))
+    (agent-repl--info ws "Finished workspace: %s" ws)))
 
 (defun agent-repl--abort-cherry-pick-if-in-flight (ws dir)
   "If a cherry-pick is in flight at DIR, run `git cherry-pick --abort'.
@@ -2387,7 +2387,7 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
             (error
              (agent-repl--log name "handle-create-command: ABORTING workspace '%s' — fork resolution failed: %s"
                               name (error-message-string err))
-             (message "[agent-repl] ERROR: cannot create workspace '%s' — %s" name (error-message-string err))
+             (agent-repl--warn name "cannot create workspace '%s' — %s" name (error-message-string err))
              nil))))
     (cond
      ;; If fork_from was requested but resolution failed, refuse to create.
@@ -2402,19 +2402,19 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
      ;; prompts as a stray "none" workspace.
      ((or (not (stringp name)) (string-empty-p name))
       (agent-repl--log nil "handle-create-command: SKIPPED workspace (missing/empty/non-string name=%S)" name)
-      (message "[agent-repl] ERROR: cannot create workspace — `name' is required and must be a non-empty string (got %S)"
-               name))
+      (agent-repl--warn nil "cannot create workspace — `name' is required and must be a non-empty string (got %S)"
+                        name))
      ((and nil-name (equal bare-name nil-name))
       (agent-repl--log name "handle-create-command: SKIPPED workspace '%s' (bare name '%s' equals persp-nil-name '%s')"
                         name bare-name nil-name)
-      (message "[agent-repl] ERROR: cannot create workspace '%s' — bare name '%s' collides with `persp-nil-name'"
-               name bare-name))
+      (agent-repl--warn name "cannot create workspace '%s' — bare name '%s' collides with `persp-nil-name'"
+                        name bare-name))
      ;; git_root is mandatory — no ambient fallback.
      ((or (null cmd-git-root) (string-empty-p cmd-git-root))
       (agent-repl--log name "handle-create-command: SKIPPED workspace '%s' (missing/empty git_root, refusing silent fallback)"
                         name)
-      (message "[agent-repl] ERROR: cannot create workspace '%s' — git_root is required and must be non-empty"
-               name))
+      (agent-repl--warn name "cannot create workspace '%s' — git_root is required and must be non-empty"
+                        name))
      (t
       (let* ((git-root (file-name-as-directory (expand-file-name cmd-git-root)))
              (effective-name
@@ -2424,8 +2424,8 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
                  (agent-repl--log name
                                    "handle-create-command: ABORTING workspace '%s' — disambiguation failed: %s"
                                    name (error-message-string err))
-                 (message "[agent-repl] ERROR: cannot disambiguate workspace name '%s' — %s"
-                          name (error-message-string err))
+                 (agent-repl--warn name "cannot disambiguate workspace name '%s' — %s"
+                                   name (error-message-string err))
                  nil))))
         (when effective-name
           (agent-repl--reserve-workspace-name effective-name)
@@ -2610,8 +2610,8 @@ it — the latter usually means the worktree was fully removed by
     (cond
      ((or (not (stringp name)) (string-empty-p name))
       (agent-repl--log nil "workspace-commands-file open: SKIPPED (missing/empty/non-string workspace=%S)" name)
-      (message "[agent-repl] ERROR: cannot open workspace — `workspace' is required and must be a non-empty string (got %S)"
-               name))
+      (agent-repl--warn nil "cannot open workspace — `workspace' is required and must be a non-empty string (got %S)"
+                        name))
      (t
       (let* ((bare (agent-repl--bare-workspace-name name))
              (dir (agent-repl--resolve-open-workspace-dir name git-root)))
@@ -2620,8 +2620,8 @@ it — the latter usually means the worktree was fully removed by
           (agent-repl--log bare
                             "workspace-commands-file open: SKIPPED ws=%s — no on-disk directory resolved (git-root=%s)"
                             bare (or git-root "nil"))
-          (message "[agent-repl] ERROR: cannot open workspace '%s' — no on-disk worktree found (was it finished/removed?)"
-                   name))
+          (agent-repl--warn bare "cannot open workspace '%s' — no on-disk worktree found (was it finished/removed?)"
+                            name))
          (t
           (agent-repl--log bare
                             "workspace-commands-file open: ws=%s dir=%s — re-establishing"
@@ -2649,9 +2649,9 @@ annotation must not error out the whole batch."
       (agent-repl--log ws "workspace-commands-file clipboard: ws=%s len=%d note=%s"
                         ws (length text) (or note "nil"))
       (agent-repl--ws-put ws :clipboard text)
-      (message "[agent-repl] %s clipboard set (%d chars)%s"
-               ws (length text)
-               (if note (format ": %s" note) ""))))))
+      (agent-repl--info ws "%s clipboard set (%d chars)%s"
+                        ws (length text)
+                        (if note (format ": %s" note) ""))))))
 
 (defun agent-repl--handle-send-pgn (ws pgn-string)
   "Open PGN-STRING in a temporary popup buffer with `pygn-mode'.
@@ -2743,7 +2743,7 @@ absent — a malformed command must not error out the whole batch."
         (let ((pgn (and (listp data) (alist-get 'pgn data))))
           (when (and (stringp pgn) (not (string-empty-p pgn)))
             (agent-repl--handle-send-pgn ws pgn)))
-        (message "[agent-repl] %s data received" ws))))))
+        (agent-repl--info ws "%s data received" ws))))))
 
 (defcustom agent-repl-profile-report-file
   (agent-repl--global-state-file "profiler-report.txt")
@@ -3074,10 +3074,10 @@ affect another agent's commands in the same JSON array."
     (cond
      ((not (stringp code))
       (agent-repl--log nil "workspace-commands-file eval: missing/non-string code, skipping")
-      (message "[agent-repl] eval: missing/non-string code, skipping"))
+      (agent-repl--warn nil "eval: missing/non-string code, skipping"))
      ((string-empty-p (string-trim code))
       (agent-repl--log ws "workspace-commands-file eval: empty code, skipping (ws=%s)" ws)
-      (message "[agent-repl] eval: empty code, skipping"))
+      (agent-repl--warn ws "eval: empty code, skipping"))
      (t
       (agent-repl--log ws
                         "workspace-commands-file eval: ws=%s note=%s code-len=%d"
@@ -3094,16 +3094,16 @@ affect another agent's commands in the same JSON array."
                             "workspace-commands-file eval: no workspace, result-len=%d not sent (error=%s)"
                             (length prompt-text)
                             (if error-string "yes" "no"))
-          (message "[agent-repl] eval: completed (no workspace; not sending)%s"
-                   (if error-string " — eval raised" "")))
+          (agent-repl--info nil "eval: completed (no workspace; not sending)%s"
+                            (if error-string " — eval raised" "")))
          (t
           (agent-repl--log ws
                             "workspace-commands-file eval: sending result (len=%d, error=%s) to ws=%s"
                             (length prompt-text)
                             (if error-string "yes" "no") ws)
           (agent-repl--send prompt-text ws)
-          (message "[agent-repl] eval: result sent to %s%s"
-                   ws (if error-string " (eval raised)" "")))))))))
+          (agent-repl--info ws "eval: result sent to %s%s"
+                            ws (if error-string " (eval raised)" "")))))))))
 
 (defconst agent-repl--workspace-command-dispatch-table
   '(("create"    . (agent-repl--handle-create-command    . t))
@@ -3199,8 +3199,8 @@ the headless workspace-generation flow occasionally emits the latter."
            (agent-repl--log nil
                              "workspace-commands-file dispatch error cmd=%S err=%S"
                              cmd err)
-           (message "[agent-repl] Workspace command failed: %s"
-                    (error-message-string err))))))
+           (agent-repl--warn nil "Workspace command failed: %s"
+                             (error-message-string err))))))
     (delete-file file)
     (agent-repl--log nil "workspace-commands-file deleted: %s" file)))
 
@@ -4087,16 +4087,16 @@ merge/<ws>~..merge/<ws>' to inspect the merged range).
 
 Uses `-f' so re-running the merge for the same workspace updates the
 tag rather than erroring on the existing one.  Failures are surfaced
-as a `message' but do not propagate — the cherry-pick already
-succeeded; a tag-write failure shouldn't undo that."
+as a warning (via `agent-repl--warn') but do not propagate — the
+cherry-pick already succeeded; a tag-write failure shouldn't undo that."
   (let* ((tag (concat "merge/" source-ws))
          (exit-code (agent-repl--git-exit-code
                      project-root "tag" "-f" tag "HEAD")))
     (agent-repl--log source-ws "tag-merge-completion: tag=%s exit=%s" tag exit-code)
     (if (= 0 exit-code)
-        (message "Tagged merge completion: %s" tag)
-      (message "[agent-repl] WARNING: failed to create tag %s (exit %d)"
-               tag exit-code))))
+        (agent-repl--info source-ws "Tagged merge completion: %s" tag)
+      (agent-repl--warn source-ws "failed to create tag %s (exit %d)"
+                        tag exit-code))))
 
 (defun agent-repl--mark-merge-failed (target-ws err)
   "Mark TARGET-WS as dead because its merge attempt failed with ERR.
@@ -4323,8 +4323,9 @@ off so the user resolves in magit directly."
               (agent-repl-drawer--refresh-detail-cache target-ws))
             (cond
              (failed
-              (message "Cherry-pick of workspace '%s' into '%s' reported failure — workspace left active for investigation."
-                       target-ws current-ws))
+              (agent-repl--warn target-ws
+                                "Cherry-pick of workspace '%s' into '%s' reported failure — workspace left active for investigation."
+                                target-ws current-ws))
              (already
               (message "Workspace '%s' was already merged into '%s' — merged."
                        target-ws current-ws))
