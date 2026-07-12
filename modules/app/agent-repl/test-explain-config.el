@@ -12,8 +12,8 @@
 ;;     back ordinary buffers.
 ;;
 ;;   - The POPUP layer (show / hide / close window placement), which is
-;;     unchanged from the pre-GUI explainer and stays decoupled from the
-;;     drawer.
+;;     strictly per-workspace (no global visible-flag, no persp-switch
+;;     re-show) and stays decoupled from the drawer.
 ;;
 ;; Run with:
 ;;   emacs -batch -Q -l ert -l test-explain-config.el -f ert-run-tests-batch-and-exit
@@ -36,7 +36,6 @@ leak conversation state across the suite."
   `(let ((agent-repl--explain-config-session-id nil)
          (agent-repl--explain-config-webview-session-id nil)
          (agent-repl--explain-config-primed-p nil)
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil))
      ,@body))
 
@@ -650,20 +649,17 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
 (ert-deftest agent-repl-ecfg-test-show/no-op-when-buffer-missing ()
   "Show is a no-op when no explain-config webview has ever been created."
   (let ((agent-repl-explain-config-buffer-name " *nonexistent-explain-config*")
-        (agent-repl--explain-config-global-visible-p nil)
         (display-called nil))
     (cl-letf (((symbol-function 'display-buffer)
                (lambda (&rest _) (setq display-called t) nil)))
       (agent-repl--explain-config-show)
-      (should-not display-called)
-      (should-not agent-repl--explain-config-global-visible-p))))
+      (should-not display-called))))
 
 (ert-deftest agent-repl-ecfg-test-show/displays-existing-buffer ()
   "Show falls back to `display-buffer' with the side-window action when the
 agent output window is not available to take over."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-show*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil)
          (display-args nil))
     (unwind-protect
@@ -679,27 +675,15 @@ agent output window is not available to take over."
                       agent-repl--explain-config-display-action)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest agent-repl-ecfg-test-show/sets-global-visible-flag ()
-  "Show sets `--global-visible-p' so the popup follows the user across persps."
-  (let* ((agent-repl-explain-config-buffer-name " *test-explain-flag-set*")
-         (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
-         (agent-repl--explain-config-replaced-window nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
-                   (lambda () nil))
-                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-apply-width) #'ignore))
-          (agent-repl--explain-config-show)
-          (should agent-repl--explain-config-global-visible-p))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+(ert-deftest agent-repl-ecfg-test-show/defines-no-global-visible-flag ()
+  "The popup is per-workspace: the old cross-persp `--global-visible-p'
+flag must not exist at all."
+  (should-not (boundp 'agent-repl--explain-config-global-visible-p)))
 
 (ert-deftest agent-repl-ecfg-test-show/reapplies-width-when-visible ()
   "Show reapplies the configured width when a side-window already displays it."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-reapply*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p t)
          (agent-repl--explain-config-replaced-window nil)
          (width-applied-with nil))
     (unwind-protect
@@ -718,7 +702,6 @@ agent output window is not available to take over."
   "Show must NOT call `agent-repl-drawer-hide' — popup and drawer are decoupled."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-no-drawer-hide*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil)
          (agent-repl-drawer--global-visible-p t)
          (drawer-hide-called nil))
@@ -741,7 +724,6 @@ agent output window is not available to take over."
 than falling back to the side-window display action."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil)
          (set-window-buffer-args nil)
          (display-buffer-called nil))
@@ -764,7 +746,6 @@ than falling back to the side-window display action."
   "Show stashes the (window . prev-buffer) cell so `--hide' can restore."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover-record*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil))
     (unwind-protect
         (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
@@ -784,7 +765,6 @@ buffers — without this, `set-window-buffer' would error on the dedicated
 window."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-takeover-dedup*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
          (agent-repl--explain-config-replaced-window nil)
          (dedicated-cleared-with nil))
     (unwind-protect
@@ -824,14 +804,6 @@ window."
       (agent-repl--explain-config-hide)
       (should-not delete-called))))
 
-(ert-deftest agent-repl-ecfg-test-hide/clears-global-visible-flag ()
-  "Hide clears `--global-visible-p' so the popup stays gone across persps."
-  (let ((agent-repl--explain-config-global-visible-p t)
-        (agent-repl--explain-config-replaced-window nil))
-    (cl-letf (((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore))
-      (agent-repl--explain-config-hide)
-      (should-not agent-repl--explain-config-global-visible-p))))
-
 (ert-deftest agent-repl-ecfg-test-hide/keeps-the-conversation-alive ()
   "Hide never releases the session — the conversation survives a close."
   (agent-repl-ecfg-test--with-state
@@ -847,8 +819,7 @@ window."
 (ert-deftest agent-repl-ecfg-test-hide/does-not-call-drawer-show ()
   "Hide must NOT call `agent-repl-drawer-show' — the popup never modified
 the drawer in the first place, so it has nothing to restore."
-  (let ((agent-repl--explain-config-global-visible-p t)
-        (agent-repl--explain-config-replaced-window nil)
+  (let ((agent-repl--explain-config-replaced-window nil)
         (drawer-show-called nil))
     (cl-letf (((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore)
               ((symbol-function 'agent-repl-drawer-show)
@@ -863,7 +834,6 @@ the drawer in the first place, so it has nothing to restore."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-restore*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
          (prev (get-buffer-create " *test-explain-restore-prev*"))
-         (agent-repl--explain-config-global-visible-p t)
          (agent-repl--explain-config-replaced-window (cons 'fake-output-win prev))
          (set-window-buffer-args nil))
     (unwind-protect
@@ -880,8 +850,7 @@ the drawer in the first place, so it has nothing to restore."
 (ert-deftest agent-repl-ecfg-test-hide/clears-replaced-window-after-restore ()
   "Hide clears `--replaced-window' after restoring, so a future show won't
 double-restore an already-rehydrated agent output window."
-  (let ((agent-repl--explain-config-global-visible-p t)
-        (agent-repl--explain-config-replaced-window (cons 'fake-output-win 'prev-buf)))
+  (let ((agent-repl--explain-config-replaced-window (cons 'fake-output-win 'prev-buf)))
     (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
               ((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore))
       (agent-repl--explain-config-hide)
@@ -891,7 +860,6 @@ double-restore an already-rehydrated agent output window."
   "Hide re-applies `--configure-vterm-window' on successful restore so the
 agent output window regains its dedicate/size-fix/delete-protect recipe."
   (let* ((prev (get-buffer-create " *test-explain-reharden-prev*"))
-         (agent-repl--explain-config-global-visible-p t)
          (agent-repl--explain-config-replaced-window (cons 'fake-output-win prev))
          (configure-called-with nil))
     (unwind-protect
@@ -906,8 +874,7 @@ agent output window regains its dedicate/size-fix/delete-protect recipe."
 
 (ert-deftest agent-repl-ecfg-test-hide/skips-restore-when-window-dead ()
   "Hide is a no-op on the restore path when the saved window is no longer live."
-  (let ((agent-repl--explain-config-global-visible-p t)
-        (agent-repl--explain-config-replaced-window (cons 'dead-win 'prev-buf))
+  (let ((agent-repl--explain-config-replaced-window (cons 'dead-win 'prev-buf))
         (set-window-buffer-called nil))
     (cl-letf (((symbol-function 'window-live-p) (lambda (_w) nil))
               ((symbol-function 'set-window-buffer)
@@ -930,51 +897,25 @@ agent output window regains its dedicate/size-fix/delete-protect recipe."
       (agent-repl-explain-config-close)
       (should (= hide-called 1)))))
 
-(ert-deftest agent-repl-ecfg-test-close/clears-flag-and-deletes-windows ()
-  "End-to-end: public close clears the global flag AND deletes the popup windows."
+(ert-deftest agent-repl-ecfg-test-close/deletes-windows ()
+  "End-to-end: public close deletes the popup windows."
   (let* ((agent-repl-explain-config-buffer-name " *test-explain-close-e2e*")
          (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p t)
          (agent-repl--explain-config-replaced-window nil)
          (delete-called-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl-window--delete-buffer-windows)
                    (lambda (b &rest _) (setq delete-called-with b))))
           (agent-repl-explain-config-close)
-          (should-not agent-repl--explain-config-global-visible-p)
           (should (eq delete-called-with buf)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-;;;; ---- Persp reconciliation --------------------------------------------------------------
+;;;; ---- Persp isolation --------------------------------------------------------------
 
-(ert-deftest agent-repl-ecfg-test-persp-switch/reshows-when-flag-says-visible ()
-  "A workspace switch re-displays the popup when the global flag says visible."
-  (let* ((agent-repl-explain-config-buffer-name " *test-explain-persp-show*")
-         (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p t)
-         (agent-repl--explain-config-replaced-window nil)
-         (shown nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-show)
-                   (lambda () (setq shown t))))
-          (agent-repl--explain-config-ensure-visible-on-persp-switch)
-          (should shown))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-ecfg-test-persp-switch/deletes-stale-window-when-flag-says-hidden ()
-  "A workspace switch deletes a persp-restored popup window when hidden."
-  (let* ((agent-repl-explain-config-buffer-name " *test-explain-persp-hide*")
-         (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-global-visible-p nil)
-         (delete-called-with nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'stale-win))
-                  ((symbol-function 'agent-repl-window--delete-buffer-windows)
-                   (lambda (b &rest _) (setq delete-called-with b))))
-          (agent-repl--explain-config-ensure-visible-on-persp-switch)
-          (should (eq delete-called-with buf)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
+(ert-deftest agent-repl-ecfg-test-persp-switch/no-reshow-hook-exists ()
+  "The popup is per-workspace: the old persp-switch re-show hook must not
+exist, so a workspace switch can never re-create the popup window."
+  (should-not (fboundp 'agent-repl--explain-config-ensure-visible-on-persp-switch)))
 
 (provide 'test-explain-config)
 
