@@ -947,3 +947,36 @@ func waitForFrameType(t *testing.T, c *Client, typ string) map[string]any {
 		}
 	}
 }
+
+func TestReplayClientAbsorbsFullRingBurst(t *testing.T) {
+	// Arrange: a ring far larger than the fixed 256-frame NewClient
+	// buffer (the transcript-seeded norm).
+	shim := newFakeShim()
+	sess := New(Config{ID: "s_test", Shim: shim, Logf: func(string, ...any) {}})
+	const ringSize = 1500
+	sess.mu.Lock()
+	for i := 0; i < ringSize; i++ {
+		sess.broadcastLocked([]protocol.L2Frame{&protocol.TextDeltaFrame{
+			Envelope: protocol.Envelope{Type: "text-delta"}, BlockID: "b1", Text: "x",
+		}})
+	}
+	sess.mu.Unlock()
+	client := sess.NewReplayClient()
+	sess.Attach(client)
+	<-client.Send // hello
+	// Act: request the full ring with no concurrent reader draining.
+	if err := sess.HandleClientFrame(client, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	// Assert: every frame was queued and the client was not dropped.
+	for i := 0; i < ringSize; i++ {
+		select {
+		case _, ok := <-client.Send:
+			if !ok {
+				t.Fatalf("client dropped (channel closed) after %d of %d frames", i, ringSize)
+			}
+		default:
+			t.Fatalf("only %d of %d frames queued", i, ringSize)
+		}
+	}
+}

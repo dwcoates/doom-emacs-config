@@ -288,7 +288,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := session.NewClient()
+	// Replay-sized: the buffer must absorb a full-ring replay burst
+	// (transcript-seeded sessions replay thousands of frames on attach).
+	client := sess.NewReplayClient()
 	sess.Attach(client)
 
 	// Writer: session frame queue → socket. Owns the socket's write side
