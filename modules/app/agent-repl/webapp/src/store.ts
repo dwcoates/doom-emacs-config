@@ -121,6 +121,13 @@ export interface StoreState {
   daemonVersion: string;
   model: string;
   cwd: string;
+  /**
+   * Durable CLI session uuid from the hello frame (empty until the
+   * SDK's system:init). This is the resume target the rebind path
+   * persists client-side — the key that survives a lost daemon
+   * session id.
+   */
+  claudeSessionId: string;
   permissionMode: PermissionMode;
   items: ConversationItem[];
   turnInFlight: boolean;
@@ -135,6 +142,7 @@ function initialState(): StoreState {
     daemonVersion: "",
     model: "",
     cwd: "",
+    claudeSessionId: "",
     permissionMode: "default",
     items: [],
     turnInFlight: false,
@@ -160,6 +168,18 @@ export interface ApplyResult {
 
 export class ConversationStore {
   state: StoreState = initialState();
+
+  /**
+   * Discard all state, as if freshly constructed. Used when the live
+   * view is rebound onto a DIFFERENT daemon session (the "session
+   * gone" rebind): the successor's hello must be treated as a fresh
+   * join, not a reconnect — a stale lastSeq would otherwise make its
+   * replay look like a small gap-fill and splice two conversations.
+   */
+  reset(): void {
+    this.state = initialState();
+    this.replayTarget = null;
+  }
 
   /**
    * Fresh-join replay watermark: the hello's seq when a full history
@@ -223,6 +243,7 @@ export class ConversationStore {
     s.daemonVersion = hello.daemon_version;
     s.model = hello.model;
     s.cwd = hello.cwd;
+    s.claudeSessionId = hello.claude_session_id ?? "";
     s.permissionMode = hello.permission_mode;
 
     const canFillFromHistory =
