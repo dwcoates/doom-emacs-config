@@ -207,6 +207,56 @@ route through the fake-daemon struct."
       (should (member agent-repl--frontend-webapp-dir
                       (cdr (member "-webapp" cmd)))))))
 
+(ert-deftest agent-repl-test-daemon-command-carries-remediation-dir ()
+  "The daemon argv nominates the checkout the lost-session analyst works in."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions t))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member agent-repl--frontend-repo-root
+                      (cdr (member "-remediation-dir" cmd)))))))
+
+(ert-deftest agent-repl-test-daemon-command-carries-remediation-permission-mode ()
+  "The headless analyst is handed the configured permission mode."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions t)
+        (agent-repl-frontend-remediation-permission-mode "bypassPermissions"))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member "bypassPermissions"
+                      (cdr (member "-remediation-permission-mode" cmd)))))))
+
+(ert-deftest agent-repl-test-daemon-command-omits-permission-mode-when-nil ()
+  "A nil permission mode hands the analyst no --permission-mode at all."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions t)
+        (agent-repl-frontend-remediation-permission-mode nil))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member "-remediation-dir" cmd))
+      (should-not (member "-remediation-permission-mode" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-command-omits-remediation-when-disabled ()
+  "Disabling remediation drops -remediation-dir, which disables it daemon-side."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions nil))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should-not (member "-remediation-dir" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-repo-root-contains-the-module ()
+  "The remediation checkout is the tree this module lives in."
+  ;; Arrange / Act
+  (let ((root agent-repl--frontend-repo-root))
+    ;; Assert
+    (should (string-prefix-p (expand-file-name root)
+                             (expand-file-name agent-repl--frontend-root)))
+    (should (file-directory-p (expand-file-name "modules/app/agent-repl" root)))))
+
 ;;;; ---- sentinel and lifecycle ----------------------------------------------
 
 (ert-deftest agent-repl-test-daemon-sentinel-clears-on-death ()
