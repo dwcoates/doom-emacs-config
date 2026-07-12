@@ -26,7 +26,15 @@
 ;;;; ---- Fake daemon process --------------------------------------------------
 
 (cl-defstruct agent-repl-test--fake-daemon
-  live pid)
+  live pid
+  ;; term-behavior: `exit' (the default) makes the fake die on SIGTERM,
+  ;; modeling a daemon whose graceful-shutdown path works; `ignore'
+  ;; models a hung daemon that outlives the grace window.
+  (term-behavior 'exit)
+  ;; signals: every signal delivered via `signal-process', newest first.
+  signals
+  ;; deleted: non-nil once `delete-process' was invoked on the fake.
+  deleted)
 
 (defun agent-repl-test--make-live-daemon (&optional pid)
   "Return a fake daemon process that reports itself live, PID default 4242."
@@ -35,8 +43,9 @@
 (defmacro agent-repl-test--with-daemon-env (&rest body)
   "Run BODY with daemon process primitives and the init guard shadowed.
 `agent-repl--frontend-init-inhibited-p' returns nil so the real ensure
-path runs under batch; `process-live-p'/`process-id'/`delete-process'
-route through the fake-daemon struct.
+path runs under batch; `process-live-p'/`process-id'/`signal-process'/
+`delete-process' route through the fake-daemon struct.  SIGTERM kills
+the fake when its `term-behavior' is `exit' (the default).
 
 `agent-repl--frontend-turn-active-sessions' is stubbed IDLE, which makes
 this env hermetic: the real probe HTTP-GETs whatever `claude-repld' is
@@ -56,8 +65,17 @@ own `cl-letf', which shadows this one for the extent of that form."
                ((symbol-function 'process-id)
                 (lambda (p) (and (agent-repl-test--fake-daemon-p p)
                                  (agent-repl-test--fake-daemon-pid p))))
+               ((symbol-function 'signal-process)
+                (lambda (p sig)
+                  (when (agent-repl-test--fake-daemon-p p)
+                    (push sig (agent-repl-test--fake-daemon-signals p))
+                    (when (and (eq sig 'TERM)
+                               (eq (agent-repl-test--fake-daemon-term-behavior p)
+                                   'exit))
+                      (setf (agent-repl-test--fake-daemon-live p) nil)))))
                ((symbol-function 'delete-process)
                 (lambda (p) (when (agent-repl-test--fake-daemon-p p)
+                              (setf (agent-repl-test--fake-daemon-deleted p) t)
                               (setf (agent-repl-test--fake-daemon-live p) nil)))))
        ,@body)))
 
@@ -383,8 +401,13 @@ whenever a real session happened to be mid-turn."
   (agent-repl-test--with-daemon-env
    (should-not (agent-repl--frontend-turn-active-sessions))))
 
-(ert-deftest agent-repl-test-daemon-stop-deletes-and-clears ()
-  "Stopping deletes the live process and clears the tracker."
+;; Master's `stop-deletes-and-clears' is deliberately superseded here: the
+;; stop path no longer SIGKILLs first, so its assertion (delete-process ran)
+;; would now encode the very bug the registry exists to survive.  Its two
+;; guarantees live on split across the three tests below (TERM is sent, the
+;; tracker is cleared) plus the SIGKILL fallback for a hung daemon.
+(ert-deftest agent-repl-test-daemon-stop-signals-term-first ()
+  "Stopping delivers SIGTERM so the daemon runs its graceful shutdown."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((proc (agent-repl-test--make-live-daemon)))
@@ -394,8 +417,44 @@ whenever a real session happened to be mid-turn."
        ;; Act
        (agent-repl--frontend-stop-daemon))
      ;; Assert
-     (should (null agent-repl--frontend-daemon-process))
+     (should (equal (agent-repl-test--fake-daemon-signals proc) '(TERM))))))
+
+(ert-deftest agent-repl-test-daemon-stop-graceful-exit-skips-kill ()
+  "A daemon that exits on TERM within the grace window is never SIGKILLed."
+  ;; Arrange — term-behavior `exit' (the default) dies on TERM.
+  (agent-repl-test--with-daemon-env
+   (let ((proc (agent-repl-test--make-live-daemon)))
+     (setq agent-repl--frontend-daemon-process proc)
+     ;; Act
+     (agent-repl--frontend-stop-daemon)
+     ;; Assert
+     (should-not (agent-repl-test--fake-daemon-deleted proc))
      (should-not (agent-repl-test--fake-daemon-live proc)))))
+
+(ert-deftest agent-repl-test-daemon-stop-falls-back-to-kill ()
+  "A daemon that outlives the grace window falls back to `delete-process'."
+  ;; Arrange — a hung daemon and a zero grace window (no real waiting).
+  (agent-repl-test--with-daemon-env
+   (let ((proc (agent-repl-test--make-live-daemon))
+         (agent-repl-frontend-stop-grace-seconds 0))
+     (setf (agent-repl-test--fake-daemon-term-behavior proc) 'ignore)
+     (setq agent-repl--frontend-daemon-process proc)
+     ;; Act
+     (agent-repl--frontend-stop-daemon)
+     ;; Assert
+     (should (agent-repl-test--fake-daemon-deleted proc))
+     (should-not (agent-repl-test--fake-daemon-live proc)))))
+
+(ert-deftest agent-repl-test-daemon-stop-clears-tracker ()
+  "Stopping clears the tracked process variable."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((proc (agent-repl-test--make-live-daemon)))
+     (setq agent-repl--frontend-daemon-process proc)
+     ;; Act
+     (agent-repl--frontend-stop-daemon)
+     ;; Assert
+     (should (null agent-repl--frontend-daemon-process)))))
 
 (provide 'test-daemon)
 
