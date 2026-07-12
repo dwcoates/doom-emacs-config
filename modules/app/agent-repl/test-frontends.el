@@ -100,6 +100,24 @@ workspace carries no `:frontend' resolves through that global."
       (should (eq (agent-repl--ws-frontend-name "ws1") 'vterm))
       (should-not (agent-repl--ws-gui-frontend-p "ws1")))))
 
+(ert-deftest agent-repl-test-frontends-shipped-default-is-gui ()
+  "The frontend shipped as the default is the web gui, not the vterm TUI.
+Reads the defcustom's STANDARD value, so a `setq' anywhere in load order
+cannot make this pass by accident."
+  ;; Act
+  (let ((shipped (eval (car (get 'agent-repl-default-frontend 'standard-value)) t)))
+    ;; Assert
+    (should (eq shipped 'gui))))
+
+(ert-deftest agent-repl-test-frontends-ws-resolution-defaults-to-gui-out-of-the-box ()
+  "Under the shipped default a workspace with no :frontend is a gui workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-default-frontend
+           (eval (car (get 'agent-repl-default-frontend 'standard-value)) t)))
+      ;; Act / Assert
+      (should (agent-repl--ws-gui-frontend-p "ws1")))))
+
 ;;;; ---- Pair validation -------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontends-validate-pair-accepts-supported ()

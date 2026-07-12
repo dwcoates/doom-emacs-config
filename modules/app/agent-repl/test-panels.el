@@ -997,6 +997,7 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
 (ert-deftest agent-repl-test-panels-agent-repl-simple-uses-simple-hide ()
   "agent-repl-simple dispatches the visible-panels case to simple-hide."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((simple-called 0)
           (full-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -1015,6 +1016,7 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
 (ert-deftest agent-repl-test-panels-agent-repl-uses-full-hide ()
   "agent-repl (deprio variant) dispatches the visible-panels case to hide-and-preserve."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((simple-called 0)
           (full-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -1243,6 +1245,7 @@ is on."
 agent session is running.  Skips the initialize-agent branch the
 plain `agent-repl-simple' (SPC o c) toggle would otherwise take."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((started nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
@@ -1260,6 +1263,7 @@ plain `agent-repl-simple' (SPC o c) toggle would otherwise take."
   "agent-repl hides the workspace mid-startup rather than showing a loading
 message — always-close skips the loading branch."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((messages nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
@@ -1276,6 +1280,7 @@ message — always-close skips the loading branch."
 (ert-deftest agent-repl-test-panels-entry-point-visible-hides ()
   "agent-repl hides panels when they are visible."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
@@ -1292,6 +1297,7 @@ message — always-close skips the loading branch."
 always-close contract: pressing SPC o C on a hidden workspace re-asserts
 :hidden + push-to-back instead of re-showing the panels."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((shown nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
@@ -1333,6 +1339,7 @@ Selection-handling stays orthogonal to the always-close hide path."
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
 nothing is running, it initializes the agent (in contrast to SPC o C)."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((started nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
@@ -1349,6 +1356,7 @@ nothing is running, it initializes the agent (in contrast to SPC o C)."
 the session is running but panels are hidden, it re-shows them (in
 contrast to SPC o C, which hides further)."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((shown nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
@@ -1365,6 +1373,7 @@ contrast to SPC o C, which hides further)."
 adds the input window beside it and focuses it — rather than rebuilding the
 whole layout (which would duplicate the already-visible output window)."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((added nil) (focused nil) (shown-hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
@@ -3528,6 +3537,7 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 (ert-deftest agent-repl-test-panels-restart-kills-then-initializes ()
   "agent-repl-restart dispatches the vterm frontend's kill-then-initialize."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((order nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--vterm-kill)
@@ -3548,6 +3558,7 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 (ert-deftest agent-repl-test-panels-kill-clears-state-axes ()
   "agent-repl-kill resets :agent-state and :repl-state."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl--ws-set "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
