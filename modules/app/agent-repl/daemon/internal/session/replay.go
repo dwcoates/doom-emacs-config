@@ -228,6 +228,10 @@ func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
 	defer s.mu.Unlock()
 	if claudeSessionID != "" {
 		s.translator.ClaudeSessionID = claudeSessionID
+		// The resume target is a durable id in its own right; the
+		// registry must hold it even if system:init later reports a
+		// successor uuid (which re-notifies).
+		s.notifyRegistrarLocked()
 	}
 	if err != nil {
 		return err

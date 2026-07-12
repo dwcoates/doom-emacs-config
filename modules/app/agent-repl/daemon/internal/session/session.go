@@ -69,6 +69,7 @@ type Session struct {
 	now        func() time.Time
 	logf       func(format string, args ...any)
 	sentinel   SentinelSink
+	registrar  Registrar
 
 	mu       sync.Mutex
 	seq      int64
@@ -79,6 +80,10 @@ type Session struct {
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
 	deathReason string
+	// registrarClaudeID / registrarTerminal track what the registrar has
+	// already been told, so each transition is reported exactly once.
+	registrarClaudeID string
+	registrarTerminal bool
 
 	done chan struct{}
 }
@@ -91,6 +96,17 @@ type SentinelSink interface {
 	PermissionRequested(cwd, sid, reqID string)
 	PermissionResolved(cwd, sid, reqID string)
 	SessionDead(cwd, sid string)
+}
+
+// Registrar receives the durable-state transitions the persistent
+// session registry records: the arrival (or change) of the CLI session
+// uuid, and the session's terminal transition. Optional: a nil
+// registrar disables the notifications (tests, embedded use).
+// Implementations are called under the session lock and must not call
+// back into the session.
+type Registrar interface {
+	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+	SessionTerminal(sessionID, deathReason string)
 }
 
 // Config carries session construction parameters.
@@ -114,6 +130,9 @@ type Config struct {
 	// Sentinel receives agent-state side-channel notifications; nil
 	// disables the sentinel writes.
 	Sentinel SentinelSink
+	// Registrar receives durable-state transitions for the persistent
+	// session registry; nil disables the notifications.
+	Registrar Registrar
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -140,6 +159,7 @@ func New(cfg Config) *Session {
 		now:           cfg.Now,
 		logf:          cfg.Logf,
 		sentinel:      cfg.Sentinel,
+		registrar:     cfg.Registrar,
 		clients:       map[*Client]struct{}{},
 		done:          make(chan struct{}),
 	}
@@ -191,6 +211,7 @@ func (s *Session) Run() {
 			s.terminal = true
 			s.deathReason = evt.Reason
 		}
+		s.notifyRegistrarLocked()
 		s.mu.Unlock()
 	}
 	s.mu.Lock()
@@ -209,12 +230,34 @@ func (s *Session) Run() {
 			Recoverable: false,
 		}})
 	}
+	s.notifyRegistrarLocked()
 	for c := range s.clients {
 		close(c.Send)
 		delete(s.clients, c)
 	}
 	s.mu.Unlock()
 	close(s.done)
+}
+
+// notifyRegistrarLocked reports durable-state transitions (the CLI
+// session uuid arriving or changing, the terminal transition) to the
+// registrar, each exactly once per value. Runs under s.mu; the
+// registrar only touches its own state (the write-through registry),
+// so no lock cycle is possible. Disk I/O under the session lock is
+// deliberate and cheap: each session transitions at most a handful of
+// times over its whole life.
+func (s *Session) notifyRegistrarLocked() {
+	if s.registrar == nil {
+		return
+	}
+	if id := s.translator.ClaudeSessionID; id != "" && id != s.registrarClaudeID {
+		s.registrarClaudeID = id
+		s.registrar.ClaudeSessionIDChanged(s.ID, id)
+	}
+	if s.terminal && !s.registrarTerminal {
+		s.registrarTerminal = true
+		s.registrar.SessionTerminal(s.ID, s.deathReason)
+	}
 }
 
 // Done is closed once the shim event stream has drained and the session

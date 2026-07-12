@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"claude-repld/internal/protocol"
+	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 )
 
@@ -847,5 +849,156 @@ func TestHelloCarriesServerBootID(t *testing.T) {
 	}
 	if int(helloA["protocol_version"].(float64)) != protocol.Layer2Version {
 		t.Fatalf("hello protocol_version = %v, want %d", helloA["protocol_version"], protocol.Layer2Version)
+	}
+}
+
+// ---- session registry write-through ----------------------------------------
+
+// registryHarness builds a harness whose server persists session records
+// into a fresh on-disk registry rooted in a test temp dir.
+func registryHarness(t *testing.T) (*harness, *registry.Registry) {
+	t.Helper()
+	reg := registry.Open(filepath.Join(t.TempDir(), "sessions.json"), func(string, ...any) {})
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		Now:           func() time.Time { return time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC) },
+		Spawn: func(sessionID string, opts CreateOpts) (session.ShimHandle, error) {
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Registry: reg,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}, reg
+}
+
+// awaitSocketClose reads until the WebSocket closes, which strictly
+// follows the session's registrar notifications (the session closes
+// client channels only after notifying) — a sleep-free sync point.
+func awaitSocketClose(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(recvTimeout)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+func TestCreateSessionPersistsARegistryRecord(t *testing.T) {
+	// Arrange
+	h, reg := registryHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
+		bytes.NewBufferString(`{"cwd":"/w","model":"haiku","permission_mode":"plan"}`))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var created struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	shim := <-h.shims
+	t.Cleanup(shim.end)
+	// Assert — the record is on disk before the create response returns.
+	rec, ok := reg.Get(created.SessionID)
+	if !ok {
+		t.Fatalf("no registry record for %s", created.SessionID)
+	}
+	if rec.CWD != "/w" || rec.Model != "haiku" || rec.PermissionMode != "plan" ||
+		rec.CreatedAt != "2026-07-12T10:00:00Z" || rec.Terminal {
+		t.Errorf("record = %+v", rec)
+	}
+}
+
+func TestSystemInitWritesClaudeSessionIDThroughToRegistry(t *testing.T) {
+	// Arrange
+	h, reg := registryHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act — init supplies the uuid; the FILLER event that follows is the
+	// sync point (Run handles events serially, so receiving the filler's
+	// frame proves the init iteration, registrar write included, is done).
+	shim.pushEvent(t, `{"type":"system","session_id":"`+id+`","uuid":"u1","subtype":"init","data":{"session_id":"cli-uuid-42"}}`)
+	shim.pushEvent(t, `{"type":"system","session_id":"`+id+`","uuid":"u2","subtype":"slash_command","data":{}}`)
+	readFrame(t, conn) // init frame
+	readFrame(t, conn) // filler frame: init iteration fully processed
+	// Assert
+	rec, ok := reg.Get(id)
+	if !ok || rec.ClaudeSessionID != "cli-uuid-42" {
+		t.Errorf("record = %+v, ok=%v", rec, ok)
+	}
+}
+
+func TestSessionEndMarksRegistryRecordTerminal(t *testing.T) {
+	// Arrange
+	h, reg := registryHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act — graceful per-session end, then shim exit.
+	shim.pushEvent(t, `{"type":"closed","session_id":"`+id+`","uuid":"u","reason":"sdk_end","exit_code":0}`)
+	shim.end()
+	awaitSocketClose(t, conn)
+	// Assert
+	rec, ok := reg.Get(id)
+	if !ok || !rec.Terminal || rec.DeathReason != "sdk_end" {
+		t.Errorf("record = %+v, ok=%v", rec, ok)
+	}
+}
+
+func TestShutdownAllLeavesRegistryRecordsRehydratable(t *testing.T) {
+	// Arrange — a live session, then a daemon-wide drain (the routine
+	// restart path): its deaths must NOT be recorded as terminal.
+	h, reg := registryHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act
+	h.srv.ShutdownAll()
+	shim.end()
+	awaitSocketClose(t, conn)
+	// Assert
+	rec, ok := reg.Get(id)
+	if !ok {
+		t.Fatalf("record for %s vanished", id)
+	}
+	if rec.Terminal || rec.DeathReason != "" {
+		t.Errorf("drained record marked terminal: %+v", rec)
+	}
+}
+
+func TestFakeSessionIsNeverRegistered(t *testing.T) {
+	// Arrange
+	h, reg := registryHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
+		bytes.NewBufferString(`{"fake":true}`))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var created struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	shim := <-h.shims
+	t.Cleanup(shim.end)
+	// Assert
+	if _, ok := reg.Get(created.SessionID); ok {
+		t.Error("fake session was registered; it can never rehydrate")
 	}
 }

@@ -980,3 +980,132 @@ func TestReplayClientAbsorbsFullRingBurst(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Registrar notifications (durable-state transitions for the registry)
+// ---------------------------------------------------------------------------
+
+// recordingRegistrar is a thread-safe Registrar that records calls.
+type recordingRegistrar struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *recordingRegistrar) record(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, s)
+}
+
+func (r *recordingRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
+	r.record("claude-id " + sessionID + " " + claudeSessionID)
+}
+
+func (r *recordingRegistrar) SessionTerminal(sessionID, deathReason string) {
+	r.record("terminal " + sessionID + " " + deathReason)
+}
+
+func (r *recordingRegistrar) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
+}
+
+func newRegistrarHarness(t *testing.T) (*harness, *recordingRegistrar) {
+	t.Helper()
+	shim := newFakeShim()
+	reg := &recordingRegistrar{}
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     16,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+		Registrar:     reg,
+	})
+	go sess.Run()
+	t.Cleanup(func() {
+		shim.end()
+		<-sess.Done()
+	})
+	return &harness{shim: shim, sess: sess}, reg
+}
+
+func TestRegistrarNotifiedWhenInitSuppliesClaudeSessionID(t *testing.T) {
+	// Arrange
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"session_id":"cli-uuid-7"}}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	calls := reg.snapshot()
+	if len(calls) == 0 || calls[0] != "claude-id sess-1 cli-uuid-7" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestRegistrarClaudeSessionIDReportedOncePerValue(t *testing.T) {
+	// Arrange — two inits carrying the SAME uuid.
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u1","subtype":"init","data":{"session_id":"cli-uuid-7"}}`)
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u2","subtype":"init","data":{"session_id":"cli-uuid-7"}}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — exactly one claude-id call.
+	count := 0
+	for _, c := range reg.snapshot() {
+		if c == "claude-id sess-1 cli-uuid-7" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("claude-id reported %d times, want 1 (calls = %v)", count, reg.snapshot())
+	}
+}
+
+func TestRegistrarNotifiedOnClosedWithReason(t *testing.T) {
+	// Arrange
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","uuid":"u","reason":"sdk_end","exit_code":0}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	calls := reg.snapshot()
+	if len(calls) != 1 || calls[0] != "terminal sess-1 sdk_end" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestRegistrarNotifiedOnHardShimDeath(t *testing.T) {
+	// Arrange
+	h, reg := newRegistrarHarness(t)
+	// Act — stream ends with no closed event.
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	calls := reg.snapshot()
+	if len(calls) != 1 || calls[0] != "terminal sess-1 shim_died" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestRegistrarNotifiedByTranscriptSeedStamp(t *testing.T) {
+	// Arrange — no Run needed: SeedFromTranscript stamps synchronously.
+	shim := newFakeShim()
+	reg := &recordingRegistrar{}
+	sess := New(Config{ID: "sess-1", Shim: shim, Logf: func(string, ...any) {}, Registrar: reg})
+	// Act — the transcript path is absent; the stamp still happens.
+	err := sess.SeedFromTranscript("/nonexistent/transcript.jsonl", "cli-uuid-9")
+	// Assert
+	if err == nil {
+		t.Fatal("expected open error for a missing transcript")
+	}
+	calls := reg.snapshot()
+	if len(calls) != 1 || calls[0] != "claude-id sess-1 cli-uuid-9" {
+		t.Fatalf("calls = %v", calls)
+	}
+}
