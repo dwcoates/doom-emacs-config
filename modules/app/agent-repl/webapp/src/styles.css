@@ -166,6 +166,12 @@ pre {
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
 .diff-output { --cap-lines: 10; }
+/* Edge-gated scrolling: a section takes the wheel only while the pointer
+   is in its left/right gutter, and while it is, both gutters light up. */
+.scroll-zone {
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
+  cursor: ns-resize;
+}
 .tool-read-output .line-no { color: var(--muted); }
 /* Markdown Reads render formatted (no gutter); same capped box, minus
    the phantom leading gap from the first block's own margin. */
