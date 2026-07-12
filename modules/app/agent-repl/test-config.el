@@ -290,6 +290,69 @@ SHA is nil."
       (should (equal (agent-repl-version) "unknown"))
       (should (equal messaged "agent-repl version: unknown")))))
 
+;;;; ---- Tests: bootstrap-phase emission ----
+;;
+;; config.el runs before core.el defines the log-severity ladder, and is also
+;; the code that reports core.el failing to load.  `--boot-info' / `--boot-warn'
+;; must therefore hold the quiet/loud bifurcation on BOTH sides of that
+;; boundary: delegating to the ladder once it exists, and degrading to a
+;; correctly-pitched bare `message' when it does not.
+;;
+;; Note this file loads config.el with `load!' stubbed out, so core.el is
+;; genuinely absent here — the fallback branch is the default state, and the
+;; delegating branch is the one that must be simulated.
+
+(defun agent-repl-test-config--capture-emission (thunk)
+  "Run THUNK with `message' stubbed; return a plist (:text T :echoed BOOL).
+:echoed is non-nil only when `inhibit-message' was nil at `message' time,
+i.e. only when the line actually reached the echo area / modeline."
+  (let ((text nil) (echoed nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (setq text (apply #'format fmt args)
+                       echoed (not inhibit-message)))))
+      (funcall thunk))
+    (list :text text :echoed echoed)))
+
+(ert-deftest agent-repl-config-test-boot-info/fallback-never-echoes ()
+  "Pre-core, `--boot-info' still emits but must NOT reach the echo area."
+  (let ((res (agent-repl-test-config--capture-emission
+              (lambda () (agent-repl--boot-info "starting up")))))
+    (should (string-match-p "\\[agent-repl\\] starting up" (plist-get res :text)))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-config-test-boot-info/fallback-expands-format-args ()
+  "Pre-core, `--boot-info' expands its &rest ARGS into FMT."
+  (let ((res (agent-repl-test-config--capture-emission
+              (lambda () (agent-repl--boot-info "loaded %d of %d" 3 7)))))
+    (should (string-match-p "loaded 3 of 7" (plist-get res :text)))))
+
+(ert-deftest agent-repl-config-test-boot-info/delegates-once-core-loaded ()
+  "Once core.el defines the ladder, `--boot-info' routes through it."
+  (let ((delegated nil))
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (ws fmt &rest args)
+                 (setq delegated (list ws (apply #'format fmt args))))))
+      (agent-repl--boot-info "hello %s" "world")
+      (should (equal delegated '(nil "hello world"))))))
+
+(ert-deftest agent-repl-config-test-boot-warn/fallback-reaches-echo-area ()
+  "Pre-core, `--boot-warn' MUST still reach the echo area — a failing load
+is exactly the thing the user has to see."
+  (let ((res (agent-repl-test-config--capture-emission
+              (lambda () (agent-repl--boot-warn "core.el exploded")))))
+    (should (plist-get res :echoed))
+    (should (string-match-p "WARNING: core.el exploded" (plist-get res :text)))))
+
+(ert-deftest agent-repl-config-test-boot-warn/delegates-once-core-loaded ()
+  "Once core.el defines the ladder, `--boot-warn' routes through it."
+  (let ((delegated nil))
+    (cl-letf (((symbol-function 'agent-repl--warn)
+               (lambda (ws fmt &rest args)
+                 (setq delegated (list ws (apply #'format fmt args))))))
+      (agent-repl--boot-warn "bad %s" "thing")
+      (should (equal delegated '(nil "bad thing"))))))
+
 (provide 'test-config)
 
 ;;; test-config.el ends here
