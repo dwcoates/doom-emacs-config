@@ -193,8 +193,11 @@ Default is near-black."
   :group 'agent-repl)
 
 (defface agent-repl-drawer-group-label
-  '((t :inherit font-lock-comment-face :weight bold))
-  "Face for repo group labels in drawer sections."
+  '((t :foreground "white" :weight bold :height 1.15))
+  "Face for repo group labels in drawer sections.
+Rendered larger than `agent-repl-drawer-workspace-name' (which sits at
+the default height) and in white, so the repo heading outranks the
+workspace names nested beneath it."
   :group 'agent-repl)
 
 (defface agent-repl-drawer-empty

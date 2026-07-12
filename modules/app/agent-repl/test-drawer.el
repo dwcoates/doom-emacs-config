@@ -2832,6 +2832,25 @@ just restored from the destination workspace's saved config."
   "Nil priority renders as the empty string so unprioritized workspaces don't carry a phantom space."
   (should (equal (agent-repl-drawer--priority-display nil) "")))
 
+;;;; ---- Group-label face (repo heading) ----
+
+(defun agent-repl-drawer-test--face-scale (face)
+  "Return FACE's height as a scale factor relative to the default face.
+An unspecified `:height' means FACE renders at the default height, i.e.
+a scale of 1.0."
+  (let ((h (face-attribute face :height nil t)))
+    (if (numberp h) h 1.0)))
+
+(ert-deftest agent-repl-drawer-test-group-label-face-is-larger-than-workspace-name ()
+  "The repo group label renders at a larger height than the workspace name."
+  (should (> (agent-repl-drawer-test--face-scale 'agent-repl-drawer-group-label)
+             (agent-repl-drawer-test--face-scale 'agent-repl-drawer-workspace-name))))
+
+(ert-deftest agent-repl-drawer-test-group-label-face-foreground-is-white ()
+  "The repo group label renders with a white foreground."
+  (should (equal (face-attribute 'agent-repl-drawer-group-label :foreground nil t)
+                 "white")))
+
 ;;;; ---- Name face (per-state coloring) ----
 
 (ert-deftest agent-repl-drawer-test-name-face-thinking-is-red ()
