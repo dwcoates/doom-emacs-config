@@ -376,6 +376,52 @@ describe("renderItem", () => {
     expect(renderItem(item)).toContain("tool-generic");
   });
 
+  it("spins the running badge of a tool call whose result has not landed", () => {
+    // Arrange — input complete, result outstanding: the wait the arc marks.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      inputJson: `{"command":"sleep 5"}`,
+      input: { command: "sleep 5" },
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
+  });
+
+  it("drops the running arc once the tool result lands", () => {
+    // Arrange — a settled call carries the done badge, not motion.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      inputJson: `{"command":"ls"}`,
+      input: { command: "ls" },
+      inputDone: true,
+      result: { isError: false, content: "a.txt" },
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("tool-spinner");
+  });
+
+  it("keeps the running arc off a call whose input is still streaming", () => {
+    // Arrange — the input phase already pulses •••, so a second indicator
+    // would double up on the same beat.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Edit",
+      messageId: "m1",
+      inputJson: `{"file_`,
+      inputDone: false,
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("tool-spinner");
+  });
+
   it("renders the tool title inside the styled tool-name span", () => {
     // Arrange — .tool-name is the CSS hook the purple title color
     // (--tool-title) hangs off; the class must stay on the header.

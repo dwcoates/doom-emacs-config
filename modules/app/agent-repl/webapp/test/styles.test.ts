@@ -351,3 +351,45 @@ describe("thinking spinner", () => {
     expect(reducedSpinner).not.toMatch(/animation:/);
   });
 });
+
+const toolSpinner = blockAfter(css, ".tool-spinner");
+const appearKeyframes = blockAfter(css, "@keyframes tool-run-appear");
+const reducedToolSpinner = blockAfter(
+  blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+  ".tool-spinner",
+);
+
+describe("running-tool spinner", () => {
+  it("spins the running arc with the same endless rotation the thinking arc uses", () => {
+    // Arrange / Act — the base .tool-spinner rule.
+    // Assert
+    expect(toolSpinner).toMatch(/thinking-spin\s+[\d.]+s\s+linear\s+infinite/);
+  });
+
+  it("holds the arc invisible until the call has run for a second", () => {
+    // Arrange / Act — the fade-in's delay is what makes the arc a >1s signal.
+    // Assert
+    expect(toolSpinner).toMatch(/opacity:\s*0/);
+    expect(toolSpinner).toMatch(/tool-run-appear\s+[\d.]+s\s+linear\s+1s\s+forwards/);
+  });
+
+  it("leaves the arc visible for the rest of the call rather than fading it back out", () => {
+    // Arrange / Act — the tool-run-appear keyframes plus its forwards fill.
+    // Assert
+    expect(appearKeyframes).toMatch(/to\s*{\s*opacity:\s*1/);
+  });
+
+  it("reserves the arc's box up front so the badge does not jump when it appears", () => {
+    // Arrange / Act — opacity hides it, display/visibility would reflow it.
+    // Assert
+    expect(toolSpinner).not.toMatch(/display:\s*none/);
+    expect(toolSpinner).not.toMatch(/visibility:/);
+  });
+
+  it("slows the running arc under reduced motion while keeping its fade-in", () => {
+    // Arrange / Act — per-animation durations, rotation first, fade-in second.
+    // Assert
+    expect(reducedToolSpinner).toMatch(/animation-duration:\s*[\d.]+s,\s*[\d.]+s/);
+    expect(reducedToolSpinner).not.toMatch(/animation:/);
+  });
+});
