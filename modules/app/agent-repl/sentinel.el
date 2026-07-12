@@ -5,6 +5,9 @@
 (require 'filenotify)
 
 (declare-function agent-repl--do-log "core")
+(declare-function agent-repl--mark-ws-thinking "input")
+(declare-function agent-repl--mark-dead-vterm "status")
+(declare-function agent-repl--ws-gui-frontend-p "frontends")
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -308,6 +311,41 @@ either a stale idle nudge or a duplicate, and we leave state alone."
      (t
       (agent-repl--log ws "on-permission-event: ws=%s ignoring notification (state=%s, not :thinking)" ws before)))))
 
+(defun agent-repl--on-permission-resolved-event (ws _dir)
+  "Flip WS back to `:thinking' after a permission prompt was resolved.
+Callback for `permission_resolved_*' sentinels, written by the DAEMON
+\(never by a hook): for gui sessions the user answers permission
+prompts in the webview, so the vterm send-path flip
+\(`agent-repl--note-permission-answered-by-send') never runs and the
+daemon's permission-resolved frame is the only resolution signal.
+
+Gates on `:permission' exactly as `agent-repl--on-permission-event'
+gates on `:thinking' — the gate is what makes the daemon's
+turn-end/close auto-cancel resolutions order-independent against the
+Stop hook's `:done' (whichever lands second finds a non-`:permission'
+state and no-ops)."
+  (let ((before (agent-repl--ws-get ws :agent-state)))
+    (cond
+     ((eq before :permission)
+      (agent-repl--log ws "on-permission-resolved-event: ws=%s :permission -> :thinking" ws)
+      (agent-repl--mark-ws-thinking ws))
+     (t
+      (agent-repl--log ws "on-permission-resolved-event: ws=%s ignoring (state=%s, not :permission)" ws before)))))
+
+(defun agent-repl--on-session-dead-event (ws _dir)
+  "Record that WS's agent backend died (daemon-written shim death).
+Callback for `session_dead_*' sentinels, written by the DAEMON when a
+gui session's shim dies abnormally (SIGKILL/crash/fatal_error) — the
+gui counterpart of the vterm process sentinel, and the only death
+signal a gui workspace ever gets (the 1Hz poll deliberately never
+marks gui workspaces dead).
+
+Delegates to `agent-repl--mark-dead-vterm', which owns the guarded
+`:dead' transition (idempotent, respects `:merged'/`:merge-failed'
+precedence and the `:init' grace)."
+  (agent-repl--log ws "on-session-dead-event: ws=%s agent-state=%s" ws (agent-repl--ws-get ws :agent-state))
+  (agent-repl--mark-dead-vterm ws))
+
 (defun agent-repl--maybe-finalize-stop (ws)
   "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
 Drives the `:thinking → :done' transition via
@@ -396,6 +434,20 @@ waiting on them are never stalled by a swallowed duplicate."
                       ws (when vterm-buf (buffer-name vterm-buf))
                       (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
     (cond
+     ;; gui frontend: there is no vterm buffer BY DESIGN, so the
+     ;; structural-inconsistency branch below must not fire.  The vterm
+     ;; readiness choreography (ready flag, ready timer, panel opening)
+     ;; is handled synchronously by the gui open path; here we only flip
+     ;; to :idle at session start (guarded so a lagging/re-fired
+     ;; session_start never clobbers an in-flight turn) and fire the
+     ;; frontend-agnostic ready hooks + latch.
+     ((agent-repl--ws-gui-frontend-p ws)
+      (agent-repl--log ws "on-session-start-event: gui ws=%s agent-state=%s"
+                        ws (agent-repl--ws-get ws :agent-state))
+      (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
+        (agent-repl--ws-set-agent-state ws :idle))
+      (agent-repl--run-after-ready-hooks ws)
+      (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready))
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
       (agent-repl--warn ws "session_start for ws=%s but vterm buffer is null/dead" ws)
       (agent-repl--log ws
@@ -410,20 +462,28 @@ waiting on them are never stalled by a swallowed duplicate."
         (agent-repl--cancel-ready-timer ws)
         (agent-repl--open-panels-after-ready ws))
       ;; Fire narrow after-ready hook (every observed session_start).
-      (run-hook-wrapped 'agent-repl-after-ready-functions
-                        (lambda (fn ws)
-                          (condition-case err
-                              (funcall fn ws)
-                            (error
-                             (agent-repl--log ws
-                                               "after-ready-hook fn=%s err=%S"
-                                               fn err)))
-                          nil)
-                        ws)
+      (agent-repl--run-after-ready-hooks ws)
       ;; Flip the agent-side bit on the fully-loaded latch.  If
       ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
       ;; hook; otherwise we just record the bit and wait for switch settle.
       (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready)))))
+
+(defun agent-repl--run-after-ready-hooks (ws)
+  "Run `agent-repl-after-ready-functions' for WS, isolating hook errors.
+Each erroring hook is logged and skipped rather than rethrown — this
+runs from a file-notify callback where a hard error would kill the
+sentinel watcher.  Shared by the vterm and gui branches of
+`agent-repl--on-session-start-event'."
+  (run-hook-wrapped 'agent-repl-after-ready-functions
+                    (lambda (fn ws)
+                      (condition-case err
+                          (funcall fn ws)
+                        (error
+                         (agent-repl--log ws
+                                           "after-ready-hook fn=%s err=%S"
+                                           fn err)))
+                      nil)
+                    ws))
 
 (defvar agent-repl-after-ready-functions nil
   "Hook run when a `session_start' event is observed for a workspace.
@@ -523,6 +583,19 @@ running but its load cycle has logically ended)."
     ("permission_prompt"  . (:callback agent-repl--on-permission-event
                              :warning  "[agent-repl] WARNING: permission dir=%s matched no workspace"
                              :name     "handle-permission"))
+    ;; `permission_resolved' shares the `permission_' stem with the two
+    ;; entries above but diverges before either is a prefix of the
+    ;; other's filenames, so order among the permission_* trio doesn't
+    ;; matter.  Written ONLY by the daemon (permission_resolved_<sid>_<reqid>).
+    ("permission_resolved" . (:callback agent-repl--on-permission-resolved-event
+                              :warning  "[agent-repl] WARNING: permission-resolved dir=%s matched no workspace"
+                              :name     "handle-permission-resolved"))
+    ;; `session_dead_' vs `session_start_' diverge at "session_d"/"session_s",
+    ;; so neither prefixes the other.  Written ONLY by the daemon
+    ;; (session_dead_<sid>) on abnormal shim death.
+    ("session_dead_"      . (:callback agent-repl--on-session-dead-event
+                             :warning  "[agent-repl] WARNING: session-dead dir=%s matched no workspace"
+                             :name     "handle-session-dead"))
     ("subagent_start_"    . (:callback agent-repl--on-subagent-start-event
                              :warning  "[agent-repl] WARNING: subagent-start sentinel dir=%s matched no workspace"
                              :name     "handle-subagent-start"))
