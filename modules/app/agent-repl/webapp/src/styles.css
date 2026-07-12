@@ -35,6 +35,9 @@
      between the --err red and the --thinking orange the alarm dot alternates
      between, so the topbar reads as one escalating band. */
   --remediation: #ca8a04;
+  /* The rule a /clear draws under its prompt: red, the loudest thing in the
+     palette, because everything above it is context the session no longer has. */
+  --clear-divider: #dc2626;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -55,6 +58,7 @@
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
     --remediation: #facc15;
+    --clear-divider: #ef4444;
   }
 }
 
@@ -265,6 +269,17 @@ pre {
   align-self: center;
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+/* The context boundary a /clear draws, between its own prompt bubble and the
+   `system: init` that re-opens the session beneath it. It carries no width of
+   its own, so it spans exactly the feed column the bubbles do rather than the
+   window edge to edge. */
+.clear-divider {
+  height: 4px;
+  margin: 0.75rem 0 0.25rem;
+  border-radius: 2px;
+  background: var(--clear-divider);
 }
 
 .error-banner {
