@@ -1,5 +1,3 @@
-<<*start of metaprompt-read-directive*
-
 # Metaprompt
 
 ## Git
@@ -317,5 +315,3 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - The new tree reads as a direct vertical extension of the prior tree's selected branches rather than as a fresh independent tree.
   - The acenstor branches of the bullet's being expanded upon should be included in the response
     - But not any non-anscestor relatives, unless they happen to be ancestors of another bullet being expanded upon
-
-*metaprompt-read-directive over - rest is actual user request that you should respond to directly*>>
