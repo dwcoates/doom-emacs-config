@@ -670,6 +670,23 @@ live in this prefix but has been migrated to the metaprompt at
 first send via `agent-repl--command-prefix' — duplicating the policy
 here would only risk the two sources drifting out of sync.")
 
+(defun agent-repl--build-preemptive-prompt (raw-prompt &optional suffix)
+  "Compose the first message sent to a spawned workspace agent.
+RAW-PROMPT is the text the user actually typed.  SUFFIX, when non-nil,
+is the success-gated wrap-up instruction (see
+`agent-repl--build-oneshot-success-suffix') appended after it.
+
+Everything the user did NOT type — the autonomous-execution preamble
+and SUFFIX — is bracketed as a harness-injected span
+\(`agent-repl--meta-wrap'), so the gui frontend renders the user-turn
+bubble as RAW-PROMPT alone while the agent still receives the whole
+composed message verbatim.  The read-directive pointing at the
+metaprompt is bracketed the same way, at its own injection point in
+`agent-repl--prepare-input'."
+  (concat (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
+          raw-prompt
+          (when suffix (agent-repl--meta-wrap suffix))))
+
 (defconst agent-repl--doom-config-dir
   (file-name-as-directory (expand-file-name "~/.config/doom"))
   "Absolute path of the doom-config repository, used by the SPC-j-o
@@ -1597,7 +1614,7 @@ the JSON file lands and the file-watcher dispatches it."
              name nil nil nil
              #'agent-repl--worktree-creation-switch-callback
              nil base-commit git-root worktree-source-dir t)))
-      (let ((prefixed-prompt (concat agent-repl--autonomous-prompt-prefix raw-prompt)))
+      (let ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt)))
         (agent-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
                           base base-commit (or source-ws "nil") git-root)
         (agent-repl--info nil "Generating workspace name via `claude -p --model %s'..."
@@ -1686,9 +1703,7 @@ JSON command as `\"force_sandbox\": true')."
                       nil agent-repl--oneshot-prompt-map)))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
-    (let* ((suffixed-raw (concat raw-prompt suffix))
-           (prefixed-prompt (concat agent-repl--autonomous-prompt-prefix
-                                    suffixed-raw)))
+    (let* ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt suffix)))
       (agent-repl--log nil "%s: base=%s git-root=%s base-commit=%s force-sandbox=%s"
                         tag base git-root base-commit (if force-sandbox "t" "nil"))
       ;; Reset tracking BEFORE the spawn so any `SPC j C-o' / `SPC j C-O'
@@ -1804,7 +1819,7 @@ SOURCE-WS from the persp workspace list."
     (let ((raw-prompt (read-string "Preemptive prompt: ")))
       (when (string-empty-p (string-trim (or raw-prompt "")))
         (user-error "Preemptive prompt is required"))
-      (let ((prefixed-prompt (concat agent-repl--autonomous-prompt-prefix raw-prompt)))
+      (let ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt)))
         (agent-repl--log fork-ws "fork-worktree-workspace: fork-ws=%s git-root=%s"
                           fork-ws git-root)
         (agent-repl--info fork-ws "Generating workspace name via `claude -p --model %s'..."

@@ -551,11 +551,15 @@ COUNTER is the current prefix counter.  FORCE bypasses the counter check."
 
 (defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
   "Optionally prepend metaprompt prefix to RAW for workspace WS.
-When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter)."
+When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter).
+The prepended read-directive is bracketed as a harness-injected span
+(`agent-repl--meta-wrap') — the agent still receives it verbatim, while
+the gui frontend keeps it out of the user-turn bubble, which shows only
+what the user typed."
   (let ((counter (or (agent-repl--ws-get ws :prefix-counter) 0)))
     (agent-repl--log ws "prepare-input counter=%d period=%d" counter agent-repl-prefix-period)
     (if (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt)
-        (concat agent-repl--command-prefix "\n\n" raw)
+        (concat (agent-repl--meta-wrap agent-repl--command-prefix) "\n\n" raw)
       raw)))
 
 ;;; Send pipeline
@@ -850,8 +854,14 @@ workspace from the vterm buffer."
   "The vterm frontend's send capability (registry `:send-fn').
 Pins the owning workspace on the vterm buffer (output-parsing
 machinery) and delivers INPUT through the terminal; posthooks and
-prompt summary key on RAW."
-  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+prompt summary key on RAW.
+
+INPUT's meta markers are dropped (their text kept) before the paste:
+they exist for the gui frontend, which hides the spans they bracket,
+whereas the terminal echoes the prompt verbatim to a human — so the
+markers would be pure noise on screen."
+  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer))
+        (input (agent-repl--meta-unmark input)))
     (agent-repl--log ws "do-send ws=%s len=%d" ws (length input))
     (agent-repl--increment-prefix-counter ws)
     (agent-repl--ws-put ws :last-prompt-time (float-time))

@@ -536,6 +536,24 @@ gates on :thinking, so the optimistic write must precede the wire."
         ;; Assert
         (should (eq state-at-send :thinking))))))
 
+(ert-deftest agent-repl-test-gui-send-turn-keeps-meta-markers ()
+  "gui-send-turn posts the marked text VERBATIM to the daemon.
+The webapp hides the bracketed spans at render time, so stripping them on
+the wire would deprive the agent of the directive it must read."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (let ((sent nil)
+          (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (_ws text) (setq sent text)))
+                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        ;; Act
+        (agent-repl--gui-send-turn "ws1" input "hello")
+        ;; Assert
+        (should (equal sent input))))))
+
 ;;;; ---- session-url ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-url-shape ()
