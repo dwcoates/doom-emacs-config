@@ -11,6 +11,9 @@
 (declare-function agent-repl--drain-merge-queue "worktree")
 (declare-function agent-repl--merge-queue-target-dirs "worktree")
 (declare-function agent-repl--merge-queue-front-for-target "worktree")
+(declare-function agent-repl--ws-gui-frontend-p "frontends")
+(declare-function agent-repl--frontend-dispatch-send "frontends")
+(declare-function agent-repl--frontend-ensure-session "frontend-client")
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -123,13 +126,20 @@ The `:permission' -> `:thinking' flip is inherited from
 `agent-repl--send-input-to-vterm' (the lowest-level send primitive),
 so predefined-prompt sends (e.g. `agent-repl-create-or-update-pr')
 answer permission prompts the same way every other send path does
-even though this path does NOT funnel through `agent-repl--do-send'."
+even though this path does NOT funnel through `agent-repl--do-send'.
+
+A gui workspace routes through the frontend registry instead: booting
+a vterm here would put a second claude process on the same directory
+as the workspace's daemon session, which is exactly the
+two-processes-one-dir state the frontend axis forbids."
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "send-to-agent len=%d" (length text))
-    (unless (agent-repl--agent-running-p ws)
-      (agent-repl--initialize-agent ws))
-    (agent-repl--send-input-to-vterm
-     (agent-repl--ws-get ws :vterm-buffer) text)))
+    (if (agent-repl--ws-gui-frontend-p ws)
+        (agent-repl--frontend-dispatch-send ws text text)
+      (unless (agent-repl--agent-running-p ws)
+        (agent-repl--initialize-agent ws))
+      (agent-repl--send-input-to-vterm
+       (agent-repl--ws-get ws :vterm-buffer) text))))
 
 ;;;; File reference helpers
 
@@ -1421,8 +1431,10 @@ Each call:
     entries in saved tab-bar order and per-entry priority reseating
     would shuffle them back into priority order, defeating
     `agent-repl--collect-snapshot-entries' order preservation,
-- starts claude (`agent-repl--initialize-agent') unless already
-  running."
+- starts claude unless already running — via
+  `agent-repl--initialize-agent' for vterm workspaces, or a background
+  daemon session (`agent-repl--frontend-ensure-session', resuming the
+  durable claude session) for gui workspaces."
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
     ;; `SPC p p' to DIR matches this workspace; see --ws-create for the
@@ -1476,10 +1488,20 @@ Each call:
     ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
     ;; (see `agent-repl--hydrate-and-reorder-on-open').
     (agent-repl--hydrate-and-reorder-on-open ws dir)
-    (when (and (fboundp 'agent-repl--initialize-agent)
-               (fboundp 'agent-repl--agent-running-p)
-               (not (agent-repl--agent-running-p ws)))
-      (agent-repl--initialize-agent ws))))
+    ;; Boot the agent through the workspace's own frontend.  The vterm
+    ;; branch is the classic pre-start; the gui branch ensures a daemon
+    ;; session (background — no webview until the user opens the panel)
+    ;; which resumes the workspace's durable claude session, so a
+    ;; restored gui workspace continues its conversation instead of
+    ;; being silently re-presented (and re-stamped) as vterm.
+    (if (agent-repl--ws-gui-frontend-p ws)
+        (unless (agent-repl--ws-get ws :frontend-session-id)
+          (agent-repl--log ws "establish-workspace: ensuring background gui session ws=%s" ws)
+          (agent-repl--frontend-ensure-session ws))
+      (when (and (fboundp 'agent-repl--initialize-agent)
+                 (fboundp 'agent-repl--agent-running-p)
+                 (not (agent-repl--agent-running-p ws)))
+        (agent-repl--initialize-agent ws)))))
 
 (defvar agent-repl--snapshot-load-state nil
   "Plist describing an in-progress recursive snapshot load, or nil.
