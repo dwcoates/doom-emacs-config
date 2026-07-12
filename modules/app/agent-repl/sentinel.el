@@ -437,15 +437,21 @@ waiting on them are never stalled by a swallowed duplicate."
      ;; gui frontend: there is no vterm buffer BY DESIGN, so the
      ;; structural-inconsistency branch below must not fire.  The vterm
      ;; readiness choreography (ready flag, ready timer, panel opening)
-     ;; is handled synchronously by the gui open path; here we only flip
+     ;; is handled synchronously by the gui open path; here we flip
      ;; to :idle at session start (guarded so a lagging/re-fired
-     ;; session_start never clobbers an in-flight turn) and fire the
+     ;; session_start never clobbers an in-flight turn), drain any
+     ;; pending prompts through the gui send path, and fire the
      ;; frontend-agnostic ready hooks + latch.
      ((agent-repl--ws-gui-frontend-p ws)
       (agent-repl--log ws "on-session-start-event: gui ws=%s agent-state=%s"
                         ws (agent-repl--ws-get ws :agent-state))
       (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
         (agent-repl--ws-set-agent-state ws :idle))
+      ;; Flush prompts queued before the session was up (the
+      ;; workspace-generation dispatch enqueues the new workspace's
+      ;; initial prompt as `:pending-prompts').  The drain is
+      ;; frontend-aware, so delivery goes through the gui send path.
+      (agent-repl--drain-pending-prompts ws)
       (agent-repl--run-after-ready-hooks ws)
       (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready))
      ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
