@@ -1618,6 +1618,7 @@ the module does not manage."
 (ert-deftest agent-repl-test-on-session-start-event-sets-ready ()
   "on-session-start-event should set agent-repl--ready on the vterm buffer."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((fake-buf (generate-new-buffer " *test-session-start-vterm*"))
           (timer-cancelled nil)
           (panels-opened nil))
@@ -1758,6 +1759,7 @@ Reaching this branch means ws is registered (caller chain checks that)
 but its :vterm-buffer slot is nil — a structural inconsistency that
 must surface, not be silently swallowed."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((messages '())
           (agent-state-written nil))
       (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
@@ -1778,6 +1780,7 @@ must surface, not be silently swallowed."
   "The missing-vterm warning is LOUD: it must reach the echo area / modeline,
 not just the log, because it reports a broken structural invariant."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((echoed nil))
       (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
                 ((symbol-function 'message)
@@ -1792,6 +1795,7 @@ not just the log, because it reports a broken structural invariant."
 (ert-deftest agent-repl-test-on-session-start-event-dead-vterm-warns ()
   "on-session-start-event emits a loud WARNING when the vterm buffer is dead."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
           (messages '())
           (agent-state-written nil))

@@ -620,6 +620,22 @@ re-routes their frontend resolution instead."
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
 
+(defun agent-repl-test--use-vterm-frontend ()
+  "Pin the enclosing test's world to the vterm frontend.
+
+The SHIPPED default is `gui' (`agent-repl-default-frontend'), so a test
+that arranges a VTERM world — a `:vterm-buffer' on the workspace, the
+vterm send / interrupt / liveness paths, the vterm session-start
+choreography — must say so explicitly.  Frontend resolution keys off the
+workspace's `:frontend' and that default, NEVER off the mere presence of
+a vterm buffer, so an unpinned vterm-world test would otherwise be
+dispatched down the gui branch it is not testing.
+
+Call it inside `agent-repl-test--with-clean-state', which scratch-binds
+`agent-repl-default-frontend' — the `setq' is therefore test-local and
+cannot leak into later tests in load order."
+  (setq agent-repl-default-frontend 'vterm))
+
 (defmacro agent-repl-test--with-merge-state (&rest body)
   "Execute BODY with fresh merge queue / in-flight / progress / lookahead state.
 Shared by the worktree tests (which exercise the cherry-pick progress

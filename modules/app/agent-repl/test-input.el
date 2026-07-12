@@ -107,6 +107,7 @@ the same delivery pipeline as every other Enter sender."
 (ert-deftest agent-repl-test-interrupt-sends-escape-twice ()
   "`agent-repl-interrupt' calls `vterm-send-key' with \"<escape>\" twice."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((escape-count 0))
       (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
         (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
@@ -1677,6 +1678,7 @@ The vterm-liveness gate previously skipped the interrupt entirely."
 (ert-deftest agent-repl-test-interrupt-agent-vterm-fallback ()
   "Workspaces without a frontend session keep the raw Ctrl-C path."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((ctrl-c nil))
       (cl-letf (((symbol-function 'agent-repl--vterm-send-raw-ctrl-c)
                  (lambda () (setq ctrl-c t))))
@@ -1688,6 +1690,7 @@ The vterm-liveness gate previously skipped the interrupt entirely."
 (ert-deftest agent-repl-test-do-send-increments-counter ()
   "`agent-repl--do-send' increments the prefix counter."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-put "ws1" :prefix-counter 5)
@@ -1701,6 +1704,7 @@ The vterm-liveness gate previously skipped the interrupt entirely."
 The :thinking transition belongs to the prompt_submit Claude Code hook
 (via `on-prompt-submit-event').  Emacs-side do-send only sends bytes."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-think*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
@@ -1712,6 +1716,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
 (ert-deftest agent-repl-test-do-send-pins-owning-workspace ()
   "`agent-repl--do-send' pins the owning workspace on the vterm buffer."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-pin*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
@@ -1722,6 +1727,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
 (ert-deftest agent-repl-test-do-send-runs-posthooks ()
   "`agent-repl--do-send' passes raw input to posthooks."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((posthook-args nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-do-send-hook*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
@@ -1734,6 +1740,7 @@ The :thinking transition belongs to the prompt_submit Claude Code hook
 (ert-deftest agent-repl-test-do-send-records-last-prompt-time ()
   "`agent-repl--do-send' stamps :last-prompt-time with the current float-time."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-time*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
@@ -1751,6 +1758,7 @@ Uses `process-send-string' rather than `vterm-send-key' because the latter
 routes through libvterm's key translation and can dispatch SIGINT instead
 of the literal ETX keystroke the agent needs to clear its input line."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-discard-test*"
         (setq-local vterm--process 'fake-proc)
@@ -1767,6 +1775,7 @@ of the literal ETX keystroke the agent needs to clear its input line."
 Previously only cleared the local buffer; this regressed real-world usage
 where the user pressed C-c C-c expecting a full reset."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil)
           (evil-called nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-discard-vterm*"
@@ -1793,6 +1802,7 @@ where the user pressed C-c C-c expecting a full reset."
 Previously `string-blank-p' treated whitespace-only as empty and skipped
 `erase-buffer', leaving the user's whitespace stuck in the input."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil)
           (evil-called nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-discard-ws*"
@@ -1820,6 +1830,7 @@ The raw Ctrl-C clears the agent's prompt line; our record of direct sends
 must follow so subsequent keystrokes don't continue forwarding and the
 next slash-return doesn't see stale accumulated input."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-discard-slash*"
         (setq-local vterm--process 'fake-proc)
@@ -1868,6 +1879,7 @@ draft without interrupting the agent's in-flight response."
 sends raw Ctrl-C to vterm — the suppression only applies when there is
 local content to discard."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-thinking-empty*"
         (setq-local vterm--process 'fake-proc)
@@ -1885,6 +1897,7 @@ local content to discard."
 C-c C-c sends raw Ctrl-C AND clears the buffer — the historical full-reset
 behavior is preserved outside the :thinking state."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-bytes nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-idle-nonempty*"
         (setq-local vterm--process 'fake-proc)
@@ -1955,6 +1968,7 @@ behavior is preserved outside the :thinking state."
 (ert-deftest agent-repl-test-send-reads-from-input-buffer ()
   "`agent-repl--send' reads from the input buffer when no prompt is given."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-input nil))
       (agent-repl-test--with-temp-buffer " *test-send-input*"
         (setq-local agent-repl--input-history nil)
@@ -1978,6 +1992,7 @@ behavior is preserved outside the :thinking state."
 (ert-deftest agent-repl-test-send-with-explicit-prompt ()
   "`agent-repl--send' uses the given prompt and does not clear input buffer."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent-input nil))
       (agent-repl-test--with-temp-buffer " *test-send-prompt-input*"
         (setq-local agent-repl--input-history nil)
@@ -2068,6 +2083,7 @@ send whenever the prefix counter aligned with the period."
 RET on an empty input should still reach the agent — useful for navigating
 permission prompts, menus, and confirmations."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((ret-buf nil))
       (agent-repl-test--with-temp-buffer " *test-send-bare-ret-empty-input*"
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
@@ -2082,6 +2098,7 @@ permission prompts, menus, and confirmations."
 (ert-deftest agent-repl-test-send-forwards-bare-ret-when-input-buffer-whitespace-only ()
   "`agent-repl--send' forwards a bare RET to vterm when the input buffer holds only whitespace."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((ret-buf nil))
       (agent-repl-test--with-temp-buffer " *test-send-bare-ret-whitespace-input*"
         (insert "  \n\t  \n")
@@ -2097,6 +2114,7 @@ permission prompts, menus, and confirmations."
 (ert-deftest agent-repl-test-send-forwards-bare-ret-when-explicit-prompt-empty ()
   "`agent-repl--send' forwards a bare RET to vterm when an empty PROMPT is passed explicitly."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((ret-call-count 0))
       (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-empty-prompt-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
@@ -2113,6 +2131,7 @@ permission prompts, menus, and confirmations."
 Prompt is nil and no input buffer means raw is nil and the empty-input branch
 should still forward RET so the keystroke reaches the agent."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((ret-buf nil))
       (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-nil-raw-vterm*"
         (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
@@ -2130,6 +2149,7 @@ lives inside `agent-repl--vterm-send-return-key-logged' (the lowest-level
 return primitive), so the real primitive must run — `vterm--term' is set
 buffer-locally so the delivered branch is taken."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer " *test-send-bare-ret-perm-input*"
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (agent-repl-test--with-temp-buffer "*agent-panel-bare-ret-perm-vterm*"
@@ -3286,6 +3306,7 @@ agent input buffer."
 (ert-deftest agent-repl-test-do-send-dead-vterm ()
   "`agent-repl--do-send' should still increment counter etc. even with a dead vterm buffer."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((buf (get-buffer-create "*agent-panel-dead-do-send*")))
       (agent-repl--ws-put "ws1" :vterm-buffer buf)
       (agent-repl--ws-put "ws1" :prefix-counter 5)
@@ -3326,6 +3347,7 @@ agent input buffer."
 (ert-deftest agent-repl-test-send-dead-vterm-noop ()
   "`agent-repl--send' does not call do-send when vterm buffer is dead."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((do-send-called nil)
           (buf (get-buffer-create "*agent-panel-send-dead-vterm*")))
       (agent-repl--ws-put "ws1" :vterm-buffer buf)
@@ -3906,6 +3928,7 @@ only the bracketed transport beneath it is stubbed.  do-send pins the
 owning workspace on the vterm buffer before sending, which is what the
 primitive resolves the workspace from."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-perm*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-set-agent-state "ws1" :permission)
@@ -3917,6 +3940,7 @@ primitive resolves the workspace from."
 (ert-deftest agent-repl-test-do-send-does-not-touch-non-permission-state ()
   "`agent-repl--do-send' only transitions :permission, not other states."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-think2*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-set-agent-state "ws1" :thinking)

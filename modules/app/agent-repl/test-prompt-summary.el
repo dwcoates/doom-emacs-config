@@ -748,6 +748,7 @@ while the user's interactive Claude is still mid-turn."
   "`agent-repl--do-send' invokes `agent-repl--kickoff-prompt-summary'
 with the workspace and raw input."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-do-send-summary*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (let ((kickoff-args nil))

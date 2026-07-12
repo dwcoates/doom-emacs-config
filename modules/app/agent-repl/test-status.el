@@ -1746,6 +1746,7 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
 `mark-dead-vterm' fires every tick regardless of the mod-N gate, so no
 gate-tweak is needed here."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((dead-ws nil))
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -1805,6 +1806,7 @@ ever being reached, keeping :thinking intact and :repl-state un-dead."
 The gui branch must not weaken the vterm liveness check (default
 :frontend is vterm)."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((dead-ws nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
@@ -1989,6 +1991,7 @@ first tick.  Synchronous step chaining comes from `--with-clean-state' setting
 within a single function call rather than being spread across `run-at-time'
 timers that would never fire under ERT batch mode."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((updated nil)
           (refreshed nil)
           (cleared nil)
@@ -2290,6 +2293,7 @@ The cheap state-machine work still runs."
 fires when DO-GIT-P is on because merged-ness is independent of vterm
 liveness — a dead workspace can still have a merge-completed parent."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((dead-called nil)
           (state-called nil)
           (merge-called nil))
