@@ -210,9 +210,15 @@ No-op when NAME is already the default."
     (when (fboundp 'agent-repl-save-workspace-snapshot)
       (agent-repl-save-workspace-snapshot))))
 
-;;;###autoload
 (defun agent-repl-select-frontend (set-default)
   "Select the presentation frontend for the current workspace.
+NOT a user-facing command (deliberately unbound and not autoloaded):
+flipping a workspace's presentation without killing its session is how
+two agent processes end up sharing one directory.  The user-facing
+switch is `agent-repl-switch-frontend' (`SPC o F'), which kills the
+current frontend's process first and carries the conversation across.
+This remains for internal callers and tests.
+
 With prefix argument SET-DEFAULT, set `agent-repl-default-frontend'
 \(for workspaces without a `:frontend' override) instead.
 
