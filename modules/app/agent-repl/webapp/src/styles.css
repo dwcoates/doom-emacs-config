@@ -28,6 +28,9 @@
      background tint, so the end of a turn reads at a glance. */
   --turn-complete-bg: #fbf0d2;
   --turn-complete-border: #e6d190;
+  /* Composer well: a grey darker than --card, so the box you type into reads as
+     sunken against the feed rather than as one more card floating on it. */
+  --composer-bg: #e4e7eb;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -46,6 +49,7 @@
     --info-tokens: #fbbf24;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
+    --composer-bg: #0c0e12;
   }
 }
 
@@ -262,7 +266,7 @@ pre {
 #composer-input {
   flex: 1;
   resize: none;
-  background: var(--card);
+  background: var(--composer-bg);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
