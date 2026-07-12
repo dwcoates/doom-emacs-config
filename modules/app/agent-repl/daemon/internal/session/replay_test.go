@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/internal/protocol"
 )
@@ -89,6 +90,39 @@ func TestBuildReplayFramesUserStringContent(t *testing.T) {
 	var blocks []map[string]string
 	if err := json.Unmarshal(turn.Content, &blocks); err != nil || len(blocks) != 1 || blocks[0]["text"] != "hello there" {
 		t.Fatalf("content = %s (err %v), want one text block", turn.Content, err)
+	}
+}
+
+func TestBuildReplayFramesUserTurnCarriesTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T12:34:56.789Z","message":{"role":"user","content":"hello there"}}`)
+	// Assert — the prompt's own send time, not the (much later) resume time.
+	wantTypes(t, frames, "user-turn")
+	if got := frames[0].Env().TS; got != "2026-05-24T12:34:56.789Z" {
+		t.Fatalf("TS = %q, want the transcript entry's timestamp", got)
+	}
+}
+
+func TestBuildReplayFramesUserTurnBlocksCarryTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act — array-form content takes a different build path.
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T01:02:03.000Z","message":{"role":"user","content":[{"type":"text","text":"block text"}]}}`)
+	// Assert
+	wantTypes(t, frames, "user-turn")
+	if got := frames[0].Env().TS; got != "2026-05-24T01:02:03.000Z" {
+		t.Fatalf("TS = %q, want the transcript entry's timestamp", got)
+	}
+}
+
+func TestBuildReplayFramesUserTurnWithoutTimestampLeavesTSUnstamped(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"hello there"}}`)
+	// Assert — an empty TS is the hub's cue to stamp its own.
+	wantTypes(t, frames, "user-turn")
+	if got := frames[0].Env().TS; got != "" {
+		t.Fatalf("TS = %q, want empty so the hub stamps it", got)
 	}
 }
 
@@ -290,6 +324,73 @@ func TestSeedFromTranscriptRetainsFramesForReplay(t *testing.T) {
 		if types[i] != want[i] {
 			t.Fatalf("replayed frame types = %v, want %v", types, want)
 		}
+	}
+}
+
+// seedAndReplayFirstFrame seeds sess from a one-entry transcript and
+// returns the single frame a freshly attached client replays back.
+func seedAndReplayFirstFrame(t *testing.T, sess *Session, entry string) map[string]any {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "uuid-1.jsonl")
+	if err := os.WriteFile(path, []byte(entry+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SeedFromTranscript(path, "uuid-1"); err != nil {
+		t.Fatalf("SeedFromTranscript: %v", err)
+	}
+	client := NewClient()
+	sess.Attach(client)
+	var hello struct {
+		ResumeFromSeq int64 `json:"resume_from_seq"`
+	}
+	if err := json.Unmarshal(<-client.Send, &hello); err != nil {
+		t.Fatalf("unmarshal hello: %v", err)
+	}
+	req := []byte(`{"type":"replay-request","from_seq":` + strconv.FormatInt(hello.ResumeFromSeq, 10) + `}`)
+	if err := sess.HandleClientFrame(client, req); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	var frame map[string]any
+	if err := json.Unmarshal(<-client.Send, &frame); err != nil {
+		t.Fatalf("unmarshal replayed frame: %v", err)
+	}
+	return frame
+}
+
+// clockedSession is a session whose frame clock is pinned to a time
+// distinct from any transcript timestamp under test.
+func clockedSession(t *testing.T) *Session {
+	t.Helper()
+	return New(Config{
+		ID:    "s_test",
+		Shim:  newFakeShim(),
+		Now:   func() time.Time { return time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC) },
+		Logf:  func(string, ...any) {},
+		Model: "claude-fable-5",
+	})
+}
+
+func TestSeedFromTranscriptReplaysUserTurnAtItsOriginalTime(t *testing.T) {
+	// Arrange
+	sess := clockedSession(t)
+	// Act
+	frame := seedAndReplayFirstFrame(t, sess,
+		`{"type":"user","timestamp":"2026-05-24T12:34:56.789Z","message":{"role":"user","content":"hello"}}`)
+	// Assert — the hub kept the prompt's send time instead of resume time.
+	if frame["type"] != "user-turn" || frame["ts"] != "2026-05-24T12:34:56.789Z" {
+		t.Fatalf("replayed frame = %v, want a user-turn stamped at its transcript time", frame)
+	}
+}
+
+func TestSeedFromTranscriptStampsHubTimeWhenTranscriptEntryHasNoTimestamp(t *testing.T) {
+	// Arrange
+	sess := clockedSession(t)
+	// Act
+	frame := seedAndReplayFirstFrame(t, sess,
+		`{"type":"user","message":{"role":"user","content":"hello"}}`)
+	// Assert
+	if frame["ts"] != "2026-06-01T09:00:00.000Z" {
+		t.Fatalf("ts = %v, want the hub clock's stamp", frame["ts"])
 	}
 }
 

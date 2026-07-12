@@ -4,7 +4,10 @@ import "encoding/json"
 
 // Envelope is the common Layer-2 frame header (§2.1). Seq, TS and
 // SessionID are stamped by the session hub just before a frame is
-// retained and broadcast; translator code leaves them zero.
+// retained and broadcast; translator code leaves them zero. TS is the
+// one field a builder may pre-set: a frame rebuilt from a transcript
+// carries the original event's timestamp, and the hub preserves it
+// rather than stamping the (much later) replay time.
 type Envelope struct {
 	Type      string `json:"type"`
 	Seq       int64  `json:"seq"`

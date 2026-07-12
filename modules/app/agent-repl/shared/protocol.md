@@ -423,6 +423,12 @@ interface WsEnvelope {
 
 All frames below extend `WsEnvelope`.
 
+`ts` is the time of the **event**, not of the send: frames the daemon
+rebuilds from a resumed session's transcript carry the original entry's
+timestamp, so a `user-turn` replayed on resume still reports when its
+prompt was actually sent (the webapp stamps each prompt bubble with it).
+Live frames are stamped as the session hub retains them.
+
 ### 2.2 Lifecycle frames
 
 #### `hello`

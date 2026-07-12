@@ -389,7 +389,11 @@ func (s *Session) broadcastLocked(frames []protocol.L2Frame) {
 		s.seq++
 		env := frame.Env()
 		env.Seq = s.seq
-		env.TS = s.timestamp()
+		if env.TS == "" {
+			// Transcript-replayed frames arrive pre-stamped with the
+			// original event's time (§2.1); only live frames are stamped here.
+			env.TS = s.timestamp()
+		}
 		env.SessionID = s.ID
 		data, err := json.Marshal(frame)
 		if err != nil {
