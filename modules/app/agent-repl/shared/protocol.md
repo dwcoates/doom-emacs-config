@@ -549,6 +549,16 @@ interface UserTurnFrame extends WsEnvelope {
 }
 ```
 
+**Harness-injected spans.** A turn submitted by the Emacs host may carry
+text the user never typed: the periodic directive to read the metaprompt
+file, and (on a generated workspace's first send) the autonomous-execution
+preamble and the wrap-up gate. The host brackets each such span with the
+inert markers `<!--agent-repl:meta-->` … `<!--/agent-repl:meta-->`. The
+daemon passes them through verbatim — the agent must see the injected text
+— and a client hides the bracketed spans, so the bubble shows only what
+the user wrote. A turn whose content is entirely bracketed renders nothing.
+Turns submitted from the webapp composer carry no markers.
+
 ### 2.4 Assistant text — streaming
 
 The daemon accumulates `stream-event` deltas into logical "text blocks"

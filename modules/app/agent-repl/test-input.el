@@ -25,14 +25,17 @@
           (agent-repl--ws-put ws :input-buffer (current-buffer))
           (agent-repl--ws-put ws :prefix-counter 0)
           (insert "hello")
-          ;; Counter 0 mod 3 = 0 -> prefix
-          (should (string-prefix-p "PREFIX: " (agent-repl--prepare-input ws "hello")))
+          ;; Counter 0 mod 3 = 0 -> prefix (bracketed as a meta span)
+          (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                                   (agent-repl--prepare-input ws "hello")))
           ;; Counter 1 mod 3 != 0 -> no prefix
           (agent-repl--ws-put ws :prefix-counter 1)
-          (should-not (string-prefix-p "PREFIX: " (agent-repl--prepare-input ws "hello")))
+          (should-not (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                                       (agent-repl--prepare-input ws "hello")))
           ;; Counter 3 mod 3 = 0 -> prefix again
           (agent-repl--ws-put ws :prefix-counter 3)
-          (should (string-prefix-p "PREFIX: " (agent-repl--prepare-input ws "hello"))))))))
+          (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                                   (agent-repl--prepare-input ws "hello"))))))))
 
 (ert-deftest agent-repl-test-prefix-counter-per-workspace ()
   "Each workspace should maintain its own prefix counter independently."
@@ -1280,7 +1283,8 @@ appear as subbullets of the \"is pre-existing\" claim."
           (agent-repl--command-prefix "PREFIX: "))
       ;; Counter 1 normally would not prepend with period 3
       (agent-repl--ws-put "ws1" :prefix-counter 1)
-      (should (string-prefix-p "PREFIX: " (agent-repl--prepare-input "ws1" "hello" t))))))
+      (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                               (agent-repl--prepare-input "ws1" "hello" t))))))
 
 (ert-deftest agent-repl-test-prepare-input-nil-counter ()
   "When counter is nil (fresh workspace), should treat as 0."
@@ -1290,7 +1294,8 @@ appear as subbullets of the \"is pre-existing\" claim."
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
       ;; No :prefix-counter set -> defaults to 0 -> 0 mod 3 = 0 -> prepend
-      (should (string-prefix-p "PREFIX: " (agent-repl--prepare-input "ws1" "hello"))))))
+      (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                               (agent-repl--prepare-input "ws1" "hello"))))))
 
 (ert-deftest agent-repl-test-prepare-input-exempt-input ()
   "Exempt inputs should not get the prefix even when counter is aligned."
@@ -3301,7 +3306,8 @@ agent input buffer."
       (agent-repl--ws-put "ws1" :prefix-counter 0)
       ;; Empty string is not in exempt list and doesn't match numeral regex
       ;; So it gets the prefix prepended (with "\n\n" separator)
-      (should (equal (agent-repl--prepare-input "ws1" "") "PREFIX: \n\n")))))
+      (should (equal (agent-repl--prepare-input "ws1" "")
+                     (concat (agent-repl--meta-wrap "PREFIX: ") "\n\n"))))))
 
 ;;; run-send-posthooks: multiple hooks matching same input
 
@@ -4257,6 +4263,25 @@ regardless of the prior state."
           (with-current-buffer " *test-passthrough-digit-idle-input*"
             (agent-repl--passthrough-start "1")))
         (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))))))
+
+;;;; ---- Tests: vterm-send-turn meta markers ----
+
+(ert-deftest agent-repl-test-vterm-send-turn-strips-meta-markers ()
+  "The vterm paste carries the injected text WITHOUT its meta markers.
+The terminal echoes the prompt to a human, and the markers exist only so
+the gui frontend can hide the spans they bracket."
+  (agent-repl-test--with-clean-state
+    (let ((pasted nil))
+      (cl-letf (((symbol-function 'agent-repl--pin-owning-workspace) #'ignore)
+                ((symbol-function 'agent-repl--send-input-to-vterm)
+                 (lambda (_buf input &optional _settle) (setq pasted input)))
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        (agent-repl--vterm-send-turn
+         "ws1"
+         (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")
+         "hello"))
+      (should (equal pasted "READ-DIRECTIVE\n\nhello")))))
 
 (provide 'test-input)
 

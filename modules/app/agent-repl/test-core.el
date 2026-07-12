@@ -1966,6 +1966,43 @@ The master kill-switch overrides the always-on file-write decoupling."
   (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
     (should (equal (agent-repl--workspace-prefix-slash) ""))))
 
+;;;; ---- Tests: harness-injected (meta) prompt spans ----
+
+(ert-deftest agent-repl-test-meta-wrap-brackets-the-text ()
+  "`agent-repl--meta-wrap' brackets TEXT with the open/close markers."
+  (should (equal (agent-repl--meta-wrap "injected")
+                 (concat agent-repl--meta-open "injected" agent-repl--meta-close))))
+
+(ert-deftest agent-repl-test-meta-wrap-keeps-the-text-verbatim ()
+  "The wrapped span still carries its text intact — the agent reads it."
+  (should (string-match-p (regexp-quote "read the file at /x/metaprompt.md")
+                          (agent-repl--meta-wrap "read the file at /x/metaprompt.md"))))
+
+(ert-deftest agent-repl-test-meta-markers-are-html-comments ()
+  "Both markers are inert HTML comments, so no renderer treats them as content."
+  (should (string-prefix-p "<!--" agent-repl--meta-open))
+  (should (string-suffix-p "-->" agent-repl--meta-open))
+  (should (string-prefix-p "<!--" agent-repl--meta-close))
+  (should (string-suffix-p "-->" agent-repl--meta-close)))
+
+(ert-deftest agent-repl-test-meta-unmark-drops-markers-keeps-text ()
+  "`agent-repl--meta-unmark' removes the markers but keeps the span's text."
+  (should (equal (agent-repl--meta-unmark
+                  (concat (agent-repl--meta-wrap "directive") "\n\nuser prompt"))
+                 "directive\n\nuser prompt")))
+
+(ert-deftest agent-repl-test-meta-unmark-drops-every-marked-span ()
+  "Unmarking handles multiple spans in one prompt (prefix AND suffix)."
+  (should (equal (agent-repl--meta-unmark
+                  (concat (agent-repl--meta-wrap "preamble: ")
+                          "the task"
+                          (agent-repl--meta-wrap " wrap-up gate")))
+                 "preamble: the task wrap-up gate")))
+
+(ert-deftest agent-repl-test-meta-unmark-leaves-unmarked-text-alone ()
+  "Text carrying no markers passes through unmarking unchanged."
+  (should (equal (agent-repl--meta-unmark "plain prompt") "plain prompt")))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

@@ -6225,6 +6225,41 @@ triggers the master-worktree lookup."
         (should master-path-called)
         (should (equal captured-source-dir "/tmp/trunk/"))))))
 
+;;;; ---- Tests: build-preemptive-prompt ----
+
+(ert-deftest agent-repl-test-build-preemptive-prompt-marks-the-preamble ()
+  "The autonomous preamble is bracketed as a harness-injected span."
+  (should (string-prefix-p
+           (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
+           (agent-repl--build-preemptive-prompt "do the thing"))))
+
+(ert-deftest agent-repl-test-build-preemptive-prompt-leaves-user-text-unmarked ()
+  "The user's own words carry no markers — they are what the gui bubble shows."
+  (should (string-suffix-p "do the thing"
+                           (agent-repl--build-preemptive-prompt "do the thing"))))
+
+(ert-deftest agent-repl-test-build-preemptive-prompt-marks-the-suffix ()
+  "The success-gated wrap-up suffix is bracketed as a harness-injected span."
+  (should (string-suffix-p
+           (agent-repl--meta-wrap "\n\nWRAP-UP GATE")
+           (agent-repl--build-preemptive-prompt "do the thing" "\n\nWRAP-UP GATE"))))
+
+(ert-deftest agent-repl-test-build-preemptive-prompt-omits-absent-suffix ()
+  "With no suffix, nothing follows the user's text (no empty marked span)."
+  (should (equal (agent-repl--build-preemptive-prompt "do the thing")
+                 (concat (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
+                         "do the thing"))))
+
+(ert-deftest agent-repl-test-build-preemptive-prompt-unmarks-to-the-agent-message ()
+  "Unmarking the composed prompt yields exactly the message the agent must read.
+The markers are annotation, never content: dropping them must leave the
+preamble + task + gate concatenation the agent always received."
+  (should (equal (agent-repl--meta-unmark
+                  (agent-repl--build-preemptive-prompt "do the thing" "\n\nWRAP-UP GATE"))
+                 (concat agent-repl--autonomous-prompt-prefix
+                         "do the thing"
+                         "\n\nWRAP-UP GATE"))))
+
 ;;;; ---- Tests: autonomous-prompt-prefix content ----
 
 (ert-deftest agent-repl-test-autonomous-prompt-prefix-keeps-plan-framing ()
@@ -6736,7 +6771,8 @@ handed to the spawn helper as PREFIXED-PROMPT."
                  (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-worktree-workspace 'head)
-        (should (string-prefix-p agent-repl--autonomous-prompt-prefix captured-prefixed))
+        (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
+                                 captured-prefixed))
         (should (string-suffix-p "do the thing" captured-prefixed))))))
 
 (ert-deftest agent-repl-test-create-worktree-workspace-passes-raw-prompt-unprefixed ()
@@ -6980,7 +7016,8 @@ firing is visible in the log even if the inner command bails."
                  (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-fork-worktree-workspace nil)
-        (should (string-prefix-p agent-repl--autonomous-prompt-prefix captured-prefixed))
+        (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
+                                 captured-prefixed))
         (should (string-suffix-p "do the thing" captured-prefixed))))))
 
 (ert-deftest agent-repl-test-fork-worktree-workspace-blank-prompt-errors ()
@@ -9373,7 +9410,7 @@ prefix so the spawned agent runs autonomously without waiting."
                  (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
-        (should (string-prefix-p agent-repl--autonomous-prompt-prefix
+        (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
                                  captured-prefixed))))))
 
 (ert-deftest agent-repl-test-create-doom-oneshot-rejects-empty-prompt ()
@@ -10540,7 +10577,7 @@ prefix so the spawned agent runs autonomously without waiting."
                  (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
-        (should (string-prefix-p agent-repl--autonomous-prompt-prefix
+        (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
                                  captured-prefixed))))))
 
 (ert-deftest agent-repl-test-explanation-engine-oneshot-rejects-empty-prompt ()
