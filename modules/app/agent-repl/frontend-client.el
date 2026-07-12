@@ -36,6 +36,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
+(declare-function agent-repl--mark-ws-thinking "input" (ws))
 
 (defvar url-http-response-status)
 
@@ -249,8 +250,16 @@ INPUT (the prepared text, which may carry the metaprompt prefix —
 genuine message content) goes to the daemon session.  Only the
 owning-workspace pin is vterm-specific machinery skipped here; the
 prefix counter still increments so metaprompt periodicity matches the
-vterm frontend.  Posthooks and prompt summary key on RAW, identically."
+vterm frontend.  Posthooks and prompt summary key on RAW, identically.
+
+Sets `:thinking' optimistically BEFORE the HTTP send: the
+UserPromptSubmit hook remains the authoritative confirmation, but a
+permission request can beat a lagging hook and
+`agent-repl--on-permission-event' gates on `:thinking' — without the
+optimistic write the daemon's permission sentinel would be silently
+dropped."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
+  (agent-repl--mark-ws-thinking ws)
   (agent-repl--increment-prefix-counter ws)
   (agent-repl--ws-put ws :last-prompt-time (float-time))
   (agent-repl--frontend-send-user-message ws input)
