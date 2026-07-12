@@ -382,20 +382,32 @@ Works from any buffer or from within the vterm buffer itself."
       (agent-repl--fix-vterm-scroll buf)))))
 
 (defun agent-repl--drain-pending-show-panels (ws)
-  "Open panels for WS if a preemptive prompt queued a :pending-show-panels flag.
-When the agent is ready, clears the flag and shows panels.  When the
-agent is still starting, leaves the flag set so `on-session-start-event' can
-re-drain via `open-panels-after-ready' once ready — avoids displaying
-an unloaded vterm window."
+  "Show WS's session if a preemptive prompt queued a :pending-show-panels flag.
+When the agent is ready, clears the flag and shows the session THROUGH
+WS'S FRONTEND — the vterm panels for a vterm workspace, the webview for
+a gui one.  A generated workspace is born with this flag set and its
+session booted headlessly (`agent-repl--frontend-boot-session'), so this
+drain is where a gui workspace first becomes visible; routing it
+straight to `--show-hidden-panels' would look for vterm panels that a
+gui workspace does not have.
+
+When the agent is still starting, leaves the flag set so
+`on-session-start-event' can re-drain via `open-panels-after-ready' once
+ready — avoids displaying an unloaded vterm window.  The starting check
+is vterm-shaped (a launched process that has not signalled ready); a gui
+workspace has no such window to display prematurely, since its webview
+attaches to the daemon session and streams whenever the agent gets
+there."
   (cond
    ((not (agent-repl--ws-get ws :pending-show-panels))
     (agent-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws))
    ((agent-repl--session-starting-p ws)
     (agent-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending session-starting — deferring" ws))
    (t
-    (agent-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining" ws)
+    (agent-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining frontend=%s"
+                      ws (agent-repl--ws-frontend-name ws))
     (agent-repl--ws-put ws :pending-show-panels nil)
-    (agent-repl--show-hidden-panels))))
+    (agent-repl--frontend-dispatch-show ws))))
 
 (defun agent-repl--drain-pending-magit (ws)
   "Open `magit-status' for WS if it was created with `:pending-magit' set.
@@ -1252,10 +1264,16 @@ path later for pending-prompt draining; its panel-show is idempotent."
     ;; This function IS the vterm boot, so the workspace's presentation is
     ;; vterm from here on — stamp it before the session_start sentinel can
     ;; race the lazy `:frontend' resolution.  Without the stamp, a workspace
-    ;; created while `agent-repl-default-frontend' is `gui' (e.g. the
-    ;; workspace-generation dispatch path) resolves to the gui branch of
+    ;; whose frontend still resolves lazily could take the gui branch of
     ;; `agent-repl--on-session-start-event', which never marks the vterm
-    ;; ready nor drains `:pending-prompts' — stranding its initial prompt.
+    ;; ready nor opens its panels — stranding the session it just launched.
+    ;;
+    ;; INCIDENTAL, not deliberate: a plain `--ws-put', NOT
+    ;; `agent-repl--ws-choose-frontend'.  The distinction is what the
+    ;; restore path keys on — a workspace that merely happened to boot a
+    ;; vterm here is NOT thereby a vterm workspace forever, and comes back
+    ;; under whatever `agent-repl-default-frontend' says after a restart.
+    ;; Only `SPC o F' (and friends) make the choice stick.
     (agent-repl--ws-put ws :frontend 'vterm)
     (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
     (let* ((root (agent-repl--ws-dir ws))
@@ -1761,8 +1779,19 @@ real main-area window — see
 (defun agent-repl--validate-env-switch (ws new-env worktree-p session-id)
   "Validate that workspace WS can switch to NEW-ENV.
 WORKTREE-P and SESSION-ID describe the current workspace state.
-Signals `user-error' if any precondition is not met."
+Signals `user-error' if any precondition is not met.
+
+The frontend check is the first one: `agent-repl-switch-environment' is
+vterm machinery end to end (`--kill-session', then `--initialize-agent'
+under the other environment), and the gui — which cannot present a
+`:sandbox' session at all (`agent-repl-frontend' SUPPORTED-ENVS) — has
+no counterpart.  Running it on a gui workspace would leave the daemon
+session orphaned and boot a second agent on the same directory, so it
+refuses out loud instead.  Switch the workspace to vterm first
+\(`SPC o F')."
   (agent-repl--log ws "validate-env-switch: ws=%s new-env=%s" ws new-env)
+  (when (agent-repl--ws-gui-frontend-p ws)
+    (user-error "Environment switching is a vterm capability — switch %s to the vterm frontend first (SPC o F)" ws))
   (unless worktree-p
     (user-error "Sandbox switching requires a worktree workspace"))
   (unless session-id
@@ -1850,6 +1879,12 @@ actually delivered to a live vterm."
  (agent-repl-frontend-create
   :name 'vterm
   :open-fn (lambda (_ws) (agent-repl--initialize-agent))
+  ;; The boot capability IS the open capability for vterm — the TUI has
+  ;; no headless mode, so `--initialize-agent' both launches the process
+  ;; and (when WS is current) shows its panels.  It takes the creation
+  ;; hints directly, which is why `boot-fn' carries them at all.
+  :boot-fn (lambda (ws project-dir-hint active-env-hint)
+             (agent-repl--initialize-agent ws project-dir-hint active-env-hint))
   :kill-fn #'agent-repl--vterm-kill
   :send-fn #'agent-repl--vterm-send-turn
   :interrupt-fn #'agent-repl--vterm-interrupt
@@ -1864,6 +1899,10 @@ actually delivered to a live vterm."
                 (agent-repl--vterm-kill ws)
                 (agent-repl--initialize-agent ws))
   :supported-backends '(claude codex)
+  ;; The vterm launches the agent through `--build-start-cmd', which
+  ;; wraps it in `docker run' for `:sandbox' — so the TUI is the only
+  ;; presentation a sandboxed workspace can have.
+  :supported-envs '(:bare-metal :sandbox)
   ;; Durable-resume currency: the hook-captured instantiation session
   ;; id IS the CLI session uuid; adopting one persists it so the next
   ;; initialize resumes through the state file.

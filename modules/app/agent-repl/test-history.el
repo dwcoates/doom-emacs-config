@@ -497,6 +497,52 @@ new path does not exist but the legacy one does."
               (should (eq (plist-get data :backend) 'codex))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest agent-repl-test-state-save-includes-frontend-explicit ()
+  "state-save serializes `:frontend-explicit' so a CHOSEN frontend survives restart.
+The restore honors a saved `:frontend' only when this marker rides with
+it, so a save that dropped the marker would silently demote every
+deliberate `SPC o F' choice back to the default."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
+            (agent-repl--ws-choose-frontend "ws" 'vterm)
+            ;; Act
+            (agent-repl--state-save "ws")
+            ;; Assert
+            (let* ((file (agent-repl--state-file tmpdir))
+                   (data (agent-repl--read-sexp-file file)))
+              (should (eq (plist-get data :frontend) 'vterm))
+              (should (plist-get data :frontend-explicit))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-state-save-omits-frontend-explicit-when-unchosen ()
+  "state-save writes no explicit marker for a workspace that never chose a frontend.
+The vterm boot's incidental `:frontend' stamp therefore restores as what it
+is — nothing chosen — and the workspace follows the default forward."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — the stamp exactly as `--initialize-agent' writes it.
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
+            (agent-repl--ws-put "ws" :frontend 'vterm)
+            ;; Act
+            (agent-repl--state-save "ws")
+            ;; Assert
+            (let* ((file (agent-repl--state-file tmpdir))
+                   (data (agent-repl--read-sexp-file file)))
+              (should-not (plist-get data :frontend-explicit))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest agent-repl-test-state-save-includes-backend-session-stash ()
   "state-save serializes `:backend-session-stash' so a prior backend's
 session ids survive restart and switching back still resumes."

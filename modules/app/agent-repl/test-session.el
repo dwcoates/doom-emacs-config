@@ -2544,6 +2544,37 @@ when the saved plist carries none."
     (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
     (should (eq (agent-repl--ws-get "ws1" :backend) 'codex))))
 
+(ert-deftest agent-repl-test-apply-display-state-restores-a-chosen-frontend ()
+  "apply-display-state restores a DELIBERATELY chosen frontend."
+  ;; Arrange / Act — the shape `agent-repl--ws-choose-frontend' persists.
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state "ws1" '(:frontend vterm :frontend-explicit t))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "ws1" :frontend) 'vterm))
+    (should (agent-repl--ws-get "ws1" :frontend-explicit))))
+
+(ert-deftest agent-repl-test-apply-display-state-ignores-an-incidental-frontend ()
+  "apply-display-state IGNORES a saved frontend that was never chosen.
+Every workspace predating the gui carries an incidental `:frontend vterm'
+stamp from the vterm boot; honoring it would pin those workspaces to vterm
+forever instead of letting them restore under `agent-repl-default-frontend'."
+  ;; Arrange / Act — an old state file: a frontend, but no explicit marker.
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state "ws1" '(:frontend vterm))
+    ;; Assert — nothing pinned, so resolution falls to the default (the gui).
+    (should-not (agent-repl--ws-get "ws1" :frontend))
+    (should (agent-repl--ws-gui-frontend-p "ws1"))))
+
+(ert-deftest agent-repl-test-apply-display-state-no-saved-frontend-leaves-plist ()
+  "apply-display-state leaves an in-memory `:frontend' alone when saved has none."
+  ;; Arrange — a live workspace already stamped by its running vterm.
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend 'vterm)
+    ;; Act
+    (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "ws1" :frontend) 'vterm))))
+
 (ert-deftest agent-repl-test-apply-display-state-restores-backend-session-stash ()
   "apply-display-state hydrates `:backend-session-stash' from the saved plist."
   (agent-repl-test--with-clean-state

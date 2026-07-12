@@ -513,6 +513,88 @@ The webapp status bar renders it for vterm mode-line parity."
   (agent-repl-test--with-frontend-ws "ws1" '(:source-ws-dir "")
     (should-not (agent-repl--frontend-parent-ws-name "ws1"))))
 
+(ert-deftest agent-repl-test-frontend-open-panel-marks-the-choice-explicit ()
+  "Asking for the web panel by name is a DELIBERATE frontend choice."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+               (lambda () t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--gui-open) #'ignore))
+      ;; Act
+      (agent-repl-frontend-open-panel)
+      ;; Assert
+      (should (eq (agent-repl--ws-get "ws1" :frontend) 'gui))
+      (should (agent-repl--ws-get "ws1" :frontend-explicit)))))
+
+;;;; ---- gui boot (headless) ----------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-gui-boot-ensures-session ()
+  "The gui boot starts the workspace's daemon session."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((ensured nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (ws) (setq ensured ws) "s_42")))
+        ;; Act
+        (agent-repl--gui-boot "ws1" "/w" :bare-metal)
+        ;; Assert
+        (should (equal ensured "ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-gui-boot-mounts-no-webview ()
+  "The gui boot is HEADLESS: no webview buffer, no window touched.
+A generated workspace is not the current one, so mounting its view here
+would evict the caller's windows."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((displayed nil)
+          (mounted nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_42"))
+                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                 (lambda (&rest _) (setq mounted t) 'fake-buffer))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (&rest _) (setq displayed t))))
+        ;; Act
+        (agent-repl--gui-boot "ws1" "/w" :bare-metal)
+        ;; Assert
+        (should-not mounted)
+        (should-not displayed)))))
+
+(ert-deftest agent-repl-test-frontend-gui-boot-marks-the-workspace-starting ()
+  "The gui boot marks :init so a generated workspace shows a loading badge.
+The vterm boot does the same; without it a gui-born workspace would render
+no state at all until its agent answered."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+               (lambda (_ws) "s_42")))
+      ;; Act
+      (agent-repl--gui-boot "ws1" "/w" :bare-metal)
+      ;; Assert
+      (should (eq (agent-repl--ws-get "ws1" :agent-state) :init)))))
+
+(ert-deftest agent-repl-test-frontend-gui-boot-refuses-a-sandbox-workspace ()
+  "The gui boot refuses a :sandbox workspace instead of running it on the host."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :active-env :sandbox)
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+               (lambda (&rest _) (error "must not reach the daemon"))))
+      ;; Act / Assert
+      (should-error (agent-repl--gui-boot "ws1" "/w" :sandbox) :type 'user-error))))
+
+(ert-deftest agent-repl-test-frontend-gui-declares-bare-metal-only ()
+  "The registered gui frontend declares :bare-metal as its only environment."
+  ;; Act / Assert
+  (should (equal (agent-repl-frontend-supported-envs (agent-repl-frontend-get 'gui))
+                 '(:bare-metal))))
+
+(ert-deftest agent-repl-test-frontend-gui-registers-a-boot-capability ()
+  "The gui frontend registers its headless boot capability."
+  ;; Act / Assert
+  (should (eq (agent-repl-frontend-boot-fn (agent-repl-frontend-get 'gui))
+              'agent-repl--gui-boot)))
+
 ;;;; ---- close-panel ------------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-close-panel-kills-and-clears ()
