@@ -934,7 +934,7 @@ Handles input preparation, sending, history, and persistence."
         (with-current-buffer buf
           (goto-char (point-max))
           (insert text))
-      (message "[agent-repl] WARNING: no input buffer for current workspace — text not appended")
+      (agent-repl--warn nil "no input buffer for current workspace — text not appended")
       (agent-repl--log (agent-repl--ws-current-name) "append-to-input-buffer: no input buffer, text discarded"))))
 
 (defun agent-repl-send-with-postfix ()
@@ -952,7 +952,7 @@ Handles input preparation, sending, history, and persistence."
         (with-current-buffer buf
           (goto-char (point-min))
           (insert text))
-      (message "[agent-repl] WARNING: no input buffer for current workspace — text not prepended")
+      (agent-repl--warn nil "no input buffer for current workspace — text not prepended")
       (agent-repl--log (agent-repl--ws-current-name) "prepend-to-input-buffer: no input buffer, text discarded"))))
 
 (defun agent-repl-send-with-prefix ()
@@ -1083,8 +1083,8 @@ mode must be surfaced to the user and logged with enough state to diagnose."
          (live (and (bufferp recorded) (buffer-live-p recorded))))
     (agent-repl--log ws "slash-%s: FAILED no live vterm — ws=%s recorded-vterm=%S live=%s payload=%S"
                       what ws recorded live payload)
-    (message "agent-repl: cannot forward to Claude — no live vterm in workspace %s"
-             (or ws "<none>"))))
+    (agent-repl--warn ws "cannot forward to Claude — no live vterm in workspace %s"
+                      (or ws "<none>"))))
 
 (defun agent-repl--slash-vterm-send (str)
   "Send STR to the current workspace's vterm buffer.

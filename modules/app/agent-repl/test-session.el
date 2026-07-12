@@ -903,18 +903,37 @@ new :done lifecycle."
       (should-not refreshed))))
 
 (ert-deftest agent-repl-test-handle-agent-finished-notifies-other-ws ()
-  "handle-agent-finished should message when WS is not the current workspace."
+  "handle-agent-finished should record a line when WS is not the current workspace."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (let ((messaged nil))
       (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                ((symbol-function 'agent-repl--do-log-to-file) #'ignore)
                 ((symbol-function 'message)
                  (lambda (fmt &rest args)
-                   (when (string-match-p "Agent finished" fmt)
+                   (when (string-match-p "Agent finished" (apply #'format fmt args))
                      (setq messaged t)))))
         (agent-repl--handle-agent-finished "ws1")
         (should messaged)))))
+
+(ert-deftest agent-repl-test-handle-agent-finished-does-not-reach-echo-area ()
+  "The agent-finished notice is background chatter: it goes to the log and
+*Messages*, but must NOT be flashed in the echo area / modeline (a desktop
+notification is the channel that gets the user's attention)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
+    (let ((echoed nil))
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+                ((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (when (and (null inhibit-message)
+                              (string-match-p "Agent finished" (apply #'format fmt args)))
+                     (setq echoed t)))))
+        (agent-repl--handle-agent-finished "ws1")
+        (should-not echoed)))))
 
 (ert-deftest agent-repl-test-handle-agent-finished-no-message-current-ws ()
   "handle-agent-finished should NOT message when WS is the current workspace."

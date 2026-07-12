@@ -517,8 +517,8 @@ _EVENT is ignored."
            (clean-result (cond
                           ((= 0 exit-code) 'clean)
                           ((= 1 exit-code) 'dirty)
-                          (t (message "[agent-repl] WARNING: git diff --quiet exited with code %d for ws=%s (git error, not dirty)"
-                                      exit-code ws)
+                          (t (agent-repl--warn ws "git diff --quiet exited with code %d for ws=%s (git error, not dirty)"
+                                               exit-code ws)
                              (agent-repl--log ws "git-diff-sentinel: unexpected exit-code=%d for ws=%s" exit-code ws)
                              nil))))
       (agent-repl--log-verbose ws "git-diff-sentinel: ws=%s exit-code=%s result=%s" ws exit-code clean-result)

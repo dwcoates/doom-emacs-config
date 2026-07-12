@@ -206,7 +206,7 @@ drawer afterward).
 
 FRAME limits the scan; defaults to the selected frame.  Deletion is
 wrapped in `condition-case' so one undeletable window doesn't abort
-the sweep — the error is logged via `message' and iteration
+the sweep — the error is logged via `agent-repl--warn' and iteration
 continues.
 
 When the caller knows the target buffer ahead of time, prefer
@@ -236,8 +236,8 @@ opted into specificity)."
            ;; is still surfaced.
            (if (agent-repl-window--benign-undeletable-error-p err)
                (agent-repl--log nil "window--delete-where: skip-undeletable %s: %S" win err)
-             (message "[agent-repl] window--delete-where: could not delete %s: %S"
-                      win err))))))
+             (agent-repl--warn nil "window--delete-where: could not delete %s: %S"
+                               win err))))))
     (nreverse deleted)))
 
 (defun agent-repl-window--benign-undeletable-error-p (err)
@@ -265,8 +265,9 @@ buffer — if BUF lives in a side window (e.g. the workspace drawer
 being hidden), that side window is the precise target.
 
 A nil BUF or a killed BUF is a no-op (returns nil).  Errors during
-individual `delete-window' calls are caught and logged via `message'
-so one undeletable window doesn't abort the sweep — typical cause is
+individual `delete-window' calls are caught and logged via
+`agent-repl--warn' so one undeletable window doesn't abort the
+sweep — typical cause is
 the buffer's window being the lone window in a frame.  Returns the
 list of windows that were actually deleted."
   (let ((deleted '()))
@@ -278,8 +279,8 @@ list of windows that were actually deleted."
                 (delete-window win)
                 (push win deleted))
             (error
-             (message "[agent-repl] window--delete-buffer-windows: could not delete %s: %S"
-                      win err))))))
+             (agent-repl--warn nil "window--delete-buffer-windows: could not delete %s: %S"
+                               win err))))))
     (nreverse deleted)))
 
 (provide 'agent-repl-window)

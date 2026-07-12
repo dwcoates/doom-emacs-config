@@ -163,7 +163,7 @@ under the same conditions: a `/.dockerenv' file exists or the
       (condition-case err
           (json-read-file path)
         (error
-         (message "[agent-repl] WARNING: failed to parse %s: %S" path err)
+         (agent-repl--warn nil "failed to parse %s: %S" path err)
          nil)))))
 
 (defun agent-repl--event-has-command-p (hooks event cmd)
@@ -230,13 +230,13 @@ inspection, and the error is still signaled so the caller's surfacing is
 preserved.  Interactive callers leave QUIET nil so a failure pops the
 output window as before."
   (if (agent-repl--in-sandbox-p)
-      (message "[agent-repl] Sandbox detected; skipping hooks %s." action)
+      (agent-repl--info nil "Sandbox detected; skipping hooks %s." action)
     (pcase-let ((`(,code ,output)
                  (agent-repl--run-install-script action)))
       (agent-repl--surface-install-output output)
       (if (= code 0)
-          (message "[agent-repl] hooks %s succeeded (see %s)."
-                   action agent-repl--install-output-buffer)
+          (agent-repl--info nil "hooks %s succeeded (see %s)."
+                            action agent-repl--install-output-buffer)
         (if quiet
             (agent-repl--log nil
                               "hooks %s failed (exit %d); output:\n%s"
@@ -528,7 +528,7 @@ CMD is of the form \"~/.claude/hooks/<name>.sh\"."
          issues-cell
          (let ((sev (cdr (assq event agent-repl--hook-severity))))
            (unless sev
-             (message "[agent-repl] WARNING: no severity defined for hook event %S — defaulting to warn" event))
+             (agent-repl--warn nil "no severity defined for hook event %S — defaulting to warn" event))
            (or sev 'warn))
          (format "%s hook not registered in %s — run M-x agent-repl-install-hooks"
                  event agent-repl--settings-file))))))

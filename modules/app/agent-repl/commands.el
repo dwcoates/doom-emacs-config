@@ -1309,14 +1309,14 @@ no active workspace or no live `claude' process is found."
 WS is the workspace name.  OK and OUTPUT come from the async-git
 sentinel.  On success, dispatches `agent-repl-rebase-onto-origin-master-prompt'
 to Claude so the agent runs the rebase itself.  On failure, surfaces
-the git error via `message' and skips the agent dispatch — the rebase
-would proceed against stale `origin/master' otherwise."
+the git error via `agent-repl--warn' and skips the agent dispatch — the
+rebase would proceed against stale `origin/master' otherwise."
   (agent-repl--log ws "rebase-onto-origin-master: fetch ok=%s output=%s" ok output)
   (if ok
       (progn
-        (message "[%s] git fetch origin complete; asking Claude to rebase onto origin/master" ws)
+        (agent-repl--info ws "[%s] git fetch origin complete; asking Claude to rebase onto origin/master" ws)
         (agent-repl--send-to-agent agent-repl-rebase-onto-origin-master-prompt))
-    (message "[%s] git fetch origin failed: %s" ws output)))
+    (agent-repl--warn ws "[%s] git fetch origin failed: %s" ws output)))
 
 (defun agent-repl-rebase-onto-origin-master ()
   "Fetch origin asynchronously, then ask Claude to rebase onto origin/master.
@@ -1324,12 +1324,12 @@ Runs `git fetch origin' in the current workspace's project directory.
 When it succeeds, sends `agent-repl-rebase-onto-origin-master-prompt'
 to Claude so the agent performs the rebase itself (and resolves any
 conflicts).  On fetch failure, skips the dispatch and surfaces the git
-error via `message'."
+error via `agent-repl--warn'."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (project-dir (agent-repl--ws-dir ws)))
     (agent-repl--log ws "rebase-onto-origin-master: fetching origin in %s" project-dir)
-    (message "[%s] git fetch origin..." ws)
+    (agent-repl--info ws "[%s] git fetch origin..." ws)
     (agent-repl--async-git
      "rebase-fetch" project-dir '("fetch" "origin")
      (lambda (ok output)
@@ -2027,9 +2027,10 @@ path uses this to avoid clobbering a richer snapshot with a half-
 populated live set during startup.  Use
 `agent-repl-update-workspace-snapshot' to force an overwrite.
 
-Called interactively prints a confirmation; called from
-`agent-repl--state-save' (the common path) stays silent so the
-roster-piggyback save doesn't spam the echo area on every state mutation."
+Called interactively records a confirmation via `agent-repl--info' (log
++ *Messages*, never the echo area); called from `agent-repl--state-save'
+(the common path) stays silent so the roster-piggyback save doesn't spam
+on every state mutation."
   (interactive)
   (let ((snapshot (agent-repl--collect-snapshot-entries)))
     (if (not (agent-repl--snapshot-save-safe-p (length snapshot)))
@@ -2375,11 +2376,11 @@ can call finish without worrying whether a normal finish already ran."
         (agent-repl--log nil
                           "snapshot-load: END loaded=%d skipped=%d load-error=%d merge-queue=%d returned-to=%s"
                           loaded skipped load-error (or mq-restored 0) (or origin "nil"))
-        (message "Loaded %d workspace(s), skipped %d, errored %d%s"
-                 loaded skipped load-error
-                 (if (and mq-restored (> mq-restored 0))
-                     (format ", merge-queue=%d" mq-restored)
-                   ""))))
+        (agent-repl--info nil "Loaded %d workspace(s), skipped %d, errored %d%s"
+                          loaded skipped load-error
+                          (if (and mq-restored (> mq-restored 0))
+                              (format ", merge-queue=%d" mq-restored)
+                            ""))))
     (setq agent-repl--snapshot-load-state nil)
     (agent-repl--snapshot-load-close-main)))
 
@@ -2444,7 +2445,7 @@ The bits we flip:
   (let ((state agent-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
       (agent-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — forcing fully-loaded :timed-out" ws)
-      (message "[agent-repl] snapshot-load timeout awaiting ws=%s — advancing" ws)
+      (agent-repl--warn ws "snapshot-load timeout awaiting ws=%s — advancing" ws)
       (setq agent-repl--snapshot-load-state
             (plist-put agent-repl--snapshot-load-state :timeout-timer nil))
       ;; Force both latch bits then fire via the helper.  Setting
@@ -2468,7 +2469,7 @@ would leave `agent-repl-ws-fully-loaded-functions' attached and
       (agent-repl--snapshot-load-step--unsafe)
     (error
      (agent-repl--log nil "snapshot-load: STEP ERROR err=%S — finishing early" err)
-     (message "[agent-repl] snapshot-load step error: %S — aborting load" err)
+     (agent-repl--warn nil "snapshot-load step error: %S — aborting load" err)
      (agent-repl--snapshot-load-finish))))
 
 (defun agent-repl--snapshot-load-step--unsafe ()
@@ -2549,7 +2550,7 @@ the error-routing `condition-case'."
               (error
                (setq establish-error err)
                (agent-repl--log nil "snapshot-load: establish-workspace err ws=%s err=%S" ws err)
-               (message "[agent-repl] establish failed ws=%s — advancing" ws)))
+               (agent-repl--warn ws "establish failed ws=%s — advancing" ws)))
             (cond
              (establish-error
               ;; Failure: bump :load-error, leave :awaiting nil, advance
@@ -2684,7 +2685,7 @@ corrupt snapshot can't block startup."
   (when (file-exists-p (agent-repl--workspace-snapshot-file-for-read))
     (condition-case err
         (agent-repl-load-workspace-snapshot)
-      (error (message "[agent-repl] snapshot load failed: %S" err)))))
+      (error (agent-repl--warn nil "snapshot load failed: %S" err)))))
 
 ;;;; Workspace snapshot archive picker
 
@@ -2794,8 +2795,8 @@ completion cascades into the next drain."
     (agent-repl--log nil
                       "drain-merge-queue: manual kick queue-len=%d"
                       (length agent-repl--merge-queue))
-    (message "[agent-repl] draining merge queue (%d entries)"
-             (length agent-repl--merge-queue))
+    (agent-repl--info nil "draining merge queue (%d entries)"
+                      (length agent-repl--merge-queue))
     (agent-repl--drain-merge-queue))))
 
 (defalias '+dwc/drain-merge-queue #'agent-repl-drain-merge-queue)

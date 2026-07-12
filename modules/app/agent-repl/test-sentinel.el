@@ -1592,42 +1592,59 @@ the module does not manage."
         (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
 
 (ert-deftest agent-repl-test-on-session-start-event-no-vterm-warns ()
-  "on-session-start-event emits a loud ERROR message when no vterm buffer exists.
+  "on-session-start-event emits a loud WARNING when no vterm buffer exists.
 Reaching this branch means ws is registered (caller chain checks that)
 but its :vterm-buffer slot is nil — a structural inconsistency that
 must surface, not be silently swallowed."
   (agent-repl-test--with-clean-state
     (let ((messages '())
           (agent-state-written nil))
-      (cl-letf (((symbol-function 'message)
+      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+                ((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
                 ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (&rest _) (setq agent-state-written t))))
         (agent-repl--on-session-start-event "ws1" "/some/dir")
         (should-not agent-state-written)
         (should (cl-some (lambda (m)
-                           (and (string-match-p "\\[agent-repl\\] ERROR" m)
+                           (and (string-match-p "\\[agent-repl\\] WARNING" m)
                                 (string-match-p "session_start" m)
                                 (string-match-p "ws1" m)
                                 (string-match-p "null/dead" m)))
                          messages))))))
 
+(ert-deftest agent-repl-test-on-session-start-event-no-vterm-reaches-echo-area ()
+  "The missing-vterm warning is LOUD: it must reach the echo area / modeline,
+not just the log, because it reports a broken structural invariant."
+  (agent-repl-test--with-clean-state
+    (let ((echoed nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (when (and (null inhibit-message)
+                              (string-match-p "null/dead" (apply #'format fmt args)))
+                     (setq echoed t))))
+                ((symbol-function 'agent-repl--ws-set-agent-state) #'ignore))
+        (agent-repl--on-session-start-event "ws1" "/some/dir")
+        (should echoed)))))
+
 (ert-deftest agent-repl-test-on-session-start-event-dead-vterm-warns ()
-  "on-session-start-event emits a loud ERROR message when the vterm buffer is dead."
+  "on-session-start-event emits a loud WARNING when the vterm buffer is dead."
   (agent-repl-test--with-clean-state
     (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
           (messages '())
           (agent-state-written nil))
       (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
       (kill-buffer fake-buf)
-      (cl-letf (((symbol-function 'message)
+      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+                ((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
                 ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (&rest _) (setq agent-state-written t))))
         (agent-repl--on-session-start-event "ws1" "/some/dir")
         (should-not agent-state-written)
         (should (cl-some (lambda (m)
-                           (and (string-match-p "\\[agent-repl\\] ERROR" m)
+                           (and (string-match-p "\\[agent-repl\\] WARNING" m)
                                 (string-match-p "session_start" m)
                                 (string-match-p "ws1" m)
                                 (string-match-p "null/dead" m)))

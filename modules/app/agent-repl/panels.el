@@ -800,7 +800,7 @@ events (kill, switch, add) are traceable."
     (agent-repl--redirect-from-agent-before-save)
     (condition-case err
         (agent-repl--ws-frame-save-state)
-      (error (message "[agent-repl] WARNING: persp-frame-save-state failed: %S" err)
+      (error (agent-repl--warn ws "persp-frame-save-state failed: %S" err)
              (agent-repl--log ws "before-persp-deactivate: persp-frame-save-state error: %S" err)))))
 
 (defun agent-repl--after-persp-activated (&rest _)
@@ -1278,8 +1278,8 @@ path later for pending-prompt draining; its panel-show is idempotent."
               (agent-repl--ws-put ws :prefix-counter 0)
               (agent-repl--enable-hide-overlay)
               (agent-repl--ws-set-agent-state ws :init)
-              (message "Starting agent... ws=%s ws-id=%s dir=%s cmd=%s"
-                       ws (agent-repl--workspace-id) root (or cmd "?"))
+              (agent-repl--info ws "Starting agent... ws=%s ws-id=%s dir=%s cmd=%s"
+                                ws (agent-repl--workspace-id) root (or cmd "?"))
               (agent-repl--state-save ws)
               ;; Open panels NOW rather than waiting for readiness (see
               ;; docstring): blocking first-run screens fire no hook, so
@@ -1483,7 +1483,7 @@ nuke path never prompts about the agent process."
                     ws (agent-repl--ws-get ws :active-env))
   (condition-case err
       (agent-repl--disable-hide-overlay)
-    (error (message "[agent-repl] WARNING: disable-hide-overlay failed during teardown: %S" err)))
+    (error (agent-repl--warn ws "disable-hide-overlay failed during teardown: %S" err)))
   (when agent-repl--sync-timer
     (cancel-timer agent-repl--sync-timer)
     (setq agent-repl--sync-timer nil))
@@ -1757,8 +1757,8 @@ independently.  Requires a worktree workspace with a captured session ID."
     (agent-repl--seed-new-env-session ws new-env session-id)
     (agent-repl--kill-session ws)
     (agent-repl--ws-put ws :active-env new-env)
-    (message "Switching to %s (resuming session %s...)"
-             (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
-             (substring session-id 0 agent-repl-session-id-display-length))
+    (agent-repl--info ws "Switching to %s (resuming session %s...)"
+                      (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
+                      (substring session-id 0 agent-repl-session-id-display-length))
     (agent-repl--initialize-agent ws)
     (agent-repl--show-panels-and-focus)))
