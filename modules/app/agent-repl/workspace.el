@@ -423,6 +423,122 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-list-names)
     (+workspace-list-names)))
 
+;;;; ---- Repo grouping + folding -----------------------------------------
+;;
+;; A "repo" here is the set of workspaces that share a git common-dir —
+;; a top-level clone plus every worktree cut from it.  The drawer groups
+;; its entries by repo, and a repo can be FOLDED: its workspaces vanish
+;; from the drawer's group body AND from the tab-bar, and the tab-bar's
+;; 1-based selection numbers close up over the survivors so `SPC <n>'
+;; stays contiguous.
+;;
+;; The fold set lives in workspace.el rather than drawer.el because it
+;; is read by three layers — the drawer render, the tab-bar render
+;; (status.el), and the indexed workspace switchers (commands.el) — and
+;; workspace.el is the canonical owner of "which workspaces does the UI
+;; enumerate".  It is deliberately in-memory only: folding is a view
+;; preference, not workspace state, so it does not round-trip through
+;; the workspace snapshot.
+
+(defconst agent-repl--repo-key-unknown "(no repo)"
+  "Repo key used when a workspace's git common-dir cannot be resolved.
+Every such workspace shares this one key, so they group — and fold —
+together.")
+
+(defun agent-repl--ws-repo-key (ws)
+  "Return WS's repo key: the canonical git common-dir of its project-dir.
+Cached on the workspace plist as `:group-key' so each workspace shells
+out to git at most once.  Returns nil when git fails on WS's
+project-dir — e.g. the worktree directory was deleted out from under
+the workspace.  Callers that need a total function should use
+`agent-repl--ws-repo-group', which maps that nil onto
+`agent-repl--repo-key-unknown'."
+  (or (agent-repl--ws-get ws :group-key)
+      (when-let* ((dir (ignore-errors (agent-repl--ws-dir ws)))
+                  (raw (agent-repl--git-string-quiet
+                        "-C" dir "rev-parse" "--git-common-dir")))
+        (when (and raw (not (string-empty-p raw))
+                   (not (string-prefix-p "fatal" raw)))
+          (let* ((abs (if (file-name-absolute-p raw) raw
+                        (expand-file-name raw dir)))
+                 (key (agent-repl--path-canonical abs)))
+            (agent-repl--ws-put ws :group-key key)
+            key)))))
+
+(defun agent-repl--ws-repo-group (ws)
+  "Return WS's fold-group key, never nil.
+`agent-repl--ws-repo-key' when git resolves the repo, otherwise the
+`agent-repl--repo-key-unknown' sentinel."
+  (or (agent-repl--ws-repo-key ws) agent-repl--repo-key-unknown))
+
+(defun agent-repl--repo-label (key)
+  "Derive a human-readable repo label from KEY (a canonical .git path).
+Returns the basename of KEY's parent directory — i.e. the project
+name, since git's common-dir is conventionally `<project>/.git'.
+Returns nil for a nil KEY, and KEY itself for the
+`agent-repl--repo-key-unknown' sentinel (which is already a label)."
+  (cond
+   ((null key) nil)
+   ((equal key agent-repl--repo-key-unknown) key)
+   (t (when-let ((parent (file-name-directory key)))
+        (file-name-nondirectory (directory-file-name parent))))))
+
+(defvar agent-repl--folded-repos (make-hash-table :test 'equal)
+  "Set of repo keys (see `agent-repl--ws-repo-group') currently folded.
+Keys are repo keys, values are `t' — presence is the signal.  Global
+rather than per-drawer-buffer: a fold is a statement about the repo,
+and it must be observable by the tab-bar renderer and the indexed
+workspace switchers, neither of which has a drawer buffer to consult.")
+
+(defun agent-repl--repo-folded-p (group)
+  "Return non-nil when repo GROUP (a repo key) is folded."
+  (and group (gethash group agent-repl--folded-repos) t))
+
+(defun agent-repl--folded-repo-keys ()
+  "Return the folded repo keys, sorted, for cheap change-detection.
+Consumed by the drawer's render signature so a fold/unfold invalidates
+the cached render."
+  (sort (hash-table-keys agent-repl--folded-repos) #'string<))
+
+(defun agent-repl--toggle-repo-fold (group)
+  "Toggle the fold state of repo GROUP (a repo key).
+Returns non-nil when GROUP is folded after the toggle."
+  (unless group
+    (error "agent-repl--toggle-repo-fold: nil repo group"))
+  (if (gethash group agent-repl--folded-repos)
+      (progn (remhash group agent-repl--folded-repos) nil)
+    (puthash group t agent-repl--folded-repos)
+    t))
+
+(defun agent-repl--ws-repo-folded-p (ws)
+  "Return non-nil when WS belongs to a folded repo."
+  (agent-repl--repo-folded-p (agent-repl--ws-repo-group ws)))
+
+(defun agent-repl--filter-folded-names (names current-name)
+  "Drop from NAMES every workspace whose repo is folded.
+CURRENT-NAME is always retained, so the active workspace never loses
+its tab — the same invariant `agent-repl--filter-hidden-names' keeps.
+
+Short-circuits to NAMES untouched when no repo is folded, so the
+common case costs no repo-key resolution (and therefore no git)."
+  (if (zerop (hash-table-count agent-repl--folded-repos))
+      names
+    (cl-remove-if
+     (lambda (name)
+       (and (not (equal name current-name))
+            (agent-repl--ws-repo-folded-p name)))
+     names)))
+
+(defun agent-repl--ws-tabline-names ()
+  "Return the workspace names the tab-bar shows.
+`agent-repl--ws-list-names' minus the workspaces of folded repos (the
+current workspace excepted).  This — not `--ws-list-names' — is the
+list the tab-bar renders and the list the indexed switchers
+\(`SPC 1'..`SPC 9') index into, so the visible tab numbers stay
+contiguous as repos fold and unfold."
+  (agent-repl--filter-folded-names (agent-repl--ws-list-names)
+                                   (agent-repl--ws-current-name)))
+
 ;;;; ---- Render-state unification ----------------------------------------
 ;;
 ;; `agent-repl--ws-render-status' is the single source of truth for

@@ -494,6 +494,10 @@ temp path so the state-save snapshot piggyback can't clobber the
 user's real snapshot during ERT runs."
   (declare (indent 0))
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
+         ;; Repo-fold set: global UI state, so a test that folds a repo
+         ;; would otherwise leak that fold into every later test's
+         ;; tab-bar / drawer render.
+         (agent-repl--folded-repos (make-hash-table :test 'equal))
          (agent-repl--snapshot-load-state nil)
          (agent-repl-after-ready-functions nil)
          (agent-repl--fullscreen-config nil)
