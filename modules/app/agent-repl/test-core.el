@@ -1197,6 +1197,34 @@ ownership intact across that transition."
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--active-inst "ws1") :type 'error)))
 
+;;;; ---- Tests: ws-durable-claude-session-id ----
+
+(ert-deftest agent-repl-test-durable-session-id-returns-recorded-uuid ()
+  "ws-durable-claude-session-id reads the active instantiation's uuid."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :active-env :bare-metal)
+    (agent-repl--ws-put "ws1" :bare-metal
+                        (make-agent-repl-instantiation :session-id "cli-uuid-1"))
+    (should (equal (agent-repl--ws-durable-claude-session-id "ws1") "cli-uuid-1"))))
+
+(ert-deftest agent-repl-test-durable-session-id-nil-without-active-env ()
+  "A workspace that never initialized an env has no durable id (nil, no signal)."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
+
+(ert-deftest agent-repl-test-durable-session-id-nil-without-instantiation ()
+  "An :active-env with no instantiation struct yields nil, not a signal."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :active-env :sandbox)
+    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
+
+(ert-deftest agent-repl-test-durable-session-id-nil-when-never-ran ()
+  "An instantiation that never captured a session id yields nil."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :active-env :sandbox)
+    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
+    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
+
 (ert-deftest agent-repl-test-active-inst-sandbox-env ()
   "active-inst should use :sandbox when :active-env is set to :sandbox."
   (agent-repl-test--with-clean-state

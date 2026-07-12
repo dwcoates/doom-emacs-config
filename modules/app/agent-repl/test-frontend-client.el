@@ -286,6 +286,46 @@ resolver supplies it exactly as creation would."
           (let ((post (car (last requests))))
             (should (string-match-p "\"cwd\":\"/repo/root/\"" (nth 2 post)))))))))
 
+(ert-deftest agent-repl-test-frontend-ensure-session-resumes-durable-id ()
+  "A fresh POST resumes the workspace's durable claude session uuid.
+The uuid lives in the active instantiation (hook-captured; shared with
+the vterm frontend), so a recreated daemon binding continues the
+conversation instead of starting over."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1"
+      (list :frontend-session-id nil :project-dir "/w"
+            :active-env :bare-metal
+            :bare-metal (make-agent-repl-instantiation :session-id "cli-uuid-7"))
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-http
+          (lambda (method &rest _)
+            (if (equal method "GET")
+                (agent-repl-test--json-ok '((sessions . [])))
+              (agent-repl-test--json-ok '((session_id . "s_resumed")))))
+        ;; Act
+        (agent-repl--frontend-ensure-session "ws1")
+        ;; Assert — the POST payload carries the resume uuid.
+        (let ((post (car (last requests))))
+          (should (string-match-p "\"resume\":\"cli-uuid-7\"" (nth 2 post))))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-fresh-without-durable-id ()
+  "No recorded durable session id means a fresh session with no resume field."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-http
+          (lambda (method &rest _)
+            (if (equal method "GET")
+                (agent-repl-test--json-ok '((sessions . [])))
+              (agent-repl-test--json-ok '((session_id . "s_new")))))
+        ;; Act
+        (agent-repl--frontend-ensure-session "ws1")
+        ;; Assert
+        (let ((post (car (last requests))))
+          (should-not (string-match-p "resume" (or (nth 2 post) ""))))))))
+
 (ert-deftest agent-repl-test-frontend-ensure-session-propagates-non-git-error ()
   "Outside a git repository, the resolver's user-error surfaces unchanged."
   ;; Arrange
