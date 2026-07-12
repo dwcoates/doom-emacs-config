@@ -2738,21 +2738,52 @@ to auto-finish."
                    ;; Non-empty range — one commit to pick.
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
-              ((symbol-function 'agent-repl--git-exit-code)
-               (lambda (_root &rest args)
+              ;; The pick now seeds its progress record with the range's
+              ;; commits, so the log probe is on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick itself streams (see `--git-exit-code-streaming'),
+              ;; so it is this boundary rather than `--git-exit-code'.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
                  (pcase args
                    (`("cherry-pick" "-x" ,_)
                     (setq cherry-pick-called t)
                     0)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
+              ((symbol-function 'agent-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ;; No CHERRY_PICK_HEAD remains — clean cherry-pick.
               ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
                (lambda (_root) nil)))
-      (should (null (agent-repl--cherry-pick-commits
-                     "/tmp/repo" "feature" sha-m "feature")))
-      (should cherry-pick-called))))
+      (agent-repl-test--with-merge-state
+        (should (null (agent-repl--cherry-pick-commits
+                       "/tmp/repo" "feature" sha-m "feature")))
+        (should cherry-pick-called)))))
+
+(ert-deftest agent-repl-test-cherry-pick-commits-seeds-progress ()
+  "The pick seeds its progress record with the commits git is about to apply,
+so the drawer can name the commit being cherry-picked from the first tick."
+  (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    (cl-letf (((symbol-function 'agent-repl--git-string)
+               (lambda (&rest _args) "2"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one\ndef5678\tfix: two"))
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest _args) 0))
+              ((symbol-function 'agent-repl--git-exit-code)
+               (lambda (_root &rest _args) 1))
+              ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
+               (lambda (_root) nil)))
+      (agent-repl-test--with-merge-state
+        (agent-repl--cherry-pick-commits "/tmp/repo" "ws" sha-m "feature")
+        (should (equal '(("abc1234" . "feat: one") ("def5678" . "fix: two"))
+                       (plist-get (agent-repl--merge-progress-get "ws")
+                                  :commits)))))))
 
 (ert-deftest agent-repl-test-cherry-pick-commits-silent-failure-returns-failed ()
   "When `git cherry-pick' exits non-zero but no CHERRY_PICK_HEAD is left
@@ -2764,19 +2795,26 @@ is in flight), `--cherry-pick-commits' returns `failed'."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
-              ((symbol-function 'agent-repl--git-exit-code)
-               (lambda (_root &rest args)
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
                  (pcase args
                    ;; Non-zero exit but no conflict-head left behind.
                    (`("cherry-pick" "-x" ,_) 128)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
+              ((symbol-function 'agent-repl--git-exit-code)
+               (lambda (_root &rest args)
+                 (pcase args
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
               ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
                (lambda (_root) nil)))
-      (should (eq (agent-repl--cherry-pick-commits
-                   "/tmp/repo" "feature" sha-m "feature")
-                  'failed)))))
+      (agent-repl-test--with-merge-state
+        (should (eq (agent-repl--cherry-pick-commits
+                     "/tmp/repo" "feature" sha-m "feature")
+                    'failed))))))
 
 (ert-deftest agent-repl-test-cherry-pick-commits-conflict-signals ()
   "Cherry-pick conflict aborts the cherry-pick and signals user-error
@@ -2791,10 +2829,21 @@ left to resolve)."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3582,10 +3631,16 @@ the cherry-pick and signals user-error."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3600,11 +3655,12 @@ the cherry-pick and signals user-error."
                  (setq check-called t
                        in-progress nil)
                  (user-error "Conflict cherry-picking from feature — aborted"))))
-      (should-error (agent-repl--cherry-pick-commits
-                     "/tmp/repo" "feature" sha-m "feature" t)
-                    :type 'user-error)
-      (should check-called)
-      (should-not in-progress))))
+      (agent-repl-test--with-merge-state
+        (should-error (agent-repl--cherry-pick-commits
+                       "/tmp/repo" "feature" sha-m "feature" t)
+                      :type 'user-error)
+        (should check-called)
+        (should-not in-progress)))))
 
 ;;;; ---- Tests: cherry-pick-commits with auto-resolve ----
 
@@ -3623,10 +3679,21 @@ is gone."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3651,10 +3718,21 @@ cherry-pick and signals user-error."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3683,10 +3761,21 @@ for existing callers."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3719,10 +3808,21 @@ of being aborted via `--check-cherry-pick-conflict'."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper issues --abort on unwind; allow it (no-op).
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -3755,10 +3855,21 @@ helper is not invoked.  Guards the interactive `SPC TAB M' path."
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
                    (_ (error "unmocked git-string args: %S" args)))))
+              ;; The pick seeds progress with the range's commits, so the log
+              ;; probe is now on the path.
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args) "abc1234\tfeat: one"))
+              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
+              ;; follow it commit by commit; --abort still goes through the
+              ;; plain, output-discarding wrapper.
+              ((symbol-function 'agent-repl--git-exit-code-streaming)
+               (lambda (_root _filter &rest args)
+                 (pcase args
+                   (`("cherry-pick" "-x" ,_) 1)
+                   (_ (error "unmocked git-exit-code-streaming args: %S" args)))))
               ((symbol-function 'agent-repl--git-exit-code)
                (lambda (_root &rest args)
                  (pcase args
-                   (`("cherry-pick" "-x" ,_) 1)
                    ;; Wrapper always issues --abort on unwind; no-op here.
                    (`("cherry-pick" "--abort") 1)
                    (_ (error "unmocked git-exit-code args: %S" args)))))
@@ -4406,6 +4517,10 @@ wedged (the historical drain-path bug)."
                    (lambda (_) nil))
                   ((symbol-function 'agent-repl--current-head-sha) (lambda (_) nil))
                   ((symbol-function 'agent-repl--persist-merge-queue) #'ignore)
+                  ;; A drain refreshes the queued entries' commit lookahead,
+                  ;; since the target just moved underneath them.
+                  ((symbol-function 'agent-repl--git-string-quiet)
+                   (lambda (&rest _args) "master"))
                   ((symbol-function 'agent-repl--workspace-merge-into-source)
                    (lambda (&rest _)
                      (signal 'agent-repl-merge-conflict-error '("rejected"))))
@@ -9878,6 +9993,9 @@ than running."
                  (lambda (parent _master) parent))
                 ((symbol-function 'agent-repl--git-branch-of-dir)
                  (lambda (_) nil))
+                ;; Enqueueing refreshes the queued entry's commit lookahead.
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _args) "master"))
                 ;; The resolved target ("/tmp/parent") has a cherry-pick in flight.
                 ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
                  (lambda (root) (equal root "/tmp/parent"))))
@@ -11413,5 +11531,135 @@ double-schedule."
             ((symbol-function 'agent-repl--git-string)
              (lambda (&rest _args) "")))
     (should (null (agent-repl--git-branch-of-dir "/tmp/x")))))
+
+;;;; ---- Tests: cherry-pick progress filter ----
+;;
+;; The filter is a pure string -> progress-plist fold, so these need no git.
+
+(defun agent-repl-test--feed (ws &rest chunks)
+  "Feed CHUNKS through a fresh cherry-pick filter for WS; return its progress."
+  (let ((filter (agent-repl--make-cherry-pick-filter ws)))
+    (dolist (chunk chunks)
+      (funcall filter nil chunk)))
+  (agent-repl--merge-progress-get ws))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-applied-advances-index ()
+  "An applied-commit line advances `:commit-index'."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("aaa1111" . "one") ("bbb2222" . "two")))
+    (let ((progress (agent-repl-test--feed "ws" "[master aaa1111] one\n")))
+      (should (= 1 (plist-get progress :commit-index))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-applied-resets-clock ()
+  "An applied-commit line restarts the per-commit clock."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("aaa1111" . "one")))
+    (agent-repl--merge-progress-put "ws" :commit-started-at 0.0)
+    (let ((progress (agent-repl-test--feed "ws" "[master aaa1111] one\n")))
+      (should (> (plist-get progress :commit-started-at) 0.0)))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-buffers-split-line ()
+  "A boundary line split across two chunks is buffered, not dropped.
+A process filter receives arbitrary chunks, so matching per-chunk would
+silently lose commits and desync the index."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("aaa1111" . "one")))
+    (let ((progress (agent-repl-test--feed "ws" "[master aaa11" "11] one\n")))
+      (should (= 1 (plist-get progress :commit-index))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-partial-line-not-counted-early ()
+  "A line with no newline yet is held back rather than counted."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("aaa1111" . "one")))
+    (let ((progress (agent-repl-test--feed "ws" "[master aaa1111] one")))
+      (should (= 0 (plist-get progress :commit-index))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-two-commits-one-chunk ()
+  "Two boundary lines arriving in one chunk both advance the index."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1") ("b" . "2") ("c" . "3")))
+    (let ((progress (agent-repl-test--feed
+                     "ws" "[master aaa1111] one\n[master bbb2222] two\n")))
+      (should (= 2 (plist-get progress :commit-index))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-conflict-commit ()
+  "A `could not apply' line records the conflicting SHA and subject."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("dec4a97" . "feat: one")))
+    (let ((progress (agent-repl-test--feed
+                     "ws" "error: could not apply dec4a97... feat: one\n")))
+      (should (equal "dec4a97" (plist-get progress :conflict-sha)))
+      (should (equal "feat: one" (plist-get progress :conflict-subject))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-conflict-file ()
+  "A CONFLICT line appends the conflicted path."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1")))
+    (let ((progress (agent-repl-test--feed
+                     "ws" "CONFLICT (content): Merge conflict in src/f.txt\n")))
+      (should (equal '("src/f.txt") (plist-get progress :conflict-files))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-conflict-file-deduped ()
+  "The same conflicted path reported twice is recorded once."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1")))
+    (let ((progress (agent-repl-test--feed
+                     "ws"
+                     "CONFLICT (content): Merge conflict in f.txt\n"
+                     "CONFLICT (content): Merge conflict in f.txt\n")))
+      (should (equal '("f.txt") (plist-get progress :conflict-files))))))
+
+(ert-deftest agent-repl-test-cherry-pick-filter-ignores-chatter ()
+  "Unrecognized git chatter leaves the progress record untouched."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1")))
+    (let ((progress (agent-repl-test--feed
+                     "ws" "Auto-merging f.txt\nhint: after resolving\n")))
+      (should (= 0 (plist-get progress :commit-index)))
+      (should (null (plist-get progress :conflict-sha))))))
+
+;;;; ---- Tests: merge progress record ----
+
+(ert-deftest agent-repl-test-merge-progress-begin-starts-at-zero ()
+  "Progress starts at index 0: git is applying the FIRST commit immediately."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1") ("b" . "2")))
+    (should (= 0 (plist-get (agent-repl--merge-progress-get "ws") :commit-index)))))
+
+(ert-deftest agent-repl-test-merge-progress-clear-removes-entry ()
+  "Clearing progress drops the entry entirely."
+  (agent-repl-test--with-merge-state
+    (agent-repl--merge-progress-begin "ws" '(("a" . "1")))
+    (agent-repl--merge-progress-clear "ws")
+    (should (null (agent-repl--merge-progress-get "ws")))))
+
+(ert-deftest agent-repl-test-merge-progress-put-bumps-seq ()
+  "Every progress write bumps the render counter the drawer's signature reads."
+  (agent-repl-test--with-merge-state
+    (let ((before agent-repl--merge-progress-seq))
+      (agent-repl--merge-progress-put "ws" :commit-index 1)
+      (should (> agent-repl--merge-progress-seq before)))))
+
+;;;; ---- Tests: range-commits ----
+
+(ert-deftest agent-repl-test-range-commits-parses-log ()
+  "Tab-separated log output parses to oldest-first (SHA . SUBJECT) pairs."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _args) "aaa1111\tfeat: one\nbbb2222\tfix: two")))
+    (should (equal '(("aaa1111" . "feat: one") ("bbb2222" . "fix: two"))
+                   (agent-repl--range-commits "/tmp/x" "master" "HEAD")))))
+
+(ert-deftest agent-repl-test-range-commits-empty-range ()
+  "An empty range yields nil rather than a bogus entry."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _args) "")))
+    (should (null (agent-repl--range-commits "/tmp/x" "master" "HEAD")))))
+
+(ert-deftest agent-repl-test-range-commits-subject-with-tabs-preserved ()
+  "Only the first tab separates SHA from subject; the subject keeps the rest."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _args) "aaa1111\tfeat: a\tb")))
+    (should (equal '(("aaa1111" . "feat: a\tb"))
+                   (agent-repl--range-commits "/tmp/x" "master" "HEAD")))))
 
 ;;; test-worktree.el ends here

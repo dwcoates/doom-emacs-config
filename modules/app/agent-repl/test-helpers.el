@@ -523,6 +523,19 @@ user's real snapshot during ERT runs."
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
 
+(defmacro agent-repl-test--with-merge-state (&rest body)
+  "Execute BODY with fresh merge queue / in-flight / progress / lookahead state.
+Shared by the worktree tests (which exercise the cherry-pick progress
+filter) and the drawer tests (which render the MERGE QUEUE section from
+exactly these globals)."
+  (declare (indent 0))
+  `(let ((agent-repl--merge-queue nil)
+         (agent-repl--in-flight-merges nil)
+         (agent-repl--merge-progress (make-hash-table :test 'equal))
+         (agent-repl--merge-progress-seq 0)
+         (agent-repl--merge-lookahead (make-hash-table :test 'equal)))
+     ,@body))
+
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)
   "Execute BODY with the cherry-pick probe's git wrappers stubbed.
 

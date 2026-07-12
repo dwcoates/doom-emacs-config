@@ -788,6 +788,7 @@ introducing a sibling raw `make-process' site."
   '(agent-repl--git-string
     agent-repl--git-string-quiet
     agent-repl--git-exit-code
+    agent-repl--git-exit-code-streaming
     agent-repl--git-branch-exists-p
     agent-repl--git-tag-exists-p
     agent-repl--async-git
