@@ -36,6 +36,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'url-util)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -236,10 +237,24 @@ webview attached to that session, and places it over the input panel."
   (let* ((session-id (agent-repl--frontend-ensure-session ws))
          ;; composer=0: Emacs owns input (the panel below), so the
          ;; webview hides its own composer and stays output-only.
+         ;; parent_ws: the recorded parent worktree's basename (the same
+         ;; source `agent-repl--workspace-mode-line' renders green) —
+         ;; the webapp's status bar shows it for vterm parity.  Omitted
+         ;; when the workspace has no recorded parent.
          (url (concat (agent-repl--frontend-session-url session-id)
-                      "&composer=0"))
+                      "&composer=0"
+                      (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
+                        (concat "&parent_ws=" (url-hexify-string parent)))))
          (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
     (agent-repl--frontend-display-webview ws buf)))
+
+(defun agent-repl--frontend-parent-ws-name (ws)
+  "Return the basename of WS's recorded parent worktree, or nil.
+Reads `:source-ws-dir' exactly like the vterm mode-line's parent label;
+nil when no parent was recorded or the recorded value is empty."
+  (let ((source-dir (agent-repl--ws-get ws :source-ws-dir)))
+    (when (and source-dir (not (string-empty-p source-dir)))
+      (file-name-nondirectory (directory-file-name source-dir)))))
 
 (defun agent-repl--gui-show (ws)
   "The gui frontend's show capability (registry `:show-fn').
