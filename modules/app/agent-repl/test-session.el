@@ -1336,6 +1336,82 @@ without sending again."
     (should-error (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
                   :type 'error)))
 
+;;;; ---- Frontend-aware delivery liveness ----
+
+(ert-deftest agent-repl-test-pending-delivery-alive-p-gui-running ()
+  "A gui workspace with a daemon session binding is deliverable."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (should (agent-repl--pending-delivery-alive-p "ws1" nil))))
+
+(ert-deftest agent-repl-test-pending-delivery-alive-p-gui-unbound ()
+  "A gui workspace without a daemon session binding is not deliverable."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (should-not (agent-repl--pending-delivery-alive-p "ws1" nil))))
+
+(ert-deftest agent-repl-test-pending-delivery-alive-p-vterm-live-buf ()
+  "A vterm workspace is deliverable while the captured buffer is live."
+  (agent-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-alive-vterm*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend 'vterm)
+            (should (agent-repl--pending-delivery-alive-p "ws1" fake-buf)))
+        (kill-buffer fake-buf)))))
+
+(ert-deftest agent-repl-test-pending-delivery-alive-p-vterm-dead-buf ()
+  "A vterm workspace with a dead captured buffer is not deliverable."
+  (agent-repl-test--with-clean-state
+    (let ((fake-buf (generate-new-buffer " *test-dead-vterm*")))
+      (kill-buffer fake-buf)
+      (agent-repl--ws-put "ws1" :frontend 'vterm)
+      (should-not (agent-repl--pending-delivery-alive-p "ws1" fake-buf)))))
+
+(ert-deftest agent-repl-test-deliver-pending-prompts-gui-sends-without-vterm ()
+  "A gui workspace delivers pending prompts with no vterm buffer at all."
+  (agent-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil)))
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts nil '("a") "ws1"))
+      (should (equal (car sent) '("a"))))))
+
+(ert-deftest agent-repl-test-deliver-pending-prompts-gui-abandons-when-released ()
+  "A gui workspace whose daemon binding was released abandons at verify."
+  (agent-repl-test--with-clean-state
+    (let ((sent (list nil))
+          (timer-slot (list nil)))
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts nil '("a" "b") "ws1")
+        (should (equal (car sent) '("a")))
+        ;; Session released (workspace nuke / daemon death) before verify.
+        (agent-repl--ws-put "ws1" :frontend-session-id nil)
+        (agent-repl--ws-put "ws1" :agent-state :thinking)
+        (funcall (car timer-slot))
+        ;; "b" was never sent — the binding is gone.
+        (should (equal (car sent) '("a")))))))
+
+(ert-deftest agent-repl-test-drain-pending-prompts-gui-schedules ()
+  "drain-pending-prompts schedules delivery for a gui workspace (nil vterm)."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled-args nil))
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+      (agent-repl--ws-put "ws1" :pending-prompts '("task prompt"))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat _fn &rest args)
+                   (setq scheduled-args args))))
+        (should (agent-repl--drain-pending-prompts "ws1"))
+        (should-not (agent-repl--ws-get "ws1" :pending-prompts))
+        ;; Scheduled with (VTERM-BUF PENDING WS) — vterm-buf nil for gui.
+        (should (equal scheduled-args '(nil ("task prompt") "ws1")))))))
+
 (ert-deftest agent-repl-test-prompt-acknowledged-p-states ()
   "prompt-acknowledged-p recognizes thinking/permission/done as ack'd."
   (agent-repl-test--with-clean-state

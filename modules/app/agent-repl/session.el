@@ -4,6 +4,8 @@
 
 (declare-function agent-repl--ws-dir-owner "agent-repl-workspace" (dir &optional except))
 (declare-function agent-repl--mark-start-failed "agent-repl-worktree" (ws err))
+(declare-function agent-repl--ws-gui-frontend-p "frontends" (ws))
+(declare-function agent-repl--gui-running-p "frontend-client" (ws))
 
 (defconst agent-repl--start-failure-marker "AGENT_REPL_START_FAILURE:"
   "Marker a start command (e.g. `claude-sandbox') prints to its vterm when it
@@ -1000,8 +1002,19 @@ not appear to have reached the agent."
   (memq (agent-repl--ws-agent-state ws)
         '(:thinking :permission :done)))
 
+(defun agent-repl--pending-delivery-alive-p (ws vterm-buf)
+  "Return non-nil when WS can still receive queued prompt deliveries.
+Frontend-aware liveness for the pending-prompt pipeline: a gui
+workspace is deliverable while it has a daemon session binding
+\(`agent-repl--gui-running-p' — VTERM-BUF is nil by design there); a
+vterm workspace is deliverable while VTERM-BUF (captured at drain
+time, pinning the delivery to that specific session) is live."
+  (if (agent-repl--ws-gui-frontend-p ws)
+      (agent-repl--gui-running-p ws)
+    (buffer-live-p vterm-buf)))
+
 (defun agent-repl--deliver-pending-prompts (vterm-buf pending ws &optional retries)
-  "Deliver PENDING prompts to WS if VTERM-BUF is still live.
+  "Deliver PENDING prompts to WS if its frontend can still receive them.
 Sends the first prompt via `agent-repl--send' with an ON-SETTLE that
 schedules `agent-repl--maybe-retry-or-continue' after
 `agent-repl-prompt-delivery-verify-seconds'.  That verify step
@@ -1011,12 +1024,16 @@ to `agent-repl-prompt-delivery-max-retries' times when the verify
 fails — closing the race between `SessionStart' (which flips Emacs
 to ready) and the agent's TUI input-area becoming interactive.
 
+VTERM-BUF is the vterm buffer captured at drain time for a vterm
+workspace, or nil for a gui workspace (whose liveness is its daemon
+session binding — see `agent-repl--pending-delivery-alive-p').
+
 RETRIES is the number of resends already performed for the prompt at
 the head of PENDING; nil/0 on the first attempt."
   (agent-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
                     ws (length pending) (or retries 0))
-  (unless (buffer-live-p vterm-buf)
-    (error "agent-repl--deliver-pending-prompts: vterm buffer is dead for ws=%s — %d prompt(s) lost"
+  (unless (agent-repl--pending-delivery-alive-p ws vterm-buf)
+    (error "agent-repl--deliver-pending-prompts: frontend session is gone for ws=%s — %d prompt(s) lost"
            ws (length pending)))
   (when pending
     (let ((retries (or retries 0)))
@@ -1043,11 +1060,13 @@ via `agent-repl--prompt-acknowledged-p':
   the prompt is still in input history for the user to resend
   manually.
 
-When the vterm buffer has died in the meantime, abandons silently."
+When the frontend session has died in the meantime (vterm buffer
+killed, or a gui workspace's daemon binding released), abandons
+silently."
   (cond
-   ((not (buffer-live-p vterm-buf))
+   ((not (agent-repl--pending-delivery-alive-p ws vterm-buf))
     (agent-repl--log ws
-                      "deliver-verify: vterm dead for ws=%s — abandoning %d prompt(s)"
+                      "deliver-verify: frontend session gone for ws=%s — abandoning %d prompt(s)"
                       ws (length pending)))
    ((agent-repl--prompt-acknowledged-p ws)
     (agent-repl--log ws
@@ -1073,7 +1092,10 @@ When the vterm buffer has died in the meantime, abandons silently."
 (defun agent-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after the agent becomes ready.
 Clears :pending-prompts and schedules them for delivery with a 0.3s delay
-so the terminal has time to settle."
+so the terminal has time to settle.  Works for both frontends: a gui
+workspace has no vterm buffer, so delivery liveness is judged by its
+daemon session binding instead (see
+`agent-repl--pending-delivery-alive-p')."
   (let ((pending (agent-repl--ws-get ws :pending-prompts)))
     (when pending
       (agent-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)

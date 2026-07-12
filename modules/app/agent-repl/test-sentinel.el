@@ -1737,6 +1737,21 @@ Without this, gui ws-fully-loaded only ever fired via the watchdog."
           (should (equal latched '("ws1" :agent-ready)))
           (should (equal hook-called-with '("ws1"))))))))
 
+(ert-deftest agent-repl-test-on-session-start-gui-drains-pending-prompts ()
+  "The gui branch drains :pending-prompts when the session comes up.
+The workspace-generation dispatch parks the new workspace's initial
+prompt there; without the drain the dispatch silently never executes."
+  (agent-repl-test--with-clean-state
+    (let ((drained nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (agent-repl--ws-put "ws1" :pending-prompts '("do the task"))
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-prompts)
+                 (lambda (ws) (setq drained ws))))
+        (agent-repl--on-session-start-event "ws1" "/some/dir")
+        (should (equal drained "ws1"))))))
+
 (ert-deftest agent-repl-test-on-session-start-event-no-vterm-warns ()
   "on-session-start-event emits a loud WARNING when no vterm buffer exists.
 Reaching this branch means ws is registered (caller chain checks that)
