@@ -1238,6 +1238,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
 (ert-deftest agent-repl-test-deliver-pending-prompts-sends-first ()
   "deliver-pending-prompts sends the first prompt immediately."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver*")))
@@ -1251,6 +1252,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
 (ert-deftest agent-repl-test-deliver-pending-prompts-schedules-verify ()
   "deliver-pending-prompts schedules a verify timer via on-settle."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver-verify*")))
@@ -1264,6 +1266,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
 (ert-deftest agent-repl-test-deliver-pending-prompts-chains-on-ack ()
   "When the verify step sees an acknowledged state, the next prompt is sent."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver-chain*")))
@@ -1280,6 +1283,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
 (ert-deftest agent-repl-test-deliver-pending-prompts-resends-when-not-acked ()
   "When verify sees :idle (no ack), the same prompt is resent."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver-resend*")))
@@ -1298,6 +1302,7 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
   "After `agent-repl-prompt-delivery-max-retries' failed resends, give up
 without sending again."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver-giveup*"))
@@ -1316,6 +1321,7 @@ without sending again."
 (ert-deftest agent-repl-test-deliver-pending-prompts-abandons-on-dead-vterm-at-verify ()
   "If the vterm buffer dies between send and verify, abandon silently."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((sent (list nil))
           (timer-slot (list nil))
           (fake-buf (generate-new-buffer " *test-deliver-dead-verify*")))

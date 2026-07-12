@@ -446,6 +446,7 @@
   "send-to-agent calls initialize-agent when the agent is not running."
   (let (init-called sent-text)
     (agent-repl-test--with-clean-state
+      (agent-repl-test--use-vterm-frontend)
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
         (unwind-protect
             (progn
@@ -467,6 +468,7 @@
   "send-to-agent skips initialize-agent when the agent is already running."
   (let (init-called sent-buf sent-text)
     (agent-repl-test--with-clean-state
+      (agent-repl-test--use-vterm-frontend)
       (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
         (unwind-protect
             (progn
@@ -695,6 +697,7 @@ focus or flip a hidden buffer's evil state."
   "interrupt sends escape keys when vterm is live."
   (let (escape-called)
     (agent-repl-test--with-clean-state
+      (agent-repl-test--use-vterm-frontend)
       (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-vterm*")))
         (unwind-protect
             (progn
@@ -721,7 +724,10 @@ focus or flip a hidden buffer's evil state."
 
 (ert-deftest agent-repl-cmd-test-interrupt/noop-when-vterm-not-live ()
   "interrupt is a no-op when vterm is not live."
-  (let (escape-called)
+  ;; Arrange — a vterm-world test, so pin the frontend (the shipped
+  ;; default is `gui'); no `with-clean-state' here to hold the binding.
+  (let ((agent-repl-default-frontend 'vterm)
+        escape-called)
     (cl-letf (((symbol-function 'agent-repl--vterm-live-p)
                (lambda () nil))
               ((symbol-function 'agent-repl--send-interrupt-escape)
@@ -732,6 +738,7 @@ focus or flip a hidden buffer's evil state."
 (ert-deftest agent-repl-cmd-test-interrupt/marks-agent-state-done-when-vterm-live ()
   "interrupt sets the workspace's :agent-state to :done after sending escape."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-done-vterm*")))
       (unwind-protect
           (progn
@@ -752,6 +759,7 @@ focus or flip a hidden buffer's evil state."
 The interrupted turn will never see a Stop hook, so leftover tracking
 state from the previous turn must be reset by Emacs."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-clear-vterm*")))
       (unwind-protect
           (progn
@@ -773,6 +781,7 @@ state from the previous turn must be reset by Emacs."
   "interrupt does not mark :done when vterm is not live.
 No interrupt was actually delivered, so the state should not change."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl--ws-put "test-ws" :vterm-buffer nil)
     (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name)
@@ -3578,6 +3587,7 @@ sourced from each project's state file, not the snapshot roster."
 (ert-deftest agent-repl-cmd-test-establish-workspace/starts-claude-when-not-running ()
   "establish-workspace starts the agent for the workspace unless it's already running."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
            (started-for nil))
       (unwind-protect
@@ -6008,6 +6018,7 @@ through `agent-repl--do-send'; the flip is inherited from the real
 `agent-repl--send-input-to-vterm' (the lowest-level string-send
 primitive), so only the bracketed transport beneath it is stubbed."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-perm*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-set-agent-state "ws1" :permission)
@@ -6020,6 +6031,7 @@ primitive), so only the bracketed transport beneath it is stubbed."
 (ert-deftest agent-repl-test-send-to-agent-leaves-non-permission-state-unchanged ()
   "`agent-repl--send-to-agent' only transitions :permission, not other states."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-idle*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl--ws-set-agent-state "ws1" :idle)

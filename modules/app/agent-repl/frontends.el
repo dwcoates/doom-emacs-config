@@ -17,7 +17,9 @@
 ;; Dispatch points that previously hand-branched on the gui (do-send,
 ;; the interrupt commands) resolve through this registry; the workspace
 ;; carries its choice in the `:frontend' plist key (persisted like
-;; `:backend'), defaulting to `agent-repl-default-frontend'.
+;; `:backend'), defaulting to `agent-repl-default-frontend' — which is
+;; the gui: the web view is the out-of-the-box presentation, and vterm
+;; is the opt-in.
 ;;
 ;; Choosing a frontend for a workspace is ALSO a statement about what
 ;; the NEXT workspace should be born with, so both selection commands
@@ -116,8 +118,18 @@ silently fall back to a different presentation."
 
 ;;;; ---- Selection ---------------------------------------------------------------
 
-(defcustom agent-repl-default-frontend 'vterm
-  "Name of the frontend used for workspaces without a `:frontend' override."
+(defcustom agent-repl-default-frontend 'gui
+  "Name of the frontend used for workspaces without a `:frontend' override.
+
+The web GUI is the out-of-the-box presentation: new workspaces are born
+under it, and `SPC o c' opens a webview over the input panel rather than
+a vterm TUI.
+
+The gui drives only the claude backend (`agent-repl-frontend'
+SUPPORTED-BACKENDS), so a codex workspace must carry an explicit vterm
+`:frontend' — `agent-repl--gui-open' rejects the pair loudly rather than
+launching a broken hybrid.  Set this to `vterm' to restore the TUI as
+the birth frontend."
   :type 'symbol
   :group 'agent-repl)
 
