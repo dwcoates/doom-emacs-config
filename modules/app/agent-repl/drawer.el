@@ -144,6 +144,28 @@ hidden from the drawer AND from the tab-bar (see
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-drawer-merge-lookahead 3
+  "How many upcoming commits the MERGE QUEUE section shows behind the current one.
+The budget is global rather than per-project: it is spent walking the
+commit stream in order, so a lookahead that crosses a project boundary
+shows commits from the next project rather than padding the current one."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-drawer-merge-slow-commit-threshold 3.0
+  "Seconds a commit must be cherry-picking before its elapsed clock appears.
+A fast queue then stays quiet and a slow commit announces itself, which is
+the only case where the number carries information."
+  :type 'number
+  :group 'agent-repl)
+
+(defcustom agent-repl-drawer-merge-subject-width 34
+  "Column budget for a commit subject in the MERGE QUEUE section.
+Subjects longer than this are truncated with an ellipsis: the drawer is a
+narrow side-window, and a wrapped subject costs a whole extra line."
+  :type 'integer
+  :group 'agent-repl)
+
 (defcustom agent-repl-drawer-marked-glyph "● "
   "Gutter glyph for entries the user has marked for bulk operations.
 Width must match `agent-repl-drawer-gutter' for column alignment."
@@ -275,6 +297,34 @@ into this workspace (see `:merged-in-workspaces')."
 Colors the brief phase-plus-count indicator (in-flight vs queued, and
 the number of commits to be cherry-picked) produced by
 `agent-repl-drawer--merge-status-text'."
+  :group 'agent-repl)
+
+(defface agent-repl-drawer-merge-sha
+  '((t :foreground "medium orchid"))
+  "Face for a commit SHA in the MERGE QUEUE section."
+  :group 'agent-repl)
+
+(defface agent-repl-drawer-merge-current
+  '((t :foreground "spring green" :weight bold))
+  "Face for the subject of the commit being cherry-picked right now."
+  :group 'agent-repl)
+
+(defface agent-repl-drawer-merge-pending
+  '((t :inherit shadow))
+  "Face for the subject of a commit still queued behind the current one."
+  :group 'agent-repl)
+
+(defface agent-repl-drawer-merge-elapsed
+  '((t :foreground "gold" :weight bold))
+  "Face for the elapsed clock on a slow commit in the MERGE QUEUE section.
+Gold rather than shadow because the clock only appears once the commit has
+exceeded `agent-repl-drawer-merge-slow-commit-threshold', so its presence
+is itself the signal."
+  :group 'agent-repl)
+
+(defface agent-repl-drawer-merge-conflict
+  '((t :foreground "tomato" :weight bold))
+  "Face for the conflict detail line in the MERGE QUEUE section."
   :group 'agent-repl)
 
 ;;;; Mode -------------------------------------------------------------------
@@ -1095,6 +1145,215 @@ header."
            (trees (agent-repl-drawer--build-tree workspaces parent-fn)))
       (agent-repl-drawer--render-trees trees current section))))
 
+;;;; MERGE QUEUE section -----------------------------------------------------
+;;
+;; Forward declarations: these live in worktree.el, which config.el loads
+;; before drawer.el.  Declared here so the section below compiles clean rather
+;; than adding to the file's cross-module free-variable warnings.
+(defvar agent-repl--merge-queue)
+(defvar agent-repl--in-flight-merges)
+(defvar agent-repl--merge-progress-seq)
+(defvar agent-repl--merge-lookahead)
+;;
+;;
+;; A COMMIT-level view, and the only section in the drawer whose rows are not
+;; workspaces.  MERGING answers "which workspaces are merging"; this answers
+;; "which commit is git applying right now, for how long, and what is behind
+;; it".  The two are complementary, which is why both exist.
+;;
+;; Because these rows carry `agent-repl-drawer-commit' rather than
+;; `agent-repl-drawer-workspace', every piece of workspace machinery — j/k
+;; navigation, the current-entry overlay, marks, expansion, cursor restore —
+;; skips them exactly the way it already skips headers and rule lines.  No
+;; workspace is ever rendered twice.
+
+(defun agent-repl-drawer--merge-project-label (target-dir)
+  "Return the project label for a merge whose destination is TARGET-DIR."
+  (when target-dir
+    (file-name-nondirectory (directory-file-name target-dir))))
+
+(defun agent-repl-drawer--merge-stream ()
+  "Return the ordered commit stream backing the MERGE QUEUE section.
+
+Each element is a plist with `:sha' `:subject' `:project' `:ws' `:state'
+and, for the commit being applied, `:started-at' plus any conflict and
+resolver detail.  `:state' is one of `current', `conflict', `pending', or
+`halted'.
+
+Order is in-flight picks first (from the commit being applied through the
+rest of their range), then queued entries in bucket FIFO order.  That is
+what lets a lookahead cross a project boundary."
+  (let ((stream nil))
+    (dolist (entry agent-repl--in-flight-merges)
+      (let* ((ws       (plist-get entry :source-ws))
+             (project  (agent-repl-drawer--merge-project-label
+                        (plist-get entry :target-dir)))
+             (progress (agent-repl--merge-progress-get ws))
+             (commits  (plist-get progress :commits))
+             (index    (or (plist-get progress :commit-index) 0))
+             (conflict (plist-get progress :conflict-sha))
+             (i        index))
+        (while (< i (length commits))
+          (let ((commit  (nth i commits))
+                (currentp (= i index)))
+            (push (append
+                   (list :sha     (car commit)
+                         :subject (cdr commit)
+                         :project project
+                         :ws      ws
+                         :state   (cond ((not currentp) 'pending)
+                                        (conflict       'conflict)
+                                        (t              'current)))
+                   (when currentp
+                     (list :started-at          (plist-get progress :commit-started-at)
+                           :conflict-files      (plist-get progress :conflict-files)
+                           :resolver-phase      (plist-get progress :resolver-phase)
+                           :resolver-started-at (plist-get progress :resolver-started-at))))
+                  stream))
+          (setq i (1+ i)))))
+    (dolist (entry agent-repl--merge-queue)
+      (let* ((ws      (plist-get entry :source-ws))
+             (project (agent-repl-drawer--merge-project-label
+                       (plist-get entry :target-dir)))
+             (state   (if (plist-get entry :halt-until-human) 'halted 'pending)))
+        (dolist (commit (plist-get (gethash ws agent-repl--merge-lookahead)
+                                   :commits))
+          (push (list :sha     (car commit)
+                      :subject (cdr commit)
+                      :project project
+                      :ws      ws
+                      :state   state)
+                stream))))
+    (nreverse stream)))
+
+(defun agent-repl-drawer--merge-stream-visible (stream)
+  "Truncate STREAM to the commits in flight plus the lookahead budget.
+
+Every `current'/`conflict' commit survives regardless of budget: buckets
+drain concurrently, so each active project has one, and hiding any of them
+would hide a merge that is actually running.  The
+`agent-repl-drawer-merge-lookahead' budget is then spent, in stream order,
+on the commits waiting behind them."
+  (let ((budget agent-repl-drawer-merge-lookahead)
+        (visible nil))
+    (dolist (element stream)
+      (cond
+       ((memq (plist-get element :state) '(current conflict))
+        (push element visible))
+       ((> budget 0)
+        (setq budget (1- budget))
+        (push element visible))))
+    (nreverse visible)))
+
+(defun agent-repl-drawer--merge-elapsed-string (started-at now)
+  "Format NOW minus STARTED-AT as `M:SS', or nil below the slow threshold."
+  (when started-at
+    (let ((seconds (- now started-at)))
+      (when (>= seconds agent-repl-drawer-merge-slow-commit-threshold)
+        (format "%d:%02d" (floor seconds 60) (mod (floor seconds) 60))))))
+
+(defun agent-repl-drawer--merge-truncate (text width)
+  "Truncate TEXT to WIDTH columns, ellipsizing when it does not fit."
+  (if (<= (length text) width)
+      text
+    (concat (substring text 0 (max 0 (1- width))) "…")))
+
+(defun agent-repl-drawer--merge-conflict-detail (element now)
+  "Return the conflict detail line for ELEMENT at NOW, or nil.
+Names the unmerged files and, while the auto-resolver is running, what it
+is doing and for how long."
+  (let* ((files    (plist-get element :conflict-files))
+         (phase    (plist-get element :resolver-phase))
+         (resolver (agent-repl-drawer--merge-elapsed-string
+                    (plist-get element :resolver-started-at) now))
+         (parts    (delq nil
+                         (list (when files
+                                 (format "%d file%s unmerged"
+                                         (length files)
+                                         (if (= 1 (length files)) "" "s")))
+                               (when phase
+                                 (concat "resolver: " (symbol-name phase)
+                                         (when resolver (concat " " resolver))))))))
+    (when parts
+      (string-join parts " · "))))
+
+(defun agent-repl-drawer--insert-merge-commit (element now)
+  "Insert one commit row for ELEMENT, evaluated at NOW."
+  (let* ((state   (plist-get element :state))
+         (glyph   (pcase state
+                    ('current  "⟳")
+                    ('conflict "💥")
+                    ('halted   "⛔")
+                    (_         " ")))
+         (pending (memq state '(pending halted)))
+         (elapsed (agent-repl-drawer--merge-elapsed-string
+                   (plist-get element :started-at) now))
+         (detail  (when (eq state 'conflict)
+                    (agent-repl-drawer--merge-conflict-detail element now)))
+         (start   (point)))
+    (insert agent-repl-drawer-gutter glyph " ")
+    (insert (propertize (plist-get element :sha)
+                        'face 'agent-repl-drawer-merge-sha))
+    (insert " ")
+    (insert (propertize (agent-repl-drawer--merge-truncate
+                         (plist-get element :subject)
+                         agent-repl-drawer-merge-subject-width)
+                        'face (if pending
+                                  'agent-repl-drawer-merge-pending
+                                'agent-repl-drawer-merge-current)))
+    (when elapsed
+      (insert (propertize (concat "  " elapsed)
+                          'face 'agent-repl-drawer-merge-elapsed)))
+    (insert "\n")
+    (when detail
+      (insert agent-repl-drawer-gutter "    ")
+      (insert (propertize detail 'face 'agent-repl-drawer-merge-conflict))
+      (insert "\n"))
+    ;; Deliberately NOT `agent-repl-drawer-workspace': see the section header
+    ;; comment.  A commit row must be invisible to workspace navigation.
+    (put-text-property start (point) 'agent-repl-drawer-commit
+                       (plist-get element :sha))
+    (put-text-property start (point) 'agent-repl-drawer-commit-ws
+                       (plist-get element :ws))))
+
+(defun agent-repl-drawer--insert-merge-project-separator (project)
+  "Insert the project separator for PROJECT in the MERGE QUEUE section.
+
+Reuses the repo group header's gutter, glyph, format, and face so the two
+read as the same kind of divider, and so a change to that styling cannot
+leave this one behind.
+
+Deliberately does NOT carry `agent-repl-drawer-repo': a repo group header
+is a foldable, navigable entry (`--render-group-header'), and this is not
+one.  Folding a project inside a commit stream is meaningless, and
+carrying the property would additionally entangle this separator with the
+real repo group's fold state."
+  (insert agent-repl-drawer-gutter
+          (propertize
+           (concat agent-repl-drawer-group-expanded-glyph
+                   (format agent-repl-drawer-group-label-format
+                           (or project "(no repo)")))
+           'face 'agent-repl-drawer-group-label)))
+
+(defun agent-repl-drawer--insert-merge-queue-section (stream now)
+  "Insert the MERGE QUEUE section for STREAM, evaluated at NOW.
+
+A project separator is emitted whenever an element's project differs from
+its predecessor's, so a run of commits within one project carries a single
+header and a lookahead that crosses into the next project announces the
+crossing."
+  (agent-repl-drawer--insert-section-header
+   (format "MERGE QUEUE (%d)" (length stream)))
+  (let ((previous-project nil)
+        (first t))
+    (dolist (element stream)
+      (let ((project (plist-get element :project)))
+        (unless (and (not first) (equal project previous-project))
+          (agent-repl-drawer--insert-merge-project-separator project)
+          (setq previous-project project))
+        (setq first nil)
+        (agent-repl-drawer--insert-merge-commit element now)))))
+
 (defun agent-repl-drawer--insert-content ()
   "Insert the drawer's full content into the current buffer.
 Extracted from `--render' so `--render' can build content in a temp
@@ -1105,8 +1364,17 @@ Reads buffer-local state (`--marked-set', `--expanded-set'); callers
 must set those in the current buffer before calling."
   (let* ((current  (agent-repl-drawer--current-ws))
          (sections (agent-repl-drawer--partition-by-section
-                    (agent-repl-drawer--visible-workspace-keys))))
+                    (agent-repl-drawer--visible-workspace-keys)))
+         (stream   (agent-repl-drawer--merge-stream-visible
+                    (agent-repl-drawer--merge-stream))))
     (insert "\n")
+    ;; Omitted entirely when the queue is idle, following HIDDEN's precedent.
+    ;; The drawer is a fixed fraction of the frame and vertical space is the
+    ;; scarce resource, so a permanent `MERGE QUEUE (0) / (none)' block would
+    ;; cost three lines forever to say nothing.
+    (when stream
+      (agent-repl-drawer--insert-merge-queue-section stream (float-time))
+      (insert "\n"))
     (let ((mains    (alist-get :main    sections))
           (hiddens  (alist-get :hidden  sections))
           (mergings (alist-get :merging sections))
@@ -1140,7 +1408,17 @@ read (state, git/merge status, priority, summary, group), plus
 marked/expanded sets per ws, the folded-repo set, and the current
 workspace.  The folded set is global (not per-ws), so it is captured
 once via `agent-repl--folded-repo-keys' — without it, a fold toggled
-outside the drawer would not invalidate the cached render."
+outside the drawer would not invalidate the cached render.
+
+The MERGE QUEUE section adds three more inputs:
+
+  - `agent-repl--merge-progress-seq', which every progress write bumps.
+    One counter stands in for every field of the progress record, so a
+    field added later cannot silently fail to redraw — the failure mode
+    this signature already had for `:merging'.
+  - the queue and in-flight lengths, so enqueue/dequeue/drain invalidate.
+  - the current second, but ONLY while a merge is in flight, so the
+    elapsed clock ticks without churning the signature when idle."
   (let (ws-sig)
     (dolist (ws (sort (agent-repl-drawer--visible-workspace-keys) #'string<))
       (push (list ws
@@ -1157,7 +1435,12 @@ outside the drawer would not invalidate the cached render."
             ws-sig))
     (list (agent-repl-drawer--current-ws)
           (agent-repl--folded-repo-keys)
-          ws-sig)))
+          ws-sig
+          agent-repl--merge-progress-seq
+          (length agent-repl--merge-queue)
+          (length agent-repl--in-flight-merges)
+          (when agent-repl--in-flight-merges
+            (floor (float-time))))))
 
 (defun agent-repl-drawer--render ()
   "Render the drawer, skipping the buffer rewrite when content is unchanged.
