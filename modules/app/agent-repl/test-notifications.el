@@ -13,12 +13,12 @@
 
 ;;;; ---- Tests: notification backend selection ----
 
-(ert-deftest agent-repl-test-select-backend-prefers-terminal-notifier-when-both-available ()
-  "When both are available, prefer terminal-notifier (it supports click actions)."
+(ert-deftest agent-repl-test-select-backend-prefers-osascript-when-both-available ()
+  "When both are available, prefer osascript (terminal-notifier hangs on macOS 26)."
   (cl-letf (((symbol-function 'executable-find)
              (lambda (_cmd) "/usr/bin/found")))
     (should (eq (agent-repl--select-notification-backend)
-                #'agent-repl--notify-backend-terminal-notifier))))
+                #'agent-repl--notify-backend-osascript))))
 
 (ert-deftest agent-repl-test-select-backend-uses-osascript-when-only-osascript ()
   "When only osascript is available, select osascript."
@@ -34,12 +34,12 @@
     (should (eq (agent-repl--select-notification-backend)
                 #'agent-repl--notify-backend-terminal-notifier))))
 
-(ert-deftest agent-repl-test-select-backend-falls-back-to-osascript ()
-  "When terminal-notifier is NOT available but osascript is, fall back to osascript."
+(ert-deftest agent-repl-test-select-backend-falls-back-to-terminal-notifier ()
+  "When osascript is NOT available but terminal-notifier is, fall back to it."
   (cl-letf (((symbol-function 'executable-find)
-             (lambda (cmd) (when (equal cmd "osascript") "/usr/bin/osascript"))))
+             (lambda (cmd) (when (equal cmd "terminal-notifier") "/usr/local/bin/terminal-notifier"))))
     (should (eq (agent-repl--select-notification-backend)
-                #'agent-repl--notify-backend-osascript))))
+                #'agent-repl--notify-backend-terminal-notifier))))
 
 (ert-deftest agent-repl-test-select-backend-errors-when-none-available ()
   "When neither terminal-notifier nor osascript is available, signal an error."
@@ -164,6 +164,7 @@
     (cl-letf (((symbol-function 'start-process)
                (lambda (&rest _args) 'fake-proc))
               ((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+              ((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer))
               ((symbol-function 'set-process-sentinel)
                (lambda (proc fn)
                  (setq sentinel-set (and (eq proc 'fake-proc) (functionp fn))))))
@@ -185,9 +186,75 @@
   (cl-letf (((symbol-function 'start-process)
              (lambda (&rest _args) 'fake-proc))
             ((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+            ((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer))
             ((symbol-function 'set-process-sentinel) (lambda (&rest _) nil)))
     (should (eq (agent-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")
                 'fake-proc))))
+
+;;;; ---- Tests: hang watchdog ----
+
+(ert-deftest agent-repl-test-notify-spawn-schedules-hang-watchdog ()
+  "spawn should schedule the hang watchdog for the spawned process."
+  (let (scheduled)
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (&rest _args) 'fake-proc))
+              ((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+              ((symbol-function 'set-process-sentinel) (lambda (&rest _) nil))
+              ((symbol-function 'run-at-time)
+               (lambda (delay repeat fn &rest args)
+                 (setq scheduled (list delay repeat fn args))
+                 'fake-timer)))
+      (agent-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")
+      (should (equal (nth 0 scheduled) agent-repl-notify-timeout-seconds))
+      (should (null (nth 1 scheduled)))
+      (should (eq (nth 2 scheduled) #'agent-repl--notify-kill-hung))
+      (should (equal (nth 3 scheduled) '(fake-proc "ws-a" osascript))))))
+
+(ert-deftest agent-repl-test-notify-spawn-no-watchdog-for-non-process ()
+  "spawn should not schedule a watchdog when start-process yields a non-process."
+  (cl-letf (((symbol-function 'start-process) (lambda (&rest _args) nil))
+            ((symbol-function 'run-at-time)
+             (lambda (&rest _) (error "watchdog must not be scheduled without a process"))))
+    (should (null (agent-repl--notify-spawn "ws-a" 'osascript "osascript" "-e" "noop")))))
+
+(ert-deftest agent-repl-test-kill-hung-deletes-live-process ()
+  "The watchdog should delete a notification process still alive at timeout."
+  (let (deleted)
+    (cl-letf (((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+              ((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'agent-repl--do-log) (lambda (&rest _) nil))
+              ((symbol-function 'delete-process)
+               (lambda (proc) (setq deleted proc))))
+      (agent-repl--notify-kill-hung 'fake-proc "ws-a" 'terminal-notifier)
+      (should (eq deleted 'fake-proc)))))
+
+(ert-deftest agent-repl-test-kill-hung-logs-loudly ()
+  "The watchdog should loudly log the hang via do-log, naming the backend."
+  (let (do-log-args)
+    (cl-letf (((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+              ((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'delete-process) (lambda (_p) nil))
+              ((symbol-function 'agent-repl--do-log)
+               (lambda (_ws fmt args &optional _err) (setq do-log-args (cons fmt args)))))
+      (agent-repl--notify-kill-hung 'fake-proc "ws-a" 'terminal-notifier)
+      (should (string-match-p "HUNG" (car do-log-args)))
+      (should (eq (nth 0 (cdr do-log-args)) 'terminal-notifier)))))
+
+(ert-deftest agent-repl-test-kill-hung-noop-for-dead-process ()
+  "The watchdog should not touch a process that already terminated."
+  (cl-letf (((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
+            ((symbol-function 'process-live-p) (lambda (_p) nil))
+            ((symbol-function 'agent-repl--do-log)
+             (lambda (&rest _) (error "do-log must not fire for a terminated process")))
+            ((symbol-function 'delete-process)
+             (lambda (&rest _) (error "delete-process must not fire for a terminated process"))))
+    (agent-repl--notify-kill-hung 'fake-proc "ws-a" 'osascript)))
+
+(ert-deftest agent-repl-test-kill-hung-noop-for-non-process ()
+  "The watchdog should not touch a non-process value (e.g. a test stub)."
+  (cl-letf (((symbol-function 'delete-process)
+             (lambda (&rest _) (error "delete-process must not fire for a non-process"))))
+    (agent-repl--notify-kill-hung 'not-a-proc "ws-a" 'osascript)))
 
 ;;;; ---- Tests: agent-repl--notify-process-sentinel ----
 
@@ -255,6 +322,63 @@
           ;; Buffer stays live because the process has not terminated.
           (should (buffer-live-p buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-sentinel-cancels-hang-watchdog ()
+  "Sentinel should cancel the hang watchdog once the process terminates."
+  (let ((buffer (generate-new-buffer " *sentinel-timer*"))
+        (cell (list 'fake-timer))
+        cancelled)
+    (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--do-log) (lambda (&rest _) nil))
+              ((symbol-function 'timerp) (lambda (obj) (eq obj 'fake-timer)))
+              ((symbol-function 'cancel-timer) (lambda (tm) (setq cancelled tm))))
+      (funcall (agent-repl--notify-process-sentinel "ws-a" 'osascript buffer cell)
+               'proc "finished\n")
+      (should (eq cancelled 'fake-timer)))))
+
+(ert-deftest agent-repl-test-sentinel-clears-cancelled-watchdog-cell ()
+  "Sentinel should clear the watchdog cell after cancelling the timer."
+  (let ((buffer (generate-new-buffer " *sentinel-timer-cell*"))
+        (cell (list 'fake-timer)))
+    (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--do-log) (lambda (&rest _) nil))
+              ((symbol-function 'timerp) (lambda (obj) (eq obj 'fake-timer)))
+              ((symbol-function 'cancel-timer) (lambda (_tm) nil)))
+      (funcall (agent-repl--notify-process-sentinel "ws-a" 'osascript buffer cell)
+               'proc "finished\n")
+      (should (null (car cell))))))
+
+(ert-deftest agent-repl-test-sentinel-keeps-watchdog-armed-while-running ()
+  "Sentinel must leave the watchdog armed for a non-terminal process state."
+  (let ((buffer (generate-new-buffer " *sentinel-timer-run*"))
+        (cell (list 'fake-timer)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-status) (lambda (_p) 'run))
+                  ((symbol-function 'timerp) (lambda (obj) (eq obj 'fake-timer)))
+                  ((symbol-function 'cancel-timer)
+                   (lambda (&rest _) (error "watchdog must stay armed while running"))))
+          (funcall (agent-repl--notify-process-sentinel "ws-a" 'osascript buffer cell)
+                   'proc "run\n")
+          (should (eq (car cell) 'fake-timer)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-sentinel-without-timer-cell-still-reports ()
+  "Sentinel called without a watchdog cell should still log and kill the buffer."
+  (let ((buffer (generate-new-buffer " *sentinel-no-cell*"))
+        log-args)
+    (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (setq log-args (cons fmt args))))
+              ((symbol-function 'agent-repl--do-log) (lambda (&rest _) nil)))
+      (funcall (agent-repl--notify-process-sentinel "ws-a" 'osascript buffer)
+               'proc "finished\n")
+      (should (string-match-p "notify-backend=%s ok" (car log-args)))
+      (should-not (buffer-live-p buffer)))))
 
 ;;;; ---- Tests: agent-repl--notify dispatch ----
 
