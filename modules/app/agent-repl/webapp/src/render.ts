@@ -113,11 +113,25 @@ export function sessionInfoHtml(
 
 // --- per-item components ------------------------------------------------------
 
+/**
+ * Envelope ts (ISO8601, §2.1) as the local wall-clock time the user sees
+ * on their own machine, zero-padded 24-hour `HH:MM` — the whole clock
+ * face would drown out the prompt it labels.
+ */
+export function formatTurnTime(ts: string): string {
+  const at = new Date(ts);
+  const hh = String(at.getHours()).padStart(2, "0");
+  const mm = String(at.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function UserTurn(item: UserTurnItem): string {
   const text = item.content
     .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
     .join("\n");
-  return `<div class="bubble user"><pre>${escapeHtml(text)}</pre></div>`;
+  return `<div class="bubble user"><pre>${escapeHtml(text)}</pre><span class="turn-ts">${escapeHtml(
+    formatTurnTime(item.ts),
+  )}</span></div>`;
 }
 
 function TextStream(item: TextItem): string {

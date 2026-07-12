@@ -26,6 +26,8 @@ export interface UserTurnItem {
   kind: "user-turn";
   requestId: string;
   content: ContentBlock[];
+  /** Envelope ts (§2.1): when the prompt was sent, rendered on the bubble. */
+  ts: string;
 }
 export interface TextItem {
   kind: "text";
@@ -268,6 +270,7 @@ export class ConversationStore {
           kind: "user-turn",
           requestId: frame.request_id,
           content: frame.content,
+          ts: frame.ts,
         });
         s.turnInFlight = true;
         break;
