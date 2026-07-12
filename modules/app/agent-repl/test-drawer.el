@@ -1720,7 +1720,7 @@ immediately without waiting for the next 1Hz poll."
                    "/cached/.git"))))
 
 (ert-deftest agent-repl-drawer-test-group-trees-by-repo-buckets ()
-  "`--group-trees-by-repo' partitions a forest by its roots' group-key labels."
+  "`--group-trees-by-repo' partitions a forest into (KEY LABEL . TREES) by repo key."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "doom-ws"      :project-dir "/d/")
     (agent-repl-drawer-test--register "doom-ws-2"    :project-dir "/d2/")
@@ -1730,9 +1730,23 @@ immediately without waiting for the next 1Hz poll."
     (agent-repl--ws-put "ee-ws"     :group-key "/path/explanation-engine/.git")
     (let* ((trees '(("doom-ws") ("doom-ws-2") ("ee-ws")))
            (groups (agent-repl-drawer--group-trees-by-repo trees)))
-      (should (equal (mapcar #'car groups) '("doom" "explanation-engine")))
-      (should (= 2 (length (cdr (assoc "doom" groups)))))
-      (should (= 1 (length (cdr (assoc "explanation-engine" groups))))))))
+      (should (equal (mapcar #'car groups)
+                     '("/path/doom/.git" "/path/explanation-engine/.git")))
+      (should (equal (mapcar #'cadr groups) '("doom" "explanation-engine")))
+      (should (= 2 (length (cddr (assoc "/path/doom/.git" groups)))))
+      (should (= 1 (length (cddr (assoc "/path/explanation-engine/.git"
+                                        groups))))))))
+
+(ert-deftest agent-repl-drawer-test-group-trees-by-repo-separates-same-basename ()
+  "`--group-trees-by-repo' keeps two repos sharing a basename in distinct buckets."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "a" :project-dir "/a/")
+    (agent-repl-drawer-test--register "b" :project-dir "/b/")
+    (agent-repl--ws-put "a" :group-key "/one/doom/.git")
+    (agent-repl--ws-put "b" :group-key "/two/doom/.git")
+    (let ((groups (agent-repl-drawer--group-trees-by-repo '(("a") ("b")))))
+      (should (equal (mapcar #'car groups)
+                     '("/one/doom/.git" "/two/doom/.git"))))))
 
 (ert-deftest agent-repl-drawer-test-render-emits-group-labels ()
   "Render emits the group label between repo groups."
@@ -1744,8 +1758,8 @@ immediately without waiting for the next 1Hz poll."
     (agent-repl-drawer-test--with-buffer
       (agent-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "▸ doom" text))
-        (should (string-match-p "▸ explanation-engine" text))))))
+        (should (string-match-p "▾ doom" text))
+        (should (string-match-p "▾ explanation-engine" text))))))
 
 ;;;; ---- Section partition + tree ----
 
@@ -2195,13 +2209,14 @@ This is the success path for an explicit merge command."
 ;;;; ---- Navigation ----
 
 (ert-deftest agent-repl-drawer-test-next-moves-to-next-workspace ()
-  "`agent-repl-drawer-next' walks past the MAIN header into successive workspaces."
+  "`agent-repl-drawer-next' walks past the MAIN + repo headers into successive workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "first" :priority "p1")
     (agent-repl-drawer-test--register "second" :priority "p2")
     (agent-repl-drawer-test--with-buffer
       (agent-repl-drawer--render)
       (goto-char (point-min))
+      (agent-repl-drawer-next)               ;; repo group header
       (agent-repl-drawer-next)
       (should (equal (agent-repl-drawer--workspace-at-point) "first"))
       (agent-repl-drawer-next)
@@ -2242,6 +2257,7 @@ This is the success path for an explicit merge command."
     (agent-repl-drawer-test--with-buffer
       (agent-repl-drawer--render)
       (goto-char (point-min))
+      (agent-repl-drawer-next)   ;; repo group header
       (agent-repl-drawer-next)   ;; first
       (agent-repl-drawer-next)   ;; second
       (agent-repl-drawer-prev)   ;; back to first
@@ -2254,6 +2270,7 @@ This is the success path for an explicit merge command."
     (agent-repl-drawer-test--with-buffer
       (agent-repl-drawer--render)
       (goto-char (point-min))
+      (agent-repl-drawer-next)               ;; repo group header
       (agent-repl-drawer-next)               ;; lands on "only"
       (should (equal (agent-repl-drawer--workspace-at-point) "only"))
       (let ((before (point)))
@@ -3536,6 +3553,157 @@ under the `or'-fall-through model."
                (lambda (_dir) nil)))
       (should-not (agent-repl-drawer--source-ws-name "child"))
       (should-not (agent-repl--ws-get "child" :source-ws-name)))))
+
+;;;; ---- Repo folding ----
+
+(ert-deftest agent-repl-drawer-test-group-header-carries-repo-property ()
+  "The repo group header carries the `agent-repl-drawer-repo' text property."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (should (agent-repl-drawer--goto-repo-line
+               agent-repl-drawer-test--group-key))
+      (should (equal (agent-repl-drawer--repo-at-point)
+                     agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-entry-at-point-on-repo-header ()
+  "`--entry-at-point' reports a `:repo' entry on the group header."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-repo-line agent-repl-drawer-test--group-key)
+      (should (equal (agent-repl-drawer--entry-at-point)
+                     (cons :repo agent-repl-drawer-test--group-key))))))
+
+(ert-deftest agent-repl-drawer-test-entry-at-point-on-workspace ()
+  "`--entry-at-point' reports a `:workspace' entry on a workspace block."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-workspace-line "ws")
+      (should (equal (agent-repl-drawer--entry-at-point)
+                     (cons :workspace "ws"))))))
+
+(ert-deftest agent-repl-drawer-test-next-stops-on-repo-header ()
+  "`agent-repl-drawer-next' selects the repo group header before its workspaces."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (goto-char (point-min))
+      (agent-repl-drawer-next)
+      (should (equal (agent-repl-drawer--repo-at-point)
+                     agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-prev-returns-to-repo-header ()
+  "`agent-repl-drawer-prev' from the first workspace lands back on the repo header."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-workspace-line "ws")
+      (agent-repl-drawer-prev)
+      (should (equal (agent-repl-drawer--repo-at-point)
+                     agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-tab-on-repo-header-folds ()
+  "`TAB' on a repo group header folds the repo."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-repo-line agent-repl-drawer-test--group-key)
+      (agent-repl-drawer-toggle-expand)
+      (should (agent-repl--repo-folded-p agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-tab-on-folded-repo-header-unfolds ()
+  "`TAB' on a folded repo group header unfolds it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl--toggle-repo-fold agent-repl-drawer-test--group-key)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-repo-line agent-repl-drawer-test--group-key)
+      (agent-repl-drawer-toggle-expand)
+      (should-not (agent-repl--repo-folded-p
+                   agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-folded-repo-hides-its-workspaces ()
+  "A folded repo renders no workspace blocks beneath its header."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl--toggle-repo-fold agent-repl-drawer-test--group-key)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (should-not (agent-repl-drawer--goto-workspace-line "ws")))))
+
+(ert-deftest agent-repl-drawer-test-folded-repo-keeps-its-header ()
+  "A folded repo still renders its own group header."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl--toggle-repo-fold agent-repl-drawer-test--group-key)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (should (agent-repl-drawer--goto-repo-line
+               agent-repl-drawer-test--group-key)))))
+
+(ert-deftest agent-repl-drawer-test-folded-repo-renders-folded-glyph ()
+  "A folded repo header renders the folded glyph instead of the expanded one."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl--toggle-repo-fold agent-repl-drawer-test--group-key)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "▸ agent-repl-test-repo" text))
+        (should-not (string-match-p "▾ agent-repl-test-repo" text))))))
+
+(ert-deftest agent-repl-drawer-test-unfolded-repo-leaves-other-repo-alone ()
+  "Folding one repo does not hide another repo's workspaces."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "doom-a" :project-dir "/d/")
+    (agent-repl-drawer-test--register "ee-a"   :project-dir "/e/")
+    (agent-repl--ws-put "doom-a" :group-key "/path/doom/.git")
+    (agent-repl--ws-put "ee-a"   :group-key "/path/explanation-engine/.git")
+    (agent-repl--toggle-repo-fold "/path/explanation-engine/.git")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (should (agent-repl-drawer--goto-workspace-line "doom-a"))
+      (should-not (agent-repl-drawer--goto-workspace-line "ee-a")))))
+
+(ert-deftest agent-repl-drawer-test-render-signature-tracks-fold-state ()
+  "`--render-signature' changes when a repo is folded, so the poll re-renders."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (let ((before (agent-repl-drawer--render-signature)))
+        (agent-repl--toggle-repo-fold agent-repl-drawer-test--group-key)
+        (should-not (equal before (agent-repl-drawer--render-signature)))))))
+
+(ert-deftest agent-repl-drawer-test-fold-toggle-forces-tab-bar-redraw ()
+  "Folding a repo from the drawer repaints the tab-bar immediately."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (let ((redraws 0))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redraws))))
+        (agent-repl-drawer-test--with-buffer
+          (agent-repl-drawer--render)
+          (agent-repl-drawer--goto-repo-line agent-repl-drawer-test--group-key)
+          (agent-repl-drawer-toggle-expand)
+          (should (= redraws 1)))))))
+
+(ert-deftest agent-repl-drawer-test-tab-on-non-entry-line-user-errors ()
+  "`TAB' on a section header (not an entry) signals a `user-error'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws" :priority "p1")
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (goto-char (point-min))
+      (should-error (agent-repl-drawer-toggle-expand) :type 'user-error))))
 
 (provide 'test-drawer)
 ;;; test-drawer.el ends here
