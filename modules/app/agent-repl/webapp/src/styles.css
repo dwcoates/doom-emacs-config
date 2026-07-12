@@ -223,6 +223,20 @@ pre {
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
 .diff-output { --cap-lines: 10; }
+/* Click-to-expand: a click anywhere on a capped section lifts its cap and
+   lays the section out at full length, and the next click restores the
+   preview. The cursor names the click's next move. One selector entry per
+   CAPPED_CLASSES entry in expand.ts, which styles.test.ts enforces. */
+.tool-input, .tool-output, .tool-read-output, .bash-input, .bash-output, .diff-output {
+  cursor: zoom-in;
+}
+/* Declared after every cap rule, so source order lifts the cap at equal
+   specificity and no !important is needed. */
+.expanded {
+  max-height: none;
+  overflow-y: visible;
+  cursor: zoom-out;
+}
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
    light up. The bars ride the SECTION (the whole card) rather than the
