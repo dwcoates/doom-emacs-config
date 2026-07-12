@@ -224,11 +224,15 @@ pre {
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
 .diff-output { --cap-lines: 10; }
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
-   is in its left/right gutter, and while it is, both gutters light up. */
+   is in a scroll box's left/right gutter, and while it is, both gutters
+   light up. The bars ride the SECTION (the whole card) rather than the
+   scroll box inside it, so each one abuts its edge of the section and
+   runs the section's full height instead of only the scrollable box's.
+   The cursor stays on the box, since that is what the wheel turns. */
 .scroll-zone {
   box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
-  cursor: ns-resize;
 }
+.scroll-zone-box { cursor: ns-resize; }
 .tool-read-output .line-no { color: var(--muted); }
 /* Markdown Reads render formatted (no gutter); same capped box, minus
    the phantom leading gap from the first block's own margin. */

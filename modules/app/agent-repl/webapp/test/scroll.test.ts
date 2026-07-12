@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   EDGE_PX,
   PIN_PX,
+  SECTION_CLASSES,
   inEdgeZone,
   innerScrollerAt,
   isPinnedToBottom,
   isScrollBox,
   redirectsToFeed,
+  sectionFor,
   wheelAction,
   wheelDeltaPx,
 } from "../src/scroll.js";
+import { renderItem } from "../src/render.js";
+import { PermissionItem, ToolItem } from "../src/store.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -18,6 +22,7 @@ interface FakeNode {
   scrollHeight: number;
   clientHeight: number;
   overflowY: string;
+  section: boolean;
 }
 
 function node(name: string, over: Partial<FakeNode> = {}): FakeNode {
@@ -27,11 +32,13 @@ function node(name: string, over: Partial<FakeNode> = {}): FakeNode {
     scrollHeight: 100,
     clientHeight: 100,
     overflowY: "visible",
+    section: false,
     ...over,
   };
 }
 
 const metrics = (n: FakeNode) => n;
+const isSection = (n: FakeNode) => n.section;
 
 describe("isScrollBox", () => {
   it("accepts an overflowing box with overflow-y auto", () => {
@@ -228,6 +235,82 @@ describe("innerScrollerAt", () => {
     const feed = node("feed", { scrollHeight: 900, clientHeight: 300, overflowY: "auto" });
     // Act + Assert
     expect(innerScrollerAt(null, feed, metrics)).toBeNull();
+  });
+});
+
+describe("sectionFor", () => {
+  it("returns the card enclosing the scroll box, so the bars span the whole section", () => {
+    // Arrange — a Bash card whose output box is one of several sub-boxes.
+    const feed = node("feed");
+    const card = node("card", { parentElement: feed, section: true });
+    const output = node("bash-output", { parentElement: card });
+    // Act + Assert
+    expect(sectionFor(output, feed, isSection).name).toBe("card");
+  });
+
+  it("returns the innermost card when cards nest", () => {
+    // Arrange
+    const feed = node("feed");
+    const outer = node("outer-card", { parentElement: feed, section: true });
+    const inner = node("inner-card", { parentElement: outer, section: true });
+    const output = node("bash-output", { parentElement: inner });
+    // Act + Assert
+    expect(sectionFor(output, feed, isSection).name).toBe("inner-card");
+  });
+
+  it("returns the scroll box itself when it is the card", () => {
+    // Arrange
+    const feed = node("feed");
+    const card = node("card", { parentElement: feed, section: true });
+    // Act + Assert
+    expect(sectionFor(card, feed, isSection).name).toBe("card");
+  });
+
+  it("falls back to the scroll box when no card encloses it", () => {
+    // Arrange
+    const feed = node("feed");
+    const output = node("bare-output", { parentElement: feed });
+    // Act + Assert
+    expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
+  });
+
+  it("never returns the feed, even when the feed matches", () => {
+    // Arrange — the feed is off-limits: lighting it would frame the viewport.
+    const feed = node("feed", { section: true });
+    const output = node("bare-output", { parentElement: feed });
+    // Act + Assert
+    expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
+  });
+});
+
+describe("SECTION_CLASSES", () => {
+  it("names the class the renderer puts on a tool card, which holds the tool scroll boxes", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      inputJson: "",
+      input: { command: "ls" },
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[0]} `);
+  });
+
+  it("names the class the renderer puts on a permission card, which holds a preview scroll box", () => {
+    // Arrange
+    const item: PermissionItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Write",
+      input: {},
+      preview: { kind: "generic", summary: "a long preview" },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[1]} `);
   });
 });
 

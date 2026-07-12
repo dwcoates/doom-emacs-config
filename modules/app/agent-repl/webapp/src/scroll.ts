@@ -21,6 +21,19 @@
 /** Width of the left/right gutters that arm a section's own scrolling. */
 export const EDGE_PX = 32;
 
+/** Class marking the whole section whose gutters are lit while armed. */
+export const ZONE_CLASS = "scroll-zone";
+
+/** Class marking the armed scroll box itself, which carries the cursor. */
+export const BOX_CLASS = "scroll-zone-box";
+
+/**
+ * Classes of the feed's sections: the bordered blocks that hold scroll
+ * boxes. A tool card holds up to three (input, progress, output); a
+ * permission card holds its preview.
+ */
+export const SECTION_CLASSES = ["tool-card", "permission"];
+
 /** Slack below which the feed still counts as parked at its tail. */
 export const PIN_PX = 40;
 
@@ -136,6 +149,24 @@ export function innerScrollerAt<T extends { parentElement: T | null }>(
   return null;
 }
 
+/**
+ * The section a scroll box belongs to: the nearest enclosing card, or
+ * the box itself when no card encloses it. The lit gutters ride the
+ * section rather than the box, so they sit flush with the section's
+ * left/right edges and run its FULL height, not just the height of
+ * whichever sub-box the pointer happens to be over.
+ */
+export function sectionFor<T extends { parentElement: T | null }>(
+  box: T,
+  feed: T,
+  isSection: (node: T) => boolean,
+): T {
+  for (let node: T | null = box; node && node !== feed; node = node.parentElement) {
+    if (isSection(node)) return node;
+  }
+  return box;
+}
+
 const domMetrics = (el: HTMLElement): ScrollMetrics => ({
   scrollHeight: el.scrollHeight,
   clientHeight: el.clientHeight,
@@ -145,8 +176,9 @@ const domMetrics = (el: HTMLElement): ScrollMetrics => ({
 /**
  * Arm edge-gated scrolling on `feed`: a wheel over a section's middle
  * scrolls the feed, a wheel over its gutters scrolls the section.
- * Hovering a gutter marks the section `.scroll-zone`, so the armed
- * state is visible before the wheel turns.
+ * Hovering a gutter marks the enclosing section `.scroll-zone` and the
+ * scroll box `.scroll-zone-box`, so the armed state is visible before
+ * the wheel turns — the bars on the section, the cursor on the box.
  */
 export function installEdgeScroll(feed: HTMLElement, edgePx: number = EDGE_PX): void {
   const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
@@ -172,14 +204,21 @@ export function installEdgeScroll(feed: HTMLElement, edgePx: number = EDGE_PX): 
     { capture: true, passive: false },
   );
 
-  let armed: HTMLElement | null = null;
+  const isSection = (el: HTMLElement): boolean =>
+    SECTION_CLASSES.some((cls) => el.classList.contains(cls));
+
+  let armedBox: HTMLElement | null = null;
+  let armedSection: HTMLElement | null = null;
   feed.addEventListener("pointermove", (e: PointerEvent) => {
     const scroller = scrollerUnder(e.target);
     const hit =
       scroller && inEdgeZone(scroller.getBoundingClientRect(), e.clientX, edgePx) ? scroller : null;
-    if (hit === armed) return;
-    armed?.classList.remove("scroll-zone");
-    hit?.classList.add("scroll-zone");
-    armed = hit;
+    if (hit === armedBox) return;
+    armedBox?.classList.remove(BOX_CLASS);
+    armedSection?.classList.remove(ZONE_CLASS);
+    armedBox = hit;
+    armedSection = hit ? sectionFor(hit, feed, isSection) : null;
+    armedBox?.classList.add(BOX_CLASS);
+    armedSection?.classList.add(ZONE_CLASS);
   });
 }

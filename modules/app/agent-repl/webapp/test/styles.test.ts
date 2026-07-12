@@ -34,6 +34,8 @@ const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
 const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
 const clearDivider = blockAfter(css, ".clear-divider");
+const scrollZone = blockAfter(css, ".scroll-zone {");
+const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
 /** Whether a `#rrggbb` literal reads as red: its red channel dominates both others. */
 function isRed(hex: string): boolean {
@@ -189,6 +191,34 @@ describe("turn-complete chip", () => {
     // Arrange / Act — the dark-scheme palette override.
     // Assert
     expect(darkTheme).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
+  });
+});
+
+describe("edge-scroll bars", () => {
+  it("insets the left bar, so it abuts the section's left edge", () => {
+    // Arrange / Act — the armed-section .scroll-zone rule.
+    // Assert
+    expect(scrollZone).toMatch(/box-shadow:[^;]*inset\s+2px\s+0\s+0\s+var\(--accent\)/);
+  });
+
+  it("insets the right bar, so it abuts the section's right edge", () => {
+    // Arrange / Act — the armed-section .scroll-zone rule.
+    // Assert
+    expect(scrollZone).toMatch(/box-shadow:[^;]*inset\s+-2px\s+0\s+0\s+var\(--accent\)/);
+  });
+
+  it("leaves the bars unbounded vertically, so they run the section's full height", () => {
+    // Arrange / Act — a vertical offset or spread would shorten the bars.
+    // Assert
+    expect(scrollZone).not.toMatch(/box-shadow:[^;]*inset\s+-?2px\s+0\s+0\s+[\d.]+px/);
+    expect(scrollZone).not.toMatch(/height/);
+  });
+
+  it("hands the scroll cursor to the box the wheel turns, not the lit section", () => {
+    // Arrange / Act — the armed-box .scroll-zone-box rule.
+    // Assert
+    expect(scrollZoneBox).toMatch(/cursor:\s*ns-resize/);
+    expect(scrollZone).not.toMatch(/cursor/);
   });
 });
 
