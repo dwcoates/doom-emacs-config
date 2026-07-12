@@ -165,7 +165,7 @@ describe("renderItem", () => {
     expect(html).toContain("step one");
   });
 
-  it("shows a pulse instead of an empty card while a textless thinking block streams", () => {
+  it("shows a pending indicator instead of an empty card while a textless thinking block streams", () => {
     // Arrange — adaptive thinking: signature only, no thinking text.
     const item: ConversationItem = {
       kind: "thinking",
@@ -179,6 +179,36 @@ describe("renderItem", () => {
     // Assert
     expect(html).toContain("thinking-pending");
     expect(html).not.toContain("<details");
+  });
+
+  it("marks the streaming textless thinking indicator with the circular spinner", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
+  });
+
+  it("drops the ••• pulse from the streaming textless thinking indicator", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("•••");
   });
 
   it("drops a textless thinking block once it closes", () => {
