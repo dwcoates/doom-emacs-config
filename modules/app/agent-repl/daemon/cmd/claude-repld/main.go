@@ -65,6 +65,7 @@ func main() {
 	srv := server.New(server.Config{
 		DaemonVersion: daemonVersion,
 		Retention:     *retention,
+		ForceFake:     *fake,
 		Spawn:         spawn,
 		Sentinel:      sentinelWriter,
 	})

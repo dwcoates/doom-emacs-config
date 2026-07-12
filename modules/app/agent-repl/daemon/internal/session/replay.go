@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -238,4 +239,24 @@ func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
 	}()
 	s.broadcastLocked(BuildReplayFrames(s.translator, f))
 	return nil
+}
+
+// NoteResumeUnavailable retains a recoverable in-band error frame
+// telling every attaching client that the requested resume target could
+// not be honored and the session started as a FRESH conversation. Used
+// by the create path when it drops a --resume whose transcript does not
+// exist in this daemon's config dir (spawning anyway would hard-kill
+// the CLI at startup); the drop must be visible in the webapp, not just
+// the daemon log.
+func (s *Session) NoteResumeUnavailable(resumeID, path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broadcastLocked([]protocol.L2Frame{&protocol.ErrorFrame{
+		Envelope: protocol.Envelope{Type: "error"},
+		Code:     "resume_unavailable",
+		Message: fmt.Sprintf(
+			"resume target %s has no transcript at %s — started a fresh conversation instead",
+			resumeID, path),
+		Recoverable: true,
+	}})
 }
