@@ -497,12 +497,48 @@ export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<s
   return finals;
 }
 
+/**
+ * Duration units, coarsest-last. MAX is the exclusive ceiling on the
+ * unit's rendered magnitude: once a value rounds up to it, the next unit
+ * carries the duration instead.
+ */
+const DURATION_UNITS: ReadonlyArray<{ suffix: string; scale: number; max: number }> = [
+  { suffix: "ms", scale: 1, max: 1000 },
+  { suffix: "s", scale: 1000, max: 60 },
+  { suffix: "m", scale: 60_000, max: 60 },
+  { suffix: "h", scale: 3_600_000, max: Infinity },
+];
+
+/** VALUE at three significant digits, trailing zeros and dot trimmed. */
+function threeSigFigs(value: number): string {
+  const decimals = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  const text = value.toFixed(decimals);
+  return text.includes(".") ? text.replace(/0+$/, "").replace(/\.$/, "") : text;
+}
+
+/**
+ * A duration in its most compact reading: the coarsest unit whose
+ * magnitude still reaches 1, carried to three significant digits
+ * (1033ms → `1.03s`, 12300ms → `12.3s`, 120000ms → `2m`).
+ *
+ * Sub-second durations stay whole milliseconds, there being no finer
+ * unit to promote a fraction into.
+ */
+export function formatDuration(ms: number): string {
+  for (const unit of DURATION_UNITS) {
+    const value = ms / unit.scale;
+    const text = unit.suffix === "ms" ? String(Math.round(value)) : threeSigFigs(value);
+    if (Number(text) < unit.max) return `${text}${unit.suffix}`;
+  }
+  throw new Error(`unreachable: no unit carried ${ms}ms`);
+}
+
 function ResultChip(item: ResultItem): string {
   const done = isTurnComplete(item);
   const label = done ? "turn complete" : item.subtype;
   return `
     <div class="result ${item.isError ? "err" : "ok"}${done ? " done" : ""}">
-      ${escapeHtml(label)} · ${item.durationMs}ms ·
+      ${escapeHtml(label)} · ${formatDuration(item.durationMs)} ·
       ${item.usage.input_tokens}in/${item.usage.output_tokens}out ·
       $${item.totalCostUsd.toFixed(4)}
     </div>`;

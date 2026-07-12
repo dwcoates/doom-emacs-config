@@ -3,6 +3,7 @@ import {
   backfillChunks,
   diffHtml,
   finalResponseBlockIds,
+  formatDuration,
   formatTurnTime,
   itemKey,
   lastUserTurnId,
@@ -853,6 +854,63 @@ describe("clear divider", () => {
   });
 });
 
+describe("formatDuration", () => {
+  it("keeps a sub-second duration in whole milliseconds", () => {
+    // Arrange + Act + Assert — no finer unit exists to promote a fraction into.
+    expect(formatDuration(850)).toBe("850ms");
+  });
+
+  it("reports a zero duration in milliseconds", () => {
+    // Arrange + Act + Assert
+    expect(formatDuration(0)).toBe("0ms");
+  });
+
+  it("renders a one-digit second count to two decimals", () => {
+    // Arrange + Act + Assert — three significant digits.
+    expect(formatDuration(1033)).toBe("1.03s");
+  });
+
+  it("renders a two-digit second count to one decimal", () => {
+    // Arrange + Act + Assert — three significant digits.
+    expect(formatDuration(12300)).toBe("12.3s");
+  });
+
+  it("trims the decimals off a whole second count", () => {
+    // Arrange + Act + Assert
+    expect(formatDuration(1000)).toBe("1s");
+  });
+
+  it("promotes a millisecond count that rounds up to a full second", () => {
+    // Arrange + Act + Assert — 999.6ms would otherwise render as 1000ms.
+    expect(formatDuration(999.6)).toBe("1s");
+  });
+
+  it("renders a whole minute count without decimals", () => {
+    // Arrange + Act + Assert
+    expect(formatDuration(120_000)).toBe("2m");
+  });
+
+  it("renders a fractional minute count to two decimals", () => {
+    // Arrange + Act + Assert
+    expect(formatDuration(93_600)).toBe("1.56m");
+  });
+
+  it("promotes a second count that rounds up to a full minute", () => {
+    // Arrange + Act + Assert — 59.999s would otherwise render as 60s.
+    expect(formatDuration(59_999)).toBe("1m");
+  });
+
+  it("renders an hour-scale duration in hours", () => {
+    // Arrange + Act + Assert
+    expect(formatDuration(5_400_000)).toBe("1.5h");
+  });
+
+  it("drops the decimals off a three-digit hour count", () => {
+    // Arrange + Act + Assert — three significant digits leaves no room for a fraction.
+    expect(formatDuration(360_000_000)).toBe("100h");
+  });
+});
+
 describe("ResultChip", () => {
   /** A result frame item for the given subtype. */
   function resultItem(subtype: ResultItem["subtype"], isError = false): ResultItem {
@@ -879,6 +937,15 @@ describe("ResultChip", () => {
     const html = renderItem(resultItem("success"));
     // Assert
     expect(html).toContain("turn complete");
+  });
+
+  it("renders the turn's duration in its most compact unit", () => {
+    // Arrange
+    const item = { ...resultItem("success"), durationMs: 12_300 };
+    // Act
+    const html = renderItem(item);
+    // Assert — the raw millisecond count never reaches the chip.
+    expect(html).toContain("turn complete · 12.3s ·");
   });
 
   it("withholds the done class from an aborted turn's chip", () => {
