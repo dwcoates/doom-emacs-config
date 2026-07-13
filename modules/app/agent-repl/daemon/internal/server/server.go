@@ -120,6 +120,9 @@ type Server struct {
 	// account; nil makes the login routes report the capability as
 	// unconfigured.
 	logins *login.Manager
+	// accounts is the canonical account roster; empty makes GET /accounts
+	// report the capability as unconfigured.
+	accounts []Account
 	// draining marks a daemon-wide teardown (ShutdownAll): the session
 	// deaths it causes are NOT conversation deaths, so the registrar
 	// must leave their records non-terminal for the next boot to
@@ -168,6 +171,23 @@ type Config struct {
 	// ClassifierModel is the model the queue classifier pins; empty takes
 	// the session package's haiku default.
 	ClassifierModel string
+	// Accounts is the canonical account roster (the -accounts flag):
+	// every root a session may run as, in menu order. Empty disables
+	// GET /accounts.
+	Accounts []Account
+}
+
+// Account is one canonical config root the daemon can name and switch
+// sessions onto. The set is closed by configuration (the -accounts
+// flag), never discovered: WHICH roots exist is the operator's policy,
+// and the daemon only reports and applies it.
+type Account struct {
+	// Label is the human name for the root ("personal", "work").
+	Label string `json:"label"`
+	// ConfigDir is the CLAUDE_CONFIG_DIR selecting the root, "" meaning
+	// the CLI's own default (~/.claude) — the same convention every
+	// session record uses, so identity comparison is plain equality.
+	ConfigDir string `json:"config_dir"`
 }
 
 // New builds a Server.
@@ -192,6 +212,7 @@ func New(cfg Config) *Server {
 		classifierModel: cfg.ClassifierModel,
 		sentinel:        cfg.Sentinel,
 		logins:          cfg.Logins,
+		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
 		registry:        cfg.Registry,
 		upgrader: websocket.Upgrader{
@@ -310,6 +331,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
+	mux.HandleFunc("GET /accounts", s.handleAccounts)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
 	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
@@ -539,6 +561,42 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, s.logf, identity)
+}
+
+// accountStatus is one roster entry as GET /accounts reports it: the
+// configured root plus who it is currently logged in as.
+type accountStatus struct {
+	Account
+	// Email is the root's logged-in account, "" when logged out.
+	Email string `json:"email"`
+	// Error carries a per-root identity read failure (corrupt
+	// .claude.json). Surfaced in-band so one broken root cannot hide the
+	// healthy ones, and never blanked into a fake "logged out".
+	Error string `json:"error,omitempty"`
+}
+
+// handleAccounts reports the canonical account roster with each root's
+// live identity, for the topbar's account menu. The roster is
+// configuration (the -accounts flag), so an empty one is the capability
+// being unconfigured, not an empty success.
+func (s *Server) handleAccounts(w http.ResponseWriter, _ *http.Request) {
+	if len(s.accounts) == 0 {
+		httpError(w, http.StatusServiceUnavailable, "accounts are not configured")
+		return
+	}
+	roster := make([]accountStatus, 0, len(s.accounts))
+	for _, acct := range s.accounts {
+		entry := accountStatus{Account: acct}
+		identity, err := account.Read(acct.ConfigDir)
+		if err != nil {
+			entry.Error = err.Error()
+		} else {
+			entry.Email = identity.Email
+		}
+		roster = append(roster, entry)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string][]accountStatus{"accounts": roster})
 }
 
 // sessionConfigDir returns id's CLAUDE_CONFIG_DIR — the ACCOUNT it runs as
