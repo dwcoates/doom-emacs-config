@@ -1890,3 +1890,166 @@ func TestAccountOnAnUnknownSessionIs404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+// --- GET /sessions/{id}/commands and POST .../commands/refresh -------------------
+
+// getCommands reads the session's slash-command menu back over HTTP.
+func (h *harness) getCommands(t *testing.T, sessionID string) (*http.Response, []protocol.SlashCommand) {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions/" + sessionID + "/commands")
+	if err != nil {
+		t.Fatalf("GET commands: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		return resp, nil
+	}
+	var body struct {
+		Commands []protocol.SlashCommand `json:"commands"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode commands: %v", err)
+	}
+	return resp, body.Commands
+}
+
+// awaitCommands polls the menu until it is non-empty: the shim's `commands`
+// event crosses a channel, so it lands a moment after pushEvent returns.
+func (h *harness) awaitCommands(t *testing.T, sessionID string) []protocol.SlashCommand {
+	t.Helper()
+	deadline := time.Now().Add(recvTimeout)
+	for time.Now().Before(deadline) {
+		if _, cmds := h.getCommands(t, sessionID); len(cmds) > 0 {
+			return cmds
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the commands menu never landed")
+	return nil
+}
+
+func TestGetCommandsServesTheMenuTheShimPublished(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	// Act
+	shim.pushEvent(t, `{"type":"commands","session_id":"s1","commands":[{"name":"debug-logs","description":"read the log","argumentHint":""}]}`)
+	cmds := h.awaitCommands(t, id)
+	// Assert
+	if len(cmds) != 1 || cmds[0].Name != "debug-logs" {
+		t.Errorf("commands = %+v, want one debug-logs entry", cmds)
+	}
+}
+
+func TestGetCommandsCarriesTheArgumentHint(t *testing.T) {
+	// Arrange — the hint is what the completion annotation renders, so it
+	// has to survive the trip rather than being dropped as cosmetic.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	// Act
+	shim.pushEvent(t, `{"type":"commands","session_id":"s1","commands":[{"name":"compact","description":"d","argumentHint":"<how>"}]}`)
+	cmds := h.awaitCommands(t, id)
+	// Assert
+	if cmds[0].ArgumentHint != "<how>" {
+		t.Errorf("argument hint = %q, want %q", cmds[0].ArgumentHint, "<how>")
+	}
+}
+
+func TestGetCommandsAnswersAnEmptyListBeforeTheMenuLands(t *testing.T) {
+	// Arrange — the menu resolves asynchronously off the SDK init handshake.
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act — ask before any `commands` event has been pushed.
+	resp, cmds := h.getCommands(t, id)
+	// Assert — early is not an error, and the list is [] rather than null so
+	// the reader never has to tell the two apart.
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(cmds) != 0 {
+		t.Errorf("commands = %+v, want empty", cmds)
+	}
+}
+
+func TestGetCommandsIs404ForAnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp, _ := h.getCommands(t, "s_nope")
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestRefreshCommandsForwardsTheCommandToTheShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/commands/refresh", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST refresh: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — accepted without waiting, and the shim was actually asked.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case line := <-shim.sent:
+		var cmd struct {
+			Type      string `json:"type"`
+			RequestID string `json:"request_id"`
+		}
+		if err := json.Unmarshal(line, &cmd); err != nil {
+			t.Fatalf("unmarshal forwarded command: %v", err)
+		}
+		if cmd.Type != "refresh-commands" {
+			t.Errorf("forwarded type = %q, want refresh-commands", cmd.Type)
+		}
+		if cmd.RequestID == "" {
+			t.Error("forwarded refresh-commands carries no request_id, so it could never be acked")
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("refresh-commands never reached the shim")
+	}
+}
+
+func TestRefreshCommandsReplacesTheCachedMenu(t *testing.T) {
+	// Arrange — a session whose menu predates a skill being added.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	shim.pushEvent(t, `{"type":"commands","session_id":"s1","commands":[{"name":"old","description":"d","argumentHint":""}]}`)
+	h.awaitCommands(t, id)
+	// Act — the re-probe reports the new skill.
+	shim.pushEvent(t, `{"type":"commands","session_id":"s1","commands":[{"name":"old","description":"d","argumentHint":""},{"name":"brand-new","description":"d","argumentHint":""}]}`)
+	deadline := time.Now().Add(recvTimeout)
+	var cmds []protocol.SlashCommand
+	for time.Now().Before(deadline) {
+		if _, c := h.getCommands(t, id); len(c) == 2 {
+			cmds = c
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Assert
+	if len(cmds) != 2 || cmds[1].Name != "brand-new" {
+		t.Errorf("commands = %+v, want the refreshed pair including brand-new", cmds)
+	}
+}
+
+func TestRefreshCommandsIs404ForAnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/s_nope/commands/refresh", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST refresh: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
