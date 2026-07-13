@@ -2103,6 +2103,149 @@ func TestAccountOnAnUnknownSessionIs404(t *testing.T) {
 	}
 }
 
+// --- GET /accounts ----------------------------------------------------------
+
+// accountsHarness builds a daemon configured with the given canonical
+// account roster.
+func accountsHarness(t *testing.T, accounts []Account) *harness {
+	t.Helper()
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		Spawn: func(string, CreateOpts) (session.ShimHandle, error) {
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Accounts: accounts,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}
+}
+
+// getAccounts reads the canonical account roster back over HTTP.
+func getAccounts(t *testing.T, h *harness) (*http.Response, []map[string]string) {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/accounts")
+	if err != nil {
+		t.Fatalf("GET /accounts: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Accounts []map[string]string `json:"accounts"`
+	}
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode /accounts body: %v", err)
+		}
+	}
+	return resp, body.Accounts
+}
+
+// writeIdentity plants a .claude.json naming EMAIL under dir.
+func writeIdentity(t *testing.T, dir, email string) {
+	t.Helper()
+	doc := fmt.Sprintf(`{"oauthAccount":{"emailAddress":%q}}`, email)
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(doc), 0o600); err != nil {
+		t.Fatalf("write identity: %v", err)
+	}
+}
+
+func TestAccountsIsUnconfiguredWithoutARoster(t *testing.T) {
+	// Arrange: no -accounts flag means the menu has nothing to offer.
+	h := accountsHarness(t, nil)
+
+	// Act
+	resp, _ := getAccounts(t, h)
+
+	// Assert
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestAccountsReportsEachRootsIdentityInRosterOrder(t *testing.T) {
+	// Arrange: two canonical roots, each logged into its own account.
+	workDir := t.TempDir()
+	writeIdentity(t, workDir, "dodge@chess.com")
+	personalDir := t.TempDir()
+	writeIdentity(t, personalDir, "dodge.w.coates@gmail.com")
+	h := accountsHarness(t, []Account{
+		{Label: "personal", ConfigDir: personalDir},
+		{Label: "work", ConfigDir: workDir},
+	})
+
+	// Act
+	resp, roster := getAccounts(t, h)
+
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(roster) != 2 {
+		t.Fatalf("roster size = %d, want 2", len(roster))
+	}
+	if roster[0]["label"] != "personal" || roster[0]["email"] != "dodge.w.coates@gmail.com" {
+		t.Errorf("roster[0] = %v, want personal/dodge.w.coates@gmail.com", roster[0])
+	}
+	if roster[1]["label"] != "work" || roster[1]["email"] != "dodge@chess.com" {
+		t.Errorf("roster[1] = %v, want work/dodge@chess.com", roster[1])
+	}
+}
+
+func TestAccountsReportsALoggedOutRootWithAnEmptyEmail(t *testing.T) {
+	// Arrange: a root with no identity file is logged out — a state the
+	// menu renders, not an error.
+	h := accountsHarness(t, []Account{{Label: "personal", ConfigDir: t.TempDir()}})
+
+	// Act
+	resp, roster := getAccounts(t, h)
+
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if roster[0]["email"] != "" {
+		t.Errorf("email = %q, want empty for a logged-out root", roster[0]["email"])
+	}
+	if roster[0]["error"] != "" {
+		t.Errorf("error = %q, want none for a logged-out root", roster[0]["error"])
+	}
+}
+
+func TestAccountsSurfacesACorruptRootWithoutHidingTheHealthyOne(t *testing.T) {
+	// Arrange: one corrupt identity file beside one healthy root. The
+	// corrupt one must carry its error in-band, never masquerade as
+	// logged out, and never fail the whole roster.
+	corruptDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(corruptDir, ".claude.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write corrupt identity: %v", err)
+	}
+	healthyDir := t.TempDir()
+	writeIdentity(t, healthyDir, "dodge@chess.com")
+	h := accountsHarness(t, []Account{
+		{Label: "personal", ConfigDir: corruptDir},
+		{Label: "work", ConfigDir: healthyDir},
+	})
+
+	// Act
+	resp, roster := getAccounts(t, h)
+
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if roster[0]["error"] == "" {
+		t.Errorf("corrupt root carried no error")
+	}
+	if roster[1]["email"] != "dodge@chess.com" {
+		t.Errorf("healthy root email = %q, want dodge@chess.com", roster[1]["email"])
+	}
+}
+
 // --- GET /sessions/{id}/commands and POST .../commands/refresh -------------------
 
 // getCommands reads the session's slash-command menu back over HTTP.
