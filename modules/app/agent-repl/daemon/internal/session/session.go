@@ -70,6 +70,9 @@ type Session struct {
 	logf       func(format string, args ...any)
 	sentinel   SentinelSink
 	registrar  Registrar
+	// configDir is the account this session's CLI runs as. Immutable for
+	// the session's life, so it needs no lock.
+	configDir string
 
 	mu       sync.Mutex
 	seq      int64
@@ -96,12 +99,6 @@ type SentinelSink interface {
 	PermissionRequested(cwd, sid, reqID string)
 	PermissionResolved(cwd, sid, reqID string)
 	SessionDead(cwd, sid string)
-	// LoginRequested asks Emacs to run the interactive Claude login for
-	// the account this session's cwd resolves to. The OAuth flow needs a
-	// TTY, which neither the daemon nor the browser has — Emacs is the
-	// only TTY host in the system, so the gui login button is a request
-	// TO Emacs rather than work the daemon can do itself.
-	LoginRequested(cwd, sid string)
 }
 
 // Registrar receives the durable-state transitions the persistent
@@ -139,6 +136,14 @@ type Config struct {
 	// Registrar receives durable-state transitions for the persistent
 	// session registry; nil disables the notifications.
 	Registrar Registrar
+	// ConfigDir is the CLAUDE_CONFIG_DIR this session's CLI runs under —
+	// i.e. WHICH ACCOUNT it is. Carried so the account is answerable for a
+	// LIVE session, not just a persisted one: the topbar names it, and the
+	// login opens against it.
+	//
+	// Empty is a real answer, not a missing one — it names the CLI's own
+	// default root.
+	ConfigDir string
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -166,6 +171,7 @@ func New(cfg Config) *Session {
 		logf:          cfg.Logf,
 		sentinel:      cfg.Sentinel,
 		registrar:     cfg.Registrar,
+		configDir:     cfg.ConfigDir,
 		clients:       map[*Client]struct{}{},
 		done:          make(chan struct{}),
 	}
@@ -176,7 +182,10 @@ type Info struct {
 	CWD             string
 	Model           string
 	ClaudeSessionID string
-	Terminal        bool
+	// ConfigDir is the session's CLAUDE_CONFIG_DIR (the account it runs
+	// as). Empty names the CLI's own default root.
+	ConfigDir string
+	Terminal  bool
 	// DeathReason classifies a terminal session's end (closed reason or
 	// "shim_died"); empty while alive.
 	DeathReason string
@@ -198,6 +207,7 @@ func (s *Session) Info() Info {
 		CWD:                s.translator.CWD,
 		Model:              s.translator.Model,
 		ClaudeSessionID:    s.translator.ClaudeSessionID,
+		ConfigDir:          s.configDir,
 		Terminal:           s.terminal,
 		DeathReason:        s.deathReason,
 		TurnActive:         s.translator.TurnActive(),

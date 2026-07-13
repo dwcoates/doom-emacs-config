@@ -101,15 +101,6 @@ func (w *Writer) SessionDead(cwd, sid string) {
 	w.jobs <- job{name: "session_dead_" + sid, cwd: cwd, sid: sid}
 }
 
-// LoginRequested relays the gui login button: Emacs is asked to run the
-// interactive Claude login for the account cwd resolves to. Filename:
-// login_request_<sid>. The sid may be empty (a session whose system:init
-// has not landed yet still has a cwd, and the cwd is what selects the
-// account) — the Emacs dispatcher keys on the cwd, not the id.
-func (w *Writer) LoginRequested(cwd, sid string) {
-	w.jobs <- job{name: "login_request_" + sid, cwd: cwd, sid: sid}
-}
-
 func (w *Writer) run() {
 	defer close(w.done)
 	for j := range w.jobs {

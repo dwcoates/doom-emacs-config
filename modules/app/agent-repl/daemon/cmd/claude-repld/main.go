@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/login"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
 	"claude-repld/internal/sentinel"
@@ -111,6 +112,24 @@ func main() {
 		remediator = runner
 	}
 
+	// Interactive Claude login, on a pty the daemon owns and the webapp
+	// renders. Nothing here parses the terminal: the login is a full-screen
+	// TUI gated behind stateful prompts before it ever reaches OAuth, so a
+	// human reads it and the daemon only carries it.
+	//
+	// The login is a direct CLI invocation rather than an SDK-driven one, so
+	// it needs a real executable: -claude-bin when it names one, else the
+	// `claude` on PATH (which is what the vterm login always ran).
+	loginBin := *claudeBin
+	if loginBin == "" {
+		loginBin = "claude"
+	}
+	logins := login.NewManager(login.Config{
+		Start: login.Spawn([]string{loginBin, "/login"}),
+		Logf:  log.Printf,
+	})
+	defer logins.CloseAll()
+
 	srv := server.New(server.Config{
 		DaemonVersion: daemonVersion,
 		Retention:     *retention,
@@ -119,6 +138,7 @@ func main() {
 		Sentinel:      sentinelWriter,
 		Remediator:    remediator,
 		Registry:      sessionRegistry,
+		Logins:        logins,
 	})
 
 	mux := http.NewServeMux()
@@ -137,6 +157,10 @@ func main() {
 		sig := <-sigCh
 		log.Printf("claude-repld: %v received, shutting down sessions", sig)
 		srv.ShutdownAll()
+		// Login terminals are children of THIS process, so a daemon that
+		// exits without killing them strands an orphaned claude TUI on a pty
+		// nobody is reading.
+		logins.CloseAll()
 		// Belt-and-suspenders: the registry is write-through crash-safe
 		// (SIGKILL loses nothing), so this flush is an optimization that
 		// re-asserts the on-disk state after the drain, never the
