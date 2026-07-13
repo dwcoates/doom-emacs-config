@@ -18,6 +18,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"claude-repld/internal/account"
+	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
@@ -110,6 +112,10 @@ type Server struct {
 	sentinel   session.SentinelSink
 	remediator Remediator
 	registry   *registry.Registry
+	// logins owns the interactive Claude login terminals, at most one per
+	// account; nil makes the login routes report the capability as
+	// unconfigured.
+	logins *login.Manager
 	// draining marks a daemon-wide teardown (ShutdownAll): the session
 	// deaths it causes are NOT conversation deaths, so the registrar
 	// must leave their records non-terminal for the next boot to
@@ -148,6 +154,9 @@ type Config struct {
 	// Registry persists session records across daemon restarts; nil
 	// disables persistence (tests, embedded use).
 	Registry *registry.Registry
+	// Logins owns the interactive Claude login terminals; nil disables the
+	// login routes.
+	Logins *login.Manager
 }
 
 // New builds a Server.
@@ -169,6 +178,7 @@ func New(cfg Config) *Server {
 		logf:          logf,
 		now:           now,
 		sentinel:      cfg.Sentinel,
+		logins:        cfg.Logins,
 		remediator:    cfg.Remediator,
 		registry:      cfg.Registry,
 		upgrader: websocket.Upgrader{
@@ -276,80 +286,200 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
+	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
+	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
+	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
 	return mux
 }
 
-// handleLogin relays the gui's login button to Emacs over the sentinel
-// side channel.
+// loginAccount resolves the account a login route is being asked about,
+// answering the 404 / 503 cases shared by all three of them. The bool
+// reports whether the caller should carry on.
 //
-// The daemon deliberately does NOT run the login itself: the Claude
-// OAuth flow is an interactive TUI that needs a controlling terminal,
-// and neither the daemon (pipes only) nor the browser has one. Emacs
-// does, so the daemon's whole job here is to name the cwd — which is
-// what selects the account (agent-repl--compute-config-dir) — and hand
-// it over.
+// The session is resolved WITHOUT rehydrating a dormant record: the login
+// is wanted precisely when the account's credentials have expired and
+// sessions are dying, so spawning a shim just to read back a config dir
+// already on the record would launch a doomed CLI for no reason.
+func (s *Server) loginAccount(w http.ResponseWriter, id string) (string, bool) {
+	configDir, known := s.sessionConfigDir(id)
+	if !known {
+		httpError(w, http.StatusNotFound, "no such session")
+		return "", false
+	}
+	if s.logins == nil {
+		httpError(w, http.StatusServiceUnavailable, "login is not configured")
+		return "", false
+	}
+	return configDir, true
+}
+
+// handleLogin opens the interactive Claude login for the account this
+// session runs as, on a pty the daemon owns. The webapp then attaches to
+// GET /sessions/{id}/login/terminal and renders it.
 //
-// The session is resolved WITHOUT rehydrating a dormant record: login is
-// most needed precisely when the account's credentials have expired and
-// sessions are dying, so spawning a shim just to read back a cwd already
-// on the record would launch a doomed CLI for no reason.
+// Idempotent: a second click, or a second workspace on the same account,
+// joins the terminal already open rather than racing a second OAuth flow.
+//
+// Note there is no "this session has no account" error. An empty config
+// dir is a REAL account — the CLI's own default root — so every known
+// session has one.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	cwd, known := s.sessionCWD(id)
+	configDir, ok := s.loginAccount(w, id)
+	if !ok {
+		return
+	}
+	sess, err := s.logins.Open(configDir)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("opening the login terminal: %v", err))
+		return
+	}
+	s.logf("session %s: login terminal open for account %q", id, sess.Account())
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]string{
+		"account":      sess.Account(),
+		"terminal_url": fmt.Sprintf("/sessions/%s/login/terminal", id),
+	})
+}
+
+// handleLoginTerminal streams the login terminal to a viewer and feeds its
+// keystrokes back.
+//
+// Nothing here parses the terminal. Binary frames are raw pty bytes in both
+// directions; text frames are the one control message, a geometry report.
+// The login is a full-screen TUI gated behind stateful prompts before it
+// ever reaches OAuth, so a human reads it — the daemon only carries it.
+func (s *Server) handleLoginTerminal(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	configDir, ok := s.loginAccount(w, id)
+	if !ok {
+		return
+	}
+	sess := s.logins.Get(configDir)
+	if sess == nil {
+		httpError(w, http.StatusConflict, "no login is running for this session's account (POST the login first)")
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logf("server: login websocket upgrade: %v", err)
+		return
+	}
+
+	client := login.NewClient()
+	sess.Attach(client)
+
+	// Writer: terminal → socket. Owns the socket's write side and its
+	// closure. The channel closing means the login ended, which the viewer
+	// learns from the socket closing under it.
+	go func() {
+		defer func() {
+			if err := conn.Close(); err != nil {
+				s.logf("server: login websocket close: %v", err)
+			}
+		}()
+		for chunk := range client.Out {
+			if err := conn.WriteMessage(websocket.BinaryMessage, chunk); err != nil {
+				s.logf("server: login websocket write: %v", err)
+				sess.Detach(client)
+				// Drain so Detach's close(Out) is safe.
+				for range client.Out { //nolint:revive
+				}
+				return
+			}
+		}
+	}()
+
+	// Reader: socket → child. Runs on the handler goroutine.
+	for {
+		kind, data, err := conn.ReadMessage()
+		if err != nil {
+			sess.Detach(client)
+			return
+		}
+		switch kind {
+		case websocket.BinaryMessage:
+			if err := sess.Write(data); err != nil {
+				s.logf("server: login keystroke: %v", err)
+			}
+		case websocket.TextMessage:
+			var ctl struct {
+				Resize *struct {
+					Rows uint16 `json:"rows"`
+					Cols uint16 `json:"cols"`
+				} `json:"resize"`
+			}
+			if err := json.Unmarshal(data, &ctl); err != nil {
+				s.logf("server: login control frame %q: %v", data, err)
+				continue
+			}
+			if ctl.Resize != nil {
+				if err := sess.Resize(ctl.Resize.Rows, ctl.Resize.Cols); err != nil {
+					s.logf("server: login resize: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// handleLoginClose ends the login terminal for this session's account.
+// Closing one that is not running is a success: the caller wanted it gone
+// and it is.
+func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	configDir, ok := s.loginAccount(w, id)
+	if !ok {
+		return
+	}
+	if err := s.logins.Close(configDir); err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("closing the login terminal: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAccount names the Claude account this session runs as, for the
+// topbar. Resolved without rehydrating, for the same reason the login is:
+// which account a session belongs to matters most when it is not running.
+//
+// A logged-out account is a 200 with an empty email, not an error — the
+// topbar renders that state rather than reporting a failure.
+func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	configDir, known := s.sessionConfigDir(id)
 	if !known {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
 	}
-	if cwd == "" {
-		// Account selection is cwd-derived, so a session with no cwd has
-		// no account to log into. That is a structural impossibility on
-		// the Emacs path (create-session refuses an empty cwd) and must
-		// surface, not silently log into whatever the default happens
-		// to be.
-		httpError(w, http.StatusConflict, "session has no cwd; the account to log into cannot be determined")
+	identity, err := account.Read(configDir)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if s.sentinel == nil {
-		httpError(w, http.StatusServiceUnavailable, "login is not configured (no sentinel sink)")
-		return
-	}
-	s.sentinel.LoginRequested(cwd, s.claudeSessionID(id))
-	s.logf("session %s: login requested for cwd %s — handed to Emacs over the sentinel channel", id, cwd)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]bool{"requested": true})
+	writeJSON(w, s.logf, identity)
 }
 
-// sessionCWD returns id's cwd and whether the daemon knows id at all,
-// consulting live sessions and dormant records alike. Unlike resolve it
-// never rehydrates.
-func (s *Server) sessionCWD(id string) (string, bool) {
+// sessionConfigDir returns id's CLAUDE_CONFIG_DIR — the ACCOUNT it runs as
+// — and whether the daemon knows id at all. Consults live sessions and
+// dormant records alike, and unlike resolve it never rehydrates.
+//
+// An empty config dir is a real answer, not a missing one: it names the
+// CLI's own default root, which is why the bool carries the "unknown"
+// case rather than the string.
+func (s *Server) sessionConfigDir(id string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sess := s.sessions[id]; sess != nil {
-		return sess.Info().CWD, true
+		return sess.Info().ConfigDir, true
 	}
 	if rec, ok := s.dormant[id]; ok {
-		return rec.CWD, true
+		return rec.ConfigDir, true
 	}
 	return "", false
-}
-
-// claudeSessionID returns id's durable CLI uuid, or "" when none has
-// arrived yet. Only ever used to decorate a sentinel filename, so an
-// empty answer is a fine answer.
-func (s *Server) claudeSessionID(id string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if sess := s.sessions[id]; sess != nil {
-		return sess.Info().ClaudeSessionID
-	}
-	if rec, ok := s.dormant[id]; ok {
-		return rec.ClaudeSessionID
-	}
-	return ""
 }
 
 // handleRemediate dispatches the "session gone" analyst. The frontend
@@ -544,6 +674,7 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 		Shim:          shim,
 		CWD:           opts.CWD,
 		Model:         opts.Model,
+		ConfigDir:     opts.ConfigDir,
 		Retention:     s.retention,
 		Logf:          s.logf,
 		Sentinel:      s.sentinel,
