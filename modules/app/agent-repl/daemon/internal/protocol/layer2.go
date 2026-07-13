@@ -2,6 +2,13 @@ package protocol
 
 import "encoding/json"
 
+// Layer2Version is the wire-compatibility version of the Layer-2
+// protocol, carried in every hello and in the GET /sessions envelope.
+// Clients compare it against the version they were built for and
+// surface a mismatch instead of mis-parsing frames. Bump on any
+// breaking frame-shape change. Version 2 = boot-id era (1 = before).
+const Layer2Version = 2
+
 // Envelope is the common Layer-2 frame header (§2.1). Seq, TS and
 // SessionID are stamped by the session hub just before a frame is
 // retained and broadcast; translator code leaves them zero. TS is the
@@ -27,8 +34,13 @@ func (e *Envelope) Env() *Envelope { return e }
 
 type HelloFrame struct {
 	Envelope
-	DaemonVersion  string         `json:"daemon_version"`
-	ResumeFromSeq  int64          `json:"resume_from_seq"`
+	DaemonVersion string `json:"daemon_version"`
+	// BootID identifies THIS daemon process instance: minted once at
+	// startup, stable across sessions, different after every restart.
+	// Clients detect a bounce by watching it change.
+	BootID          string         `json:"boot_id"`
+	ProtocolVersion int            `json:"protocol_version"`
+	ResumeFromSeq   int64          `json:"resume_from_seq"`
 	PermissionMode PermissionMode `json:"permission_mode"`
 	Model          string         `json:"model"`
 	CWD            string         `json:"cwd"`

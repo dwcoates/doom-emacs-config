@@ -499,9 +499,10 @@ in-memory instantiation with staler on-disk state."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
                                     :reattach-failures 2 :project-dir "/w")
-    (let ((reattached nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
-                 (lambda () '(((session_id . "s_1")))))
+    (let ((reattached nil)
+          (agent-repl--frontend-last-boot-id nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (&rest _) '((boot_id . "b_1") (sessions . (((session_id . "s_1")))))))
                 ((symbol-function 'agent-repl--frontend-reattach-ws)
                  (lambda (&rest args) (push args reattached))))
         ;; Act
@@ -515,9 +516,10 @@ in-memory instantiation with staler on-disk state."
   "A binding missing from the daemon's list triggers a reattach."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
-    (let ((reattached nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
-                 (lambda () '(((session_id . "s_other")))))
+    (let ((reattached nil)
+          (agent-repl--frontend-last-boot-id nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (&rest _) '((boot_id . "b_1") (sessions . (((session_id . "s_other")))))))
                 ((symbol-function 'agent-repl--frontend-reattach-ws)
                  (lambda (ws stale) (push (list ws stale) reattached))))
         ;; Act
@@ -530,9 +532,10 @@ in-memory instantiation with staler on-disk state."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :reattach-failed t
                                     :project-dir "/w")
-    (let ((reattached nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
-                 (lambda () '()))
+    (let ((reattached nil)
+          (agent-repl--frontend-last-boot-id nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (&rest _) '((boot_id . "b_1") (sessions . ()))))
                 ((symbol-function 'agent-repl--frontend-reattach-ws)
                  (lambda (&rest args) (push args reattached))))
         ;; Act
@@ -545,14 +548,51 @@ in-memory instantiation with staler on-disk state."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
     (let ((ensured nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-list-sessions)
-                 (lambda () (error "connection refused")))
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (&rest _) (error "connection refused")))
                 ((symbol-function 'agent-repl--ensure-frontend-daemon)
                  (lambda (&optional _f) (setq ensured t))))
         ;; Act
         (agent-repl--frontend-reattach-check)
         ;; Assert
         (should ensured)))))
+
+(ert-deftest agent-repl-test-frontend-note-boot-id-first-observation-sets ()
+  "The first boot id observation records without resetting anything."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+                                    :project-dir "/w")
+    (let ((agent-repl--frontend-last-boot-id nil))
+      ;; Act
+      (agent-repl--frontend-note-boot-id "b_first")
+      ;; Assert — recorded, but no give-up reset on first sight.
+      (should (equal agent-repl--frontend-last-boot-id "b_first"))
+      (should (agent-repl--ws-get "ws1" :reattach-failed)))))
+
+(ert-deftest agent-repl-test-frontend-note-boot-id-change-resets-give-ups ()
+  "A boot id change resets :reattach-failed give-ups across workspaces."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+                                    :reattach-failures 3 :project-dir "/w")
+    (let ((agent-repl--frontend-last-boot-id "b_old"))
+      ;; Act
+      (agent-repl--frontend-note-boot-id "b_new")
+      ;; Assert
+      (should (equal agent-repl--frontend-last-boot-id "b_new"))
+      (should-not (agent-repl--ws-get "ws1" :reattach-failed))
+      (should-not (agent-repl--ws-get "ws1" :reattach-failures)))))
+
+(ert-deftest agent-repl-test-frontend-note-boot-id-nil-never-resets ()
+  "A pre-boot-id daemon (nil boot id) neither records nor resets."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+                                    :project-dir "/w")
+    (let ((agent-repl--frontend-last-boot-id "b_old"))
+      ;; Act
+      (agent-repl--frontend-note-boot-id nil)
+      ;; Assert
+      (should (equal agent-repl--frontend-last-boot-id "b_old"))
+      (should (agent-repl--ws-get "ws1" :reattach-failed)))))
 
 (ert-deftest agent-repl-test-frontend-reattach-ws-success-remounts ()
   "A successful reattach re-ensures, remounts, and clears counters."

@@ -67,6 +67,7 @@ type Remediator interface {
 // Server routes daemon HTTP traffic.
 type Server struct {
 	daemonVersion string
+	bootID        string
 	retention     int
 	forceFake     bool
 	spawn         SpawnFunc
@@ -106,6 +107,7 @@ func New(cfg Config) *Server {
 	}
 	return &Server{
 		daemonVersion: cfg.DaemonVersion,
+		bootID:        newBootID(),
 		retention:     cfg.Retention,
 		forceFake:     cfg.ForceFake,
 		spawn:         cfg.Spawn,
@@ -271,6 +273,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	sess := session.New(session.Config{
 		ID:            id,
 		DaemonVersion: s.daemonVersion,
+		BootID:        s.bootID,
 		Shim:          shim,
 		CWD:           opts.CWD,
 		Model:         opts.Model,
@@ -340,7 +343,13 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, s.logf, map[string]any{"sessions": list})
+	writeJSON(w, s.logf, map[string]any{
+		"sessions": list,
+		// Instance identity + wire version: clients watch boot_id to
+		// detect a daemon bounce and protocol_version to detect skew.
+		"boot_id":          s.bootID,
+		"protocol_version": protocol.Layer2Version,
+	})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +451,12 @@ func writeJSON(w http.ResponseWriter, logf func(string, ...any), v any) {
 
 func newSessionID() string {
 	return "s_" + randomHex()
+}
+
+// newBootID mints the daemon instance identity: stable for the life of
+// this process, different after every restart.
+func newBootID() string {
+	return "b_" + randomHex()
 }
 
 // newRequestID mints correlation ids for daemon-originated commands
