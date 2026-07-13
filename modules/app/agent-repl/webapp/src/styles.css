@@ -125,6 +125,15 @@ body {
   50% { color: var(--thinking); }
 }
 
+/* The account this session runs as, sitting immediately right of the status
+   dot. With a personal and a work account both in play, the wrong one is
+   easy to reach and expensive to notice, so the topbar names it rather than
+   leaving the user to infer it from a workspace path. Quiet by default; the
+   error colour when the root has no login at all, because a logged-out
+   session cannot run a turn and that is a problem, not a decoration. */
+#account { color: var(--muted); }
+#account.logged-out { color: var(--err); }
+
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
 
@@ -634,3 +643,66 @@ pre {
 /* Items the renderer suppresses (textless thinking, AskUserQuestion's tool
    card) render as empty nodes: hide them so #feed's gap does not show. */
 .feed-item:empty { display: none; }
+
+/* ---- The login terminal ----------------------------------------------------
+
+   The Claude login is a full-screen TUI, gated behind stateful prompts
+   (theme onboarding, folder trust) before it ever reaches OAuth. Nothing can
+   reliably scrape that, so the GUI renders the terminal and lets a human
+   read it — exactly as the Emacs vterm this replaces did. It is an overlay
+   rather than a panel because the login is modal in practice: there is
+   nothing useful to do in the session it is fixing until it is done. */
+#login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.55);
+}
+#login-overlay[hidden] { display: none; }
+
+#login-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(96vw, 1100px);
+  height: min(80vh, 640px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #11151c;
+  overflow: hidden;
+}
+
+#login-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+#login-title { color: var(--fg); }
+/* The account being logged INTO. Naming it here is the guard against the
+   whole point of the two-account split going wrong in the one place it
+   matters most. */
+#login-account { color: var(--muted); }
+#login-close {
+  margin-left: auto;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+#login-close:hover { color: var(--fg); border-color: var(--fg); }
+
+/* The pty's own viewport. xterm sizes itself to this box, and the column
+   count it reports is what keeps the ~350-character OAuth URL on one line. */
+#login-term {
+  flex: 1;
+  min-height: 0;
+  padding: 0.4rem;
+}

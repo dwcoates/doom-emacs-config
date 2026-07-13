@@ -9,6 +9,7 @@
     <header id="topbar">
       <span id="conn-status">connecting…</span>
       <span id="spinner" class="spinner">●</span>
+      <span id="account" title="the Claude account this session runs as"></span>
       <span id="remediation"></span>
       <span id="session-info"></span>
       <select id="mode-select" title="permission mode">
@@ -28,6 +29,19 @@
       <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
       <button id="send-btn">send</button>
     </footer>
+    <!-- The login terminal. Hidden until the login button opens it: the
+         daemon owns the pty, this is where it gets rendered, and a human
+         drives it exactly as they drove the vterm it replaces. -->
+    <div id="login-overlay" hidden>
+      <div id="login-panel">
+        <header id="login-header">
+          <span id="login-title">Claude login</span>
+          <span id="login-account"></span>
+          <button id="login-close" title="close the login terminal">close</button>
+        </header>
+        <div id="login-term"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
