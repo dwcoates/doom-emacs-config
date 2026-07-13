@@ -8,6 +8,7 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
+  pulsingBlockId,
   renderItem,
   repinsToTail,
   sessionInfoHtml,
@@ -35,6 +36,43 @@ function userTurnAt(hour: number, minute: number, text = "do the thing"): Conver
     requestId: "r1",
     content: [{ type: "text", text }],
     ts: new Date(2026, 4, 24, hour, minute).toISOString(),
+  };
+}
+
+/** A text block item carrying the given id, finished unless DONE says otherwise. */
+function text(blockId: string, done = true): ConversationItem {
+  return { kind: "text", blockId, messageId: "m1", text: "hi", done };
+}
+
+/** A thinking block item, finished unless DONE says otherwise. */
+function thinking(blockId: string, done = true): ConversationItem {
+  return { kind: "thinking", blockId, messageId: "m1", text: "hmm", done };
+}
+
+/** A result frame closing a turn with the given subtype. */
+function result(subtype: ResultItem["subtype"] = "success"): ConversationItem {
+  return {
+    kind: "result",
+    subtype,
+    durationMs: 12,
+    numTurns: 1,
+    totalCostUsd: 0.5,
+    usage: { input_tokens: 3, output_tokens: 4 },
+    isError: subtype === "error_during_execution",
+    context: { total: 300_000, delta: 100_000 },
+  };
+}
+
+/** A tool card item, standing in for work between two text blocks. */
+function tool(): ConversationItem {
+  return {
+    kind: "tool",
+    toolUseId: "t1",
+    messageId: "m1",
+    toolName: "Bash",
+    inputJson: "{}",
+    input: {},
+    inputDone: true,
   };
 }
 
@@ -366,6 +404,51 @@ describe("renderItem", () => {
     const html = renderItem(item, undefined, true);
     // Assert
     expect(html).toContain(`class="bubble assistant md final-response"`);
+  });
+
+  it("pulses a text block flagged as the working frontier", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "on it",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, false, true);
+    // Assert
+    expect(html).toContain(`class="bubble assistant md pulsing"`);
+  });
+
+  it("pulses a working-frontier response rendered as a metaprompt tree", () => {
+    // Arrange — the tree path builds its own bubble, so it needs the class too.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Response (👀 no changes made)\n\n1 👀 Answer\n├── 1.1 First\n└── 1.2 Second",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, false, true);
+    // Assert
+    expect(html).toContain(`class="bubble assistant md pulsing"`);
+  });
+
+  it("withholds the pulse from a text block that is not the working frontier", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "on it",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item, undefined, false, false);
+    // Assert
+    expect(html).not.toContain("pulsing");
   });
 
   it("withholds the green border from a text block that is not a final response", () => {
@@ -1283,38 +1366,6 @@ describe("ResultChip", () => {
 });
 
 describe("finalResponseBlockIds", () => {
-  /** A text block item carrying the given id. */
-  function text(blockId: string): ConversationItem {
-    return { kind: "text", blockId, messageId: "m1", text: "hi", done: true };
-  }
-
-  /** A result frame closing a turn with the given subtype. */
-  function result(subtype: ResultItem["subtype"] = "success"): ConversationItem {
-    return {
-      kind: "result",
-      subtype,
-      durationMs: 12,
-      numTurns: 1,
-      totalCostUsd: 0.5,
-      usage: { input_tokens: 3, output_tokens: 4 },
-      isError: subtype === "error_during_execution",
-      context: { total: 300_000, delta: 100_000 },
-    };
-  }
-
-  /** A tool card item, standing in for work between two text blocks. */
-  function tool(): ConversationItem {
-    return {
-      kind: "tool",
-      toolUseId: "t1",
-      messageId: "m1",
-      toolName: "Bash",
-      inputJson: "{}",
-      input: {},
-      inputDone: true,
-    };
-  }
-
   it("marks the last text block of a completed turn", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), result()];
@@ -1401,6 +1452,80 @@ describe("finalResponseBlockIds", () => {
     const finals = finalResponseBlockIds(items);
     // Assert
     expect(finals.size).toBe(0);
+  });
+});
+
+describe("pulsingBlockId", () => {
+  it("pulses the finished response of a turn still running a tool", () => {
+    // Arrange — the agent said its piece and went off to work.
+    const items = [userTurnAt(9, 0), text("b1"), tool()];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBe("b1");
+  });
+
+  it("pulses only the LAST finished response of the in-flight turn", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2")];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBe("b2");
+  });
+
+  it("stills the pulse once the turn ends", () => {
+    // Arrange — an idle session is working on nothing, so nothing breathes.
+    const items = [userTurnAt(9, 0), text("b1"), result()];
+    // Act
+    const pulse = pulsingBlockId(items, false);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("withholds the pulse from a response still streaming", () => {
+    // Arrange — the bubble's own cursor is the live signal there.
+    const items = [userTurnAt(9, 0), text("b1", false)];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("withholds the pulse while a thinking indicator is active", () => {
+    // Arrange — the thinking spinner is the live signal there.
+    const items = [userTurnAt(9, 0), text("b1"), thinking("k1", false)];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("pulses again once that thinking block finishes", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), thinking("k1", true)];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBe("b1");
+  });
+
+  it("withholds the pulse from a fresh prompt's turn that has written nothing yet", () => {
+    // Arrange — the previous turn's answer is not this turn's frontier.
+    const items = [userTurnAt(9, 0), text("b1"), result(), userTurnAt(9, 5)];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("withholds the pulse from an in-flight turn that has only run tools", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), tool()];
+    // Act
+    const pulse = pulsingBlockId(items, true);
+    // Assert
+    expect(pulse).toBeNull();
   });
 });
 
