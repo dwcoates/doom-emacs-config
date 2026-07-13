@@ -874,7 +874,34 @@ func registryHarness(t *testing.T) (*harness, *registry.Registry) {
 	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
+	drainSessionsOnCleanup(t, srv)
 	return &harness{ts: ts, srv: srv, shims: shims}, reg
+}
+
+// drainSessionsOnCleanup waits for every session's Run goroutine to
+// finish before the test's temp dir is removed. Registrar write-through
+// happens on those goroutines, so without the wait a session reacting to
+// its shim's death can still be writing the registry (and its lock file)
+// while t.TempDir's RemoveAll is deleting the directory — a flake, and a
+// misleading one. Cleanups run LIFO, so this (registered after t.TempDir,
+// before any shim's own cleanup) lands exactly between the two.
+func drainSessionsOnCleanup(t *testing.T, srv *Server) {
+	t.Helper()
+	t.Cleanup(func() {
+		srv.mu.Lock()
+		sessions := make([]*session.Session, 0, len(srv.sessions))
+		for _, sess := range srv.sessions {
+			sessions = append(sessions, sess)
+		}
+		srv.mu.Unlock()
+		for _, sess := range sessions {
+			select {
+			case <-sess.Done():
+			case <-time.After(recvTimeout):
+				t.Errorf("session %s never drained; a registry write may race cleanup", sess.ID)
+			}
+		}
+	})
 }
 
 // awaitSocketClose reads until the WebSocket closes, which strictly
@@ -1077,6 +1104,7 @@ func rehydrationHarness(t *testing.T, forceFake bool, records ...registry.Record
 	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
+	drainSessionsOnCleanup(t, srv)
 	return &harness{ts: ts, srv: srv, shims: shims}, reg, rec
 }
 
