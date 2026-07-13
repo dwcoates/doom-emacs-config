@@ -59,7 +59,15 @@ export function askQuestions(item: PermissionItem): AskQuestion[] | null {
 }
 
 /** Tool names the SPA renders specially (§2.6); others use Generic. */
-const SPECIAL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep", ...SUBAGENT_TOOLS]);
+const SPECIAL_TOOLS = new Set([
+  "Bash",
+  "Read",
+  "Edit",
+  "Write",
+  "Grep",
+  "Skill",
+  ...SUBAGENT_TOOLS,
+]);
 
 /**
  * Tool names whose cards are suppressed entirely: AskUserQuestion's UI
@@ -278,6 +286,12 @@ function toolInput(item: ToolItem): string {
     const to = typeof item.input.to === "string" ? `→ ${item.input.to}: ` : "";
     return `<div class="file-path">${escapeHtml(`${to}${item.input.summary}`)}</div>`;
   }
+  // Skill announces the launch and nothing else: the input's `args` is the
+  // prompt the skill is handed, which the feed already carries as the user
+  // turn or the agent's own text.
+  if (item.toolName === "Skill" && item.input && typeof item.input.skill === "string") {
+    return `<div class="skill-launch">Launching skill: ${escapeHtml(item.input.skill)}</div>`;
+  }
   return `<pre class="tool-input">${escapeHtml(item.inputJson)}</pre>`;
 }
 
@@ -311,6 +325,12 @@ function toolResult(item: ToolItem): string {
   // nothing over the summary line. Errors still fall through below so
   // failures stay loud.
   if (item.toolName === "SendMessage" && !item.result.isError) {
+    return "";
+  }
+  // Skill's success result is the very "Launching skill: <name>" line the
+  // card's input already renders. Errors fall through below so a skill that
+  // failed to launch stays loud.
+  if (item.toolName === "Skill" && !item.result.isError) {
     return "";
   }
   return `<pre class="tool-output${item.result.isError ? " stderr" : ""}">${escapeHtml(
