@@ -54,6 +54,10 @@ type Translator struct {
 	PermissionMode protocol.PermissionMode
 	// Models is the selectable-model menu from the shim's `models` event.
 	Models []protocol.ModelInfo
+	// Commands is the invocable slash-command menu from the shim's
+	// `commands` event, deduplicated by name. Read back over HTTP by the
+	// Emacs input panel, which completes against it.
+	Commands []protocol.SlashCommand
 	// ClaudeSessionID is the CLI-assigned session uuid captured from
 	// system:init. Empty until init arrives. This is the DURABLE id
 	// (usable as CreateOpts.Resume across daemon restarts), unlike the
@@ -131,6 +135,8 @@ func (t *Translator) OnEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		return t.onAck(evt)
 	case "models":
 		return t.onModels(evt)
+	case "commands":
+		return t.onCommands(evt)
 	case "stream-event":
 		return t.onStreamEvent(evt)
 	case "assistant-message":
@@ -267,6 +273,39 @@ func (t *Translator) onModels(evt *protocol.L1Event) []protocol.L2Frame {
 		Envelope: protocol.Envelope{Type: "models"},
 		Models:   evt.Models,
 	}}
+}
+
+// onCommands caches the slash-command menu, which the Emacs input panel
+// reads back over HTTP to complete against. A `refresh-commands` republishes
+// the list, so this REPLACES the cache rather than merging into it: a skill
+// deleted since the last probe must disappear from the menu, and merging
+// would keep offering it forever.
+func (t *Translator) onCommands(evt *protocol.L1Event) []protocol.L2Frame {
+	t.Commands = dedupeCommands(evt.Commands)
+	return nil
+}
+
+// dedupeCommands collapses commands that share a name, keeping the first.
+//
+// The SDK really does report duplicates: a skill installed both at user
+// scope and at project scope is resolved once per scope and reported once
+// per resolution. Offering the same name twice would be a completion menu
+// with two identical rows, so the list is deduplicated once here rather
+// than by every reader.
+func dedupeCommands(cmds []protocol.SlashCommand) []protocol.SlashCommand {
+	if len(cmds) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(cmds))
+	out := make([]protocol.SlashCommand, 0, len(cmds))
+	for _, c := range cmds {
+		if seen[c.Name] {
+			continue
+		}
+		seen[c.Name] = true
+		out = append(out, c)
+	}
+	return out
 }
 
 // rawStreamEvent is the subset of RawMessageStreamEvent the translator

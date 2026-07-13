@@ -289,3 +289,42 @@ func TestDecodeL1EventModels(t *testing.T) {
 		t.Errorf("models = %+v, want one Opus 4.5 entry", evt.Models)
 	}
 }
+
+func TestDecodeL1EventCommands(t *testing.T) {
+	// Arrange — `commands` must be in the known-event allowlist, or
+	// DecodeL1Event returns (nil, nil) and the menu vanishes with no error
+	// anywhere to explain where it went.
+	line := `{"type":"commands","session_id":"s1","commands":[{"name":"compact","description":"summarize","argumentHint":"<how>"}]}`
+	// Act
+	evt, err := DecodeL1Event([]byte(line))
+	// Assert
+	if err != nil {
+		t.Fatalf("DecodeL1Event: %v", err)
+	}
+	if evt == nil {
+		t.Fatal("commands decoded to nil: the type is missing from l1EventKnownTypes")
+	}
+	if len(evt.Commands) != 1 || evt.Commands[0].Name != "compact" {
+		t.Errorf("commands = %+v, want one compact entry", evt.Commands)
+	}
+	if evt.Commands[0].ArgumentHint != "<how>" {
+		t.Errorf("argument hint = %q, want %q", evt.Commands[0].ArgumentHint, "<how>")
+	}
+}
+
+func TestDecodeCommandRefreshCommands(t *testing.T) {
+	// Arrange — likewise for the command allowlist, in the other direction.
+	line := `{"type":"refresh-commands","request_id":"r1"}`
+	// Act
+	cmd, err := DecodeCommand([]byte(line))
+	// Assert
+	if err != nil {
+		t.Fatalf("DecodeCommand: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("refresh-commands decoded to nil: the type is missing from l1CommandKnownTypes")
+	}
+	if cmd.Type != "refresh-commands" || cmd.RequestID != "r1" {
+		t.Errorf("cmd = %+v, want refresh-commands r1", cmd)
+	}
+}

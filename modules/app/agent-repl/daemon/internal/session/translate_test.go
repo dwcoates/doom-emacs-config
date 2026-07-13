@@ -403,6 +403,57 @@ func TestTranslatorModelsEventCachesAndForwardsTheMenu(t *testing.T) {
 	}
 }
 
+func TestTranslatorCommandsEventCachesTheMenu(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"commands","session_id":"s1","commands":[{"name":"compact","description":"d","argumentHint":"<how>"}]}`))
+	// Assert — cached for the HTTP readers; no L2 frame, since the Emacs
+	// input panel reads the menu over HTTP rather than off the socket.
+	wantTypes(t, frames)
+	if len(tr.Commands) != 1 || tr.Commands[0].Name != "compact" {
+		t.Errorf("cached commands = %+v, want one compact entry", tr.Commands)
+	}
+}
+
+func TestTranslatorCommandsEventKeepsTheArgumentHint(t *testing.T) {
+	// Arrange — the hint is what the completion annotation renders.
+	tr := NewTranslator()
+	// Act
+	tr.OnEvent(evt(t, `{"type":"commands","session_id":"s1","commands":[{"name":"compact","description":"d","argumentHint":"<how>"}]}`))
+	// Assert
+	if tr.Commands[0].ArgumentHint != "<how>" {
+		t.Errorf("argument hint = %q, want %q", tr.Commands[0].ArgumentHint, "<how>")
+	}
+}
+
+func TestTranslatorCommandsEventDedupesByName(t *testing.T) {
+	// Arrange — a skill installed at BOTH user and project scope is resolved
+	// once per scope, so the SDK genuinely reports it twice.
+	tr := NewTranslator()
+	// Act
+	tr.OnEvent(evt(t, `{"type":"commands","session_id":"s1","commands":[{"name":"debug-logs","description":"user","argumentHint":""},{"name":"debug-logs","description":"project","argumentHint":""}]}`))
+	// Assert — one row, and it is the first-resolved one.
+	if len(tr.Commands) != 1 {
+		t.Fatalf("cached commands = %+v, want the duplicate collapsed to one", tr.Commands)
+	}
+	if tr.Commands[0].Description != "user" {
+		t.Errorf("kept description = %q, want the first-resolved %q", tr.Commands[0].Description, "user")
+	}
+}
+
+func TestTranslatorCommandsEventReplacesRatherThanMergesTheMenu(t *testing.T) {
+	// Arrange — a refresh republishes the whole list.
+	tr := NewTranslator()
+	tr.OnEvent(evt(t, `{"type":"commands","session_id":"s1","commands":[{"name":"gone","description":"d","argumentHint":""}]}`))
+	// Act — the skill was deleted, so the re-probe no longer reports it.
+	tr.OnEvent(evt(t, `{"type":"commands","session_id":"s1","commands":[{"name":"kept","description":"d","argumentHint":""}]}`))
+	// Assert — merging would keep offering a command that no longer exists.
+	if len(tr.Commands) != 1 || tr.Commands[0].Name != "kept" {
+		t.Errorf("cached commands = %+v, want only the re-probed entry", tr.Commands)
+	}
+}
+
 // --- result and the block-closure invariant --------------------------------------
 
 func TestTranslatorResultMapsFields(t *testing.T) {
