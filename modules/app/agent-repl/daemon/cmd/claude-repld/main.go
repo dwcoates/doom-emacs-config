@@ -56,10 +56,11 @@ func main() {
 		proc, err := shim.Spawn(shim.Options{
 			Argv: argv,
 			Dir:  opts.CWD,
-			// Ownership marker: the SDK's claude subprocess inherits it,
-			// its hook scripts stamp sentinel line 3, and Emacs then
-			// accepts session-id updates from this CLI as module-owned.
-			ExtraEnv: []string{"AGENT_REPL_OWNED=1"},
+			// The SDK's claude subprocess inherits this overlay: the
+			// ownership marker (whose hook scripts stamp sentinel line 3,
+			// so Emacs accepts session-id updates from this CLI) and the
+			// session's CLAUDE_CONFIG_DIR (which account it runs as).
+			ExtraEnv: server.ShimEnv(opts),
 		})
 		if err != nil {
 			return nil, err

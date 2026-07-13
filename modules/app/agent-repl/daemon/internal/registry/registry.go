@@ -29,6 +29,12 @@ type Record struct {
 	CWD            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// ConfigDir is the session's CLAUDE_CONFIG_DIR (the account its CLI
+	// runs under). Persisted because the transcript a rehydration
+	// resumes lives under THIS root, not the daemon's own: without it a
+	// restart would stat ~/.claude for a ~/.claude-chesscom transcript,
+	// find nothing, and prune a perfectly live conversation.
+	ConfigDir string `json:"config_dir,omitempty"`
 	// ClaudeSessionID is the durable CLI session uuid (the --resume
 	// target). Empty until system:init reports it; a record never
 	// filled in cannot be rehydrated.

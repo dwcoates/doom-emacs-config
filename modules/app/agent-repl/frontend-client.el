@@ -155,12 +155,23 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
 (defun agent-repl--frontend-create-session (cwd &optional model resume)
   "POST /sessions rooted at CWD; return the new session id.
 MODEL and RESUME (a durable claude session uuid) are optional
-passthroughs.  Signals on HTTP failure or a malformed response."
+passthroughs.  Signals on HTTP failure or a malformed response.
+
+The account the session's CLI runs as travels in the `config_dir' field,
+computed from CWD by `agent-repl--compute-config-dir' — the SAME resolver
+the vterm start command uses, so both frontends land on the same account
+for the same project (~/.claude-chesscom under $MULTI_REPO_ROOT,
+~/.claude elsewhere).  Sending it per-session is not optional: ONE daemon
+serves every workspace, so the daemon's own environment cannot encode a
+per-workspace account, and without this field every gui session would
+silently run as whichever account the daemon happened to inherit."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
-  (let* ((payload (append `(("cwd" . ,cwd))
+  (let* ((config-dir (agent-repl--compute-config-dir cwd))
+         (payload (append `(("cwd" . ,cwd))
                           (when model `(("model" . ,model)))
                           (when resume `(("resume" . ,resume)))
+                          (when config-dir `(("config_dir" . ,config-dir)))
                           (when agent-repl-frontend-permission-mode
                             `(("permission_mode" . ,agent-repl-frontend-permission-mode)))))
          (resp (agent-repl--frontend-api "POST" "/sessions" payload))
