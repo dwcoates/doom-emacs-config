@@ -2466,21 +2466,83 @@ displays it — we can't select what isn't shown."
             (agent-repl-drawer--post-command))
         (agent-repl-drawer--call-in-drawer fn)))))
 
+(defun agent-repl-drawer--follow-cursor-workspace ()
+  "Switch the active workspace to the one under the drawer cursor.
+
+The realtime half of global drawer navigation: `C-S-n' / `C-S-p' move
+the cursor AND the frame, so walking the list walks the workspaces and
+the user sees each agent's panels as they pass over its entry, instead
+of having to confirm with a separate `C-S-<return>' visit.
+
+Three cursor positions name no switch to make, and each is a normal
+resting place for the cursor rather than a violated precondition:
+
+  - a repo group header, which names a repo and not a workspace;
+  - the already-active workspace, whose switch would be a redundant
+    persp round-trip (the first `C-S-n' out of a fresh drawer lands
+    here, since the cursor auto-syncs to the active workspace);
+  - a workspace in the MERGED section, whose persp has been torn down.
+    Reviving one costs a fresh persp plus a fresh agent session
+    \(`--reactivate-merged'), and that is `agent-repl-drawer-visit''s
+    deliberate act — never a side effect of scrolling past the entry.
+
+Errors when no drawer buffer exists, matching `--call-in-drawer'.
+
+Reuses `--leave-side-window-before-switch' for the same reason
+`agent-repl-drawer-visit' does: a persp switch anchored on a side
+window can clobber the destination's panels."
+  (let* ((buf (or (get-buffer agent-repl-drawer-buffer-name)
+                  (user-error "Drawer not open — `SPC o d' first")))
+         (ws (with-current-buffer buf
+               (agent-repl-drawer--workspace-at-point)))
+         (current (agent-repl--ws-current-name)))
+    (cond
+     ((null ws)
+      (agent-repl--log current
+                       "drawer-follow: no switch, cursor is on a repo group header"))
+     ((equal ws current)
+      (agent-repl--log ws "drawer-follow: no switch, ws=%s is already active" ws))
+     ((eq (agent-repl-drawer--workspace-section ws) :merged)
+      (agent-repl--log ws "drawer-follow: no switch, ws=%s is MERGED (visit it to reactivate)" ws))
+     (t
+      (agent-repl--log ws "drawer-follow: switching from=%s to=%s" current ws)
+      (agent-repl-drawer--leave-side-window-before-switch)
+      (agent-repl--ws-switch ws)))))
+
+(defun agent-repl-drawer--navigate-and-follow (move-fn)
+  "Move the drawer cursor with MOVE-FN, then switch to the workspace it lands on.
+
+Ordering is load-bearing.  MOVE-FN runs inside `--call-in-drawer-focused'
+so the drawer window is selected while the cursor moves (`hl-line' and
+friends engage), and the follow-switch runs AFTER that dispatch returns
+— once focus is back on the originating window.  Switching from inside
+the focused dispatch would run the persp switch with the drawer's side
+window selected, which is exactly the layout-clobbering anchor that
+`--leave-side-window-before-switch' exists to avoid, and would leave
+`with-selected-window' trying to restore a window the switch has already
+replaced."
+  (agent-repl-drawer--call-in-drawer-focused move-fn)
+  (agent-repl-drawer--follow-cursor-workspace))
+
 (defun agent-repl-drawer-global-next ()
-  "Move drawer cursor to next entry from any window.
-Selects the drawer window for the duration of the command so visual
+  "Move drawer cursor to next entry from any window, switching to it.
+Selects the drawer window for the duration of the cursor move so visual
 selection features (`hl-line', etc.) engage and persist after focus
-returns to the originating window — see `--call-in-drawer-focused'."
+returns to the originating window — see `--call-in-drawer-focused'.
+The workspace under the new cursor position becomes the active one — see
+`--follow-cursor-workspace'."
   (interactive)
-  (agent-repl-drawer--call-in-drawer-focused #'agent-repl-drawer-next))
+  (agent-repl-drawer--navigate-and-follow #'agent-repl-drawer-next))
 
 (defun agent-repl-drawer-global-prev ()
-  "Move drawer cursor to previous entry from any window.
-Selects the drawer window for the duration of the command so visual
+  "Move drawer cursor to previous entry from any window, switching to it.
+Selects the drawer window for the duration of the cursor move so visual
 selection features (`hl-line', etc.) engage and persist after focus
-returns to the originating window — see `--call-in-drawer-focused'."
+returns to the originating window — see `--call-in-drawer-focused'.
+The workspace under the new cursor position becomes the active one — see
+`--follow-cursor-workspace'."
   (interactive)
-  (agent-repl-drawer--call-in-drawer-focused #'agent-repl-drawer-prev))
+  (agent-repl-drawer--navigate-and-follow #'agent-repl-drawer-prev))
 
 (defun agent-repl-drawer-global-visit ()
   "Visit (switch to) the workspace at the drawer cursor."
