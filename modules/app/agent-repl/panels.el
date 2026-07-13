@@ -1900,7 +1900,10 @@ actually delivered to a live vterm."
   :kill-fn #'agent-repl--vterm-kill
   :send-fn #'agent-repl--vterm-send-turn
   :interrupt-fn #'agent-repl--vterm-interrupt
-  :running-p-fn (lambda (ws) (agent-repl--agent-running-p ws))
+  ;; The DIRECT process check, never `agent-repl--agent-running-p' — that
+  ;; function now dispatches through this registry, so pointing back at it
+  ;; would close the loop on itself.
+  :running-p-fn #'agent-repl--vterm-process-alive-p
   :show-fn (lambda (_ws) (agent-repl--show-hidden-panels))
   ;; The hide capability is PURE view teardown (restore the pre-panel
   ;; layout, else swap in the fallback buffer) — the gui frontend's
