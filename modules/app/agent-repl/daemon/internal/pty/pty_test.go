@@ -123,6 +123,33 @@ func TestSetsize_ChildSeesTheColumns(t *testing.T) {
 	}
 }
 
+func TestStart_InheritedCOLUMNSDoesNotOverrideThePTY(t *testing.T) {
+	// Arrange: a parent whose environment carries a stale COLUMNS — the
+	// daemon's own case whenever it is launched from a terminal. `tput
+	// cols` prefers COLUMNS OVER the winsize ioctl, so before the child
+	// env was scrubbed this leaked straight through and re-wrapped the
+	// OAuth URL the 400-column pty exists to keep on one line.
+	t.Setenv("COLUMNS", "134")
+	t.Setenv("LINES", "40")
+	cmd := exec.Command("sh", "-c", "tput cols")
+	master, err := Start(cmd)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = master.Close() }()
+	defer func() { _ = cmd.Wait() }()
+
+	// Act
+	if err := Setsize(master, 60, 400); err != nil {
+		t.Fatalf("Setsize: %v", err)
+	}
+
+	// Assert: the pty wins, not the inherited environment.
+	if got := readLineWithin(t, bufio.NewReader(master), 5*time.Second); got != "400" {
+		t.Errorf("child columns: got %q, want %q (inherited COLUMNS beat the pty)", got, "400")
+	}
+}
+
 func TestSetsize_ErrorsOnANonTerminal(t *testing.T) {
 	// Arrange: /dev/null is a character device but NOT a terminal, so the
 	// winsize ioctl must fail loudly rather than silently no-op.
