@@ -6,6 +6,8 @@
 (declare-function agent-repl--mark-start-failed "agent-repl-worktree" (ws err))
 (declare-function agent-repl--ws-gui-frontend-p "frontends" (ws))
 (declare-function agent-repl--gui-running-p "frontend-client" (ws))
+(declare-function agent-repl--ws-frontend "frontends" (ws))
+(declare-function agent-repl-frontend-running-p-fn "frontends" (frontend))
 
 ;; Defined in worktree.el, which may load after this file; referenced only
 ;; at call time by `agent-repl--doom-config-tree-p'.
@@ -1141,12 +1143,24 @@ layout is left untouched in both branches."
     result))
 
 (defun agent-repl--agent-running-p (&optional ws)
-  "Return t if the agent vterm buffer for WS exists with a live process.
+  "Return non-nil when WS has a live agent session on ITS OWN frontend.
 WS defaults to the current workspace name.  Signals an error if no
-workspace can be determined."
+workspace can be determined.
+
+Dispatches through the frontend registry rather than looking for a live
+vterm process directly, so a gui workspace's daemon session counts as
+running too.  While this asked only about `:vterm-buffer' it answered
+\"not running\" for EVERY gui workspace, which silently disarmed every
+guard keyed to it: the refusal to switch backend under a live agent
+\(`agent-repl-select-backend'), the kill-before-workspace-delete advice,
+and the status poll's liveness gate.
+
+The vterm frontend's `:running-p-fn' must therefore point at
+`agent-repl--vterm-process-alive-p' rather than back at this function,
+or the dispatch closes a loop on itself."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
-    (agent-repl--vterm-process-alive-p ws)))
+    (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl--session-starting-p (&optional ws)
   "Return t if vterm exists with a live process but the agent is not yet ready.

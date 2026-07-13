@@ -212,17 +212,23 @@ When t, it should call `message'."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (should (agent-repl--vterm-live-p))))))
 
+;; Both pin the workspace to vterm: `--agent-running-p' dispatches through
+;; the frontend registry, so without the pin these resolve to the gui
+;; default and never reach the vterm process check they mean to exercise.
+
 (ert-deftest agent-repl-test-agent-running-p-no-process ()
-  "Returns nil when buffer is live but has no process."
+  "Returns nil when the vterm buffer is live but has no process."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer " *test-no-proc*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (should-not (agent-repl--agent-running-p))))))
 
 (ert-deftest agent-repl-test-agent-running-p-with-process ()
-  "Returns non-nil when buffer has a live process."
+  "Returns non-nil when the vterm buffer has a live process."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (agent-repl-test--with-temp-buffer " *test-with-proc*"
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
