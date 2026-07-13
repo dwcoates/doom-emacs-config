@@ -121,7 +121,11 @@ func (w *Writer) writeOnce(j job) error {
 		return err
 	}
 	// Single direct write to the final name (see package comment for why
-	// not tmp+rename). Two lines: CWD, then claude session id — the exact
-	// format the hook scripts produce and read-sentinel-file parses.
-	return os.WriteFile(filepath.Join(w.dir, j.name), []byte(j.cwd+"\n"+j.sid+"\n"), 0o644)
+	// not tmp+rename). Three lines: CWD, claude session id, then the
+	// ownership marker — the exact format the hook scripts produce and
+	// read-sentinel-file parses. Daemon-driven sessions are ALWAYS
+	// module-owned (the daemon only ever runs sessions Emacs asked for),
+	// so the marker is unconditional here.
+	return os.WriteFile(filepath.Join(w.dir, j.name),
+		[]byte(j.cwd+"\n"+j.sid+"\nowned\n"), 0o644)
 }

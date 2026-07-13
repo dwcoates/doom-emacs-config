@@ -129,7 +129,10 @@ personal-project ROUTING rather than the defcustom's current default
     (let ((cmd (agent-repl--claude-start-cmd
                 (list :session-id nil :fork-session-id nil
                       :project-dir "/home/user/personal-proj" :model nil))))
-      (should (string-prefix-p "claude " cmd))
+      ;; The ownership env prefix leads every module-launched CLI (it is
+      ;; what the hooks' sentinel marker is derived from); the invocation
+      ;; itself is plain `claude'.
+      (should (string-prefix-p "AGENT_REPL_OWNED=1 claude " cmd))
       (should (string-match-p "--personal-sentinel-flag" cmd))
       (should-not (string-match-p "CLAUDE_CONFIG_DIR" cmd)))))
 

@@ -155,10 +155,22 @@ Falls back to container-path matching for Docker sandbox workspaces."
 
 ;;; Sentinel file reading
 
+(defconst agent-repl--sentinel-owned-marker "owned"
+  "Line-3 value marking a sentinel as written by a MODULE-LAUNCHED CLI.
+The hook scripts emit it when `AGENT_REPL_OWNED' (exported by the vterm
+start command and the daemon's shim spawn) or `DOOM_SANDBOX' is set;
+the daemon's own sentinel writer emits it unconditionally.  Its absence
+means a FOREIGN claude — e.g. a terminal session run by hand in a
+workspace's directory — whose session id must never be adopted onto the
+workspace (see `agent-repl--update-session-id-from-sentinel').")
+
 (defun agent-repl--read-sentinel-file (file)
-  "Read sentinel FILE and return a plist (:dir DIR :session-id SID), or nil on error.
-The file format is two lines: CWD on line 1, session_id on line 2.
-For backward compatibility, a single-line file (CWD only) returns :session-id nil."
+  "Read sentinel FILE and return a plist (:dir DIR :session-id SID :owned BOOL), or nil.
+The file format is three lines: CWD, session_id, then the ownership
+marker (`agent-repl--sentinel-owned-marker' or empty).  Older
+two-line files (and single-line CWD-only files) parse as unowned with a
+nil session-id respectively — the conservative reading, since an
+unmarked writer cannot be proven to be ours."
   (let ((fname (file-name-nondirectory file)))
     (agent-repl--log-verbose nil "read-sentinel-file: ENTER file=%s exists=%s readable=%s"
                       fname (file-exists-p file) (file-readable-p file))
@@ -166,17 +178,25 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
         (let* ((raw (with-temp-buffer
                       (insert-file-contents file)
                       (buffer-string)))
-               (lines (split-string (string-trim raw) "\n" t))
+               ;; NOT omit-nulls: an unowned sentinel's line 3 is EMPTY,
+               ;; and dropping it would shift nothing here but would make
+               ;; the marker's absence indistinguishable from a truncated
+               ;; file.  Trailing blank lines are trimmed off `raw' first.
+               (lines (split-string (string-trim raw) "\n"))
                (dir (string-trim (or (nth 0 lines) "")))
-               (session-id (when (nth 1 lines) (string-trim (nth 1 lines)))))
-          (agent-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S"
-                            fname dir session-id)
+               (session-id (when (nth 1 lines)
+                             (let ((s (string-trim (nth 1 lines))))
+                               (unless (string-empty-p s) s))))
+               (owned (equal (string-trim (or (nth 2 lines) ""))
+                             agent-repl--sentinel-owned-marker)))
+          (agent-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S owned=%s"
+                            fname dir session-id owned)
           (if (or (string= dir "null") (string= dir ""))
               (progn
                 (agent-repl--log nil "read-sentinel-file: REJECTING file=%s with bogus dir=%S (hook may not have received cwd)"
                                   fname dir)
                 nil)
-            (list :dir dir :session-id session-id)))
+            (list :dir dir :session-id session-id :owned owned)))
       (file-missing
        (agent-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)
@@ -187,23 +207,40 @@ For backward compatibility, a single-line file (CWD only) returns :session-id ni
 
 ;;; Event handlers
 
-(defun agent-repl--update-session-id-from-sentinel (ws session-id)
+(defun agent-repl--update-session-id-from-sentinel (ws session-id &optional owned)
   "Update the session ID for workspace WS from sentinel data if non-nil.
-Only updates when WS is already registered in `agent-repl--workspaces'
-and SESSION-ID is a non-empty string that differs from the stored value.
+Only updates when WS is already registered in `agent-repl--workspaces',
+SESSION-ID is a non-empty string that differs from the stored value, and
+OWNED is non-nil.
 Skipping unregistered workspaces is load-bearing: `agent-repl--active-inst'
 auto-creates an instantiation in the hash, which would otherwise cause
 sentinel fires for workspaces this module doesn't manage (e.g. the
 default persp matched via `workspace-for-buffer') to leak entries into
-`agent-repl--workspaces'."
+`agent-repl--workspaces'.
+
+OWNED is the sentinel's ownership marker (see
+`agent-repl--sentinel-owned-marker').  The hooks are keyed on CWD, so a
+FOREIGN claude — a terminal session the user runs by hand inside a
+workspace's directory — fires the same hooks and, before this gate,
+stamped ITS session id onto the workspace.  The workspace's durable id
+is the resume target for both frontends, so the hijack silently made
+`SPC o c' (and every daemon-bounce reattach) resume the wrong
+conversation.  An unowned sentinel still drives STATE transitions
+\(thinking/done/permission — the user does want to see that an agent is
+running in that directory); only the identity write is refused."
   (when (and session-id
              (not (string-empty-p session-id))
              (gethash ws agent-repl--workspaces))
     (let* ((inst (agent-repl--active-inst ws))
            (current (agent-repl-instantiation-session-id inst)))
-      (unless (equal current session-id)
+      (cond
+       ((equal current session-id) nil)
+       ((not owned)
+        (agent-repl--log ws "update-session-id-from-sentinel: REFUSING unowned session %s for ws=%s (foreign CLI in this cwd; keeping %s)"
+                          session-id ws current))
+       (t
         (agent-repl--log ws "update-session-id-from-sentinel: ws=%s old=%s new=%s" ws current session-id)
-        (agent-repl--set-session-id ws session-id)))))
+        (agent-repl--set-session-id ws session-id))))))
 
 (defun agent-repl--process-sentinel-file (file handler)
   "Read sentinel FILE, delete it, resolve its workspace, then invoke HANDLER's callback.
@@ -221,6 +258,7 @@ name and the directory."
   (let* ((sentinel-data (agent-repl--read-sentinel-file file))
          (dir (plist-get sentinel-data :dir))
          (session-id (plist-get sentinel-data :session-id))
+         (owned (plist-get sentinel-data :owned))
          (ws  (when dir (agent-repl--ws-for-dir dir))))
     ;; Delete the file immediately after reading so the poll fallback can't
     ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
@@ -229,8 +267,8 @@ name and the directory."
       (error
        (agent-repl--warn ws "could not delete sentinel file %s: %S"
                          (file-name-nondirectory file) err)))
-    (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S ws=%s"
-                      (plist-get handler :name) (file-name-nondirectory file) dir session-id ws)
+    (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S owned=%s ws=%s"
+                      (plist-get handler :name) (file-name-nondirectory file) dir session-id owned ws)
     (cond
      ((null dir)
       (agent-repl--log nil "process-sentinel-file: dir is nil (read failed) for %s"
@@ -260,7 +298,7 @@ name and the directory."
       ;; channel for this async context.
       (condition-case err
           (progn
-            (agent-repl--update-session-id-from-sentinel ws session-id)
+            (agent-repl--update-session-id-from-sentinel ws session-id owned)
             (agent-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
                               (plist-get handler :name)
                               (file-name-nondirectory file) dir ws

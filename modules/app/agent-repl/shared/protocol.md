@@ -868,9 +868,28 @@ fallback + filename-prefix dispatch) is unchanged machinery.
   resolves this from its **inherited environment** (it is spawned by
   Emacs), which is the same resolution the hook scripts perform —
   daemon and hooks therefore always agree on the directory.
-- **File format**: byte-identical to the hook scripts' output — two
-  `\n`-terminated lines: the session `cwd`, then the durable claude
-  session id (may be empty before `system:init`).
+- **File format**: byte-identical to the hook scripts' output — three
+  `\n`-terminated lines: the session `cwd`, the durable claude session
+  id (may be empty before `system:init`), then the **ownership marker**
+  (`owned`, or empty).
+
+  The marker exists because the hooks are keyed on `cwd`: a FOREIGN
+  claude — a terminal session the user runs by hand inside a
+  workspace's directory — fires the same hooks and, without it, stamped
+  ITS session id onto the workspace. Since the workspace's durable id is
+  the resume target for both frontends, that hijack silently made
+  `SPC o c` (and every daemon-bounce reattach) resume the wrong
+  conversation.
+
+  Emitters stamp `owned` when the CLI is module-launched: the vterm
+  start command exports `AGENT_REPL_OWNED=1`, the daemon's shim spawn
+  passes it in the shim's (and therefore the SDK's claude subprocess's)
+  environment, sandboxed sessions are module-launched by definition
+  (`DOOM_SANDBOX=1`), and the daemon's own sentinel writer marks
+  unconditionally. Emacs adopts a session id ONLY from a marked
+  sentinel; unmarked sentinels still drive state transitions
+  (thinking/done/permission) but never identity. Legacy two-line files
+  parse as unowned — the conservative reading.
 - **Write strategy**: a single direct `write()` to the final filename.
   A same-directory tmp+rename is forbidden: the Emacs watcher runs on
   kqueue where the rename arrives as an ignored `renamed` action, and

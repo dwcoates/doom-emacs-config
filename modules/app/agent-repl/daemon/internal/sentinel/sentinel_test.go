@@ -105,7 +105,9 @@ func TestWriteFilenamesAndContent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("expected sentinel %s: %v (dir has %v)", tt.wantName, err, readDir(t, dir))
 			}
-			if got, want := string(data), "/repo\nsid1\n"; got != want {
+			// Line 3 is the ownership marker: daemon-driven sessions are
+			// module-owned by definition, so Emacs accepts their session ids.
+			if got, want := string(data), "/repo\nsid1\nowned\n"; got != want {
 				t.Fatalf("content = %q, want %q", got, want)
 			}
 		})
@@ -127,7 +129,7 @@ func TestWriteEmptySidStillPrefixMatched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got, want := string(data), "/repo\n\n"; got != want {
+	if got, want := string(data), "/repo\n\nowned\n"; got != want {
 		t.Fatalf("content = %q, want %q", got, want)
 	}
 }

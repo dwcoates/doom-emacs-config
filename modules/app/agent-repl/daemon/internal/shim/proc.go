@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -36,6 +37,11 @@ type Options struct {
 	Argv []string
 	// Dir is the subprocess working directory ("" = inherit).
 	Dir string
+	// ExtraEnv entries are appended to the inherited environment
+	// (KEY=VALUE form). The SDK's claude subprocess inherits them from
+	// the shim, which is how the AGENT_REPL_OWNED ownership marker
+	// reaches the hook scripts.
+	ExtraEnv []string
 	// Logf receives shim stderr lines and protocol decode complaints.
 	// Defaults to log.Printf.
 	Logf func(format string, args ...any)
@@ -52,6 +58,9 @@ func Spawn(opts Options) (*Proc, error) {
 	}
 	cmd := exec.Command(opts.Argv[0], opts.Argv[1:]...)
 	cmd.Dir = opts.Dir
+	if len(opts.ExtraEnv) > 0 {
+		cmd.Env = append(os.Environ(), opts.ExtraEnv...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("shim: stdin pipe: %w", err)
