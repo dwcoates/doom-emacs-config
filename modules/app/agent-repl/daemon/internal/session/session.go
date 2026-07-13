@@ -73,6 +73,9 @@ type Session struct {
 	// configDir is the account this session's CLI runs as. Immutable for
 	// the session's life, so it needs no lock.
 	configDir string
+	// Model-drift reconciler clock (§2.12); immutable for the session's life.
+	reconcileInterval time.Duration
+	reconcileTicks    <-chan time.Time
 
 	mu       sync.Mutex
 	seq      int64
@@ -144,6 +147,16 @@ type Config struct {
 	// Empty is a real answer, not a missing one — it names the CLI's own
 	// default root.
 	ConfigDir string
+	// ModelReconcileInterval is how often the session re-derives its model
+	// from the transcript (§2.12). Zero takes the 30s default; NEGATIVE
+	// disables the check, which is what a fake session wants — it has no
+	// transcript, so a reconciler could only ever log that it cannot find
+	// one.
+	ModelReconcileInterval time.Duration
+	// ModelReconcileTicks overrides the reconciler's clock. Nil mints a
+	// real ticker; tests inject a channel so the check runs on demand
+	// rather than on a wall clock.
+	ModelReconcileTicks <-chan time.Time
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -157,23 +170,28 @@ func New(cfg Config) *Session {
 	if cfg.Logf == nil {
 		cfg.Logf = log.Printf
 	}
+	if cfg.ModelReconcileInterval == 0 {
+		cfg.ModelReconcileInterval = DefaultModelReconcileInterval
+	}
 	translator := NewTranslator()
 	translator.CWD = cfg.CWD
 	translator.Model = cfg.Model
 	return &Session{
-		ID:            cfg.ID,
-		DaemonVersion: cfg.DaemonVersion,
-		BootID:        cfg.BootID,
-		shim:          cfg.Shim,
-		translator:    translator,
-		retention:     cfg.Retention,
-		now:           cfg.Now,
-		logf:          cfg.Logf,
-		sentinel:      cfg.Sentinel,
-		registrar:     cfg.Registrar,
-		configDir:     cfg.ConfigDir,
-		clients:       map[*Client]struct{}{},
-		done:          make(chan struct{}),
+		ID:                cfg.ID,
+		DaemonVersion:     cfg.DaemonVersion,
+		BootID:            cfg.BootID,
+		shim:              cfg.Shim,
+		translator:        translator,
+		retention:         cfg.Retention,
+		now:               cfg.Now,
+		logf:              cfg.Logf,
+		sentinel:          cfg.Sentinel,
+		registrar:         cfg.Registrar,
+		configDir:         cfg.ConfigDir,
+		reconcileInterval: cfg.ModelReconcileInterval,
+		reconcileTicks:    cfg.ModelReconcileTicks,
+		clients:           map[*Client]struct{}{},
+		done:              make(chan struct{}),
 	}
 }
 
@@ -219,6 +237,10 @@ func (s *Session) Info() Info {
 // its own goroutine. All translation happens here, so the translator
 // needs no locking of its own.
 func (s *Session) Run() {
+	// The model mirror's safety net (§2.12). Lives for exactly as long as
+	// the session does: it selects on s.done, which Run closes on its way
+	// out, so the goroutine cannot outlive the shim it is checking.
+	go s.runModelReconciler(s.reconcileTicks, s.reconcileInterval)
 	for evt := range s.shim.Events() {
 		s.mu.Lock()
 		frames := s.translator.OnEvent(evt)
@@ -325,6 +347,7 @@ func (s *Session) helloLocked() []byte {
 		ResumeFromSeq:   resumeFrom,
 		PermissionMode:  s.translator.PermissionMode,
 		Model:           s.translator.Model,
+		Models:          s.translator.Models,
 		CWD:             s.translator.CWD,
 		ClaudeSessionID: s.translator.ClaudeSessionID,
 	}
@@ -374,6 +397,9 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 		return s.shim.SendRaw(ndjson(raw))
 	case "set-permission-mode":
 		s.translator.OnSetPermissionModeCmd(cmd)
+		return s.shim.SendRaw(ndjson(raw))
+	case "set-model":
+		s.translator.OnSetModelCmd(cmd)
 		return s.shim.SendRaw(ndjson(raw))
 	}
 	// `shutdown` is deliberately NOT forwarded: the §2 preamble limits

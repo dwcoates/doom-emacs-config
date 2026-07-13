@@ -48,6 +48,15 @@ type Usage struct {
 	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
 }
 
+// ModelInfo is one selectable model, from the SDK's supportedModels().
+// Shared by both layers: the shim reports it, the daemon caches it, the
+// hello republishes it.
+type ModelInfo struct {
+	Value       string `json:"value"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+}
+
 // PermissionDenial is one entry of ResultEvt.permission_denials.
 type PermissionDenial struct {
 	ToolUseID string `json:"tool_use_id"`
@@ -70,6 +79,9 @@ type L1Event struct {
 	ShimVersion    string `json:"shim_version,omitempty"`
 	SDKVersion     string `json:"sdk_version,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
+
+	// models
+	Models []ModelInfo `json:"models,omitempty"`
 
 	// stream-event / assistant-message / tool-result
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
@@ -126,6 +138,7 @@ func (e *L1Event) MessageText() string {
 var l1EventKnownTypes = map[string]bool{
 	"ready":              true,
 	"ack":                true,
+	"models":             true,
 	"stream-event":       true,
 	"assistant-message":  true,
 	"result":             true,
@@ -193,6 +206,9 @@ type L1Command struct {
 	// set-permission-mode
 	Mode string `json:"mode,omitempty"`
 
+	// set-model
+	Model string `json:"model,omitempty"`
+
 	// shutdown
 	Reason string `json:"reason,omitempty"`
 
@@ -214,6 +230,7 @@ var l1CommandKnownTypes = map[string]bool{
 	"permission-decision": true,
 	"interrupt":           true,
 	"set-permission-mode": true,
+	"set-model":           true,
 	"shutdown":            true,
 	"replay-request":      true,
 }
@@ -259,6 +276,14 @@ func DecodeCommand(line []byte) (*L1Command, error) {
 	case "set-permission-mode":
 		if !ValidPermissionMode(cmd.Mode) {
 			return nil, fmt.Errorf("layer1: set-permission-mode invalid mode %q", cmd.Mode)
+		}
+	case "set-model":
+		// Empty is a caller who forgot to name a model, NOT a request for
+		// the default one: reading it as "default" would switch the
+		// session to a model nobody chose. The model id itself is the
+		// CLI's to validate, so it passes through unchecked beyond this.
+		if cmd.Model == "" {
+			return nil, fmt.Errorf("layer1: set-model requires a non-empty model")
 		}
 	}
 	return &cmd, nil

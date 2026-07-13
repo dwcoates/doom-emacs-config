@@ -245,8 +245,10 @@ func TestTranslatorToolResultWithoutKnownToolHasNoRender(t *testing.T) {
 // --- assistant-message synthesis -----------------------------------------------
 
 func TestTranslatorAssistantMessageSynthesizesUnstreamedBlocks(t *testing.T) {
-	// Arrange — no stream events preceded this message id.
+	// Arrange — no stream events preceded this message id. The mirror is
+	// pinned to the fixture's model so this test sees only block synthesis.
 	tr := NewTranslator()
+	tr.Model = "m"
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","message":{"id":"msgX","role":"assistant","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"full"},{"type":"tool_use","id":"t9","name":"Read","input":{"file_path":"/f"}}],"usage":{"input_tokens":1,"output_tokens":1}}}`))
 	// Assert
@@ -258,6 +260,7 @@ func TestTranslatorAssistantMessageSynthesizesUnstreamedBlocks(t *testing.T) {
 func TestTranslatorAssistantMessageDedupesStreamedMessage(t *testing.T) {
 	// Arrange — the same message id already streamed.
 	tr := NewTranslator()
+	tr.Model = "m"
 	startMessage(t, tr, "msgY")
 	runTextBlock(t, tr, 0, "already streamed")
 	// Act
@@ -265,6 +268,138 @@ func TestTranslatorAssistantMessageDedupesStreamedMessage(t *testing.T) {
 	// Assert
 	if len(frames) != 0 {
 		t.Errorf("frames = %v, want none", frameTypes(frames))
+	}
+}
+
+// --- model mirror ---------------------------------------------------------------
+
+// assistantMsg builds an assistant-message event line reporting MODEL,
+// optionally as a subagent (non-empty PARENT).
+func assistantMsg(id, model, parent string) string {
+	p := ""
+	if parent != "" {
+		p = fmt.Sprintf(`"parent_tool_use_id":%q,`, parent)
+	}
+	return fmt.Sprintf(`{"type":"assistant-message","session_id":"s1","uuid":"u",%s"message":{"id":%q,"role":"assistant","model":%q,"stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}}`, p, id, model)
+}
+
+func TestTranslatorAssistantMessageAnnouncesAnAgentModelSwitch(t *testing.T) {
+	// Arrange — the mirror believes the session is on opus.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act — the agent answers on haiku instead (a /model, a fallback).
+	frames := tr.OnEvent(evt(t, assistantMsg("msg1", "haiku", "")))
+	// Assert
+	if got := frames[0].(*protocol.ModelChangedFrame); got.Model != "haiku" || got.Origin != "agent" {
+		t.Errorf("model-changed = %+v, want model haiku origin agent", got)
+	}
+	if tr.Model != "haiku" {
+		t.Errorf("mirror = %q, want haiku", tr.Model)
+	}
+}
+
+func TestTranslatorAssistantMessageAnnouncesASwitchEvenWhenTheMessageStreamed(t *testing.T) {
+	// Arrange — the streamed-dedup path is the COMMON case, so a mirror
+	// blind to it would be blind to nearly every real switch.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	startMessage(t, tr, "msgS")
+	runTextBlock(t, tr, 0, "streamed")
+	// Act
+	frames := tr.OnEvent(evt(t, assistantMsg("msgS", "haiku", "")))
+	// Assert — the blocks are still deduped, but the switch is announced.
+	wantTypes(t, frames, "model-changed")
+}
+
+func TestTranslatorAssistantMessageIgnoresASubagentModel(t *testing.T) {
+	// Arrange — a Haiku subagent under an Opus session.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	tr.OnEvent(evt(t, assistantMsg("msg2", "haiku", "toolu_1")))
+	// Assert — the topbar must not flip to the subagent's model.
+	if tr.Model != "opus" {
+		t.Errorf("mirror = %q, want opus (a sidechain model leaked)", tr.Model)
+	}
+}
+
+func TestTranslatorAssistantMessageEmitsNoFrameForASubagentModel(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	frames := tr.OnEvent(evt(t, assistantMsg("msg2", "haiku", "toolu_1")))
+	// Assert — block synthesis only, no model-changed.
+	wantTypes(t, frames, "text-start", "text-delta", "text-end")
+}
+
+func TestTranslatorAssistantMessageIsSilentWhenTheModelIsUnchanged(t *testing.T) {
+	// Arrange — the steady state: every turn reports the same model.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	frames := tr.OnEvent(evt(t, assistantMsg("msg3", "opus", "")))
+	// Assert — an unchanged model puts nothing on the wire.
+	wantTypes(t, frames, "text-start", "text-delta", "text-end")
+}
+
+func TestTranslatorSetModelIgnoresAnEmptyModel(t *testing.T) {
+	// Arrange — an assistant message with no model must not blank the mirror.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	frame := tr.SetModel("", "agent")
+	// Assert
+	if frame != nil || tr.Model != "opus" {
+		t.Errorf("frame = %v, mirror = %q, want nil / opus", frame, tr.Model)
+	}
+}
+
+func TestTranslatorSetModelCmdAnnouncesTheSwitchOnlyOnAck(t *testing.T) {
+	// Arrange — a switch the SDK has not confirmed is not a switch.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	tr.OnSetModelCmd(&protocol.L1Command{Type: "set-model", RequestID: "r1", Model: "haiku"})
+	// Assert — nothing moved yet.
+	if tr.Model != "opus" {
+		t.Errorf("mirror = %q, want opus (announced before the ack)", tr.Model)
+	}
+}
+
+func TestTranslatorAckOfSetModelEmitsModelChanged(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	tr.Model = "opus"
+	tr.OnSetModelCmd(&protocol.L1Command{Type: "set-model", RequestID: "r1", Model: "haiku"})
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"ack","session_id":"s1","request_id":"r1"}`))
+	// Assert
+	if got := frames[0].(*protocol.ModelChangedFrame); got.Model != "haiku" || got.Origin != "user" {
+		t.Errorf("model-changed = %+v, want model haiku origin user", got)
+	}
+}
+
+func TestTranslatorAckOfSetPermissionModeStillEmitsModeChanged(t *testing.T) {
+	// Arrange — the two pending maps share the ack path; neither may
+	// shadow the other.
+	tr := NewTranslator()
+	tr.OnSetPermissionModeCmd(&protocol.L1Command{Type: "set-permission-mode", RequestID: "r1", Mode: "plan"})
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"ack","session_id":"s1","request_id":"r1"}`))
+	// Assert
+	wantTypes(t, frames, "permission-mode-changed")
+}
+
+func TestTranslatorModelsEventCachesAndForwardsTheMenu(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"models","session_id":"s1","models":[{"value":"opus","displayName":"Opus","description":"d"}]}`))
+	// Assert — forwarded to attached clients AND cached for later hellos.
+	wantTypes(t, frames, "models")
+	if len(tr.Models) != 1 || tr.Models[0].Value != "opus" {
+		t.Errorf("cached models = %+v, want one opus entry", tr.Models)
 	}
 }
 
@@ -452,11 +587,23 @@ func TestTranslatorSystemInitUpdatesSessionInfo(t *testing.T) {
 	tr := NewTranslator()
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"model":"opus-x","cwd":"/work","permissionMode":"plan"}}`))
-	// Assert
-	wantTypes(t, frames, "system")
+	// Assert — init's model is ANNOUNCED, not merely recorded, so a client
+	// that attached before it does not sit on the hello's empty model.
+	wantTypes(t, frames, "model-changed", "system")
 	if tr.Model != "opus-x" || tr.CWD != "/work" || tr.PermissionMode != protocol.PermissionModePlan {
 		t.Errorf("info = %q %q %q", tr.Model, tr.CWD, tr.PermissionMode)
 	}
+}
+
+func TestTranslatorSystemInitIsSilentWhenTheModelMatchesTheRequest(t *testing.T) {
+	// Arrange — the session was created asking for the model init reports,
+	// so init confirms the mirror rather than moving it.
+	tr := NewTranslator()
+	tr.Model = "opus-x"
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"model":"opus-x","cwd":"/work"}}`))
+	// Assert
+	wantTypes(t, frames, "system")
 }
 
 func TestTranslatorCompactBoundaryMapsToDedicatedFrame(t *testing.T) {

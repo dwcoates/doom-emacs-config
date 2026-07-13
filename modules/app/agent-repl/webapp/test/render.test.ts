@@ -7,6 +7,7 @@ import {
   formatTurnTime,
   itemKey,
   lastUserTurnId,
+  modelOptionsHtml,
   renderItem,
   repinsToTail,
   sessionInfoHtml,
@@ -56,40 +57,40 @@ describe("formatTurnTime", () => {
 describe("sessionInfoHtml", () => {
   it("renders the parent workspace datapoint from parent_ws", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("my-feature", "claude-fable-5", null);
+    const html = sessionInfoHtml("my-feature", null);
     // Assert
     expect(html).toContain(`parent workspace: <span class="info-ws">my-feature</span>`);
   });
 
   it("omits the parent workspace datapoint when parent_ws is absent", () => {
     // Arrange + Act
-    const html = sessionInfoHtml(null, "claude-fable-5", null);
+    const html = sessionInfoHtml(null, null);
     // Assert — no dangling label or leading delimiter.
     expect(html).not.toContain("parent workspace");
-    expect(html.startsWith("model:")).toBe(true);
+    expect(html.startsWith("tokens:")).toBe(true);
   });
 
   it("omits the parent workspace datapoint when parent_ws is empty", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml("", "claude-fable-5", null)).not.toContain("parent workspace");
+    expect(sessionInfoHtml("", null)).not.toContain("parent workspace");
   });
 
   it("escapes markup in the parent workspace name", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml("<b>ws", "m", null)).not.toContain("<b>");
+    expect(sessionInfoHtml("<b>ws", null)).not.toContain("<b>");
   });
 
   it("joins the datapoints with the dot separator", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", "m", null);
+    const html = sessionInfoHtml("ws", null);
     // Assert
-    expect(html).toContain("</span> · model:");
     expect(html).toContain("</span> · tokens:");
   });
 
-  it("omits the model datapoint before hello delivers one", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml(null, "", null)).not.toContain("model:");
+  it("does not print the model, which the picker now both names and switches", () => {
+    // Arrange + Act + Assert — printing it here too would duplicate the
+    // dropdown sitting immediately to its right.
+    expect(sessionInfoHtml("ws", null)).not.toContain("model:");
   });
 
   it("sums input and cache tokens with thousands separators", () => {
@@ -101,28 +102,28 @@ describe("sessionInfoHtml", () => {
       cache_creation_input_tokens: 22256,
     };
     // Act + Assert
-    expect(sessionInfoHtml(null, "m", usage)).toContain(
+    expect(sessionInfoHtml(null, usage)).toContain(
       `tokens: <span class="info-tokens">123,456</span>`,
     );
   });
 
   it("treats missing cache fields as zero", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml(null, "m", { input_tokens: 5, output_tokens: 1 })).toContain(
+    expect(sessionInfoHtml(null, { input_tokens: 5, output_tokens: 1 })).toContain(
       `tokens: <span class="info-tokens">5</span>`,
     );
   });
 
   it("shows zero tokens before any usage arrives", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml(null, "m", null)).toContain(
+    expect(sessionInfoHtml(null, null)).toContain(
       `tokens: <span class="info-tokens">0</span>`,
     );
   });
 
   it("no longer renders the in/out counter or the cost estimate", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", "m", { input_tokens: 3, output_tokens: 7 });
+    const html = sessionInfoHtml("ws", { input_tokens: 3, output_tokens: 7 });
     // Assert
     expect(html).not.toContain("in/");
     expect(html).not.toContain("out");
@@ -133,7 +134,7 @@ describe("sessionInfoHtml", () => {
     // Arrange
     const agents = [subagentEntry()];
     // Act
-    const html = sessionInfoHtml("ws", "m", null, agents, false);
+    const html = sessionInfoHtml("ws", null, agents, false);
     // Assert
     expect(html).toContain("</span> · <span class=\"agents-menu\">");
   });
@@ -142,26 +143,103 @@ describe("sessionInfoHtml", () => {
     // Arrange
     const agents = [subagentEntry(), subagentEntry({ toolUseId: "t2" })];
     // Act + Assert
-    expect(sessionInfoHtml("ws", "m", null, agents, false)).toContain("2 agents");
+    expect(sessionInfoHtml("ws", null, agents, false)).toContain("2 agents");
   });
 
   it("drops the subagent roster when the chip is open", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", "m", null, [subagentEntry()], true);
+    const html = sessionInfoHtml("ws", null, [subagentEntry()], true);
     // Assert
     expect(html).toContain("agents-overlay");
   });
 
   it("omits the subagent chip when the session spawned none", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml("ws", "m", null, [], false)).not.toContain("agents-menu");
+    expect(sessionInfoHtml("ws", null, [], false)).not.toContain("agents-menu");
   });
 
   it("leaves no dangling separator when the session spawned no subagents", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", "m", null, [], false);
+    const html = sessionInfoHtml("ws", null, [], false);
     // Assert
     expect(html.endsWith("</span>")).toBe(true);
+  });
+});
+
+describe("modelOptionsHtml", () => {
+  const MODELS = [
+    { value: "opus", displayName: "Opus 4.5", description: "smartest" },
+    { value: "haiku", displayName: "Haiku 4.5", description: "fastest" },
+  ];
+
+  it("renders one option per model the daemon offers", () => {
+    // Arrange + Act
+    const html = modelOptionsHtml(MODELS, "opus");
+    // Assert
+    expect(html).toContain(`value="opus"`);
+    expect(html).toContain(`value="haiku"`);
+  });
+
+  it("labels each option with its display name", () => {
+    // Arrange + Act + Assert
+    expect(modelOptionsHtml(MODELS, "opus")).toContain(">Opus 4.5</option>");
+  });
+
+  it("selects the live model", () => {
+    // Arrange + Act
+    const html = modelOptionsHtml(MODELS, "haiku");
+    // Assert
+    expect(html).toContain(`<option value="haiku" selected`);
+  });
+
+  it("does not select a model the session is not on", () => {
+    // Arrange + Act
+    const html = modelOptionsHtml(MODELS, "haiku");
+    // Assert
+    expect(html).toContain(`<option value="opus" title=`);
+  });
+
+  it("selects a disabled placeholder before any model is known", () => {
+    // Arrange — pre-hello. Without this the browser auto-selects the first
+    // option and the picker claims a model the session is not on.
+    // Act
+    const html = modelOptionsHtml(MODELS, "");
+    // Assert
+    expect(html).toContain(`<option value="" disabled selected>`);
+  });
+
+  it("names a live model the menu does not list", () => {
+    // Arrange — an id the CLI accepts but does not advertise.
+    // Act
+    const html = modelOptionsHtml(MODELS, "claude-secret-9");
+    // Assert — the picker tells the truth about what is actually running.
+    expect(html).toContain(`<option value="claude-secret-9" selected>claude-secret-9</option>`);
+  });
+
+  it("still offers the menu alongside an unlisted live model", () => {
+    // Arrange + Act
+    const html = modelOptionsHtml(MODELS, "claude-secret-9");
+    // Assert
+    expect(html).toContain(`value="opus"`);
+  });
+
+  it("renders only the placeholder when nothing is known at all", () => {
+    // Arrange + Act
+    const html = modelOptionsHtml([], "");
+    // Assert
+    expect(html).toBe(`<option value="" disabled selected>model…</option>`);
+  });
+
+  it("escapes markup in a model id", () => {
+    // Arrange + Act + Assert
+    expect(modelOptionsHtml([], "<b>x")).not.toContain("<b>x");
+  });
+
+  it("escapes markup in a model display name", () => {
+    // Arrange
+    const evil = [{ value: "m", displayName: "<b>m", description: "d" }];
+    // Act + Assert
+    expect(modelOptionsHtml(evil, "m")).not.toContain("<b>m");
   });
 });
 
