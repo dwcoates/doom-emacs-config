@@ -103,6 +103,17 @@ describe("cappedSectionAt", () => {
     // Act + Assert
     expect(cappedSectionAt(null, feed)).toBeNull();
   });
+
+  it("resolves a click on a subagent description to the box holding its folded JSON", () => {
+    // Arrange — the Agent card as render.ts lays it out: the description line is
+    // all the user can aim at, and the .tool-input box around it is what expands.
+    const feed = node("feed", null);
+    const card = node("card", feed, "tool-card", "tool-agent");
+    const box = node("box", card, "tool-input", "agent-input");
+    const desc = node("desc", box, "file-path", "agent-input-desc");
+    // Act + Assert
+    expect(cappedSectionAt(desc, feed)?.name).toBe("box");
+  });
 });
 
 describe("expandAction", () => {

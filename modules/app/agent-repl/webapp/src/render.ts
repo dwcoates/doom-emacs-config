@@ -273,12 +273,18 @@ function toolInput(item: ToolItem): string {
   if (item.toolName === "Grep" && item.input && typeof item.input.pattern === "string") {
     return `<pre class="cmd">grep: ${escapeHtml(item.input.pattern)}</pre>`;
   }
+  // A subagent call reads as its description alone; the prompt, model and
+  // agent type stay folded into the JSON one click away. The description
+  // class is .agent-input-desc, NOT the .agent-desc the topbar roster
+  // already owns for its own rows — two different components.
   if (
     SUBAGENT_TOOLS.has(item.toolName) &&
     item.input &&
     typeof item.input.description === "string"
   ) {
-    return `<div class="file-path">${escapeHtml(item.input.description)}</div>`;
+    return `<div class="tool-input agent-input"><div class="file-path agent-input-desc">${escapeHtml(
+      item.input.description,
+    )}</div><pre class="agent-json">${escapeHtml(item.inputJson)}</pre></div>`;
   }
   // SendMessage renders summary-only: the UI-preview summary (plus the
   // recipient), never the full message body.
