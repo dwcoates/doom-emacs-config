@@ -294,6 +294,11 @@ successful ensure or a manual panel open clears the marker."
 (defvar agent-repl--frontend-reattach-timer nil
   "Repeating timer driving `agent-repl--frontend-reattach-check', or nil.")
 
+(defvar agent-repl--frontend-last-boot-id nil
+  "The daemon boot id last observed by the reattach sweep, or nil.
+A change means a NEW daemon instance: every `:reattach-failed' give-up
+is reset, because the failures belonged to the previous instance.")
+
 (defun agent-repl--frontend-reattach-timer-start ()
   "Idempotently start the reattach sweep timer.
 No-op in batch/sandbox (`agent-repl--frontend-init-inhibited-p') —
@@ -311,11 +316,10 @@ A binding missing from GET /sessions while the daemon answers means a
 new daemon instance (or a deleted session) — either way the workspace
 re-ensures and remounts.  When the daemon is unreachable but bindings
 exist, ensure it (spawn or adopt) so the next sweep can reattach."
-  (let ((listed (condition-case nil
-                    (mapcar (lambda (s) (alist-get 'session_id s))
-                            (agent-repl--frontend-list-sessions))
-                  (error :unreachable))))
-    (if (eq listed :unreachable)
+  (let ((resp (condition-case nil
+                  (agent-repl--frontend-api "GET" "/sessions")
+                (error :unreachable))))
+    (if (eq resp :unreachable)
         (when (cl-some (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                        (agent-repl--live-ws-names))
           (agent-repl--log nil "reattach: daemon unreachable with bound sessions — ensuring")
@@ -324,14 +328,32 @@ exist, ensure it (spawn or adopt) so the next sweep can reattach."
             (error
              (agent-repl--log nil "reattach: daemon ensure failed: %s"
                                (error-message-string err)))))
-      (dolist (ws (agent-repl--live-ws-names))
+      (agent-repl--frontend-note-boot-id (alist-get 'boot_id resp))
+      (let ((listed (mapcar (lambda (s) (alist-get 'session_id s))
+                            (alist-get 'sessions resp))))
+        (dolist (ws (agent-repl--live-ws-names))
         (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
           (cond
            ((member bound listed)
             (agent-repl--ws-put ws :reattach-failed nil)
             (agent-repl--ws-put ws :reattach-failures nil))
            ((agent-repl--ws-get ws :reattach-failed) nil)
-           (t (agent-repl--frontend-reattach-ws ws bound))))))))
+           (t (agent-repl--frontend-reattach-ws ws bound)))))))))
+
+(defun agent-repl--frontend-note-boot-id (boot-id)
+  "Record BOOT-ID; on an instance change, reset every reattach give-up.
+A give-up (`:reattach-failed') binds a failure history to ONE daemon
+instance — a fresh instance deserves fresh attempts.  Old daemons that
+predate boot ids report nil, which never triggers a reset."
+  (when (and boot-id (not (equal boot-id agent-repl--frontend-last-boot-id)))
+    (when agent-repl--frontend-last-boot-id
+      (agent-repl--log nil "reattach: daemon instance changed %s -> %s — resetting give-ups"
+                        agent-repl--frontend-last-boot-id boot-id)
+      (dolist (ws (agent-repl--live-ws-names))
+        (when (agent-repl--ws-get ws :reattach-failed)
+          (agent-repl--ws-put ws :reattach-failed nil)
+          (agent-repl--ws-put ws :reattach-failures nil))))
+    (setq agent-repl--frontend-last-boot-id boot-id)))
 
 (defun agent-repl--frontend-reattach-ws (ws stale-id)
   "Re-ensure WS's daemon session after STALE-ID vanished; remount webview.

@@ -801,3 +801,51 @@ func TestRemediationReportsAnUnconfiguredRunner(t *testing.T) {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
 }
+
+// --- boot identity -----------------------------------------------------------
+
+func TestListSessionsEnvelopeCarriesBootIdentity(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		BootID          string `json:"boot_id"`
+		ProtocolVersion int    `json:"protocol_version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Assert
+	if !strings.HasPrefix(body.BootID, "b_") || len(body.BootID) < 8 {
+		t.Fatalf("boot_id = %q, want b_<hex>", body.BootID)
+	}
+	if body.ProtocolVersion != protocol.Layer2Version {
+		t.Fatalf("protocol_version = %d, want %d", body.ProtocolVersion, protocol.Layer2Version)
+	}
+}
+
+func TestHelloCarriesServerBootID(t *testing.T) {
+	// Arrange: two sessions in one server share the boot id.
+	h := newHarness(t)
+	idA, _ := h.createSession(t)
+	idB, _ := h.createSession(t)
+	// Act
+	helloA := readFrame(t, h.dial(t, idA))
+	helloB := readFrame(t, h.dial(t, idB))
+	// Assert
+	bootA, _ := helloA["boot_id"].(string)
+	if !strings.HasPrefix(bootA, "b_") {
+		t.Fatalf("hello boot_id = %v, want b_<hex>", helloA["boot_id"])
+	}
+	if helloB["boot_id"] != bootA {
+		t.Fatalf("boot ids differ across sessions of one server: %v vs %v", bootA, helloB["boot_id"])
+	}
+	if int(helloA["protocol_version"].(float64)) != protocol.Layer2Version {
+		t.Fatalf("hello protocol_version = %v, want %d", helloA["protocol_version"], protocol.Layer2Version)
+	}
+}

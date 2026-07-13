@@ -440,6 +440,15 @@ the SPA knows whether it joined mid-conversation.
 interface HelloFrame extends WsEnvelope {
   type: "hello";
   daemon_version: string;
+  // boot_id identifies THIS daemon process instance: minted at startup,
+  // stable across all sessions of the instance, different after every
+  // restart. Clients detect a daemon bounce by watching it change. Also
+  // present in the GET /sessions envelope alongside protocol_version.
+  boot_id: string;
+  // Layer-2 wire-compatibility version (Go: protocol.Layer2Version). A
+  // client built for a different version must surface the mismatch
+  // instead of mis-parsing frames.
+  protocol_version: number;
   resume_from_seq: number;            // 0 if no prior history
   permission_mode: PermissionMode;
   model: string;
