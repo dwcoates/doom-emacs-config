@@ -69,6 +69,16 @@ export interface PermissionItem {
   preview?: PermissionPreview;
   resolution?: { decision: "allow" | "deny" | "cancel"; message?: string };
 }
+/**
+ * The session's input-token standing as of a result: how many tokens the
+ * conversation carries into an API request, and how much that grew over
+ * the previous result. The growth is negative when the turn shed context
+ * rather than added it.
+ */
+export interface ResultContext {
+  total: number;
+  delta: number;
+}
 export interface ResultItem {
   kind: "result";
   subtype: ResultSubtype;
@@ -78,6 +88,13 @@ export interface ResultItem {
   usage: Usage;
   isError: boolean;
   resultText?: string;
+  /**
+   * `null` when the turn ended with the session's context size unknown: a
+   * `/clear` re-inits the session and a compaction rewrites it, and
+   * neither reports the size it left behind, so the figure is unknown
+   * until the next API request declares it.
+   */
+  context: ResultContext | null;
 }
 export interface CompactBoundaryItem {
   kind: "compact-boundary";
@@ -100,6 +117,21 @@ export interface RetryItem {
 export interface SystemItem {
   kind: "system";
   subtype: string;
+}
+
+/**
+ * The tokens an API request carries in its input: the fresh tokens, plus
+ * the cached prefix it read, plus the prefix it wrote to cache. Their sum
+ * IS the conversation's context size at that request, so the last one a
+ * session reported is what the session currently costs to think with.
+ */
+export function contextTokens(usage: Usage | null): number {
+  if (!usage) return 0;
+  return (
+    usage.input_tokens +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  );
 }
 
 export type ConversationItem =
@@ -132,6 +164,13 @@ export interface StoreState {
   items: ConversationItem[];
   turnInFlight: boolean;
   usage: Usage | null;
+  /**
+   * The session's context size as last reported by an API request, which
+   * a `/clear` (`system: init`) and a compaction both invalidate: neither
+   * reports the context it leaves behind, so the figure reverts to `null`
+   * (unknown) until the next request declares the new one.
+   */
+  contextTokens: number | null;
   costUsd: number | null;
   lastSeq: number;
 }
@@ -147,6 +186,7 @@ function initialState(): StoreState {
     items: [],
     turnInFlight: false,
     usage: null,
+    contextTokens: null,
     costUsd: null,
     lastSeq: 0,
   };
@@ -264,6 +304,7 @@ export class ConversationStore {
     s.items = [];
     s.turnInFlight = false;
     s.usage = null;
+    s.contextTokens = null;
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
     if (hello.resume_from_seq > 0 && hello.seq >= hello.resume_from_seq) {
@@ -408,6 +449,7 @@ export class ConversationStore {
           usage: frame.usage,
           isError: frame.is_error,
           resultText: frame.result_text,
+          context: this.resultContext(),
         });
         s.turnInFlight = false;
         s.usage = frame.usage;
@@ -420,9 +462,14 @@ export class ConversationStore {
           preTokens: frame.pre_tokens,
           postTokens: frame.post_tokens,
         });
+        // A compaction rewrites the conversation and the SDK reports no
+        // post-compaction size, so the standing figure is stale the moment
+        // the boundary lands.
+        s.contextTokens = null;
         break;
       case "usage":
         s.usage = frame.usage;
+        s.contextTokens = contextTokens(frame.usage);
         if (frame.cost_usd !== undefined) s.costUsd = frame.cost_usd;
         break;
       case "permission-mode-changed":
@@ -447,8 +494,26 @@ export class ConversationStore {
         break;
       case "system":
         s.items.push({ kind: "system", subtype: frame.subtype });
+        // A `/clear` re-inits the session, dropping the context it had
+        // accumulated. The init announces no size, so the figure is
+        // unknown until the next request reports the fresh one.
+        if (frame.subtype === "init") s.contextTokens = null;
         break;
     }
+  }
+
+  /**
+   * The context standing to stamp on the result now closing: the session's
+   * last-reported size, and its growth over the previous result's. A result
+   * whose own size is unknown carries no standing at all, and one following
+   * such a result measures its growth from zero, since a `/clear` really does
+   * zero the context and a compaction leaves only a fraction of it behind.
+   */
+  private resultContext(): ResultContext | null {
+    const total = this.state.contextTokens;
+    if (total === null) return null;
+    const prior = this.findLast((i): i is ResultItem => i.kind === "result");
+    return { total, delta: total - (prior?.context?.total ?? 0) };
   }
 
   // --- lookups (last matching item wins: block/tool ids are unique, but

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ConversationStore,
   PermissionItem,
+  ResultItem,
   TextItem,
   ToolItem,
   UserTurnItem,
@@ -39,6 +40,34 @@ function newStore(): ConversationStore {
   const store = new ConversationStore();
   store.applyRaw(hello());
   return store;
+}
+
+/** A successful result frame, closing a turn. */
+function resultFrame(fields: Record<string, unknown> = {}): string {
+  return frame("result", {
+    subtype: "success",
+    duration_ms: 5,
+    duration_api_ms: 3,
+    num_turns: 1,
+    total_cost_usd: 0.01,
+    usage: { input_tokens: 1, output_tokens: 2 },
+    is_error: false,
+    result_text: "ok",
+    ...fields,
+  });
+}
+
+/** A usage frame declaring a request that carried TOTAL tokens of context. */
+function usageFrame(total: number): string {
+  return frame("usage", {
+    message_id: "m1",
+    usage: { input_tokens: total, output_tokens: 2 },
+  });
+}
+
+/** The store's result items, in arrival order. */
+function resultItems(store: ConversationStore): ResultItem[] {
+  return store.state.items.filter((i): i is ResultItem => i.kind === "result");
 }
 
 describe("ConversationStore hello handling", () => {
@@ -301,6 +330,103 @@ describe("ConversationStore turn lifecycle", () => {
     // Assert
     expect(store.state.usage?.output_tokens).toBe(20);
     expect(store.state.costUsd).toBe(0.2);
+  });
+
+  it("stamps a result with the session's standing input tokens", () => {
+    // Arrange — a request's input side IS the context it carried.
+    const store = newStore();
+    store.applyRaw(frame("usage", {
+      message_id: "m1",
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 20,
+        cache_read_input_tokens: 250_000,
+        cache_creation_input_tokens: 49_000,
+      },
+    }));
+    // Act
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[0].context).toEqual({ total: 300_000, delta: 300_000 });
+  });
+
+  it("measures a result's increase against the previous result's standing", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(resultFrame());
+    // Act
+    store.applyRaw(usageFrame(300_000));
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[1].context).toEqual({ total: 300_000, delta: 100_000 });
+  });
+
+  it("signs a shrunken context as a decrease", () => {
+    // Arrange — the turn after a compaction stands below the one before it.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(resultFrame());
+    // Act
+    store.applyRaw(usageFrame(60_000));
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[1].context).toEqual({ total: 60_000, delta: -140_000 });
+  });
+
+  it("unknows the standing input tokens when a compaction rewrites the context", () => {
+    // Arrange — the SDK reports no post-compaction size, so the old one is stale.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act
+    store.applyRaw(frame("compact-boundary", { trigger: "manual", pre_tokens: 200_000, post_tokens: 0 }));
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[0].context).toBeNull();
+  });
+
+  it("unknows the standing input tokens when a /clear re-inits the session", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[0].context).toBeNull();
+  });
+
+  it("measures the first result after a /clear from zero", () => {
+    // Arrange — a cleared session really does start its context over.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(resultFrame());
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    store.applyRaw(resultFrame());
+    // Act
+    store.applyRaw(usageFrame(30_000));
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(resultItems(store)[2].context).toEqual({ total: 30_000, delta: 30_000 });
+  });
+
+  it("withholds the standing input tokens from a result the session never reported one for", () => {
+    // Arrange — a turn that errored before any request went out.
+    const store = newStore();
+    // Act
+    store.applyRaw(resultFrame({ subtype: "error_during_execution", is_error: true }));
+    // Assert
+    expect(resultItems(store)[0].context).toBeNull();
+  });
+
+  it("leaves the standing input tokens untouched by the result frame's own usage", () => {
+    // Arrange — a result's usage sums the turn's requests, so it is no context size.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act
+    store.applyRaw(resultFrame({ usage: { input_tokens: 999_999, output_tokens: 2 } }));
+    // Assert
+    expect(store.state.contextTokens).toBe(200_000);
   });
 
   it("tracks permission-mode-changed frames", () => {

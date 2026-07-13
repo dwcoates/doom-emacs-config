@@ -27,8 +27,10 @@
   /* The subagent roster chip: the --tool-title purple the tool cards title
      themselves with, since a subagent IS a tool call the session made. */
   --info-agents: #7c3aed;
-  /* "turn complete" chip wash: the --info-tokens amber dialed down to a muted
-     background tint, so the end of a turn reads at a glance. */
+  /* Completed-turn chip wash: the --info-tokens amber dialed down to a muted
+     background tint, so a turn that ran to completion reads at a glance —
+     the wash IS the "turn complete" label, which is why the chip prints no
+     such word. */
   --turn-complete-bg: #fbf0d2;
   --turn-complete-border: #e6d190;
   /* Composer well: a grey darker than --card, so the box you type into reads as
