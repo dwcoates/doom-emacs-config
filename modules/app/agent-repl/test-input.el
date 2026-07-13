@@ -3461,6 +3461,10 @@ agent input buffer."
 (ert-deftest agent-repl-test-send-and-hide ()
   "`agent-repl-send-and-hide' calls `agent-repl--send' then `agent-repl--hide-panels'."
   (agent-repl-test--with-clean-state
+    ;; A VTERM workspace: `--on-close' dispatches its view teardown through
+    ;; the workspace's own frontend, so a workspace that never declares one
+    ;; resolves to the gui default and puts a webview away instead.
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (let ((calls nil))
       (cl-letf (((symbol-function 'agent-repl--send)
                  (lambda (&rest _) (push 'send calls)))
