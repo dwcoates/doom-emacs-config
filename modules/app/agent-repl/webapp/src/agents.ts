@@ -1,14 +1,19 @@
 /**
- * Subagent roster — the session's Task/Agent tool calls, surfaced as a
- * topbar datapoint beside parent workspace / model / tokens.
+ * Subagent roster — the Task/Agent tool calls the session's context still
+ * carries, surfaced as a topbar datapoint beside parent workspace / model
+ * / tokens.
  *
- * The roster is DERIVED, not tracked: every subagent the session ever
- * spawned is already in the feed as a tool item, so the chip's count and
- * the overlay's rows are a projection of `StoreState.items` rather than
- * a second copy of the same state that could drift from it.
+ * The roster is DERIVED, not tracked: every subagent the session spawned
+ * is already in the feed as a tool item, so the chip's count and the
+ * overlay's rows are a projection of `StoreState.items` rather than a
+ * second copy of the same state that could drift from it. A `/clear` thus
+ * needs no reset of its own — the roster reads the context
+ * (`itemsSinceClear`), and the clear is what moves where that context
+ * begins.
  */
 import { escapeHtml } from "./highlight.js";
 import { ConversationItem, ToolItem } from "./store.js";
+import { itemsSinceClear } from "./turn.js";
 
 /**
  * Tool names that spawn a subagent. The CLI renamed the tool from `Task`
@@ -43,10 +48,16 @@ function stringField(item: ToolItem, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Every subagent the session spawned, in spawn order. */
+/**
+ * Every subagent the session's current context carries, in spawn order.
+ *
+ * A subagent spawned before the last `/clear` is gone from that context
+ * even though its tool card is still on screen above the divider, so the
+ * roster starts where the context starts.
+ */
 export function sessionSubagents(items: readonly ConversationItem[]): SubagentEntry[] {
   const entries: SubagentEntry[] = [];
-  for (const item of items) {
+  for (const item of itemsSinceClear(items)) {
     if (item.kind !== "tool" || !SUBAGENT_TOOLS.has(item.toolName)) continue;
     entries.push({
       toolUseId: item.toolUseId,
