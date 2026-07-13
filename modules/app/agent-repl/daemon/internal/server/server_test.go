@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
@@ -1474,36 +1476,81 @@ func TestResumeGateStatsTranscriptUnderTheSessionConfigDir(t *testing.T) {
 	}
 }
 
-// --- POST /sessions/{id}/login ------------------------------------------------
+// --- the login terminal, and the account it targets ---------------------------
 
-// recordingSentinel captures the sentinel side-channel calls the daemon
-// makes on Emacs's behalf.
-type recordingSentinel struct {
-	mu     sync.Mutex
-	logins [][2]string
+// fakeTerminal is a login child that records what it was asked to do.
+type fakeTerminal struct {
+	emit      chan []byte
+	leftover  []byte
+	closeOnce sync.Once
+
+	mu      sync.Mutex
+	written []byte
+	rows    uint16
+	cols    uint16
 }
 
-func (r *recordingSentinel) PermissionRequested(string, string, string) {}
-func (r *recordingSentinel) PermissionResolved(string, string, string)  {}
-func (r *recordingSentinel) SessionDead(string, string)                 {}
+func newFakeTerminal() *fakeTerminal { return &fakeTerminal{emit: make(chan []byte, 16)} }
 
-func (r *recordingSentinel) LoginRequested(cwd, sid string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.logins = append(r.logins, [2]string{cwd, sid})
+func (f *fakeTerminal) Read(p []byte) (int, error) {
+	if len(f.leftover) == 0 {
+		chunk, ok := <-f.emit
+		if !ok {
+			return 0, io.EOF
+		}
+		f.leftover = chunk
+	}
+	n := copy(p, f.leftover)
+	f.leftover = f.leftover[n:]
+	return n, nil
 }
 
-func (r *recordingSentinel) requested() [][2]string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return slices.Clone(r.logins)
+func (f *fakeTerminal) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.written = append(f.written, p...)
+	return len(p), nil
 }
 
-// loginHarness is a harness whose sentinel side channel is observable.
-func loginHarness(t *testing.T, sink session.SentinelSink) *harness {
+func (f *fakeTerminal) Resize(rows, cols uint16) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows, f.cols = rows, cols
+	return nil
+}
+
+func (f *fakeTerminal) Wait() error { return nil }
+
+func (f *fakeTerminal) Close() error {
+	f.closeOnce.Do(func() { close(f.emit) })
+	return nil
+}
+
+func (f *fakeTerminal) say(s string) { f.emit <- []byte(s) }
+
+func (f *fakeTerminal) keystrokes() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return string(f.written)
+}
+
+func (f *fakeTerminal) size() (uint16, uint16) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rows, f.cols
+}
+
+// loginHarness is a harness whose login terminals are fakes. The returned
+// map is keyed by ACCOUNT (the CLAUDE_CONFIG_DIR), and accounts records the
+// accounts a terminal was actually opened for, in order.
+func loginHarness(t *testing.T, withLogins bool) (*harness, map[string]*fakeTerminal, *[]string) {
 	t.Helper()
+	var mu sync.Mutex
+	terms := map[string]*fakeTerminal{}
+	accounts := []string{}
 	shims := make(chan *fakeShim, 8)
-	srv := New(Config{
+
+	cfg := Config{
 		DaemonVersion: "0.1.0-test",
 		Retention:     64,
 		Logf:          func(string, ...any) {},
@@ -1512,11 +1559,26 @@ func loginHarness(t *testing.T, sink session.SentinelSink) *harness {
 			shims <- shim
 			return shim, nil
 		},
-		Sentinel: sink,
-	})
+	}
+	if withLogins {
+		cfg.Logins = login.NewManager(login.Config{
+			Logf: func(string, ...any) {},
+			Start: func(acct string) (login.Proc, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				accounts = append(accounts, acct)
+				term := newFakeTerminal()
+				terms[acct] = term
+				return term, nil
+			},
+		})
+		t.Cleanup(cfg.Logins.CloseAll)
+	}
+
+	srv := New(cfg)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return &harness{ts: ts, srv: srv, shims: shims}
+	return &harness{ts: ts, srv: srv, shims: shims}, terms, &accounts
 }
 
 func postLogin(t *testing.T, h *harness, sessionID string) *http.Response {
@@ -1529,59 +1591,300 @@ func postLogin(t *testing.T, h *harness, sessionID string) *http.Response {
 	return resp
 }
 
-func TestLoginHandsTheSessionCWDToEmacs(t *testing.T) {
-	// Arrange
-	sink := &recordingSentinel{}
-	h := loginHarness(t, sink)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+// dialLoginTerminal attaches a viewer to the session's login terminal.
+func dialLoginTerminal(t *testing.T, h *harness, sessionID string) *websocket.Conn {
+	t.Helper()
+	url := "ws" + strings.TrimPrefix(h.ts.URL, "http") + "/sessions/" + sessionID + "/login/terminal"
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial login terminal: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+func TestLoginOpensATerminalForTheSessionsAccount(t *testing.T) {
+	// Arrange: the ACCOUNT is the config dir, not the cwd. A login aimed at
+	// the wrong account would log into the wrong one and leave the real
+	// problem in place.
+	h, _, accounts := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude-chesscom"}`)
+
 	// Act
 	resp := postLogin(t, h, id)
-	// Assert — the cwd is what selects the account, so it is the payload.
+
+	// Assert
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", resp.StatusCode)
 	}
-	got := sink.requested()
-	if len(got) != 1 || got[0][0] != "/w" {
-		t.Fatalf("login requests = %v, want one for cwd /w", got)
+	if len(*accounts) != 1 || (*accounts)[0] != "/root/.claude-chesscom" {
+		t.Fatalf("terminals opened for %v, want one for /root/.claude-chesscom", *accounts)
+	}
+}
+
+func TestLoginOnADefaultAccountSessionOpensATerminal(t *testing.T) {
+	// Arrange: an empty config dir is a REAL account (the CLI's own default
+	// root), so it must open a terminal rather than be refused as accountless
+	// — which is what the cwd-derived predecessor did.
+	h, _, accounts := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+
+	// Act
+	resp := postLogin(t, h, id)
+
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if len(*accounts) != 1 || (*accounts)[0] != "" {
+		t.Fatalf("terminals opened for %v, want one for the default account", *accounts)
+	}
+}
+
+func TestLoginIsIdempotentForOneAccount(t *testing.T) {
+	// Arrange: a second click must join the terminal already open, not race
+	// a second OAuth flow against the first.
+	h, _, accounts := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude"}`)
+
+	// Act
+	_ = postLogin(t, h, id)
+	_ = postLogin(t, h, id)
+
+	// Assert
+	if len(*accounts) != 1 {
+		t.Fatalf("terminals opened = %v, want exactly one", *accounts)
 	}
 }
 
 func TestLoginOnAnUnknownSessionIs404(t *testing.T) {
 	// Arrange
-	h := loginHarness(t, &recordingSentinel{})
+	h, _, _ := loginHarness(t, true)
+
 	// Act
 	resp := postLogin(t, h, "s_nope")
+
 	// Assert
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
 
-func TestLoginWithoutASentinelSinkIs503(t *testing.T) {
-	// Arrange — no sink means no channel to Emacs, so the button cannot
-	// work and must say so rather than report a login that never happened.
-	h := loginHarness(t, nil)
+func TestLoginWithoutAManagerIs503(t *testing.T) {
+	// Arrange: no manager means the button cannot work, and must say so
+	// rather than report a login that never happened.
+	h, _, _ := loginHarness(t, false)
 	id := postCreate(t, h, `{"cwd":"/w"}`)
+
 	// Act
 	resp := postLogin(t, h, id)
+
 	// Assert
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
 }
 
-func TestLoginOnACWDlessSessionIs409(t *testing.T) {
-	// Arrange — no cwd means no account can be derived.
-	sink := &recordingSentinel{}
-	h := loginHarness(t, sink)
-	id := postCreate(t, h, `{}`)
+func TestLoginTerminalCarriesTheScreenToTheViewer(t *testing.T) {
+	// Arrange
+	h, terms, _ := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude"}`)
+	_ = postLogin(t, h, id)
+	conn := dialLoginTerminal(t, h, id)
+
 	// Act
-	resp := postLogin(t, h, id)
+	terms["/root/.claude"].say("Paste code here >")
+
 	// Assert
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
 	}
-	if got := sink.requested(); len(got) != 0 {
-		t.Fatalf("login requests = %v, want none", got)
+	kind, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read terminal: %v", err)
+	}
+	if kind != websocket.BinaryMessage {
+		t.Errorf("frame kind = %d, want binary (raw pty bytes)", kind)
+	}
+	if string(data) != "Paste code here >" {
+		t.Errorf("terminal = %q", data)
+	}
+}
+
+func TestLoginTerminalCarriesKeystrokesToTheChild(t *testing.T) {
+	// Arrange
+	h, terms, _ := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude"}`)
+	_ = postLogin(t, h, id)
+	conn := dialLoginTerminal(t, h, id)
+
+	// Act — the pasted OAuth code.
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte("code-123\r")); err != nil {
+		t.Fatalf("write keystrokes: %v", err)
+	}
+
+	// Assert
+	term := terms["/root/.claude"]
+	deadline := time.Now().Add(3 * time.Second)
+	for term.keystrokes() != "code-123\r" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := term.keystrokes(); got != "code-123\r" {
+		t.Errorf("child stdin = %q, want %q", got, "code-123\r")
+	}
+}
+
+func TestLoginTerminalCarriesGeometryToTheChild(t *testing.T) {
+	// Arrange: the TUI hard-wraps at the column count, so the viewer's real
+	// width is what keeps the OAuth URL readable.
+	h, terms, _ := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude"}`)
+	_ = postLogin(t, h, id)
+	conn := dialLoginTerminal(t, h, id)
+
+	// Act
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"resize":{"rows":40,"cols":180}}`)); err != nil {
+		t.Fatalf("write resize: %v", err)
+	}
+
+	// Assert
+	term := terms["/root/.claude"]
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if rows, cols := term.size(); rows == 40 && cols == 180 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rows, cols := term.size()
+	t.Errorf("child geometry = %dx%d, want 40x180", rows, cols)
+}
+
+func TestLoginTerminalBeforeAnyLoginIs409(t *testing.T) {
+	// Arrange: attaching to a terminal nobody opened must say so rather than
+	// silently open one, which would start an OAuth flow the user never asked
+	// for.
+	h, _, _ := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+
+	// Act
+	url := "ws" + strings.TrimPrefix(h.ts.URL, "http") + "/sessions/" + id + "/login/terminal"
+	_, resp, err := websocket.DefaultDialer.Dial(url, nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("dial succeeded, want a refusal")
+	}
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %v, want 409", resp)
+	}
+}
+
+func TestLoginCloseEndsTheTerminal(t *testing.T) {
+	// Arrange
+	h, terms, accounts := loginHarness(t, true)
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/root/.claude"}`)
+	_ = postLogin(t, h, id)
+
+	// Act
+	req, err := http.NewRequest(http.MethodDelete, h.ts.URL+"/sessions/"+id+"/login", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE login: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Assert — closed, and a later login starts a fresh terminal.
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	term := terms["/root/.claude"]
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := term.Read(make([]byte, 1)); err == io.EOF {
+			break
+		}
+	}
+	_ = postLogin(t, h, id)
+	if len(*accounts) != 2 {
+		t.Errorf("terminals opened = %v, want a fresh one after the close", *accounts)
+	}
+}
+
+// --- GET /sessions/{id}/account -----------------------------------------------
+
+func getAccount(t *testing.T, h *harness, sessionID string) (*http.Response, map[string]string) {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions/" + sessionID + "/account")
+	if err != nil {
+		t.Fatalf("GET account: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	var body map[string]string
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode account: %v", err)
+		}
+	}
+	return resp, body
+}
+
+func TestAccountNamesTheLoggedInEmail(t *testing.T) {
+	// Arrange: the topbar's whole job is naming the account a session is
+	// about to spend tokens as.
+	cfgDir := t.TempDir()
+	doc := `{"oauthAccount":{"emailAddress":"dodge@chess.com"}}`
+	if err := os.WriteFile(filepath.Join(cfgDir, ".claude.json"), []byte(doc), 0o600); err != nil {
+		t.Fatalf("write identity: %v", err)
+	}
+	h, _, _ := loginHarness(t, true)
+	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgDir))
+
+	// Act
+	resp, body := getAccount(t, h, id)
+
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if body["email"] != "dodge@chess.com" {
+		t.Errorf("email = %q, want dodge@chess.com", body["email"])
+	}
+	if body["config_dir"] != cfgDir {
+		t.Errorf("config_dir = %q, want %q", body["config_dir"], cfgDir)
+	}
+}
+
+func TestAccountReportsLoggedOutRatherThanFailing(t *testing.T) {
+	// Arrange: a config root with no identity file is logged out, which the
+	// topbar renders. It is not a server failure.
+	h, _, _ := loginHarness(t, true)
+	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, t.TempDir()))
+
+	// Act
+	resp, body := getAccount(t, h, id)
+
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if body["email"] != "" {
+		t.Errorf("email = %q, want empty for a logged-out root", body["email"])
+	}
+}
+
+func TestAccountOnAnUnknownSessionIs404(t *testing.T) {
+	// Arrange
+	h, _, _ := loginHarness(t, true)
+
+	// Act
+	resp, _ := getAccount(t, h, "s_nope")
+
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
