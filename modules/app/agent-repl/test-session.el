@@ -2318,21 +2318,50 @@ without losing any runtime behavior."
 
 ;;;; ---- Tests: agent-running-p ----
 
-(ert-deftest agent-repl-test-agent-running-p-explicit-ws ()
-  "agent-running-p with explicit ws should delegate to vterm-process-alive-p."
+;; `--agent-running-p' asks the workspace's OWN frontend.  While it looked
+;; only at `:vterm-buffer' it answered "not running" for every gui
+;; workspace, which silently disarmed every guard keyed to it.
+
+(ert-deftest agent-repl-test-agent-running-p-asks-the-vterm-frontend ()
+  "A vterm workspace's liveness is its vterm process check."
+  ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--use-vterm-frontend)
     (let ((checked-ws nil))
       (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
                  (lambda (ws) (setq checked-ws ws) t)))
+        ;; Act / Assert
         (should (agent-repl--agent-running-p "my-ws"))
         (should (equal checked-ws "my-ws"))))))
+
+(ert-deftest agent-repl-test-agent-running-p-asks-the-gui-frontend ()
+  "A gui workspace's live daemon session counts as running.
+This is the bug the registry dispatch fixes: keyed to `:vterm-buffer',
+this answered nil for EVERY gui workspace, disarming the backend-switch
+guard, the kill-before-workspace-delete advice, and the status poll."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((checked-ws nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-running-p)
+                 (lambda (ws) (setq checked-ws ws) t)))
+        ;; Act / Assert
+        (should (agent-repl--agent-running-p "gui-ws"))
+        (should (equal checked-ws "gui-ws"))))))
+
+(ert-deftest agent-repl-test-agent-running-p-gui-without-a-session-is-not-running ()
+  "A gui workspace with no daemon session is not running."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--gui-running-p) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--agent-running-p "gui-ws")))))
 
 (ert-deftest agent-repl-test-agent-running-p-nil-ws-uses-current ()
   "agent-running-p with nil ws should fall back to +workspace-current-name."
   (agent-repl-test--with-clean-state
     (let ((checked-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'agent-repl--vterm-process-alive-p)
+                ((symbol-function 'agent-repl--gui-running-p)
                  (lambda (ws) (setq checked-ws ws) nil)))
         (should-not (agent-repl--agent-running-p))
         (should (equal checked-ws "current-ws"))))))
