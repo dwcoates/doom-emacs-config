@@ -502,8 +502,7 @@ pre {
   cursor: not-allowed;
 }
 
-/* --- pending indicators (streaming tool input, textless thinking) ---------- */
-.tool-input-pending { padding: 0.35em 0.2em; }
+/* --- pending indicators (running tool call, textless thinking) ------------- */
 /* Textless thinking: an orange spinner, with no quote bar, so the "model is
    working" beat reads as progress rather than as quoted content. */
 .thinking-pending {
@@ -527,14 +526,16 @@ pre {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-/* A tool call still awaiting its result spins the same arc, one size down,
-   inside its running badge. Two animations run on it: the endless rotation,
-   and a fade-in whose 1s delay is the whole mechanic — the arc is invisible
-   for the call's first second, so only a call the user actually waits on
-   ever shows it. The box is laid out from the start (opacity, not display),
-   so the badge does not jump when the arc fades in. A tool-use-progress
-   update rewrites the card and so restarts the delay, which is harmless: a
-   fresh progress line is itself the liveness signal the arc stands in for. */
+/* A tool call that has not settled spins the same arc, one size down, inside
+   its running badge — through BOTH in-flight phases (streaming input, then
+   awaiting the result), so every card in progress reads the same. Two
+   animations run on it: the endless rotation, and a fade-in whose 1s delay is
+   the whole mechanic — the arc is invisible for the phase's first second, so
+   only a call the user actually waits on ever shows it. The box is laid out
+   from the start (opacity, not display), so the badge does not jump when the
+   arc fades in. Rewriting the card restarts the delay (a tool-use-progress
+   update does, as does the input→running flip), which is harmless: each such
+   rewrite is itself the liveness signal the arc stands in for. */
 .tool-spinner {
   flex: none;
   width: 0.7em;
@@ -570,15 +571,6 @@ pre {
   .agent-dot.agent-running {
     animation: none;
   }
-}
-.pulse {
-  color: var(--muted);
-  letter-spacing: 0.25em;
-  animation: tool-pulse 1.2s ease-in-out infinite;
-}
-@keyframes tool-pulse {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 0.9; }
 }
 
 /* Items the renderer suppresses (textless thinking, AskUserQuestion's tool

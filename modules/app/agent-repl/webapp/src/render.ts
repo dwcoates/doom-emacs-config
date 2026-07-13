@@ -216,19 +216,20 @@ function Thinking(item: ThinkingItem): string {
 
 function ToolCard(item: ToolItem): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
-  // A call whose input has landed but whose result has not is the one card
-  // state with no motion of its own: the input phase already pulses •••,
-  // and a settled card carries done/error. So the running badge grows the
-  // same arc the thinking indicator spins, held invisible for its first
-  // second by CSS (see .tool-spinner), which keeps the sub-second tools —
-  // Edit, Read, most Bash — from flashing it.
+  // In-flight is ONE look, whichever phase the call is in: the orange run
+  // badge carrying the same arc the thinking indicator spins, held
+  // invisible for its first second by CSS (see .tool-spinner) so the
+  // sub-second tools — Edit, Read, most Bash — never flash it. Only the
+  // badge's label distinguishes the two phases; a settled card drops the
+  // badge for done/error. The card body carries no indicator of its own,
+  // so the arc is the single place motion lives.
   const status = item.result
     ? item.result.isError
       ? `<span class="badge err">error</span>`
       : `<span class="badge ok">done</span>`
-    : item.inputDone
-      ? `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`
-      : `<span class="badge run">streaming input…</span>`;
+    : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>${
+        item.inputDone ? "running…" : "streaming input…"
+      }</span>`;
   const progress = item.progress
     ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>`
     : "";
@@ -244,11 +245,11 @@ function ToolCard(item: ToolItem): string {
 function toolInput(item: ToolItem): string {
   // While the input is still streaming, item.input is unparsed and the
   // only material is the accumulating RAW partial JSON — flashing that
-  // before the pretty per-tool form renders reads as a glitch. Show a
-  // quiet preparing indicator until tool-use-input-end lands.
-  if (!item.inputDone) {
-    return `<div class="tool-input-pending"><span class="pulse">•••</span></div>`;
-  }
+  // before the pretty per-tool form renders reads as a glitch. The body
+  // stays empty until tool-use-input-end lands: the head's running badge
+  // (see ToolCard) is the sole in-progress indicator, so an in-body pulse
+  // would only double up on the beat the arc already marks.
+  if (!item.inputDone) return "";
   if (item.toolName === "Bash" && item.input && typeof item.input.command === "string") {
     // .bash-input caps the visible command at 5 lines, scrollable
     // independently of the output's own 5-line cap.
