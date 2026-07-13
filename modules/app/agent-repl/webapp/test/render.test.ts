@@ -11,8 +11,21 @@ import {
   repinsToTail,
   sessionInfoHtml,
 } from "../src/render.js";
+import { SubagentEntry } from "../src/agents.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { ConversationItem, ResultItem, ToolItem } from "../src/store.js";
+
+/** A settled roster entry for one spawned subagent. */
+function subagentEntry(over: Partial<SubagentEntry> = {}): SubagentEntry {
+  return {
+    toolUseId: "t1",
+    description: "hunt the flake",
+    agentType: "Explore",
+    status: "done",
+    nested: false,
+    ...over,
+  };
+}
 
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
 function userTurnAt(hour: number, minute: number, text = "do the thing"): ConversationItem {
@@ -114,6 +127,41 @@ describe("sessionInfoHtml", () => {
     expect(html).not.toContain("in/");
     expect(html).not.toContain("out");
     expect(html).not.toContain("$");
+  });
+
+  it("appends the subagent chip after the token datapoint", () => {
+    // Arrange
+    const agents = [subagentEntry()];
+    // Act
+    const html = sessionInfoHtml("ws", "m", null, agents, false);
+    // Assert
+    expect(html).toContain("</span> · <span class=\"agents-menu\">");
+  });
+
+  it("counts the session's subagents on the chip", () => {
+    // Arrange
+    const agents = [subagentEntry(), subagentEntry({ toolUseId: "t2" })];
+    // Act + Assert
+    expect(sessionInfoHtml("ws", "m", null, agents, false)).toContain("2 agents");
+  });
+
+  it("drops the subagent roster when the chip is open", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", "m", null, [subagentEntry()], true);
+    // Assert
+    expect(html).toContain("agents-overlay");
+  });
+
+  it("omits the subagent chip when the session spawned none", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml("ws", "m", null, [], false)).not.toContain("agents-menu");
+  });
+
+  it("leaves no dangling separator when the session spawned no subagents", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", "m", null, [], false);
+    // Assert
+    expect(html.endsWith("</span>")).toBe(true);
   });
 });
 
@@ -1115,6 +1163,21 @@ describe("itemKey", () => {
 });
 
 describe("renderItem tool previews", () => {
+  it("previews an Agent spawn by its description, as it does the legacy Task", () => {
+    // Arrange — the CLI renamed Task to Agent; the card must not regress to raw JSON.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Agent",
+      messageId: "m1",
+      input: { description: "hunt the flake", prompt: "go" },
+      inputJson: `{"description":"hunt the flake"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<div class="file-path">hunt the flake</div>`);
+  });
+
   it("suppresses the tool card for TaskUpdate", () => {
     // Arrange — task-list bookkeeping is feed noise, not conversation.
     const item: ToolItem = {

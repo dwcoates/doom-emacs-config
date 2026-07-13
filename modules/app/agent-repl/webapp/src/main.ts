@@ -7,6 +7,7 @@
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
+import { sessionSubagents } from "./agents.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
@@ -103,14 +104,46 @@ async function boot(): Promise<void> {
   const remediationEl = must("remediation");
   const parentWs = params.get("parent_ws");
 
+  // The subagent roster's disclosure state. It lives HERE rather than in the
+  // DOM because renderChrome rewrites the whole topbar on every frame, which
+  // would otherwise collapse an overlay the user is reading mid-turn.
+  let agentsOpen = false;
+
   const renderChrome = (): void => {
     const s = store.state;
     // sessionInfoHtml escapes every value it interpolates.
-    infoEl.innerHTML = sessionInfoHtml(parentWs, s.model, s.usage);
+    infoEl.innerHTML = sessionInfoHtml(
+      parentWs,
+      s.model,
+      s.usage,
+      sessionSubagents(s.items),
+      agentsOpen,
+    );
     if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
+
+  const setAgentsOpen = (open: boolean): void => {
+    if (agentsOpen === open) return;
+    agentsOpen = open;
+    renderChrome();
+  };
+
+  // The chip is re-created by every renderChrome, so the toggle is delegated
+  // off the topbar rather than bound to a node that will not survive the turn.
+  infoEl.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-agents-toggle]")) {
+      setAgentsOpen(!agentsOpen);
+    }
+  });
+  // An open overlay closes the way every dropdown does: click off it, or Escape.
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".agents-menu")) setAgentsOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setAgentsOpen(false);
+  });
 
   const rerender = (): void => {
     feed.render(store.state);

@@ -431,3 +431,82 @@ describe("running badge", () => {
     expect(r > g && g > b).toBe(true);
   });
 });
+
+/* The subagent roster drops out of the topbar, which is a fixed-height flex row:
+   the overlay has to leave that row's layout entirely, and its anchor has to be
+   the positioned ancestor it hangs from. Both are pure CSS, so both are asserted
+   against the stylesheet source. */
+const agentsMenu = blockAfter(css, ".agents-menu");
+const agentsOverlay = blockAfter(css, ".agents-overlay");
+const agentsToggle = blockAfter(css, ".info-agents {");
+const runningDot = blockAfter(css, ".agent-dot.agent-starting,");
+const reducedDot = blockAfter(
+  blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+  ".agent-dot.agent-starting,",
+);
+
+describe("subagent roster styles", () => {
+  it("anchors the overlay on the menu that drops it", () => {
+    // Arrange / Act — the overlay is absolute, so it needs a positioned ancestor.
+    // Assert
+    expect(agentsMenu).toMatch(/position:\s*relative/);
+  });
+
+  it("lifts the overlay out of the topbar's flex row", () => {
+    // Arrange / Act — an in-flow roster would stretch the topbar to its height.
+    // Assert
+    expect(agentsOverlay).toMatch(/position:\s*absolute/);
+  });
+
+  it("hangs the overlay below the topbar rather than over it", () => {
+    // Arrange / Act
+    // Assert
+    expect(agentsOverlay).toMatch(/top:\s*calc\(100% \+ [\d.]+rem\)/);
+  });
+
+  it("stacks the overlay above the feed it covers", () => {
+    // Arrange / Act — an un-stacked overlay renders behind the feed's cards.
+    // Assert
+    expect(agentsOverlay).toMatch(/z-index:\s*\d+/);
+  });
+
+  it("scrolls the overlay instead of running it off the viewport", () => {
+    // Arrange / Act — a long-running session spawns more agents than fit.
+    // Assert
+    expect(agentsOverlay).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("renders the chip as a pointer target so it reads as pressable", () => {
+    // Arrange / Act
+    // Assert
+    expect(agentsToggle).toMatch(/cursor:\s*pointer/);
+  });
+
+  it("colors the chip with its own datapoint token", () => {
+    // Arrange / Act — the chip joins the parent-workspace/model/tokens run.
+    // Assert
+    expect(agentsToggle).toMatch(/color:\s*var\(--info-agents\)/);
+  });
+
+  it("binds the chip's token in the light palette", () => {
+    // Arrange / Act + Assert
+    expect(token(lightTheme, "--info-agents")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("binds the chip's token in the dark palette", () => {
+    // Arrange / Act + Assert
+    expect(token(darkTheme, "--info-agents")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("pulses the dot of a subagent still working", () => {
+    // Arrange / Act — a settled roster has no motion in it at all.
+    // Assert
+    expect(runningDot).toMatch(/animation:\s*pulse/);
+  });
+
+  it("stills the working dot under reduced motion", () => {
+    // Arrange / Act
+    // Assert
+    expect(reducedDot).toMatch(/animation:\s*none/);
+  });
+});
