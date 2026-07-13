@@ -90,6 +90,18 @@ export interface ResultItem {
   kind: "result";
   subtype: ResultSubtype;
   durationMs: number;
+  /**
+   * How long the turn ran measured from the PREVIOUS final response of the
+   * session (a `success` result), or from this turn's own start for the
+   * session's first one. This is what the final-response bubble's chip
+   * shows, as against `durationMs` (the SDK's whole-task figure) which the
+   * standalone chip still shows.
+   *
+   * Derived from the daemon stamps in the store (`ts` and the anchor), not
+   * from any tab's own clock, so a tab that reconnects mid-session
+   * re-derives the same figure from the replayed results.
+   */
+  sincePrevFinalMs: number;
   numTurns: number;
   totalCostUsd: number;
   usage: Usage;
@@ -187,6 +199,19 @@ export interface StoreState {
    * resumes the count where the turn actually is.
    */
   turnStartedAt: string | null;
+  /**
+   * The daemon stamp of the session's most recent FINAL RESPONSE (a
+   * `success` result's envelope ts), or `null` before the first one. The
+   * anchor the final-response chip measures its elapsed time from: a chip
+   * reads "since the previous final response", and the session's first one
+   * falls back to its own turn start (`turnStartedAt`).
+   *
+   * Advanced ONLY at a `success` result, so a queued follow-up prompt or an
+   * aborted turn between two answers never moves it. The daemon's stamp
+   * rather than this tab's clock, like `turnStartedAt`, so a reconnecting
+   * tab re-derives the same anchor from the replayed results.
+   */
+  lastFinalResponseAt: string | null;
   usage: Usage | null;
   /**
    * The session's context size as last reported by an API request, which
@@ -211,6 +236,7 @@ function initialState(): StoreState {
     items: [],
     turnInFlight: false,
     turnStartedAt: null,
+    lastFinalResponseAt: null,
     usage: null,
     contextTokens: null,
     costUsd: null,
@@ -333,6 +359,7 @@ export class ConversationStore {
     s.items = [];
     s.turnInFlight = false;
     s.turnStartedAt = null;
+    s.lastFinalResponseAt = null;
     s.usage = null;
     s.contextTokens = null;
     s.costUsd = null;
@@ -471,11 +498,21 @@ export class ConversationStore {
         }
         break;
       }
-      case "result":
+      case "result": {
+        // Measure from the previous final response, or from this turn's own
+        // start for the session's first one. An unknown anchor (a result
+        // whose turn's start never arrived, e.g. a truncated replay) falls
+        // back to the SDK's own whole-task figure.
+        const anchor = s.lastFinalResponseAt ?? s.turnStartedAt;
+        const sincePrevFinalMs =
+          anchor === null
+            ? frame.duration_ms
+            : Date.parse(frame.ts) - Date.parse(anchor);
         s.items.push({
           kind: "result",
           subtype: frame.subtype,
           durationMs: frame.duration_ms,
+          sincePrevFinalMs,
           numTurns: frame.num_turns,
           totalCostUsd: frame.total_cost_usd,
           usage: frame.usage,
@@ -483,11 +520,15 @@ export class ConversationStore {
           resultText: frame.result_text,
           context: this.resultContext(),
         });
+        // Only a successful turn is a final response, so only it becomes the
+        // next chip's anchor — an aborted or errored turn produced no answer.
+        if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
         s.turnInFlight = false;
         s.turnStartedAt = null;
         s.usage = frame.usage;
         s.costUsd = frame.total_cost_usd;
         break;
+      }
       case "compact-boundary":
         s.items.push({
           kind: "compact-boundary",
