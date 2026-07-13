@@ -45,11 +45,19 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
-  /* Skill-launch card wash: turquoise, a hue nothing else in the palette
-     claims, so "the agent handed itself off to a skill" reads at a glance
-     against the card grey every other tool call sits in. */
+  /* Skill-launch card wash: turquoise, so "the agent handed itself off to a
+     skill" reads at a glance against the card grey every other tool call sits
+     in. Kept PALE, because the subagent wash below shares its hue family and
+     the two are told apart by depth. */
   --skill-bg: #d5f4ef;
   --skill-border: #8fded1;
+  /* Subagent (Agent/Task) card wash: teal, so a spawned agent stands out from
+     the grey run of ordinary tool cards — a subagent is a whole conversation of
+     its own, not one more file read. DEEPER than the skill turquoise on purpose:
+     the two sit a few degrees apart in hue, so saturation is what separates a
+     spawned agent from a skill handoff. styles.test.ts pins them apart. */
+  --agent-card: #a7e8dd;
+  --agent-border: #4fb8a8;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -75,6 +83,8 @@
     --final-response: #4ade80;
     --skill-bg: #12403c;
     --skill-border: #1f6b62;
+    --agent-card: #0f6b60;
+    --agent-border: #4fc4b0;
   }
 }
 
@@ -289,13 +299,21 @@ pre {
   font-size: 0.85rem;
 }
 /* A skill launch is a handoff, not a tool result: the card carries the one
-   "Launching skill: <name>" line and wears the turquoise wash so the handoff
-   is findable among the grey tool cards around it. */
+   "Launching skill: <name>" line and wears the pale turquoise wash so the
+   handoff is findable among the grey tool cards around it. */
 .tool-card.tool-skill {
   background: var(--skill-bg);
   border-color: var(--skill-border);
 }
 .skill-launch { font-weight: 600; }
+/* A spawned subagent gets the deep teal card: it is a whole conversation of its
+   own, not one more file read, and the wash makes it findable in a long feed.
+   The depth is what separates it from the skill handoff above, which shares its
+   hue family but stays pale. */
+.tool-card.tool-agent, .tool-card.tool-task {
+  background: var(--agent-card);
+  border-color: var(--agent-border);
+}
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
@@ -309,6 +327,15 @@ pre {
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
 .tool-output { max-height: 16rem; overflow-y: auto; border-top: 1px dashed var(--border); margin-top: 0.35rem; padding-top: 0.35rem; }
+/* Subagent input: the description IS the preview, and the input JSON — which
+   carries the subagent's entire prompt — stays folded until the section is
+   expanded. The fold is display, not height: a subagent prompt is pages long,
+   so even a peek of it would drown the description it labels. The wrapper
+   carries .tool-input, which is what makes the whole box the click target
+   (CAPPED_CLASSES in expand.ts). */
+.agent-input-desc { white-space: pre-wrap; }
+.agent-json { display: none; margin-top: 0.35rem; }
+.agent-input.expanded .agent-json { display: block; }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
    5 each, independently scrollable) and --cap-extra absorbs the

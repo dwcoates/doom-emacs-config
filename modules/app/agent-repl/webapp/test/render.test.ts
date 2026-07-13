@@ -1305,7 +1305,9 @@ describe("renderItem tool previews", () => {
       inputDone: true,
     };
     // Act + Assert
-    expect(renderItem(item)).toContain(`<div class="file-path">hunt the flake</div>`);
+    expect(renderItem(item)).toContain(
+      `<div class="file-path agent-input-desc">hunt the flake</div>`,
+    );
   });
 
   it("suppresses the tool card for TaskUpdate", () => {
@@ -1376,6 +1378,104 @@ describe("renderItem tool previews", () => {
     };
     // Act + Assert
     expect(renderItem(item)).toContain(`class="diff diff-output"`);
+  });
+});
+
+describe("renderItem subagent input", () => {
+  /** An Agent call spawning a subagent, its prompt pages long. */
+  function agentCall(toolName = "Agent"): ToolItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName,
+      messageId: "m1",
+      input: { description: "Audit the sentinel", prompt: "Read every file and…" },
+      inputJson: `{"description":"Audit the sentinel","prompt":"Read every file and…"}`,
+      inputDone: true,
+    };
+  }
+
+  it("leads the Agent card with the description alone", () => {
+    // Arrange
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="file-path agent-input-desc"`);
+    expect(html).toContain("Audit the sentinel");
+  });
+
+  it("keeps the Agent prompt out of the description line", () => {
+    // Arrange — the prompt reaches the card only inside the folded JSON.
+    const item = agentCall();
+    // Act
+    const desc = renderItem(item).match(/class="file-path agent-input-desc">([^<]*)</)?.[1];
+    // Assert
+    expect(desc).toBe("Audit the sentinel");
+  });
+
+  it("carries the full input JSON in the card, folded behind .agent-json", () => {
+    // Arrange
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<pre class="agent-json">`);
+    expect(html).toContain("Read every file and");
+  });
+
+  it("makes the Agent input box a capped section, so a click unfolds the JSON", () => {
+    // Arrange — .tool-input is what expand.ts recognizes as clickable.
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="tool-input agent-input"`);
+  });
+
+  it("washes the Agent card teal by naming it a special tool rather than Generic", () => {
+    // Arrange
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="tool-card tool-agent"`);
+  });
+
+  it("gives the legacy Task name the same description-first card", () => {
+    // Arrange — Task is what the CLI called the subagent tool before Agent.
+    const item = agentCall("Task");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="tool-input agent-input"`);
+  });
+
+  it("falls back to the plain JSON dump for an Agent call carrying no description", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Agent",
+      messageId: "m1",
+      input: { prompt: "go" },
+      inputJson: `{"prompt":"go"}`,
+      inputDone: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<pre class="tool-input">`);
+    expect(html).not.toContain("agent-input-desc");
+  });
+
+  it("leaves the Agent's own output rendering untouched by the input fold", () => {
+    // Arrange — only the input is description-only; the result still shows.
+    const item: ToolItem = { ...agentCall(), result: { isError: false, content: "the findings" } };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<pre class="tool-output">the findings</pre>`);
   });
 });
 
