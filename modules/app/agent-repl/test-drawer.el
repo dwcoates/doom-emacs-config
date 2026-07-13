@@ -3102,21 +3102,21 @@ unfocused window's `window-point' to the top unless it is re-synced."
 
 ;;;; ---- Window width ----
 
-(ert-deftest agent-repl-drawer-test-width-fraction-default-is-0.27 ()
-  "Default `agent-repl-drawer-width-fraction' is 0.27."
-  (should (= 0.27
+(ert-deftest agent-repl-drawer-test-width-fraction-default-is-0.243 ()
+  "Default `agent-repl-drawer-width-fraction' is 0.243."
+  (should (= 0.243
              (eval (car (get 'agent-repl-drawer-width-fraction
                              'standard-value))))))
 
 (ert-deftest agent-repl-drawer-test-window-width-at-default-fraction ()
-  "At the default fraction the drawer takes 27% of the frame width."
+  "At the default fraction the drawer takes 24.3% of the frame width."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-drawer-width-fraction
            (eval (car (get 'agent-repl-drawer-width-fraction
                            'standard-value)))))
       (cl-letf (((symbol-function 'window-frame) (lambda (_) 'fake-frame))
                 ((symbol-function 'frame-width)  (lambda (_) 200)))
-        (should (= (agent-repl-drawer--window-width 'fake-window) 54))))))
+        (should (= (agent-repl-drawer--window-width 'fake-window) 49))))))
 
 (ert-deftest agent-repl-drawer-test-window-width-is-fraction-of-frame ()
   "`agent-repl-drawer--window-width' returns the configured fraction of frame-width."
