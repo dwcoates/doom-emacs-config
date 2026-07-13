@@ -122,13 +122,24 @@ type Server struct {
 	// rehydrate.
 	draining atomic.Bool
 
+	// idleTimeout is how long a session may go without real activity before
+	// the sweeper hibernates it (frees its CLI process pair). Zero disables
+	// hibernation entirely.
+	idleTimeout time.Duration
+	// idleSweepTicks drives the sweeper; tests inject a channel so the
+	// sweep runs on demand rather than on a wall clock.
+	idleSweepTicks <-chan time.Time
+	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
+	stopped   chan struct{}
+	stopOnce  sync.Once
+
 	mu       sync.Mutex
 	sessions map[string]*session.Session
 	// dormant holds rehydratable registry records from a previous daemon
 	// process, keyed by their ORIGINAL s_ id: the id keeps resolving
-	// across the restart, and the first real access (stream / message /
-	// interrupt) spawns a shim with --resume. A restart never fans out N
-	// shims eagerly.
+	// across the restart, and the first ATTACH materializes it as a
+	// hibernated session (history, no processes); only a real act spawns
+	// its shim. A restart never fans out N shims eagerly.
 	dormant map[string]registry.Record
 }
 
@@ -157,6 +168,19 @@ type Config struct {
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
+	// IdleTimeout is how long a session may go without real activity (a
+	// shim event, an acting client command) before the sweeper hibernates
+	// it: the ~500MB node+CLI pair is freed while the conversation stays
+	// listed and fully replayable, and the next act respawns it with
+	// --resume. Zero disables hibernation.
+	//
+	// Attaching, replaying, and listing are NOT activity. A workspace the
+	// user merely switches to still goes idle, which is the point: people
+	// open workspaces far more often than they prompt them.
+	IdleTimeout time.Duration
+	// IdleSweepTicks overrides the sweeper's clock. Nil mints a real
+	// ticker; tests inject a channel so a sweep runs on demand.
+	IdleSweepTicks <-chan time.Time
 }
 
 // New builds a Server.
@@ -177,10 +201,13 @@ func New(cfg Config) *Server {
 		spawn:         cfg.Spawn,
 		logf:          logf,
 		now:           now,
-		sentinel:      cfg.Sentinel,
-		logins:        cfg.Logins,
-		remediator:    cfg.Remediator,
-		registry:      cfg.Registry,
+		sentinel:       cfg.Sentinel,
+		logins:         cfg.Logins,
+		remediator:     cfg.Remediator,
+		registry:       cfg.Registry,
+		idleTimeout:    cfg.IdleTimeout,
+		idleSweepTicks: cfg.IdleSweepTicks,
+		stopped:        make(chan struct{}),
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -197,6 +224,9 @@ func New(cfg Config) *Server {
 		s.loadDormant()
 	} else if s.registry != nil {
 		s.logf("server: -fake daemon: session registry left untouched (no rehydration)")
+	}
+	if s.idleTimeout > 0 || s.idleSweepTicks != nil {
+		go s.runIdleSweeper()
 	}
 	return s
 }
@@ -526,7 +556,8 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 // so connected tabs still get the user-turn broadcast and replay
 // retention sees it.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolve(r.PathValue("id"))
+	// An ACT: this is the prompt, so it is exactly what earns a CLI back.
+	sess, err := s.resolveForAct(r.PathValue("id"))
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -567,7 +598,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // C-c C-k path). Same pipeline as a WS interrupt: pending permission
 // prompts cancel and the turn's result arrives as "aborted".
 func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolve(r.PathValue("id"))
+	// An ACT: it reaches the CLI, so the CLI has to exist.
+	sess, err := s.resolveForAct(r.PathValue("id"))
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -667,17 +699,46 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 	if err != nil {
 		return nil, err
 	}
+	sess := session.New(s.sessionConfig(id, opts, registrable, shim))
+	s.seedFromTranscript(sess, id, opts)
+	return sess, nil
+}
+
+// buildHibernated assembles a session hub with NO shim: full replayable
+// history seeded from the transcript, and zero processes.
+//
+// This is what a dormant record becomes when someone merely LOOKS at its
+// workspace. Attaching to it replays the whole conversation from the ring
+// without spawning a CLI, which is the entire point: switching to a
+// workspace has to stay free, or the savings evaporate the moment a user
+// clicks through their worktrees. The CLI arrives only on the first act,
+// via reviveLocked.
+func (s *Server) buildHibernated(id string, opts CreateOpts, registrable bool) *session.Session {
+	sess := session.New(s.sessionConfig(id, opts, registrable, nil))
+	s.seedFromTranscript(sess, id, opts)
+	return sess
+}
+
+// sessionConfig assembles the session hub's config. Shared by the live
+// path (launchSession) and the no-shim path (buildHibernated) so the two
+// cannot drift; a nil shim yields a session born hibernated.
+func (s *Server) sessionConfig(id string, opts CreateOpts, registrable bool, shim session.ShimHandle) session.Config {
 	cfg := session.Config{
-		ID:            id,
-		DaemonVersion: s.daemonVersion,
-		BootID:        s.bootID,
-		Shim:          shim,
-		CWD:           opts.CWD,
-		Model:         opts.Model,
-		ConfigDir:     opts.ConfigDir,
-		Retention:     s.retention,
-		Logf:          s.logf,
-		Sentinel:      s.sentinel,
+		ID:             id,
+		DaemonVersion:  s.daemonVersion,
+		BootID:         s.bootID,
+		Shim:           shim,
+		CWD:            opts.CWD,
+		Model:          opts.Model,
+		PermissionMode: opts.PermissionMode,
+		ConfigDir:      opts.ConfigDir,
+		Retention:      s.retention,
+		Logf:           s.logf,
+		Sentinel:       s.sentinel,
+		// Share the server's clock so a session's idle stamp and the
+		// sweeper's idle check read the same time — identical to time.Now
+		// in production, injectable together under test.
+		Now: s.now,
 	}
 	// A fake session's CLI is a scripted stand-in that writes no
 	// transcript, so there is nothing to reconcile its model against; a
@@ -689,20 +750,23 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 	if registrable {
 		cfg.Registrar = registrar{s}
 	}
-	sess := session.New(cfg)
-	// Resumed sessions seed their replay ring from the durable
-	// transcript BEFORE Run: the CLI re-emits no history on --resume,
-	// so without this every rebind (daemon restart, frontend switch)
-	// attaches to a blank conversation.
-	if opts.Resume != "" {
-		path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
-		if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
-			s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
-		} else {
-			s.logf("session %s: replay seeded from %s", id, path)
-		}
+	return cfg
+}
+
+// seedFromTranscript fills the replay ring from the durable transcript
+// BEFORE Run: the CLI re-emits no history on --resume, so without this
+// every rebind (daemon restart, frontend switch, hibernation attach)
+// would show a blank conversation.
+func (s *Server) seedFromTranscript(sess *session.Session, id string, opts CreateOpts) {
+	if opts.Resume == "" {
+		return
 	}
-	return sess, nil
+	path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
+	if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
+		s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
+		return
+	}
+	s.logf("session %s: replay seeded from %s", id, path)
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
@@ -726,6 +790,12 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// daemon process: its id resolves, but the shim spawns (with
 		// --resume) only on first real access.
 		Rehydratable bool `json:"rehydratable,omitempty"`
+		// Hibernated marks a session whose CLI has been freed for idleness
+		// while its conversation stays fully replayable. It is NOT
+		// terminal: it lists, it answers replay, and it revives on the
+		// next act. Frontends must keep treating it as a live session, so
+		// terminal stays false — this field is observability only.
+		Hibernated bool `json:"hibernated,omitempty"`
 	}
 	list := make([]entry, 0, len(s.sessions)+len(s.dormant))
 	for id, sess := range s.sessions {
@@ -739,6 +809,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			DeathReason:        info.DeathReason,
 			TurnActive:         info.TurnActive,
 			PendingPermissions: info.PendingPermissions,
+			Hibernated:         info.Hibernated,
 		})
 	}
 	for id, rec := range s.dormant {
@@ -790,7 +861,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolve(r.PathValue("id"))
+	// ATTACH, not act: opening the socket is what a frontend does the
+	// instant a workspace appears on screen. It must stay free — a
+	// hibernated session serves its whole history from the ring, and only
+	// a command arriving on this socket (below) can spawn a CLI.
+	sess, err := s.resolveForAttach(r.PathValue("id"))
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -837,6 +912,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			sess.Detach(client)
 			return
 		}
+		// An acting frame (the webapp's own composer POSTs its prompt over
+		// this socket) revives a hibernated session before it is handled —
+		// this is the second act-path, alongside HTTP send/interrupt. A
+		// replay-request is NOT acting, so a client that merely reconnects
+		// and rebuilds history never resurrects the CLI.
+		if protocol.CommandActs(data) && sess.Hibernated() {
+			if _, err := s.resolveForAct(sess.ID); err != nil {
+				s.logf("server: revive on client frame failed: %v", err)
+			}
+		}
 		if err := sess.HandleClientFrame(client, data); err != nil {
 			s.logf("server: client frame rejected: %v", err)
 		}
@@ -861,12 +946,19 @@ func (s *Server) known(id string) bool {
 	return ok
 }
 
-// resolve returns the live session for id, rehydrating a dormant record
-// into a running --resume session on first access. (nil, nil) means the
-// id is unknown (404). Holding s.mu across the rehydration spawn is
-// deliberate: two tabs racing the first access must resolve to exactly
-// ONE shim, and the spawn is a rare, short, local exec.
-func (s *Server) resolve(id string) (*session.Session, error) {
+// resolveForAttach returns a session to OBSERVE, and never spawns a
+// process to do it.
+//
+// This is the read path — the WebSocket attach a frontend opens the
+// moment a workspace comes on screen. Users switch to workspaces
+// constantly without prompting them, so if merely looking cost a CLI,
+// hibernation would reclaim nothing in practice. A dormant record
+// therefore materializes as a HIBERNATED session: history replayed from
+// the transcript, zero processes. The CLI arrives only when the user
+// actually acts (resolveForAct).
+//
+// (nil, nil) means the id is unknown (404).
+func (s *Server) resolveForAttach(id string) (*session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sess := s.sessions[id]; sess != nil {
@@ -876,16 +968,80 @@ func (s *Server) resolve(id string) (*session.Session, error) {
 	if !ok {
 		return nil, nil
 	}
-	return s.rehydrateLocked(rec)
+	return s.materializeLocked(rec)
 }
 
-// rehydrateLocked revives one dormant record under its ORIGINAL s_ id —
-// the whole point of the registry: the id a frontend held before the
-// daemon restart keeps resolving after it. The transcript is re-statted
-// (same viability gate as the create path) because it may have vanished
-// since boot; a record that fails the gate is pruned and reports
-// unknown, which routes the client to its own rebind path.
-func (s *Server) rehydrateLocked(rec registry.Record) (*session.Session, error) {
+// resolveForAct returns a session with a LIVE shim, spawning one if the
+// session is hibernated (or dormant from a previous daemon).
+//
+// This is the write path — a message, an interrupt, a UI command. It is
+// the ONLY thing that brings a CLI back, which is what makes idle
+// eviction pay: the process is spent on work, never on attention.
+//
+// Holding s.mu across the spawn is deliberate: two tabs racing the first
+// act must resolve to exactly ONE shim, and the spawn is a rare, short,
+// local exec.
+func (s *Server) resolveForAct(id string) (*session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.sessions[id]
+	if sess == nil {
+		rec, ok := s.dormant[id]
+		if !ok {
+			return nil, nil
+		}
+		var err error
+		if sess, err = s.materializeLocked(rec); err != nil || sess == nil {
+			return sess, err
+		}
+	}
+	if !sess.Hibernated() {
+		return sess, nil
+	}
+	if err := s.reviveLocked(sess); err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+// reviveLocked spawns a fresh shim for a hibernated session and hands it
+// over. The session keeps its ring, seq watermark, translator, and
+// attached clients across the gap, so nothing is re-seeded and no client
+// observes anything but a pause.
+func (s *Server) reviveLocked(sess *session.Session) error {
+	info := sess.Info()
+	// The resume target is the basis of recovery. Hibernate refuses to
+	// suspend a session without one, so its absence here is not a
+	// recoverable condition — it is a broken invariant, and papering over
+	// it would silently start a FRESH conversation in place of the user's.
+	if info.ClaudeSessionID == "" {
+		return fmt.Errorf("session %s: revive: hibernated with no claude_session_id to resume from", sess.ID)
+	}
+	shim, err := s.spawn(sess.ID, CreateOpts{
+		CWD:            info.CWD,
+		Model:          info.Model,
+		PermissionMode: string(info.PermissionMode),
+		ConfigDir:      info.ConfigDir,
+		Resume:         info.ClaudeSessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("session %s: revive: spawn shim: %w", sess.ID, err)
+	}
+	return sess.Revive(shim)
+}
+
+// materializeLocked revives one dormant record under its ORIGINAL s_ id
+// as a HIBERNATED session — the whole point of the registry: the id a
+// frontend held before the daemon restart keeps resolving after it. The
+// transcript is re-statted (same viability gate as the create path)
+// because it may have vanished since boot; a record that fails the gate
+// is pruned and reports unknown, which routes the client to its own
+// rebind path.
+//
+// No shim is spawned here. A daemon restart followed by a user clicking
+// through their workspaces must not fan out N CLIs; each one waits for a
+// real act.
+func (s *Server) materializeLocked(rec registry.Record) (*session.Session, error) {
 	path := session.TranscriptPath(session.ClaudeConfigDir(rec.ConfigDir), rec.CWD, rec.ClaudeSessionID)
 	if _, err := os.Stat(path); err != nil {
 		s.logf("session %s: rehydration target %s lost its transcript at %s — pruning: %v",
@@ -896,26 +1052,84 @@ func (s *Server) rehydrateLocked(rec registry.Record) (*session.Session, error) 
 		}
 		return nil, nil
 	}
-	opts := CreateOpts{
+	sess := s.buildHibernated(rec.SessionID, CreateOpts{
 		CWD:            rec.CWD,
 		Model:          rec.Model,
 		PermissionMode: rec.PermissionMode,
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
-	}
-	sess, err := s.launchSession(rec.SessionID, opts, true)
-	if err != nil {
-		return nil, fmt.Errorf("rehydrate session %s: spawn shim: %w", rec.SessionID, err)
-	}
+	}, true)
 	delete(s.dormant, rec.SessionID)
 	s.sessions[rec.SessionID] = sess
-	go sess.Run()
-	s.logf("session %s: rehydrated on first access (resume %s)", rec.SessionID, rec.ClaudeSessionID)
+	s.logf("session %s: materialized hibernated from registry (resume %s) — no CLI until first act",
+		rec.SessionID, rec.ClaudeSessionID)
 	return sess, nil
+}
+
+// runIdleSweeper periodically hibernates sessions that have gone idle,
+// freeing their CLI process pairs. It is the ONLY thing that initiates
+// hibernation; everything else (attach, list, replay) is deliberately
+// free of side effects on process lifetime.
+func (s *Server) runIdleSweeper() {
+	ticks := s.idleSweepTicks
+	if ticks == nil {
+		// Sweep at a quarter of the timeout so a session hibernates within
+		// ~25% of idleTimeout of crossing it, never a whole timeout late.
+		interval := s.idleTimeout / 4
+		if interval <= 0 {
+			interval = s.idleTimeout
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
+	for {
+		select {
+		case <-s.stopped:
+			return
+		case _, ok := <-ticks:
+			if !ok {
+				return
+			}
+			s.sweepIdle()
+		}
+	}
+}
+
+// sweepIdle hibernates every live session idle past the timeout. Refusals
+// (busy, no resume target yet) are expected and simply skipped — the next
+// sweep re-checks them.
+func (s *Server) sweepIdle() {
+	now := s.now()
+	s.mu.Lock()
+	var candidates []*session.Session
+	for _, sess := range s.sessions {
+		if sess.Hibernated() || sess.Terminal() {
+			continue
+		}
+		if sess.IdleFor(now) >= s.idleTimeout {
+			candidates = append(candidates, sess)
+		}
+	}
+	s.mu.Unlock()
+	// Hibernate OUTSIDE the server lock: Hibernate sends the shim a
+	// shutdown command and may spawn a grace-timer goroutine, none of
+	// which needs s.mu, and holding it would serialize every session's
+	// teardown behind one lock.
+	for _, sess := range candidates {
+		if err := sess.Hibernate("idle timeout"); err != nil {
+			// Not a failure: a busy or not-yet-initialized session refuses,
+			// and the next sweep tries again. Logged at debug volume only.
+			s.logf("session %s: idle sweep skipped: %v", sess.ID, err)
+		}
+	}
 }
 
 // ShutdownAll asks every live session to drain (daemon teardown).
 func (s *Server) ShutdownAll() {
+	// Stop the idle sweeper first: a hibernate racing the drain would
+	// churn a shim we are about to ask to shut down anyway.
+	s.stopOnce.Do(func() { close(s.stopped) })
 	// Flag the drain FIRST: the terminal transitions it triggers must
 	// not mark registry records terminal, or nothing would rehydrate on
 	// the next boot and every routine daemon restart would strand its

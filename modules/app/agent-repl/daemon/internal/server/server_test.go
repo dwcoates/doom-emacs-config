@@ -56,6 +56,15 @@ func (f *fakeShim) Send(cmd any) error {
 	return f.SendRaw(line)
 }
 
+// Kill models a real process kill: the event stream dies, which is what
+// Run observes. Server-level hibernation tests synchronize on the shim's
+// forwarded shutdown command and on spawn events, not on the kill itself,
+// so this fake need only end the stream.
+func (f *fakeShim) Kill() error {
+	f.end()
+	return nil
+}
+
 func (f *fakeShim) end() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -899,6 +908,14 @@ func drainSessionsOnCleanup(t *testing.T, srv *Server) {
 		}
 		srv.mu.Unlock()
 		for _, sess := range sessions {
+			// A live session drains when its fake shim's LIFO end() cleanup
+			// (registered later, so run earlier) closes the event stream. A
+			// HIBERNATED session has no shim to end, so nothing would ever
+			// close its Done() — shut it down explicitly to reach the same
+			// terminal state before the wait.
+			if sess.Hibernated() {
+				_ = sess.Shutdown("test cleanup")
+			}
 			select {
 			case <-sess.Done():
 			case <-time.After(recvTimeout):
@@ -1171,17 +1188,43 @@ func TestRestartSpawnsNoShimBeforeFirstAccess(t *testing.T) {
 	}
 }
 
-func TestFirstStreamAccessRehydratesWithResume(t *testing.T) {
+func TestFirstStreamAccessMaterializesWithoutSpawn(t *testing.T) {
+	// Arrange
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, spawns := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
+	// Act — attaching is OBSERVING, not acting: it materializes the record
+	// into a hibernated session (history from the transcript) with no CLI.
+	conn := h.dial(t, "s_before")
+	hello := readFrame(t, conn)
+	// Assert — the conversation is answerable (hello carries the resume
+	// uuid), yet no process was spawned to serve a mere look.
+	if hello["type"] != "hello" || hello["session_id"] != "s_before" || hello["claude_session_id"] != "uuid-1" {
+		t.Fatalf("hello = %v", hello)
+	}
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d on stream attach, want 0", n)
+	}
+}
+
+func TestFirstMessageAccessRevivesWithResumeOpts(t *testing.T) {
 	// Arrange
 	cfg := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
 	writeTranscript(t, cfg, "uuid-1")
 	h, _, spawns := rehydrationHarness(t, false,
 		registry.Record{SessionID: "s_before", CWD: "/w", Model: "haiku", PermissionMode: "plan", ClaudeSessionID: "uuid-1"})
-	// Act
-	conn := h.dial(t, "s_before")
+	// Act — the ACT path (an HTTP send) is what earns the CLI back.
+	resp, err := http.Post(h.ts.URL+"/sessions/s_before/message", "application/json",
+		bytes.NewBufferString(`{"content":"still here?"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
 	h.awaitShim(t)
-	// Assert — one shim, resuming the durable uuid with the record's opts.
+	// Assert — one shim, resuming the durable uuid under the record's opts.
 	id, opts := spawns.last()
 	if spawns.count() != 1 || id != "s_before" {
 		t.Fatalf("spawns = %d for id %q", spawns.count(), id)
@@ -1189,35 +1232,33 @@ func TestFirstStreamAccessRehydratesWithResume(t *testing.T) {
 	if opts.Resume != "uuid-1" || opts.CWD != "/w" || opts.Model != "haiku" || opts.PermissionMode != "plan" {
 		t.Fatalf("spawn opts = %+v", opts)
 	}
-	hello := readFrame(t, conn)
-	if hello["type"] != "hello" || hello["session_id"] != "s_before" || hello["claude_session_id"] != "uuid-1" {
-		t.Fatalf("hello = %v", hello)
-	}
 }
 
-func TestRehydratedSessionReplaysPreRestartHistory(t *testing.T) {
+func TestMaterializedSessionReplaysPreRestartHistoryWithoutSpawn(t *testing.T) {
 	// Arrange
 	cfg := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
 	writeTranscript(t, cfg, "uuid-1")
-	h, _, _ := rehydrationHarness(t, false,
+	h, _, spawns := rehydrationHarness(t, false,
 		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
-	// Act
+	// Act — attach and replay, both pure observation.
 	conn := h.dial(t, "s_before")
-	h.awaitShim(t)
 	hello := readFrame(t, conn)
 	req, _ := json.Marshal(map[string]any{"type": "replay-request", "from_seq": hello["resume_from_seq"]})
 	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
 		t.Fatalf("replay-request: %v", err)
 	}
-	// Assert — the transcript-seeded user turn comes back.
+	// Assert — the transcript-seeded user turn comes back, still no CLI.
 	frame := readFrame(t, conn)
 	if frame["type"] != "user-turn" {
 		t.Fatalf("frame = %v, want the pre-restart user-turn", frame)
 	}
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d serving replay, want 0", n)
+	}
 }
 
-func TestSecondAccessReusesTheRehydratedSession(t *testing.T) {
+func TestSecondStreamAccessReusesMaterializedSession(t *testing.T) {
 	// Arrange
 	cfg := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
@@ -1225,14 +1266,16 @@ func TestSecondAccessReusesTheRehydratedSession(t *testing.T) {
 	h, _, spawns := rehydrationHarness(t, false,
 		registry.Record{SessionID: "s_before", CWD: "/w", ClaudeSessionID: "uuid-1"})
 	conn1 := h.dial(t, "s_before")
-	h.awaitShim(t)
 	readFrame(t, conn1) // hello
 	// Act — a second tab attaches to the SAME id.
 	conn2 := h.dial(t, "s_before")
 	readFrame(t, conn2) // hello
-	// Assert
-	if n := spawns.count(); n != 1 {
-		t.Fatalf("spawn count = %d after second access, want 1", n)
+	// Assert — both observers share one materialized session, still no CLI.
+	if n := spawns.count(); n != 0 {
+		t.Fatalf("spawn count = %d after second attach, want 0", n)
+	}
+	if sessions := listSessions(t, h); len(sessions) != 1 {
+		t.Fatalf("sessions = %v, want exactly one materialized session", sessions)
 	}
 }
 

@@ -38,6 +38,7 @@ func main() {
 		shimScript     = flag.String("shim", "", "path to the shim entrypoint (shim/dist/main.js)")
 		fake           = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
 		retention      = flag.Int("retention", 4096, "per-session frame retention window for replay")
+		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "hibernate a session (free its node+CLI pair, keep it replayable) after this long without a real act; 0 disables")
 		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
@@ -139,6 +140,7 @@ func main() {
 		Remediator:    remediator,
 		Registry:      sessionRegistry,
 		Logins:        logins,
+		IdleTimeout:   *idleTimeout,
 	})
 
 	mux := http.NewServeMux()
