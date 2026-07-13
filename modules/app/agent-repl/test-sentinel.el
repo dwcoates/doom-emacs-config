@@ -232,6 +232,29 @@ would adopt it into a workspace; the drain only deletes."
         (agent-repl--dispatch-sentinel-file "/dir/login_request_")
         (should warned)))))
 
+;;;; ---- Tests: delete-sentinel-file helper ----
+
+(ert-deftest agent-repl-test-delete-sentinel-file-deletes ()
+  "delete-sentinel-file should delete the file it is given."
+  (agent-repl-test--with-clean-state
+    (let ((deleted nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (f) (setq deleted f))))
+        (agent-repl--delete-sentinel-file "/dir/stop_abc" nil)
+        (should (equal deleted "/dir/stop_abc"))))))
+
+(ert-deftest agent-repl-test-delete-sentinel-file-warns-and-does-not-rethrow ()
+  "A failed delete must warn (loud surface) and NOT rethrow into the watcher."
+  (agent-repl-test--with-clean-state
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (_f) (error "boom")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (setq warned t))))
+        ;; Must return normally despite the delete error.
+        (agent-repl--delete-sentinel-file "/dir/stop_abc" nil)
+        (should warned)))))
+
 ;;;; ---- Tests: process-sentinel-file orchestration ----
 
 (ert-deftest agent-repl-test-process-sentinel-file-calls-callback ()
