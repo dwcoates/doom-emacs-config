@@ -640,13 +640,12 @@ running but its load cycle has logically ended)."
     ("session_dead_"      . (:callback agent-repl--on-session-dead-event
                              :warning  "[agent-repl] WARNING: session-dead dir=%s matched no workspace"
                              :name     "handle-session-dead"))
-    ;; `login_request_' collides with no other prefix.  Written ONLY by
-    ;; the daemon (login_request_<sid>) when the gui topbar's login button
-    ;; is clicked: the OAuth flow needs a TTY, which only Emacs has, so
-    ;; the daemon delegates it here.  See login.el.
-    ("login_request_"     . (:callback agent-repl--on-login-request-event
-                             :warning  "[agent-repl] WARNING: login-request dir=%s matched no workspace"
-                             :name     "handle-login-request"))
+    ;; There is no `login_request_' here any more.  The gui login used to be
+    ;; relayed to Emacs on this channel because the OAuth flow needs a TTY
+    ;; and Emacs was the only TTY host in the system.  That premise was
+    ;; wrong: the daemon can open a pty of its own, so it now runs the login
+    ;; itself and streams the terminal to the webapp, which renders it.  See
+    ;; daemon/internal/login.
     ("subagent_start_"    . (:callback agent-repl--on-subagent-start-event
                              :warning  "[agent-repl] WARNING: subagent-start sentinel dir=%s matched no workspace"
                              :name     "handle-subagent-start"))
