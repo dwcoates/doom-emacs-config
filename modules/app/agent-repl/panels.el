@@ -655,8 +655,50 @@ visible — the input panel's live partner is the webview."
         (agent-repl--log-verbose (agent-repl--ws-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
       result)))
 
+(defun agent-repl--own-panel-p (name)
+  "Return non-nil when panel NAME belongs to the CURRENT workspace.
+Compares the workspace id extracted from NAME (see
+`agent-repl--extract-panel-id') against the sanitized current
+workspace name.  Panel buffer names embed the SANITIZED workspace
+name (see `agent-repl--buffer-name'), so the current name is
+sanitized before the comparison — mirroring how
+`agent-repl--stale-panel-windows' sanitizes before deciding
+foreign-ness.  Returns nil when NAME is not a panel buffer, or when
+there is no current workspace to compare against."
+  (when-let ((id (agent-repl--extract-panel-id name))
+             (current (agent-repl--sanitize-ws-name (agent-repl--ws-current-name))))
+    (string= id current)))
+
+(defun agent-repl--sweepable-panel-p (name)
+  "Return non-nil when panel NAME may be reaped by `agent-repl--sync-panels'.
+A panel is sweepable only when it is orphaned
+\(`agent-repl--orphaned-panel-p') AND does NOT belong to the current
+workspace (`agent-repl--own-panel-p').
+
+The current workspace's own panels are laid out and torn down by the
+explicit show/hide paths, never by the window-change sweep: during a
+webview mount the input window is split below the webview and the
+webview window is briefly not observable via `get-buffer-window', a
+transient mid-split state in which `agent-repl--orphaned-panel-p'
+would (correctly, in isolation) report the current workspace's input
+panel as orphaned and the sweep would delete it out from under the
+mount.  Skipping any panel whose id matches the current workspace
+closes that race, leaving the sweep to reap only panels drifted in
+from OTHER, switched-away workspaces.
+
+The guard lives here (and via `agent-repl--own-panel-p'), rather than
+inside `agent-repl--orphaned-panel-p', so the orphan predicate stays a
+pure partner-visibility test and the sweep policy is localized with
+the sweeper."
+  (and (agent-repl--orphaned-panel-p name)
+       (not (agent-repl--own-panel-p name))))
+
 (defun agent-repl--sync-panels ()
-  "Close any agent panel whose partner is no longer visible.
+  "Close any OTHER workspace's agent panel whose partner is no longer visible.
+The current workspace's own panels are never swept (see
+`agent-repl--sweepable-panel-p') — only panels belonging to other,
+switched-away workspaces are reaped.
+
 Side windows (e.g. the drawer) can never be agent panels by
 predicate construction, so the default `--delete-where' side-skip
 costs nothing and remains defense-in-depth.
@@ -668,7 +710,7 @@ deletion that follows."
          (orphan-names
           (cl-loop for win in (window-list)
                    for name = (buffer-name (window-buffer win))
-                   when (agent-repl--orphaned-panel-p name)
+                   when (agent-repl--sweepable-panel-p name)
                    collect name)))
     (agent-repl--log-verbose ws "sync-panels: entry windows=%d"
                               (length (window-list)))
@@ -677,7 +719,7 @@ deletion that follows."
     (let ((deleted
            (agent-repl-window--delete-where
             (lambda (win)
-              (agent-repl--orphaned-panel-p
+              (agent-repl--sweepable-panel-p
                (buffer-name (window-buffer win)))))))
       (agent-repl--log-verbose ws "sync-panels: closed %d orphans"
                                 (length deleted)))))

@@ -163,6 +163,146 @@
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
       (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*")))))
 
+;;;; ---- Tests: own-panel-p ----
+
+(ert-deftest agent-repl-test-panels-own-panel-p-current-ws ()
+  "own-panel-p is non-nil for a panel buffer of the current workspace."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur")))
+      (should (agent-repl--own-panel-p "*agent-panel-input-cur*"))
+      (should (agent-repl--own-panel-p "*agent-frontend-cur*")))))
+
+(ert-deftest agent-repl-test-panels-own-panel-p-other-ws ()
+  "own-panel-p is nil for a panel buffer of a different workspace."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur")))
+      (should-not (agent-repl--own-panel-p "*agent-panel-input-other*")))))
+
+(ert-deftest agent-repl-test-panels-own-panel-p-non-panel ()
+  "own-panel-p is nil for a non-panel buffer name."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur")))
+      (should-not (agent-repl--own-panel-p "*scratch*")))))
+
+(ert-deftest agent-repl-test-panels-own-panel-p-sanitized-name ()
+  "own-panel-p sanitizes the current name before matching the embedded id."
+  ;; Panel buffer names embed the sanitized ws name (\"my ws\" -> \"my_ws\"),
+  ;; so a raw current name carrying unsafe chars must still match.
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my ws")))
+      (should (agent-repl--own-panel-p "*agent-panel-input-my_ws*")))))
+
+;;;; ---- Tests: sweepable-panel-p ----
+
+(ert-deftest agent-repl-test-panels-sweepable-current-ws-not-sweepable ()
+  "sweepable-panel-p is nil for the current workspace's own orphaned panel."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur"))
+              ((symbol-function 'one-window-p) (lambda () nil))
+              ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
+              ((symbol-function 'get-buffer) (lambda (_name) nil)))
+      ;; orphaned-panel-p reports this input panel orphaned (no visible
+      ;; partner), but it belongs to the current ws, so the sweep must
+      ;; leave it alone.
+      (should (agent-repl--orphaned-panel-p "*agent-panel-input-cur*"))
+      (should-not (agent-repl--sweepable-panel-p "*agent-panel-input-cur*")))))
+
+(ert-deftest agent-repl-test-panels-sweepable-other-ws-sweepable ()
+  "sweepable-panel-p is non-nil for another workspace's orphaned panel."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur"))
+              ((symbol-function 'one-window-p) (lambda () nil))
+              ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
+              ((symbol-function 'get-buffer) (lambda (_name) nil)))
+      (should (agent-repl--sweepable-panel-p "*agent-panel-input-other*")))))
+
+(ert-deftest agent-repl-test-panels-sweepable-non-orphan-not-sweepable ()
+  "sweepable-panel-p is nil when the panel is not orphaned."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "cur"))
+              ((symbol-function 'one-window-p) (lambda () nil))
+              ;; Partner webview window visible -> input panel not orphaned.
+              ((symbol-function 'get-buffer-window)
+               (lambda (buf) (when (equal buf "*agent-frontend-other*") 'fake-window)))
+              ((symbol-function 'get-buffer) (lambda (_name) nil)))
+      (should-not (agent-repl--sweepable-panel-p "*agent-panel-input-other*")))))
+
+;;;; ---- Tests: sync-panels ----
+
+(defun agent-repl-test--run-sync-panels (current-ws window-buffers visible-names)
+  "Drive `agent-repl--sync-panels' over a mocked window layout.
+CURRENT-WS is returned by `+workspace-current-name'.  WINDOW-BUFFERS is
+an alist of (WINDOW-SYMBOL . BUFFER-NAME); a live buffer is created for
+each BUFFER-NAME for the duration of the run.  VISIBLE-NAMES lists the
+buffer names whose `get-buffer-window' should report a live window.
+Returns the list of window symbols `delete-window' was asked to delete."
+  (let ((created '())
+        (deleted '())
+        (windows (mapcar #'car window-buffers)))
+    (unwind-protect
+        (progn
+          (dolist (cell window-buffers)
+            (push (get-buffer-create (cdr cell)) created))
+          (cl-letf (((symbol-function '+workspace-current-name)
+                     (lambda () current-ws))
+                    ((symbol-function 'window-list)
+                     (lambda (&rest _) windows))
+                    ((symbol-function 'window-buffer)
+                     (lambda (win) (get-buffer (cdr (assq win window-buffers)))))
+                    ((symbol-function 'window-live-p)
+                     (lambda (win) (and (memq win windows) t)))
+                    ((symbol-function 'agent-repl-window--side-window-p)
+                     (lambda (_win) nil))
+                    ((symbol-function 'one-window-p)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (name &rest _)
+                       (when (member name visible-names) 'fake-window)))
+                    ((symbol-function 'delete-window)
+                     (lambda (&optional win) (push win deleted))))
+            (agent-repl--sync-panels))
+          (nreverse deleted))
+      (dolist (buf created)
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-panels-sync-keeps-current-input-when-webview-absent ()
+  "sync-panels does NOT sweep the current ws input panel mid-split.
+Models the regression: the webview window is not yet observable via
+`get-buffer-window' during the split, so the current ws input (and
+webview) look orphaned — but both belong to the current ws and must
+survive."
+  (agent-repl-test--with-clean-state
+    (should-not
+     (agent-repl-test--run-sync-panels
+      "cur"
+      '((win-input . "*agent-panel-input-cur*")
+        (win-webview . "*agent-frontend-cur*"))
+      ;; Nothing observable yet -> both panels look orphaned.
+      '()))))
+
+(ert-deftest agent-repl-test-panels-sync-sweeps-orphaned-other-ws-panel ()
+  "sync-panels sweeps a genuinely orphaned panel from another workspace."
+  (agent-repl-test--with-clean-state
+    (should (equal
+             (agent-repl-test--run-sync-panels
+              "cur"
+              '((win-keep . "*scratch*")
+                (win-other . "*agent-panel-input-other*"))
+              ;; The other ws webview partner is not visible -> orphaned.
+              '())
+             '(win-other)))))
+
+(ert-deftest agent-repl-test-panels-sync-leaves-settled-layout-intact ()
+  "sync-panels leaves a settled current ws two-window layout untouched."
+  (agent-repl-test--with-clean-state
+    (should-not
+     (agent-repl-test--run-sync-panels
+      "cur"
+      '((win-input . "*agent-panel-input-cur*")
+        (win-webview . "*agent-frontend-cur*"))
+      ;; Both windows observable -> neither panel is orphaned.
+      '("*agent-panel-input-cur*" "*agent-frontend-cur*")))))
+
 ;;;; ---- Tests: Defcustom defaults ----
 
 ;;;; ---- Tests: drain-pending-show-panels ----
