@@ -177,6 +177,61 @@ Guards the reverse shadowing direction of the new session_dead_ entry."
                (lambda (&rest _) nil)))
       (should (eq t (agent-repl--dispatch-sentinel-file "/dir/stop_abc"))))))
 
+;;;; ---- Tests: deprecated-prefix drain ----
+
+(ert-deftest agent-repl-test-sentinel-drains-deprecated-login-request ()
+  "A bare login_request_ file should be drained (deleted), not warned about.
+Draining is what stops the poll fallback re-detecting and re-warning about
+the retired channel every cycle."
+  (agent-repl-test--with-clean-state
+    (let ((deleted nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (f) (setq deleted f)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (ert-fail "drain must not warn"))))
+        (agent-repl--dispatch-sentinel-file "/dir/login_request_")
+        (should (equal deleted "/dir/login_request_"))))))
+
+(ert-deftest agent-repl-test-sentinel-drains-suffixed-login-request ()
+  "A login_request_<sid> file should also match the deprecated prefix and drain."
+  (agent-repl-test--with-clean-state
+    (let ((deleted nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (f) (setq deleted f)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (ert-fail "drain must not warn"))))
+        (agent-repl--dispatch-sentinel-file "/dir/login_request_abc123")
+        (should (equal deleted "/dir/login_request_abc123"))))))
+
+(ert-deftest agent-repl-test-sentinel-drain-returns-t ()
+  "Draining a deprecated file should return t so the poll path treats it as handled."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'delete-file) (lambda (_f) nil)))
+      (should (eq t (agent-repl--dispatch-sentinel-file "/dir/login_request_"))))))
+
+(ert-deftest agent-repl-test-sentinel-drain-skips-process-sentinel-file ()
+  "Draining must not route through process-sentinel-file, so no side effect runs.
+The retired channel carries a session id, and running the normal pipeline
+would adopt it into a workspace; the drain only deletes."
+  (agent-repl-test--with-clean-state
+    (let ((processed nil))
+      (cl-letf (((symbol-function 'delete-file) (lambda (_f) nil))
+                ((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (&rest _) (setq processed t))))
+        (agent-repl--dispatch-sentinel-file "/dir/login_request_abc123")
+        (should-not processed)))))
+
+(ert-deftest agent-repl-test-sentinel-drain-warns-on-delete-failure ()
+  "A failed drain delete must surface loudly, not be swallowed."
+  (agent-repl-test--with-clean-state
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (_f) (error "boom")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (setq warned t))))
+        (agent-repl--dispatch-sentinel-file "/dir/login_request_")
+        (should warned)))))
+
 ;;;; ---- Tests: process-sentinel-file orchestration ----
 
 (ert-deftest agent-repl-test-process-sentinel-file-calls-callback ()
