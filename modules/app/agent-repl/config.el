@@ -302,7 +302,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; before session.el (whose command assembly resolves the backend).
 (agent-repl--load-module "backend")
 ;; WHY: frontends.el defines the presentation-frontend registry that
-;; panels.el (vterm) and frontend.el (gui) register into at load time.
+;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")
 (agent-repl--load-module "install")
 ;; WHY: codex.el registers the codex backend (backend.el must precede
@@ -312,12 +312,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
 (agent-repl--load-module "memory-state")
-(agent-repl--load-module "overlay")
 (agent-repl--load-module "status")
 (agent-repl--load-module "workspace-status-export")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "sentinel")
-(agent-repl--load-module "vterm-freeze")
 (agent-repl--load-module "input")
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")

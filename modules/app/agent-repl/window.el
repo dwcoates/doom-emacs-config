@@ -46,7 +46,7 @@
 ;; Reserved: populated in a follow-up step when callers are migrated.
 ;; The intended shape is:
 ;;
-;;   '((:vterm  :fill main :buffer-key :vterm-buffer
+;;   '((:view   :fill main :buffer-key :frontend-buffer
 ;;              :harden (dedicate size-fix-width  delete-protect))
 ;;     (:input  :side below :buffer-key :input-buffer
 ;;              :height-frac agent-repl-input-height-fraction
@@ -60,7 +60,7 @@
 (defun agent-repl-window--panel-buffer (kind &optional ws)
   "Return the buffer for panel KIND in workspace WS.
 
-KIND ∈ (:vterm :input :drawer).  WS defaults to the current
+KIND ∈ (:view :input :drawer).  WS defaults to the current
 workspace; for the frame-scoped `:drawer' panel WS is ignored.
 
 Returns the buffer object regardless of liveness — callers needing
@@ -70,9 +70,9 @@ been initialized (or `:drawer' when the drawer buffer has never been
 created).  Signals an error for an unknown KIND so typos surface at
 call time."
   (pcase kind
-    (:vterm
+    (:view
      (agent-repl--ws-get (or ws (agent-repl--ws-current-name))
-                          :vterm-buffer))
+                          :frontend-buffer))
     (:input
      (agent-repl--ws-get (or ws (agent-repl--ws-current-name))
                           :input-buffer))
@@ -84,7 +84,7 @@ call time."
 (defun agent-repl-window--panel-window (kind &optional ws frame)
   "Return the live window displaying panel KIND, or nil.
 
-KIND ∈ (:vterm :input :drawer).  WS defaults to the current
+KIND ∈ (:view :input :drawer).  WS defaults to the current
 workspace; ignored for `:drawer'.  FRAME is passed through to
 `get-buffer-window' (nil = selected frame, t = all frames, a frame
 value = that frame).
@@ -120,7 +120,7 @@ frame-level UI elements like the workspace drawer."
   "Apply a hardening recipe to WIN.
 
 Centralizes the dedicate/size-fix/delete-protect/preserve-size
-combinations that panel-style windows (vterm, input, drawer) all
+combinations that panel-style windows (view, input, drawer) all
 need.  Before this helper existed, the same four-line recipe was
 inlined into 3+ call sites with subtle drift.
 

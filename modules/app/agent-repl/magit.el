@@ -212,8 +212,8 @@ skips the `:fullscreen-config' write to avoid creating a stub entry
 
 When the Claude panels are visible (they always fill the frame —
 fullscreen is the sole display format), closes the input window and
-un-dedicates the vterm window before opening magit so that
-`display-buffer-same-window' can replace the vterm window cleanly
+un-dedicates the webview window before opening magit so that
+`display-buffer-same-window' can replace the webview window cleanly
 instead of splitting it."
   (interactive)
   (when (window-parameter (selected-window) 'window-side)
@@ -228,18 +228,18 @@ instead of splitting it."
                         dir (if tracked-dir "yes" "no")))
     (when tracked-dir
       ;; When the panels are visible, close the input window and un-dedicate
-      ;; the vterm window so magit can replace the vterm window via same-window
-      ;; display without splitting it (the vterm window is dedicated, which
-      ;; blocks same-window).
+      ;; the webview window so magit can replace the webview window via
+      ;; same-window display without splitting it (the webview window is
+      ;; dedicated, which blocks same-window).
       (when (agent-repl--panels-visible-p)
         (let ((input-buf (agent-repl--ws-get ws :input-buffer))
-              (vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+              (webview-buf (agent-repl--ws-get ws :frontend-buffer)))
           (when input-buf
             (agent-repl--close-buffer-window input-buf))
-          (when vterm-buf
-            (when-let ((vterm-win (get-buffer-window vterm-buf)))
-              (set-window-dedicated-p vterm-win nil)
-              (select-window vterm-win)))))
+          (when webview-buf
+            (when-let ((webview-win (get-buffer-window webview-buf)))
+              (set-window-dedicated-p webview-win nil)
+              (select-window webview-win)))))
       (agent-repl--ws-put ws :fullscreen-config nil))
     (magit-status dir)))
 

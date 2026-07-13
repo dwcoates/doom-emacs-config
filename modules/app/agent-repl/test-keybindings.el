@@ -77,7 +77,7 @@
 ;;;; ---- Tests: agent-repl--kill-before-workspace-delete ----
 
 (ert-deftest agent-repl-test-kill-before-workspace-delete-when-running ()
-  "kill-before-workspace-delete should call agent-repl-kill when vterm is
+  "kill-before-workspace-delete should call agent-repl-kill when the agent is
 running and the kill targets the current workspace (no NAME arg means the
 implicit target is the current workspace)."
   (let ((killed nil))
@@ -88,7 +88,7 @@ implicit target is the current workspace)."
       (should killed))))
 
 (ert-deftest agent-repl-test-kill-before-workspace-delete-when-not-running ()
-  "kill-before-workspace-delete should not call agent-repl-kill when vterm is not running."
+  "kill-before-workspace-delete should not call agent-repl-kill when the agent is not running."
   (let ((killed nil))
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
@@ -364,85 +364,6 @@ already missing from the cache — that would emit the spurious
           (should (string= result (expand-file-name "out.json" tmpdir))))
       (delete-directory tmpdir t))))
 
-;;;; ---- Tests: agent-repl--list-agent-vterm-buffers ----
-
-(ert-deftest agent-repl-test-list-agent-vterm-buffers-filters ()
-  "list-agent-vterm-buffers should return only buffers matching the vterm pattern."
-  (let ((buf1 (get-buffer-create "*agent-panel-abcd1234*"))
-        (buf2 (get-buffer-create "*not-agent*"))
-        (buf3 (get-buffer-create "*agent-panel-11223344*")))
-    (unwind-protect
-        (let ((result (agent-repl--list-agent-vterm-buffers)))
-          (should (memq buf1 result))
-          (should (memq buf3 result))
-          (should-not (memq buf2 result)))
-      (kill-buffer buf1)
-      (kill-buffer buf2)
-      (kill-buffer buf3))))
-
-(ert-deftest agent-repl-test-list-agent-vterm-buffers-empty ()
-  "list-agent-vterm-buffers should return nil when no matching buffers exist."
-  ;; Ensure no stray agent buffers
-  (dolist (buf (buffer-list))
-    (when (string-match-p agent-repl--vterm-buffer-re (buffer-name buf))
-      (kill-buffer buf)))
-  (should-not (agent-repl--list-agent-vterm-buffers)))
-
-;;;; ---- Tests: agent-repl--send-digit-char ----
-
-(ert-deftest agent-repl-test-send-digit-char-extracts-last-key ()
-  "send-digit-char should extract the last key from the key sequence and send it."
-  (let ((sent-char nil))
-    (cl-letf (((symbol-function 'agent-repl-send-char)
-               (lambda (ch) (setq sent-char ch)))
-              ((symbol-function 'this-command-keys-vector)
-               (lambda () [32 111 51])))  ;; SPC o 3
-      (agent-repl--send-digit-char)
-      (should (equal sent-char "3")))))
-
-(ert-deftest agent-repl-test-send-digit-char-zero ()
-  "send-digit-char should handle digit 0 correctly."
-  (let ((sent-char nil))
-    (cl-letf (((symbol-function 'agent-repl-send-char)
-               (lambda (ch) (setq sent-char ch)))
-              ((symbol-function 'this-command-keys-vector)
-               (lambda () [32 111 48])))  ;; SPC o 0
-      (agent-repl--send-digit-char)
-      (should (equal sent-char "0")))))
-
-(ert-deftest agent-repl-test-send-digit-char-nine ()
-  "send-digit-char should handle digit 9 correctly."
-  (let ((sent-char nil))
-    (cl-letf (((symbol-function 'agent-repl-send-char)
-               (lambda (ch) (setq sent-char ch)))
-              ((symbol-function 'this-command-keys-vector)
-               (lambda () [32 111 57])))  ;; SPC o 9
-      (agent-repl--send-digit-char)
-      (should (equal sent-char "9")))))
-
-;;;; ---- Tests: agent-repl-paste-to-vterm ----
-
-(ert-deftest agent-repl-test-paste-to-vterm-when-live ()
-  "paste-to-vterm should forward Ctrl-V to the vterm buffer when live."
-  (let ((sent-args nil))
-    (agent-repl-test--with-clean-state
-      (agent-repl-test--with-temp-buffer "*agent-panel-aabbccdd*"
-        (cl-letf (((symbol-function 'agent-repl--vterm-live-p) (lambda () t))
-                  ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--ws-get)
-                   (lambda (ws key)
-                     (when (and (equal ws "test-ws") (eq key :vterm-buffer))
-                       (current-buffer))))
-                  ((symbol-function 'vterm-send-key)
-                   (lambda (&rest args) (setq sent-args args))))
-          (agent-repl-paste-to-vterm)
-          (should (equal sent-args '("v" nil nil t))))))))
-
-(ert-deftest agent-repl-test-paste-to-vterm-when-not-live ()
-  "paste-to-vterm should signal user-error when vterm is not live."
-  (cl-letf (((symbol-function 'agent-repl--vterm-live-p) (lambda () nil)))
-    (should-error (agent-repl-paste-to-vterm) :type 'user-error)))
-
 ;;;; ---- Tests: agent-repl-set-priority ----
 
 (ert-deftest agent-repl-test-set-priority-stores-value ()
@@ -556,9 +477,9 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-kill-owned-panel-buffers-kills-matching ()
   "kill-owned-panel-buffers should kill panel buffers owned by the specified workspace."
-  (let ((buf1 (get-buffer-create "*agent-panel-aabb0011*"))
+  (let ((buf1 (get-buffer-create "*agent-frontend-aabb0011*"))
         (buf2 (get-buffer-create "*agent-panel-input-aabb0011*"))
-        (buf3 (get-buffer-create "*agent-panel-ccdd2233*")))
+        (buf3 (get-buffer-create "*agent-frontend-ccdd2233*")))
     (unwind-protect
         (progn
           (with-current-buffer buf1
@@ -597,7 +518,7 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-kill-owned-panel-buffers-silences-process ()
   "kill-owned-panel-buffers should silence process query before killing."
-  (let ((buf (get-buffer-create "*agent-panel-99887766*")))
+  (let ((buf (get-buffer-create "*agent-frontend-99887766*")))
     (unwind-protect
         (let ((proc (start-process "test-proc" buf "cat")))
           (set-process-query-on-exit-flag proc t)
@@ -717,34 +638,29 @@ this test doesn't pin."
 ;;;; ---- Tests: agent-repl-debug/--format-diagnostics ----
 
 (ert-deftest agent-repl-test-format-diagnostics-full ()
-  "format-diagnostics should include all diagnostic fields."
-  (agent-repl-test--with-temp-buffer "*agent-panel-aabb0011*"
-    (let* ((diag (list :vterm-buf (current-buffer)
-                       :proc-alive t
-                       :owning-ws "my-ws"
-                       :has-window t
-                       :agent-open t
-                       :dirty nil))
-           (result (agent-repl-debug/--format-diagnostics "ws1" diag :thinking :done)))
-      (should (string-match-p "ws1" result))
-      (should (string-match-p "\\*agent-panel-aabb0011\\*" result))
-      (should (string-match-p "process=alive" result))
-      (should (string-match-p "owning-ws=my-ws" result))
-      (should (string-match-p "has-window=yes" result))
-      (should (string-match-p "agent-open=yes" result))
-      (should (string-match-p "dirty=no" result))
-      (should (string-match-p ":thinking -> :done" result)))))
+  "format-diagnostics should include all diagnostic fields.
+DIAG's keys are `:owning-ws :has-window :agent-open :dirty' -- there is
+no `:vterm-buf'/`:proc-alive' anymore now that the agent view is always
+the webview buffer, derived independently of any vterm process."
+  (let* ((diag (list :owning-ws "my-ws"
+                     :has-window t
+                     :agent-open t
+                     :dirty nil))
+         (result (agent-repl-debug/--format-diagnostics "ws1" diag :thinking :done)))
+    (should (string-match-p "ws1" result))
+    (should (string-match-p "owning-ws=my-ws" result))
+    (should (string-match-p "has-window=yes" result))
+    (should (string-match-p "agent-open=yes" result))
+    (should (string-match-p "dirty=no" result))
+    (should (string-match-p ":thinking -> :done" result))))
 
 (ert-deftest agent-repl-test-format-diagnostics-nil-values ()
   "format-diagnostics should handle nil values gracefully."
-  (let* ((diag (list :vterm-buf nil
-                     :proc-alive nil
-                     :owning-ws nil
+  (let* ((diag (list :owning-ws nil
                      :has-window nil
                      :agent-open nil
                      :dirty nil))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
-    (should (string-match-p "process=dead/nil" result))
     (should (string-match-p "owning-ws=nil" result))
     (should (string-match-p "has-window=no" result))
     (should (string-match-p "agent-open=no" result))
@@ -753,8 +669,7 @@ this test doesn't pin."
 
 (ert-deftest agent-repl-test-format-diagnostics-dirty ()
   "format-diagnostics should show dirty=yes when dirty is non-nil."
-  (let* ((diag (list :vterm-buf nil :proc-alive nil :owning-ws nil
-                     :has-window nil :agent-open nil :dirty t))
+  (let* ((diag (list :owning-ws nil :has-window nil :agent-open nil :dirty t))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
     (should (string-match-p "dirty=yes" result))))
 
@@ -777,9 +692,9 @@ this test doesn't pin."
 
 (ert-deftest agent-repl-test-apply-state-refresh-not-open-clears-thinking ()
   "apply-state-refresh with the agent not open clears :thinking.
-The underlying vterm is gone, so no hook will ever fire to clear it
-naturally.  mark-dead-vterm clears :agent-state regardless of prior
-value and writes :repl-state :dead."
+The underlying agent session is gone, so no hook will ever fire to clear
+it naturally.  `agent-repl--mark-dead' clears :agent-state regardless of
+prior value and writes :repl-state :dead."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
@@ -895,8 +810,8 @@ var is unset, yielding the bare slug with no leading slash."
 ;;;; ---- Tests: agent-repl-debug/buffer-info ----
 
 (ert-deftest agent-repl-test-debug-buffer-info-with-buffers ()
-  "buffer-info should display info for all agent vterm buffers."
-  (let ((buf (get-buffer-create "*agent-panel-aabb0011*")))
+  "buffer-info should display info for all agent view (webview) buffers."
+  (let ((buf (get-buffer-create "*agent-frontend-aabb0011*")))
     (unwind-protect
         (progn
           (with-current-buffer buf
@@ -908,7 +823,7 @@ var is unset, yielding the bare slug with no leading slash."
                        (lambda (fmt &rest args)
                          (setq msg (apply #'format fmt args)))))
               (agent-repl-debug/buffer-info)
-              (should (string-match-p "\\*agent-panel-aabb0011\\*" msg))
+              (should (string-match-p "\\*agent-frontend-aabb0011\\*" msg))
               (should (string-match-p "owning=ws1" msg)))))
       (kill-buffer buf))))
 
@@ -916,7 +831,7 @@ var is unset, yielding the bare slug with no leading slash."
   "buffer-info should show (none) when no agent buffers exist."
   ;; Clean up any stray agent buffers
   (dolist (buf (buffer-list))
-    (when (string-match-p agent-repl--vterm-buffer-re (buffer-name buf))
+    (when (string-match-p agent-repl--frontend-buffer-re (buffer-name buf))
       (kill-buffer buf)))
   (let ((msg nil))
     (cl-letf (((symbol-function 'message)
@@ -963,41 +878,6 @@ var is unset, yielding the bare slug with no leading slash."
       (let ((result (agent-repl--format-buffer-info (current-buffer))))
         (should (string-match-p "owning=my-ws" result))
         (should (string-match-p "persp=nil" result))))))
-
-;;;; ---- Tests: list-agent-vterm-buffers excludes input buffers ----
-
-(ert-deftest agent-repl-test-list-agent-vterm-buffers-excludes-input ()
-  "list-agent-vterm-buffers should not include input buffers (only vterm pattern)."
-  (let ((vterm-buf (get-buffer-create "*agent-panel-aabb1122*"))
-        (input-buf (get-buffer-create "*agent-panel-input-aabb1122*")))
-    (unwind-protect
-        (let ((result (agent-repl--list-agent-vterm-buffers)))
-          (should (memq vterm-buf result))
-          (should-not (memq input-buf result)))
-      (kill-buffer vterm-buf)
-      (kill-buffer input-buf))))
-
-;;;; ---- Tests: list-agent-vterm-buffers excludes killed buffers ----
-
-(ert-deftest agent-repl-test-list-agent-vterm-buffers-excludes-killed ()
-  "list-agent-vterm-buffers should not include killed/dead buffers."
-  (let ((buf (get-buffer-create "*agent-panel-dead0001*")))
-    (kill-buffer buf)
-    ;; After killing, buffer-list should not contain buf, so result should not either
-    (let ((result (agent-repl--list-agent-vterm-buffers)))
-      (should-not (memq buf result)))))
-
-;;;; ---- Tests: send-digit-char with non-digit last key ----
-
-(ert-deftest agent-repl-test-send-digit-char-non-digit ()
-  "send-digit-char should send whatever character the last key maps to, even if non-digit."
-  (let ((sent-char nil))
-    (cl-letf (((symbol-function 'agent-repl-send-char)
-               (lambda (ch) (setq sent-char ch)))
-              ((symbol-function 'this-command-keys-vector)
-               (lambda () [32 111 97])))  ;; SPC o a (97 = ?a)
-      (agent-repl--send-digit-char)
-      (should (equal sent-char "a")))))
 
 ;;;; ---- Tests: mock-workspace-commands-with-priority (interactive) ----
 
@@ -1075,7 +955,7 @@ killing the buffer.  Asserts via the contract: the window.el helper
 panel buffer before `kill-buffer'.  Pre-consolidation this test
 intercepted `get-buffer-window' / `delete-window' directly; now the
 deletion is routed through the helper so the contract test follows."
-  (let ((buf (get-buffer-create "*agent-panel-a1b2c3d4*"))
+  (let ((buf (get-buffer-create "*agent-frontend-a1b2c3d4*"))
         (helper-called-with nil)
         (kill-called-with nil))
     (unwind-protect
@@ -1094,8 +974,13 @@ deletion is routed through the helper so the contract test follows."
 ;;;; ---- Tests: set-owning-workspace (interactive) ----
 
 (ert-deftest agent-repl-test-debug-set-owning-workspace ()
-  "set-owning-workspace should set the owning workspace on the selected buffer."
-  (let ((buf (get-buffer-create "*agent-panel-owntest01*")))
+  "set-owning-workspace should set the owning workspace on the selected buffer.
+The candidate list comes from `agent-repl--agent-view-buffer-p' walking
+`buffer-list' directly (no `agent-repl--list-agent-vterm-buffers' -- that
+function is gone), so BUF must actually match the webview buffer-name
+pattern for it to appear in the completing-read candidates at all."
+  (let ((buf (get-buffer-create "*agent-frontend-owntest01*"))
+        (offered-candidates nil))
     (unwind-protect
         (let ((call-count 0))
           (cl-letf (((symbol-function 'completing-read)
@@ -1103,14 +988,14 @@ deletion is routed through the helper so the contract test follows."
                        (setq call-count (1+ call-count))
                        (if (= call-count 1)
                            ;; First call: select buffer
-                           (buffer-name buf)
+                           (progn (setq offered-candidates coll)
+                                  (buffer-name buf))
                          ;; Second call: select workspace
                          "new-owner")))
-                    ((symbol-function 'agent-repl--list-agent-vterm-buffers)
-                     (lambda () (list buf)))
                     ((symbol-function '+workspace-list-names)
                      (lambda () '("new-owner" "other-ws"))))
             (agent-repl-debug/set-owning-workspace)
+            (should (member (buffer-name buf) offered-candidates))
             (should (equal (buffer-local-value 'agent-repl--owning-workspace buf)
                            "new-owner"))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
@@ -1118,23 +1003,24 @@ deletion is routed through the helper so the contract test follows."
 ;;;; ---- Tests: --gather-ws-diagnostics: all fields populated ----
 
 (ert-deftest agent-repl-test-gather-ws-diagnostics-all-populated ()
-  "gather-ws-diagnostics should return all fields populated when persp has a vterm buffer."
+  "gather-ws-diagnostics should return all fields populated when persp has
+the workspace's agent view (webview) buffer.
+`:owning-ws' and `:has-window' are derived from `agent-repl--agent-view-buffer-p'
+independently re-walking the persp's buffers -- there is no `:vterm-buf'/
+`:proc-alive' anymore now that liveness is the daemon's concern, not a
+local process this diagnostic could observe."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*agent-panel-diagfull*"
+    (agent-repl-test--with-temp-buffer "*agent-frontend-diagfull*"
       (setq-local agent-repl--owning-workspace "ws1")
       (let ((test-buf (current-buffer)))
         (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) t))
                   ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) nil))
                   ((symbol-function 'persp-get-by-name) (lambda (_) [fake-persp]))
                   ((symbol-function 'persp-buffers) (lambda (_) (list test-buf)))
-                  ((symbol-function 'agent-repl--agent-buffer-p)
+                  ((symbol-function 'agent-repl--agent-view-buffer-p)
                    (lambda (&optional buf) (eq (or buf (current-buffer)) test-buf)))
-                  ((symbol-function 'get-buffer-process) (lambda (_) 'fake-proc))
-                  ((symbol-function 'process-live-p) (lambda (_) t))
                   ((symbol-function 'get-buffer-window) (lambda (_buf &optional _) 'fake-win)))
           (let ((diag (agent-repl-debug/--gather-ws-diagnostics "ws1")))
-            (should (eq (plist-get diag :vterm-buf) test-buf))
-            (should (eq (plist-get diag :proc-alive) t))
             (should (equal (plist-get diag :owning-ws) "ws1"))
             (should (eq (plist-get diag :has-window) 'fake-win))
             (should (eq (plist-get diag :agent-open) t))
@@ -1149,8 +1035,6 @@ deletion is routed through the helper so the contract test follows."
               ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) nil)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "nonexistent")))
-        (should-not (plist-get diag :vterm-buf))
-        (should-not (plist-get diag :proc-alive))
         (should-not (plist-get diag :owning-ws))
         (should-not (plist-get diag :has-window))
         (should-not (plist-get diag :agent-open))
@@ -1165,9 +1049,11 @@ deletion is routed through the helper so the contract test follows."
               ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) 'none)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "ws1")))
-        ;; When persp is a symbol, (not (symbolp persp)) is nil, so persp-bufs is nil
-        (should-not (plist-get diag :vterm-buf))
-        (should-not (plist-get diag :proc-alive))
+        ;; `persp-buffers' is unbound in this batch environment, so
+        ;; `agent-repl--ws-buffers''s own `fboundp' guard returns nil
+        ;; regardless of what `--ws-resolve-persp' hands it here -- the
+        ;; symbol `none' passes its `(not (keywordp p))' filter unchanged,
+        ;; but there is still no buffer list to walk.
         (should-not (plist-get diag :owning-ws))
         (should-not (plist-get diag :has-window))))))
 
@@ -1198,8 +1084,7 @@ deletion is routed through the helper so the contract test follows."
     (let ((msg nil))
       (cl-letf (((symbol-function 'agent-repl-debug/--gather-ws-diagnostics)
                  (lambda (_ws)
-                   (list :vterm-buf nil :proc-alive nil :owning-ws nil
-                         :has-window nil :agent-open nil :dirty nil)))
+                   (list :owning-ws nil :has-window nil :agent-open nil :dirty nil)))
                 ((symbol-function 'agent-repl-debug/--apply-state-refresh)
                  (lambda (ws _open)
                    ;; Simulate clearing state (mirroring non-open + :done behavior)
@@ -1244,13 +1129,13 @@ deletion is routed through the helper so the contract test follows."
       (unwind-protect
           (progn
             (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "ws1")))
               (agent-repl-debug/dump-workspace)
               (with-current-buffer "*agent-repl-dump*"
                 (let ((content (buffer-string)))
-                  (should (string-match-p ":vterm-buffer" content))
+                  (should (string-match-p ":frontend-buffer" content))
                   (should (string-match-p "live" content))))
               (kill-buffer "*agent-repl-dump*")))
         (when (buffer-live-p buf) (kill-buffer buf))))))
@@ -1784,125 +1669,30 @@ user can spot the slot whose priority just shifted."
       (agent-repl-set-priority "p1")
       (should (equal (agent-repl--ws-get "ws1" :priority) "p1")))))
 
-;;;; ---- Tests: vterm-mode-map shadow strip ----
+;;;; ---- Tests: scroll-output-intercept-states (shared by surviving overrides) ----
 
-;;; vterm-mode-map binds C-S-<letter> to `vterm--self-insert', which
-;;; shadows our global drawer-mirror bindings whenever point lands in a
-;;; vterm buffer (e.g. immediately after `C-S-<return>' visits a
-;;; workspace).  The (after! vterm ...) block in keybindings.el must
-;;; unmap those keys so the global binding wins.
-
-(ert-deftest agent-repl-test-strip-vterm-shadow-keys-unmaps-csn-csp ()
-  "`--strip-vterm-shadow-keys' must unmap `C-S-n' and `C-S-p' from
-`vterm-mode-map' so the global drawer-mirror bindings win in vterm."
-  (let ((vterm-mode-map (make-sparse-keymap)))
-    (define-key vterm-mode-map (kbd "C-S-n") #'ignore)
-    (define-key vterm-mode-map (kbd "C-S-p") #'ignore)
-    (agent-repl--strip-vterm-shadow-keys)
-    (should-not (lookup-key vterm-mode-map (kbd "C-S-n")))
-    (should-not (lookup-key vterm-mode-map (kbd "C-S-p")))))
-
-(ert-deftest agent-repl-test-strip-vterm-shadow-keys-unmaps-all-letters ()
-  "Every entry of `agent-repl--vterm-shadow-keys' must be unmapped."
-  (let ((vterm-mode-map (make-sparse-keymap)))
-    (dolist (key agent-repl--vterm-shadow-keys)
-      (define-key vterm-mode-map (kbd key) #'ignore))
-    (agent-repl--strip-vterm-shadow-keys)
-    (dolist (key agent-repl--vterm-shadow-keys)
-      (should-not (lookup-key vterm-mode-map (kbd key))))))
-
-(ert-deftest agent-repl-test-vterm-shadow-keys-covers-nav-pair ()
-  "Sanity: the unmap list must include the two chords that actually
-provoked the user-visible bug — `C-S-n' (next) and `C-S-p' (prev) —
-otherwise a future trim could silently re-break workspace-visit nav."
-  (should (member "C-S-n" agent-repl--vterm-shadow-keys))
-  (should (member "C-S-p" agent-repl--vterm-shadow-keys)))
-
-(ert-deftest agent-repl-test-vterm-shadow-keys-covers-scroll-pair ()
-  "The unmap list must include `C-S-j' / `C-S-k' — the global scroll-output
-chords — so vterm doesn't capture them via `vterm--self-insert' when point
-sits inside the agent vterm buffer."
-  (should (member "C-S-j" agent-repl--vterm-shadow-keys))
-  (should (member "C-S-k" agent-repl--vterm-shadow-keys)))
-
-;;;; ---- Tests: scroll-output override install ----
-
-;;; `C-S-j' / `C-S-k' must win lookup even when evil intercept aux maps
-;;; on `general-override-mode-map' have `C-j' / `C-k' bound to
-;;; `evil-window-down/up' (via `config.el's `:nv "C-j"' / `:nv "C-k"').
-;;; Without an explicit `C-S-j' entry in the same intercept aux map,
-;;; shift-translation routes the chord to the window-nav command.
-
-(ert-deftest agent-repl-test-scroll-chords-covers-csj-csk ()
-  "`agent-repl--scroll-output-chords' must include both `C-S-j' and
-`C-S-k' — the two chords the override install is meant to protect."
-  (should (assoc "C-S-j" agent-repl--scroll-output-chords))
-  (should (assoc "C-S-k" agent-repl--scroll-output-chords))
-  (should (eq (cdr (assoc "C-S-j" agent-repl--scroll-output-chords))
-              'agent-repl-scroll-output-down))
-  (should (eq (cdr (assoc "C-S-k" agent-repl--scroll-output-chords))
-              'agent-repl-scroll-output-up)))
+;;; `agent-repl--scroll-output-intercept-states' was introduced for the
+;;; now-removed `C-S-j' / `C-S-k' scroll-output chords (and their vterm
+;;; shadow-key stripping); both are gone along with vterm.  The list
+;;; survives because `agent-repl--install-drawer-visit-override' and
+;;; `agent-repl--install-workspace-jump-overrides' reuse it as-is, so a
+;;; chord installed by either still needs to win lookup across every
+;;; evil state.
 
 (ert-deftest agent-repl-test-scroll-intercept-states-covers-normal-visual ()
   "`agent-repl--scroll-output-intercept-states' must include `normal'
 and `visual' — the two states where `config.el's `:nv \"C-j\"' /
 `:nv \"C-k\"' window-nav intercept aux maps live (the source of the
-shift-translation shadow)."
+shift-translation shadow the surviving override installers defeat)."
   (should (memq 'normal agent-repl--scroll-output-intercept-states))
   (should (memq 'visual agent-repl--scroll-output-intercept-states)))
 
 (ert-deftest agent-repl-test-scroll-intercept-states-covers-all-evil-states ()
-  "Sanity: the intercept state list must cover every evil state so the
-chord works regardless of which state is current.  A future trim that
-drops a state would silently re-break the chord there."
+  "Sanity: the intercept state list must cover every evil state so a
+chord installed through it works regardless of which state is current.
+A future trim that drops a state would silently re-break that chord there."
   (dolist (state '(normal visual insert emacs operator motion replace))
     (should (memq state agent-repl--scroll-output-intercept-states))))
-
-(ert-deftest agent-repl-test-install-scroll-overrides-installs-top-level ()
-  "`--install-scroll-output-overrides' must populate `general-override-mode-map'
-at top level so the chord works in non-evil contexts and wins above
-any other minor-mode-map binding."
-  (let ((general-override-mode-map (make-sparse-keymap)))
-    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
-               (lambda (&rest _) (make-sparse-keymap))))
-      (agent-repl--install-scroll-output-overrides))
-    (should (eq (lookup-key general-override-mode-map (kbd "C-S-j"))
-                'agent-repl-scroll-output-down))
-    (should (eq (lookup-key general-override-mode-map (kbd "C-S-k"))
-                'agent-repl-scroll-output-up))))
-
-(ert-deftest agent-repl-test-install-scroll-overrides-installs-intercept-aux ()
-  "`--install-scroll-output-overrides' must populate the evil intercept
-aux map of `general-override-mode-map' for every state in
-`--scroll-output-intercept-states' -- this is what defeats the
-shift-translation fallback that routes `C-S-j' to `evil-window-down'."
-  (let* ((general-override-mode-map (make-sparse-keymap))
-         (aux-maps nil))
-    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
-               (lambda (_keymap state &rest _)
-                 (or (cdr (assq state aux-maps))
-                     (let ((m (make-sparse-keymap)))
-                       (push (cons state m) aux-maps)
-                       m)))))
-      (agent-repl--install-scroll-output-overrides))
-    (dolist (state agent-repl--scroll-output-intercept-states)
-      (let ((aux (cdr (assq state aux-maps))))
-        (should aux)
-        (should (eq (lookup-key aux (kbd "C-S-j"))
-                    'agent-repl-scroll-output-down))
-        (should (eq (lookup-key aux (kbd "C-S-k"))
-                    'agent-repl-scroll-output-up))))))
-
-(ert-deftest agent-repl-test-install-scroll-overrides-skips-aux-without-evil ()
-  "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
-`--install-scroll-output-overrides' must still install the top-level
-binding without erroring."
-  (let ((general-override-mode-map (make-sparse-keymap)))
-    (cl-letf (((symbol-function 'fboundp)
-               (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
-      (agent-repl--install-scroll-output-overrides))
-    (should (eq (lookup-key general-override-mode-map (kbd "C-S-j"))
-                'agent-repl-scroll-output-down))))
 
 ;;;; ---- Tests: drawer-visit override install ----
 
@@ -1970,9 +1760,8 @@ binding without erroring."
 ;;;   - Doom default's `:n "s-9" -> +workspace/switch-to-final' in
 ;;;     `evil-normal-state-map' (last-workspace bug from normal state).
 ;;;   - Doom default's `"s-0" -> doom/reset-font-size' (font-resize bug).
-;;;   - `vterm-mode-map's blanket `M-X' -> `vterm--self-insert-meta'.
 ;;;
-;;; A plain `(map! :g ... )' global-map entry loses to all three; the
+;;; A plain `(map! :g ... )' global-map entry loses to both; the
 ;;; intercept-aux install is what wins.
 
 (ert-deftest agent-repl-test-workspace-jump-chords-cover-mod-and-super-digits ()
@@ -1981,7 +1770,7 @@ across BOTH `M-' (Option/Meta) and `s-' (Cmd/Super).  Command `s-1..s-9'
 map to the FIRST nine (`switch-to-0'..`switch-to-8'); Option `M-1..M-9'
 map to the SECOND nine (`switch-to-9'..`switch-to-17'); `M-0'/`s-0' map
 to `switch-to-final'.  Anything less leaves gaps that fall through to
-whatever Doom or `vterm-mode-map' bound."
+whatever Doom's own defaults bound."
   (let ((expected
          '(("M-1" . agent-repl-workspace-switch-to-9)
            ("M-2" . agent-repl-workspace-switch-to-10)
@@ -2062,8 +1851,8 @@ any other minor-mode-map binding."
   "`--install-workspace-jump-overrides' must populate the evil intercept
 aux map of `general-override-mode-map' for every state in
 `agent-repl--scroll-output-intercept-states' -- this is what beats
-both Doom default's `:n s-9' (normal-state-map) and `vterm-mode-map's
-blanket `M-X' bindings, regardless of which evil state is current."
+Doom default's `:n s-9' (normal-state-map) binding, regardless of
+which evil state is current."
   (let* ((general-override-mode-map (make-sparse-keymap))
          (aux-maps nil))
     (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)

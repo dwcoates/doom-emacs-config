@@ -131,43 +131,16 @@ advice's effect would be invisible)."
 (unless (boundp 'doom-leader-map)
   (defvar doom-leader-map (make-sparse-keymap) "Stub leader keymap."))
 
-;; vterm stubs
-(unless (fboundp 'vterm-mode)
-  (defun vterm-mode () "Stub." nil))
-(unless (fboundp 'vterm-send-string)
-  (defun vterm-send-string (&rest _args) "Stub." nil))
-(unless (fboundp 'vterm-send-return)
-  (defun vterm-send-return () "Stub." nil))
-(unless (fboundp 'vterm-send-key)
-  (defun vterm-send-key (&rest _args) "Stub." nil))
-(unless (fboundp 'vterm-send-down)
-  (defun vterm-send-down () "Stub." nil))
-(unless (fboundp 'vterm-send-up)
-  (defun vterm-send-up () "Stub." nil))
-(unless (fboundp 'vterm-reset-cursor-point)
-  (defun vterm-reset-cursor-point () "Stub." nil))
-(unless (fboundp 'vterm--redraw)
-  (defun vterm--redraw (&rest _args) "Stub." nil))
-(unless (fboundp 'vterm--invalidate)
-  (defun vterm--invalidate (&rest _args) "Stub." nil))
-(unless (fboundp 'vterm--set-title)
-  (defun vterm--set-title (&rest _args) "Stub." nil))
+;; No vterm stubs: agent-repl has no vterm frontend, so no production code
+;; path reaches a `vterm-*' symbol.  A test that still calls one is testing
+;; a frontend that no longer exists, and the resulting void-function is the
+;; correct, loud answer.
 
-;; vterm-mode-map stub — `(after! vterm ...)' in keybindings.el strips
-;; conflicting `C-S-<letter>' bindings via `define-key' at load time
-;; (the `after!' shim above is eager), so the variable must exist.
-(unless (boundp 'vterm-mode-map)
-  (defvar vterm-mode-map (make-sparse-keymap) "Stub."))
-
-;; general-override-mode-map stub — keybindings.el installs scroll-output
-;; override chords into this keymap at load time, so the variable must
-;; exist before that load runs.
+;; general-override-mode-map stub — keybindings.el installs override chords
+;; into this keymap at load time, so the variable must exist before that
+;; load runs.
 (unless (boundp 'general-override-mode-map)
   (defvar general-override-mode-map (make-sparse-keymap) "Stub."))
-(unless (boundp 'vterm--term)
-  (defvar vterm--term nil "Stub."))
-(unless (boundp 'vterm--process)
-  (defvar vterm--process nil "Stub."))
 
 ;; evil stubs
 (unless (fboundp 'evil-insert-state)
@@ -668,22 +641,6 @@ re-routes their frontend resolution instead."
        (let ((archive-dir (agent-repl--workspace-snapshot-archive-dir)))
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
-
-(defun agent-repl-test--use-vterm-frontend ()
-  "Pin the enclosing test's world to the vterm frontend.
-
-The SHIPPED default is `gui' (`agent-repl-default-frontend'), so a test
-that arranges a VTERM world — a `:vterm-buffer' on the workspace, the
-vterm send / interrupt / liveness paths, the vterm session-start
-choreography — must say so explicitly.  Frontend resolution keys off the
-workspace's `:frontend' and that default, NEVER off the mere presence of
-a vterm buffer, so an unpinned vterm-world test would otherwise be
-dispatched down the gui branch it is not testing.
-
-Call it inside `agent-repl-test--with-clean-state', which scratch-binds
-`agent-repl-default-frontend' — the `setq' is therefore test-local and
-cannot leak into later tests in load order."
-  (setq agent-repl-default-frontend 'vterm))
 
 (defmacro agent-repl-test--with-merge-state (&rest body)
   "Execute BODY with fresh merge queue / in-flight / progress / lookahead state.

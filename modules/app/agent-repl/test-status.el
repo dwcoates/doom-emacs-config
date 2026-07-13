@@ -160,7 +160,7 @@ distinct from `:stop-failed' (⚠) and `:dead' (❌)."
   "Palette has a `:merge-failed' entry that maps to the ⛔ label so the
 tab-bar renders the badge when render-status yields `:merge-failed'.
 Distinct from `:dead' (❌) so a blocked merge is not mistaken for a
-dead vterm."
+dead session."
   (should (equal (plist-get
                   (alist-get :merge-failed agent-repl--tab-palette)
                   :label)
@@ -289,23 +289,23 @@ dead vterm."
     (should-not (agent-repl--ws-get "ws1" :agent-state))
     (should-not (agent-repl--ws-get "ws1" :agent-state))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-clears-agent-state ()
-  "mark-dead-vterm clears :agent-state and sets :repl-state :dead."
+(ert-deftest agent-repl-test-mark-dead-clears-agent-state ()
+  "mark-dead clears :agent-state and sets :repl-state :dead."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (should-not (agent-repl--ws-get "ws1" :agent-state))
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-preserves-merged ()
-  "mark-dead-vterm is a no-op when :repl-state is already :merged.
+(ert-deftest agent-repl-test-mark-dead-preserves-merged ()
+  "mark-dead is a no-op when :repl-state is already :merged.
 The post-merge poll otherwise clobbers the 🔀 badge with ❌."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :repl-state :merged)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :merged))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-already-dead-clears-stale-agent-state ()
+(ert-deftest agent-repl-test-mark-dead-already-dead-clears-stale-agent-state ()
   "A death event on an already-:dead workspace still clears :agent-state.
 A gui send into a dead binding optimistically marks :thinking; if the
 healed session also dies, the death event fires with :repl-state
@@ -315,19 +315,19 @@ already :dead and must not leave the tab spinning :thinking forever."
     (agent-repl--ws-put "ws1" :repl-state :dead)
     (agent-repl--ws-put "ws1" :agent-state :thinking)
     ;; Act
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     ;; Assert
     (should-not (agent-repl--ws-get "ws1" :agent-state))
     (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-already-dead-init-grace-preserved ()
+(ert-deftest agent-repl-test-mark-dead-already-dead-init-grace-preserved ()
   "The :init grace outranks the stale-state sweep on a :dead workspace."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (agent-repl--ws-put "ws1" :repl-state :dead)
     (agent-repl--ws-put "ws1" :agent-state :init)
     ;; Act
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     ;; Assert — :init survives; the session-start hook owns the transition.
     (should (eq (agent-repl--ws-get "ws1" :agent-state) :init))))
 
@@ -1513,16 +1513,6 @@ purpose is the alternating-space cache-bust."
   "wconf-has-agent-p should return nil for a non-list wconf."
   (should-not (agent-repl--wconf-has-agent-p "not-a-list")))
 
-(ert-deftest agent-repl-test-wconf-has-agent-flat-match ()
-  "wconf-has-agent-p should return t for a flat wconf with a matching buffer."
-  (let ((wconf '((buffer "*agent-panel-ab12cd34*"))))
-    (should (agent-repl--wconf-has-agent-p wconf))))
-
-(ert-deftest agent-repl-test-wconf-has-agent-nested-match ()
-  "wconf-has-agent-p should return t for a nested wconf with matching buffer."
-  (let ((wconf '((child ((buffer "*agent-panel-ab12cd34*"))))))
-    (should (agent-repl--wconf-has-agent-p wconf))))
-
 (ert-deftest agent-repl-test-wconf-has-agent-no-buffer ()
   "wconf-has-agent-p should return nil for a wconf with no buffer entries."
   (let ((wconf '((something "other"))))
@@ -1563,19 +1553,6 @@ window config, it simply was not recognized."
   "visible-agent-buffer-p should return nil for a live non-agent buffer."
   (agent-repl-test--with-temp-buffer "*not-agent*"
     (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
-
-(ert-deftest agent-repl-test-visible-agent-buffer-no-window ()
-  "visible-agent-buffer-p should return nil for a live agent buffer with no window."
-  (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
-    ;; Buffer is live and an agent buffer but has no window
-    (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
-
-(ert-deftest agent-repl-test-visible-agent-buffer-with-window ()
-  "visible-agent-buffer-p should return non-nil for a live agent buffer with a window."
-  (agent-repl-test--with-temp-buffer "*agent-panel-00112233*"
-    (cl-letf (((symbol-function 'get-buffer-window)
-               (lambda (_buf) 'fake-window)))
-      (should (agent-repl--visible-agent-buffer-p (current-buffer))))))
 
 (ert-deftest agent-repl-test-visible-agent-buffer-gui-webview-with-window ()
   "A displayed gui webview IS a visible agent view.
@@ -1641,7 +1618,7 @@ Emacs 30 native-compiled callers pass the ALL-FRAMES slot explicitly
 (as nil) even when the source only writes `(get-buffer-window buf)' —
 without it, the test fails with `wrong-number-of-arguments' under AOT
 native-comp."
-  (agent-repl-test--with-temp-buffer "*agent-panel-aabbccdd*"
+  (agent-repl-test--with-temp-buffer "*agent-frontend-aabbccdd*"
     (let ((test-buf (current-buffer)))
       (cl-letf (((symbol-function 'buffer-list)
                  (lambda () (list test-buf)))
@@ -1665,7 +1642,7 @@ native-comp."
 (ert-deftest agent-repl-test-agent-in-saved-wconf-with-claude ()
   "agent-in-saved-wconf-p should return t when saved wconf contains an agent buffer."
   (let ((fake-persp (list 'fake-persp-struct))
-        (fake-wconf '((buffer "*agent-panel-ab12cd34*"))))
+        (fake-wconf '((buffer "*agent-frontend-ab12cd34*"))))
     (cl-letf (((symbol-function 'persp-get-by-name) (lambda (_name) fake-persp))
               ((symbol-function 'persp-window-conf) (lambda (_persp) fake-wconf)))
       (should (agent-repl--agent-in-saved-wconf-p "ws1")))))
@@ -1811,8 +1788,8 @@ trees; under the revised model only the Stop hook writes :done."
         (agent-repl--update-all-workspace-states)
         (should-not update-called)))))
 
-(ert-deftest agent-repl-test-update-all-running-vterm ()
-  "update-all should call update-ws-state and async-refresh for ws with running vterm.
+(ert-deftest agent-repl-test-update-all-running-agent ()
+  "update-all should call update-ws-state and async-refresh for ws with a running agent.
 Binds `agent-repl-state-git-tick-modulus' to 1 so every tick is a git tick;
 otherwise the mod-N gate would suppress `--async-refresh-git-status' on the
 first call (counter increments to 1, `(mod 1 5)' is non-zero)."
@@ -1833,18 +1810,21 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
         (should (equal updated-ws "ws1"))
         (should (equal refreshed-ws "ws1"))))))
 
-(ert-deftest agent-repl-test-update-all-no-vterm ()
-  "update-all should call mark-dead-vterm for ws without running vterm.
-`mark-dead-vterm' fires every tick regardless of the mod-N gate, so no
-gate-tweak is needed here."
+(ert-deftest agent-repl-test-update-all-non-gui-not-running-marks-dead ()
+  "update-all should call mark-dead for a non-gui workspace with no running agent.
+`mark-dead' fires every tick regardless of the mod-N gate, so no
+gate-tweak is needed here.  `:frontend' is stamped directly to a
+non-gui placeholder symbol so `--ws-gui-frontend-p' is false for this
+ws — `agent-repl--agent-running-p' is stubbed below, so the placeholder
+is never resolved through the (real, gui-only) frontend registry."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
     (let ((dead-ws nil))
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--mark-dead-vterm)
+                ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (setq dead-ws ws)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore))
         (agent-repl--update-all-workspace-states)
@@ -1860,7 +1840,7 @@ meaningless and the daemon owns death via session_dead_* sentinels."
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--update-ws-state) #'ignore)
-                ((symbol-function 'agent-repl--mark-dead-vterm)
+                ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (setq dead-ws ws))))
         (agent-repl--update-one-workspace-state "ws1" nil)
         (should-not dead-ws)))))
@@ -1881,7 +1861,7 @@ firing so gui tabs decay like vterm tabs."
 
 (ert-deftest agent-repl-test-update-one-gui-preserves-sentinel-state ()
   "The poll must not clobber sentinel-driven agent-state on a gui workspace.
-Runs the REAL mark-dead-vterm: the gui branch must prevent it from
+Runs the REAL mark-dead: the gui branch must prevent it from
 ever being reached, keeping :thinking intact and :repl-state un-dead."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -1893,16 +1873,19 @@ ever being reached, keeping :thinking intact and :repl-state un-dead."
       (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
       (should-not (eq (agent-repl--ws-get "ws1" :repl-state) :dead)))))
 
-(ert-deftest agent-repl-test-update-one-vterm-still-marks-dead ()
-  "update-one-workspace-state still marks a vterm workspace dead.
-The gui branch must not weaken the vterm liveness check (default
-:frontend is vterm)."
+(ert-deftest agent-repl-test-update-one-non-gui-still-marks-dead ()
+  "update-one-workspace-state still marks a non-gui workspace dead.
+The gui branch must not weaken the liveness check for any OTHER
+frontend a workspace might carry — `:frontend' is stamped directly to
+a non-gui placeholder symbol so `--ws-gui-frontend-p' is false; the
+`agent-repl--agent-running-p' stub below means the placeholder is
+never resolved through the (real, gui-only) frontend registry."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
     (let ((dead-ws nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--mark-dead-vterm)
+                ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (setq dead-ws ws))))
         (agent-repl--update-one-workspace-state "ws1" nil)
         (should (equal dead-ws "ws1"))))))
@@ -1932,25 +1915,25 @@ redundant `directory-files' scan to each."
         (agent-repl--update-all-workspace-states-now)
         (should-not poll-called)))))
 
-;;;; ---- Tests: mark-dead-vterm ----
+;;;; ---- Tests: mark-dead ----
 
-(ert-deftest agent-repl-test-mark-dead-vterm-sets-dead-and-clears-agent-state ()
-  "mark-dead-vterm writes :repl-state :dead and clears :agent-state."
+(ert-deftest agent-repl-test-mark-dead-sets-dead-and-clears-agent-state ()
+  "mark-dead writes :repl-state :dead and clears :agent-state."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
     (should-not (agent-repl--ws-agent-state "ws1"))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-from-thinking ()
-  "mark-dead-vterm clears :thinking (vterm is gone; sentinel won't fire)."
+(ert-deftest agent-repl-test-mark-dead-from-thinking ()
+  "mark-dead clears :thinking (vterm is gone; sentinel won't fire)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :thinking)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
     (should-not (agent-repl--ws-agent-state "ws1"))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-idempotent ()
+(ert-deftest agent-repl-test-mark-dead-idempotent ()
   "A second death observation leaves an already-clean :dead workspace unchanged.
 Stale :agent-state residue on a :dead workspace is NOT preserved
 anymore — that was the stuck-:thinking bug — so idempotence means the
@@ -1958,62 +1941,58 @@ fully-transitioned state (:dead, nil agent-state) is a fixed point."
   (agent-repl-test--with-clean-state
     ;; Arrange: first observation performs the full transition.
     (agent-repl--ws-put "ws1" :agent-state :done)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     ;; Act
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     ;; Assert — fixed point.
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
     (should-not (agent-repl--ws-agent-state "ws1"))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-display-state ()
-  "mark-dead-vterm results in :dead display state (❌ badge) when panels visible."
+(ert-deftest agent-repl-test-mark-dead-display-state ()
+  "mark-dead results in :dead display state (❌ badge) when panels visible."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :dead (agent-repl--ws-display-state "ws1"))))))
 
-(ert-deftest agent-repl-test-mark-dead-vterm-preserves-init ()
-  "mark-dead-vterm is a no-op when :agent-state is :init.
+(ert-deftest agent-repl-test-mark-dead-preserves-init ()
+  "mark-dead is a no-op when :agent-state is :init.
 During initialize-agent, the timer may tick before agent-running-p returns t
 even though the session is legitimately coming up; under the old code
 this clobbered :init with :dead.  The :init guard prevents that."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :init)
-    (agent-repl--mark-dead-vterm "ws1")
+    (agent-repl--mark-dead "ws1")
     (should (eq (agent-repl--ws-agent-state "ws1") :init))
     (should-not (agent-repl--ws-repl-state "ws1"))))
 
 ;;;; ---- Tests: on-frame-focus ----
 
 (ert-deftest agent-repl-test-on-frame-focus-with-focus ()
-  "on-frame-focus should refresh vterm and update states when frame has focus.
+  "on-frame-focus should update all workspace states when frame has focus.
 Mocks the unguarded `-now' entrypoint because frame-focus bypasses the
-periodic-timer in-flight guard — see `--on-frame-focus' docstring."
+periodic-timer in-flight guard — see `--on-frame-focus' docstring.
+No vterm to refresh anymore; readiness is entirely hook-driven."
   (agent-repl-test--with-clean-state
-    (let ((refresh-called nil)
-          (update-called nil))
+    (let ((update-called nil))
       (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
-                ((symbol-function 'agent-repl--refresh-vterm)
-                 (lambda () (setq refresh-called t)))
                 ((symbol-function 'agent-repl--update-all-workspace-states-now)
                  (lambda () (setq update-called t))))
         (agent-repl--on-frame-focus)
-        (should refresh-called)
         (should update-called)))))
 
 (ert-deftest agent-repl-test-on-frame-focus-no-focus ()
   "on-frame-focus should be a no-op when frame does not have focus.
 Mocks the unguarded `-now' entrypoint; matches what production code calls."
   (agent-repl-test--with-clean-state
-    (let ((refresh-called nil))
+    (let ((update-called nil))
       (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
-                ((symbol-function 'agent-repl--refresh-vterm)
-                 (lambda () (setq refresh-called t)))
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore))
+                ((symbol-function 'agent-repl--update-all-workspace-states-now)
+                 (lambda () (setq update-called t))))
         (agent-repl--on-frame-focus)
-        (should-not refresh-called)))))
+        (should-not update-called)))))
 
 ;;;; ---- Tests: update-ws-state edge cases (status transitions .md) ----
 
@@ -2087,9 +2066,13 @@ Binds `agent-repl-state-git-tick-modulus' to 1 so git refreshes fire on the
 first tick.  Synchronous step chaining comes from `--with-clean-state' setting
 `agent-repl--update-spread-sync' to `t', so both workspaces are processed
 within a single function call rather than being spread across `run-at-time'
-timers that would never fire under ERT batch mode."
+timers that would never fire under ERT batch mode.
+
+`dead-ws' is stamped with a non-gui placeholder `:frontend' so
+`--ws-gui-frontend-p' is false for it -- otherwise the gui branch of
+`--update-one-workspace-state' would take the running path regardless
+of the stubbed `agent-repl--agent-running-p' answer below."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
     (let ((updated nil)
           (refreshed nil)
           (cleared nil)
@@ -2097,6 +2080,7 @@ timers that would never fire under ERT batch mode."
       ;; Register both workspaces in the hashmap
       (agent-repl--ws-put "running-ws" :project-dir "/tmp/running")
       (agent-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
+      (agent-repl--ws-put "dead-ws" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (ws) (equal ws "running-ws")))
@@ -2105,7 +2089,7 @@ timers that would never fire under ERT batch mode."
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (ws) (push ws refreshed)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore)
-                ((symbol-function 'agent-repl--mark-dead-vterm)
+                ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (push ws cleared))))
         (agent-repl--update-all-workspace-states)
         ;; running-ws should get update + refresh
@@ -2385,21 +2369,21 @@ The cheap state-machine work still runs."
         (should git-fired)
         (should merge-fired)))))
 
-(ert-deftest agent-repl-test-update-one-ws-dead-vterm-skips-state-update ()
-  "When the vterm process is dead, `--update-one-workspace-state' calls
-`--mark-dead-vterm' instead of `--update-ws-state'.  Merge refresh still
-fires when DO-GIT-P is on because merged-ness is independent of vterm
+(ert-deftest agent-repl-test-update-one-ws-dead-agent-skips-state-update ()
+  "When a non-gui workspace's agent is not running, `--update-one-workspace-state'
+calls `--mark-dead' instead of `--update-ws-state'.  Merge refresh still
+fires when DO-GIT-P is on because merged-ness is independent of agent
 liveness — a dead workspace can still have a merge-completed parent."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
     (let ((dead-called nil)
           (state-called nil)
           (merge-called nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-put "ws1" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq state-called t)))
-                ((symbol-function 'agent-repl--mark-dead-vterm)
+                ((symbol-function 'agent-repl--mark-dead)
                  (lambda (_ws) (setq dead-called t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-called t))))

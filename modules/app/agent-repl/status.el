@@ -73,7 +73,7 @@ recognized repo or the repo has no configured default."
   "Per-workspace git refreshes fire once every N timer ticks.
 The 1Hz `agent-repl--update-all-workspace-states' timer drives both
 the cheap state-machine work (agent-running-p, update-ws-state,
-mark-dead-vterm) and the expensive git work
+mark-dead) and the expensive git work
 \(`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged').  Cheap work runs every
 tick so transitions like `:done' -> `:idle' stay snappy.  Git work
@@ -273,13 +273,13 @@ every recognized priority."
 ;;                   :idle | :thinking | :done | :permission.
 ;;                   Written primarily by hook sentinels; narrow
 ;;                   Emacs-side exceptions at lifecycle boundaries
-;;                   (initialize-agent writes :init; kill clears).
+;;                   (the boot path writes :init; kill clears).
 ;;   :repl-state   — Emacs-owned session-lifecycle flag.  Values:
 ;;                     nil       — workspace registered, no agent
 ;;                                 session has ever been attached.
 ;;                     :active   — panels open, session running.
 ;;                     :inactive — panels closed, session preserved.
-;;                     :dead     — vterm process has died.
+;;                     :dead     — agent session has died.
 ;;                   Only :dead contributes to tab display (❌ badge);
 ;;                   other values are bookkeeping only.
 
@@ -325,8 +325,8 @@ STATE is one of:
                (alongside `:merge-completed t').  Takes precedence
                over `:dead' so the 🔀 badge survives the post-merge
                nuke-and-poll cycle that would otherwise mark the
-               (now-vterm-less) workspace dead.
-  :dead      — vterm process gone
+               now-sessionless workspace dead.
+  :dead      — agent session gone
 
 The orthogonal `:done-acked' boolean tracks whether the user has seen
 the current `:agent-state :done' result.  It used to be the
@@ -338,7 +338,7 @@ is `:active', `:inactive', or `:hidden' so panel-visibility (and the
 deprio-hide marker) survives Emacs restart.  `:dead' / nil are not
 persisted — they reduce to \"no opinion\" at restart, so default
 open-panels behavior applies.  `:dead' is set via `--ws-put' directly
-(in `--mark-dead-vterm'), bypassing this setter, so no special-case is
+(in `--mark-dead'), bypassing this setter, so no special-case is
 needed there."
   (unless ws (error "agent-repl--ws-set-repl-state: ws is nil"))
   (agent-repl--log ws "repl-state %s -> %s" ws state)
@@ -594,8 +594,8 @@ visually distinct from states that have no palette mapping.")
   "Magenta used for the :stop-failed agent-state tab background.
 :stop-failed means the StopFailure hook fired — the agent's turn ended
 due to an API error (rate limit, auth failure, billing, etc.).  The
-vterm session is still alive and re-promptable; :dead (the plain ❌
-badge) is reserved for vterm process death.  A distinct color signals
+agent session is still alive and re-promptable; :dead (the plain ❌
+badge) is reserved for agent session death.  A distinct color signals
 \"needs your attention, but not the same kind of attention as :thinking
 or :dead\".")
 
@@ -620,32 +620,32 @@ tabs; readable against `agent-repl--color-selected-bg'.")
 asking for a permission decision.")
 
 (defconst agent-repl--label-dead             "❌"
-  "Bracket label shown adjacent to the numeric index when the vterm
-process has died.")
+  "Bracket label shown adjacent to the numeric index when the agent
+session has died.")
 
 (defconst agent-repl--label-stop-failed      "⚠"
   "Bracket label shown adjacent to the numeric index when the
-StopFailure hook fired (turn ended on an API error, but the vterm
+StopFailure hook fired (turn ended on an API error, but the agent
 session is still alive and re-promptable).")
 
 (defconst agent-repl--label-start-failed     "🚫"
   "Bracket label shown adjacent to the numeric index when starting
 the agent failed.  Distinct from `:stop-failed' (⚠, a live re-promptable
-session) and `:dead' (❌, a vterm that died) — the session never came up
-at all.")
+session) and `:dead' (❌, a session that died) — the session never came
+up at all.")
 
 (defconst agent-repl--label-merge-conflict   "💥"
   "Bracket label shown adjacent to the numeric index when a workspace's
 merge was rejected by a cherry-pick conflict (real conflict markers
 left behind, auto-resolver declined or interactive abort).  Distinct
-from `:dead' (vterm died) and `:merge-failed' (silent git-aborted, no
+from `:dead' (session died) and `:merge-failed' (silent git-aborted, no
 CHERRY_PICK_HEAD) — collision metaphor reflects the actual conflict.")
 
 (defconst agent-repl--label-merged           "🔀"
   "Bracket label shown adjacent to the numeric index when the
 workspace's branch has been merged into its source (`:repl-state'
 `:merged').  Takes precedence over the `:dead' badge so a merged
-workspace whose vterm has since died still reads as merged, not
+workspace whose session has since died still reads as merged, not
 dead.")
 
 (defconst agent-repl--label-merge-failed     "⛔"
@@ -653,7 +653,7 @@ dead.")
 merge dispatch failed silently (`:repl-state' `:merge-failed') —
 typically because the source repo is mid cherry-pick/rebase/merge and
 git refused the cherry-pick.  Distinct from `:dead' (❌) so a stuck
-merge does not look like a dead vterm at a glance.")
+merge does not look like a dead session at a glance.")
 
 (defconst agent-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
@@ -1466,8 +1466,7 @@ notification while dropping the leading workspace list."
 ;; Walk saved window-configuration tree to find agent buffers.
 (defun agent-repl--wconf-has-agent-p (wconf)
   "Return non-nil if WCONF (a `window-state-get' tree) shows a workspace's agent.
-The agent view is the vterm output buffer for a vterm workspace and the
-webview for a gui one, so both count — see
+The agent view is the webview buffer — see
 `agent-repl--agent-view-buffer-name-p'.  Excludes input buffers: presence
 of only the input panel in a saved config (e.g. from a placeholder layout)
 should not count as agent open."
@@ -1481,8 +1480,7 @@ should not count as agent open."
 
 (defun agent-repl--visible-agent-buffer-p (buf)
   "Return non-nil if BUF is a live, visible agent VIEW buffer.
-The view is a vterm output buffer for a vterm workspace and a webview for
-a gui one — see `agent-repl--agent-view-buffer-p'."
+The view is the webview buffer — see `agent-repl--agent-view-buffer-p'."
   (and (buffer-live-p buf)
        (agent-repl--agent-view-buffer-p buf)
        (get-buffer-window buf)))
@@ -1598,34 +1596,35 @@ caller is told to proceed."
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
   "Run the per-workspace state-update body for WS.
 The cheap parts (`agent-repl--agent-running-p',
-`agent-repl--update-ws-state', `agent-repl--mark-dead-vterm') run
-every tick so transitions like `:done' -> `:idle' stay snappy.
-DO-GIT-P gates the expensive git refreshes
-\(`agent-repl--async-refresh-git-status' and
+`agent-repl--update-ws-state', `agent-repl--mark-dead') run every tick
+so transitions like `:done' -> `:idle' stay snappy.  DO-GIT-P gates the
+expensive git refreshes (`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged') so they fire only on the
 mod-N tick selected by `agent-repl-state-git-tick-modulus'.
 
-A gui-frontend workspace has no vterm process to observe, so the
-vterm-liveness check is meaningless there: without the gui branch it
-would take the dead path once and permanently mask every
-sentinel-driven agent-state behind `:repl-state :dead' (the render
-precedence puts `:dead' above all agent-states, and nothing on the
-gui path ever clears it).  For gui workspaces liveness/death is owned
-exclusively by the daemon (`session_dead_*' sentinels), so the poll
-runs only the frontend-agnostic decay + git refresh."
+A gui-frontend workspace always takes the alive branch here,
+regardless of what `agent-repl--agent-running-p' would separately
+answer: for a gui workspace that predicate is a CHEAP check (a daemon
+session binding exists — see `agent-repl--gui-running-p') rather than
+a live daemon health probe, and it can be transiently nil for reasons
+that are not a death (e.g. mid-reattach after a daemon restart).
+Liveness/death for a gui workspace is owned exclusively by the daemon
+\(`session_dead_*' sentinels — see `agent-repl--on-session-dead-event'),
+so this poll deliberately never marks a gui workspace dead; it only
+runs the frontend-agnostic decay + git refresh for it."
   (if (or (agent-repl--ws-gui-frontend-p ws)
           (agent-repl--agent-running-p ws))
       (progn
         (agent-repl--update-ws-state ws)
         (when do-git-p
           (agent-repl--async-refresh-git-status ws)))
-    ;; No live vterm process → clear non-thinking state
-    (agent-repl--mark-dead-vterm ws))
-  ;; Merged-ness is independent of agent/vterm liveness — refresh
-  ;; for every workspace so the drawer's flatten-through-merged
-  ;; rendering has fresh `:branch-merged' values.  Gated on DO-GIT-P
-  ;; because the refresh's preconditions and process spawn are
-  ;; comparable in cost to the diff refresh above.
+    ;; No live agent session → clear non-thinking state.
+    (agent-repl--mark-dead ws))
+  ;; Merged-ness is independent of agent liveness — refresh for every
+  ;; workspace so the drawer's flatten-through-merged rendering has
+  ;; fresh `:branch-merged' values.  Gated on DO-GIT-P because the
+  ;; refresh's preconditions and process spawn are comparable in cost
+  ;; to the diff refresh above.
   (when (and do-git-p
              (fboundp 'agent-repl--async-refresh-branch-merged))
     (agent-repl--async-refresh-branch-merged ws)))
@@ -1707,8 +1706,8 @@ unnecessary overhead on those paths.  The periodic timer
 \(`agent-repl--update-all-workspace-states') is the sole caller of
 the poll."
   (setq agent-repl--update-tick-counter (1+ agent-repl--update-tick-counter))
-  ;; Filter to live workspaces only — tombstoned entries have no
-  ;; vterm/process to probe and would burn git status calls for no UI.
+  ;; Filter to live workspaces only — tombstoned entries have no live
+  ;; session to probe and would burn git status calls for no UI.
   (let* ((ws-names (agent-repl--live-ws-names))
          (n (length ws-names))
          (do-git-p (zerop (mod agent-repl--update-tick-counter
@@ -1771,11 +1770,11 @@ the in-flight slot."
 (push (run-with-timer agent-repl-state-poll-interval agent-repl-state-poll-interval #'agent-repl--update-all-workspace-states)
       agent-repl--timers)
 
-(defun agent-repl--mark-dead-vterm (ws)
-  "Record that WS's vterm process is no longer running.
+(defun agent-repl--mark-dead (ws)
+  "Record that WS's agent session is no longer running.
 Sets `:repl-state :dead' and clears `:agent-state'.  This is a
 documented lifecycle-cleanup exception to the sentinel-only writer
-rule: no hook will ever fire again for a dead process, so Emacs is
+rule: no hook will ever fire again for a dead session, so Emacs is
 the only observer that can reset state.
 
 No-op in four cases:
@@ -1789,10 +1788,10 @@ No-op in four cases:
   :dead).  Without this guard, the next poll would re-classify the
   workspace as plain `:dead' and the MERGED-section semantics would
   be lost.
-- `:agent-state' is `:init' — the agent is starting, the vterm process
-  may not have reached running state yet, and observing no process
-  does not mean dead.  The session-start hook will transition away
-  from `:init' shortly; until then the timer leaves things alone.
+- `:agent-state' is `:init' — the agent is starting, the daemon
+  session may not have reached running state yet, and observing no
+  session does not mean dead.  The session-start hook will transition
+  away from `:init' shortly; until then the timer leaves things alone.
 
 An already-`:dead' workspace is idempotent for `:repl-state' but NOT
 for `:agent-state': a gui send into a dead binding optimistically
@@ -1806,12 +1805,12 @@ dies the death event must still clear it — otherwise the tab spins
     nil)
    ((eq (agent-repl--ws-repl-state ws) :dead)
     (when (agent-repl--ws-agent-state ws)
-      (agent-repl--log ws "mark-dead-vterm: ws=%s already :dead — clearing stale agent-state=%s"
+      (agent-repl--log ws "mark-dead: ws=%s already :dead — clearing stale agent-state=%s"
                         ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-put ws :agent-state nil)
       (force-mode-line-update t)))
    (t
-    (agent-repl--log ws "mark-dead-vterm: ws=%s agent-state=%s -> :dead"
+    (agent-repl--log ws "mark-dead: ws=%s agent-state=%s -> :dead"
                       ws (agent-repl--ws-agent-state ws))
     (agent-repl--ws-put ws :repl-state :dead)
     (agent-repl--ws-put ws :agent-state nil)
@@ -1820,7 +1819,7 @@ dies the death event must still clear it — otherwise the tab spins
 ;;; Frame focus handler -------------------------------------------------------
 
 (defun agent-repl--on-frame-focus ()
-  "Refresh the agent vterm and update all workspace states when Emacs regains focus.
+  "Update all workspace states when Emacs regains focus.
 Calls `agent-repl--update-all-workspace-states-now' (the unguarded
 entrypoint) rather than the periodic-timer entrypoint: frame focus is
 an event-driven signal that the user is back and wants fresh data, so
@@ -1828,7 +1827,6 @@ it should kick a refresh regardless of the in-flight reentry guard."
   (if (frame-focus-state)
       (progn
         (agent-repl--log (agent-repl--ws-current-name) "on-frame-focus: focused")
-        (agent-repl--refresh-vterm)
         (agent-repl--update-all-workspace-states-now))
     (agent-repl--log-verbose (agent-repl--ws-current-name) "on-frame-focus: not focused")))
 

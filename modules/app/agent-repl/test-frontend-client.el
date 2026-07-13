@@ -357,6 +357,32 @@ conversation instead of starting over."
         (let ((post (car (last requests))))
           (should-not (string-match-p "resume" (or (nth 2 post) ""))))))))
 
+(ert-deftest agent-repl-test-frontend-ensure-session-passes-ws-model ()
+  "A fresh POST carries the workspace's `:model', not a hardcoded nil.
+
+Regression test: `agent-repl--frontend-ensure-session' once passed a
+literal nil for the model argument regardless of WS, so a gui workspace
+generated with an explicit model silently ran on the daemon/SDK default
+model instead.  Fails against that hardcoded nil, since `:model' would
+then never reach the POST body at all
+\(`agent-repl--frontend-create-session' omits the field entirely when
+model is nil)."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1"
+      '(:frontend-session-id nil :project-dir "/w" :model "opus")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-http
+          (lambda (method &rest _)
+            (if (equal method "GET")
+                (agent-repl-test--json-ok '((sessions . [])))
+              (agent-repl-test--json-ok '((session_id . "s_new")))))
+        ;; Act
+        (agent-repl--frontend-ensure-session "ws1")
+        ;; Assert
+        (let ((post (car (last requests))))
+          (should (string-match-p "\"model\":\"opus\"" (nth 2 post))))))))
+
 (ert-deftest agent-repl-test-frontend-ensure-session-restores-env-when-missing ()
   "A nil :active-env triggers env restore, and the restored durable id resumes.
 After an Emacs restart the workspace plist carries no :active-env; the
@@ -423,6 +449,44 @@ in-memory instantiation with staler on-disk state."
           (lambda (&rest _) (agent-repl-test--json-ok '((sessions . []))))
         ;; Act / Assert
         (should-error (agent-repl--frontend-ensure-session "ws1") :type 'user-error)))))
+
+;;;; ---- gui-adopt-session ----------------------------------------------------------
+
+(ert-deftest agent-repl-test-gui-adopt-session-passes-ws-model ()
+  "Adopting a durable session carries the workspace's `:model', not a
+hardcoded nil.
+
+Regression test for the same bug fixed in
+`agent-repl--frontend-ensure-session': `agent-repl--gui-adopt-session'
+once passed a literal nil for the model argument regardless of WS, so a
+frontend switch that adopted a durable claude session silently dropped
+the workspace's model.  Fails against that hardcoded nil, since
+`:model' would then never reach the POST body at all."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :model "opus")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-http
+          (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_new"))))
+        ;; Act
+        (agent-repl--gui-adopt-session "ws1" "cli-uuid-1")
+        ;; Assert
+        (let ((post (car (last requests))))
+          (should (string-match-p "\"model\":\"opus\"" (nth 2 post))))))))
+
+(ert-deftest agent-repl-test-gui-adopt-session-binds-the-new-session-id ()
+  "Adopt binds WS's `:frontend-session-id' to the newly created session."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-http
+          (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_adopted"))))
+        ;; Act
+        (let ((id (agent-repl--gui-adopt-session "ws1" "cli-uuid-1")))
+          ;; Assert
+          (should (equal id "s_adopted"))
+          (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_adopted")))))))
 
 ;;;; ---- message / interrupt injection -----------------------------------------
 
