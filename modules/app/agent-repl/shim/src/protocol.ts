@@ -60,6 +60,23 @@ export interface ModelInfo {
   description: string;
 }
 
+/**
+ * One invocable slash command, from the SDK's `query.supportedCommands()`.
+ *
+ * The SDK resolves this list itself — built-ins plus user, project, and
+ * plugin skills — under the session's own `cwd`, `CLAUDE_CONFIG_DIR`, and
+ * `settingSources`. So the set offered here is exactly the set the session
+ * can actually invoke, and enumerating the skill directories from disk
+ * would only re-derive it less faithfully.
+ */
+export interface SlashCommand {
+  /** Command name WITHOUT the leading slash (e.g. `debug-logs`). */
+  name: string;
+  description: string;
+  /** Hint for the command's arguments; empty when it takes none. */
+  argumentHint: string;
+}
+
 export interface ContentBlockText {
   type: "text";
   text: string;
@@ -139,12 +156,26 @@ export interface ShutdownCmd {
   reason?: string;
 }
 
+/**
+ * Re-resolve the slash-command list (§1.1).
+ *
+ * The SDK memoizes `supportedCommands()` against the init handshake, so a
+ * skill added mid-session is invisible to the live query. Re-resolving
+ * therefore means standing up a throwaway query purely to re-run that
+ * handshake — which is what this command asks the shim to do.
+ */
+export interface RefreshCommandsCmd {
+  type: "refresh-commands";
+  request_id: RequestId;
+}
+
 export type ShimCommand =
   | UserMessageCmd
   | PermissionDecisionCmd
   | InterruptCmd
   | SetPermissionModeCmd
   | SetModelCmd
+  | RefreshCommandsCmd
   | ShutdownCmd;
 
 const COMMAND_TYPES: ReadonlySet<string> = new Set([
@@ -153,6 +184,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set([
   "interrupt",
   "set-permission-mode",
   "set-model",
+  "refresh-commands",
   "shutdown",
 ]);
 
@@ -183,6 +215,18 @@ export interface ModelsEvt {
   type: "models";
   session_id: SessionId;
   models: ModelInfo[];
+}
+
+/**
+ * The slash commands this session may invoke (§1.2). Emitted once,
+ * unsolicited, after the SDK's init handshake resolves, and again after
+ * every `refresh-commands`: like the model menu, the list belongs to the
+ * session rather than to any one command.
+ */
+export interface CommandsEvt {
+  type: "commands";
+  session_id: SessionId;
+  commands: SlashCommand[];
 }
 
 /** Inlined subset of the Anthropic Messages streaming event union. */
@@ -327,6 +371,7 @@ export type ShimEvent =
   | ReadyEvt
   | AckEvt
   | ModelsEvt
+  | CommandsEvt
   | StreamEventEvt
   | AssistantMessageEvt
   | ResultEvt

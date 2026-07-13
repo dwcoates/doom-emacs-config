@@ -19,6 +19,7 @@ import {
   ResultSubtype,
   ShimCommand,
   ShimEvent,
+  SlashCommand,
   UserMessageCmd,
   decodeCommandLine,
 } from "./protocol.js";
@@ -33,6 +34,7 @@ export interface QueryLike extends AsyncIterable<SdkMessageLike> {
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
   supportedModels(): Promise<ModelInfo[]>;
+  supportedCommands(): Promise<SlashCommand[]>;
 }
 
 /** Structural subset of the SDK message union the shim consumes. */
@@ -81,6 +83,17 @@ export interface SessionDeps {
     prompt: AsyncIterable<SdkUserMessageLike>,
     canUseTool: CanUseToolLike,
   ) => QueryLike;
+  /**
+   * Re-resolve the slash-command list from a throwaway SDK handshake.
+   *
+   * Separate from {@link SessionDeps.createQuery} because the live query
+   * cannot answer: the SDK memoizes `supportedCommands()` against the init
+   * handshake it already performed, so only a NEW handshake sees a skill
+   * added since. The implementation must reuse the live session's options
+   * verbatim, or the list it resolves will not be the list the session can
+   * actually invoke.
+   */
+  probeCommands: () => Promise<SlashCommand[]>;
   /** Emit one Layer-1 event (the transport writes the NDJSON line). */
   emit: (evt: ShimEvent) => void;
   /** Terminate the shim process with the given exit code. */
@@ -131,6 +144,7 @@ export class ShimSession {
     // init handshake, and blocking `ready` (or the pump) on it would
     // delay every command behind a list nothing needs synchronously.
     this.publishSupportedModels();
+    this.publishSupportedCommands();
     return this.pump();
   }
 
@@ -196,6 +210,9 @@ export class ShimSession {
       case "set-model":
         this.ackOnSettled(cmd.type, cmd.request_id, this.query!.setModel(cmd.model));
         break;
+      case "refresh-commands":
+        this.ackOnSettled(cmd.type, cmd.request_id, this.republishCommands());
+        break;
       case "shutdown":
         this.shutdownRequestId = cmd.request_id;
         this.deps.emit({
@@ -259,6 +276,51 @@ export class ShimSession {
           this.deps.newRequestId(),
         );
       });
+  }
+
+  /**
+   * Publish the slash-command menu (§1.2 `commands`). Fired once at
+   * startup off the live query, for the same reason the model menu is:
+   * `supportedCommands()` resolves off the init handshake the SDK has
+   * already done, so it costs nothing and no command has to ask.
+   *
+   * Failure is recoverable exactly as it is for the model menu — only the
+   * completion menu goes unpopulated — so it is surfaced with a synthetic
+   * request_id, which is what tells the daemon this is a command-scoped
+   * error rather than the prelude to a shim death.
+   */
+  private publishSupportedCommands(): void {
+    void this.query!.supportedCommands()
+      .then((commands) => {
+        this.emitCommands(commands);
+      })
+      .catch((err: unknown) => {
+        this.emitError(
+          "sdk_throw",
+          `supportedCommands failed: ${errMessage(err)}`,
+          this.deps.newRequestId(),
+        );
+      });
+  }
+
+  /**
+   * Re-resolve and republish the menu for a `refresh-commands`.
+   *
+   * Goes through {@link SessionDeps.probeCommands} rather than the live
+   * query on purpose: the live query's `supportedCommands()` is memoized
+   * against its init handshake, so asking it again would faithfully return
+   * the very list we already know is stale.
+   */
+  private async republishCommands(): Promise<void> {
+    this.emitCommands(await this.deps.probeCommands());
+  }
+
+  private emitCommands(commands: SlashCommand[]): void {
+    this.deps.emit({
+      type: "commands",
+      session_id: this.deps.sessionId,
+      commands,
+    });
   }
 
   private handleUserMessage(cmd: UserMessageCmd): void {

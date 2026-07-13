@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AsyncQueue } from "../src/input-queue.js";
-import { ModelInfo, PermissionMode, ShimEvent } from "../src/protocol.js";
+import { ModelInfo, PermissionMode, ShimEvent, SlashCommand } from "../src/protocol.js";
 import {
   CanUseToolLike,
   PermissionResultLike,
@@ -28,6 +28,7 @@ interface Harness {
   interruptCalls: () => number;
   modeCalls: () => PermissionMode[];
   modelCalls: () => string[];
+  probeCalls: () => number;
   exitCode: () => number | null;
   pump: Promise<void>;
   send: (frame: Record<string, unknown>) => void;
@@ -39,11 +40,27 @@ interface HarnessOpts {
   setModelError?: Error;
   supportedModels?: ModelInfo[];
   supportedModelsError?: Error;
+  supportedCommands?: SlashCommand[];
+  supportedCommandsError?: Error;
+  /** What a `refresh-commands` probe resolves to (defaults to REFRESHED_COMMANDS). */
+  probeCommands?: SlashCommand[];
+  probeCommandsError?: Error;
 }
 
 const FAKE_MODELS: ModelInfo[] = [
   { value: "claude-opus-4-5", displayName: "Opus 4.5", description: "smartest" },
   { value: "claude-haiku-4-5", displayName: "Haiku 4.5", description: "fastest" },
+];
+
+const FAKE_COMMANDS: SlashCommand[] = [
+  { name: "compact", description: "summarize the context", argumentHint: "<instructions>" },
+  { name: "debug-logs", description: "read the debug log", argumentHint: "" },
+];
+
+/** The list a re-probe resolves: a skill added since the session started. */
+const REFRESHED_COMMANDS: SlashCommand[] = [
+  ...FAKE_COMMANDS,
+  { name: "brand-new-skill", description: "added mid-session", argumentHint: "" },
 ];
 
 function makeHarness(opts?: HarnessOpts): Harness {
@@ -54,6 +71,7 @@ function makeHarness(opts?: HarnessOpts): Harness {
   let interruptCount = 0;
   const modes: PermissionMode[] = [];
   const models: string[] = [];
+  let probeCount = 0;
   let exit: number | null = null;
   let requestCounter = 0;
 
@@ -74,6 +92,10 @@ function makeHarness(opts?: HarnessOpts): Harness {
       if (opts?.supportedModelsError) throw opts.supportedModelsError;
       return opts?.supportedModels ?? FAKE_MODELS;
     },
+    supportedCommands: async () => {
+      if (opts?.supportedCommandsError) throw opts.supportedCommandsError;
+      return opts?.supportedCommands ?? FAKE_COMMANDS;
+    },
   };
 
   const session = new ShimSession({
@@ -87,6 +109,11 @@ function makeHarness(opts?: HarnessOpts): Harness {
         for await (const m of prompt) userMessages.push(m);
       })();
       return query;
+    },
+    probeCommands: async () => {
+      probeCount++;
+      if (opts?.probeCommandsError) throw opts.probeCommandsError;
+      return opts?.probeCommands ?? REFRESHED_COMMANDS;
     },
     emit: (evt) => emitted.push(evt),
     exit: (code) => {
@@ -105,6 +132,7 @@ function makeHarness(opts?: HarnessOpts): Harness {
     interruptCalls: () => interruptCount,
     modeCalls: () => modes,
     modelCalls: () => models,
+    probeCalls: () => probeCount,
     exitCode: () => exit,
     pump,
     send: (frame) => session.handleLine(JSON.stringify(frame)),
@@ -201,6 +229,7 @@ describe("ShimSession lifecycle", () => {
       setPermissionMode: async () => {},
       setModel: async () => {},
       supportedModels: async () => [],
+      supportedCommands: async () => [],
     };
     const session = new ShimSession({
       sessionId: "sess-1",
@@ -208,6 +237,7 @@ describe("ShimSession lifecycle", () => {
       sdkVersion: "v",
       initialPermissionMode: "default",
       createQuery: () => throwingQuery,
+      probeCommands: async () => [],
       emit: (e) => emitted.push(e),
       exit: (c) => {
         exit = c;
@@ -404,6 +434,137 @@ describe("ShimSession model menu", () => {
     await until(() => h.eventsOfType("error").length === 1);
     // Assert — an empty menu is never asserted as if it were the truth.
     expect(h.eventsOfType("models")).toEqual([]);
+  });
+});
+
+describe("ShimSession command menu", () => {
+  it("publishes the SDK's supported commands on start", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Assert
+    expect(h.eventsOfType("commands")[0]).toEqual({
+      type: "commands",
+      session_id: "sess-1",
+      commands: FAKE_COMMANDS,
+    });
+  });
+
+  it("publishes the command menu without being asked for it", async () => {
+    // Arrange — no command is sent at all.
+    const h = makeHarness();
+    // Act
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Assert — the list rides on startup, not on a request.
+    expect(h.eventsOfType("commands")).toHaveLength(1);
+  });
+
+  it("carries the argument hint of a command that takes an argument", async () => {
+    // Arrange — the hint is what the completion UI renders as an annotation.
+    const h = makeHarness();
+    // Act
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Assert
+    const compact = h.eventsOfType("commands")[0].commands.find((c) => c.name === "compact");
+    expect(compact?.argumentHint).toBe("<instructions>");
+  });
+
+  it("surfaces a supportedCommands failure as a recoverable sdk_throw", async () => {
+    // Arrange — an unpopulated completion menu is a degraded session, not a
+    // dead one, so the error carries a request_id (which is what marks it
+    // recoverable to the daemon) rather than reading as a shim death.
+    const h = makeHarness({ supportedCommandsError: new Error("no commands") });
+    // Act
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    const err = h.eventsOfType("error")[0];
+    expect(err).toMatchObject({ code: "sdk_throw" });
+    expect(err.request_id).toBeTruthy();
+  });
+
+  it("emits no commands event when supportedCommands fails", async () => {
+    // Arrange
+    const h = makeHarness({ supportedCommandsError: new Error("no commands") });
+    // Act
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert — an empty menu is never asserted as if it were the truth.
+    expect(h.eventsOfType("commands")).toEqual([]);
+  });
+});
+
+describe("ShimSession refresh-commands", () => {
+  it("republishes the menu from a fresh probe rather than the live query", async () => {
+    // Arrange — the live query's supportedCommands() is memoized against the
+    // init handshake, so only the probe can see a skill added since.
+    const h = makeHarness();
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("commands").length === 2);
+    // Assert
+    expect(h.eventsOfType("commands")[1].commands).toEqual(REFRESHED_COMMANDS);
+  });
+
+  it("probes exactly once per refresh-commands", async () => {
+    // Arrange
+    const h = makeHarness();
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("commands").length === 2);
+    // Assert — the startup publish rides the live query, so the probe (which
+    // costs a process spawn) must not have run for it.
+    expect(h.probeCalls()).toBe(1);
+  });
+
+  it("acks the refresh-commands once the fresh menu is published", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("ack").length === 1);
+    // Assert
+    expect(h.eventsOfType("ack")[0]).toEqual({
+      type: "ack",
+      session_id: "sess-1",
+      request_id: "r1",
+    });
+  });
+
+  it("surfaces a failed probe as an sdk_throw carrying the request_id", async () => {
+    // Arrange — a refresh that cannot spawn its probe leaves the session
+    // perfectly usable on the menu it already has.
+    const h = makeHarness({ probeCommandsError: new Error("spawn failed") });
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    expect(h.eventsOfType("error")[0]).toMatchObject({
+      code: "sdk_throw",
+      request_id: "r1",
+    });
+  });
+
+  it("does not ack a refresh-commands whose probe failed", async () => {
+    // Arrange
+    const h = makeHarness({ probeCommandsError: new Error("spawn failed") });
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    expect(h.eventsOfType("ack")).toEqual([]);
+  });
+
+  it("republishes nothing when the probe failed", async () => {
+    // Arrange
+    const h = makeHarness({ probeCommandsError: new Error("spawn failed") });
+    await until(() => h.eventsOfType("commands").length === 1);
+    // Act
+    h.send({ type: "refresh-commands", request_id: "r1" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert — the startup menu stands; a failed refresh never blanks it.
+    expect(h.eventsOfType("commands")).toHaveLength(1);
   });
 });
 

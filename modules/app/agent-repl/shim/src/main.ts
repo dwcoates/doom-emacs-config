@@ -19,11 +19,12 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { createFakeQuery } from "./fake-query.js";
+import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import {
   ModelInfo,
   PermissionMode,
   ShimEvent,
+  SlashCommand,
   encodeEvent,
   isPermissionMode,
 } from "./protocol.js";
@@ -149,6 +150,66 @@ async function realQueryFactory(
   }) as unknown as QueryLike;
 }
 
+/**
+ * The probe never yields a prompt, so no tool can ever be requested of it.
+ * A call here is therefore a broken invariant rather than a permission
+ * question, and inventing an answer would only hide that.
+ */
+const probeCanUseTool: CanUseToolLike = () => {
+  throw new Error("shim: the command probe was asked to permit a tool, but it runs no turn");
+};
+
+/**
+ * SDK options for the throwaway command probe.
+ *
+ * Derived from {@link realQueryOptions} rather than hand-rolled, because a
+ * probe that resolved commands under options the session does not share
+ * would offer commands the session cannot invoke. `settingSources` is the
+ * sharpest example: without it the CLI resolves the 8 built-ins and none of
+ * the user's or project's skills.
+ *
+ * `resume` is the one option deliberately dropped. Command resolution reads
+ * the skill directories and settings, never the transcript, so resuming buys
+ * the probe nothing and only points a second process at the live session's
+ * transcript.
+ */
+export function probeQueryOptions(
+  args: CliArgs,
+  abortController: AbortController,
+): Record<string, unknown> {
+  const opts = realQueryOptions(args, probeCanUseTool);
+  delete opts.resume;
+  // The probe's only exit is this controller: aborting it is what SIGTERMs
+  // the `claude` child the query spawned. A Query exposes no close() of its
+  // own, so without this the shim would leak a process per refresh.
+  opts.abortController = abortController;
+  return opts;
+}
+
+/**
+ * Re-resolve the slash-command list by standing up a throwaway query.
+ *
+ * The prompt iterable never yields, so the CLI completes the init handshake
+ * that carries the command list and then simply idles: the probe costs one
+ * process spawn and zero model tokens.
+ */
+async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  const idle = (async function* (): AsyncGenerator<SdkUserMessageLike> {
+    await new Promise<never>(() => {});
+  })();
+  const abortController = new AbortController();
+  const probe = sdk.query({
+    prompt: idle as never,
+    options: probeQueryOptions(args, abortController) as never,
+  });
+  try {
+    return (await probe.supportedCommands()) as SlashCommand[];
+  } finally {
+    abortController.abort();
+  }
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -176,6 +237,8 @@ export async function main(): Promise<void> {
       }
       return lazyQuery(realQueryFactory(args, prompt, canUseTool));
     },
+    probeCommands: (): Promise<SlashCommand[]> =>
+      args.fake ? Promise.resolve(FAKE_COMMANDS) : realProbeCommands(args),
     emit: (evt: ShimEvent): void => {
       process.stdout.write(encodeEvent(evt));
     },
@@ -212,6 +275,8 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
     setModel: async (model): Promise<void> => (await queryPromise).setModel(model),
     supportedModels: async (): Promise<ModelInfo[]> =>
       (await queryPromise).supportedModels(),
+    supportedCommands: async (): Promise<SlashCommand[]> =>
+      (await queryPromise).supportedCommands(),
   };
 }
 
