@@ -262,6 +262,32 @@ func TestValidPermissionMode(t *testing.T) {
 	}
 }
 
+func TestCommandActs(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"user-message acts", `{"type":"user-message","request_id":"r","content":"hi"}`, true},
+		{"permission-decision acts", `{"type":"permission-decision","request_id":"r","decision":{"behavior":"allow"}}`, true},
+		{"interrupt acts", `{"type":"interrupt","request_id":"r"}`, true},
+		{"set-permission-mode acts", `{"type":"set-permission-mode","request_id":"r","mode":"plan"}`, true},
+		{"set-model acts", `{"type":"set-model","request_id":"r","model":"m"}`, true},
+		{"replay-request does not act", `{"type":"replay-request","from_seq":0}`, false},
+		{"shutdown does not act", `{"type":"shutdown","request_id":"r"}`, false},
+		{"unknown type does not act", `{"type":"who-knows"}`, false},
+		{"malformed json does not act", `{not json`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act + Assert
+			if got := CommandActs([]byte(tt.line)); got != tt.want {
+				t.Errorf("CommandActs(%s) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeCommandSetModel(t *testing.T) {
 	// Arrange
 	line := `{"type":"set-model","request_id":"r1","model":"claude-opus-4-5"}`
