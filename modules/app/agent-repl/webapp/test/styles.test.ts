@@ -338,10 +338,10 @@ describe("thinking spinner", () => {
     expect(keyframes).toMatch(/to\s*{\s*transform:\s*rotate\(360deg\)/);
   });
 
-  it("keeps rotating under reduced motion instead of pulsing in place", () => {
+  it("keeps rotating under reduced motion instead of swapping in another animation", () => {
     // Arrange / Act — the reduced-motion .thinking-spinner override.
     // Assert
-    expect(reducedSpinner).not.toContain("tool-pulse");
+    expect(reducedSpinner).not.toMatch(/animation-name:/);
   });
 
   it("slows the rotation under reduced motion rather than replacing it", () => {
@@ -391,6 +391,14 @@ describe("running-tool spinner", () => {
     // Assert
     expect(reducedToolSpinner).toMatch(/animation-duration:\s*[\d.]+s,\s*[\d.]+s/);
     expect(reducedToolSpinner).not.toMatch(/animation:/);
+  });
+
+  it("retires the in-body ••• pulse the arc now stands in for", () => {
+    // Arrange / Act — the arc is the sole in-progress indicator, so neither the
+    // pulsing body nor its keyframes may survive to compete with it.
+    // Assert
+    expect(css).not.toContain("tool-pulse");
+    expect(css).not.toContain("tool-input-pending");
   });
 });
 

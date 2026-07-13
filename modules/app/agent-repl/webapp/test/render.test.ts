@@ -456,9 +456,9 @@ describe("renderItem", () => {
     expect(renderItem(item)).not.toContain("tool-spinner");
   });
 
-  it("keeps the running arc off a call whose input is still streaming", () => {
-    // Arrange — the input phase already pulses •••, so a second indicator
-    // would double up on the same beat.
+  it("spins the running badge of a call whose input is still streaming", () => {
+    // Arrange — in-flight is one look: the streaming-input phase carries the
+    // same arc the awaiting-result phase does.
     const item: ToolItem = {
       kind: "tool",
       toolUseId: "t1",
@@ -468,7 +468,22 @@ describe("renderItem", () => {
       inputDone: false,
     };
     // Act + Assert
-    expect(renderItem(item)).not.toContain("tool-spinner");
+    expect(renderItem(item)).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
+  });
+
+  it("labels a still-streaming call's run badge as streaming rather than running", () => {
+    // Arrange — the arc is shared across both in-flight phases, so only the
+    // badge's label tells them apart.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Edit",
+      messageId: "m1",
+      inputJson: `{"file_`,
+      inputDone: false,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain("streaming input…");
   });
 
   it("renders the tool title inside the styled tool-name span", () => {
@@ -693,7 +708,7 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-q-submit");
   });
 
-  it("hides streaming partial input JSON behind a pulse indicator", () => {
+  it("hides the raw partial input JSON of a still-streaming call", () => {
     // Arrange — input still streaming: raw partial JSON must NOT show.
     const item: ToolItem = {
       kind: "tool",
@@ -706,8 +721,25 @@ describe("renderItem", () => {
     // Act
     const html = renderItem(item);
     // Assert
-    expect(html).toContain("tool-input-pending");
     expect(html).not.toContain("file_path");
+  });
+
+  it("drops the ••• pulse from a still-streaming call's empty body", () => {
+    // Arrange — the head's running arc is the sole in-progress indicator, so
+    // the body pulses nothing while it waits to be filled.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Read",
+      messageId: "m1",
+      inputJson: `{"file_path":"/private/e`,
+      inputDone: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("•••");
+    expect(html).not.toContain("tool-input-pending");
   });
 
   it("escapes untrusted content in tool output", () => {
