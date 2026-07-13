@@ -2262,6 +2262,203 @@ is intentionally phrased as a generic \"read this file\" instruction
   (should-not (string-match-p "metaprompt file" agent-repl--command-prefix))
   (should-not (string-match-p "the metaprompt" agent-repl--command-prefix)))
 
+;;;; ---- Tests: slash-command completion (capf) ----
+
+(defun agent-repl-test--capf-bounds-in (text point)
+  "Return `agent-repl--skill-capf-bounds' for TEXT with point at POINT.
+POINT is a 1-indexed buffer position."
+  (with-temp-buffer
+    (insert text)
+    (goto-char point)
+    (agent-repl--skill-capf-bounds)))
+
+(ert-deftest agent-repl-test-capf-bounds-bare-command ()
+  "The bounds span the `/name' token when it is at buffer start."
+  ;; "/deb" with point at end (position 5) → the whole token, positions 1..5.
+  (should (equal (agent-repl-test--capf-bounds-in "/deb" 5) '(1 . 5))))
+
+(ert-deftest agent-repl-test-capf-bounds-lone-slash ()
+  "A lone `/' is completable: the menu should offer everything."
+  (should (equal (agent-repl-test--capf-bounds-in "/" 2) '(1 . 2))))
+
+(ert-deftest agent-repl-test-capf-bounds-rejects-path ()
+  "A path is not completed: the name run is stopped by a second slash."
+  (should-not (agent-repl-test--capf-bounds-in "/Users/foo" 7)))
+
+(ert-deftest agent-repl-test-capf-bounds-rejects-non-start-slash ()
+  "A `/' that is not at buffer start is not completed."
+  (should-not (agent-repl-test--capf-bounds-in "hello /deb" 11)))
+
+(ert-deftest agent-repl-test-capf-bounds-rejects-point-past-token ()
+  "Once point has moved past the command into its arguments, there is
+nothing to complete."
+  ;; "/deb x": point at 7 (after the space) is past the token.
+  (should-not (agent-repl-test--capf-bounds-in "/deb x" 7)))
+
+(ert-deftest agent-repl-test-capf-bounds-empty-buffer ()
+  "An empty buffer has no slash-command token."
+  (should-not (agent-repl-test--capf-bounds-in "" 1)))
+
+(ert-deftest agent-repl-test-capf-candidates-carry-the-slash ()
+  "Candidates include the leading slash, since the completion region does."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :slash-commands
+                        '(((name . "debug-logs") (description . "d") (argumentHint . ""))))
+    (should (equal (agent-repl--skill-capf-candidates "ws1") '("/debug-logs")))))
+
+(ert-deftest agent-repl-test-capf-candidates-carry-hint-property ()
+  "Each candidate carries its argument hint as a text property."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :slash-commands
+                        '(((name . "compact") (description . "d") (argumentHint . "<how>"))))
+    (let ((cand (car (agent-repl--skill-capf-candidates "ws1"))))
+      (should (equal (get-text-property 0 'agent-repl-skill-hint cand) "<how>")))))
+
+(ert-deftest agent-repl-test-capf-annotation-shows-hint ()
+  "The annotation renders the argument hint of a command that takes one."
+  (let ((cand (propertize "/compact" 'agent-repl-skill-hint "<how>")))
+    (should (equal (agent-repl--skill-capf-annotation cand) " <how>"))))
+
+(ert-deftest agent-repl-test-capf-annotation-nil-for-argless-command ()
+  "A command with an empty hint annotates to nil, so no trailing space
+is shown."
+  (let ((cand (propertize "/debug-logs" 'agent-repl-skill-hint "")))
+    (should-not (agent-repl--skill-capf-annotation cand))))
+
+(ert-deftest agent-repl-test-capf-returns-region-and-collection ()
+  "The capf returns the token region and the candidate collection when
+point sits on a slash command in a workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :slash-commands
+                        '(((name . "debug-logs") (description . "d") (argumentHint . ""))))
+    (with-temp-buffer
+      (setq-local agent-repl--owning-workspace "ws1")
+      (insert "/deb")
+      (let ((result (agent-repl--skill-capf)))
+        (should (equal (nth 0 result) 1))
+        (should (equal (nth 1 result) 5))
+        (should (equal (nth 2 result) '("/debug-logs")))))))
+
+(ert-deftest agent-repl-test-capf-nil-when-not-on-a-command ()
+  "The capf returns nil when point is not on a slash command."
+  (agent-repl-test--with-clean-state
+    (with-temp-buffer
+      (setq-local agent-repl--owning-workspace "ws1")
+      (insert "hello world")
+      (should-not (agent-repl--skill-capf)))))
+
+;;;; ---- Tests: slash-command menu cache ----
+
+(ert-deftest agent-repl-test-slash-commands-refetch-caches ()
+  "`agent-repl--slash-commands-for-ws' fetches once and then serves the
+cache."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (let ((fetch-count 0))
+      (cl-letf (((symbol-function 'agent-repl--frontend-fetch-commands)
+                 (lambda (_id)
+                   (cl-incf fetch-count)
+                   '(((name . "debug-logs") (description . "d") (argumentHint . ""))))))
+        ;; Act — two reads.
+        (agent-repl--slash-commands-for-ws "ws1")
+        (agent-repl--slash-commands-for-ws "ws1")
+        ;; Assert — only the first hit the daemon.
+        (should (equal fetch-count 1))))))
+
+(ert-deftest agent-repl-test-slash-commands-refetch-tolerates-http-error ()
+  "A failed fetch returns nil rather than propagating, so a broken daemon
+never interrupts typing."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-fetch-commands)
+               (lambda (_id) (error "daemon down"))))
+      (should-not (agent-repl--slash-commands-for-ws "ws1")))))
+
+(ert-deftest agent-repl-test-slash-commands-refetch-nil-without-session ()
+  "With no live session there is nothing to fetch, so the menu is nil and
+the daemon is never called."
+  (agent-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-fetch-commands)
+                 (lambda (_id) (setq called t) nil)))
+        (should-not (agent-repl--slash-commands-for-ws "ws1"))
+        (should-not called)))))
+
+(ert-deftest agent-repl-test-slash-commands-invalidate-clears-and-refreshes ()
+  "Invalidation drops the cache AND asks the daemon to re-resolve the menu."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (agent-repl--ws-put "ws1" :slash-commands
+                        '(((name . "stale") (description . "d") (argumentHint . ""))))
+    (let ((refreshed-id nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-refresh-commands)
+                 (lambda (id) (setq refreshed-id id) t)))
+        (agent-repl--slash-commands-invalidate "ws1")
+        ;; Assert — cache gone, and the daemon was told to re-probe.
+        (should-not (agent-repl--ws-get "ws1" :slash-commands))
+        (should (equal refreshed-id "s1"))))))
+
+(ert-deftest agent-repl-test-slash-commands-invalidate-tolerates-refresh-error ()
+  "A refresh failure during invalidation is swallowed: the stale menu
+simply stands until the next change."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-refresh-commands)
+               (lambda (_id) (error "daemon down"))))
+      ;; Act + Assert — no error escapes.
+      (should-not (agent-repl--slash-commands-invalidate "ws1")))))
+
+;;;; ---- Tests: skill-directory watch dirs ----
+
+(ert-deftest agent-repl-test-watch-dirs-includes-existing-user-and-project ()
+  "Watch dirs include the user config's skills dir and the project's
+.claude/skills, and exclude directories that do not exist."
+  (agent-repl-test--with-clean-state
+    (let* ((config-root (make-temp-file "capf-config" t))
+           (project-root (make-temp-file "capf-project" t))
+           (user-skills (expand-file-name "skills" config-root))
+           (project-skills (expand-file-name ".claude/skills" project-root)))
+      (unwind-protect
+          (progn
+            (make-directory user-skills t)
+            (make-directory project-skills t)
+            ;; Note: neither `commands' dir is created, so both must be filtered.
+            (agent-repl--ws-put "ws1" :project-dir project-root)
+            (let ((process-environment
+                   (cons (concat "CLAUDE_CONFIG_DIR=" config-root)
+                         process-environment)))
+              (let ((dirs (agent-repl--slash-command-watch-dirs "ws1")))
+                (should (member user-skills dirs))
+                (should (member project-skills dirs))
+                ;; The non-existent commands dirs are filtered out.
+                (should-not (member (expand-file-name "commands" config-root) dirs)))))
+        (delete-directory config-root t)
+        (delete-directory project-root t)))))
+
+(ert-deftest agent-repl-test-watch-dirs-no-project ()
+  "With no project dir, only the (existing) user config dirs are watched."
+  (agent-repl-test--with-clean-state
+    (let* ((config-root (make-temp-file "capf-config" t))
+           (user-skills (expand-file-name "skills" config-root)))
+      (unwind-protect
+          (progn
+            (make-directory user-skills t)
+            (let ((process-environment
+                   (cons (concat "CLAUDE_CONFIG_DIR=" config-root)
+                         process-environment)))
+              (let ((dirs (agent-repl--slash-command-watch-dirs "ws1")))
+                (should (equal dirs (list user-skills))))))
+        (delete-directory config-root t)))))
+
+(ert-deftest agent-repl-test-ensure-watch-noop-in-batch ()
+  "Watcher install is a no-op in batch, so headless runs never leak real
+file-notify watchers."
+  (agent-repl-test--with-clean-state
+    (with-temp-buffer
+      ;; `noninteractive' is t under `emacs -batch'.
+      (agent-repl--slash-commands-ensure-watch "ws1")
+      (should-not agent-repl--slash-command-watchers))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
