@@ -1016,13 +1016,17 @@ claude-repld-sessions.json`, crash-safe write-through) carrying the
 s_ id, cwd, model, permission mode, and the durable
 `claude_session_id`; on boot it re-registers every non-terminal record
 whose transcript still exists as a **rehydratable** session under its
-ORIGINAL s_ id. No shim is spawned at boot — the first real access
-(`GET /sessions/{id}/stream`, `POST /sessions/{id}/message`,
-`POST /sessions/{id}/interrupt`) launches the shim with
-`--resume <claude_session_id>`, seeding the replay ring from the
-transcript exactly as §2.10 describes for created-with-`resume`
-sessions. A client holding a pre-restart id therefore reconnects to
-the same conversation without ever observing "session gone".
+ORIGINAL s_ id. No shim is spawned at boot. The first ATTACH
+(`GET /sessions/{id}/stream`) MATERIALIZES the record as a hibernated
+session (§2.14): the replay ring is seeded from the transcript so the
+whole conversation renders, but no shim is spawned — merely viewing a
+restored workspace stays free. The shim launches with
+`--resume <claude_session_id>` only on the first ACT
+(`POST /sessions/{id}/message`, `POST /sessions/{id}/interrupt`, or a
+`user-message`/`interrupt`/`permission-decision`/`set-*` frame over the
+stream socket), which revives the session per §2.14. A client holding a
+pre-restart id therefore reconnects to the same conversation without
+ever observing "session gone".
 
 Wire surface (documented here despite the HTTP-route non-goal below,
 because clients key off it): entries in the `GET /sessions` listing
@@ -1195,6 +1199,46 @@ classifier verdict/reason once known, plus a Cancel control and a
 Run-now control. The whole point of the feature is that the user SEES
 a message is parked for later handling and is explicitly NOT
 interrupting the current task unless escalated.
+### 2.14 Idle hibernation
+
+Each live session pins a `node` shim plus a `claude` CLI (~500MB
+resident). A daemon serving many workspaces would hold that for every
+session ever opened, since nothing reaps an idle one. Hibernation frees
+the process pair for sessions that have gone idle, WITHOUT tearing the
+session down: the ring, the translator, the attached clients, and the
+non-terminal registry record all survive, so the session stays listed,
+still answers `replay-request`, and revives on the next act.
+
+**Idle** is measured from the last REAL activity — a shim event or an
+acting client command (`user-message`, `interrupt`, `permission-decision`,
+`set-permission-mode`, `set-model`). Attaching, detaching, replaying, and
+listing deliberately do NOT count: a workspace the user merely switches to
+(which holds its stream socket open in the background indefinitely) must
+still be allowed to go idle, or nothing would ever be reclaimed. A
+periodic sweeper hibernates every session idle past `-idle-timeout`
+(default 10m; 0 disables).
+
+A session is **skipped** by the sweeper (re-checked next pass, never an
+error) when it has no `claude_session_id` yet (no `--resume` target, so
+suspending would destroy it), a turn is in flight, or a permission request
+is pending (that state lives only in memory, never in the transcript).
+Hibernation is cooperative: the daemon sends the shim a `shutdown` so the
+CLI flushes its transcript first, escalating to a hard kill only if the
+shim ignores it past a grace window.
+
+**Revival** is lazy and act-triggered. An ATTACH
+(`GET /sessions/{id}/stream`) never revives — it replays the retained ring
+and holds the socket, all free. Only an ACT (an HTTP `message`/`interrupt`,
+or an acting frame over the stream socket) spawns a fresh shim with
+`--resume`. Nothing is re-seeded on revival: history was never dropped, so
+attached clients observe only a brief pause.
+
+Wire surface: a hibernated session carries `hibernated: true` in the
+`GET /sessions` listing and stays `terminal: false` — frontends MUST keep
+treating it as live, or their reconnect/reattach logic would resurrect it
+into a fresh session. Unlike a `rehydratable` cross-restart record, a
+hibernated session is a real in-memory session that has simply shed its
+process pair.
 
 ---
 
