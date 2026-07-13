@@ -146,6 +146,77 @@ func TestBuildReplayFramesUserTextBlocks(t *testing.T) {
 	}
 }
 
+// userTurnText returns the joined text of a user-turn frame's blocks.
+func userTurnText(t *testing.T, frame protocol.L2Frame) string {
+	t.Helper()
+	turn, ok := frame.(*protocol.UserTurnFrame)
+	if !ok {
+		t.Fatalf("frame = %T, want *protocol.UserTurnFrame", frame)
+	}
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(turn.Content, &blocks); err != nil {
+		t.Fatalf("unmarshal content %s: %v", turn.Content, err)
+	}
+	var texts []string
+	for _, b := range blocks {
+		texts = append(texts, b.Text)
+	}
+	return strings.Join(texts, "\n")
+}
+
+func TestBuildReplayFramesCollapsesSlashCommandEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "argless command reads as the typed command",
+			content: `<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>`,
+			want:    "/clear",
+		},
+		{
+			name:    "command with args reads as command plus args",
+			content: `<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>fable</command-args>`,
+			want:    "/model fable",
+		},
+		{
+			name:    "message-first tag order still collapses",
+			content: `<command-message>workspace</command-message>\n<command-name>/workspace</command-name>\n<command-args>merge it</command-args>`,
+			want:    "/workspace merge it",
+		},
+		{
+			name:    "prompt quoting the tags is left verbatim",
+			content: `i see <command-name>/clear</command-name> in the output`,
+			want:    `i see <command-name>/clear</command-name> in the output`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			line := `{"type":"user","message":{"role":"user","content":"` + tt.content + `"}}`
+			// Act
+			frames, _ := buildFrames(t, line)
+			// Assert
+			wantTypes(t, frames, "user-turn")
+			if got := userTurnText(t, frames[0]); got != tt.want {
+				t.Fatalf("user-turn text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildReplayFramesSkipsNamelessCommandEnvelope(t *testing.T) {
+	// Arrange / Act — an envelope whose name collapses to nothing has no
+	// prompt to render, so it gets no bubble at all.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"<command-name></command-name>\n<command-args></command-args>"}}`)
+	// Assert
+	wantTypes(t, frames)
+}
+
 func TestBuildReplayFramesToolResultBlock(t *testing.T) {
 	// Arrange / Act
 	frames, _ := buildFrames(t,
