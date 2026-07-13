@@ -481,6 +481,47 @@ describe("turn-complete chip", () => {
   });
 });
 
+/** The chip as it sits inside the final response, rather than adrift in the feed. */
+const nestedChip = blockAfter(css, ".bubble.assistant.final-response .bubble-body > .result");
+
+/** The margin shorthand's four sides, in `[top, right, bottom, left]` order. */
+function margins(rule: string): string[] {
+  const shorthand = rule.match(/margin:\s*([^;]+);/);
+  if (!shorthand) throw new Error("rule sets no margin shorthand");
+  const sides = shorthand[1].trim().split(/\s+/);
+  const [top, right = top, bottom = top, left = right] = sides;
+  return [top, right, bottom, left];
+}
+
+describe("nested turn-complete chip", () => {
+  it("shrinks the nested chip back around its own text", () => {
+    // Arrange / Act — the bubble's block flow would stretch it to full width.
+    // Assert
+    expect(nestedChip).toMatch(/width:\s*fit-content/);
+  });
+
+  it("centers the nested chip across the bubble", () => {
+    // Arrange
+    const [, right, , left] = margins(nestedChip);
+    // Act / Assert — auto side margins are what center a fit-content box.
+    expect([right, left]).toEqual(["auto", "auto"]);
+  });
+
+  it("holds the nested chip clear of the bubble's bottom edge", () => {
+    // Arrange
+    const [, , bottom] = margins(nestedChip);
+    // Act / Assert — the kerning between the chip and the bubble's floor.
+    expect(parseFloat(bottom)).toBeGreaterThan(0);
+  });
+
+  it("parts the nested chip from the answer's last line", () => {
+    // Arrange
+    const [top] = margins(nestedChip);
+    // Act / Assert — the chip never crowds the prose it closes.
+    expect(parseFloat(top)).toBeGreaterThan(0);
+  });
+});
+
 const agentCard = blockAfter(css, ".tool-card.tool-agent");
 const agentJson = blockAfter(css, ".agent-json {");
 const agentJsonOpen = blockAfter(css, ".agent-input.expanded .agent-json");

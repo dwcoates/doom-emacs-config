@@ -227,6 +227,12 @@ function UserTurn(item: UserTurnItem): string {
  * turn actually landed on, set apart from the running commentary the
  * agent emits between its tool calls.
  *
+ * CHIP is the closing chip of the turn that bubble answers, and it rides
+ * INSIDE the bubble, along its bottom edge — the turn's ending belongs to
+ * the answer it ended on rather than to a pill floating in the feed
+ * beneath it. Only a final response carries one, so CHIP is null for the
+ * commentary bubbles above it (see `finalResponses`).
+ *
  * The working frontier gets the pulse instead (see `pulsingBlockId`). The
  * two never land on the same bubble: a final response only exists once the
  * turn has ended, and the pulse only runs while it has not.
@@ -236,18 +242,23 @@ function UserTurn(item: UserTurnItem): string {
  * the response the same way the user bubble's dates the prompt, and it
  * does not jump while the block streams.
  */
-function TextStream(item: TextItem, isFinal: boolean, isPulsing = false): string {
+function TextStream(item: TextItem, chip: ResultItem | null, isPulsing = false): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
-  const cls = `bubble assistant md${isFinal ? " final-response" : ""}${
+  const cls = `bubble assistant md${chip ? " final-response" : ""}${
     isPulsing ? " pulsing" : ""
   }`;
+  const closer = chip ? ResultChip(chip) : "";
   // A bare metaprompt TLDR tree (no code fence — fenced trees are the
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
   if (!item.text.includes("```") && isMetapromptTree(item.text)) {
-    return Bubble(cls, `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}`, item.ts);
+    return Bubble(
+      cls,
+      `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}${closer}`,
+      item.ts,
+    );
   }
-  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}`, item.ts);
+  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}${closer}`, item.ts);
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -560,16 +571,32 @@ function isTurnComplete(item: ResultItem): boolean {
 }
 
 /**
- * Block ids of the text bubbles that CONCLUDE a completed turn — the
- * agent's final response to a prompt, as against the commentary it emits
- * between tool calls. A turn's final response is its last text block
- * before the `result`, and only a turn that ran to completion has one: an
- * aborted or errored turn's last text is a severed thought, not an answer.
- * A turn still streaming has no final response either, since its next
- * block could always continue it.
+ * The feed's final responses, seen from both ends of the pairing they
+ * create between a turn's answer and the chip that closes the turn.
  */
-export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<string> {
-  const finals = new Set<string>();
+export interface FinalResponses {
+  /** Final-response block id → the closing chip that bubble swallows. */
+  readonly chips: ReadonlyMap<string, ResultItem>;
+  /** The results a bubble swallowed, which the feed no longer prints itself. */
+  readonly swallowed: ReadonlySet<ResultItem>;
+}
+
+/**
+ * The text bubbles that CONCLUDE a completed turn — the agent's final
+ * response to a prompt, as against the commentary it emits between tool
+ * calls — each paired with the `result` that closes its turn. A turn's
+ * final response is its last text block before the `result`, and only a
+ * turn that ran to completion has one: an aborted or errored turn's last
+ * text is a severed thought, not an answer. A turn still streaming has no
+ * final response either, since its next block could always continue it.
+ *
+ * The pairing is what nests a completed turn's chip inside its answer.
+ * A completed turn that wrote no answer to nest it in (one that only ran
+ * tools) pairs with nothing, so its chip keeps printing standalone.
+ */
+export function finalResponses(items: readonly ConversationItem[]): FinalResponses {
+  const chips = new Map<string, ResultItem>();
+  const swallowed = new Set<ResultItem>();
   let lastText: string | null = null;
   for (const item of items) {
     if (item.kind === "user-turn") {
@@ -577,11 +604,14 @@ export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<s
     } else if (item.kind === "text") {
       lastText = item.blockId;
     } else if (item.kind === "result") {
-      if (lastText !== null && isTurnComplete(item)) finals.add(lastText);
+      if (lastText !== null && isTurnComplete(item)) {
+        chips.set(lastText, item);
+        swallowed.add(item);
+      }
       lastText = null;
     }
   }
-  return finals;
+  return { chips, swallowed };
 }
 
 /**
@@ -668,6 +698,11 @@ function formatTokenDelta(n: number): string {
  * its subtype. A turn that ended with the context size unknown (a
  * `/clear` or a `/compact`) reports the duration alone, since the figure
  * it would otherwise print is the one the turn just invalidated.
+ *
+ * A completed turn's chip is drawn INSIDE the final response it closes
+ * (see `TextStream`), so the feed prints the chip standalone only when no
+ * bubble swallowed it: an aborted or errored turn, or a completed turn
+ * that wrote no answer at all.
  */
 function ResultChip(item: ResultItem): string {
   const done = isTurnComplete(item);
@@ -701,17 +736,23 @@ function SystemNote(item: SystemItem): string {
   return `<div class="system-note">system: ${escapeHtml(item.subtype)}</div>`;
 }
 
+/**
+ * One item's HTML. FINALS pairs the feed's answers with the chips that
+ * close their turns: a text block it names renders as a final response
+ * carrying its chip, and the paired result renders as nothing, since the
+ * bubble above it has already drawn it.
+ */
 export function renderItem(
   item: ConversationItem,
   selections?: QuestionSelections,
-  isFinal = false,
+  finals?: FinalResponses,
   isPulsing = false,
 ): string {
   switch (item.kind) {
     case "user-turn":
       return UserTurn(item);
     case "text":
-      return TextStream(item, isFinal, isPulsing);
+      return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing);
     case "thinking":
       return Thinking(item);
     case "tool":
@@ -724,7 +765,7 @@ export function renderItem(
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
-      return ResultChip(item);
+      return finals?.swallowed.has(item) ? "" : ResultChip(item);
     case "compact-boundary":
       return CompactDivider(item);
     case "error":
@@ -871,18 +912,18 @@ export class FeedRenderer {
   }
 
   /**
-   * One item's HTML: green-bordered when FINALS marks it a turn's answer, and
-   * pulsing when PULSE-ID marks it the working frontier.
+   * One item's HTML: green-bordered and chip-bearing when FINALS marks it a
+   * turn's answer, and pulsing when PULSE-ID marks it the working frontier.
    */
   private itemHtml(
     item: ConversationItem,
-    finals: ReadonlySet<string>,
+    finals: FinalResponses,
     pulseId: string | null,
   ): string {
     return renderItem(
       item,
       this.questionSelections,
-      item.kind === "text" && finals.has(item.blockId),
+      finals,
       item.kind === "text" && item.blockId === pulseId,
     );
   }
@@ -922,7 +963,7 @@ export class FeedRenderer {
     this.backfillQueue = [];
     this.container.innerHTML = "";
     this.nodes.clear();
-    const finals = finalResponseBlockIds(state.items);
+    const finals = finalResponses(state.items);
     const pulseId = pulsingBlockId(state.items, state.turnInFlight);
     const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
     state.items.forEach((item, i) => {
@@ -986,7 +1027,7 @@ export class FeedRenderer {
       pinned: isPinnedToBottom(this.container),
     });
     this.lastUserTurn = turnId;
-    const finals = finalResponseBlockIds(state.items);
+    const finals = finalResponses(state.items);
     const pulseId = pulsingBlockId(state.items, state.turnInFlight);
     const seen = new Set<string>();
     state.items.forEach((item, i) => {
