@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -18,7 +19,36 @@ type ShimHandle interface {
 	Events() <-chan *protocol.L1Event
 	SendRaw(line []byte) error
 	Send(cmd any) error
+	// Kill terminates the shim process without waiting for it to drain.
+	// Hibernation's escalation path: a shim that ignores the cooperative
+	// shutdown command must not be able to pin its ~500MB CLI forever.
+	Kill() error
 }
+
+// Hibernation refusal reasons. A session that cannot hibernate is a
+// normal, expected condition (it is busy, or it has no durable resume
+// target yet), never an invariant violation — the sweeper skips it and
+// re-checks on its next pass.
+var (
+	// ErrNoResumeTarget: system:init has not reported the CLI's session
+	// uuid, so nothing could bring this session back. Hibernating it
+	// would DESTROY it, not save it.
+	ErrNoResumeTarget = errors.New("session has no claude_session_id to resume from")
+	// ErrTurnActive: a user turn is in flight; killing the CLI now would
+	// lose the response it is mid-way through producing.
+	ErrTurnActive = errors.New("session has a turn in flight")
+	// ErrPermissionPending: an unresolved permission request lives only
+	// in the translator's memory and is absent from the transcript, so a
+	// revived session could never answer it.
+	ErrPermissionPending = errors.New("session has pending permission requests")
+	// ErrNotHibernatable: the session is already terminal, already
+	// hibernated, or hibernating.
+	ErrNotHibernatable = errors.New("session is not in a hibernatable state")
+)
+
+// hibernateGrace is how long a hibernating shim is given to honor the
+// cooperative shutdown command before it is killed outright.
+const hibernateGrace = 5 * time.Second
 
 // Client is one attached WebSocket consumer. The server owns the socket;
 // the session owns the outbound frame queue.
@@ -76,6 +106,9 @@ type Session struct {
 	// Model-drift reconciler clock (§2.12); immutable for the session's life.
 	reconcileInterval time.Duration
 	reconcileTicks    <-chan time.Time
+	// hibernateGrace bounds the wait for a cooperative shutdown before the
+	// shim is killed; immutable for the session's life.
+	hibernateGrace time.Duration
 
 	mu       sync.Mutex
 	seq      int64
@@ -90,6 +123,35 @@ type Session struct {
 	// already been told, so each transition is reported exactly once.
 	registrarClaudeID string
 	registrarTerminal bool
+
+	// hibernating marks a shim teardown that is a SUSPENSION, not a death.
+	// Run consults it on the way out: set, it keeps the ring, the
+	// translator, the attached clients, and the non-terminal registry
+	// record, so the session survives as a warm cache with no processes.
+	// Clear, and Run's exit is the ordinary terminal path.
+	hibernating bool
+	// hibernated marks the settled suspended state: no shim, but full
+	// history. An attach REPLAYS from here without spawning anything;
+	// only an act (a message, an interrupt, a UI command) revives it.
+	// This is the whole point — viewing a workspace must stay free.
+	hibernated bool
+	// lastActive stamps the last REAL activity: a shim event, or a client
+	// command that acts. Attaching, detaching, replaying, and listing all
+	// deliberately do NOT stamp it — a workspace the user merely looks at
+	// must still go idle, or the sweeper would never reclaim a session
+	// whose webview stays mounted in the background forever.
+	lastActive time.Time
+	// runDone is closed by each Run on its way out (hibernation OR death),
+	// bounding the per-run reconciler goroutine to the shim it checks. A
+	// revived session gets a fresh one, so a Run/Hibernate/Run cycle
+	// cannot leave two reconcilers behind. Distinct from done, which is
+	// closed ONLY on the true terminal transition.
+	runDone chan struct{}
+	// hibernateDone is set by Hibernate and closed by Run when it settles
+	// into the suspended state. It lets a caller (today: tests) observe
+	// the transition without racing on the hibernating→hibernated flip,
+	// which happens on Run's goroutine after the shim's stream closes.
+	hibernateDone chan struct{}
 
 	done chan struct{}
 }
@@ -127,6 +189,12 @@ type Config struct {
 	// system:init overwrites them with authoritative values.
 	CWD   string
 	Model string
+	// PermissionMode seeds the translator's mode mirror the same way, so a
+	// session materialized from a registry record (a cross-restart resume)
+	// reports and REVIVES under its persisted mode instead of the default.
+	// Empty or invalid leaves the translator's default in place; the SDK's
+	// system:init later reports the authoritative value.
+	PermissionMode string
 	// Retention is the §2.10 replay window in frames (defaults to 4096).
 	Retention int
 	// Now is the frame-timestamp clock (defaults to time.Now).
@@ -157,6 +225,10 @@ type Config struct {
 	// real ticker; tests inject a channel so the check runs on demand
 	// rather than on a wall clock.
 	ModelReconcileTicks <-chan time.Time
+	// HibernateGrace is how long a hibernating shim is given to honor the
+	// cooperative shutdown before it is killed. Zero takes the default
+	// (hibernateGrace); tests shrink it to exercise the escalation path.
+	HibernateGrace time.Duration
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -173,14 +245,25 @@ func New(cfg Config) *Session {
 	if cfg.ModelReconcileInterval == 0 {
 		cfg.ModelReconcileInterval = DefaultModelReconcileInterval
 	}
+	if cfg.HibernateGrace <= 0 {
+		cfg.HibernateGrace = hibernateGrace
+	}
 	translator := NewTranslator()
 	translator.CWD = cfg.CWD
 	translator.Model = cfg.Model
+	if cfg.PermissionMode != "" && protocol.ValidPermissionMode(cfg.PermissionMode) {
+		translator.PermissionMode = protocol.PermissionMode(cfg.PermissionMode)
+	}
 	return &Session{
-		ID:                cfg.ID,
-		DaemonVersion:     cfg.DaemonVersion,
-		BootID:            cfg.BootID,
-		shim:              cfg.Shim,
+		ID:            cfg.ID,
+		DaemonVersion: cfg.DaemonVersion,
+		BootID:        cfg.BootID,
+		shim:          cfg.Shim,
+		// A nil shim is a session born HIBERNATED: a dormant registry
+		// record materialized to serve an attach (history from the
+		// transcript) without paying for a CLI nobody has prompted yet.
+		// Revive gives it a shim when someone finally acts.
+		hibernated:        cfg.Shim == nil,
 		translator:        translator,
 		retention:         cfg.Retention,
 		now:               cfg.Now,
@@ -190,7 +273,9 @@ func New(cfg Config) *Session {
 		configDir:         cfg.ConfigDir,
 		reconcileInterval: cfg.ModelReconcileInterval,
 		reconcileTicks:    cfg.ModelReconcileTicks,
+		hibernateGrace:    cfg.HibernateGrace,
 		clients:           map[*Client]struct{}{},
+		lastActive:        cfg.Now(),
 		done:              make(chan struct{}),
 	}
 }
@@ -211,6 +296,14 @@ type Info struct {
 	TurnActive bool
 	// PendingPermissions lists unresolved permission request ids, sorted.
 	PendingPermissions []string
+	// Hibernated reports that the CLI process pair has been freed while
+	// the conversation stays fully replayable. NOT a kind of terminal:
+	// the session still answers, still lists, and revives on the next act.
+	Hibernated bool
+	// PermissionMode is the session's current mode. Carried so a revive
+	// can respawn the CLI under the mode the session actually holds now,
+	// rather than the one it was created with.
+	PermissionMode protocol.PermissionMode
 }
 
 // Info returns the session's current introspection snapshot: the
@@ -230,6 +323,8 @@ func (s *Session) Info() Info {
 		DeathReason:        s.deathReason,
 		TurnActive:         s.translator.TurnActive(),
 		PendingPermissions: s.translator.PendingPermissionIDs(),
+		Hibernated:         s.hibernated,
+		PermissionMode:     s.translator.PermissionMode,
 	}
 }
 
@@ -237,12 +332,26 @@ func (s *Session) Info() Info {
 // its own goroutine. All translation happens here, so the translator
 // needs no locking of its own.
 func (s *Session) Run() {
-	// The model mirror's safety net (§2.12). Lives for exactly as long as
-	// the session does: it selects on s.done, which Run closes on its way
-	// out, so the goroutine cannot outlive the shim it is checking.
-	go s.runModelReconciler(s.reconcileTicks, s.reconcileInterval)
-	for evt := range s.shim.Events() {
+	s.mu.Lock()
+	shim := s.shim
+	if shim == nil {
+		// Run with no shim is a caller bug: a hibernated session has
+		// nothing to consume. Revive installs the shim, THEN starts Run.
+		s.mu.Unlock()
+		panic(fmt.Sprintf("session %s: Run with no shim", s.ID))
+	}
+	runDone := make(chan struct{})
+	s.runDone = runDone
+	s.mu.Unlock()
+
+	// The model mirror's safety net (§2.12). Bounded by runDone, not by
+	// s.done: a hibernating session's Run returns WITHOUT ending the
+	// session, and the reconciler must die with the shim it checks or a
+	// revive would leave a second one running behind it.
+	go s.runModelReconciler(runDone, s.reconcileTicks, s.reconcileInterval)
+	for evt := range shim.Events() {
 		s.mu.Lock()
+		s.lastActive = s.now()
 		frames := s.translator.OnEvent(evt)
 		s.broadcastLocked(frames)
 		if evt.Type == "closed" {
@@ -252,7 +361,29 @@ func (s *Session) Run() {
 		s.notifyRegistrarLocked()
 		s.mu.Unlock()
 	}
+
 	s.mu.Lock()
+	if s.hibernating {
+		// SUSPENSION, not death. Everything that makes this session
+		// answerable survives: the ring (so an attach still replays the
+		// whole conversation), the translator (so tool metadata and the
+		// model mirror hold), the attached clients (so no socket churns
+		// and no frontend sees a "session gone"), and the non-terminal
+		// registry record (so the Emacs reattach sweep leaves it alone).
+		// The ONLY thing freed is the CLI process pair.
+		s.hibernating = false
+		s.hibernated = true
+		s.shim = nil
+		close(runDone)
+		if s.hibernateDone != nil {
+			close(s.hibernateDone)
+		}
+		nRing, nClients := len(s.ring), len(s.clients)
+		s.mu.Unlock()
+		s.logf("session %s: hibernated (idle) — CLI freed, %d frames retained, %d clients still attached",
+			s.ID, nRing, nClients)
+		return
+	}
 	if !s.terminal {
 		// Shim stdout closed without a `closed` event: hard death.
 		// Cancel pending permission prompts FIRST (§2.7 "cancel" on shim
@@ -273,8 +404,138 @@ func (s *Session) Run() {
 		close(c.Send)
 		delete(s.clients, c)
 	}
+	close(runDone)
 	s.mu.Unlock()
 	close(s.done)
+}
+
+// Hibernate suspends an IDLE session: it asks the shim to drain and exit,
+// freeing the ~500MB node+CLI process pair, while the session itself
+// stays live in the server's map as a warm, fully-replayable cache.
+//
+// It is deliberately NOT a teardown. The session stays non-terminal and
+// stays listed, because both frontends treat "absent or terminal" as
+// "recreate it": the Emacs reattach sweep would POST a new session within
+// 15s, and the webapp's exists-probe would declare the session gone.
+// Hibernation has to be invisible to them, and it is.
+//
+// Returns a non-nil error when the session must NOT be suspended, which
+// the sweeper treats as "skip and re-check next pass", never as a
+// failure. Refusal is how a busy session protects itself.
+func (s *Session) Hibernate(reason string) error {
+	s.mu.Lock()
+	if s.terminal || s.hibernated || s.hibernating || s.shim == nil {
+		s.mu.Unlock()
+		return ErrNotHibernatable
+	}
+	// The resume target is the whole basis of recovery: with no CLI
+	// session uuid there is no --resume to come back through, so
+	// suspending would be destroying. system:init has simply not landed
+	// yet; the next sweep will find it.
+	if s.translator.ClaudeSessionID == "" {
+		s.mu.Unlock()
+		return ErrNoResumeTarget
+	}
+	// A turn in flight is unfinished work that lives only in the CLI.
+	if s.translator.TurnActive() {
+		s.mu.Unlock()
+		return ErrTurnActive
+	}
+	// A pending permission request exists ONLY in the translator's memory
+	// and never reaches the transcript, so a revived CLI could not be
+	// answered about it. Wait for the human.
+	if len(s.translator.PendingPermissionIDs()) > 0 {
+		s.mu.Unlock()
+		return ErrPermissionPending
+	}
+	s.hibernating = true
+	s.hibernateDone = make(chan struct{})
+	shim := s.shim
+	runDone := s.runDone
+	s.mu.Unlock()
+
+	// Cooperative first: `shutdown` lets the CLI flush its transcript,
+	// which is the very thing a revive resumes from. A truncated
+	// transcript would be an unrecoverable session, so the graceful path
+	// is not a nicety here — it is the correctness path.
+	if err := shim.Send(protocol.NewShutdownCmd(newRequestID(), reason)); err != nil {
+		// It cannot be asked nicely, so take it down anyway rather than
+		// leak the process pair. The error is surfaced, not swallowed.
+		s.logf("session %s: hibernate shutdown command failed, killing shim: %v", s.ID, err)
+		if killErr := shim.Kill(); killErr != nil {
+			return fmt.Errorf("session %s: hibernate: shutdown failed (%w) and kill failed: %w", s.ID, err, killErr)
+		}
+		return nil
+	}
+	// Escalation: a shim that ignores shutdown must not pin its CLI's
+	// half-gigabyte forever. Wait for Run to observe the event stream
+	// close (runDone), and kill if it does not.
+	go func() {
+		select {
+		case <-runDone:
+		case <-time.After(s.hibernateGrace):
+			s.logf("session %s: shim ignored hibernate shutdown after %s — killing", s.ID, s.hibernateGrace)
+			if err := shim.Kill(); err != nil {
+				s.logf("session %s: hibernate kill FAILED, the CLI process pair is leaked: %v", s.ID, err)
+			}
+		}
+	}()
+	return nil
+}
+
+// Revive re-arms a hibernated session with a freshly spawned shim (the
+// server spawns it with --resume, pointed at the transcript the CLI has
+// been writing all along).
+//
+// Nothing is re-seeded: the ring, the seq watermark, the translator, and
+// the attached clients all survived hibernation, so history is already
+// in memory and the clients never knew it went away. Re-seeding here
+// would duplicate the whole conversation.
+func (s *Session) Revive(shim ShimHandle) error {
+	s.mu.Lock()
+	if s.terminal {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s: cannot revive a terminal session", s.ID)
+	}
+	if !s.hibernated {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s: cannot revive a session that is not hibernated", s.ID)
+	}
+	s.shim = shim
+	s.hibernated = false
+	s.lastActive = s.now()
+	s.mu.Unlock()
+	s.logf("session %s: revived on demand", s.ID)
+	go s.Run()
+	return nil
+}
+
+// Hibernated reports whether the session is suspended (no shim, but full
+// retained history). An attach to one of these must NOT revive it.
+func (s *Session) Hibernated() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hibernated
+}
+
+// HibernateDone returns the channel that closes when the pending
+// Hibernate settles into the suspended state (the shim's stream has
+// closed and Run has freed it). Nil before any Hibernate call. A
+// supervisor uses it to know a suspension has fully landed before, say,
+// reviving on a racing act.
+func (s *Session) HibernateDone() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hibernateDone
+}
+
+// IdleFor reports how long the session has gone without real activity
+// (shim events, acting client commands). Attaching and replaying do not
+// count, so a workspace that is merely on screen still goes idle.
+func (s *Session) IdleFor(now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return now.Sub(s.lastActive)
 }
 
 // notifyRegistrarLocked reports durable-state transitions (the CLI
@@ -372,7 +633,10 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	defer s.mu.Unlock()
 	// replay-request works on TERMINAL sessions too: a client attaching
 	// after the shim ended must still be able to rebuild the retained
-	// history instead of staring at an empty feed.
+	// history instead of staring at an empty feed. It works on HIBERNATED
+	// sessions for the same reason, and it must never revive one — replay
+	// is served wholly from the ring, and answering it is exactly the
+	// "look at a workspace for free" case hibernation exists to protect.
 	if cmd.Type == "replay-request" {
 		s.replayLocked(c, cmd.FromSeq)
 		return nil
@@ -380,6 +644,15 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	if s.terminal {
 		return fmt.Errorf("session %s: command %s on terminal session", s.ID, cmd.Type)
 	}
+	// Every command below ACTS, so it needs a live CLI. The server revives
+	// the session before handing the frame over (Server.resolveForAct); a
+	// hibernated session reaching here means that contract was broken, and
+	// the command would otherwise nil-panic on s.shim.
+	if s.hibernated || s.shim == nil {
+		return fmt.Errorf("session %s: command %s on a hibernated session: it must be revived first", s.ID, cmd.Type)
+	}
+	// This is real activity, so it defers hibernation.
+	s.lastActive = s.now()
 
 	switch cmd.Type {
 	case "user-message":
@@ -435,6 +708,22 @@ func (s *Session) Shutdown(reason string) error {
 	s.mu.Lock()
 	if s.terminal {
 		s.mu.Unlock()
+		return nil
+	}
+	// A hibernated session has no shim to ask. There is no Run in flight
+	// to observe a death either, so the terminal transition has to be made
+	// here: mark it, tell the registrar (so the record stops rehydrating),
+	// and release the clients — the same end state Run would have reached.
+	if s.hibernated || s.shim == nil {
+		s.terminal = true
+		s.deathReason = reason
+		s.notifyRegistrarLocked()
+		for c := range s.clients {
+			close(c.Send)
+			delete(s.clients, c)
+		}
+		s.mu.Unlock()
+		close(s.done)
 		return nil
 	}
 	s.mu.Unlock()

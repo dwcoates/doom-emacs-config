@@ -17,15 +17,18 @@ const recvTimeout = 5 * time.Second
 type fakeShim struct {
 	events chan *protocol.L1Event
 	sent   chan []byte
+	killCh chan struct{}
 
 	mu           sync.Mutex
 	eventsClosed bool
+	killed       bool
 }
 
 func newFakeShim() *fakeShim {
 	return &fakeShim{
 		events: make(chan *protocol.L1Event, 64),
 		sent:   make(chan []byte, 64),
+		killCh: make(chan struct{}),
 	}
 }
 
@@ -42,6 +45,26 @@ func (f *fakeShim) Send(cmd any) error {
 		return err
 	}
 	return f.SendRaw(line)
+}
+
+// Kill models a real process kill: the event stream dies, which is what
+// Run observes. Recorded (and signaled on killed-close) so hibernation
+// tests can synchronize on the escalation path without polling.
+func (f *fakeShim) Kill() error {
+	f.mu.Lock()
+	if !f.killed {
+		f.killed = true
+		close(f.killCh)
+	}
+	f.mu.Unlock()
+	f.end()
+	return nil
+}
+
+func (f *fakeShim) wasKilled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.killed
 }
 
 func (f *fakeShim) end() {
@@ -79,11 +102,23 @@ func newHarness(t *testing.T, retention int) *harness {
 		Logf:          func(string, ...any) {},
 	})
 	go sess.Run()
+	cleanupSession(t, shim, sess)
+	return &harness{shim: shim, sess: sess}
+}
+
+// cleanupSession drives a session to a terminal state and waits for its
+// Run goroutine to finish. A HIBERNATED session's Done() never fires on
+// its own (suspension is not death), so it must be shut down explicitly
+// first; a live session terminalizes when its shim's stream closes.
+func cleanupSession(t *testing.T, shim *fakeShim, sess *Session) {
+	t.Helper()
 	t.Cleanup(func() {
 		shim.end()
+		if sess.Hibernated() {
+			_ = sess.Shutdown("test cleanup")
+		}
 		<-sess.Done()
 	})
-	return &harness{shim: shim, sess: sess}
 }
 
 // endShim closes the fake shim's event stream (simulates shim exit).
