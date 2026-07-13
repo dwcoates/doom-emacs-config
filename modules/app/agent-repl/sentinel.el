@@ -242,6 +242,19 @@ running in that directory); only the identity write is refused."
         (agent-repl--log ws "update-session-id-from-sentinel: ws=%s old=%s new=%s" ws current session-id)
         (agent-repl--set-session-id ws session-id))))))
 
+(defun agent-repl--delete-sentinel-file (file ws)
+  "Delete sentinel FILE, surfacing any failure loudly for workspace WS.
+Both the normal dispatch path and the deprecated-prefix drain must remove a
+sentinel file after acting on it, otherwise the poll fallback re-detects it
+every cycle.  This runs from the file-notify / poll async context, where a
+hard error would kill the sentinel watcher, so a failed delete is surfaced
+via `agent-repl--warn' rather than rethrown."
+  (condition-case err
+      (delete-file file)
+    (error
+     (agent-repl--warn ws "could not delete sentinel file %s: %S"
+                       (file-name-nondirectory file) err))))
+
 (defun agent-repl--process-sentinel-file (file handler)
   "Read sentinel FILE, delete it, resolve its workspace, then invoke HANDLER's callback.
 HANDLER is an entry from `agent-repl--sentinel-dispatch-alist' with keys
@@ -262,11 +275,7 @@ name and the directory."
          (ws  (when dir (agent-repl--ws-for-dir dir))))
     ;; Delete the file immediately after reading so the poll fallback can't
     ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
-    (condition-case err
-        (delete-file file)
-      (error
-       (agent-repl--warn ws "could not delete sentinel file %s: %S"
-                         (file-name-nondirectory file) err)))
+    (agent-repl--delete-sentinel-file file ws)
     (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S owned=%s ws=%s"
                       (plist-get handler :name) (file-name-nondirectory file) dir session-id owned ws)
     (cond
@@ -681,11 +690,7 @@ Returns non-nil if a handler was found and called."
                agent-repl--deprecated-sentinel-prefixes)
       ;; Retired channel: drain the file so the poll fallback stops re-detecting
       ;; and re-warning about it every cycle.  No handler and no side effect run.
-      (condition-case err
-          (delete-file file)
-        (error
-         (agent-repl--warn nil "could not drain deprecated sentinel file %s: %S"
-                           name err)))
+      (agent-repl--delete-sentinel-file file nil)
       (agent-repl--log nil "dispatch-sentinel-file: drained deprecated sentinel file=%s" name)
       t)
      (t
