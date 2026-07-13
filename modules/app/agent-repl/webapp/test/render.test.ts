@@ -1043,17 +1043,12 @@ describe("formatDuration", () => {
     expect(formatDuration(0)).toBe("0ms");
   });
 
-  it("renders a one-digit second count to two decimals", () => {
-    // Arrange + Act + Assert — three significant digits.
-    expect(formatDuration(1033)).toBe("1.03s");
+  it("carries a second's leftover in whole milliseconds", () => {
+    // Arrange + Act + Assert — not the fractional 1.03s.
+    expect(formatDuration(1033)).toBe("1s 33ms");
   });
 
-  it("renders a two-digit second count to one decimal", () => {
-    // Arrange + Act + Assert — three significant digits.
-    expect(formatDuration(12300)).toBe("12.3s");
-  });
-
-  it("trims the decimals off a whole second count", () => {
+  it("drops the leftover off a whole second count", () => {
     // Arrange + Act + Assert
     expect(formatDuration(1000)).toBe("1s");
   });
@@ -1063,28 +1058,33 @@ describe("formatDuration", () => {
     expect(formatDuration(999.6)).toBe("1s");
   });
 
-  it("renders a whole minute count without decimals", () => {
+  it("carries a minute's leftover in whole seconds", () => {
+    // Arrange + Act + Assert — not the fractional 5.5m.
+    expect(formatDuration(330_000)).toBe("5m 30s");
+  });
+
+  it("rounds a minute's fractional second leftover to a whole second", () => {
+    // Arrange + Act + Assert — 93.6s is 1m plus 33.6s.
+    expect(formatDuration(93_600)).toBe("1m 34s");
+  });
+
+  it("drops the leftover off a whole minute count", () => {
     // Arrange + Act + Assert
     expect(formatDuration(120_000)).toBe("2m");
   });
 
-  it("renders a fractional minute count to two decimals", () => {
+  it("carries an hour's leftover in whole minutes", () => {
+    // Arrange + Act + Assert — not the fractional 1.5h.
+    expect(formatDuration(5_400_000)).toBe("1h 30m");
+  });
+
+  it("promotes a leftover that rounds up to a full major unit", () => {
+    // Arrange + Act + Assert — 59m 59.999s renders as 1h, never 59m 60s.
+    expect(formatDuration(3_599_999)).toBe("1h");
+  });
+
+  it("keeps a three-digit hour count in whole hours", () => {
     // Arrange + Act + Assert
-    expect(formatDuration(93_600)).toBe("1.56m");
-  });
-
-  it("promotes a second count that rounds up to a full minute", () => {
-    // Arrange + Act + Assert — 59.999s would otherwise render as 60s.
-    expect(formatDuration(59_999)).toBe("1m");
-  });
-
-  it("renders an hour-scale duration in hours", () => {
-    // Arrange + Act + Assert
-    expect(formatDuration(5_400_000)).toBe("1.5h");
-  });
-
-  it("drops the decimals off a three-digit hour count", () => {
-    // Arrange + Act + Assert — three significant digits leaves no room for a fraction.
     expect(formatDuration(360_000_000)).toBe("100h");
   });
 });
@@ -1117,13 +1117,13 @@ describe("ResultChip", () => {
     expect(html).toContain("turn complete");
   });
 
-  it("renders the turn's duration in its most compact unit", () => {
+  it("renders the turn's duration in whole units", () => {
     // Arrange
-    const item = { ...resultItem("success"), durationMs: 12_300 };
+    const item = { ...resultItem("success"), durationMs: 330_000 };
     // Act
     const html = renderItem(item);
-    // Assert — the raw millisecond count never reaches the chip.
-    expect(html).toContain("turn complete · 12.3s ·");
+    // Assert — whole minutes and seconds, never the fractional 5.5m.
+    expect(html).toContain("turn complete · 5m 30s ·");
   });
 
   it("withholds the done class from an aborted turn's chip", () => {
