@@ -1916,6 +1916,58 @@ fails on worker\".  The cost is negligible — the timer queue drains
 on the very next event-loop tick."
   (run-at-time 0 nil thunk))
 
+;;;; ---- Thread-safe process teardown ----
+;;
+;; `delete-process' — and `kill-buffer' on a buffer that still owns a
+;; live process, which calls it implicitly — can trigger a REDISPLAY
+;; (`delete-process' → status update → `redisplay_preserve_echo_area' →
+;; `gui_consider_frame_title').  On the macOS NS build redisplay calls
+;; into AppKit (`-[NSWindow setTitle:]'), which is main-thread-only:
+;; from a worker thread it raises an uncaught ObjC exception, which
+;; `abort's Emacs into its fatal-signal handler.  The worker then sits
+;; suspended in that handler STILL HOLDING the global Lisp lock, and
+;; the main thread deadlocks forever on the next form it evaluates.
+;;
+;; That is the same family as the `ns_select_1' trap in AGENTS.md (a
+;; worker thread reaching main-thread-only AppKit code), reached
+;; through process teardown rather than `accept-process-output'.  It
+;; wedged Emacs on 2026-07-12 when a declined cherry-pick auto-resolve
+;; killed its resolver buffer on the merge worker thread.
+;;
+;; Every teardown reachable from the merge worker MUST route through
+;; the two wrappers below.
+
+(defun agent-repl--kill-process-safely (proc)
+  "Delete PROC on the MAIN thread, whatever thread this is called from.
+See this section's preamble: `delete-process' can redisplay, and
+redisplay off the main thread aborts Emacs on macOS.  A no-op for a
+nil or already-dead PROC.  Returns non-nil when a deletion was
+performed or scheduled."
+  (when (process-live-p proc)
+    (if (eq (current-thread) main-thread)
+        (progn (delete-process proc) t)
+      (agent-repl--log nil "kill-process-safely: deferring delete-process %s to main thread"
+                        (ignore-errors (process-name proc)))
+      (agent-repl--defer-to-main-thread
+       (lambda () (when (process-live-p proc) (delete-process proc))))
+      t)))
+
+(defun agent-repl--kill-buffer-safely (buf)
+  "Kill BUF on the MAIN thread, whatever thread this is called from.
+`kill-buffer' implicitly `delete-process'es a live process the buffer
+still owns, so it carries the same redisplay-off-main hazard as
+`agent-repl--kill-process-safely' (see this section's preamble).  A
+no-op for a nil or dead BUF.  Returns non-nil when a kill was
+performed or scheduled."
+  (when (buffer-live-p buf)
+    (if (eq (current-thread) main-thread)
+        (progn (kill-buffer buf) t)
+      (agent-repl--log nil "kill-buffer-safely: deferring kill-buffer %s to main thread"
+                        (buffer-name buf))
+      (agent-repl--defer-to-main-thread
+       (lambda () (when (buffer-live-p buf) (kill-buffer buf))))
+      t)))
+
 (defun agent-repl--close-workspace (ws &optional preserve-entry)
   "Close the editor workspace WS: kill session, buffers, persp.
 Editor-only teardown — tears down vterm session, workspace buffers,
@@ -3741,7 +3793,7 @@ Busy-waits via `accept-process-output'.  Safe on the main thread because
       (accept-process-output proc 0.2 nil t)
       (when (> (float-time) deadline)
         (setq timed-out t)
-        (delete-process proc)))
+        (agent-repl--kill-process-safely proc)))
     (let ((status (if timed-out 'timeout (process-exit-status proc))))
       (when (and log-tag log-ws)
         (agent-repl--log log-ws
@@ -3793,7 +3845,7 @@ AppKit code on macOS)."
                  (unless done
                    (setq done t)
                    (setq status 'timeout)
-                   (ignore-errors (delete-process proc))
+                   (ignore-errors (agent-repl--kill-process-safely proc))
                    (condition-notify condvar)))))))
     (unwind-protect
         (with-mutex mutex
@@ -3894,7 +3946,9 @@ Keyword args:
         (funcall on-completed status output))
       (unwind-protect status
         (unless keep-buffer
-          (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
+          ;; Thread-safe: this runs on the merge WORKER thread for
+          ;; auto-resolve, and OUT-BUF may still own a live process.
+          (agent-repl--kill-buffer-safely out-buf))))))
 
 (defun agent-repl--invoke-auto-resolve-agent (root prompt &optional target-ws)
   "Synchronously invoke the auto-resolution `claude -p' in repo at ROOT.

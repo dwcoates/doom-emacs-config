@@ -3089,6 +3089,142 @@ header text — header lines must never leak into the log."
                    "")))
       (kill-buffer buf))))
 
+(ert-deftest agent-repl-test-kill-process-safely-main-thread-deletes-directly ()
+  "On the main thread the deletion happens inline (no deferral needed)."
+  ;; Arrange
+  (let ((deleted nil) (deferred nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p)))
+              ((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (_thunk) (setq deferred t))))
+      ;; Act — ert runs on the main thread.
+      (agent-repl--kill-process-safely 'proc)
+      ;; Assert
+      (should (eq deleted 'proc))
+      (should-not deferred))))
+
+(ert-deftest agent-repl-test-kill-process-safely-worker-thread-defers ()
+  "Off the main thread the deletion is DEFERRED, never run inline.
+`delete-process' can redisplay, and redisplay off-main aborts Emacs on
+macOS — the deadlock of 2026-07-12."
+  ;; Arrange
+  (let ((deleted nil) (thunk nil))
+    (cl-letf (((symbol-function 'current-thread) (lambda () 'worker-thread))
+              ((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p)))
+              ((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (fn) (setq thunk fn))))
+      ;; Act
+      (agent-repl--kill-process-safely 'proc)
+      ;; Assert — nothing deleted inline; the work is queued for main.
+      (should-not deleted)
+      (should (functionp thunk))
+      ;; And the queued thunk performs the deletion when main runs it.
+      (funcall thunk)
+      (should (eq deleted 'proc)))))
+
+(ert-deftest agent-repl-test-kill-process-safely-dead-process-is-no-op ()
+  "A dead (or nil) process is neither deleted nor deferred."
+  ;; Arrange
+  (let ((deferred nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (_thunk) (setq deferred t))))
+      ;; Act / Assert
+      (should-not (agent-repl--kill-process-safely nil))
+      (should-not deferred))))
+
+(ert-deftest agent-repl-test-kill-buffer-safely-main-thread-kills-directly ()
+  "On the main thread the buffer is killed inline."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *safe-kill-main*"))
+        (deferred nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--defer-to-main-thread)
+                   (lambda (_thunk) (setq deferred t))))
+          ;; Act
+          (agent-repl--kill-buffer-safely buf)
+          ;; Assert
+          (should-not (buffer-live-p buf))
+          (should-not deferred))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-kill-buffer-safely-worker-thread-defers ()
+  "Off the main thread the kill is DEFERRED.
+`kill-buffer' implicitly deletes a live process the buffer owns, so it
+carries the same redisplay-off-main abort hazard."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *safe-kill-worker*"))
+        (thunk nil))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'current-thread) (lambda () 'worker-thread))
+                    ((symbol-function 'agent-repl--defer-to-main-thread)
+                     (lambda (fn) (setq thunk fn))))
+            ;; Act
+            (agent-repl--kill-buffer-safely buf))
+          ;; Assert — still alive; the kill is queued for the main thread.
+          (should (buffer-live-p buf))
+          (should (functionp thunk))
+          (funcall thunk)
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-kill-buffer-safely-dead-buffer-is-no-op ()
+  "A dead (or nil) buffer is neither killed nor deferred."
+  ;; Arrange
+  (let ((deferred nil))
+    (cl-letf (((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (_thunk) (setq deferred t))))
+      ;; Act / Assert
+      (should-not (agent-repl--kill-buffer-safely nil))
+      (should-not deferred))))
+
+(ert-deftest agent-repl-test-spawn-and-wait-cleanup-is-thread-safe ()
+  "spawn-and-wait's buffer cleanup routes through the thread-safe kill.
+This IS the site that wedged Emacs: auto-resolve runs on the merge
+worker thread, and its raw `kill-buffer' of a live-process buffer
+redisplayed off-main and aborted Emacs into a lock-holding deadlock."
+  ;; Arrange
+  (let ((out-buf (generate-new-buffer " *spawn-and-wait-cleanup*"))
+        (safe-kills nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'start-process) (lambda (&rest _) 'proc))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'agent-repl--wait-for-process-exit)
+                   (lambda (&rest _) 0))
+                  ((symbol-function 'agent-repl--kill-buffer-safely)
+                   (lambda (b) (push b safe-kills))))
+          ;; Act
+          (agent-repl--spawn-and-wait
+           (list "true") out-buf
+           :process-name "test" :timeout 1 :log-tag "test" :log-ws nil)
+          ;; Assert — cleanup went through the safe wrapper, not raw kill-buffer.
+          (should (equal safe-kills (list out-buf))))
+      (when (buffer-live-p out-buf) (kill-buffer out-buf)))))
+
+(ert-deftest agent-repl-test-spawn-and-wait-keep-buffer-skips-cleanup ()
+  "KEEP-BUFFER still suppresses cleanup entirely."
+  ;; Arrange
+  (let ((out-buf (generate-new-buffer " *spawn-and-wait-keep*"))
+        (safe-kills nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'start-process) (lambda (&rest _) 'proc))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'agent-repl--wait-for-process-exit)
+                   (lambda (&rest _) 0))
+                  ((symbol-function 'agent-repl--kill-buffer-safely)
+                   (lambda (b) (push b safe-kills))))
+          ;; Act
+          (agent-repl--spawn-and-wait
+           (list "true") out-buf
+           :process-name "test" :timeout 1 :log-tag "test" :log-ws nil
+           :keep-buffer t)
+          ;; Assert
+          (should (null safe-kills))
+          (should (buffer-live-p out-buf)))
+      (when (buffer-live-p out-buf) (kill-buffer out-buf)))))
+
 (ert-deftest agent-repl-test-wait-for-process-exit-dispatches-main-thread-to-main-impl ()
   "On the main thread (ert tests run here) `--wait-for-process-exit'
 dispatches to `--wait-for-process-exit--main' rather than the
