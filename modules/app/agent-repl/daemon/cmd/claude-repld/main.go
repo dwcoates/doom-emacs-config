@@ -44,8 +44,15 @@ func main() {
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
 		classifyQueue  = flag.Bool("classify-queue", envBool("AGENT_REPL_CLASSIFY_QUEUE", true), "classify a message submitted mid-turn (interrupt vs wait) via a headless model (§2.13)")
 		classifierMdl  = flag.String("classifier-model", envStr("AGENT_REPL_CLASSIFIER_MODEL", "haiku"), "model for the in-flight-queue classifier")
+		accountsFlag   = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
 	)
 	flag.Parse()
+
+	accounts, err := parseAccounts(*accountsFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "claude-repld: -accounts: %v\n", err)
+		os.Exit(2)
+	}
 
 	if *shimScript == "" {
 		fmt.Fprintln(os.Stderr, "claude-repld: --shim is required (path to shim/dist/main.js)")
@@ -144,12 +151,14 @@ func main() {
 		Logins:          logins,
 		ClassifyQueue:   *classifyQueue,
 		ClassifierModel: *classifierMdl,
+		Accounts:        accounts,
 	})
 
 	mux := http.NewServeMux()
 	mux.Handle("/sessions", srv.Handler())
 	mux.Handle("/sessions/", srv.Handler())
 	mux.Handle("/remediation", srv.Handler())
+	mux.Handle("/accounts", srv.Handler())
 	if *webappDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(*webappDir)))
 	}
@@ -189,6 +198,31 @@ func main() {
 // itself runs for as long as diagnosing a lost session takes. Its output
 // is pumped into the daemon log so the plan it devises is visible in the
 // same place the failure was.
+// parseAccounts decodes the -accounts flag: comma-separated label=dir
+// pairs, where an empty dir names the CLI's own default root. An empty
+// flag is the capability being unconfigured (nil roster), not an error;
+// a malformed pair or duplicate label IS one — a half-parsed roster
+// would silently offer the menu with entries missing.
+func parseAccounts(raw string) ([]server.Account, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var accounts []server.Account
+	seen := map[string]bool{}
+	for _, pair := range strings.Split(raw, ",") {
+		label, dir, ok := strings.Cut(pair, "=")
+		if !ok || label == "" {
+			return nil, fmt.Errorf("malformed pair %q (want label=config-dir)", pair)
+		}
+		if seen[label] {
+			return nil, fmt.Errorf("duplicate label %q", label)
+		}
+		seen[label] = true
+		accounts = append(accounts, server.Account{Label: label, ConfigDir: dir})
+	}
+	return accounts, nil
+}
+
 func startAnalyst(argv []string, dir string) error {
 	// An os.Pipe (rather than Cmd.StdoutPipe) hands the child a raw fd
 	// for both streams, so the reader below is independent of Wait's
