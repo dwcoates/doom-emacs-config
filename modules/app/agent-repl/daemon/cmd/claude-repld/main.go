@@ -52,7 +52,14 @@ func main() {
 		if *claudeBin != "" {
 			argv = append(argv, "--claude-bin", *claudeBin)
 		}
-		proc, err := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD})
+		proc, err := shim.Spawn(shim.Options{
+			Argv: argv,
+			Dir:  opts.CWD,
+			// Ownership marker: the SDK's claude subprocess inherits it,
+			// its hook scripts stamp sentinel line 3, and Emacs then
+			// accepts session-id updates from this CLI as module-owned.
+			ExtraEnv: []string{"AGENT_REPL_OWNED=1"},
+		})
 		if err != nil {
 			return nil, err
 		}

@@ -654,6 +654,90 @@ Inherits mark-dead-vterm's precedence guard."
             (should-not (agent-repl--read-sentinel-file tmp)))
         (ignore-errors (delete-file tmp))))))
 
+(ert-deftest agent-repl-test-read-sentinel-file-owned-marker-parsed ()
+  "A three-line file with the owned marker parses as :owned t."
+  (agent-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            ;; Arrange / Act
+            (write-region "/some/project/dir\nabc-123\nowned\n" nil tmp)
+            (let ((result (agent-repl--read-sentinel-file tmp)))
+              ;; Assert
+              (should (equal (plist-get result :session-id) "abc-123"))
+              (should (plist-get result :owned))))
+        (ignore-errors (delete-file tmp))))))
+
+(ert-deftest agent-repl-test-read-sentinel-file-blank-marker-is-unowned ()
+  "A foreign CLI's sentinel (blank line 3) parses as :owned nil."
+  (agent-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            ;; Arrange / Act
+            (write-region "/some/project/dir\nabc-123\n\n" nil tmp)
+            (let ((result (agent-repl--read-sentinel-file tmp)))
+              ;; Assert — session id still read; only ownership is false.
+              (should (equal (plist-get result :session-id) "abc-123"))
+              (should-not (plist-get result :owned))))
+        (ignore-errors (delete-file tmp))))))
+
+(ert-deftest agent-repl-test-read-sentinel-file-legacy-two-line-is-unowned ()
+  "A pre-marker two-line sentinel parses as unowned (conservative)."
+  (agent-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            ;; Arrange / Act
+            (write-region "/some/project/dir\nabc-123\n" nil tmp)
+            (let ((result (agent-repl--read-sentinel-file tmp)))
+              ;; Assert
+              (should (equal (plist-get result :session-id) "abc-123"))
+              (should-not (plist-get result :owned))))
+        (ignore-errors (delete-file tmp))))))
+
+;;;; ---- Tests: update-session-id-from-sentinel ownership gate ----
+
+(ert-deftest agent-repl-test-update-session-id-adopts-owned ()
+  "An owned sentinel's session id is adopted onto the workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (let ((set-args nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (ws id) (setq set-args (list ws id)))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel "ws1" "owned-uuid" t)
+        ;; Assert
+        (should (equal set-args '("ws1" "owned-uuid")))))))
+
+(ert-deftest agent-repl-test-update-session-id-refuses-unowned ()
+  "A FOREIGN cli's session id is refused — the hijack this gate exists for."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (let ((set-called nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (&rest _) (setq set-called t))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel "ws1" "foreign-uuid" nil)
+        ;; Assert
+        (should-not set-called)))))
+
+(ert-deftest agent-repl-test-update-session-id-unowned-does-not-clobber-existing ()
+  "A refused foreign id leaves the workspace's recorded id intact."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "ours-uuid")
+    ;; Act
+    (agent-repl--update-session-id-from-sentinel "ws1" "foreign-uuid" nil)
+    ;; Assert
+    (should (equal (agent-repl--ws-durable-claude-session-id "ws1") "ours-uuid"))))
+
 ;;;; ---- Tests: ws-for-dir-fast ----
 
 (ert-deftest agent-repl-test-ws-for-dir-fast-hit ()
@@ -1558,7 +1642,8 @@ overwrote :done with :permission, which is exactly what we no longer want."
     (let ((inst (make-agent-repl-instantiation)))
       (agent-repl--ws-put "ws1" :active-env :bare-metal)
       (agent-repl--ws-put "ws1" :bare-metal inst)
-      (agent-repl--update-session-id-from-sentinel "ws1" "new-sid-abc")
+      ;; OWNED t: a module-launched CLI's sentinel (see the ownership gate).
+      (agent-repl--update-session-id-from-sentinel "ws1" "new-sid-abc" t)
       (should (equal (agent-repl-instantiation-session-id inst) "new-sid-abc")))))
 
 (ert-deftest agent-repl-test-update-session-id-from-sentinel-skips-nil ()
@@ -1610,7 +1695,7 @@ the module does not manage."
     (let ((inst (make-agent-repl-instantiation :session-id "old-sid")))
       (agent-repl--ws-put "ws1" :active-env :bare-metal)
       (agent-repl--ws-put "ws1" :bare-metal inst)
-      (agent-repl--update-session-id-from-sentinel "ws1" "new-sid")
+      (agent-repl--update-session-id-from-sentinel "ws1" "new-sid" t)
       (should (equal (agent-repl-instantiation-session-id inst) "new-sid")))))
 
 ;;;; ---- Tests: on-session-start-event ----
