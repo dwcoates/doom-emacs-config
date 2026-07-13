@@ -14,6 +14,12 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;; `defvar' with no value marks a symbol special only within the file that
+;; carries it, so workspace.el's declaration does not reach this file — a
+;; `let' here would bind lexically and never meet the dynamic binding
+;; `agent-repl--ws-remove-buffer' establishes.  Redeclare it to test that.
+(defvar persp-autokill-buffer-on-remove)
+
 ;;;; ---- Tests: ws-get / ws-put (moved from test-core.el) ----
 
 (ert-deftest agent-repl-test-ws-get-nonexistent-workspace ()
@@ -1725,6 +1731,26 @@ identity-distinct string injected by `agent-repl-set-priority' from
     (cl-letf (((symbol-function 'persp-remove-buffer) nil))
       (fmakunbound 'persp-remove-buffer)
       (should-not (agent-repl--ws-remove-buffer 'buf)))))
+
+(ert-deftest agent-repl-test-ws-remove-buffer-suppresses-autokill ()
+  "ws-remove-buffer nils persp-autokill-buffer-on-remove for the removal.
+Doom's `kill-weak' would otherwise let persp-mode kill the detached
+buffer, taking the frontend webview (persp-free, xwidget-bearing) with it."
+  (agent-repl-test--with-clean-state
+    (let ((persp-autokill-buffer-on-remove 'kill-weak)
+          observed)
+      (cl-letf (((symbol-function 'persp-remove-buffer)
+                 (lambda (_buf) (setq observed persp-autokill-buffer-on-remove))))
+        (agent-repl--ws-remove-buffer 'buf)
+        (should-not observed)))))
+
+(ert-deftest agent-repl-test-ws-remove-buffer-restores-autokill ()
+  "ws-remove-buffer leaves persp-autokill-buffer-on-remove untouched afterward."
+  (agent-repl-test--with-clean-state
+    (let ((persp-autokill-buffer-on-remove 'kill-weak))
+      (cl-letf (((symbol-function 'persp-remove-buffer) #'ignore))
+        (agent-repl--ws-remove-buffer 'buf)
+        (should (eq persp-autokill-buffer-on-remove 'kill-weak))))))
 
 ;;;; ---- Tests: --ws-nil-name ----
 
