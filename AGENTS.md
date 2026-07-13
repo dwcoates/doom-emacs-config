@@ -439,9 +439,29 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 8. **Choosing standard vs verbose.**
    Events that fire on every timer tick, every window change, or every keystroke MUST use `agent-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `agent-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
 
-## `ns_select_1` worker-thread trap — never call `accept-process-output` from a non-main thread on macOS
+## Worker-thread AppKit trap — nothing that reaches AppKit may run off the main thread on macOS
 
-**TL;DR:** if your code runs inside `(make-thread ...)` and needs to wait for a subprocess, **do not** call `accept-process-output`, `call-process`, `shell-command-to-string`, or anything else that routes through `wait_reading_process_output`. Use a process sentinel + condition variable instead. The convenience helpers `agent-repl--wait-for-process-exit` and `agent-repl--spawn-and-wait` in `modules/app/agent-repl/worktree.el` already encapsulate the correct pattern — prefer those.
+**The invariant:** a `(make-thread ...)` worker must never execute anything that can reach AppKit. On the NS build that means **two** distinct families, and both have wedged Emacs in production:
+
+1. **Waiting on a subprocess** — `accept-process-output`, `call-process`, `shell-command-to-string`, anything routing through `wait_reading_process_output` → `ns_select_1` → `[NSApp run]`. (The `ns_select_1` analysis below.)
+
+2. **Anything that can trigger a REDISPLAY** — redisplay calls `gui_consider_frame_title` → `-[NSWindow setTitle:]`. The non-obvious members of this family are process/buffer teardown:
+  - `delete-process` — a status change redisplays (`redisplay_preserve_echo_area`).
+  - `kill-buffer` on a buffer that still owns a live process — implicitly calls `delete-process`.
+  - `message`, and modifying a buffer that is displayed in a window.
+
+  Failure mode: AppKit raises an uncaught ObjC exception off-main → `objc_exception_throw` → `std::terminate` → `abort` → Emacs's fatal-signal handler. The worker then sits suspended in that handler **still holding the global Lisp lock**, so the main thread deadlocks forever on its next Lisp form (it appears as a 0%-CPU hang, blocked in `really_call_select` → `pthread_mutex_firstfit_lock_wait`). This wedged Emacs on 2026-07-12: a declined cherry-pick auto-resolve killed its resolver buffer on the merge worker thread.
+
+**Required helpers** (all in `modules/app/agent-repl/worktree.el`) — never hand-roll these in worker-reachable code:
+
+| Need | Use | Never |
+|---|---|---|
+| Wait for a subprocess | `agent-repl--wait-for-process-exit` / `agent-repl--spawn-and-wait` | `accept-process-output`, `call-process` |
+| Kill a process | `agent-repl--kill-process-safely` | bare `delete-process` |
+| Kill a (possibly process-owning) buffer | `agent-repl--kill-buffer-safely` | bare `kill-buffer` |
+| Any UI op (perspective switch, magit, window config, workspace close) | `agent-repl--defer-to-main-thread` | calling it directly |
+
+**Per-diff audit (mandatory when touching merge/worker paths):** grep the diff for `delete-process`, `kill-buffer`, `accept-process-output`, `message`, `magit-`, `display-buffer`, `switch-to-buffer`. For each hit, ask *"can this run on the merge worker thread?"* — the worker entry point is the `make-thread` in `agent-repl--workspace-merge-async`, so anything reachable from `agent-repl--dispatch-merge-handler` qualifies. If it can, route it through the table above.
 
 ### The structural cause (Emacs 30.2 source)
 
