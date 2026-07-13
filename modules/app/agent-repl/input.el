@@ -120,6 +120,11 @@ in-repo file, not here.")
   ;; mode-map below, mirroring the bindings `evil-integration.el' would have
   ;; installed had the variable been set globally before Evil loaded.
   (setq-local evil-respect-visual-line-mode t)
+  ;; Slash-command completion: our capf is the buffer's only completion
+  ;; source, so dropping the minimum prefix to 1 makes the menu appear on a
+  ;; lone `/' without affecting completion anywhere else.
+  (add-hook 'completion-at-point-functions #'agent-repl--skill-capf nil t)
+  (setq-local company-minimum-prefix-length 1)
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t))
 
 (defun agent-repl-discard-input ()
@@ -394,6 +399,201 @@ matching) is untouched."
     (if (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt)
         (concat (agent-repl--meta-wrap agent-repl--command-prefix) "\n\n" tagged)
       tagged)))
+
+;;; Slash-command completion
+
+;; The command menu is resolved by the SDK (built-ins plus user, project,
+;; and plugin skills) and cached on the daemon; the input buffer reads it
+;; back over HTTP and completes against it.  Company is already live in
+;; this buffer (`global-company-mode'), so a `completion-at-point-functions'
+;; entry is all it takes to get fuzzy matching and keyboard navigation.
+
+(defun agent-repl--slash-commands-refetch (ws)
+  "Fetch WS's slash-command menu from the daemon and cache it on WS.
+Returns the fetched list (possibly nil).  An HTTP failure is caught and
+logged rather than surfaced: a completion menu that cannot populate is a
+degraded convenience, never a reason to interrupt what the user is
+typing.  Returns nil when WS has no live session yet."
+  (let ((session-id (agent-repl--ws-get ws :frontend-session-id)))
+    (when session-id
+      (condition-case err
+          (let ((cmds (agent-repl--frontend-fetch-commands session-id)))
+            (agent-repl--ws-put ws :slash-commands cmds)
+            cmds)
+        (error
+         (agent-repl--log ws "slash-commands: fetch failed: %s"
+                          (error-message-string err))
+         nil)))))
+
+(defun agent-repl--slash-commands-for-ws (ws)
+  "Return WS's slash-command menu, fetching and caching it on first use.
+A nil cache is refetched every call rather than treated as final: the
+menu resolves asynchronously off the SDK init handshake, so an empty
+answer early in a session is transient, and the daemon read is a local
+round-trip.  Once the list is non-empty it is cached until invalidated
+by `agent-repl--slash-commands-invalidate'."
+  (or (agent-repl--ws-get ws :slash-commands)
+      (agent-repl--slash-commands-refetch ws)))
+
+(defun agent-repl--slash-commands-invalidate (ws)
+  "Drop WS's cached menu and ask the daemon to re-resolve it.
+Called when a skill directory changes.  Clearing the cache is what makes
+the next completion refetch, and the refresh is what makes the daemon
+re-probe so that refetch sees the new list.  A refresh failure is logged
+rather than surfaced -- the stale menu simply stands until the next
+change."
+  (agent-repl--ws-put ws :slash-commands nil)
+  (let ((session-id (agent-repl--ws-get ws :frontend-session-id)))
+    (when session-id
+      (condition-case err
+          (agent-repl--frontend-refresh-commands session-id)
+        (error
+         (agent-repl--log ws "slash-commands: refresh failed: %s"
+                          (error-message-string err)))))))
+
+(defun agent-repl--slash-command-watch-dirs (ws)
+  "Return the existing skill directories to watch for workspace WS.
+Covers the user config's `skills' and `commands' directories (honoring
+CLAUDE_CONFIG_DIR, since a workspace may run under a non-default config
+root) and, when WS has a project dir, that project's `.claude/skills' and
+`.claude/commands'.  Only directories that exist are returned, so a
+project without a `.claude' contributes nothing."
+  (let* ((config-dir (or (getenv "CLAUDE_CONFIG_DIR")
+                         (expand-file-name "~/.claude")))
+         (project (agent-repl--ws-get ws :project-dir))
+         (candidates (list (expand-file-name "skills" config-dir)
+                           (expand-file-name "commands" config-dir))))
+    (when project
+      (setq candidates
+            (append candidates
+                    (list (expand-file-name ".claude/skills" project)
+                          (expand-file-name ".claude/commands" project)))))
+    (seq-filter #'file-directory-p candidates)))
+
+(defvar-local agent-repl--slash-command-watchers nil
+  "File-notify descriptors watching this input buffer's skill dirs.
+Buffer-local so the watchers live and die with the input buffer, and are
+torn down by its `kill-buffer-hook'.")
+
+(defun agent-repl--slash-commands-teardown-watch ()
+  "Remove this buffer's skill-directory watchers."
+  (dolist (desc agent-repl--slash-command-watchers)
+    (when (file-notify-valid-p desc)
+      (file-notify-rm-watch desc)))
+  (setq agent-repl--slash-command-watchers nil))
+
+(defun agent-repl--slash-commands-ensure-watch (ws)
+  "Install skill-directory watchers for WS in the current buffer, once.
+On any change under a watched directory, WS's cached menu is invalidated
+and the daemon is asked to re-resolve it, so a skill added or edited
+mid-session appears in completion without a restart.
+
+No-op in batch (`noninteractive'): a headless run completes nothing, and
+installing real watchers would leak them into the test process.  Also a
+no-op once installed, so calling it from every completion is cheap."
+  (when (and (not noninteractive)
+             (null agent-repl--slash-command-watchers))
+    (setq agent-repl--slash-command-watchers
+          (delq nil
+                (mapcar
+                 (lambda (dir)
+                   (file-notify-add-watch
+                    dir '(change)
+                    (lambda (_event) (agent-repl--slash-commands-invalidate ws))))
+                 (agent-repl--slash-command-watch-dirs ws))))
+    (add-hook 'kill-buffer-hook #'agent-repl--slash-commands-teardown-watch nil t)))
+
+(defun agent-repl--skill-capf-bounds ()
+  "Return (START . END) of the slash-command token at point, or nil.
+START is the leading slash and END the end of the command-name run, but
+only when that slash sits at the very start of the buffer and the name
+run is not terminated by a second slash (which would make it a path).
+Point must lie within the token.  nil in every other position, so
+completion never fires inside a path or later in the message."
+  (let* ((start (save-excursion
+                  (goto-char (point-min))
+                  (point)))
+         (p (point)))
+    (when (and (< start (point-max))
+               (eq (char-after start) ?/))
+      (let ((name-end (save-excursion
+                        (goto-char (1+ start))
+                        (skip-chars-forward agent-repl--slash-command-name-chars)
+                        (point))))
+        ;; A second slash right after the name run means this is a path
+        ;; (`/Users/foo'), not a command.
+        (when (and (>= p start)
+                   (<= p name-end)
+                   (not (eq (char-after name-end) ?/)))
+          (cons start name-end))))))
+
+(defun agent-repl--skill-capf-candidates (ws)
+  "Return WS's slash commands as completion candidates.
+Each candidate is a `/name' string (the completion region includes the
+leading slash) carrying its argument hint and description as text
+properties, which `agent-repl--skill-capf-annotation' reads back."
+  (mapcar
+   (lambda (cmd)
+     (let ((name (alist-get 'name cmd))
+           (hint (or (alist-get 'argumentHint cmd) ""))
+           (desc (or (alist-get 'description cmd) "")))
+       (propertize (concat "/" name)
+                   'agent-repl-skill-hint hint
+                   'agent-repl-skill-desc desc)))
+   (agent-repl--slash-commands-for-ws ws)))
+
+(defun agent-repl--skill-capf-annotation (candidate)
+  "Return the inline annotation for CANDIDATE: its argument hint.
+An empty hint (a command that takes no argument) annotates to nil so no
+trailing space is shown."
+  (let ((hint (get-text-property 0 'agent-repl-skill-hint candidate)))
+    (when (and hint (not (string-empty-p hint)))
+      (concat " " hint))))
+
+(defun agent-repl--skill-capf ()
+  "`completion-at-point-functions' entry for slash commands.
+Offers the session's command menu when the text before point is a
+`/name' fragment at the very start of the input, and returns nil
+everywhere else.  The workspace is resolved from the buffer's permanent
+owner so it survives the perspective drifting under a long turn."
+  (let ((bounds (agent-repl--skill-capf-bounds))
+        (ws (or agent-repl--owning-workspace (agent-repl--ws-current-name))))
+    (when (and bounds ws)
+      (agent-repl--slash-commands-ensure-watch ws)
+      (list (car bounds)
+            (cdr bounds)
+            (agent-repl--skill-capf-candidates ws)
+            :annotation-function #'agent-repl--skill-capf-annotation
+            :exclusive 'no))))
+
+(defun agent-repl--company-abort-and-send ()
+  "Abort any open company popup, then send the input.
+Bound to RET in `company-active-map' for the agent input buffer only, so
+RET always sends there rather than being swallowed by company's default
+of completing the highlighted selection.  Accepting a candidate is TAB's
+job (`company-complete-common-or-cycle'); RET sends exactly what was
+typed."
+  (interactive)
+  (when (bound-and-true-p company-candidates)
+    (company-abort))
+  (call-interactively #'agent-repl--send))
+
+(with-eval-after-load 'company
+  ;; Company raises its keymap above the input mode's, so its RET
+  ;; (`company-complete-selection') would otherwise shadow the send key
+  ;; whenever the popup is open.  Reclaim RET for this buffer only, via a
+  ;; runtime-dispatched binding: the input buffer sends, every other buffer
+  ;; keeps company's default of completing the selection.  The else branch
+  ;; restores `company-complete-selection' explicitly rather than falling
+  ;; through, because this overwrites the very binding it would fall to.
+  (dolist (key (list (kbd "RET") [return]))
+    (define-key company-active-map key
+                '(menu-item
+                  "" agent-repl--company-abort-and-send
+                  :filter (lambda (_)
+                            (if (eq major-mode 'agent-repl-input-mode)
+                                #'agent-repl--company-abort-and-send
+                              #'company-complete-selection))))))
 
 ;;; Send pipeline
 

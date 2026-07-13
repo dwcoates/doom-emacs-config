@@ -856,6 +856,53 @@ the wire would deprive the agent of the directive it must read."
     (should (equal (agent-repl--frontend-session-url "s_9")
                    "http://127.0.0.1:9999/?session=s_9"))))
 
+;;;; ---- slash commands -------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-fetch-commands-gets-the-menu ()
+  "Fetch GETs the session's commands endpoint and returns the list."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _)
+        (agent-repl-test--json-ok
+         '((commands . (((name . "debug-logs") (description . "d") (argumentHint . "")))))))
+    ;; Act
+    (let ((cmds (agent-repl--frontend-fetch-commands "s1")))
+      ;; Assert
+      (should (equal (alist-get 'name (car cmds)) "debug-logs"))
+      (pcase-let ((`(,method ,url ,_payload) (car requests)))
+        (should (equal method "GET"))
+        (should (string-suffix-p "/sessions/s1/commands" url))))))
+
+(ert-deftest agent-repl-test-frontend-fetch-commands-empty-menu ()
+  "An unresolved menu (the daemon's `{\"commands\":[]}') is returned as nil,
+not an error."
+  ;; Arrange — feed the daemon's literal empty-array body, since that is
+  ;; exactly what an unresolved menu serializes to (never JSON null).
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 200 "{\"commands\":[]}"))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-fetch-commands "s1")))))
+
+(ert-deftest agent-repl-test-frontend-refresh-commands-posts-to-refresh ()
+  "Refresh POSTs to the session's commands/refresh endpoint."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 202 ""))
+    ;; Act
+    (agent-repl--frontend-refresh-commands "s1")
+    ;; Assert
+    (pcase-let ((`(,method ,url ,_payload) (car requests)))
+      (should (equal method "POST"))
+      (should (string-suffix-p "/sessions/s1/commands/refresh" url)))))
+
+(ert-deftest agent-repl-test-frontend-refresh-commands-errors-on-non-2xx ()
+  "A refresh that the daemon rejects signals rather than reporting success."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 404 "no such session"))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-refresh-commands "s1"))))
+
 (provide 'test-frontend-client)
 
 ;;; test-frontend-client.el ends here
