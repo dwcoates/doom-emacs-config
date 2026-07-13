@@ -26,6 +26,16 @@ function agentTool(over: Partial<ToolItem> = {}): ToolItem {
   };
 }
 
+/** The `/clear` prompt, whose bubble bounds the context the roster counts. */
+function clearTurn(): ConversationItem {
+  return {
+    kind: "user-turn",
+    requestId: "r1",
+    content: [{ type: "text", text: "/clear" }],
+    ts: "2026-05-24T09:05:00Z",
+  };
+}
+
 /** A roster entry, defaulted to a settled successful one. */
 function entry(over: Partial<SubagentEntry> = {}): SubagentEntry {
   return {
@@ -157,6 +167,22 @@ describe("sessionSubagents", () => {
     const [agent] = sessionSubagents([agentTool()]);
     // Assert
     expect(agent.nested).toBe(false);
+  });
+
+  it("forgets a subagent the /clear discarded from the context", () => {
+    // Arrange
+    const items: ConversationItem[] = [agentTool(), clearTurn()];
+    // Act + Assert
+    expect(sessionSubagents(items)).toHaveLength(0);
+  });
+
+  it("keeps a subagent spawned after the /clear", () => {
+    // Arrange
+    const items: ConversationItem[] = [agentTool(), clearTurn(), agentTool({ toolUseId: "t2" })];
+    // Act
+    const agents = sessionSubagents(items);
+    // Assert
+    expect(agents.map((a) => a.toolUseId)).toEqual(["t2"]);
   });
 });
 
