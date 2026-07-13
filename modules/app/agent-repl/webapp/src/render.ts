@@ -223,14 +223,18 @@ export function isClearTurn(item: UserTurnItem): boolean {
   return userTurnText(item).trim() === "/clear";
 }
 
-function UserTurn(item: UserTurnItem): string {
-  // A turn that was nothing BUT injected spans has no bubble at all.
-  const text = userTurnText(item);
-  if (text === "") return "";
+/**
+ * The prompt bubble, breathing when PULSE-ID marks it the newest thing the
+ * feed has drawn (see `pulseTarget`): a prompt whose turn has produced
+ * nothing visible yet is the one moment the UI has no other motion to offer,
+ * so the prompt itself carries the beat until something supersedes it.
+ */
+function UserTurn(item: UserTurnItem, isPulsing = false): string {
+  const cls = `bubble user${isPulsing ? " pulsing" : ""}`;
   const divider = isClearTurn(item)
     ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
     : "";
-  return `${Bubble("bubble user", `<pre>${escapeHtml(text)}</pre>`, item.ts)}${divider}`;
+  return `${Bubble(cls, `<pre>${escapeHtml(userTurnText(item))}</pre>`, item.ts)}${divider}`;
 }
 
 /**
@@ -244,7 +248,7 @@ function UserTurn(item: UserTurnItem): string {
  * beneath it. Only a final response carries one, so CHIP is null for the
  * commentary bubbles above it (see `finalResponses`).
  *
- * The working frontier gets the pulse instead (see `pulsingBlockId`). The
+ * The working frontier gets the pulse instead (see `pulseTarget`). The
  * two never land on the same bubble: a final response only exists once the
  * turn has ended, and the pulse only runs while it has not.
  *
@@ -276,12 +280,10 @@ function Thinking(item: ThinkingItem): string {
   // Adaptive-thinking models withhold the thinking text: the block streams
   // a signature and no thinking_delta, so item.text stays empty. A
   // disclosure triangle over an empty <pre> unfolds to nothing, so a
-  // textless block gets a spinner while it is open and disappears once it
-  // closes.
+  // textless block gets a spinner while it is open and, once it closes,
+  // disappears entirely (`rendersEmpty`).
   if (item.text === "") {
-    return item.done
-      ? ""
-      : `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking</div>`;
+    return `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking</div>`;
   }
   const state = item.done ? "" : " (thinking…)";
   return `
@@ -626,33 +628,104 @@ export function finalResponses(items: readonly ConversationItem[]): FinalRespons
 }
 
 /**
- * Block id of the text bubble that BREATHES — the working frontier: the last
- * response the agent has finished while the turn keeps running, so the reader
- * knows more is still being written rather than that the agent went quiet.
+ * Whether an item draws NOTHING into the feed.
  *
- * Four states forfeit the pulse, each because something else already carries
- * the beat (or because there is no beat to carry):
+ * The renderer and the pulse both need this same answer, from opposite ends:
+ * `renderItem` returns the empty node, and `pulseTarget` scans straight past
+ * it, since a thing the feed never drew cannot be the progress that
+ * supersedes a breathing bubble. Keeping the two on one predicate is what
+ * stops a suppressed tool from silently stilling a pulse it never replaced.
+ *
+ * FINALS is needed only for a result, whose chip rides inside the response
+ * bubble that swallowed it rather than standing alone in the feed.
+ */
+export function rendersEmpty(
+  item: ConversationItem,
+  finals?: FinalResponses,
+): boolean {
+  switch (item.kind) {
+    // A turn that was nothing BUT injected spans has no bubble at all.
+    case "user-turn":
+      return userTurnText(item) === "";
+    // A textless thinking block leaves nothing behind once it closes.
+    case "thinking":
+      return item.done && item.text === "";
+    // AskUserQuestion's UI IS the permission picker card — the generic tool
+    // card would just dump the questions JSON (input) and the "User has
+    // answered…" echo (result) alongside it. ToolSearch is deferred-tool
+    // schema plumbing and TaskUpdate is task-list bookkeeping: both pure
+    // feed noise.
+    case "tool":
+      return SUPPRESSED_TOOLS.has(item.toolName);
+    case "result":
+      return finals?.swallowed.has(item) ?? false;
+    default:
+      return false;
+  }
+}
+
+/** The bubble that BREATHES, or null when none does. */
+export type PulseTarget =
+  | { kind: "user-turn"; requestId: string }
+  | { kind: "text"; blockId: string }
+  | null;
+
+/**
+ * The one bubble that breathes: whichever of the prompt and the agent's last
+ * word the UI has drawn nothing newer than.
+ *
+ * - The PROMPT breathes from the moment it is sent until the turn draws its
+ *   first visible thing, so a send is never answered by a still feed.
+ * - The WORKING FRONTIER (the last response a still-running turn has
+ *   finished) breathes after that, so a reader who has caught up sees the
+ *   agent is still writing rather than that it went quiet.
+ *
+ * They are mutually exclusive by construction: the prompt only breathes while
+ * nothing visible follows it, and the frontier only exists once something
+ * does. The states that forfeit the pulse entirely, each because something
+ * else already carries the beat (or because there is no beat to carry):
  * - the turn is not in flight, so nothing more is coming at all;
- * - a later response is streaming, and its cursor is the live signal;
+ * - a response is streaming, and its own cursor is the live signal;
  * - a thinking indicator is running, and its spinner is the live signal;
- * - the in-flight turn has written no response yet, so there is nothing to pulse.
+ * - a visible section (a tool card, a retry, an error) followed the prompt
+ *   before the agent wrote a word, and IT is now the progress on show.
  *
  * The scan stops at the newest user turn: the previous turn's answer belongs
  * to a question already answered, so a fresh prompt never breathes life back
- * into it.
+ * into it. What the feed never drew (`rendersEmpty`) is skipped outright — a
+ * pulse is stilled only by progress the user can actually see.
  */
-export function pulsingBlockId(
+export function pulseTarget(
   items: readonly ConversationItem[],
   turnInFlight: boolean,
-): string | null {
+  finals?: FinalResponses,
+): PulseTarget {
   if (!turnInFlight) return null;
+  // Whether the cursor is still at the feed's visible tail, i.e. nothing
+  // drawn has been passed on the way back to the item under inspection.
+  let atTail = true;
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === "user-turn") return null;
+    if (rendersEmpty(item, finals)) continue;
+    if (item.kind === "user-turn") {
+      return atTail ? { kind: "user-turn", requestId: item.requestId } : null;
+    }
     if (item.kind === "thinking" && !item.done) return null;
-    if (item.kind === "text") return item.done ? item.blockId : null;
+    if (item.kind === "text") {
+      return item.done ? { kind: "text", blockId: item.blockId } : null;
+    }
+    atTail = false;
   }
   return null;
+}
+
+/** Whether PULSE names this item as the bubble that breathes. */
+export function isPulsed(item: ConversationItem, pulse: PulseTarget): boolean {
+  if (!pulse) return false;
+  if (pulse.kind === "text") {
+    return item.kind === "text" && item.blockId === pulse.blockId;
+  }
+  return item.kind === "user-turn" && item.requestId === pulse.requestId;
 }
 
 /** A context increase as a signed figure: `+100,000`, `-40,000`, `+0`. */
@@ -708,10 +781,14 @@ function SystemNote(item: SystemItem): string {
 }
 
 /**
- * One item's HTML. FINALS pairs the feed's answers with the chips that
+ * One item's HTML, or nothing at all for the items the feed draws no node
+ * for (`rendersEmpty`). FINALS pairs the feed's answers with the chips that
  * close their turns: a text block it names renders as a final response
  * carrying its chip, and the paired result renders as nothing, since the
  * bubble above it has already drawn it.
+ *
+ * IS-PULSING marks the one bubble that breathes (`pulseTarget`), which is
+ * either the prompt or a finished response.
  */
 export function renderItem(
   item: ConversationItem,
@@ -719,24 +796,20 @@ export function renderItem(
   finals?: FinalResponses,
   isPulsing = false,
 ): string {
+  if (rendersEmpty(item, finals)) return "";
   switch (item.kind) {
     case "user-turn":
-      return UserTurn(item);
+      return UserTurn(item, isPulsing);
     case "text":
       return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing);
     case "thinking":
       return Thinking(item);
     case "tool":
-      // AskUserQuestion's UI IS the permission picker card — the
-      // generic tool card would just dump the questions JSON (input)
-      // and the "User has answered…" echo (result) alongside it.
-      // ToolSearch is deferred-tool schema plumbing and TaskUpdate is
-      // task-list bookkeeping: both pure feed noise.
-      return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item);
+      return ToolCard(item);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
-      return finals?.swallowed.has(item) ? "" : ResultChip(item);
+      return ResultChip(item);
     case "compact-boundary":
       return CompactDivider(item);
     case "error":
@@ -884,19 +957,14 @@ export class FeedRenderer {
 
   /**
    * One item's HTML: green-bordered and chip-bearing when FINALS marks it a
-   * turn's answer, and pulsing when PULSE-ID marks it the working frontier.
+   * turn's answer, and breathing when PULSE names it.
    */
   private itemHtml(
     item: ConversationItem,
     finals: FinalResponses,
-    pulseId: string | null,
+    pulse: PulseTarget,
   ): string {
-    return renderItem(
-      item,
-      this.questionSelections,
-      finals,
-      item.kind === "text" && item.blockId === pulseId,
-    );
+    return renderItem(item, this.questionSelections, finals, isPulsed(item, pulse));
   }
 
   private submitQuestionAnswers(requestId: string): void {
@@ -935,7 +1003,7 @@ export class FeedRenderer {
     this.container.innerHTML = "";
     this.nodes.clear();
     const finals = finalResponses(state.items);
-    const pulseId = pulsingBlockId(state.items, state.turnInFlight);
+    const pulse = pulseTarget(state.items, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
@@ -950,7 +1018,7 @@ export class FeedRenderer {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
         const { el, item } = shells[i];
-        const html = this.itemHtml(item, finals, pulseId);
+        const html = this.itemHtml(item, finals, pulse);
         el.innerHTML = html;
         const entry = this.nodes.get(el.dataset.key ?? "");
         if (entry) entry.html = html;
@@ -999,12 +1067,12 @@ export class FeedRenderer {
     });
     this.lastUserTurn = turnId;
     const finals = finalResponses(state.items);
-    const pulseId = pulsingBlockId(state.items, state.turnInFlight);
+    const pulse = pulseTarget(state.items, state.turnInFlight, finals);
     const seen = new Set<string>();
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
       seen.add(key);
-      const html = this.itemHtml(item, finals, pulseId);
+      const html = this.itemHtml(item, finals, pulse);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");

@@ -261,20 +261,20 @@ describe("final-response border", () => {
   });
 });
 
-describe("working-frontier pulse", () => {
-  const pulsing = blockAfter(css, ".bubble.assistant.pulsing {");
-  const breathe = blockAfter(css, "@keyframes response-breathe");
+describe("the bubble pulse", () => {
+  const pulsing = blockAfter(css, ".bubble.pulsing {");
+  const breathe = blockAfter(css, "@keyframes bubble-breathe");
   const reducedPulse = blockAfter(
     blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
-    ".bubble.assistant.pulsing",
+    ".bubble.pulsing",
   );
-  /** Seconds the frontier bubble takes to complete one breath. */
-  const period = Number(pulsing.match(/response-breathe\s+([\d.]+)s/)?.[1]);
+  /** Seconds a breathing bubble takes to complete one breath. */
+  const period = Number(pulsing.match(/bubble-breathe\s+([\d.]+)s/)?.[1]);
 
-  it("breathes the frontier bubble on an endless loop", () => {
-    // Arrange / Act — the .bubble.assistant.pulsing rule.
+  it("breathes a flagged bubble on an endless loop", () => {
+    // Arrange / Act — the .bubble.pulsing rule.
     // Assert
-    expect(pulsing).toMatch(/animation:\s*response-breathe\s+[\d.]+s\s+ease-in-out\s+infinite/);
+    expect(pulsing).toMatch(/animation:\s*bubble-breathe\s+[\d.]+s\s+ease-in-out\s+infinite/);
   });
 
   it("holds the breath slower than every ticking indicator in the app", () => {
@@ -283,70 +283,96 @@ describe("working-frontier pulse", () => {
     expect(period).toBeGreaterThanOrEqual(3);
   });
 
-  it("breathes toward the assistant-pulse token rather than to a color of its own", () => {
-    // Arrange / Act — the @keyframes response-breathe midpoint.
+  it("carries no hue of its own, breathing toward whatever the role names", () => {
+    // Arrange / Act — the @keyframes bubble-breathe midpoint. One keyframe
+    // serves both roles precisely because it names none of their colors.
     // Assert
-    expect(breathe).toMatch(/background:\s*var\(--assistant-pulse\)/);
+    expect(breathe).toMatch(/background:\s*var\(--pulse-to\)/);
   });
 
-  it("keeps the light-theme breath inside the assistant bubble's own hue", () => {
+  it("points the assistant bubble's breath at the assistant-pulse token", () => {
+    // Arrange / Act — the .bubble.assistant rule.
+    // Assert
+    expect(blockAfter(css, ".bubble.assistant {")).toMatch(
+      /--pulse-to:\s*var\(--assistant-pulse\)/,
+    );
+  });
+
+  it("points the user bubble's breath at the user-pulse token", () => {
+    // Arrange / Act — the .bubble.user rule.
+    // Assert
+    expect(blockAfter(css, ".bubble.user {")).toMatch(/--pulse-to:\s*var\(--user-pulse\)/);
+  });
+
+  it("drops the breath entirely under reduced motion, since it is a hint and not the signal", () => {
+    // Arrange / Act — the reduced-motion .bubble.pulsing override.
+    // Assert
+    expect(reducedPulse).toMatch(/animation:\s*none/);
+  });
+});
+
+/**
+ * Both breathing bubbles take the SAME breath and differ only in the wash they
+ * take it from — the working frontier from the assistant purple, the just-sent
+ * prompt from the user blue — so the palette contract is one table run per
+ * role rather than two suites drifting apart.
+ */
+describe.each([
+  { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
+  { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
+])("$role pulse palette", ({ wash, far }) => {
+  it("keeps the light-theme breath inside the bubble's own hue", () => {
     // Arrange
-    const [wash, pulse] = [token(lightTheme, "--assistant"), token(lightTheme, "--assistant-pulse")];
+    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
     // Act
-    const drift = Math.abs(hue(pulse) - hue(wash));
+    const drift = Math.abs(hue(deep) - hue(near));
     // Assert
     expect(drift).toBeLessThan(10);
   });
 
-  it("keeps the dark-theme breath inside the assistant bubble's own hue", () => {
+  it("keeps the dark-theme breath inside the bubble's own hue", () => {
     // Arrange
-    const [wash, pulse] = [token(darkTheme, "--assistant"), token(darkTheme, "--assistant-pulse")];
+    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
     // Act
-    const drift = Math.abs(hue(pulse) - hue(wash));
+    const drift = Math.abs(hue(deep) - hue(near));
     // Assert
     expect(drift).toBeLessThan(10);
   });
 
   it("deepens the light-theme wash at the top of the breath", () => {
     // Arrange
-    const [wash, pulse] = [token(lightTheme, "--assistant"), token(lightTheme, "--assistant-pulse")];
+    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
     // Act
-    const deeper = luminance(pulse) < luminance(wash);
+    const deeper = luminance(deep) < luminance(near);
     // Assert
     expect(deeper).toBe(true);
   });
 
   it("lifts the dark-theme wash at the top of the breath, where deepening would vanish", () => {
     // Arrange
-    const [wash, pulse] = [token(darkTheme, "--assistant"), token(darkTheme, "--assistant-pulse")];
+    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
     // Act
-    const lifted = luminance(pulse) > luminance(wash);
+    const lifted = luminance(deep) > luminance(near);
     // Assert
     expect(lifted).toBe(true);
   });
 
   it("keeps the light-theme breath shallow enough to read under prose", () => {
     // Arrange
-    const [wash, pulse] = [token(lightTheme, "--assistant"), token(lightTheme, "--assistant-pulse")];
+    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
     // Act
-    const depth = Math.abs(luminance(pulse) - luminance(wash));
+    const depth = Math.abs(luminance(deep) - luminance(near));
     // Assert
     expect(depth).toBeLessThan(30);
   });
 
   it("keeps the dark-theme breath shallow enough to read under prose", () => {
     // Arrange
-    const [wash, pulse] = [token(darkTheme, "--assistant"), token(darkTheme, "--assistant-pulse")];
+    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
     // Act
-    const depth = Math.abs(luminance(pulse) - luminance(wash));
+    const depth = Math.abs(luminance(deep) - luminance(near));
     // Assert
     expect(depth).toBeLessThan(30);
-  });
-
-  it("drops the breath entirely under reduced motion, since it is a hint and not the signal", () => {
-    // Arrange / Act — the reduced-motion .bubble.assistant.pulsing override.
-    // Assert
-    expect(reducedPulse).toMatch(/animation:\s*none/);
   });
 });
 

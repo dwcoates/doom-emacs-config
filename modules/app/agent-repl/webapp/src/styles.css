@@ -6,11 +6,14 @@
   --border: #e5e7eb;
   --card: #f9fafb;
   --user: #e0ecff;
+  /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
+     the same blue one shade deeper, on the same terms as --assistant-pulse. */
+  --user-pulse: #cfdefb;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
   /* The far end of the breath the working frontier takes (see
-     .bubble.assistant.pulsing): the SAME purple one shade deeper, never a
+     .bubble.pulsing): the SAME purple one shade deeper, never a
      second hue — the pulse is a sign of life on a bubble the reader is
      mid-sentence in, so it must be readable as motion out of the corner of the
      eye and invisible to the eye reading the words. */
@@ -87,6 +90,7 @@
     --border: #2a2e37;
     --card: #1a1d24;
     --user: #1e2a44;
+    --user-pulse: #2a3a5c;
     --assistant: #292040;
     --assistant-pulse: #372c57;
     --thinking: #fb923c;
@@ -290,7 +294,11 @@ pre {
   gap: 0.9rem;
 }
 .bubble-body { flex: 1; min-width: 0; }
-.bubble.user { background: var(--user); align-self: flex-end; }
+.bubble.user {
+  background: var(--user);
+  --pulse-to: var(--user-pulse);
+  align-self: flex-end;
+}
 /* Smaller and quieter than the text it dates, and lifted clear of the
    body's first line: a corner label rather than a word in the sentence.
    It never shrinks the way the wrapping body does. */
@@ -301,20 +309,26 @@ pre {
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.bubble.assistant { background: var(--assistant); }
+.bubble.assistant {
+  background: var(--assistant);
+  --pulse-to: var(--assistant-pulse);
+}
 /* The answer the turn landed on, as against the commentary above it. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
-/* The working frontier: the last response a still-running turn has finished,
-   breathing between its own wash and one shade deeper, so a reader who has
-   caught up sees the agent is still writing rather than that it went quiet.
-   SLOW (a full breath takes seconds, where every other indicator in the app
-   ticks in around one) and SHALLOW on purpose — this is the only motion the
-   app puts under a block of prose the user is reading, so it must never pull
-   the eye the way the spinners are meant to. A turn that has ENDED never
-   pulses: see pulsingBlockId. */
-.bubble.assistant.pulsing { animation: response-breathe 4s ease-in-out infinite; }
-@keyframes response-breathe {
-  50% { background: var(--assistant-pulse); }
+/* The breath of the bubble the UI has nothing newer to show for: it rocks
+   between its own wash and one shade of that same wash (--pulse-to, named by
+   each role above), so a reader who has caught up sees the session still
+   moving rather than gone quiet. Two bubbles take it, never both at once
+   (see pulseTarget): the prompt just sent, until the agent draws anything at
+   all in reply, and the working frontier, the last response a still-running
+   turn has finished. SLOW (a full breath takes seconds, where every other
+   indicator in the app ticks in around one) and SHALLOW on purpose — this is
+   the only motion the app puts under a block of prose the user is reading, so
+   it must never pull the eye the way the spinners are meant to. A turn that
+   has ENDED never pulses. */
+.bubble.pulsing { animation: bubble-breathe 4s ease-in-out infinite; }
+@keyframes bubble-breathe {
+  50% { background: var(--pulse-to); }
 }
 .cursor { animation: pulse 1s infinite; color: var(--accent); }
 
@@ -705,10 +719,10 @@ pre {
   .agent-dot.agent-running {
     animation: none;
   }
-  /* The frontier's breath is a hint, never the sole liveness signal (the
-     topbar spinner and the running tool arcs both still say a turn is in
-     flight), so it drops entirely rather than degrading to something slower. */
-  .bubble.assistant.pulsing {
+  /* A bubble's breath is a hint, never the sole liveness signal (the topbar
+     spinner and the running tool arcs both still say a turn is in flight), so
+     it drops entirely rather than degrading to something slower. */
+  .bubble.pulsing {
     animation: none;
   }
 }
