@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"claude-repld/internal/protocol"
 )
@@ -150,6 +151,46 @@ func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *tra
 	}
 }
 
+// The CLI does not store a slash command as the user typed it. It
+// rewrites the turn into a tagged envelope before writing the
+// transcript line (tag order varies by CLI version):
+//
+//	<command-name>/model</command-name>
+//	<command-message>model</command-message>
+//	<command-args>fable</command-args>
+//
+// The live stream never carries that shape: a §2.3 user-turn is echoed
+// from the daemon's own user-message command, so it holds the literal
+// "/model fable" the user typed. Collapsing the envelope back to that
+// typed form is what keeps a replayed command rendering the way it
+// rendered live (raw tags in the bubble otherwise, and no /clear
+// context divider).
+var (
+	commandNameRe = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
+	commandArgsRe = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+)
+
+// slashCommandText collapses a transcript slash-command envelope to the
+// text the user typed. Any other text passes through verbatim: the
+// leading tag is what marks an envelope, so a prompt that merely quotes
+// the tags mid-sentence is left alone.
+func slashCommandText(s string) string {
+	if !strings.HasPrefix(strings.TrimSpace(s), "<command-") {
+		return s
+	}
+	name := commandNameRe.FindStringSubmatch(s)
+	if name == nil {
+		return s
+	}
+	typed := strings.TrimSpace(name[1])
+	if args := commandArgsRe.FindStringSubmatch(s); args != nil {
+		if a := strings.TrimSpace(args[1]); a != "" {
+			return typed + " " + a
+		}
+	}
+	return typed
+}
+
 // replayUserFrames maps one user transcript entry to frames: tool_result
 // blocks become tool-use-result frames (through the Translator, so
 // render hints fire for tools it has seen), and the remaining content
@@ -161,6 +202,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 	}
 	var text string
 	if err := json.Unmarshal(msg.Content, &text); err == nil {
+		text = slashCommandText(text)
 		if text == "" {
 			return nil
 		}
