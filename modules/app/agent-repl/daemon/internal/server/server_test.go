@@ -2216,6 +2216,352 @@ func TestAccountsReportsALoggedOutRootWithAnEmptyEmail(t *testing.T) {
 	}
 }
 
+// --- POST /sessions/{id}/account (switch) -----------------------------------
+
+// switchHarness builds a registry-backed daemon with the given account
+// roster — the configuration an account switch requires.
+func switchHarness(t *testing.T, accounts []Account) *harness {
+	t.Helper()
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		Spawn: func(string, CreateOpts) (session.ShimHandle, error) {
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Registry: registry.Open(filepath.Join(t.TempDir(), "sessions.json"), func(string, ...any) {}),
+		Accounts: accounts,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	// Wait for every session to drain before the registry's TempDir is
+	// removed: a session ending during cleanup fires a registrar
+	// write-through, and that write racing RemoveAll flakes the test.
+	// LIFO ordering makes this safe — the per-test shim.end cleanups run
+	// first, so each Done here is already closing.
+	t.Cleanup(func() {
+		srv.mu.Lock()
+		open := make([]*session.Session, 0, len(srv.sessions))
+		for _, sess := range srv.sessions {
+			open = append(open, sess)
+		}
+		srv.mu.Unlock()
+		for _, sess := range open {
+			select {
+			case <-sess.Done():
+			case <-time.After(recvTimeout):
+				t.Errorf("session %s did not drain during cleanup", sess.ID)
+			}
+		}
+	})
+	return &harness{ts: ts, srv: srv, shims: shims}
+}
+
+// postSwitch asks the daemon to move sessionID onto configDir.
+func postSwitch(t *testing.T, h *harness, sessionID, configDir string) (*http.Response, map[string]any) {
+	t.Helper()
+	body := fmt.Sprintf(`{"config_dir":%q}`, configDir)
+	resp, err := http.Post(h.ts.URL+"/sessions/"+sessionID+"/account", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /sessions/%s/account: %v", sessionID, err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && err != io.EOF {
+		t.Fatalf("decode switch body: %v", err)
+	}
+	return resp, out
+}
+
+// drainOnShutdown ends the fake shim when the daemon asks it to shut
+// down, standing in for a real shim's graceful exit.
+func drainOnShutdown(shim *fakeShim) {
+	go func() {
+		<-shim.sent
+		shim.end()
+	}()
+}
+
+// createForSwitch creates a session and hands back its shim — which
+// postCreate would otherwise consume from h.shims — so a switch test can
+// wire the shim's shutdown behavior itself.
+func createForSwitch(t *testing.T, h *harness, body string) (string, *fakeShim) {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	select {
+	case shim := <-h.shims:
+		return out.SessionID, shim
+	case <-time.After(recvTimeout):
+		t.Fatal("spawn was not invoked")
+		return "", nil
+	}
+}
+
+// plantTranscript writes a transcript for claudeSessionID under
+// configDir/cwd and returns its path and content.
+func plantTranscript(t *testing.T, configDir, cwd, claudeSessionID string) (string, string) {
+	t.Helper()
+	path := session.TranscriptPath(configDir, cwd, claudeSessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	content := `{"type":"user","timestamp":"2026-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return path, content
+}
+
+func TestSwitchMigratesTheTranscriptAndRelaunchesUnderTheTargetRoot(t *testing.T) {
+	// Arrange: a live resumed session on root A, switching to root B.
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	writeIdentity(t, cfgB, "dodge@chess.com")
+	_, content := plantTranscript(t, cfgA, "/w", "u_1")
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id, shim := createForSwitch(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"u_1"}`, cfgA))
+	drainOnShutdown(shim)
+
+	// Act
+	resp, body := postSwitch(t, h, id, cfgB)
+
+	// Assert: accepted, renamed to the target identity...
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	acct, _ := body["account"].(map[string]any)
+	if acct["email"] != "dodge@chess.com" {
+		t.Errorf("account.email = %v, want dodge@chess.com", acct["email"])
+	}
+	// ...the transcript rode over...
+	data, err := os.ReadFile(session.TranscriptPath(cfgB, "/w", "u_1"))
+	if err != nil {
+		t.Fatalf("migrated transcript: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("migrated transcript = %q, want %q", data, content)
+	}
+	// ...a fresh shim spawned...
+	select {
+	case relaunched := <-h.shims:
+		t.Cleanup(relaunched.end)
+	case <-time.After(recvTimeout):
+		t.Fatal("no relaunch shim spawned")
+	}
+	// ...and the record persisted the new root, non-terminally.
+	rec, ok := h.srv.registry.Get(id)
+	if !ok {
+		t.Fatal("registry record vanished")
+	}
+	if rec.ConfigDir != cfgB {
+		t.Errorf("record.ConfigDir = %q, want %q", rec.ConfigDir, cfgB)
+	}
+	if rec.Terminal {
+		t.Errorf("record went terminal across a planned switch (reason %q)", rec.DeathReason)
+	}
+}
+
+func TestSwitchOnAnUnknownSessionIs404(t *testing.T) {
+	// Arrange
+	h := switchHarness(t, []Account{{Label: "work", ConfigDir: "/w"}})
+
+	// Act
+	resp, _ := postSwitch(t, h, "s_nope", "/w")
+
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestSwitchRejectsARootOffTheRoster(t *testing.T) {
+	// Arrange: a free-form target dir would strand the session on an
+	// unauthenticated root, so only roster entries are switchable.
+	cfgA := t.TempDir()
+	h := switchHarness(t, []Account{{Label: "personal", ConfigDir: cfgA}})
+	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+
+	// Act
+	resp, _ := postSwitch(t, h, id, "/not/on/the/roster")
+
+	// Assert
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSwitchToTheCurrentRootIsANoOp(t *testing.T) {
+	// Arrange
+	cfgA := t.TempDir()
+	h := switchHarness(t, []Account{{Label: "personal", ConfigDir: cfgA}})
+	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+
+	// Act
+	resp, body := postSwitch(t, h, id, cfgA)
+
+	// Assert: 200 not 202, switched:false, and no relaunch shim.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if body["switched"] != false {
+		t.Errorf("switched = %v, want false", body["switched"])
+	}
+	select {
+	case <-h.shims:
+		t.Fatal("a no-op switch relaunched the shim")
+	default:
+	}
+}
+
+func TestSwitchRefusesWhileATurnIsInFlight(t *testing.T) {
+	// Arrange: a mid-generation shim bounce would kill the turn, so the
+	// switch refuses exactly as the Emacs daemon-stop guard does.
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		strings.NewReader(`{"content":"hi"}`))
+	if err != nil || resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("prime turn: %v (status %d)", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Act
+	resp2, _ := postSwitch(t, h, id, cfgB)
+
+	// Assert
+	if resp2.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp2.StatusCode)
+	}
+}
+
+func TestSwitchOnAnEndedSessionIs409(t *testing.T) {
+	// Arrange: an abnormally dead shim marks the conversation terminal;
+	// there is nothing left to switch.
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id, shim := createForSwitch(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+	shim.end()
+	<-h.srv.lookup(id).Done()
+
+	// Act
+	resp, _ := postSwitch(t, h, id, cfgB)
+
+	// Assert
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestSwitchIsUnconfiguredWithoutARoster(t *testing.T) {
+	// Arrange
+	h := switchHarness(t, nil)
+
+	// Act
+	resp, _ := postSwitch(t, h, "s_any", "/w")
+
+	// Assert
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestSwitchIsUnconfiguredWithoutARegistry(t *testing.T) {
+	// Arrange: no registry means no durable record to move — the
+	// accountsHarness deliberately carries none.
+	h := accountsHarness(t, []Account{{Label: "work", ConfigDir: "/w"}})
+
+	// Act
+	resp, _ := postSwitch(t, h, "s_any", "/w")
+
+	// Assert
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestSwitchOfAFreshSessionRelaunchesWithoutATranscript(t *testing.T) {
+	// Arrange: a session that never reported a claude_session_id has no
+	// transcript to migrate; the switch relaunches it fresh rather than
+	// failing on a copy it does not need.
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id, shim := createForSwitch(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+	drainOnShutdown(shim)
+
+	// Act
+	resp, _ := postSwitch(t, h, id, cfgB)
+
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case relaunched := <-h.shims:
+		t.Cleanup(relaunched.end)
+	case <-time.After(recvTimeout):
+		t.Fatal("no relaunch shim spawned")
+	}
+	if rec, _ := h.srv.registry.Get(id); rec.ConfigDir != cfgB {
+		t.Errorf("record.ConfigDir = %q, want %q", rec.ConfigDir, cfgB)
+	}
+}
+
+func TestSwitchTimesOutWhenTheOldShimNeverDrains(t *testing.T) {
+	// Arrange: a shim that ignores its shutdown must not hang the switch
+	// forever, and a timed-out switch must leave the session unchanged.
+	old := switchDrainTimeout
+	switchDrainTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { switchDrainTimeout = old })
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id, shim := createForSwitch(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q}`, cfgA))
+
+	// Act: nobody drains the shim.
+	resp, _ := postSwitch(t, h, id, cfgB)
+
+	// Assert
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", resp.StatusCode)
+	}
+	if rec, _ := h.srv.registry.Get(id); rec.ConfigDir != cfgA {
+		t.Errorf("record.ConfigDir = %q, want unchanged %q", rec.ConfigDir, cfgA)
+	}
+	// End the ignored shim so the harness cleanup's drain-wait is
+	// deterministic rather than riding its timeout.
+	shim.end()
+}
+
 func TestAccountsSurfacesACorruptRootWithoutHidingTheHealthyOne(t *testing.T) {
 	// Arrange: one corrupt identity file beside one healthy root. The
 	// corrupt one must carry its error in-band, never masquerade as
