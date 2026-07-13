@@ -953,6 +953,14 @@ for the combined check.")
 (defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
   "Regexp matching agent input buffer names (e.g. *agent-panel-input-my-workspace*).")
 
+(defconst agent-repl--frontend-buffer-re "^\\*agent-frontend-[[:alnum:]_-]+\\*$"
+  "Regexp matching gui webview buffer names (e.g. *agent-frontend-my-workspace*).
+Mirrors `agent-repl-frontend-buffer-name-format'.  DELIBERATELY a separate
+namespace from the two panel regexes above rather than a widening of them:
+the panel regexes key real behavior (the input-panel bounce, the orphan
+sweep), and the webview must stay out of that.  It exists so RENDERING can
+ask a different question — see `agent-repl--agent-view-buffer-name-p'.")
+
 (defun agent-repl--sanitize-ws-name (name)
   "Return NAME with unsafe characters replaced by underscores.
 Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
@@ -1014,6 +1022,35 @@ Matches both vterm and input buffers."
   (let ((name (buffer-name (or buf (current-buffer)))))
     (or (string-match-p agent-repl--vterm-buffer-re name)
         (string-match-p agent-repl--input-buffer-re name))))
+
+(defun agent-repl--agent-view-buffer-name-p (name)
+  "Return non-nil when NAME is the buffer a workspace SHOWS its agent in.
+That is the vterm output buffer for a vterm workspace and the webview for
+a gui one — the two answers to \"where does the user watch this agent\".
+
+This is the RENDERING question, and it is deliberately not
+`agent-repl--agent-buffer-p'.  That predicate answers \"is this a vterm
+output buffer\", which the input-panel bounce and the orphan sweep key
+off, and which the webview must therefore stay outside of.  Asking it the
+rendering question is what left every gui workspace's tab permanently
+drawn as though its panels were closed: the state was right, the tab just
+could not see the view.
+
+Takes a NAME rather than a buffer because both callers need it that way —
+one walks live buffers, the other walks a saved `window-state-get' tree,
+where buffers survive only as their names.  The input panel is excluded
+for the same reason it always was: a saved layout holding only the input
+panel is not a workspace showing its agent."
+  (and (stringp name)
+       (or (and (string-match-p agent-repl--vterm-buffer-re name)
+                (not (string-match-p agent-repl--input-buffer-re name)))
+           (string-match-p agent-repl--frontend-buffer-re name))))
+
+(defun agent-repl--agent-view-buffer-p (&optional buf)
+  "Return non-nil if BUF (default: current buffer) is a workspace's agent view.
+Buffer-shaped form of `agent-repl--agent-view-buffer-name-p'."
+  (agent-repl--agent-view-buffer-name-p
+   (buffer-name (or buf (current-buffer)))))
 
 (defun agent-repl--non-user-buffer-p (buf)
   "Return non-nil if BUF is not a user-facing buffer.
