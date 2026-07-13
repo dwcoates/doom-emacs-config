@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs, realQueryOptions } from "../src/main.js";
+import { parseArgs, probeQueryOptions, realQueryOptions } from "../src/main.js";
 
 describe("parseArgs", () => {
   it("defaults to real SDK mode with a generated session id and default mode", () => {
@@ -78,6 +78,39 @@ describe("realQueryOptions", () => {
     expect(full.cwd).toBe("/w");
     expect(full.model).toBe("haiku");
     expect(full.resume).toBe("cli-1");
+  });
+});
+
+describe("probeQueryOptions", () => {
+  it("keeps the session's setting sources so the probe resolves the same skills", () => {
+    // Arrange — without settingSources the CLI resolves only the 8
+    // built-ins, so the probe would offer a menu the session cannot match.
+    const args = parseArgs(["--session-id", "s1", "--cwd", "/w"]);
+    // Act
+    const opts = probeQueryOptions(args, new AbortController());
+    // Assert
+    expect(opts.settingSources).toEqual(["user", "project", "local"]);
+    expect(opts.cwd).toBe("/w");
+  });
+
+  it("drops resume, since command resolution never reads the transcript", () => {
+    // Arrange — resuming would only point a second process at the live
+    // session's transcript for a list that comes from disk and settings.
+    const args = parseArgs(["--session-id", "s1", "--resume", "cli-1"]);
+    // Act
+    const opts = probeQueryOptions(args, new AbortController());
+    // Assert
+    expect("resume" in opts).toBe(false);
+  });
+
+  it("wires the abort controller so the probe's child can be reaped", () => {
+    // Arrange — a Query exposes no close(), so aborting the controller is
+    // the only way to SIGTERM the `claude` child the probe spawns.
+    const controller = new AbortController();
+    // Act
+    const opts = probeQueryOptions(parseArgs(["--session-id", "s1"]), controller);
+    // Assert
+    expect(opts.abortController).toBe(controller);
   });
 });
 
