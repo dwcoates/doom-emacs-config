@@ -96,6 +96,12 @@ type SentinelSink interface {
 	PermissionRequested(cwd, sid, reqID string)
 	PermissionResolved(cwd, sid, reqID string)
 	SessionDead(cwd, sid string)
+	// LoginRequested asks Emacs to run the interactive Claude login for
+	// the account this session's cwd resolves to. The OAuth flow needs a
+	// TTY, which neither the daemon nor the browser has — Emacs is the
+	// only TTY host in the system, so the gui login button is a request
+	// TO Emacs rather than work the daemon can do itself.
+	LoginRequested(cwd, sid string)
 }
 
 // Registrar receives the durable-state transitions the persistent

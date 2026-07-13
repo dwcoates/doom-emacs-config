@@ -1473,3 +1473,115 @@ func TestResumeGateStatsTranscriptUnderTheSessionConfigDir(t *testing.T) {
 		t.Fatalf("spawn opts.Resume = %q, want uuid-1 (the gate looked in the wrong config dir)", captured.Resume)
 	}
 }
+
+// --- POST /sessions/{id}/login ------------------------------------------------
+
+// recordingSentinel captures the sentinel side-channel calls the daemon
+// makes on Emacs's behalf.
+type recordingSentinel struct {
+	mu     sync.Mutex
+	logins [][2]string
+}
+
+func (r *recordingSentinel) PermissionRequested(string, string, string) {}
+func (r *recordingSentinel) PermissionResolved(string, string, string)  {}
+func (r *recordingSentinel) SessionDead(string, string)                 {}
+
+func (r *recordingSentinel) LoginRequested(cwd, sid string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logins = append(r.logins, [2]string{cwd, sid})
+}
+
+func (r *recordingSentinel) requested() [][2]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.logins)
+}
+
+// loginHarness is a harness whose sentinel side channel is observable.
+func loginHarness(t *testing.T, sink session.SentinelSink) *harness {
+	t.Helper()
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+		Spawn: func(string, CreateOpts) (session.ShimHandle, error) {
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Sentinel: sink,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}
+}
+
+func postLogin(t *testing.T, h *harness, sessionID string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+sessionID+"/login", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /sessions/%s/login: %v", sessionID, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func TestLoginHandsTheSessionCWDToEmacs(t *testing.T) {
+	// Arrange
+	sink := &recordingSentinel{}
+	h := loginHarness(t, sink)
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+	// Act
+	resp := postLogin(t, h, id)
+	// Assert — the cwd is what selects the account, so it is the payload.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	got := sink.requested()
+	if len(got) != 1 || got[0][0] != "/w" {
+		t.Fatalf("login requests = %v, want one for cwd /w", got)
+	}
+}
+
+func TestLoginOnAnUnknownSessionIs404(t *testing.T) {
+	// Arrange
+	h := loginHarness(t, &recordingSentinel{})
+	// Act
+	resp := postLogin(t, h, "s_nope")
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestLoginWithoutASentinelSinkIs503(t *testing.T) {
+	// Arrange — no sink means no channel to Emacs, so the button cannot
+	// work and must say so rather than report a login that never happened.
+	h := loginHarness(t, nil)
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+	// Act
+	resp := postLogin(t, h, id)
+	// Assert
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestLoginOnACWDlessSessionIs409(t *testing.T) {
+	// Arrange — no cwd means no account can be derived.
+	sink := &recordingSentinel{}
+	h := loginHarness(t, sink)
+	id := postCreate(t, h, `{}`)
+	// Act
+	resp := postLogin(t, h, id)
+	// Assert
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if got := sink.requested(); len(got) != 0 {
+		t.Fatalf("login requests = %v, want none", got)
+	}
+}
