@@ -568,6 +568,13 @@ daemon passes them through verbatim — the agent must see the injected text
 the user wrote. A turn whose content is entirely bracketed renders nothing.
 Turns submitted from the webapp composer carry no markers.
 
+**Slash commands on replay.** The CLI stores a slash-command turn in its
+transcript as a tagged envelope (`<command-name>` / `<command-message>` /
+`<command-args>`) rather than as the text the user typed. A `user-turn`
+rebuilt from a transcript collapses that envelope back to the typed form
+(`/clear`, `/model fable`), so a resumed conversation renders its commands
+exactly as the live stream did.
+
 ### 2.4 Assistant text — streaming
 
 The daemon accumulates `stream-event` deltas into logical "text blocks"
