@@ -169,6 +169,25 @@ interface SetModelCmd {
 }
 ```
 
+#### `refresh-commands`
+
+Ask the shim to re-resolve the slash-command menu and re-emit `commands`.
+
+The SDK memoizes `supportedCommands()` against the init handshake it
+performed at startup, so a skill added or edited mid-session is invisible
+to the live query. Re-resolving therefore means the shim stands up a
+throwaway query whose prompt never yields: the CLI completes a fresh
+handshake that carries the current list and then idles, costing one
+process spawn and zero model tokens. The shim `ack`s once the fresh
+`commands` event has been emitted.
+
+```ts
+interface RefreshCommandsCmd {
+  type: "refresh-commands";
+  request_id: RequestId;
+}
+```
+
 #### `shutdown`
 
 Ask the shim to drain, close the SDK query, and exit cleanly. Go then
@@ -244,6 +263,36 @@ interface ModelsEvt {
   type: "models";
   session_id: SessionId;
   models: ModelInfo[];
+}
+```
+
+#### `commands`
+
+The slash commands this session may invoke, from the SDK's
+`query.supportedCommands()` — built-ins plus user, project, and plugin
+skills, resolved by the CLI itself under the session's own `cwd`,
+`CLAUDE_CONFIG_DIR`, and setting sources. Emitted once, unsolicited, after
+the init handshake resolves (like `models`, the list belongs to the
+session, not to any command), and again after every `refresh-commands`.
+
+The daemon caches the list on the translator, deduplicated by name (a
+skill installed at both user and project scope is resolved once per scope
+and reported twice). The menu is read back by the Emacs input panel over
+`GET /sessions/{id}/commands`, which completes against it; it is not
+forwarded as a Layer-2 frame, because the only client that would render it
+is host-owned and reads it over HTTP.
+
+```ts
+interface SlashCommand {
+  name: string;                       // command name, no leading slash
+  description: string;
+  argumentHint: string;               // "" when the command takes no argument
+}
+
+interface CommandsEvt {
+  type: "commands";
+  session_id: SessionId;
+  commands: SlashCommand[];
 }
 ```
 
