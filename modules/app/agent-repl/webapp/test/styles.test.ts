@@ -38,15 +38,21 @@ const clearDivider = blockAfter(css, ".clear-divider");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
+/** The red, green and blue channels of a `#rrggbb` literal, each 0-255. */
+function channels(hex: string): [number, number, number] {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return [r, g, b];
+}
+
 /** Whether a `#rrggbb` literal reads as red: its red channel dominates both others. */
 function isRed(hex: string): boolean {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [r, g, b] = channels(hex);
   return r > 2 * g && r > 2 * b;
 }
 
 /** Whether a `#rrggbb` literal reads as green: its green channel dominates both others. */
 function isGreen(hex: string): boolean {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [r, g, b] = channels(hex);
   return g > 1.5 * r && g > 1.5 * b;
 }
 
@@ -55,7 +61,7 @@ function isGreen(hex: string): boolean {
  * tint and a deep one share it, where channel-dominance checks do not.
  */
 function hue(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = channels(hex).map((c) => c / 255);
   const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
   const delta = max - min;
   if (delta === 0) return 0;
@@ -81,7 +87,7 @@ function isTurquoise(hex: string): boolean {
 
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
 function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [r, g, b] = channels(hex);
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
@@ -599,7 +605,7 @@ describe("running badge", () => {
     // Arrange
     const orange = token(lightTheme, "--thinking");
     // Act
-    const [r, g, b] = [1, 3, 5].map((i) => parseInt(orange.slice(i, i + 2), 16));
+    const [r, g, b] = channels(orange);
     // Assert
     expect(r > g && g > b).toBe(true);
   });
@@ -608,7 +614,7 @@ describe("running badge", () => {
     // Arrange
     const orange = token(darkTheme, "--thinking");
     // Act
-    const [r, g, b] = [1, 3, 5].map((i) => parseInt(orange.slice(i, i + 2), 16));
+    const [r, g, b] = channels(orange);
     // Assert
     expect(r > g && g > b).toBe(true);
   });
