@@ -11,7 +11,9 @@ import { sessionSubagents } from "./agents.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
-import { loginNotice, requestLogin } from "./login.js";
+import { accountIsLoggedOut, accountLabel, fetchAccount } from "./account.js";
+import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
+import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
@@ -104,6 +106,11 @@ async function boot(): Promise<void> {
   const loginEl = must<HTMLButtonElement>("login-btn");
   const spinnerEl = must("spinner");
   const remediationEl = must("remediation");
+  const accountEl = must("account");
+  const loginOverlayEl = must("login-overlay");
+  const loginAccountEl = must("login-account");
+  const loginTermEl = must("login-term");
+  const loginCloseEl = must<HTMLButtonElement>("login-close");
   const parentWs = params.get("parent_ws");
 
   // The subagent roster's disclosure state. It lives HERE rather than in the
@@ -277,17 +284,59 @@ async function boot(): Promise<void> {
     });
   });
 
-  // Login is the one topbar control that does not talk to the SDK session:
-  // the OAuth flow needs a TTY, so it goes over HTTP to the daemon, which
-  // hands it to Emacs to run in a vterm. The button is disabled for the
-  // round trip so a double-click cannot ask for two login terminals.
+  // Which account this session runs as. Refreshed after every login, since
+  // logging in is the one thing that changes the answer.
+  const refreshAccount = (): void => {
+    void fetchAccount(httpBase, activeSessionId)
+      .then((account) => {
+        accountEl.textContent = accountLabel(account);
+        accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
+      })
+      .catch((err: unknown) => {
+        // Not fatal: the session may still be perfectly usable. Leave the slot
+        // blank rather than assert an account we failed to read.
+        accountEl.textContent = "";
+        accountEl.classList.remove("logged-out");
+        console.error("account lookup failed", err);
+      });
+  };
+  refreshAccount();
+
+  // Login is the one topbar control that does not talk to the SDK session.
+  // The daemon runs the login on a pty it owns and streams it here, where it
+  // renders as a real terminal: the flow is a full-screen TUI gated behind
+  // stateful prompts before it ever reaches OAuth, so a human reads it and
+  // nothing parses it. The button is disabled for the round trip so a
+  // double-click cannot ask for two terminals.
   //
   // The notice reuses #remediation, the topbar's one status-line slot.
+  let terminal: LoginTerminal | null = null;
+
+  const closeOverlay = (): void => {
+    terminal?.dispose();
+    terminal = null;
+    loginOverlayEl.hidden = true;
+    remediationEl.textContent = "";
+    // The login is the only thing that changes the account, so this is where
+    // the topbar learns the user's answer to it.
+    refreshAccount();
+  };
+
   loginEl.addEventListener("click", () => {
     loginEl.disabled = true;
     void requestLogin(httpBase, activeSessionId)
-      .then((phase) => {
-        remediationEl.textContent = loginNotice(phase);
+      .then((opened) => {
+        remediationEl.textContent = loginNotice("open");
+        // Name the account being logged INTO. With two in play, logging into
+        // the wrong one would leave the real problem exactly where it was.
+        loginAccountEl.textContent =
+          opened.account === "" ? "default account" : opened.account;
+        loginOverlayEl.hidden = false;
+        terminal = attachLoginTerminal(loginTermEl, wsBase, activeSessionId, {
+          onClosed: () => {
+            remediationEl.textContent = loginNotice("closed");
+          },
+        });
       })
       .catch((err: unknown) => {
         // A login that never opened must say so: leaving the topbar silent
@@ -298,6 +347,15 @@ async function boot(): Promise<void> {
       .finally(() => {
         loginEl.disabled = false;
       });
+  });
+
+  loginCloseEl.addEventListener("click", () => {
+    // Kill the child too, not just the view. A login left running on a pty
+    // nobody is reading is an orphaned OAuth flow.
+    void closeLogin(httpBase, activeSessionId).catch((err: unknown) => {
+      console.error("closing the login terminal failed", err);
+    });
+    closeOverlay();
   });
 }
 
