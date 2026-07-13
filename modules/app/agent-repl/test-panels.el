@@ -597,9 +597,13 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
 ;;;; ---- Tests: on-close (single close audit point) ----
 
 (ert-deftest agent-repl-test-panels-on-close-calls-hide-panels ()
-  "on-close invokes hide-panels."
+  "on-close invokes hide-panels for a VTERM workspace.
+The teardown is dispatched through the workspace's own frontend, so the
+workspace has to say which one it is — an undeclared frontend resolves to
+the gui default and tears down a webview instead."
   (agent-repl-test--with-clean-state
     (let ((hide-called nil))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--hide-panels)
                  (lambda () (setq hide-called t)))
@@ -607,12 +611,71 @@ Does NOT set `no-other-window' — keyboard isolation now comes from
         (agent-repl--on-close)
         (should hide-called)))))
 
+;;;; ---- Tests: a gui close is a real close ----
+;;
+;; The bug these close: the gui branch of `--toggle' called the frontend's
+;; hide capability directly, so a gui workspace put its view away with NONE
+;; of the bookkeeping a close carries — no `:repl-state', so hide-mode could
+;; never sweep it, and on `SPC o C' no deprio and no session kill either.
+
+(ert-deftest agent-repl-test-panels-gui-simple-close-marks-inactive ()
+  "`SPC o c' on a gui workspace records the close as `:inactive'."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore))
+      (agent-repl--on-simple-close)
+      (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
+
+(ert-deftest agent-repl-test-panels-gui-close-marks-hidden ()
+  "`SPC o C' on a gui workspace records the close as `:hidden'.
+Without this the workspace can never become a hide-mode sweep candidate."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore)
+              ((symbol-function 'agent-repl--save-tab-index) #'ignore)
+              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
+      (agent-repl--on-close)
+      (should (eq :hidden (agent-repl--ws-get "test-ws" :repl-state))))))
+
+(ert-deftest agent-repl-test-panels-gui-close-tears-down-the-webview ()
+  "A gui close puts the WEBVIEW away, never the vterm panels it does not have."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (let ((hidden-ws 'unset) (vterm-hide-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'agent-repl--frontend-dispatch-hide)
+                 (lambda (ws) (setq hidden-ws ws)))
+                ((symbol-function 'agent-repl--hide-panels)
+                 (lambda () (cl-incf vterm-hide-called))))
+        (agent-repl--on-simple-close)
+        (should (equal hidden-ws "test-ws"))
+        (should (= 0 vterm-hide-called))))))
+
+(ert-deftest agent-repl-test-panels-vterm-close-still-tears-down-its-panels ()
+  "A vterm close is unchanged: it never routes through the frontend hide."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
+    (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
+    (let ((dispatched 0) (hide-called 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'set-window-configuration) #'ignore)
+                ((symbol-function 'agent-repl--frontend-dispatch-hide)
+                 (lambda (_ws) (cl-incf dispatched)))
+                ((symbol-function 'agent-repl--hide-panels)
+                 (lambda () (cl-incf hide-called))))
+        (agent-repl--on-simple-close)
+        (should (= 0 dispatched))
+        (should (= 1 hide-called))))))
+
 (ert-deftest agent-repl-test-panels-on-close-restores-config-before-hide ()
   "on-close restores the pre-panel layout before hiding panels.
 The restore must run BEFORE hide-panels so the frame-filling panels are
 removed via the restored work layout rather than stranding a panel."
   (agent-repl-test--with-clean-state
     (let ((order '()))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
@@ -733,9 +796,14 @@ which writes :inactive."
       (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
 
 (ert-deftest agent-repl-test-panels-on-simple-close-hides-panels ()
-  "on-simple-close calls hide-panels when a saved layout is restored."
+  "on-simple-close calls hide-panels when a saved layout is restored.
+The workspace declares `:frontend vterm': the teardown is dispatched
+through the workspace's own frontend now, so a workspace that never says
+which one it is resolves to the gui default and tears down a webview
+instead — which is exactly the point of the dispatch."
   (agent-repl-test--with-clean-state
     (let ((hide-called 0))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration) #'ignore)
@@ -772,6 +840,7 @@ The restore must run BEFORE hide-panels so hide-panels deletes the panels
 from the restored splitscreen layout rather than from the full-frame one."
   (agent-repl-test--with-clean-state
     (let ((order '()))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
@@ -810,6 +879,7 @@ no-`:fullscreen-config' branch routes to
 `agent-repl--replace-panels-with-fallback'."
   (agent-repl-test--with-clean-state
     (let ((hide-called 0) (replace-ws 'unset))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration) #'ignore)
                 ((symbol-function 'agent-repl--hide-panels)
@@ -845,6 +915,7 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
           (work-buf (generate-new-buffer "*fsclose-work*"))
           (vterm-buf (generate-new-buffer "*agent-panel-fsclose*"))
           (input-buf (generate-new-buffer "*agent-panel-input-fsclose*")))
+      (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
             (delete-other-windows)
@@ -1168,6 +1239,7 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
 :repl-state :hidden so the workspace is a sweep candidate when hide-mode
 is on."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore)
@@ -2774,6 +2846,7 @@ puts the view away."
 hide sessions that keep running."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :frontend 'vterm)
     (let ((killed nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--hide-panels) (lambda () nil))

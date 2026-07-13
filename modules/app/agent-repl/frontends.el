@@ -278,6 +278,17 @@ KIND is `ctrl-c' or `escape' (see the struct docstring)."
   "Make WS's already-running session visible through its frontend."
   (funcall (agent-repl-frontend-show-fn (agent-repl--ws-frontend ws)) ws))
 
+(defun agent-repl--frontend-dispatch-hide (ws)
+  "Put WS's view away through its frontend, leaving the session running.
+Pure view teardown.  The `:repl-state' bookkeeping that goes with a close
+is NOT a frontend concern — it belongs to the close commands
+\(`agent-repl--on-simple-close' and `agent-repl--on-close'), which own it
+once for every frontend rather than leaving each frontend to remember it.
+Leaving that to the frontends is exactly how the gui came to close without
+ever marking itself `:inactive' or `:hidden', which in turn left hide-mode
+unable to sweep it."
+  (funcall (agent-repl-frontend-hide-fn (agent-repl--ws-frontend ws)) ws))
+
 (defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)
   "Start WS's agent session under WS's own frontend, WITHOUT showing it.
 
