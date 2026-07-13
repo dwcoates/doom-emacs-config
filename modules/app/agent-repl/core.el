@@ -639,6 +639,17 @@ explode."
                              stdout-buf
                              program args))))
           (set-process-query-on-exit-flag proc nil)
+          ;; Install a no-op sentinel BEFORE waiting.  Left alone, the
+          ;; process keeps Emacs's `internal-default-process-sentinel',
+          ;; which appends a human-readable "Process NAME finished" line
+          ;; into the very buffer this helper reads back as command output.
+          ;; On the main-thread wait path (`accept-process-output') that
+          ;; default sentinel fires before the buffer is read, folding the
+          ;; status line into the returned string — that is what poisoned a
+          ;; cached `:branch-name' into a multi-line, unusable git ref.  The
+          ;; worker-thread wait installs its own sentinel and is already
+          ;; immune; `#'ignore' covers the main-thread path the same way.
+          (set-process-sentinel proc #'ignore)
           (let ((status (agent-repl--wait-for-process-exit
                          proc timeout nil nil)))
             (cond

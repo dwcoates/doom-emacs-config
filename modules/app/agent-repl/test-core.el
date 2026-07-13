@@ -850,6 +850,8 @@ contents with leading/trailing whitespace trimmed."
                  (list :fake-proc buf)))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (should (equal (agent-repl--capture-process-output
@@ -869,6 +871,8 @@ must not explode when git hangs or doesn't terminate in time."
                (list :fake-proc buf)))
             ((symbol-function 'set-process-query-on-exit-flag)
              (lambda (&rest _) nil))
+            ((symbol-function 'set-process-sentinel)
+             (lambda (&rest _) nil))
             ((symbol-function 'agent-repl--wait-for-process-exit)
              (lambda (&rest _) 'timeout)))
     (should (equal (agent-repl--capture-process-output
@@ -883,6 +887,8 @@ post-mortem breadcrumb."
     (cl-letf (((symbol-function 'start-process)
                (lambda (_name buf &rest _cmd) (list :fake-proc buf)))
               ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
                (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 'timeout))
@@ -913,6 +919,8 @@ depend on."
                  (list :fake-proc nil)))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (agent-repl--capture-process-output "git" '("status") t))
@@ -937,6 +945,8 @@ depend on."
                  (list :fake-proc buf)))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (agent-repl--capture-process-output "git" '("status") nil))
@@ -953,11 +963,54 @@ before return so we don't accumulate hidden buffers across many git calls."
                  (list :fake-proc (plist-get args :buffer))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (agent-repl--capture-process-output "git" '("status") t))
     (should stderr-buf-arg)
     (should-not (buffer-live-p stderr-buf-arg))))
+
+(ert-deftest agent-repl-test-capture-process-output-installs-noop-sentinel ()
+  "`--capture-process-output' installs `#'ignore' as the capture process's
+sentinel.  This displaces Emacs's `internal-default-process-sentinel',
+whose `Process NAME finished' status insertion into the shared buffer
+would otherwise be read back as command output and corrupt the result."
+  (let ((sentinel-arg 'unset))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (with-current-buffer buf (insert "clean-output\n"))
+                 (list :fake-proc buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_proc sentinel) (setq sentinel-arg sentinel)))
+              ((symbol-function 'agent-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (should (equal (agent-repl--capture-process-output
+                      "git" '("rev-parse" "HEAD"))
+                     "clean-output"))
+      (should (eq sentinel-arg #'ignore)))))
+
+(ert-deftest agent-repl-test-capture-process-output-installs-sentinel-before-waiting ()
+  "The no-op sentinel is installed BEFORE the wait, not after.  Installing
+it after `--wait-for-process-exit' would be useless on the main-thread
+path, where the default sentinel fires during the wait's
+`accept-process-output' loop."
+  (let ((waited nil)
+        (installed-before-wait nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name buf &rest _cmd)
+                 (with-current-buffer buf (insert "out\n"))
+                 (list :fake-proc buf)))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) (setq installed-before-wait (not waited))))
+              ((symbol-function 'agent-repl--wait-for-process-exit)
+               (lambda (&rest _) (setq waited t) 0)))
+      (agent-repl--capture-process-output "git" '("rev-parse" "HEAD"))
+      (should installed-before-wait))))
 
 ;;;; ---- Tests: print-git-branch ----
 
