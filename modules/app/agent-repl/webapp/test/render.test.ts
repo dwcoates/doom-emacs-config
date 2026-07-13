@@ -3,7 +3,6 @@ import {
   backfillChunks,
   diffHtml,
   finalResponses,
-  formatDuration,
   formatTurnTime,
   itemKey,
   lastUserTurnId,
@@ -15,6 +14,7 @@ import {
 } from "../src/render.js";
 import { SubagentEntry } from "../src/agents.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
+import { TIMER_SLOT } from "../src/timer.js";
 import { ConversationItem, ResultItem, TextItem, ToolItem } from "../src/store.js";
 
 /** A settled roster entry for one spawned subagent. */
@@ -125,7 +125,7 @@ describe("sessionInfoHtml", () => {
     const html = sessionInfoHtml(null, null);
     // Assert — no dangling label or leading delimiter.
     expect(html).not.toContain("parent workspace");
-    expect(html.startsWith("tokens:")).toBe(true);
+    expect(html.startsWith("time:")).toBe(true);
   });
 
   it("omits the parent workspace datapoint when parent_ws is empty", () => {
@@ -221,6 +221,37 @@ describe("sessionInfoHtml", () => {
     const html = sessionInfoHtml("ws", null, [], false);
     // Assert
     expect(html.endsWith("</span>")).toBe(true);
+  });
+
+  it("renders the running task's elapsed time", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", null, [], false, "5m 30s");
+    // Assert
+    expect(html).toContain(
+      `time: <span class="info-time" data-task-timer>5m 30s</span>`,
+    );
+  });
+
+  it("reads the idle label when no task is running", () => {
+    // Arrange + Act + Assert — the default, since the store starts idle.
+    expect(sessionInfoHtml("ws", null)).toContain(
+      `time: <span class="info-time" data-task-timer>--</span>`,
+    );
+  });
+
+  it("marks the timer span so the tick can repaint it alone", () => {
+    // Arrange + Act — a whole-strip rewrite once a second would be churn.
+    const html = sessionInfoHtml("ws", null, [], false, "12s");
+    // Assert
+    expect(html).toContain(TIMER_SLOT);
+  });
+
+  it("places the timer between the parent workspace and the token count", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", null, [], false, "12s");
+    // Assert
+    expect(html.indexOf("time:")).toBeGreaterThan(html.indexOf("parent workspace:"));
+    expect(html.indexOf("time:")).toBeLessThan(html.indexOf("tokens:"));
   });
 });
 
@@ -1318,63 +1349,6 @@ describe("clear divider", () => {
     const html = renderItem(item);
     // Assert — the rule hangs off the prompt, so a plain session start has none.
     expect(html).not.toContain("clear-divider");
-  });
-});
-
-describe("formatDuration", () => {
-  it("keeps a sub-second duration in whole milliseconds", () => {
-    // Arrange + Act + Assert — no finer unit exists to promote a fraction into.
-    expect(formatDuration(850)).toBe("850ms");
-  });
-
-  it("reports a zero duration in milliseconds", () => {
-    // Arrange + Act + Assert
-    expect(formatDuration(0)).toBe("0ms");
-  });
-
-  it("carries a second's leftover in whole milliseconds", () => {
-    // Arrange + Act + Assert — not the fractional 1.03s.
-    expect(formatDuration(1033)).toBe("1s 33ms");
-  });
-
-  it("drops the leftover off a whole second count", () => {
-    // Arrange + Act + Assert
-    expect(formatDuration(1000)).toBe("1s");
-  });
-
-  it("promotes a millisecond count that rounds up to a full second", () => {
-    // Arrange + Act + Assert — 999.6ms would otherwise render as 1000ms.
-    expect(formatDuration(999.6)).toBe("1s");
-  });
-
-  it("carries a minute's leftover in whole seconds", () => {
-    // Arrange + Act + Assert — not the fractional 5.5m.
-    expect(formatDuration(330_000)).toBe("5m 30s");
-  });
-
-  it("rounds a minute's fractional second leftover to a whole second", () => {
-    // Arrange + Act + Assert — 93.6s is 1m plus 33.6s.
-    expect(formatDuration(93_600)).toBe("1m 34s");
-  });
-
-  it("drops the leftover off a whole minute count", () => {
-    // Arrange + Act + Assert
-    expect(formatDuration(120_000)).toBe("2m");
-  });
-
-  it("carries an hour's leftover in whole minutes", () => {
-    // Arrange + Act + Assert — not the fractional 1.5h.
-    expect(formatDuration(5_400_000)).toBe("1h 30m");
-  });
-
-  it("promotes a leftover that rounds up to a full major unit", () => {
-    // Arrange + Act + Assert — 59m 59.999s renders as 1h, never 59m 60s.
-    expect(formatDuration(3_599_999)).toBe("1h");
-  });
-
-  it("keeps a three-digit hour count in whole hours", () => {
-    // Arrange + Act + Assert
-    expect(formatDuration(360_000_000)).toBe("100h");
   });
 });
 

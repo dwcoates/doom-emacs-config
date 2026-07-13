@@ -642,3 +642,133 @@ describe("ConversationStore rebind support", () => {
     expect(store.replaying).toBe(false);
   });
 });
+
+describe("ConversationStore task-timer start", () => {
+  /** The daemon's stamp on the turn that started it. */
+  const START = "2026-05-24T12:34:56.789Z";
+
+  /** A user-turn frame stamped at TS. */
+  function userTurn(ts: string, seq?: number): string {
+    return JSON.stringify({
+      type: "user-turn",
+      seq: seq ?? ++autoSeq,
+      ts,
+      session_id: "s1",
+      request_id: "r1",
+      content: [{ type: "text", text: "hi" }],
+    });
+  }
+
+  /** A result frame closing the turn. */
+  function result(): string {
+    return frame("result", {
+      subtype: "success",
+      duration_ms: 5,
+      duration_api_ms: 3,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 1, output_tokens: 2 },
+      is_error: false,
+    });
+  }
+
+  it("carries no turn start before any turn runs", () => {
+    // Arrange + Act + Assert — the header reads idle.
+    expect(newStore().state.turnStartedAt).toBeNull();
+  });
+
+  it("takes the turn start from the user-turn frame's daemon stamp", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(userTurn(START));
+    // Assert — the daemon's clock, not this tab's.
+    expect(store.state.turnStartedAt).toBe(START);
+  });
+
+  it("clears the turn start at the result", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(userTurn(START));
+    // Act
+    store.applyRaw(result());
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+  });
+
+  it("clears the turn start on an unrecoverable error", () => {
+    // Arrange — a dead shim sends no result, so the error is the turn's end.
+    const store = newStore();
+    store.applyRaw(userTurn(START));
+    // Act
+    store.applyRaw(frame("error", { code: "shim_died", message: "gone", recoverable: false }));
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+  });
+
+  it("keeps the turn start through a recoverable error", () => {
+    // Arrange — the turn is still running, so the clock is still running.
+    const store = newStore();
+    store.applyRaw(userTurn(START));
+    // Act
+    store.applyRaw(frame("error", { code: "sdk_error", message: "hiccup", recoverable: true }));
+    // Assert
+    expect(store.state.turnStartedAt).toBe(START);
+  });
+
+  it("moves the turn start to a second turn's own stamp", () => {
+    // Arrange
+    const later = "2026-05-24T12:40:00.000Z";
+    const store = newStore();
+    store.applyRaw(userTurn(START));
+    store.applyRaw(result());
+    // Act
+    store.applyRaw(userTurn(later));
+    // Assert
+    expect(store.state.turnStartedAt).toBe(later);
+  });
+
+  it("clears the turn start when a fresh join discards local state", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(userTurn(START, 1));
+    // Act — an eviction rebuild (the retained window has moved past our
+    // history) throws the old conversation away.
+    store.applyRaw(hello({ seq: 9, resume_from_seq: 5 }));
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+  });
+
+  it("keeps the turn start across a reconnect that keeps local history", () => {
+    // Arrange — the socket dropped mid-turn and the daemon still retains it.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(userTurn(START, 1));
+    // Act
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    // Assert — the turn never stopped running, so the clock never stopped.
+    expect(store.state.turnStartedAt).toBe(START);
+  });
+
+  it("resumes a mid-turn reconnect at the turn's original stamp", () => {
+    // Arrange — a fresh join whose replay carries a turn that never resulted.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    // Act — the retained user-turn keeps the stamp the daemon gave it.
+    store.applyRaw(userTurn(START, 1));
+    // Assert — the count picks up where the turn really is, not at zero.
+    expect(store.state.turnStartedAt).toBe(START);
+  });
+
+  it("clears the turn start when the view is reset onto a successor session", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(userTurn(START));
+    // Act
+    store.reset();
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+  });
+});
