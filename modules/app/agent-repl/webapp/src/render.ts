@@ -531,40 +531,44 @@ export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<s
   return finals;
 }
 
-/**
- * Duration units, coarsest-last. MAX is the exclusive ceiling on the
- * unit's rendered magnitude: once a value rounds up to it, the next unit
- * carries the duration instead.
- */
-const DURATION_UNITS: ReadonlyArray<{ suffix: string; scale: number; max: number }> = [
-  { suffix: "ms", scale: 1, max: 1000 },
-  { suffix: "s", scale: 1000, max: 60 },
-  { suffix: "m", scale: 60_000, max: 60 },
-  { suffix: "h", scale: 3_600_000, max: Infinity },
+/** Duration units, coarsest-first. Each scale is a whole multiple of the next. */
+const DURATION_UNITS: ReadonlyArray<{ suffix: string; scale: number }> = [
+  { suffix: "h", scale: 3_600_000 },
+  { suffix: "m", scale: 60_000 },
+  { suffix: "s", scale: 1000 },
+  { suffix: "ms", scale: 1 },
 ];
 
-/** VALUE at three significant digits, trailing zeros and dot trimmed. */
-function threeSigFigs(value: number): string {
-  const decimals = value >= 100 ? 0 : value >= 10 ? 1 : 2;
-  const text = value.toFixed(decimals);
-  return text.includes(".") ? text.replace(/0+$/, "").replace(/\.$/, "") : text;
-}
-
 /**
- * A duration in its most compact reading: the coarsest unit whose
- * magnitude still reaches 1, carried to three significant digits
- * (1033ms → `1.03s`, 12300ms → `12.3s`, 120000ms → `2m`).
+ * A duration in whole units: the coarsest unit whose magnitude reaches 1,
+ * with the leftover carried by the next unit down rather than by a
+ * fraction of the coarse one (330000ms → `5m 30s`, 12300ms → `12s 300ms`,
+ * 5400000ms → `1h 30m`).
  *
- * Sub-second durations stay whole milliseconds, there being no finer
- * unit to promote a fraction into.
+ * The leftover is dropped when it is zero (120000ms → `2m`), and rounding
+ * it up past its own unit promotes the coarse magnitude instead
+ * (3599999ms → `1h`, never `59m 60s`).
  */
 export function formatDuration(ms: number): string {
-  for (const unit of DURATION_UNITS) {
-    const value = ms / unit.scale;
-    const text = unit.suffix === "ms" ? String(Math.round(value)) : threeSigFigs(value);
-    if (Number(text) < unit.max) return `${text}${unit.suffix}`;
-  }
-  throw new Error(`unreachable: no unit carried ${ms}ms`);
+  const total = Math.round(ms);
+  const found = DURATION_UNITS.findIndex((unit) => total >= unit.scale);
+  // A sub-millisecond duration reaches no unit's magnitude, so milliseconds
+  // (the finest unit) carry it.
+  const index = found === -1 ? DURATION_UNITS.length - 1 : found;
+  const major = DURATION_UNITS[index];
+  const minor = DURATION_UNITS[index + 1];
+  if (!minor) return `${total}${major.suffix}`;
+
+  // Snap to a whole minor unit first, so a leftover that rounds up to a
+  // full major unit re-picks the coarser unit instead of overflowing.
+  const snapped = Math.round(total / minor.scale) * minor.scale;
+  if (snapped !== total) return formatDuration(snapped);
+
+  const majorValue = Math.floor(total / major.scale);
+  const minorValue = (total - majorValue * major.scale) / minor.scale;
+  return minorValue === 0
+    ? `${majorValue}${major.suffix}`
+    : `${majorValue}${major.suffix} ${minorValue}${minor.suffix}`;
 }
 
 function ResultChip(item: ResultItem): string {
