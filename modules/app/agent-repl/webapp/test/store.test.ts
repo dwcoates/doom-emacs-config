@@ -332,21 +332,54 @@ describe("ConversationStore turn lifecycle", () => {
       result_text: "ok",
     }));
     expect(store.state.turnInFlight).toBe(false);
-    expect(store.state.usage).toEqual({ input_tokens: 1, output_tokens: 2 });
     expect(store.state.costUsd).toBe(0.01);
   });
 
-  it("updates the usage chip from mid-turn usage frames", () => {
+  it("does not move the standing context tokens from a result frame", () => {
+    // Arrange — a result's usage is the turn's CUMULATIVE spend across every
+    // API request it made, so routing it into the context figure runs the
+    // topbar past the window without bound.
+    const store = newStore();
+    // Act — a result arrives before any per-request usage frame declared a size.
+    store.applyRaw(frame("result", {
+      subtype: "success",
+      duration_ms: 5,
+      duration_api_ms: 3,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 2_500_000, output_tokens: 2 },
+      is_error: false,
+      result_text: "ok",
+    }));
+    // Assert — the context size stays unknown, not the 2.5M the result carried.
+    expect(store.state.contextTokens).toBeNull();
+  });
+
+  it("holds the context tokens at the last usage frame across a result", () => {
+    // Arrange — a per-request usage frame sets the standing size.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act — a result carrying a far larger cumulative figure closes the turn.
+    store.applyRaw(resultFrame({ usage: { input_tokens: 2_500_000, output_tokens: 2 } }));
+    // Assert — the header figure is the request's 200k, not the result's 2.5M.
+    expect(store.state.contextTokens).toBe(200_000);
+  });
+
+  it("updates the context tokens from mid-turn usage frames", () => {
     // Arrange
     const store = newStore();
     // Act
     store.applyRaw(frame("usage", {
       message_id: "m1",
-      usage: { input_tokens: 10, output_tokens: 20 },
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_read_input_tokens: 190,
+      },
       cost_usd: 0.2,
     }));
-    // Assert
-    expect(store.state.usage?.output_tokens).toBe(20);
+    // Assert — input plus cache read IS the request's context size.
+    expect(store.state.contextTokens).toBe(200);
     expect(store.state.costUsd).toBe(0.2);
   });
 

@@ -175,37 +175,33 @@ describe("sessionInfoHtml", () => {
     expect(sessionInfoHtml("ws", null)).not.toContain("model:");
   });
 
-  it("sums input and cache tokens with thousands separators", () => {
-    // Arrange
-    const usage = {
-      input_tokens: 1200,
-      output_tokens: 5,
-      cache_read_input_tokens: 100000,
-      cache_creation_input_tokens: 22256,
-    };
-    // Act + Assert
-    expect(sessionInfoHtml(null, usage)).toContain(
+  it("renders the context token count with thousands separators", () => {
+    // Arrange + Act + Assert — the count is precomputed context occupancy,
+    // not a usage object the header re-sums.
+    expect(sessionInfoHtml(null, 123456)).toContain(
       `tokens: <span class="info-tokens">123,456</span>`,
     );
   });
 
-  it("treats missing cache fields as zero", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml(null, { input_tokens: 5, output_tokens: 1 })).toContain(
-      `tokens: <span class="info-tokens">5</span>`,
+  it("shows a dash when the context size is unknown", () => {
+    // Arrange + Act + Assert — a `/clear` and a compaction each leave a
+    // context size behind without reporting it, so `null` is unknown, not 0.
+    expect(sessionInfoHtml(null, null)).toContain(
+      `tokens: <span class="info-tokens">—</span>`,
     );
   });
 
-  it("shows zero tokens before any usage arrives", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml(null, null)).toContain(
+  it("renders a genuine zero as zero, not a dash", () => {
+    // Arrange + Act + Assert — 0 is a known-empty context, distinct from
+    // the unknown `null`.
+    expect(sessionInfoHtml(null, 0)).toContain(
       `tokens: <span class="info-tokens">0</span>`,
     );
   });
 
   it("no longer renders the in/out counter or the cost estimate", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", { input_tokens: 3, output_tokens: 7 });
+    const html = sessionInfoHtml("ws", 10);
     // Assert
     expect(html).not.toContain("in/");
     expect(html).not.toContain("out");
