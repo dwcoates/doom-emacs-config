@@ -619,6 +619,104 @@ describe("renderItem", () => {
     expect(html).toContain("stderr");
   });
 
+  it("renders Skill as its launch line, not its input JSON", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs", args: "emacs crashed twice" },
+      inputJson: `{"skill":"debug-logs","args":"emacs crashed twice"}`,
+      inputDone: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("Launching skill: debug-logs");
+    expect(html).not.toContain("tool-input");
+  });
+
+  it("omits the Skill args from the launch line", () => {
+    // Arrange — the skill's prompt is already in the feed as the turn that asked for it.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs", args: "emacs crashed twice" },
+      inputJson: `{"skill":"debug-logs","args":"emacs crashed twice"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).not.toContain("emacs crashed twice");
+  });
+
+  it("tags the Skill card with the class its turquoise wash hangs on", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs" },
+      inputJson: `{"skill":"debug-logs"}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain("tool-card tool-skill");
+  });
+
+  it("suppresses the successful Skill result, which only echoes the launch line", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs" },
+      inputJson: "",
+      inputDone: true,
+      result: { isError: false, content: "Launching skill: debug-logs" },
+    };
+    // Act + Assert — the launch line renders once (from the input), not twice.
+    expect(renderItem(item)).not.toContain("tool-output");
+  });
+
+  it("keeps Skill error results visible", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "ghost-skill" },
+      inputJson: "",
+      inputDone: true,
+      result: { isError: true, content: "no such skill: ghost-skill" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("no such skill: ghost-skill");
+    expect(html).toContain("stderr");
+  });
+
+  it("falls back to the input JSON for a Skill call with no skill name", () => {
+    // Arrange — a malformed input must not silently render an empty card.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: {},
+      inputJson: `{}`,
+      inputDone: true,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain("tool-input");
+  });
+
   it("renders AskUserQuestion as an option picker, not allow/deny", () => {
     // Arrange
     const item: ConversationItem = {

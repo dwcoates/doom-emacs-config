@@ -45,6 +45,11 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* Skill-launch card wash: turquoise, a hue nothing else in the palette
+     claims, so "the agent handed itself off to a skill" reads at a glance
+     against the card grey every other tool call sits in. */
+  --skill-bg: #d5f4ef;
+  --skill-border: #8fded1;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -68,6 +73,8 @@
     --remediation: #facc15;
     --clear-divider: #ef4444;
     --final-response: #4ade80;
+    --skill-bg: #12403c;
+    --skill-border: #1f6b62;
   }
 }
 
@@ -281,6 +288,14 @@ pre {
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
 }
+/* A skill launch is a handoff, not a tool result: the card carries the one
+   "Launching skill: <name>" line and wears the turquoise wash so the handoff
+   is findable among the grey tool cards around it. */
+.tool-card.tool-skill {
+  background: var(--skill-bg);
+  border-color: var(--skill-border);
+}
+.skill-launch { font-weight: 600; }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }

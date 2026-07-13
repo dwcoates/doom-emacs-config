@@ -50,6 +50,30 @@ function isGreen(hex: string): boolean {
   return g > 1.5 * r && g > 1.5 * b;
 }
 
+/**
+ * Hue (degrees, 0-360) of a `#rrggbb` literal. Hue survives the wash: a pale
+ * tint and a deep one share it, where channel-dominance checks do not.
+ */
+function hue(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
+  const delta = max - min;
+  if (delta === 0) return 0;
+  const raw =
+    max === r
+      ? ((g - b) / delta) % 6
+      : max === g
+        ? (b - r) / delta + 2
+        : (r - g) / delta + 4;
+  return (raw * 60 + 360) % 360;
+}
+
+/** Whether a `#rrggbb` literal reads as turquoise: cyan-green, between teal and aqua. */
+function isTurquoise(hex: string): boolean {
+  const h = hue(hex);
+  return h >= 160 && h <= 195;
+}
+
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -223,6 +247,56 @@ describe("final-response border", () => {
     const brighter = luminance(dark) > luminance(light);
     // Assert
     expect(brighter).toBe(true);
+  });
+});
+
+describe("skill-launch card", () => {
+  const skillCard = blockAfter(css, ".tool-card.tool-skill");
+
+  it("washes the skill-launch card in the skill token", () => {
+    // Arrange / Act — the .tool-card.tool-skill rule.
+    // Assert
+    expect(skillCard).toMatch(/background:\s*var\(--skill-bg\)/);
+  });
+
+  it("recolors the card's existing border rather than adding a second one", () => {
+    // Arrange / Act — .tool-card already lays out the 1px border.
+    // Assert
+    expect(skillCard).toMatch(/border-color:\s*var\(--skill-border\)/);
+    expect(skillCard).not.toMatch(/border:\s/);
+  });
+
+  it("defines a turquoise wash token for the light theme", () => {
+    // Arrange / Act
+    const turquoise = isTurquoise(token(lightTheme, "--skill-bg"));
+    // Assert
+    expect(turquoise).toBe(true);
+  });
+
+  it("defines a turquoise wash token for the dark theme", () => {
+    // Arrange / Act
+    const turquoise = isTurquoise(token(darkTheme, "--skill-bg"));
+    // Assert
+    expect(turquoise).toBe(true);
+  });
+
+  it("darkens the dark-theme wash below the light-theme one, as every other wash does", () => {
+    // Arrange
+    const [dark, light] = [token(darkTheme, "--skill-bg"), token(lightTheme, "--skill-bg")];
+    // Act
+    const darker = luminance(dark) < luminance(light);
+    // Assert
+    expect(darker).toBe(true);
+  });
+
+  it("keeps the card's border turquoise in both themes", () => {
+    // Arrange / Act
+    const [light, dark] = [
+      isTurquoise(token(lightTheme, "--skill-border")),
+      isTurquoise(token(darkTheme, "--skill-border")),
+    ];
+    // Assert
+    expect([light, dark]).toEqual([true, true]);
   });
 });
 
