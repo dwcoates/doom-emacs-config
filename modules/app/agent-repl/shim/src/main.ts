@@ -20,7 +20,12 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { createFakeQuery } from "./fake-query.js";
-import { PermissionMode, ShimEvent, encodeEvent } from "./protocol.js";
+import {
+  PermissionMode,
+  ShimEvent,
+  encodeEvent,
+  isPermissionMode,
+} from "./protocol.js";
 import {
   CanUseToolLike,
   QueryLike,
@@ -64,16 +69,7 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       case "--permission-mode": {
         const mode = next();
-        if (
-          mode !== "default" &&
-          mode !== "acceptEdits" &&
-          mode !== "bypassPermissions" &&
-          mode !== "plan" &&
-          mode !== "auto" &&
-          mode !== "manual" &&
-          mode !== "dontAsk" &&
-          mode !== "delegate"
-        ) {
+        if (!isPermissionMode(mode)) {
           throw new Error(`invalid --permission-mode: ${mode}`);
         }
         args.permissionMode = mode;
