@@ -276,8 +276,80 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
+	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
 	return mux
+}
+
+// handleLogin relays the gui's login button to Emacs over the sentinel
+// side channel.
+//
+// The daemon deliberately does NOT run the login itself: the Claude
+// OAuth flow is an interactive TUI that needs a controlling terminal,
+// and neither the daemon (pipes only) nor the browser has one. Emacs
+// does, so the daemon's whole job here is to name the cwd — which is
+// what selects the account (agent-repl--compute-config-dir) — and hand
+// it over.
+//
+// The session is resolved WITHOUT rehydrating a dormant record: login is
+// most needed precisely when the account's credentials have expired and
+// sessions are dying, so spawning a shim just to read back a cwd already
+// on the record would launch a doomed CLI for no reason.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	cwd, known := s.sessionCWD(id)
+	if !known {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if cwd == "" {
+		// Account selection is cwd-derived, so a session with no cwd has
+		// no account to log into. That is a structural impossibility on
+		// the Emacs path (create-session refuses an empty cwd) and must
+		// surface, not silently log into whatever the default happens
+		// to be.
+		httpError(w, http.StatusConflict, "session has no cwd; the account to log into cannot be determined")
+		return
+	}
+	if s.sentinel == nil {
+		httpError(w, http.StatusServiceUnavailable, "login is not configured (no sentinel sink)")
+		return
+	}
+	s.sentinel.LoginRequested(cwd, s.claudeSessionID(id))
+	s.logf("session %s: login requested for cwd %s — handed to Emacs over the sentinel channel", id, cwd)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]bool{"requested": true})
+}
+
+// sessionCWD returns id's cwd and whether the daemon knows id at all,
+// consulting live sessions and dormant records alike. Unlike resolve it
+// never rehydrates.
+func (s *Server) sessionCWD(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess := s.sessions[id]; sess != nil {
+		return sess.Info().CWD, true
+	}
+	if rec, ok := s.dormant[id]; ok {
+		return rec.CWD, true
+	}
+	return "", false
+}
+
+// claudeSessionID returns id's durable CLI uuid, or "" when none has
+// arrived yet. Only ever used to decorate a sentinel filename, so an
+// empty answer is a fine answer.
+func (s *Server) claudeSessionID(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess := s.sessions[id]; sess != nil {
+		return sess.Info().ClaudeSessionID
+	}
+	if rec, ok := s.dormant[id]; ok {
+		return rec.ClaudeSessionID
+	}
+	return ""
 }
 
 // handleRemediate dispatches the "session gone" analyst. The frontend
