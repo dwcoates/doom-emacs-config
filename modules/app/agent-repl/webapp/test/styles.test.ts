@@ -698,3 +698,67 @@ describe("subagent roster styles", () => {
     expect(reducedDot).toMatch(/animation:\s*none/);
   });
 });
+
+const inlineCode = blockAfter(css, ".md code {");
+const fencedBlock = blockAfter(css, ".md pre.md-code {");
+const fencedInner = blockAfter(css, ".md pre.md-code code");
+
+/** The value bound to `--code-bg` inside a palette block. */
+function codeBg(block: string): string {
+  const hit = block.match(/--code-bg:\s*([^;]+);/);
+  if (!hit) throw new Error("palette block has no --code-bg");
+  return hit[1];
+}
+
+/** Percentage of `color` a `color-mix(... , transparent)` declaration washes in. */
+function washPercent(decl: string, color: string): number {
+  const hit = decl.match(new RegExp(`color-mix\\(in srgb,\\s*${color}\\s+(\\d+)%,\\s*transparent\\)`));
+  if (!hit) throw new Error(`declaration washes no ${color}: ${decl}`);
+  return Number(hit[1]);
+}
+
+describe("inline-code chip", () => {
+  it("washes an inline code span with its own token rather than an ad-hoc mix", () => {
+    // Arrange / Act — the .md code rule.
+    // Assert
+    expect(inlineCode).toMatch(/background:\s*var\(--code-bg\)/);
+  });
+
+  it("darkens the light-theme chip by washing black into it", () => {
+    // Arrange / Act
+    const black = washPercent(codeBg(lightTheme), "#000000");
+    // Assert
+    expect(black).toBeGreaterThan(0);
+  });
+
+  it("darkens the dark-theme chip by washing black into it", () => {
+    // Arrange / Act — a --fg wash would LIGHTEN the chip here, since --fg flips
+    // light in the dark theme.
+    const black = washPercent(codeBg(darkTheme), "#000000");
+    // Assert
+    expect(black).toBeGreaterThan(0);
+  });
+
+  it("deepens the dark-theme wash past the light-theme one", () => {
+    // Arrange — the same wash over a dark bubble moves the eye far less than
+    // it does over a white one.
+    const [dark, light] = [washPercent(codeBg(darkTheme), "#000000"), washPercent(codeBg(lightTheme), "#000000")];
+    // Act
+    const deeper = dark > light;
+    // Assert
+    expect(deeper).toBe(true);
+  });
+
+  it("keeps the chip's wash off the fenced code block", () => {
+    // Arrange / Act — a fenced block is its own surface, not a chip inline in prose.
+    // Assert
+    expect(fencedBlock).not.toMatch(/var\(--code-bg\)/);
+  });
+
+  it("strips the chip's wash from the code inside a fenced block", () => {
+    // Arrange / Act — .md code also matches the <code> a fence wraps, so without
+    // this override the chip wash would stack on top of the block's own.
+    // Assert
+    expect(fencedInner).toMatch(/background:\s*none/);
+  });
+});
