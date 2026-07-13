@@ -4,6 +4,7 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
+import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
 import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
@@ -58,7 +59,7 @@ export function askQuestions(item: PermissionItem): AskQuestion[] | null {
 }
 
 /** Tool names the SPA renders specially (§2.6); others use Generic. */
-const SPECIAL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep", "Task"]);
+const SPECIAL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "Grep", ...SUBAGENT_TOOLS]);
 
 /**
  * Tool names whose cards are suppressed entirely: AskUserQuestion's UI
@@ -91,15 +92,21 @@ function contextTokens(usage: Usage | null): number {
 
 /**
  * Topbar session datapoints: `parent workspace: <ws> · model: <m> ·
- * tokens: <n>` (the vterm modeline's context mirror). The parent
- * workspace entry is omitted entirely when PARENT-WS is absent or
- * empty, as is model before hello delivers one; each value gets its
- * own color via the info-* classes.
+ * tokens: <n> · <k> agents ▾` (the vterm modeline's context mirror). The
+ * parent workspace entry is omitted entirely when PARENT-WS is absent or
+ * empty, as is model before hello delivers one and the agents chip before
+ * the session spawns one; each value gets its own color via the info-*
+ * classes.
+ *
+ * AGENTS-OPEN is the caller's disclosure state for the agents chip, which
+ * drops the subagent roster as an overlay.
  */
 export function sessionInfoHtml(
   parentWs: string | null,
   model: string,
   usage: Usage | null,
+  agents: readonly SubagentEntry[] = [],
+  agentsOpen = false,
 ): string {
   const parts: string[] = [];
   if (parentWs) {
@@ -111,6 +118,8 @@ export function sessionInfoHtml(
   parts.push(
     `tokens: <span class="info-tokens">${contextTokens(usage).toLocaleString("en-US")}</span>`,
   );
+  const menu = agentsMenuHtml(agents, agentsOpen);
+  if (menu !== "") parts.push(menu);
   return parts.join(" · ");
 }
 
@@ -255,7 +264,11 @@ function toolInput(item: ToolItem): string {
   if (item.toolName === "Grep" && item.input && typeof item.input.pattern === "string") {
     return `<pre class="cmd">grep: ${escapeHtml(item.input.pattern)}</pre>`;
   }
-  if (item.toolName === "Task" && item.input && typeof item.input.description === "string") {
+  if (
+    SUBAGENT_TOOLS.has(item.toolName) &&
+    item.input &&
+    typeof item.input.description === "string"
+  ) {
     return `<div class="file-path">${escapeHtml(item.input.description)}</div>`;
   }
   // SendMessage renders summary-only: the UI-preview summary (plus the

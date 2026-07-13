@@ -24,6 +24,9 @@
   --info-ws: #15803d;
   --info-model: #0e7490;
   --info-tokens: #b45309;
+  /* The subagent roster chip: the --tool-title purple the tool cards title
+     themselves with, since a subagent IS a tool call the session made. */
+  --info-agents: #7c3aed;
   /* "turn complete" chip wash: the --info-tokens amber dialed down to a muted
      background tint, so the end of a turn reads at a glance. */
   --turn-complete-bg: #fbf0d2;
@@ -58,6 +61,7 @@
     --info-ws: #4ade80;
     --info-model: #22d3ee;
     --info-tokens: #fbbf24;
+    --info-agents: #c4b5fd;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
@@ -111,6 +115,74 @@ body {
 #session-info .info-ws { color: var(--info-ws); }
 #session-info .info-model { color: var(--info-model); }
 #session-info .info-tokens { color: var(--info-tokens); }
+
+/* Subagent roster: a chip in the session-datapoint run that drops the full
+   list. The menu anchors the overlay, which hangs below the topbar without
+   displacing the row it hangs from. */
+.agents-menu { position: relative; display: inline-block; }
+
+.info-agents {
+  font: inherit;
+  color: var(--info-agents);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.info-agents:hover { text-decoration: underline; }
+.agents-caret { font-size: 0.7rem; }
+/* The one datapoint that is not a settled number: subagents still working
+   read in the palette's in-flight orange, as the thinking indicator does. */
+.agents-running { color: var(--thinking); }
+
+.agents-overlay {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  min-width: 22rem;
+  max-width: 34rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+}
+
+.agent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.agent-row:hover { background: var(--bg); }
+/* A subagent another subagent spawned is indented under the roster, so the
+   nesting the feed shows through parent_tool_use_id survives into the list. */
+.agent-row.nested { padding-left: 1.25rem; }
+
+.agent-desc {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-type {
+  color: var(--tool-title);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.agent-status { color: var(--muted); font-size: 0.75rem; margin-left: auto; padding-left: 0.75rem; }
+
+.agent-dot { font-size: 0.6rem; }
+.agent-dot.agent-starting,
+.agent-dot.agent-running { color: var(--thinking); animation: pulse 1s infinite; }
+.agent-dot.agent-done { color: var(--ok); }
+.agent-dot.agent-error { color: var(--err); }
 
 #feed {
   flex: 1;
@@ -491,6 +563,12 @@ pre {
      in the shorthand, survives this override). */
   .tool-spinner {
     animation-duration: 1.4s, 0.2s;
+  }
+  /* The roster's in-flight dot has no rotation to slow, only a pulse — which
+     is exactly the motion this query exists to drop. */
+  .agent-dot.agent-starting,
+  .agent-dot.agent-running {
+    animation: none;
   }
 }
 .pulse {
