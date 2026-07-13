@@ -604,12 +604,15 @@ running but its load cycle has logically ended)."
     ("session_dead_"      . (:callback agent-repl--on-session-dead-event
                              :warning  "[agent-repl] WARNING: session-dead dir=%s matched no workspace"
                              :name     "handle-session-dead"))
-    ;; There is no `login_request_' here any more.  The gui login used to be
-    ;; relayed to Emacs on this channel because the OAuth flow needs a TTY
-    ;; and Emacs was the only TTY host in the system.  That premise was
-    ;; wrong: the daemon can open a pty of its own, so it now runs the login
-    ;; itself and streams the terminal to the webapp, which renders it.  See
-    ;; daemon/internal/login.
+    ;; There is no `login_request_' handler here any more.  The gui login
+    ;; used to be relayed to Emacs on this channel because the OAuth flow
+    ;; needs a TTY and Emacs was the only TTY host in the system.  That
+    ;; premise was wrong: the daemon can open a pty of its own, so it now
+    ;; runs the login itself and streams the terminal to the webapp, which
+    ;; renders it.  See daemon/internal/login.  A stale daemon binary or
+    ;; older shim may still emit `login_request_' files, so the prefix is
+    ;; listed in `agent-repl--deprecated-sentinel-prefixes' below and drained
+    ;; rather than left to spam the log every poll cycle.
     ("subagent_start_"    . (:callback agent-repl--on-subagent-start-event
                              :warning  "[agent-repl] WARNING: subagent-start sentinel dir=%s matched no workspace"
                              :name     "handle-subagent-start"))
@@ -637,6 +640,27 @@ Each entry is (PREFIX . PLIST) where PLIST has keys:
 Order matters: see the leading comment in the source for the prefix
 overlap between `stop_' and `stop_failure_'.")
 
+(defconst agent-repl--deprecated-sentinel-prefixes
+  '("login_request_")
+  "Filename prefixes for sentinel channels Emacs no longer acts on.
+A file matching one of these is DRAINED (deleted and dropped) rather than
+warned about.  It is deliberately NOT in `agent-repl--sentinel-dispatch-alist':
+there is no live handler and no side effect to run, only cleanup.
+
+The reason draining matters: an unrecognized sentinel file is never deleted
+by the dispatch path, so `agent-repl--poll-workspace-notifications' re-detects
+it every poll cycle and re-warns indefinitely.  A retired channel that a
+stale daemon binary or older shim can still emit would therefore spam the
+log forever.  Draining deletes the file on first sight so the poll fallback
+stops seeing it.
+
+`login_request_' was retired by the commit \"Emacs is out of the login
+path\": the daemon now owns its own pty and runs `claude /login' itself,
+streaming the terminal to the webapp, so Emacs has no reason to act on the
+request.  Truly-unknown prefixes are NOT listed here — they still warn and
+are left on disk, since a not-yet-reloaded handler may be able to process
+them (forward compatibility).")
+
 (defun agent-repl--dispatch-sentinel-file (file)
   "Dispatch FILE to the appropriate sentinel handler.
 Matches the filename against `agent-repl--sentinel-dispatch-alist'.
@@ -649,14 +673,26 @@ Returns non-nil if a handler was found and called."
                            and return plist)))
     (agent-repl--log nil "dispatch-sentinel-file: file=%s matched-prefix=%S handler=%s"
                       name matched-prefix (if handler (plist-get handler :name) "NONE"))
-    (if handler
-        (progn
-          (agent-repl--process-sentinel-file file handler)
-          t)
+    (cond
+     (handler
+      (agent-repl--process-sentinel-file file handler)
+      t)
+     ((cl-some (lambda (prefix) (string-prefix-p prefix name))
+               agent-repl--deprecated-sentinel-prefixes)
+      ;; Retired channel: drain the file so the poll fallback stops re-detecting
+      ;; and re-warning about it every cycle.  No handler and no side effect run.
+      (condition-case err
+          (delete-file file)
+        (error
+         (agent-repl--warn nil "could not drain deprecated sentinel file %s: %S"
+                           name err)))
+      (agent-repl--log nil "dispatch-sentinel-file: drained deprecated sentinel file=%s" name)
+      t)
+     (t
       (agent-repl--warn nil "no handler for sentinel file %s" name)
       (agent-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s (tried prefixes: %S)"
                         name (mapcar #'car agent-repl--sentinel-dispatch-alist))
-      nil)))
+      nil))))
 
 (defun agent-repl--dispatch-sentinel-event (event)
   "Handle file-notify EVENT for workspace notification sentinel files.
