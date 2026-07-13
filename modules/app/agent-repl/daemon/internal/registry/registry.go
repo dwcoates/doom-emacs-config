@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"syscall"
 )
 
 // Record is one session's durable registry entry.
@@ -77,32 +78,106 @@ func DefaultPath() (string, error) {
 // <path>.corrupt for post-mortem rather than silently overwritten.
 func Open(path string, logf func(string, ...any)) *Registry {
 	r := &Registry{path: path, logf: logf, records: map[string]Record{}}
-	data, err := os.ReadFile(path)
+	r.records = r.loadRecordsLocked()
+	return r
+}
+
+// loadRecordsLocked reads the on-disk records. A missing file yields an
+// empty set (first boot, silently). A file that cannot be read or parsed
+// is logged LOUDLY and yields an empty set — the daemon must never
+// refuse to boot over its own bookkeeping — with the unparseable bytes
+// preserved at <path>.corrupt rather than silently overwritten.
+//
+// Callers hold r.mu (Open is pre-publication, mutate holds it).
+func (r *Registry) loadRecordsLocked() map[string]Record {
+	records := map[string]Record{}
+	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logf("registry: READ FAILED for %s — starting empty, existing sessions will NOT rehydrate: %v", path, err)
+			r.logf("registry: READ FAILED for %s — starting empty, existing sessions will NOT rehydrate: %v", r.path, err)
 		}
-		return r
+		return records
 	}
 	var doc fileShape
 	if err := json.Unmarshal(data, &doc); err != nil {
-		logf("registry: CORRUPT file at %s — starting empty, existing sessions will NOT rehydrate: %v", path, err)
-		corrupt := path + ".corrupt"
-		if mvErr := os.Rename(path, corrupt); mvErr != nil {
-			logf("registry: could not preserve corrupt file at %s: %v", corrupt, mvErr)
+		r.logf("registry: CORRUPT file at %s — starting empty, existing sessions will NOT rehydrate: %v", r.path, err)
+		corrupt := r.path + ".corrupt"
+		if mvErr := os.Rename(r.path, corrupt); mvErr != nil {
+			r.logf("registry: could not preserve corrupt file at %s: %v", corrupt, mvErr)
 		} else {
-			logf("registry: corrupt file preserved at %s", corrupt)
+			r.logf("registry: corrupt file preserved at %s", corrupt)
 		}
-		return r
+		return records
 	}
 	for _, rec := range doc.Sessions {
 		if rec.SessionID == "" {
-			logf("registry: DROPPING record with empty session_id in %s (external edit?)", path)
+			r.logf("registry: DROPPING record with empty session_id in %s (external edit?)", r.path)
 			continue
 		}
-		r.records[rec.SessionID] = rec
+		records[rec.SessionID] = rec
 	}
-	return r
+	return records
+}
+
+// lockFile takes the exclusive cross-process lock guarding the registry
+// and returns the release func. The lock lives on a SIDE file
+// (<path>.lock), never on the registry itself: saveLocked replaces the
+// registry by rename, so a lock held on that inode would guard a file
+// that no longer exists at the path.
+func (r *Registry) lockFile() (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
+		return nil, fmt.Errorf("registry: mkdir %s: %w", filepath.Dir(r.path), err)
+	}
+	f, err := os.OpenFile(r.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("registry: open lock file: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		if cerr := f.Close(); cerr != nil {
+			r.logf("registry: close lock file after failed flock: %v", cerr)
+		}
+		return nil, fmt.Errorf("registry: lock %s: %w", r.path+".lock", err)
+	}
+	return func() {
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+			r.logf("registry: unlock %s: %v", r.path+".lock", err)
+		}
+		if err := f.Close(); err != nil {
+			r.logf("registry: close lock file: %v", err)
+		}
+	}, nil
+}
+
+// mutate performs one read-modify-write cycle against the file under an
+// exclusive cross-process lock: re-read what is CURRENTLY on disk, apply
+// fn to it, write it back atomically, and adopt the result as this
+// process's cache.
+//
+// The re-read is what makes two daemons on one registry path safe. A
+// second daemon is not hypothetical (an agent rebuilds and bounces the
+// binary while the old process is still draining, and master's adopt
+// path can leave two alive briefly), and without it each process would
+// rewrite the whole file from its OWN map, silently dropping every
+// record the other had added since it loaded — the lost-update that
+// would strand exactly the sessions this registry exists to save.
+func (r *Registry) mutate(fn func(map[string]Record)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	unlock, err := r.lockFile()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Merge our cache over what is on disk: another daemon's records are
+	// preserved, and ours win for ids we both know (we are authoritative
+	// for the sessions we serve).
+	onDisk := r.loadRecordsLocked()
+	for id, rec := range r.records {
+		onDisk[id] = rec
+	}
+	fn(onDisk)
+	r.records = onDisk
+	return r.saveLocked()
 }
 
 // Put upserts rec and writes through to disk.
@@ -110,36 +185,30 @@ func (r *Registry) Put(rec Record) error {
 	if rec.SessionID == "" {
 		return fmt.Errorf("registry: Put with empty session_id")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.records[rec.SessionID] = rec
-	return r.saveLocked()
+	return r.mutate(func(recs map[string]Record) { recs[rec.SessionID] = rec })
 }
 
 // Update mutates id's record in place and writes through. Reports
-// whether the record existed; an absent id performs no write.
+// whether the record existed; an absent id still performs the
+// lock-and-merge cycle but changes nothing.
 func (r *Registry) Update(id string, fn func(*Record)) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	rec, ok := r.records[id]
-	if !ok {
-		return false, nil
-	}
-	fn(&rec)
-	r.records[id] = rec
-	return true, r.saveLocked()
+	found := false
+	err := r.mutate(func(recs map[string]Record) {
+		rec, ok := recs[id]
+		if !ok {
+			return
+		}
+		found = true
+		fn(&rec)
+		recs[id] = rec
+	})
+	return found, err
 }
 
 // Delete removes id's record and writes through. Deleting an absent id
 // is a no-op (prune paths race benignly with each other).
 func (r *Registry) Delete(id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.records[id]; !ok {
-		return nil
-	}
-	delete(r.records, id)
-	return r.saveLocked()
+	return r.mutate(func(recs map[string]Record) { delete(recs, id) })
 }
 
 // Get returns id's record and whether it exists.
@@ -163,13 +232,12 @@ func (r *Registry) All() []Record {
 	return out
 }
 
-// Flush rewrites the on-disk file from the in-memory state. Every
-// mutation already writes through, so this is a belt-and-suspenders
+// Flush re-asserts the in-memory state onto disk, merged (under the
+// cross-process lock) with whatever another daemon has written since.
+// Every mutation already writes through, so this is a belt-and-suspenders
 // step for the graceful-shutdown path, never the durability mechanism.
 func (r *Registry) Flush() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.saveLocked()
+	return r.mutate(func(map[string]Record) {})
 }
 
 // saveLocked writes the registry atomically: marshal, write to a temp
