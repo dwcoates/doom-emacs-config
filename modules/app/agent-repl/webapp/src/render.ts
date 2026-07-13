@@ -25,6 +25,7 @@ import {
   ThinkingItem,
   ToolItem,
   UserTurnItem,
+  contextTokens,
 } from "./store.js";
 
 export interface Actions {
@@ -88,14 +89,9 @@ function contentToText(
 
 // --- topbar chrome ------------------------------------------------------------
 
-/** Context usage for the topbar: input + cache read + cache creation. */
-function contextTokens(usage: Usage | null): number {
-  if (!usage) return 0;
-  return (
-    usage.input_tokens +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0)
-  );
+/** Token counts as the topbar and the result chip both write them: `300,000`. */
+function formatTokens(n: number): string {
+  return n.toLocaleString("en-US");
 }
 
 /**
@@ -123,9 +119,7 @@ export function sessionInfoHtml(
   if (model !== "") {
     parts.push(`model: <span class="info-model">${escapeHtml(model)}</span>`);
   }
-  parts.push(
-    `tokens: <span class="info-tokens">${contextTokens(usage).toLocaleString("en-US")}</span>`,
-  );
+  parts.push(`tokens: <span class="info-tokens">${formatTokens(contextTokens(usage))}</span>`);
   const menu = agentsMenuHtml(agents, agentsOpen);
   if (menu !== "") parts.push(menu);
   return parts.join(" · ");
@@ -577,14 +571,32 @@ export function formatDuration(ms: number): string {
     : `${majorValue}${major.suffix} ${minorValue}${minor.suffix}`;
 }
 
+/** A context increase as a signed figure: `+100,000`, `-40,000`, `+0`. */
+function formatTokenDelta(n: number): string {
+  return `${n < 0 ? "" : "+"}${formatTokens(n)}`;
+}
+
+/**
+ * A turn's closing chip: how long the turn took, then where the session's
+ * input tokens now stand and how far this turn moved them.
+ *
+ * A completed turn is labelled by the chip's own wash rather than by a
+ * word, so only a turn that ended some OTHER way (aborted, errored) names
+ * its subtype. A turn that ended with the context size unknown (a
+ * `/clear` or a `/compact`) reports the duration alone, since the figure
+ * it would otherwise print is the one the turn just invalidated.
+ */
 function ResultChip(item: ResultItem): string {
   const done = isTurnComplete(item);
-  const label = done ? "turn complete" : item.subtype;
+  const parts = done ? [] : [escapeHtml(item.subtype)];
+  parts.push(formatDuration(item.durationMs));
+  if (item.context) {
+    parts.push(`${formatTokens(item.context.total)} in`);
+    parts.push(formatTokenDelta(item.context.delta));
+  }
   return `
     <div class="result ${item.isError ? "err" : "ok"}${done ? " done" : ""}">
-      ${escapeHtml(label)} · ${formatDuration(item.durationMs)} ·
-      ${item.usage.input_tokens}in/${item.usage.output_tokens}out ·
-      $${item.totalCostUsd.toFixed(4)}
+      ${parts.join(" · ")}
     </div>`;
 }
 
