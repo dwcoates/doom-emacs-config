@@ -443,13 +443,64 @@ each registered wrapper was actually reassigned away from its real
 implementation, and by any test that genuinely needs the real wrapper
 back (rare; usually a smell — see AGENTS.md).")
 
+(defvar agent-repl-test--external-guard-functions nil
+  "Alist of (SYMBOL . GUARD-FUNCTION) as installed over each registry entry.
+Read by `agent-repl-test--reinstall-external-guards' to re-`fset' the
+SAME guard a production-file re-load overwrote, without re-capturing
+`agent-repl-test--external-original-functions' (whose entries must stay
+the REAL implementations, not a previously-installed guard).")
+
+(defun agent-repl-test--make-external-guard (fn-name)
+  "Return the unmocked-call guard function installed over FN-NAME."
+  (lambda (&rest args)
+    ;; Fail-open OUTSIDE batch: a guard reaching a live interactive
+    ;; session is a harness leak (install refuses outside batch, so
+    ;; this should be impossible), and erroring there breaks the
+    ;; user's editor.  Warn loudly and delegate to the captured
+    ;; original so the session keeps working.  Inside batch the guard
+    ;; errors exactly as before.
+    (if (not noninteractive)
+        (let ((orig (cdr (assq fn-name agent-repl-test--external-original-functions))))
+          (unless orig
+            (error "agent-repl test guard: `%s' invoked in an interactive session with no captured original to delegate to" fn-name))
+          (display-warning
+           'agent-repl-test
+           (format "external-boundary guard for `%s' invoked in an interactive session — delegating to the real implementation (harness leak; report this)" fn-name)
+           :warning)
+          (apply orig args))
+      (error
+       (concat
+        "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
+        "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
+        "every external-boundary wrapper MUST be stubbed via `cl-letf'\n"
+        "before the production code under test reaches it.\n"
+        "\n"
+        "REQUIRED REMEDIATION (one of these two; no other option exists):\n"
+        "  (a) Add the stub: `((symbol-function '%s)\n"
+        "                      (lambda (&rest _args) <fixture>))`\n"
+        "      to the failing test's `cl-letf' bindings.\n"
+        "  (b) Delete the test if its only purpose is to exercise the\n"
+        "      external boundary itself (per AGENTS.md \"We test lisp,\n"
+        "      not external code\" — such tests do not belong in ERT).\n"
+        "\n"
+        "BYPASSING IS FORBIDDEN.  Do NOT route around this guard via\n"
+        "`--no-verify', `ignore-errors', `condition-case' that swallows\n"
+        "the signal, restoring the original `symbol-function' inside the\n"
+        "test, advice that no-ops the guard, or any other technique.\n"
+        "If you find yourself reasoning \"just this once\", stop and\n"
+        "apply remediation (a) or (b) instead.")
+       fn-name args fn-name))))
+
 (defun agent-repl-test--install-external-guards ()
   "Replace every symbol in `agent-repl--external-boundary-functions'
 with a guard that errors if invoked.  Captures the original function
 of each symbol into `agent-repl-test--external-original-functions'
 so the install can be verified after the fact by
 `agent-repl-test--verify-external-guards-installed' (proves the
-`fset' actually took for every registry entry).
+`fset' actually took for every registry entry), and the installed guard
+into `agent-repl-test--external-guard-functions' so a later re-load of a
+production file can be re-armed by
+`agent-repl-test--reinstall-external-guards'.
 
 Refuses to run outside batch: the `fset's would replace the LIVE
 session's external wrappers, breaking every path that shells out or
@@ -466,48 +517,35 @@ talks HTTP (the \"daemon never became ready\" incident)."
         ;; back has a documented escape hatch).
         (push (cons sym (and (fboundp sym) (symbol-function sym)))
               agent-repl-test--external-original-functions)
-        (let ((fn-name sym))
-          (fset sym
-                (lambda (&rest args)
-                  ;; Fail-open OUTSIDE batch: a guard reaching a live
-                  ;; interactive session is a harness leak (install
-                  ;; refuses outside batch, so this should be
-                  ;; impossible), and erroring there breaks the user's
-                  ;; editor.  Warn loudly and delegate to the captured
-                  ;; original so the session keeps working.  Inside
-                  ;; batch the guard errors exactly as before.
-                  (if (not noninteractive)
-                      (let ((orig (cdr (assq fn-name agent-repl-test--external-original-functions))))
-                        (unless orig
-                          (error "agent-repl test guard: `%s' invoked in an interactive session with no captured original to delegate to" fn-name))
-                        (display-warning
-                         'agent-repl-test
-                         (format "external-boundary guard for `%s' invoked in an interactive session — delegating to the real implementation (harness leak; report this)" fn-name)
-                         :warning)
-                        (apply orig args))
-                    (error
-                     (concat
-                      "EXTERNAL BOUNDARY UNMOCKED: `%s' called with %S during a test run.\n"
-                      "Per AGENTS.md \"No External Processes or External State in Tests\",\n"
-                      "every external-boundary wrapper MUST be stubbed via `cl-letf'\n"
-                      "before the production code under test reaches it.\n"
-                      "\n"
-                      "REQUIRED REMEDIATION (one of these two; no other option exists):\n"
-                      "  (a) Add the stub: `((symbol-function '%s)\n"
-                      "                      (lambda (&rest _args) <fixture>))`\n"
-                      "      to the failing test's `cl-letf' bindings.\n"
-                      "  (b) Delete the test if its only purpose is to exercise the\n"
-                      "      external boundary itself (per AGENTS.md \"We test lisp,\n"
-                      "      not external code\" — such tests do not belong in ERT).\n"
-                      "\n"
-                      "BYPASSING IS FORBIDDEN.  Do NOT route around this guard via\n"
-                      "`--no-verify', `ignore-errors', `condition-case' that swallows\n"
-                      "the signal, restoring the original `symbol-function' inside the\n"
-                      "test, advice that no-ops the guard, or any other technique.\n"
-                      "If you find yourself reasoning \"just this once\", stop and\n"
-                      "apply remediation (a) or (b) instead.")
-                     fn-name args fn-name)))))))
+        (let ((guard (agent-repl-test--make-external-guard sym)))
+          (push (cons sym guard) agent-repl-test--external-guard-functions)
+          (fset sym guard))))
     (setq agent-repl-test--external-guards-installed t)))
+
+(defun agent-repl-test--reinstall-external-guards ()
+  "Re-arm the external-boundary guards after a production file was re-loaded.
+`agent-repl-test--install-external-guards' installs once per Emacs
+session, so ANY later re-load of a production file silently DISARMS the
+guards for every wrapper that file `defun's: the re-`defun' overwrites
+the guard with the real implementation, and the install will not fire
+again.  A test file that re-loads a production file (e.g. `config.el',
+to exercise a load-time code path) MUST call this afterwards — otherwise
+every test loaded after it in the aggregate run executes UNGUARDED and
+can silently reach the real `git' / `gh' / daemon.
+
+Re-`fset's the guard recorded in `agent-repl-test--external-guard-functions'
+for every registry entry, then verifies the result so a re-arm that fails
+to take is loud rather than silent."
+  (unless noninteractive
+    (error (concat "agent-repl-test--reinstall-external-guards: refusing in an "
+                   "interactive session — the guards would clobber the live "
+                   "session's external-boundary wrappers")))
+  (unless agent-repl-test--external-guards-installed
+    (error (concat "agent-repl-test--reinstall-external-guards: guards were never "
+                   "installed — nothing to re-arm (install runs at test-helpers load)")))
+  (dolist (cell agent-repl-test--external-guard-functions)
+    (fset (car cell) (cdr cell)))
+  (agent-repl-test--verify-external-guards-installed))
 
 (defun agent-repl-test--verify-external-guards-installed ()
   "Sanity-check that every symbol in `agent-repl--external-boundary-functions'
@@ -543,8 +581,19 @@ shell out to the real binary."
 
 ;; Batch-gated: installing the guards is the single most destructive
 ;; side effect this file has when leaked into a live session.
+;;
+;; RE-ARM on every load, not just the first.  Every test file `load's this
+;; file, and this file's body re-`load's `config.el' (and with it every
+;; production module) — which re-`defun's the external-boundary wrappers and
+;; overwrites the guards.  Since the install is once-per-session, the first
+;; test file used to be the ONLY guarded one: from the second file onward the
+;; whole aggregate ran UNGUARDED, free to shell out to the real `git' / `gh'
+;; or HTTP the developer's live daemon (which is exactly what
+;; `agent-repl-test-daemon-stop-deletes-and-clears' started doing).
 (when noninteractive
-  (agent-repl-test--install-external-guards)
+  (if agent-repl-test--external-guards-installed
+      (agent-repl-test--reinstall-external-guards)
+    (agent-repl-test--install-external-guards))
   ;; Eager verification: if the install missed anything, abort BEFORE any
   ;; test gets a chance to silently shell out.  Failure here means a
   ;; bug in the install loop, the registry, or someone clobbered the
