@@ -15,7 +15,7 @@ import {
 } from "../src/render.js";
 import { SubagentEntry } from "../src/agents.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
-import { ConversationItem, ResultItem, ToolItem } from "../src/store.js";
+import { ConversationItem, ResultItem, TextItem, ToolItem } from "../src/store.js";
 
 /** A settled roster entry for one spawned subagent. */
 function subagentEntry(over: Partial<SubagentEntry> = {}): SubagentEntry {
@@ -26,6 +26,21 @@ function subagentEntry(over: Partial<SubagentEntry> = {}): SubagentEntry {
     status: "done",
     nested: false,
     ...over,
+  };
+}
+
+/** When the agent opened a text block, for the items that do not assert on it. */
+const TEXT_TS = new Date(2026, 4, 24, 9, 5).toISOString();
+
+/** A text item the agent opened at the given local wall-clock time. */
+function textAt(hour: number, minute: number, text = "the answer"): ConversationItem {
+  return {
+    kind: "text",
+    blockId: "b1",
+    messageId: "m1",
+    text,
+    done: true,
+    ts: new Date(2026, 4, 24, hour, minute).toISOString(),
   };
 }
 
@@ -41,7 +56,7 @@ function userTurnAt(hour: number, minute: number, text = "do the thing"): Conver
 
 /** A text block item carrying the given id, finished unless DONE says otherwise. */
 function text(blockId: string, done = true): ConversationItem {
-  return { kind: "text", blockId, messageId: "m1", text: "hi", done };
+  return { kind: "text", blockId, messageId: "m1", text: "hi", done, ts: TEXT_TS };
 }
 
 /** A thinking block item, finished unless DONE says otherwise. */
@@ -307,8 +322,42 @@ describe("renderItem", () => {
     const item = userTurnAt(14, 32, "do the thing");
     // Act
     const html = renderItem(item);
-    // Assert — the stamp trails the prompt inside the same bubble.
-    expect(html).toContain(`<div class="bubble user"><pre>do the thing</pre><span class="turn-ts">`);
+    // Assert — the stamp trails the prompt's body column inside the same bubble.
+    expect(html).toContain(
+      `<div class="bubble user"><div class="bubble-body"><pre>do the thing</pre></div><span class="turn-ts">`,
+    );
+  });
+
+  it("stamps an agent response bubble with the time its block opened", () => {
+    // Arrange
+    const item = textAt(14, 33);
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="turn-ts">14:33</span>`);
+  });
+
+  it("stamps a response rendered as a metaprompt tree", () => {
+    // Arrange — the tree path builds its own bubble, so it needs the stamp too.
+    const item = textAt(14, 34, "Response (👀 no changes made)\n\n1 👀 Answer\n└── 1.1 First");
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="turn-ts">14:34</span>`);
+  });
+
+  it("stamps the corner of a response bubble rather than its text column", () => {
+    // Arrange
+    const item = textAt(14, 33, "the answer");
+    // Act
+    const html = renderItem(item);
+    // Assert — the stamp is the body column's sibling, so it never sits in the prose.
+    expect(html).toContain(`</div><span class="turn-ts">14:33</span></div>`);
+  });
+
+  it("keeps a streaming response's cursor inside the body column", () => {
+    // Arrange
+    const item: ConversationItem = { ...(textAt(14, 33, "hel") as TextItem), done: false };
+    // Act
+    const html = renderItem(item);
+    // Assert — the cursor trails the text, not the stamp.
+    expect(html).toContain(`<span class="cursor">▍</span></div><span class="turn-ts">`);
   });
 
   it("hides the host's injected spans from the user bubble", () => {
@@ -339,6 +388,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "hel",
@@ -352,6 +402,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "# Hi\n**bold** and `code`",
@@ -369,6 +420,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "<img src=x onerror=alert(1)>",
@@ -382,6 +434,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "hello",
@@ -395,6 +448,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "done",
@@ -410,6 +464,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "on it",
@@ -425,6 +480,7 @@ describe("renderItem", () => {
     // Arrange — the tree path builds its own bubble, so it needs the class too.
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "Response (👀 no changes made)\n\n1 👀 Answer\n├── 1.1 First\n└── 1.2 Second",
@@ -440,6 +496,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "on it",
@@ -455,6 +512,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "working on it",
@@ -470,6 +528,7 @@ describe("renderItem", () => {
     // Arrange — the tree path builds its own bubble, so it needs the class too.
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "Response (👀 no changes made)\n\n1 👀 Answer\n├── 1.1 First\n└── 1.2 Second",
@@ -1534,6 +1593,7 @@ describe("itemKey", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b7",
       messageId: "m1",
       text: "",
@@ -1771,6 +1831,7 @@ describe("TextStream metaprompt trees", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More",
@@ -1787,6 +1848,7 @@ describe("TextStream metaprompt trees", () => {
     // Arrange — the fence handler owns tree detection inside fences.
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "Response (✏️)\n\n```\n1 🔧 Fixed it\n├── 1.1 Detail\n```",
@@ -1803,6 +1865,7 @@ describe("TextStream metaprompt trees", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
+      ts: TEXT_TS,
       blockId: "b1",
       messageId: "m1",
       text: "Just **prose** here.\nSecond line.",
@@ -1824,6 +1887,7 @@ describe("lastUserTurnId", () => {
   /** An assistant text item: the noise a user turn is picked out from. */
   const text = (blockId: string): ConversationItem => ({
     kind: "text",
+    ts: TEXT_TS,
     blockId,
     messageId: "m1",
     text: "answering",

@@ -470,8 +470,14 @@ All frames below extend `WsEnvelope`.
 `ts` is the time of the **event**, not of the send: frames the daemon
 rebuilds from a resumed session's transcript carry the original entry's
 timestamp, so a `user-turn` replayed on resume still reports when its
-prompt was actually sent (the webapp stamps each prompt bubble with it).
-Live frames are stamped as the session hub retains them.
+prompt was actually sent, and a replayed `text-start` still reports when
+the agent wrote its response. Live frames are stamped as the session hub
+retains them.
+
+The webapp stamps both bubbles from this field, into their top-right
+corner: the prompt bubble from its `user-turn`, the response bubble from
+the `text-start` that opened the block (the block's OPENING time, so the
+stamp holds still while the response streams).
 
 ### 2.2 Lifecycle frames
 

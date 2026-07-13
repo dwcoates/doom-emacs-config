@@ -36,6 +36,12 @@ export interface TextItem {
   messageId: string;
   text: string;
   done: boolean;
+  /**
+   * Envelope ts (§2.1) of the `text-start` frame: when the agent OPENED
+   * the block, rendered on the bubble. Taken at the start rather than the
+   * end so the stamp holds still while the block streams.
+   */
+  ts: string;
 }
 export interface ThinkingItem {
   kind: "thinking";
@@ -355,6 +361,7 @@ export class ConversationStore {
           messageId: frame.message_id,
           text: "",
           done: false,
+          ts: frame.ts,
         });
         break;
       case "text-delta": {
