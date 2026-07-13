@@ -259,6 +259,33 @@ var l1CommandKnownTypes = map[string]bool{
 	"queue-cancel":  true,
 }
 
+// l1CommandActs lists the command types that must reach a LIVE CLI. A
+// hibernated session receiving one has to be revived first; the rest
+// (replay-request) are served wholly from the daemon's retained ring and
+// must never spawn a process, since that is the free-to-view path.
+var l1CommandActs = map[string]bool{
+	"user-message":        true,
+	"permission-decision": true,
+	"interrupt":           true,
+	"set-permission-mode": true,
+	"set-model":           true,
+}
+
+// CommandActs reports whether a raw webapp→daemon frame is a command that
+// needs a live CLI (and so must revive a hibernated session). A frame
+// that does not decode, or decodes to a non-acting type (replay-request,
+// an unknown type, or the deliberately-dropped shutdown), reports false —
+// merely observing a session must never resurrect its process pair.
+func CommandActs(line []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(line, &probe); err != nil {
+		return false
+	}
+	return l1CommandActs[probe.Type]
+}
+
 // DecodeCommand decodes one command frame (webapp→daemon or Go→shim
 // direction). Unknown types return (nil, nil) per the forward
 // compatibility rule; structurally invalid frames return an error.
