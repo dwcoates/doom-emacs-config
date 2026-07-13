@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 
-;; Tests for session lifecycle management: sandbox config, command building,
-;; session startup, completion handling, session ID management, readiness
+;; Tests for session lifecycle management: command building, session
+;; startup, completion handling, session ID management, readiness
 ;; handling, process state predicates, and the ready timer.
 
 ;;; Code:
@@ -218,118 +218,6 @@ by vterm-buf presence; the :done write is not."
         (agent-repl--handle-agent-finished "ws1")
         (should (null sent))))))
 
-;;;; ---- Tests: Sandbox configuration ----
-
-(ert-deftest agent-repl-test-find-sandbox-script-prefers-path ()
-  "find-sandbox-script should prefer executable on PATH over repo script."
-  (cl-letf (((symbol-function 'executable-find)
-             (lambda (name)
-               (when (equal name "claude-sandbox") "/usr/bin/claude-sandbox")))
-            ((symbol-function 'file-executable-p) (lambda (_f) t)))
-    (should (equal (agent-repl--find-sandbox-script "/repo")
-                   "/usr/bin/claude-sandbox"))))
-
-(ert-deftest agent-repl-test-find-sandbox-script-falls-back-to-repo ()
-  "find-sandbox-script should fall back to .agents-sandbox/sandbox in repo."
-  (cl-letf (((symbol-function 'executable-find) (lambda (_n) nil))
-            ((symbol-function 'file-executable-p)
-             (lambda (f)
-               (string-suffix-p ".agents-sandbox/sandbox" f))))
-    (should (equal (agent-repl--find-sandbox-script "/my/repo")
-                   "/my/repo/.agents-sandbox/sandbox"))))
-
-(ert-deftest agent-repl-test-find-sandbox-script-returns-nil ()
-  "find-sandbox-script should return nil when no launcher exists."
-  (cl-letf (((symbol-function 'executable-find) (lambda (_n) nil))
-            ((symbol-function 'file-executable-p) (lambda (_f) nil)))
-    (should-not (agent-repl--find-sandbox-script "/my/repo"))))
-
-(ert-deftest agent-repl-test-query-sandbox-image-returns-trimmed ()
-  "query-sandbox-image should return trimmed output from script."
-  (cl-letf (((symbol-function 'call-process)
-             (lambda (_script _infile destination _display &rest args)
-               ;; Real call-process with destination=t inserts into current buffer
-               (when (and (eq destination t) (equal args '("--image-name")))
-                 (insert "  my-image:latest  "))
-               0)))
-    (should (equal (agent-repl--query-sandbox-image "/path/to/script")
-                   "my-image:latest"))))
-
-(ert-deftest agent-repl-test-query-sandbox-image-empty-returns-nil ()
-  "query-sandbox-image should return nil when script outputs empty string."
-  (cl-letf (((symbol-function 'call-process)
-             (lambda (_script _infile _dest _display &rest _args) 0)))
-    (should-not (agent-repl--query-sandbox-image "/path/to/script"))))
-
-(ert-deftest agent-repl-test-find-install-script-exists ()
-  "find-install-script should return path when install script is executable."
-  (cl-letf (((symbol-function 'file-executable-p)
-             (lambda (f) (string-suffix-p "install-claude.sh" f))))
-    (should (equal (agent-repl--find-install-script "/repo")
-                   "/repo/.agents-sandbox/install-claude.sh"))))
-
-(ert-deftest agent-repl-test-find-install-script-missing ()
-  "find-install-script should return nil when install script not found."
-  (cl-letf (((symbol-function 'file-executable-p) (lambda (_f) nil)))
-    (should-not (agent-repl--find-install-script "/repo"))))
-
-(ert-deftest agent-repl-test-docker-image-exists-p-true ()
-  "docker-image-exists-p should return non-nil when docker inspect returns 0.
-Stubs the registered external-boundary wrapper, not `call-process'
-directly — the runtime guards installed by test-helpers.el fset the
-wrapper to an error-on-call lambda."
-  (cl-letf (((symbol-function 'agent-repl--docker-exit-code)
-             (lambda (&rest _args) 0)))
-    (should (agent-repl--docker-image-exists-p "my-image:latest"))))
-
-(ert-deftest agent-repl-test-docker-image-exists-p-false ()
-  "docker-image-exists-p should return nil when docker inspect returns non-zero."
-  (cl-letf (((symbol-function 'agent-repl--docker-exit-code)
-             (lambda (&rest _args) 1)))
-    (should-not (agent-repl--docker-image-exists-p "no-such-image"))))
-
-(ert-deftest agent-repl-test-resolve-sandbox-config-no-launcher ()
-  "resolve-sandbox-config should return nil when no launcher script is found."
-  (cl-letf (((symbol-function 'agent-repl--find-sandbox-script) (lambda (_r) nil)))
-    (should-not (agent-repl--resolve-sandbox-config "/repo"))))
-
-(ert-deftest agent-repl-test-resolve-sandbox-config-image-ready ()
-  "resolve-sandbox-config should return (:image IMAGE :script SCRIPT) when image exists."
-  (cl-letf (((symbol-function 'agent-repl--find-sandbox-script)
-             (lambda (_r) "/usr/bin/claude-sandbox"))
-            ((symbol-function 'agent-repl--query-sandbox-image)
-             (lambda (_s) "my-image:latest"))
-            ((symbol-function 'agent-repl--docker-image-exists-p)
-             (lambda (_i) t)))
-    (let ((result (agent-repl--resolve-sandbox-config "/repo")))
-      (should (equal (plist-get result :image) "my-image:latest"))
-      (should (equal (plist-get result :script) "/usr/bin/claude-sandbox"))
-      (should-not (plist-get result :needs-build)))))
-
-(ert-deftest agent-repl-test-resolve-sandbox-config-needs-build ()
-  "resolve-sandbox-config should return :needs-build when image does not exist."
-  (cl-letf (((symbol-function 'agent-repl--find-sandbox-script)
-             (lambda (_r) "/usr/bin/claude-sandbox"))
-            ((symbol-function 'agent-repl--query-sandbox-image)
-             (lambda (_s) "my-image:latest"))
-            ((symbol-function 'agent-repl--docker-image-exists-p)
-             (lambda (_i) nil))
-            ((symbol-function 'agent-repl--find-install-script)
-             (lambda (_r) "/repo/.agents-sandbox/install-claude.sh")))
-    (let ((result (agent-repl--resolve-sandbox-config "/repo")))
-      (should (plist-get result :needs-build))
-      (should (equal (plist-get result :image) "my-image:latest"))
-      (should (equal (plist-get result :install-script)
-                     "/repo/.agents-sandbox/install-claude.sh")))))
-
-(ert-deftest agent-repl-test-resolve-sandbox-config-empty-image ()
-  "resolve-sandbox-config should return nil when launcher outputs empty image."
-  (cl-letf (((symbol-function 'agent-repl--find-sandbox-script)
-             (lambda (_r) "/usr/bin/claude-sandbox"))
-            ((symbol-function 'agent-repl--query-sandbox-image)
-             (lambda (_s) nil)))
-    (should-not (agent-repl--resolve-sandbox-config "/repo"))))
-
 ;;;; ---- Tests: Command building ----
 
 (ert-deftest agent-repl-test-compute-claude-flags-continue ()
@@ -483,27 +371,23 @@ wrapper to an error-on-call lambda."
     (should (equal (agent-repl--compute-claude-flags nil nil nil)
                    "--model sonnet"))))
 
-(ert-deftest agent-repl-test-compute-perm-flag-sandboxed ()
-  "compute-perm-flag should return nil when sandboxed."
-  (should-not (agent-repl--compute-perm-flag t "/some/dir")))
-
 (ert-deftest agent-repl-test-compute-perm-flag-chesscom ()
   "compute-perm-flag should return --permission-mode auto for ChessCom repos."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/ChessCom/project")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/ChessCom/project")
                  "--permission-mode auto")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-personal ()
   "compute-perm-flag should return --permission-mode auto for personal repos."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/personal/project")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/personal/project")
                  "--permission-mode auto")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-nil-dir ()
   "compute-perm-flag with nil project-dir should signal an error."
-  (should-error (agent-repl--compute-perm-flag nil nil) :type 'error))
+  (should-error (agent-repl--compute-perm-flag nil) :type 'error))
 
 (ert-deftest agent-repl-test-compute-perm-flag-chesscom-dir ()
   "compute-perm-flag with ChessCom project-dir returns auto permissions."
-  (should (equal (agent-repl--compute-perm-flag nil "/tmp/ChessCom/test")
+  (should (equal (agent-repl--compute-perm-flag "/tmp/ChessCom/test")
                  "--permission-mode auto")))
 
 ;;;; ---- Tests: agent-repl--model-haiku-p ----
@@ -544,37 +428,33 @@ wrapper to an error-on-call lambda."
 
 (ert-deftest agent-repl-test-compute-perm-flag-haiku-personal-downgrades ()
   "compute-perm-flag downgrades a personal repo to skip-permissions for haiku."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/personal/project" "haiku")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/personal/project" "haiku")
                  "--dangerously-skip-permissions")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-haiku-chesscom-downgrades ()
   "compute-perm-flag downgrades a ChessCom repo to skip-permissions for haiku."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/ChessCom/project" "haiku")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/ChessCom/project" "haiku")
                  "--dangerously-skip-permissions")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-haiku-versioned-downgrades ()
   "compute-perm-flag downgrades for a versioned haiku alias."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/personal/project" "haiku-4-5")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/personal/project" "haiku-4-5")
                  "--dangerously-skip-permissions")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-opus-keeps-auto ()
   "compute-perm-flag keeps --permission-mode auto for a non-haiku (opus) model."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/personal/project" "opus")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/personal/project" "opus")
                  "--permission-mode auto")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-sonnet-keeps-auto ()
   "compute-perm-flag keeps --permission-mode auto for a non-haiku (sonnet) model."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/ChessCom/project" "sonnet")
+  (should (equal (agent-repl--compute-perm-flag "/home/user/ChessCom/project" "sonnet")
                  "--permission-mode auto")))
 
 (ert-deftest agent-repl-test-compute-perm-flag-nil-model-keeps-auto ()
   "compute-perm-flag keeps --permission-mode auto when model is nil."
-  (should (equal (agent-repl--compute-perm-flag nil "/home/user/personal/project" nil)
+  (should (equal (agent-repl--compute-perm-flag "/home/user/personal/project" nil)
                  "--permission-mode auto")))
-
-(ert-deftest agent-repl-test-compute-perm-flag-haiku-sandboxed-still-nil ()
-  "compute-perm-flag returns nil when sandboxed even for a haiku model."
-  (should-not (agent-repl--compute-perm-flag t "/home/user/personal/project" "haiku")))
 
 (ert-deftest agent-repl-test-assemble-cmd-bare-metal ()
   "assemble-cmd should produce a plain `claude' command."
@@ -1887,15 +1767,16 @@ and route to mark-start-failed with the scraped reason, before any timeout."
 
 (ert-deftest agent-repl-test-initialize-ws-env-initializes-fresh ()
   "initialize-ws-env on a fresh workspace with no state file sets up
-default `:active-env' and instantiation structs for each environment.
-The project-dir hint is used to locate the (absent) state file."
+default `:active-env' and an instantiation struct for every environment
+in `agent-repl--environment-keys' (`:bare-metal' alone, since the
+`:sandbox' axis was retired).  The project-dir hint is used to locate
+the (absent) state file."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-fresh-" t)))
       (unwind-protect
           (progn
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal))
-            (should (agent-repl-instantiation-p (agent-repl--ws-get "ws1" :sandbox)))
             (should (agent-repl-instantiation-p (agent-repl--ws-get "ws1" :bare-metal))))
         (delete-directory tmpdir t)))))
 
@@ -1956,7 +1837,6 @@ where fresh-ws-env wrote :active-env without :project-dir."
             (agent-repl--ws-put "ws1" :active-env :bare-metal)
             (agent-repl--ws-put "ws1" :last-prompt-time 1700000000.5)
             (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws1")
             (remhash "ws1" agent-repl--workspaces)
             (agent-repl--initialize-ws-env "ws1" tmpdir)
@@ -1977,7 +1857,6 @@ rather than restarting its count from re-init time."
             (agent-repl--ws-put "ws1" :last-prompt-summary "Auth Bug Fix")
             (agent-repl--ws-put "ws1" :last-prompt-summary-at 1700000123.5)
             (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws1")
             (remhash "ws1" agent-repl--workspaces)
             (agent-repl--initialize-ws-env "ws1" tmpdir)
@@ -1985,18 +1864,26 @@ rather than restarting its count from re-init time."
                            1700000123.5)))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-initialize-ws-env-active-env-hint-sets-sandbox ()
-  "initialize-ws-env uses ACTIVE-ENV-HINT when provided and no state file exists."
+(ert-deftest agent-repl-test-initialize-ws-env-active-env-hint-honored ()
+  "initialize-ws-env uses ACTIVE-ENV-HINT when provided and no state file exists.
+`:bare-metal' is the only environment left on the axis, and the only value
+any caller passes (see the worktree-setup call site)."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-init-sandbox-" t)))
+    (let ((tmpdir (make-temp-file "test-init-hint-" t)))
       (unwind-protect
           (progn
-            (agent-repl--initialize-ws-env "ws1" tmpdir :sandbox)
-            (should (eq (agent-repl--ws-get "ws1" :active-env) :sandbox)))
+            (agent-repl--initialize-ws-env "ws1" tmpdir :bare-metal)
+            (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal)))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-state-file-beats-hint ()
-  "State file value for :project-dir and :active-env overrides caller hints."
+  "Saved state supersedes the caller's ACTIVE-ENV-HINT.
+The file here is a sandbox-era one, so its `:active-env' is migrated to
+`:bare-metal' on the way in and its `:sandbox' instantiation is promoted
+into the surviving env.  The hint path would have written a FRESH EMPTY
+instantiation, so the saved session id landing on `:bare-metal' is what
+proves the file — not the hint — is what hydrated the workspace (and that
+the promotion supersedes the stale `:bare-metal' slot beside it)."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-override-" t)))
       (unwind-protect
@@ -2008,10 +1895,55 @@ rather than restarting its count from re-init time."
                :bare-metal (:session-id "bm-saved")
                :sandbox (:session-id "sb-saved")))
             (agent-repl--initialize-ws-env "ws1" tmpdir :bare-metal)
-            (should (eq (agent-repl--ws-get "ws1" :active-env) :sandbox))
+            (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal))
             (should (equal (agent-repl-instantiation-session-id
                             (agent-repl--ws-get "ws1" :bare-metal))
-                           "bm-saved")))
+                           "sb-saved")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-initialize-ws-env-migrates-saved-sandbox-env ()
+  "A sandbox-era state file hydrates as `:bare-metal'.
+The environment axis retired `:sandbox', so a saved `:active-env :sandbox'
+would fail `agent-repl--validate-ws-env' if it reached the workspace
+plist verbatim; `agent-repl--migrate-saved-state' coerces it on the way in."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-migrate-env-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — a state file written before the sandbox was retired.
+            (agent-repl--write-sexp-file
+             (agent-repl--state-file (agent-repl--path-canonical tmpdir))
+             `(:project-dir ,(agent-repl--path-canonical tmpdir)
+               :active-env :sandbox
+               :sandbox (:session-id "sb-legacy")))
+            ;; Act
+            (agent-repl--initialize-ws-env "ws1" tmpdir)
+            ;; Assert
+            (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal)))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-initialize-ws-env-promotes-saved-sandbox-session-id ()
+  "A sandbox-era state file keeps its claude session id through the migration.
+The workspace's session id lived in the `:sandbox' instantiation, so a bare
+relabel of `:active-env' would hydrate the empty `:bare-metal' slot beside it
+and strand the conversation; the instantiation is PROMOTED instead."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-init-migrate-sid-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — a state file written before the sandbox was retired.
+            (agent-repl--write-sexp-file
+             (agent-repl--state-file (agent-repl--path-canonical tmpdir))
+             `(:project-dir ,(agent-repl--path-canonical tmpdir)
+               :active-env :sandbox
+               :sandbox (:session-id "sb-legacy")))
+            ;; Act
+            (agent-repl--initialize-ws-env "ws1" tmpdir)
+            ;; Assert — the session id rides the promotion into :bare-metal,
+            ;; which is what `agent-repl--active-inst' now reads.
+            (should (equal (agent-repl-instantiation-session-id
+                            (agent-repl--ws-get "ws1" :bare-metal))
+                           "sb-legacy")))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-saved-tab-index ()
@@ -2026,8 +1958,7 @@ ws that was deprioritized at quit returns to its prior slot on restart."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :saved-tab-index 4
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :saved-tab-index) 4)))
         (delete-directory tmpdir t)))))
@@ -2045,8 +1976,7 @@ fork-ws whose agent session never started before quit can launch with
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :fork-session-id "fsid-abc"
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (equal (agent-repl--ws-get "ws1" :fork-session-id) "fsid-abc")))
         (delete-directory tmpdir t)))))
@@ -2063,8 +1993,7 @@ survives restart."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :last-prompt-summary "refactor auth"
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (equal (agent-repl--ws-get "ws1" :last-prompt-summary)
                            "refactor auth")))
@@ -2082,8 +2011,7 @@ so hide-mode survives Emacs restart."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :repl-state :inactive
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :repl-state) :inactive)))
         (delete-directory tmpdir t)))))
@@ -2100,8 +2028,7 @@ so the deprio-hide marker survives Emacs restart."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :repl-state :hidden
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :repl-state) :hidden)))
         (delete-directory tmpdir t)))))
@@ -2119,8 +2046,7 @@ Absence of `:merge-failed' takes the success path."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :merge-completed t
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :merge-completed) t))
             (should (eq (agent-repl--ws-get "ws1" :repl-state) :merged))
@@ -2142,8 +2068,7 @@ distinction across restarts)."
                :active-env :bare-metal
                :merge-completed t
                :merge-failed t
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :merge-completed) t))
             (should (eq (agent-repl--ws-get "ws1" :merge-failed) t))
@@ -2163,8 +2088,7 @@ restart (the lazy-start path applies its defaults instead)."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :repl-state :dead
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (null (agent-repl--ws-get "ws1" :repl-state))))
         (delete-directory tmpdir t)))))
@@ -2180,8 +2104,7 @@ restart (the lazy-start path applies its defaults instead)."
              `(:project-dir ,(agent-repl--path-canonical tmpdir)
                :active-env :bare-metal
                :priority "p1"
-               :bare-metal nil
-               :sandbox nil))
+               :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (equal (agent-repl--ws-get "ws1" :priority) "p1")))
         (delete-directory tmpdir t)))))
@@ -2198,105 +2121,6 @@ restart (the lazy-start path applies its defaults instead)."
             (should (equal (agent-repl--ws-get "ws1" :priority) "p2")))
         (delete-directory tmpdir t)))))
 
-;;;; ---- Tests: prompt-sandbox-build ----
-
-(ert-deftest agent-repl-test-prompt-sandbox-build-yes-compiles-and-errors ()
-  "prompt-sandbox-build should call compile then signal user-error when user says yes."
-  (let ((compiled-cmd nil))
-    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-              ((symbol-function 'compile)
-               (lambda (cmd) (setq compiled-cmd cmd))))
-      (should-error
-       (agent-repl--prompt-sandbox-build
-        '(:image "my-img:latest" :install-script "/repo/.agents-sandbox/install-claude.sh"))
-       :type 'user-error)
-      (should (string-match-p "install-claude.sh" compiled-cmd)))))
-
-(ert-deftest agent-repl-test-prompt-sandbox-build-no-falls-through ()
-  "prompt-sandbox-build should return nil (no error) when user answers no."
-  (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil))
-            ((symbol-function 'compile) #'ignore))
-    ;; Should NOT signal user-error -- just returns nil
-    (should-not
-     (agent-repl--prompt-sandbox-build
-      '(:image "my-img:latest" :install-script "/repo/.agents-sandbox/install-claude.sh")))))
-
-(ert-deftest agent-repl-test-prompt-sandbox-build-no-install-script ()
-  "prompt-sandbox-build should signal user-error with manual instruction when no install-script."
-  (should-error
-   (agent-repl--prompt-sandbox-build '(:image "my-img:latest" :install-script nil))
-   :type 'user-error))
-
-(ert-deftest agent-repl-test-prompt-sandbox-build-empty-image ()
-  "prompt-sandbox-build with empty image should still signal user-error when no install-script."
-  (should-error
-   (agent-repl--prompt-sandbox-build '(:image "" :install-script nil))
-   :type 'user-error))
-
-;;;; ---- Tests: get-sandbox-image ----
-
-(ert-deftest agent-repl-test-get-sandbox-image-non-worktree ()
-  "get-sandbox-image should return nil for non-worktree workspaces."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :worktree-p nil)
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (let ((resolve-called nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-sandbox-config)
-                 (lambda (_r) (setq resolve-called t) nil)))
-        (should-not (agent-repl--get-sandbox-image "ws1"))
-        (should-not resolve-called)))))
-
-(ert-deftest agent-repl-test-get-sandbox-image-not-sandbox-env ()
-  "get-sandbox-image should return nil when :active-env is not :sandbox."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (let ((resolve-called nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-sandbox-config)
-                 (lambda (_r) (setq resolve-called t) nil)))
-        (should-not (agent-repl--get-sandbox-image "ws1"))
-        (should-not resolve-called)))))
-
-(ert-deftest agent-repl-test-get-sandbox-image-exists ()
-  "get-sandbox-image should return config plist when image is ready."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :project-dir "/my/project")
-    (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_d) "/my/project"))
-              ((symbol-function 'agent-repl--resolve-sandbox-config)
-               (lambda (_r) '(:image "img:latest" :script "/usr/bin/claude-sandbox"))))
-      (let ((result (agent-repl--get-sandbox-image "ws1")))
-        (should (equal (plist-get result :image) "img:latest"))
-        (should (equal (plist-get result :script) "/usr/bin/claude-sandbox"))))))
-
-(ert-deftest agent-repl-test-get-sandbox-image-needs-build ()
-  "get-sandbox-image should call prompt-sandbox-build when image needs building."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :project-dir "/my/project")
-    (let ((prompt-called nil))
-      (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_d) "/my/project"))
-                ((symbol-function 'agent-repl--resolve-sandbox-config)
-                 (lambda (_r) '(:needs-build t :image "img:latest"
-                                :install-script "/repo/install.sh")))
-                ((symbol-function 'agent-repl--prompt-sandbox-build)
-                 (lambda (_cfg) (setq prompt-called t))))
-        (agent-repl--get-sandbox-image "ws1")
-        (should prompt-called)))))
-
-(ert-deftest agent-repl-test-get-sandbox-image-nil-project-dir ()
-  "get-sandbox-image should return nil when :project-dir is nil."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :project-dir nil)
-    (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_d) nil))
-              ((symbol-function 'agent-repl--resolve-sandbox-config)
-               (lambda (_r) nil)))
-      (should-not (agent-repl--get-sandbox-image "ws1")))))
-
 ;;;; ---- Tests: build-start-cmd ----
 
 (ert-deftest agent-repl-test-build-start-cmd-bare-metal-no-session ()
@@ -2308,12 +2132,9 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (equal (plist-get result :cmd)
-                         "AGENT_REPL_OWNED=1 claude --permission-mode auto"))
-          (should-not (plist-get result :sandboxed-p)))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (equal (plist-get result :cmd)
+                       "AGENT_REPL_OWNED=1 claude --permission-mode auto"))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-uses-ws-model ()
   "build-start-cmd emits `--model <ws :model>' when the workspace has one."
@@ -2325,11 +2146,9 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
       (agent-repl--ws-put "ws1" :model "sonnet")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (string-match-p "--model sonnet" (plist-get result :cmd)))
-          (should-not (string-match-p "--model opus" (plist-get result :cmd))))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (string-match-p "--model sonnet" (plist-get result :cmd)))
+        (should-not (string-match-p "--model opus" (plist-get result :cmd)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-defaults-model-to-interactive-model ()
   "build-start-cmd falls back to `agent-repl-interactive-model' when ws has no :model."
@@ -2340,10 +2159,8 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (string-match-p "--model opus" (plist-get result :cmd))))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (string-match-p "--model opus" (plist-get result :cmd)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-ws-haiku-model-skips-permissions ()
   "build-start-cmd downgrades to --dangerously-skip-permissions when ws :model is haiku."
@@ -2355,11 +2172,9 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
       (agent-repl--ws-put "ws1" :model "haiku")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
-          (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd))))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
+        (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-interactive-haiku-skips-permissions ()
   "build-start-cmd downgrades to --dangerously-skip-permissions when the interactive model is haiku and ws has no :model."
@@ -2370,11 +2185,9 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
-          (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd))))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
+        (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-opus-keeps-permission-mode-auto ()
   "build-start-cmd keeps --permission-mode auto when the interactive model is opus."
@@ -2385,11 +2198,9 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (string-match-p "--permission-mode auto" (plist-get result :cmd)))
-          (should-not (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd))))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (string-match-p "--permission-mode auto" (plist-get result :cmd)))
+        (should-not (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
   "build-start-cmd for bare-metal with default `agent-repl-system-prompt' includes --system-prompt \".\"."
@@ -2400,17 +2211,18 @@ restart (the lazy-start path applies its defaults instead)."
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :worktree-p nil)
       (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-                 (lambda (_ws) nil)))
-        (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (equal (plist-get result :cmd)
-                         "AGENT_REPL_OWNED=1 claude --permission-mode auto --system-prompt \".\"")))))))
+      (let ((result (agent-repl--build-start-cmd "ws1")))
+        (should (equal (plist-get result :cmd)
+                       "AGENT_REPL_OWNED=1 claude --permission-mode auto --system-prompt \".\""))))))
 
-(ert-deftest agent-repl-test-build-start-cmd-sandbox-env-uses-plain-claude ()
-  "Even a :sandbox-env worktree with a session launches plain `claude' + --continue, never claude-sandbox."
+(ert-deftest agent-repl-test-build-start-cmd-worktree-session-uses-plain-claude ()
+  "A worktree with a saved session launches plain `claude' + --continue.
+Never a claude-sandbox wrapper: agent-repl has only ever launched plain
+`claude', which is why the `:sandbox' environment could be retired
+without losing any runtime behavior."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :sandbox
+    (agent-repl--ws-put "ws1" :active-env :bare-metal)
+    (agent-repl--ws-put "ws1" :bare-metal
                          (make-agent-repl-instantiation :session-id "sess-123"))
     (agent-repl--ws-put "ws1" :worktree-p t)
     (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
@@ -2418,9 +2230,7 @@ restart (the lazy-start path applies its defaults instead)."
       (should-not (string-match-p "claude-sandbox" (plist-get result :cmd)))
       ;; The ownership env prefix leads; the invocation itself is plain claude.
       (should (string-match-p "\\`AGENT_REPL_OWNED=1 claude " (plist-get result :cmd)))
-      (should (string-match-p "--continue" (plist-get result :cmd)))
-      (should-not (plist-get result :sandboxed-p))
-      (should-not (plist-get result :docker-image)))))
+      (should (string-match-p "--continue" (plist-get result :cmd))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-fork-session ()
   "build-start-cmd with fork-session-id should include --fork-session flag."
@@ -2430,24 +2240,9 @@ restart (the lazy-start path applies its defaults instead)."
     (agent-repl--ws-put "ws1" :worktree-p nil)
     (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
     (agent-repl--ws-put "ws1" :fork-session-id "fork-abc")
-    (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-               (lambda (_ws) nil)))
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--resume fork-abc --fork-session" (plist-get result :cmd)))
-        (should (equal (plist-get result :fork-session-id) "fork-abc"))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-needs-build ()
-  "build-start-cmd when sandbox needs-build should have nil docker-image and sandboxed-p false."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
-    (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-               (lambda (_ws) '(:needs-build t :image "img:latest"))))
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should-not (plist-get result :docker-image))
-        (should-not (plist-get result :sandboxed-p))))))
+    (let ((result (agent-repl--build-start-cmd "ws1")))
+      (should (string-match-p "--resume fork-abc --fork-session" (plist-get result :cmd)))
+      (should (equal (plist-get result :fork-session-id) "fork-abc")))))
 
 (ert-deftest agent-repl-test-build-start-cmd-nil-project-dir ()
   "build-start-cmd with personal :project-dir should produce a command."
@@ -2456,11 +2251,9 @@ restart (the lazy-start path applies its defaults instead)."
     (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
     (agent-repl--ws-put "ws1" :worktree-p nil)
     (agent-repl--ws-put "ws1" :project-dir "/tmp/personal/project")
-    (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-               (lambda (_ws) nil)))
-      (let* ((result (agent-repl--build-start-cmd "ws1")))
-        (should (stringp (plist-get result :cmd)))
-        (should (string-match-p "claude" (plist-get result :cmd)))))))
+    (let* ((result (agent-repl--build-start-cmd "ws1")))
+      (should (stringp (plist-get result :cmd)))
+      (should (string-match-p "claude" (plist-get result :cmd))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-empty-session-id ()
   "build-start-cmd with nil session-id should not include --resume or --continue."
@@ -2469,11 +2262,9 @@ restart (the lazy-start path applies its defaults instead)."
     (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation :session-id nil))
     (agent-repl--ws-put "ws1" :worktree-p nil)
     (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
-               (lambda (_ws) nil)))
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should-not (string-match-p "--resume" (plist-get result :cmd)))
-        (should-not (string-match-p "--continue" (plist-get result :cmd)))))))
+    (let ((result (agent-repl--build-start-cmd "ws1")))
+      (should-not (string-match-p "--resume" (plist-get result :cmd)))
+      (should-not (string-match-p "--continue" (plist-get result :cmd))))))
 
 ;;;; ---- Tests: log-session-start ----
 
@@ -2487,12 +2278,12 @@ restart (the lazy-start path applies its defaults instead)."
                                         :session-id "abc"
                                         :fork-session-id "fork-1"
                                         :worktree-p t
-                                        :active-env :sandbox))
+                                        :active-env :bare-metal))
       (should (string-match-p "ws=ws1" logged-msg))
       (should (string-match-p "session-id=abc" logged-msg))
       (should (string-match-p "fork-session-id=fork-1" logged-msg))
       (should (string-match-p "worktree=yes" logged-msg))
-      (should (string-match-p "env=:sandbox" logged-msg)))))
+      (should (string-match-p "env=:bare-metal" logged-msg)))))
 
 (ert-deftest agent-repl-test-log-session-start-nil-optional-fields ()
   "log-session-start should handle nil session-id and fork-session-id."
@@ -2515,7 +2306,7 @@ restart (the lazy-start path applies its defaults instead)."
     (cl-letf (((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (setq msg-yes (apply #'format fmt args)))))
       (agent-repl--log-session-start "ws1"
-                                      '(:cmd "claude" :worktree-p t :active-env :sandbox
+                                      '(:cmd "claude" :worktree-p t :active-env :bare-metal
                                         :session-id nil :fork-session-id nil)))
     (cl-letf (((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (setq msg-no (apply #'format fmt args)))))
@@ -2591,7 +2382,6 @@ through an Emacs crash — without it, the SID would only reach
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--set-session-id "ws" "captured-sid")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -2604,7 +2394,6 @@ through an Emacs crash — without it, the SID would only reach
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :active-env :bare-metal)
     (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     (agent-repl--set-session-id "ws" "captured-sid")
     (should (equal (agent-repl-instantiation-session-id
                     (agent-repl--ws-get "ws" :bare-metal))

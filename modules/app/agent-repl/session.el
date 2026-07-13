@@ -31,15 +31,6 @@ start command itself has not been taught to print the marker.")
 (defvar-local agent-repl--ready nil
   "Non-nil once Claude Code has set its terminal title, indicating startup is complete.")
 
-;;;; Sandbox configuration
-
-(defcustom agent-repl-docker-image ""
-  "Fallback Docker image for sandboxed worktree workspaces with no .claude/sandbox/image.
-Prefer per-repo .claude/sandbox/image files over this global setting.
-If empty (the default), worktrees without a .claude/sandbox/image run the agent directly."
-  :type 'string
-  :group 'agent-repl)
-
 (defcustom agent-repl-managed-project-pattern "ChessCom"
   "Pattern matched against the project directory to determine permission mode.
 Projects whose expanded path contains this pattern use `agent-repl-managed-permission-flag';
@@ -168,81 +159,6 @@ rather than looping forever."
   :type 'number
   :group 'agent-repl)
 
-(defun agent-repl--docker-image-exists-p (image)
-  "Return non-nil if IMAGE exists in the local Docker image store.
-Routes through `agent-repl--docker-exit-code' (the registered
-external-boundary wrapper) so the call is mocked by the test-time
-runtime guards."
-  (let ((result (= 0 (agent-repl--docker-exit-code
-                      "image" "inspect" "--format" "." image))))
-    (agent-repl--log nil "docker-image-exists-p: image=%s exists=%s" image (if result "yes" "no"))
-    result))
-
-(defun agent-repl--find-sandbox-script (git-root)
-  "Return the path to the sandbox launcher script for GIT-ROOT, or nil.
-Checks for `claude-sandbox' on PATH first, then falls back to
-`.agents-sandbox/sandbox' inside the repository."
-  (let ((result (or (when-let ((p (executable-find "claude-sandbox")))
-                      (agent-repl--log nil "find-sandbox-script: found claude-sandbox on PATH at %s" p)
-                      p)
-                    (let ((f (expand-file-name ".agents-sandbox/sandbox" git-root)))
-                      (if (file-executable-p f)
-                          (progn
-                            (agent-repl--log nil "find-sandbox-script: found .agents-sandbox/sandbox at %s" f)
-                            f)
-                        nil)))))
-    (unless result
-      (agent-repl--log nil "find-sandbox-script: no sandbox script found for git-root=%s" git-root))
-    result))
-
-(defun agent-repl--query-sandbox-image (script)
-  "Return the Docker image name reported by sandbox SCRIPT, or nil on failure.
-Runs SCRIPT with --image-name and trims the output."
-  (let ((image (string-trim
-                (with-output-to-string
-                  (with-current-buffer standard-output
-                    (call-process script nil t nil "--image-name"))))))
-    (if (string-empty-p image)
-        (progn
-          (agent-repl--log nil "query-sandbox-image: script=%s returned empty image" script)
-          nil)
-      (agent-repl--log nil "query-sandbox-image: script=%s image=%s" script image)
-      image)))
-
-(defun agent-repl--find-install-script (git-root)
-  "Return the path to the sandbox install script in GIT-ROOT, or nil."
-  (let ((f (expand-file-name ".agents-sandbox/install-claude.sh" git-root)))
-    (if (file-executable-p f)
-        (progn
-          (agent-repl--log nil "find-install-script: found %s" f)
-          f)
-      (agent-repl--log nil "find-install-script: no install script in git-root=%s" git-root)
-      nil)))
-
-(defun agent-repl--resolve-sandbox-config (git-root)
-  "Return a plist (:image IMAGE :script SCRIPT) for a worktree at GIT-ROOT.
-Detects sandbox support by looking for the `claude-sandbox' launcher on PATH
-or `.agents-sandbox/sandbox' in the repo.  Queries the launcher's --image-name
-flag to determine the Docker image.
-Returns nil if no sandbox launcher is found.
-Returns (:needs-build t :install-script PATH) if the image is not built yet."
-  (let ((script (agent-repl--find-sandbox-script git-root)))
-    (if (null script)
-        (progn
-          (agent-repl--log nil "resolve-sandbox-config: no-launcher for git-root=%s" git-root)
-          nil)
-      (if-let ((image (agent-repl--query-sandbox-image script)))
-          (if (agent-repl--docker-image-exists-p image)
-              (progn
-                (agent-repl--log nil "resolve-sandbox-config: success image=%s script=%s" image script)
-                (list :image image :script script))
-            (progn
-              (agent-repl--log nil "resolve-sandbox-config: needs-build image=%s" image)
-              (list :needs-build t
-                    :image image
-                    :install-script (agent-repl--find-install-script git-root))))
-        (agent-repl--log nil "resolve-sandbox-config: empty-image from script=%s in git-root=%s" script git-root)
-        nil))))
 
 ;;;; Workspace environment initialization
 
@@ -308,7 +224,7 @@ remaining keys are written only when SAVED carries them."
   ;; never follow `agent-repl-default-frontend' forward.  Left unset, the
   ;; frontend re-resolves from the default (constrained by the workspace's
   ;; backend and env — see `agent-repl--frontend-default-for-ws', which is
-  ;; what still brings a codex or `:sandbox' workspace back up in vterm).
+  ;; what still brings a codex workspace back up in vterm).
   (when (and saved (plist-get saved :frontend-explicit))
     (agent-repl--ws-put ws :frontend-explicit t)
     (agent-repl--ws-put ws :frontend
@@ -405,13 +321,14 @@ missing or malformed."
   (when (and ws project-root
              (null (agent-repl--ws-get ws :active-env)))
     (let* ((state-file (agent-repl--state-file-for-read project-root))
-           (saved (and state-file
-                       (condition-case err
-                           (agent-repl--read-sexp-file-if-exists state-file)
-                         (error
-                          (agent-repl--log ws "load-display-state: read error file=%s err=%S"
-                                            state-file err)
-                          nil)))))
+           (saved (agent-repl--migrate-saved-state
+                   (and state-file
+                        (condition-case err
+                            (agent-repl--read-sexp-file-if-exists state-file)
+                          (error
+                           (agent-repl--log ws "load-display-state: read error file=%s err=%S"
+                                             state-file err)
+                           nil))))))
       (when saved
         (agent-repl--log ws "load-display-state: ws=%s root=%s" ws project-root)
         (agent-repl--apply-display-state ws saved)
@@ -449,14 +366,15 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                              (agent-repl--git-root default-directory)))
          (root (and root-candidate (agent-repl--path-canonical root-candidate)))
          (state-file (and root (agent-repl--state-file-for-read root)))
-         (saved (and state-file
-                     (file-exists-p state-file)
-                     (condition-case err
-                         (agent-repl--read-sexp-file state-file)
-                       (error
-                        (agent-repl--log ws "initialize-ws-env: state file read error file=%s err=%S"
-                                          state-file err)
-                        nil)))))
+         (saved (agent-repl--migrate-saved-state
+                 (and state-file
+                      (file-exists-p state-file)
+                      (condition-case err
+                          (agent-repl--read-sexp-file state-file)
+                        (error
+                         (agent-repl--log ws "initialize-ws-env: state file read error file=%s err=%S"
+                                           state-file err)
+                         nil))))))
     (unless root
       (error "agent-repl--initialize-ws-env: cannot derive :project-dir for ws=%s (no hint, no prior :project-dir, no git-root for default-directory=%s)"
              ws default-directory))
@@ -499,35 +417,6 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
       (agent-repl--log ws "initialize-ws-env: no state file, writing initial state ws=%s root=%s" ws root)
       (agent-repl--state-save ws))))
 
-(defun agent-repl--prompt-sandbox-build (sandbox-config)
-  "Prompt the user to build a missing sandbox image from SANDBOX-CONFIG.
-Signals `user-error' unconditionally -- either after kicking off the build
-or telling the user to do it manually."
-  (let ((image (plist-get sandbox-config :image))
-        (install-script (plist-get sandbox-config :install-script)))
-    (agent-repl--log nil "prompt-sandbox-build: image=%s install-script=%s" image install-script)
-    (if install-script
-        (when (y-or-n-p (format "Sandbox image '%s' not built. Run install.sh now? " image))
-          (compile (format "bash %s" install-script))
-          (user-error "Run 'SPC o c' again once the build completes"))
-      (user-error "Sandbox image '%s' not built — run .agents-sandbox/install-claude.sh manually" image))))
-
-(defun agent-repl--get-sandbox-image (ws)
-  "Return the sandbox Docker image config plist for workspace WS.
-Returns a sandbox-config plist from `agent-repl--resolve-sandbox-config',
-or nil if sandboxing is not applicable.  Signals `user-error' if the image
-needs building, optionally kicking off the build first."
-  (let* ((worktree-p (agent-repl--ws-get ws :worktree-p))
-         (active-env (agent-repl--ws-get ws :active-env))
-         (project-dir (agent-repl--ws-get ws :project-dir))
-         (sandbox-config (when (and worktree-p (eq active-env :sandbox))
-                           (agent-repl--resolve-sandbox-config project-dir))))
-    (agent-repl--log ws "get-sandbox-image: ws=%s worktree-p=%s env=%s config=%s"
-                      ws (if worktree-p "yes" "no") active-env
-                      (if sandbox-config "found" "nil"))
-    (when (plist-get sandbox-config :needs-build)
-      (agent-repl--prompt-sandbox-build sandbox-config))
-    sandbox-config))
 
 ;;;; Command building
 
@@ -599,31 +488,27 @@ without it."
   (string-match-p agent-repl-managed-project-pattern
                   (expand-file-name project-dir)))
 
-(defun agent-repl--compute-perm-flag (sandboxed-p project-dir &optional model)
+(defun agent-repl--compute-perm-flag (project-dir &optional model)
   "Return the permission flag string for the Claude CLI, or nil.
-SANDBOXED-P means Docker handles permissions.  Otherwise, PROJECT-DIR
-determines the base flag: ChessCom repos use `agent-repl-managed-permission-flag',
-all others use `agent-repl-personal-permission-flag' (both default to
+PROJECT-DIR determines the base flag: ChessCom repos use
+`agent-repl-managed-permission-flag', all others use
+`agent-repl-personal-permission-flag' (both default to
 --permission-mode auto).  MODEL is the effective interactive model alias;
 `--permission-mode auto' is only allowed when MODEL is not Haiku (see
 `agent-repl--model-haiku-p'), so a resolved base flag of
 `--permission-mode auto' is downgraded to `--dangerously-skip-permissions'
 whenever MODEL denotes Haiku."
-  (if sandboxed-p
-      (progn
-        (agent-repl--log nil "compute-perm-flag: sandboxed — no perm flag")
-        nil)
-    (let* ((managed (agent-repl--managed-project-p project-dir))
-           (base (if managed
-                     agent-repl-managed-permission-flag
-                   agent-repl-personal-permission-flag))
-           (flag (if (and (agent-repl--model-haiku-p model)
-                          (equal base "--permission-mode auto"))
-                     "--dangerously-skip-permissions"
-                   base)))
-      (agent-repl--log nil "compute-perm-flag: branch=%s model=%s flag=%s"
-                        (if managed "managed" "personal") model flag)
-      flag)))
+  (let* ((managed (agent-repl--managed-project-p project-dir))
+         (base (if managed
+                   agent-repl-managed-permission-flag
+                 agent-repl-personal-permission-flag))
+         (flag (if (and (agent-repl--model-haiku-p model)
+                        (equal base "--permission-mode auto"))
+                   "--dangerously-skip-permissions"
+                 base)))
+    (agent-repl--log nil "compute-perm-flag: branch=%s model=%s flag=%s"
+                      (if managed "managed" "personal") model flag)
+    flag))
 
 (defun agent-repl--under-dir-p (dir project-dir)
   "Non-nil when PROJECT-DIR is DIR or lies beneath it.
@@ -715,8 +600,9 @@ CLIs, which is what stops a foreign claude in the same cwd (e.g. a
 terminal session) from having its session id adopted onto the
 workspace (see `agent-repl--update-session-id-from-sentinel').
 
-agent-repl ALWAYS launches plain `claude' — it never shells out to
-`claude-sandbox'.  There is deliberately no sandbox branch here."
+agent-repl ALWAYS launches plain `claude'.  There is deliberately no
+sandbox branch here, and there never was one: the retired `:sandbox'
+environment was a label, not a container."
   (let* ((base (concat "claude " claude-flags))
          (env-prefix (concat "AGENT_REPL_OWNED=1 "
                              (if config-dir
@@ -732,9 +618,7 @@ This is the `claude' backend's START-CMD-FN (see `agent-repl-backend').
 OPTS is a plist carrying `:session-id', `:fork-session-id',
 `:project-dir' and `:model' (any may be nil except `:project-dir').
 Returns the full shell command string, wrapping the perm-flag,
-config-dir and flag-assembly helpers.  The claude backend always
-launches plain `claude', never `claude-sandbox', so the command is
-never sandboxed and no Docker image is resolved."
+config-dir and flag-assembly helpers."
   (let* ((session-id      (plist-get opts :session-id))
          (fork-session-id (plist-get opts :fork-session-id))
          (project-dir     (plist-get opts :project-dir))
@@ -744,7 +628,7 @@ never sandboxed and no Docker image is resolved."
          ;; interactive-model fallback here (mirroring what
          ;; `--compute-claude-flags' resolves for the --model flag).
          (effective-model (or model agent-repl-interactive-model))
-         (perm-flag   (agent-repl--compute-perm-flag nil project-dir effective-model))
+         (perm-flag   (agent-repl--compute-perm-flag project-dir effective-model))
          (config-dir  (agent-repl--compute-config-dir project-dir))
          (claude-flags (agent-repl--compute-claude-flags
                         session-id fork-session-id perm-flag model)))
@@ -761,9 +645,9 @@ delivered on the process's stdin by the caller."
 
 (defun agent-repl--build-start-cmd (ws)
   "Build the shell command string to start the agent for workspace WS.
-Returns a plist (:cmd CMD :sandboxed-p BOOL :docker-image IMAGE
-:session-id ID :fork-session-id ID :worktree-p BOOL :active-env ENV :inst INST)
-with everything the caller needs for logging and mode-line setup.
+Returns a plist (:cmd CMD :session-id ID :fork-session-id ID
+:worktree-p BOOL :active-env ENV :inst INST) with everything the caller
+needs for logging and mode-line setup.
 
 The CLI-specific command assembly is delegated to WS's resolved
 backend (see `agent-repl--ws-backend' and `agent-repl-backend'); this
@@ -785,8 +669,6 @@ lookup, session-id resolution, mode-line metadata)."
                              :project-dir project-dir
                              :model model))))
     (list :cmd cmd
-          :sandboxed-p nil
-          :docker-image nil
           :session-id session-id
           :fork-session-id fork-session-id
           :worktree-p worktree-p
