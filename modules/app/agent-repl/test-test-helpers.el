@@ -191,6 +191,35 @@ clean; BODY runs after the load with the same bindings still active."
     ;; Act / Assert
     (should-error (agent-repl--frontend-http-request "GET" "http://x" nil))))
 
+(ert-deftest agent-repl-test-helpers-reinstall-rearms-a-redefined-wrapper ()
+  "Re-installing the guards re-arms a wrapper a production re-load re-`defun'-ed."
+  ;; Arrange: simulate a production re-load putting the real impl back.
+  (let ((guard (symbol-function 'agent-repl--frontend-http-request)))
+    (unwind-protect
+        (progn
+          (fset 'agent-repl--frontend-http-request (lambda (&rest _args) 'real-impl))
+          ;; Act
+          (agent-repl-test--reinstall-external-guards)
+          ;; Assert: the guard is back, so the boundary errors instead of running.
+          (should-error (agent-repl--frontend-http-request "GET" "http://x" nil)))
+      (fset 'agent-repl--frontend-http-request guard))))
+
+(ert-deftest agent-repl-test-helpers-reinstall-keeps-captured-original-real ()
+  "Re-installing leaves the captured original as the REAL impl, not a guard."
+  ;; Arrange
+  (let ((guard (symbol-function 'agent-repl--frontend-http-request))
+        (before (cdr (assq 'agent-repl--frontend-http-request
+                           agent-repl-test--external-original-functions))))
+    (unwind-protect
+        (progn
+          ;; Act
+          (agent-repl-test--reinstall-external-guards)
+          ;; Assert
+          (should (eq before
+                      (cdr (assq 'agent-repl--frontend-http-request
+                                 agent-repl-test--external-original-functions)))))
+      (fset 'agent-repl--frontend-http-request guard))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

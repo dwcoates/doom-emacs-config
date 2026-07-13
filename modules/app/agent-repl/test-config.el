@@ -32,22 +32,32 @@
 (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
   (load (expand-file-name "test-helpers.el" dir) nil t))
 
-;; `config.el' calls `--load-module' for every sub-file; stub it to a
-;; no-op so we get the early-recovery defuns + invocation without
-;; loading the full module.
-(unless (fboundp 'load!)
-  (defmacro load! (&rest _args)
-    "Test-only no-op stub: skip the sub-module loads in config.el."
-    nil))
-
-;; Loading `config.el' also invokes `agent-repl--early-recover-orphan-cherry-picks'
-;; against the host's real `~/.claude-emacs/workspaces.el', which is
-;; undesirable in a test run.  Suppress that invocation by binding the
-;; function to a no-op for the duration of the load.
-(cl-letf (((symbol-function 'message) #'ignore))
+;; `config.el' calls `agent-repl--load-module' for every sub-file; stub it
+;; to a no-op so we get the early-recovery defuns + invocation without
+;; re-loading the full module.
+;;
+;; This was previously spelled `(unless (fboundp 'load!) (defmacro load! ...))',
+;; which NEVER fired: test-helpers.el (loaded above) already defines `load!'
+;; as a real loader.  So this load re-loaded every production sub-module and
+;; re-`defun'-ed their external-boundary wrappers, DISARMING the guards
+;; test-helpers.el had installed — for the rest of the batch session, and
+;; therefore for every test file the aggregate loads after this one.  That is
+;; how `agent-repl-test-daemon-stop-deletes-and-clears' came to HTTP-GET the
+;; developer's real `claude-repld'.  The guards are re-armed below regardless,
+;; since `config.el' itself defines the two `--early-git-*' wrappers.
+(cl-letf (((symbol-function 'message) #'ignore)
+          ((symbol-function 'agent-repl--load-module) (lambda (&rest _args) nil)))
+  ;; Loading `config.el' also invokes `agent-repl--early-recover-orphan-cherry-picks'
+  ;; against the host's real `~/.claude-emacs/workspaces.el', which is
+  ;; undesirable in a test run.  Suppress that invocation by binding the
+  ;; function to a no-op for the duration of the load.
   (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
     (defun agent-repl--early-recover-orphan-cherry-picks () nil)
     (load (expand-file-name "config.el" dir) nil t)))
+
+;; Re-arm the boundary guards over the wrappers this load re-`defun'-ed.
+(when noninteractive
+  (agent-repl-test--reinstall-external-guards))
 
 ;;;; ---- Test helpers ----
 
@@ -352,6 +362,17 @@ is exactly the thing the user has to see."
                  (setq delegated (list ws (apply #'format fmt args))))))
       (agent-repl--boot-warn "bad %s" "thing")
       (should (equal delegated '(nil "bad thing"))))))
+
+(ert-deftest agent-repl-config-test-boundary-guards-survive-the-config-reload ()
+  "This file's `config.el' load leaves the external-boundary guards armed.
+Regression guard: the load used to re-`defun' the production wrappers and
+disarm every guard for the rest of the batch session, so tests in files
+loaded after this one silently reached the real `git' / `gh' / daemon."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl--early-git-string "rev-parse" "HEAD")
+                :type 'error)
+  (should-error (agent-repl--frontend-http-request "GET" "http://x" nil)
+                :type 'error))
 
 (provide 'test-config)
 
