@@ -68,7 +68,12 @@ function hue(hex: string): number {
   return (raw * 60 + 360) % 360;
 }
 
-/** Whether a `#rrggbb` literal reads as turquoise: cyan-green, between teal and aqua. */
+/**
+ * Whether a `#rrggbb` literal reads as turquoise: cyan-green, between teal and
+ * aqua. BOTH special card washes live in this band on purpose — the skill
+ * handoff and the spawned subagent — so hue alone never tells them apart. What
+ * separates them is depth, which the "subagent card" suite pins.
+ */
 function isTurquoise(hex: string): boolean {
   const h = hue(hex);
   return h >= 160 && h <= 195;
@@ -317,6 +322,101 @@ describe("turn-complete chip", () => {
     // Arrange / Act — the dark-scheme palette override.
     // Assert
     expect(darkTheme).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
+  });
+});
+
+const agentCard = blockAfter(css, ".tool-card.tool-agent");
+const agentJson = blockAfter(css, ".agent-json {");
+const agentJsonOpen = blockAfter(css, ".agent-input.expanded .agent-json");
+
+describe("subagent card", () => {
+  it("washes the subagent card in the teal token rather than the tool-card grey", () => {
+    // Arrange / Act — the .tool-card.tool-agent rule.
+    // Assert
+    expect(agentCard).toMatch(/background:\s*var\(--agent-card\)/);
+  });
+
+  it("carries the legacy Task name into the same teal wash", () => {
+    // Arrange / Act — Agent and Task are one tool under two names.
+    // Assert
+    expect(css).toMatch(/\.tool-card\.tool-agent,\s*\.tool-card\.tool-task/);
+  });
+
+  it("outranks the grey .tool-card background by carrying an extra class", () => {
+    // Arrange / Act — two classes beat one, so source order cannot strand the wash.
+    // Assert
+    expect(agentCard).not.toContain("!important");
+    expect(css.indexOf(".tool-card.tool-agent")).toBeGreaterThan(css.indexOf(".tool-card {"));
+  });
+
+  it("defines a teal card token for the light theme", () => {
+    // Arrange / Act
+    const teal = isTurquoise(token(lightTheme, "--agent-card"));
+    // Assert
+    expect(teal).toBe(true);
+  });
+
+  it("defines a teal card token for the dark theme", () => {
+    // Arrange / Act
+    const teal = isTurquoise(token(darkTheme, "--agent-card"));
+    // Assert
+    expect(teal).toBe(true);
+  });
+
+  it("sinks the dark-theme card token below the light-theme one", () => {
+    // Arrange
+    const [dark, light] = [token(darkTheme, "--agent-card"), token(lightTheme, "--agent-card")];
+    // Act
+    const darker = luminance(dark) < luminance(light);
+    // Assert
+    expect(darker).toBe(true);
+  });
+
+  it("sinks the light-theme subagent wash below the skill wash it shares a hue with", () => {
+    // Arrange — both washes are turquoise, so only depth can tell a spawned
+    // subagent apart from a skill handoff sitting next to it in the feed.
+    const [agent, skill] = [token(lightTheme, "--agent-card"), token(lightTheme, "--skill-bg")];
+    // Act
+    const separation = luminance(skill) - luminance(agent);
+    // Assert — a token or two apart would still read as the same card.
+    expect(separation).toBeGreaterThan(20);
+  });
+
+  it("lifts the dark-theme subagent wash clear of the skill wash it shares a hue with", () => {
+    // Arrange — the dark theme inverts which of the two is the deeper wash.
+    const [agent, skill] = [token(darkTheme, "--agent-card"), token(darkTheme, "--skill-bg")];
+    // Act
+    const separation = Math.abs(luminance(agent) - luminance(skill));
+    // Assert
+    expect(separation).toBeGreaterThan(10);
+  });
+});
+
+describe("subagent input fold", () => {
+  it("keeps the card's description class off the topbar roster's own .agent-desc", () => {
+    // Arrange / Act — two different components: the roster row ellipsizes its
+    // label, the card description wraps. One class for both would cross-style them.
+    // Assert
+    expect(blockAfter(css, ".agent-input-desc")).toMatch(/white-space:\s*pre-wrap/);
+    expect(blockAfter(css, ".agent-desc {")).not.toMatch(/white-space/);
+  });
+
+  it("folds the subagent's input JSON away entirely until the card is opened", () => {
+    // Arrange / Act — a height cap would still leak a peek of a pages-long prompt.
+    // Assert
+    expect(agentJson).toMatch(/display:\s*none/);
+  });
+
+  it("unfolds the input JSON once the section carries the expanded class", () => {
+    // Arrange / Act — the .agent-input.expanded .agent-json rule.
+    // Assert
+    expect(agentJsonOpen).toMatch(/display:\s*block/);
+  });
+
+  it("outranks the fold from the open rule rather than reaching for !important", () => {
+    // Arrange / Act — three classes beat one at any source position.
+    // Assert
+    expect(agentJsonOpen).not.toContain("!important");
   });
 });
 
