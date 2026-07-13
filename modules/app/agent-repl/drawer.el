@@ -25,10 +25,10 @@
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-drawer-width-fraction 0.20
+(defcustom agent-repl-drawer-width-fraction 0.30
   "Fraction of the frame width the drawer should occupy.
 Computed against `frame-width' so the drawer scales with the frame.
-Capped at 20% by default — the drawer is meant to stay open during
+Capped at 30% by default — the drawer is meant to stay open during
 work, not dominate the layout.
 
 This is the SOLE determinant of drawer width: the width is always
