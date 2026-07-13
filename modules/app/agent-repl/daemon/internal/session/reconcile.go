@@ -166,7 +166,11 @@ func (s *Session) ReconcileModel() {
 // is the caller's clock; a nil channel means the session mints its own at
 // INTERVAL. A non-positive INTERVAL with no TICKS disables the check
 // entirely (fake sessions, which have no transcript to reconcile against).
-func (s *Session) runModelReconciler(ticks <-chan time.Time, interval time.Duration) {
+// runDone bounds the reconciler to ONE shim's run, not to the session's
+// whole life: a hibernated session has no CLI to reconcile a model
+// against, and its Run has already returned. Reviving starts a fresh
+// reconciler with a fresh runDone, so the two never coexist.
+func (s *Session) runModelReconciler(runDone <-chan struct{}, ticks <-chan time.Time, interval time.Duration) {
 	if ticks == nil {
 		if interval <= 0 {
 			return
@@ -177,7 +181,7 @@ func (s *Session) runModelReconciler(ticks <-chan time.Time, interval time.Durat
 	}
 	for {
 		select {
-		case <-s.done:
+		case <-runDone:
 			return
 		case _, ok := <-ticks:
 			if !ok {
