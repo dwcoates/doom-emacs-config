@@ -25,6 +25,27 @@ export type PermissionMode =
   | "dontAsk"
   | "delegate";
 
+/**
+ * The PermissionMode enum, once. Both the command decoder and the
+ * `--permission-mode` flag parser gate on THIS: the two used to carry
+ * hand-written copies of the list, they drifted, and the decoder's copy
+ * silently rejected every CLI-era mode the topbar offers.
+ */
+export const PERMISSION_MODES: readonly PermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "auto",
+  "manual",
+  "dontAsk",
+  "delegate",
+];
+
+export function isPermissionMode(v: unknown): v is PermissionMode {
+  return typeof v === "string" && (PERMISSION_MODES as readonly string[]).includes(v);
+}
+
 export interface Usage {
   input_tokens: number;
   output_tokens: number;
@@ -349,14 +370,8 @@ export function decodeCommandLine(line: string): ShimCommand | null {
       break;
     }
     case "set-permission-mode": {
-      const mode = frame.mode;
-      if (
-        mode !== "default" &&
-        mode !== "acceptEdits" &&
-        mode !== "bypassPermissions" &&
-        mode !== "plan"
-      ) {
-        throw new ProtocolError(`set-permission-mode invalid mode: ${String(mode)}`);
+      if (!isPermissionMode(frame.mode)) {
+        throw new ProtocolError(`set-permission-mode invalid mode: ${String(frame.mode)}`);
       }
       break;
     }
