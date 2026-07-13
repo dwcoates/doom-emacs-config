@@ -1700,6 +1700,140 @@ dispatcher — same rationale as global-next."
               (should-not unfocused-called)))
         (kill-buffer buf)))))
 
+;;;; ---- Realtime workspace follow (C-S-n / C-S-p) ----
+
+(defmacro agent-repl-drawer-test--with-follow-drawer (&rest body)
+  "Render the drawer, park the cursor on its first workspace, run BODY.
+BODY runs with `switched' bound to a list collecting every workspace
+`agent-repl--ws-switch' is asked to switch to, so a test reads the follow
+purely as the switches it provoked."
+  (declare (indent 0) (debug body))
+  `(let ((buf (get-buffer-create agent-repl-drawer-buffer-name))
+         (switched nil))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                    (lambda (ws &rest _) (push ws switched)))
+                   ((symbol-function 'agent-repl-drawer--leave-side-window-before-switch)
+                    #'ignore))
+           (with-current-buffer buf
+             (agent-repl-drawer-mode)
+             (agent-repl-drawer--render)
+             (agent-repl-drawer--goto-first-workspace))
+           ,@body)
+       (kill-buffer buf))))
+
+(ert-deftest agent-repl-drawer-test-global-next-switches-to-the-entry-it-lands-on ()
+  "`agent-repl-drawer-global-next' switches to the workspace the cursor
+moved ONTO — the realtime half of the nav, so walking the list walks the
+workspaces without a separate visit."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "first"  :priority "p1")
+    (agent-repl-drawer-test--register "second" :priority "p2")
+    (agent-repl-drawer-test--with-follow-drawer
+      (agent-repl-drawer-global-next)
+      (should (equal switched '("second"))))))
+
+(ert-deftest agent-repl-drawer-test-global-prev-switches-to-the-entry-it-lands-on ()
+  "`agent-repl-drawer-global-prev' follows the cursor upward the same way
+`agent-repl-drawer-global-next' follows it downward."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "first"  :priority "p1")
+    (agent-repl-drawer-test--register "second" :priority "p2")
+    (agent-repl-drawer-test--with-follow-drawer
+      (agent-repl-drawer-global-next)
+      (agent-repl-drawer-global-prev)
+      (should (equal switched '("first" "second"))))))
+
+(ert-deftest agent-repl-drawer-test-follow-switches-after-the-cursor-moved ()
+  "The follow reads the cursor AFTER the move, never before: two `C-S-n'
+presses in a row land on the third entry, not twice on the second."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "first"  :priority "p1")
+    (agent-repl-drawer-test--register "second" :priority "p2")
+    (agent-repl-drawer-test--register "third"  :priority "p3")
+    (agent-repl-drawer-test--with-follow-drawer
+      (agent-repl-drawer-global-next)
+      (agent-repl-drawer-global-next)
+      (should (equal switched '("third" "second"))))))
+
+(ert-deftest agent-repl-drawer-test-follow-skips-the-already-active-workspace ()
+  "The follow makes no switch when the cursor already sits on the active
+workspace — a redundant persp round-trip is not a navigation."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "test-ws" :priority "p1")
+    (agent-repl-drawer-test--with-follow-drawer
+      (agent-repl-drawer--follow-cursor-workspace)
+      (should-not switched))))
+
+(ert-deftest agent-repl-drawer-test-follow-skips-a-repo-group-header ()
+  "The follow makes no switch when the cursor sits on a repo group header
+— a repo names no workspace to switch to."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "first"  :priority "p1")
+    (agent-repl-drawer-test--with-follow-drawer
+      (with-current-buffer buf
+        (should (agent-repl-drawer--goto-repo-line
+                 agent-repl-drawer-test--group-key)))
+      (agent-repl-drawer--follow-cursor-workspace)
+      (should-not switched))))
+
+(ert-deftest agent-repl-drawer-test-follow-skips-a-merged-workspace ()
+  "The follow never switches to a MERGED workspace: its persp is torn down,
+so a switch would reactivate it (a fresh persp plus a fresh agent session)
+as a side effect of merely scrolling past its entry."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "live"   :priority "p1")
+    (agent-repl-drawer-test--register "merged" :merge-completed t)
+    (agent-repl-drawer-test--with-follow-drawer
+      (with-current-buffer buf
+        (should (agent-repl-drawer--goto-workspace-line "merged")))
+      (agent-repl-drawer--follow-cursor-workspace)
+      (should-not switched))))
+
+(ert-deftest agent-repl-drawer-test-follow-never-reactivates-a-merged-workspace ()
+  "Landing on a MERGED entry must not call `--reactivate-merged' — that
+revival is `agent-repl-drawer-visit''s deliberate act, never the follow's."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "live"   :priority "p1")
+    (agent-repl-drawer-test--register "merged" :merge-completed t)
+    (let ((reactivated nil))
+      (cl-letf (((symbol-function 'agent-repl-drawer--reactivate-merged)
+                 (lambda (ws) (setq reactivated ws))))
+        (agent-repl-drawer-test--with-follow-drawer
+          (with-current-buffer buf
+            (should (agent-repl-drawer--goto-workspace-line "merged")))
+          (agent-repl-drawer--follow-cursor-workspace)
+          (should-not reactivated))))))
+
+(ert-deftest agent-repl-drawer-test-follow-leaves-the-side-window-before-switching ()
+  "The follow switches from a non-side window, exactly as
+`agent-repl-drawer-visit' does: a persp switch anchored on the drawer's
+side window can clobber the destination workspace's panels."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "first"  :priority "p1")
+    (agent-repl-drawer-test--register "second" :priority "p2")
+    (let ((buf (get-buffer-create agent-repl-drawer-buffer-name))
+          (order nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                     (lambda (_ws &rest _) (push 'switch order)))
+                    ((symbol-function 'agent-repl-drawer--leave-side-window-before-switch)
+                     (lambda () (push 'leave-side-window order))))
+            (with-current-buffer buf
+              (agent-repl-drawer-mode)
+              (agent-repl-drawer--render)
+              (agent-repl-drawer--goto-first-workspace))
+            (agent-repl-drawer-global-next)
+            (should (equal (nreverse order) '(leave-side-window switch))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-drawer-test-follow-errors-when-no-drawer ()
+  "`--follow-cursor-workspace' signals when no drawer buffer exists — the
+same contract as `--call-in-drawer', whose cursor it reads."
+  (when-let ((b (get-buffer agent-repl-drawer-buffer-name)))
+    (kill-buffer b))
+  (should-error (agent-repl-drawer--follow-cursor-workspace) :type 'user-error))
+
 (ert-deftest agent-repl-drawer-test-sync-cursor-to-current-ws ()
   "`--sync-cursor-to-current-ws' positions point on the current ws's entry."
   (agent-repl-test--with-clean-state
