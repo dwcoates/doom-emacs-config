@@ -970,12 +970,12 @@ so the dedicated vterm window is un-dedicated before the buffer swap."
       (agent-repl--safe-delete-window
        vterm-win (agent-repl--panel-fallback-buffer ws)))))
 
-(defun agent-repl--on-simple-close (&optional ws)
-  "Bookkeep + hide panels; do NOT touch tab-bar order.
-Sets `:repl-state :inactive' on WS (`:agent-state' untouched so an
-in-flight :thinking / :permission survives the close), then hides
-the panel windows.  No save-tab-index, no push-to-back, no flash —
-this is the simple-close audit point that `SPC o c' is bound to.
+(defun agent-repl--vterm-hide-view (ws)
+  "Put WS's vterm view away.  The vterm frontend's `:hide-fn'.
+
+PURE view teardown, with no bookkeeping: the `:repl-state' write belongs
+to the close commands, which own it for every frontend (see
+`agent-repl--frontend-dispatch-hide').
 
 The panels fill the frame (fullscreen is the only display format).
 When a pre-panel layout was captured at open time, restores it via
@@ -990,6 +990,36 @@ windows on screen), replaces both panels with a single fallback buffer
 via `agent-repl--replace-panels-with-fallback' — the workspace's
 magit-status buffer when one already exists, else the Doom splash —
 rather than stranding the output window."
+  (if (agent-repl--restore-fullscreen-config ws)
+      (agent-repl--hide-panels)
+    (agent-repl--replace-panels-with-fallback ws)))
+
+(defun agent-repl--close-view (ws vterm-teardown)
+  "Put WS's view away as part of a close, dispatching through its frontend.
+
+A gui workspace closes its WEBVIEW, through the registry's hide capability.
+Anything else runs VTERM-TEARDOWN, a thunk: a vterm workspace, or a nil WS,
+which has no frontend to resolve at all.
+
+The thunk exists because the two close commands do NOT share a vterm
+teardown — `agent-repl--on-simple-close' falls back to a replacement buffer
+where `agent-repl--on-close' does not — and this change is about giving the
+gui the close BOOKKEEPING it never had, not about quietly rewriting what a
+vterm close does."
+  (if (and ws (agent-repl--ws-gui-frontend-p ws))
+      (agent-repl--frontend-dispatch-hide ws)
+    (funcall vterm-teardown)))
+
+(defun agent-repl--on-simple-close (&optional ws)
+  "Bookkeep + hide the view; do NOT touch tab-bar order.
+Sets `:repl-state :inactive' on WS (`:agent-state' untouched so an
+in-flight :thinking / :permission survives the close), then puts the view
+away through WS's own frontend — the vterm panels for a vterm workspace,
+the webview for a gui one.  No save-tab-index, no push-to-back, no flash —
+this is the simple-close audit point that `SPC o c' is bound to.
+
+The teardown is frontend-dispatched rather than hard-wired to the vterm
+panels, so a gui workspace closes its actual view AND records that it did."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
@@ -997,9 +1027,7 @@ rather than stranding the output window."
       (agent-repl--log ws "on-simple-close ws=%s agent-state=%s -> repl-state=:inactive"
                         ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-set-repl-state ws :inactive))
-    (if (agent-repl--restore-fullscreen-config ws)
-        (agent-repl--hide-panels)
-      (agent-repl--replace-panels-with-fallback ws))))
+    (agent-repl--close-view ws (lambda () (agent-repl--vterm-hide-view ws)))))
 
 (defun agent-repl--on-close (&optional ws)
   "Full close: bookkeep + restore pre-panel layout + hide + deprio + save tab index.
@@ -1028,8 +1056,11 @@ hides panels but skips the bookkeeping write and the tab shuffle."
       (agent-repl--log ws "on-close ws=%s agent-state=%s -> repl-state=:hidden"
                         ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-set-repl-state ws :hidden))
-    (agent-repl--restore-fullscreen-config ws)
-    (agent-repl--hide-panels)
+    (agent-repl--close-view
+     ws
+     (lambda ()
+       (agent-repl--restore-fullscreen-config ws)
+       (agent-repl--hide-panels)))
     (when (and ws (equal ws (agent-repl--ws-current-name)))
       (agent-repl--save-tab-index ws)
       (agent-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
@@ -1488,9 +1519,18 @@ workspace that is already hidden / never-started should still mark it
                       vterm-running session-starting panels-visible
                       (if selection "yes" "no") (if always-close "yes" "no"))
     (cond
-     ;; GUI frontend: its own three-way toggle (send-selection / hide /
+     ;; GUI frontend: its own three-way toggle (send-selection / close /
      ;; open-or-show) — the vterm branches below reason about vterm
      ;; process state and panel pairs that do not exist for the gui.
+     ;;
+     ;; The close branches route through CLOSE-FN, exactly as the vterm
+     ;; branches do, rather than calling the frontend's hide capability
+     ;; directly.  Calling hide directly is what left a gui workspace
+     ;; closing WITHOUT any of the bookkeeping that goes with a close: no
+     ;; `:repl-state', so hide-mode could never sweep it, and on `SPC o C'
+     ;; no deprio, no tab shuffle and no session kill either.  CLOSE-FN
+     ;; owns all of that and dispatches the view teardown back through this
+     ;; workspace's own frontend.
      ((agent-repl--ws-gui-frontend-p ws)
       (let ((fe (agent-repl--ws-frontend ws))
             (webview (agent-repl--ws-get ws :frontend-buffer)))
@@ -1499,9 +1539,15 @@ workspace that is already hidden / never-started should still mark it
           (agent-repl--log ws "toggle[gui]: branch=send-selection")
           (deactivate-mark)
           (agent-repl--send-to-agent selection))
+         ;; `SPC o C' means "done with this workspace" whether or not its
+         ;; view happens to be on screen — the same contract it has for a
+         ;; vterm.
+         (always-close
+          (agent-repl--log ws "toggle[gui]: branch=always-close")
+          (funcall close-fn))
          ((and (buffer-live-p webview) (get-buffer-window webview))
-          (agent-repl--log ws "toggle[gui]: branch=hide")
-          (funcall (agent-repl-frontend-hide-fn fe) ws))
+          (agent-repl--log ws "toggle[gui]: branch=close")
+          (funcall close-fn))
          ((funcall (agent-repl-frontend-running-p-fn fe) ws)
           (agent-repl--log ws "toggle[gui]: branch=show")
           (funcall (agent-repl-frontend-show-fn fe) ws))
@@ -1925,11 +1971,12 @@ actually delivered to a live vterm."
   :interrupt-fn #'agent-repl--vterm-interrupt
   :running-p-fn (lambda (ws) (agent-repl--agent-running-p ws))
   :show-fn (lambda (_ws) (agent-repl--show-hidden-panels))
-  ;; The hide capability is the SPC-o-c CLOSE semantic (restore the
-  ;; pre-panel layout, mark :inactive), not the bare window hide —
-  ;; the gui frontend's hide is its analog, and the frontend switch
-  ;; composes hide+open, so both must leave a clean frame behind.
-  :hide-fn (lambda (ws) (agent-repl--on-simple-close ws))
+  ;; The hide capability is PURE view teardown (restore the pre-panel
+  ;; layout, else swap in the fallback buffer) — the gui frontend's
+  ;; `--gui-hide' is its exact analog.  The `:repl-state' bookkeeping that
+  ;; goes with a close is deliberately NOT here: it belongs to the close
+  ;; commands, which own it once for every frontend.
+  :hide-fn #'agent-repl--vterm-hide-view
   :restart-fn (lambda (ws)
                 (agent-repl--vterm-kill ws)
                 (agent-repl--initialize-agent ws))
