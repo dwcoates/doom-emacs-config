@@ -471,6 +471,24 @@ pre {
   background: var(--turn-complete-bg);
   border-color: var(--turn-complete-border);
 }
+/* A completed turn's chip rides INSIDE the answer it closes, centered along
+   the bottom of the bubble's body column: the turn's ending belongs to the
+   response it ended on, not to a pill adrift in the feed below it. The chip
+   sits in the BODY rather than in the bubble itself, since the bubble is the
+   flex row that pins the turn's time stamp to its corner — a chip parked
+   there would land in a third column beside the stamp, not under the prose.
+   - `width: fit-content` shrinks the pill back around its own text, which the
+     feed's flex column would otherwise do (`align-self`) but the body's block
+     flow will not.
+   - `auto` side margins center it, and the bottom margin sits it clear of the
+     bubble's floor rather than flush against the padding.
+   The specificity here outranks `.md .bubble-body > :last-child`, whose
+   margin-bottom: 0 would otherwise flatten that gap the moment the chip
+   became the body's last child. */
+.bubble.assistant.final-response .bubble-body > .result {
+  width: fit-content;
+  margin: 0.7rem auto 0.2rem;
+}
 
 .compact-divider, .system-note, .retry-badge {
   align-self: center;

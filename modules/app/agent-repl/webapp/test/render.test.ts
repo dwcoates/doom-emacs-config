@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   backfillChunks,
   diffHtml,
-  finalResponseBlockIds,
+  finalResponses,
   formatDuration,
   formatTurnTime,
   itemKey,
@@ -65,7 +65,7 @@ function thinking(blockId: string, done = true): ConversationItem {
 }
 
 /** A result frame closing a turn with the given subtype. */
-function result(subtype: ResultItem["subtype"] = "success"): ConversationItem {
+function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
   return {
     kind: "result",
     subtype,
@@ -89,6 +89,11 @@ function tool(): ConversationItem {
     input: {},
     inputDone: true,
   };
+}
+
+/** The finals of a one-turn feed that ITEM closes, as renderItem takes them. */
+function finalsClosing(item: ConversationItem, subtype: ResultItem["subtype"] = "success") {
+  return finalResponses([userTurnAt(9, 0), item, result(subtype)]);
 }
 
 describe("formatTurnTime", () => {
@@ -455,9 +460,73 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, true);
+    const html = renderItem(item, undefined, finalsClosing(item));
     // Assert
     expect(html).toContain(`class="bubble assistant md final-response"`);
+  });
+
+  it("nests the completed turn's chip inside the final response it closes", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "done",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act
+    const html = renderItem(item, undefined, finalsClosing(item));
+    // Assert — the chip's div opens before the bubble's div closes.
+    expect(html).toMatch(/<div class="bubble assistant md final-response">[\s\S]*class="result ok done"/);
+  });
+
+  it("seats the nested chip below the answer's own text", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "the answer",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act
+    const html = renderItem(item, undefined, finalsClosing(item));
+    // Assert — the chip trails the prose it closes rather than heading it.
+    expect(html.indexOf(`class="result`)).toBeGreaterThan(html.indexOf("the answer"));
+  });
+
+  it("nests the chip inside a final response rendered as a metaprompt tree", () => {
+    // Arrange — the tree path builds its own bubble, so it must carry the chip too.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "Response (👀 no changes made)\n\n1 👀 Answer\n├── 1.1 First\n└── 1.2 Second",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act
+    const html = renderItem(item, undefined, finalsClosing(item));
+    // Assert
+    expect(html).toMatch(/<div class="bubble assistant md final-response">[\s\S]*class="result ok done"/);
+  });
+
+  it("withholds the chip from a bubble that is not a turn's final response", () => {
+    // Arrange — commentary the agent emitted before its answer.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "working on it",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act
+    const html = renderItem(item, undefined, finalsClosing(text("b2")));
+    // Assert
+    expect(html).not.toContain(`class="result`);
   });
 
   it("pulses a text block flagged as the working frontier", () => {
@@ -471,7 +540,7 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, false, true);
+    const html = renderItem(item, undefined, undefined, true);
     // Assert
     expect(html).toContain(`class="bubble assistant md pulsing"`);
   });
@@ -487,7 +556,7 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, false, true);
+    const html = renderItem(item, undefined, undefined, true);
     // Assert
     expect(html).toContain(`class="bubble assistant md pulsing"`);
   });
@@ -503,7 +572,7 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, false, false);
+    const html = renderItem(item, undefined, undefined, false);
     // Assert
     expect(html).not.toContain("pulsing");
   });
@@ -519,7 +588,7 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, false);
+    const html = renderItem(item, undefined, undefined);
     // Assert
     expect(html).not.toContain("final-response");
   });
@@ -535,7 +604,7 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, true);
+    const html = renderItem(item, undefined, finalsClosing(item));
     // Assert
     expect(html).toContain(`class="bubble assistant md final-response"`);
   });
@@ -1424,59 +1493,89 @@ describe("ResultChip", () => {
   });
 });
 
-describe("finalResponseBlockIds", () => {
+describe("finalResponses", () => {
   it("marks the last text block of a completed turn", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), result()];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect([...finals]).toEqual(["b1"]);
+    expect([...finals.chips.keys()]).toEqual(["b1"]);
+  });
+
+  it("pairs the completed turn's answer with the very chip that closes it", () => {
+    // Arrange — the pairing is what lets the bubble draw the chip itself.
+    const closer = result();
+    const items = [userTurnAt(9, 0), text("b1"), closer];
+    // Act
+    const finals = finalResponses(items);
+    // Assert
+    expect(finals.chips.get("b1")).toBe(closer);
+  });
+
+  it("swallows the result a final response now draws for itself", () => {
+    // Arrange
+    const closer = result();
+    const items = [userTurnAt(9, 0), text("b1"), closer];
+    // Act
+    const finals = finalResponses(items);
+    // Assert — the feed no longer prints this one standalone.
+    expect(finals.swallowed.has(closer)).toBe(true);
   });
 
   it("leaves a completed turn's earlier text block unmarked", () => {
     // Arrange — commentary, then a tool call, then the answer.
     const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2"), result()];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.has("b1")).toBe(false);
+    expect(finals.chips.has("b1")).toBe(false);
   });
 
   it("marks the text block that follows a completed turn's last tool call", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2"), result()];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.has("b2")).toBe(true);
+    expect(finals.chips.has("b2")).toBe(true);
   });
 
   it("leaves a still-streaming turn's text unmarked until its result lands", () => {
     // Arrange — no result frame yet, so the next block could still continue it.
     const items = [userTurnAt(9, 0), text("b1")];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.size).toBe(0);
+    expect(finals.chips.size).toBe(0);
   });
 
   it("leaves an aborted turn's last text unmarked", () => {
     // Arrange — an interrupted turn never reached the answer it worked toward.
     const items = [userTurnAt(9, 0), text("b1"), result("aborted")];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.size).toBe(0);
+    expect(finals.chips.size).toBe(0);
+  });
+
+  it("leaves an aborted turn's chip standing in the feed", () => {
+    // Arrange — no bubble claims it, so the feed keeps printing it itself.
+    const closer = result("aborted");
+    const items = [userTurnAt(9, 0), text("b1"), closer];
+    // Act
+    const finals = finalResponses(items);
+    // Assert
+    expect(finals.swallowed.has(closer)).toBe(false);
   });
 
   it("leaves a failed turn's last text unmarked", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), result("error_during_execution")];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.size).toBe(0);
+    expect(finals.chips.size).toBe(0);
   });
 
   it("marks the final text of every completed turn in the feed", () => {
@@ -1490,27 +1589,69 @@ describe("finalResponseBlockIds", () => {
       result(),
     ];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect([...finals]).toEqual(["b1", "b2"]);
+    expect([...finals.chips.keys()]).toEqual(["b1", "b2"]);
   });
 
   it("marks nothing for a completed turn that produced no text at all", () => {
     // Arrange — a turn that only ran tools.
     const items = [userTurnAt(9, 0), tool(), result()];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.size).toBe(0);
+    expect(finals.chips.size).toBe(0);
+  });
+
+  it("leaves a textless completed turn's chip standing in the feed", () => {
+    // Arrange — a tools-only turn wrote no answer for the chip to sit inside.
+    const closer = result();
+    const items = [userTurnAt(9, 0), tool(), closer];
+    // Act
+    const finals = finalResponses(items);
+    // Assert
+    expect(finals.swallowed.has(closer)).toBe(false);
   });
 
   it("never lets a resultless turn's text be claimed by the next turn's result", () => {
     // Arrange — turn one never closed; turn two ran tools only and completed.
     const items = [userTurnAt(9, 0), text("b1"), userTurnAt(9, 5), tool(), result()];
     // Act
-    const finals = finalResponseBlockIds(items);
+    const finals = finalResponses(items);
     // Assert
-    expect(finals.size).toBe(0);
+    expect(finals.chips.size).toBe(0);
+  });
+});
+
+describe("swallowed chips", () => {
+  it("prints no standalone chip for a result a final response swallowed", () => {
+    // Arrange
+    const closer = result();
+    const finals = finalResponses([userTurnAt(9, 0), text("b1"), closer]);
+    // Act
+    const html = renderItem(closer, undefined, finals);
+    // Assert — the bubble above it already drew this chip.
+    expect(html).toBe("");
+  });
+
+  it("still prints the standalone chip of an aborted turn", () => {
+    // Arrange
+    const closer = result("aborted");
+    const finals = finalResponses([userTurnAt(9, 0), text("b1"), closer]);
+    // Act
+    const html = renderItem(closer, undefined, finals);
+    // Assert
+    expect(html).toContain(`class="result ok"`);
+  });
+
+  it("still prints the standalone chip of a completed turn that wrote no answer", () => {
+    // Arrange — a tools-only turn has no bubble to nest the chip in.
+    const closer = result();
+    const finals = finalResponses([userTurnAt(9, 0), tool(), closer]);
+    // Act
+    const html = renderItem(closer, undefined, finals);
+    // Assert
+    expect(html).toContain(`class="result ok done"`);
   });
 });
 
