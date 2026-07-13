@@ -1173,6 +1173,40 @@ appear as subbullets of the \"is pre-existing\" claim."
     (should-not (agent-repl--should-prepend-metaprompt-p "42" 0))
     (should-not (agent-repl--should-prepend-metaprompt-p "0" 0))))
 
+;;;; ---- Tests: slash-command-p ----
+
+(ert-deftest agent-repl-test-slash-command-p-bare-command ()
+  "A lone `/name' is a slash command."
+  (should (agent-repl--slash-command-p "/compact"))
+  (should (agent-repl--slash-command-p "/debug-logs")))
+
+(ert-deftest agent-repl-test-slash-command-p-command-with-args ()
+  "A `/name' followed by arguments is a slash command."
+  (should (agent-repl--slash-command-p "/analyze-position e4 detailed")))
+
+(ert-deftest agent-repl-test-slash-command-p-namespaced ()
+  "A plugin-namespaced `/plugin:name' is a slash command."
+  (should (agent-repl--slash-command-p "/gns-cowork:gns-bootstrap")))
+
+(ert-deftest agent-repl-test-slash-command-p-rejects-path ()
+  "A Unix path is NOT a slash command: its name run is stopped by the
+second slash rather than by whitespace or end."
+  (should-not (agent-repl--slash-command-p "/Users/foo/bar"))
+  (should-not (agent-repl--slash-command-p "/etc/hosts")))
+
+(ert-deftest agent-repl-test-slash-command-p-rejects-leading-whitespace ()
+  "A `/' preceded by whitespace is NOT a slash command, matching the CLI's
+true-message-start rule."
+  (should-not (agent-repl--slash-command-p "  /compact")))
+
+(ert-deftest agent-repl-test-slash-command-p-rejects-bare-slash ()
+  "A lone `/' with no name is not yet a slash command."
+  (should-not (agent-repl--slash-command-p "/")))
+
+(ert-deftest agent-repl-test-slash-command-p-rejects-mid-message-slash ()
+  "A `/' that is not at the start is not a slash command."
+  (should-not (agent-repl--slash-command-p "please run /compact")))
+
 ;;;; ---- Tests: skip-metaprompt-p ----
 
 (ert-deftest agent-repl-test-skip-metaprompt-exempt-strings ()
@@ -1196,8 +1230,27 @@ appear as subbullets of the \"is pre-existing\" claim."
   "`agent-repl--skip-metaprompt-p' returns nil for normal input."
   (should-not (agent-repl--skip-metaprompt-p "hello world"))
   (should-not (agent-repl--skip-metaprompt-p "fix the bug"))
-  (should-not (agent-repl--skip-metaprompt-p "/clearsomething"))
   (should-not (agent-repl--skip-metaprompt-p "123abc")))
+
+(ert-deftest agent-repl-test-skip-metaprompt-any-slash-command ()
+  "`agent-repl--skip-metaprompt-p' skips ANY slash command, not just the
+four exempt strings."
+  (should (agent-repl--skip-metaprompt-p "/debug-logs"))
+  (should (agent-repl--skip-metaprompt-p "/analyze-position e4"))
+  (should (agent-repl--skip-metaprompt-p "/gns-cowork:gns-bootstrap")))
+
+(ert-deftest agent-repl-test-skip-metaprompt-unknown-slash-command ()
+  "A slash-prefixed token that is not a real command is still treated as a
+slash command, so it too skips the metaprompt."
+  ;; `/clearsomething' used to get the metaprompt (it is not `/clear'); under
+  ;; the general slash-command rule it no longer does.
+  (should (agent-repl--skip-metaprompt-p "/clearsomething")))
+
+(ert-deftest agent-repl-test-skip-metaprompt-path-is-not-a-command ()
+  "A Unix path that merely starts with `/' is NOT a slash command, so it
+still gets the metaprompt."
+  (should-not (agent-repl--skip-metaprompt-p "/Users/foo/bar.el has a bug"))
+  (should-not (agent-repl--skip-metaprompt-p "/etc/hosts")))
 
 ;;;; ---- Tests: prepare-input ----
 
@@ -1292,10 +1345,13 @@ command when the metaprompt is not due to fire."
       (should (equal (agent-repl--prepare-input "ws1" "/workspace-generation do it")
                      "/workspace-generation do it [source-ws:ws1 path:/repo/root]")))))
 
-(ert-deftest agent-repl-test-prepare-input-source-ws-tag-survives-metaprepend ()
-  "When BOTH the metaprompt prefix and the source-ws tag apply, the
-metaprompt wraps the front and the source-ws tag stays appended at the end —
-the two decorations compose rather than one clobbering the other."
+(ert-deftest agent-repl-test-prepare-input-wor-command-gets-tag-not-metaprompt ()
+  "A /wor slash command gets its source-ws tag but NEVER the metaprompt,
+even when the prefix counter would otherwise trigger the metaprompt.
+
+`/workspace-generation' is a slash command, and slash commands run a skill
+that owns its own behavior, so the harness metaprompt is never prepended;
+the source-ws tag the skill actually needs is still appended."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
           (agent-repl-prefix-period 1)
@@ -1304,8 +1360,7 @@ the two decorations compose rather than one clobbering the other."
       (agent-repl--ws-put "ws1" :prefix-counter 0)
       (agent-repl--ws-put "ws1" :project-dir "/repo/root")
       (should (equal (agent-repl--prepare-input "ws1" "/workspace-generation do it")
-                     (concat (agent-repl--meta-wrap "PREFIX: ") "\n\n"
-                             "/workspace-generation do it [source-ws:ws1 path:/repo/root]"))))))
+                     "/workspace-generation do it [source-ws:ws1 path:/repo/root]")))))
 
 (ert-deftest agent-repl-test-send-injects-source-ws-into-dispatched-input-but-not-raw ()
   "A /wor command sent via `agent-repl--send' reaches `agent-repl--do-send'

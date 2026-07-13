@@ -252,16 +252,51 @@ even though `evil-define-key' is a no-op stub in the test harness.")
 (defcustom agent-repl-metaprompt-exempt-strings
   '("/clear" "/usage" "/login" "/logout")
   "Inputs that should never have the metaprompt prepended.
-Compared exactly against the trimmed input."
+Compared exactly against the trimmed input.
+
+Now largely redundant with the general slash-command rule (see
+`agent-repl--slash-command-p'): every entry here is itself a slash
+command, so it would be exempted anyway.  The list is retained for any
+future NON-slash exemption and as an explicit record of intent."
   :type '(repeat string)
   :group 'agent-repl)
 
+(defconst agent-repl--slash-command-name-chars "A-Za-z0-9_:-"
+  "The `skip-chars-forward' set for a slash-command NAME.
+A name is letters, digits, `_', and the `:'/`-' that namespaced plugin
+commands and hyphenated skill names use.  Deliberately excludes `/', so
+a name run stops at the second slash of a path like `/Users/foo'.")
+
+(defconst agent-repl--slash-command-regexp
+  (concat "\\`/[" agent-repl--slash-command-name-chars "]+\\(?:[[:space:]]\\|\\'\\)")
+  "Regexp matching an input that is a slash-command invocation.
+Anchored at the very start of the string (no leading whitespace, matching
+the CLI, which only treats `/' as a command at true message start), a
+`/name' run must be followed by whitespace or the end of the string.
+That trailing boundary is what tells a command like `/workspace-open'
+apart from a path like `/Users/foo': in the path the name run is followed
+by another `/', not whitespace or end.")
+
+(defun agent-repl--slash-command-p (raw)
+  "Return non-nil if RAW is a slash-command invocation.
+See `agent-repl--slash-command-regexp' for exactly what counts (and what
+does not, e.g. a Unix path that merely starts with `/', or a `/' preceded
+by whitespace)."
+  (string-match-p agent-repl--slash-command-regexp raw))
+
 (defun agent-repl--skip-metaprompt-p (raw)
   "Return non-nil if RAW input should never have the metaprompt prepended.
-Matches `agent-repl-metaprompt-exempt-strings' and bare numerals,
-ignoring trailing whitespace."
+Skips any slash command (see `agent-repl--slash-command-p'), every entry
+of `agent-repl-metaprompt-exempt-strings', and bare numerals, ignoring
+trailing whitespace.
+
+The slash-command clause is the load-bearing one: the metaprompt is a
+harness directive meant for free-form work, and a slash command runs a
+skill or built-in that owns its own behavior, so prepending the directive
+to it is never wanted."
   (let* ((trimmed (string-trim-right raw))
-         (result (or (member trimmed agent-repl-metaprompt-exempt-strings)
+         (result (or (agent-repl--slash-command-p trimmed)
+                     (member trimmed agent-repl-metaprompt-exempt-strings)
                      (string-match-p "^[0-9]+$" trimmed))))
     (agent-repl--log-verbose (agent-repl--ws-current-name) "skip-metaprompt-p: result=%s" result)
     result))
