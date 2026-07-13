@@ -4,11 +4,13 @@ import {
   diffHtml,
   finalResponses,
   formatTurnTime,
+  isPulsed,
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
-  pulsingBlockId,
+  pulseTarget,
   renderItem,
+  rendersEmpty,
   repinsToTail,
   sessionInfoHtml,
 } from "../src/render.js";
@@ -45,10 +47,15 @@ function textAt(hour: number, minute: number, text = "the answer"): Conversation
 }
 
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
-function userTurnAt(hour: number, minute: number, text = "do the thing"): ConversationItem {
+function userTurnAt(
+  hour: number,
+  minute: number,
+  text = "do the thing",
+  requestId = "r1",
+): ConversationItem {
   return {
     kind: "user-turn",
-    requestId: "r1",
+    requestId,
     content: [{ type: "text", text }],
     ts: new Date(2026, 4, 24, hour, minute).toISOString(),
   };
@@ -60,8 +67,8 @@ function text(blockId: string, done = true): ConversationItem {
 }
 
 /** A thinking block item, finished unless DONE says otherwise. */
-function thinking(blockId: string, done = true): ConversationItem {
-  return { kind: "thinking", blockId, messageId: "m1", text: "hmm", done };
+function thinking(blockId: string, done = true, text = "hmm"): ConversationItem {
+  return { kind: "thinking", blockId, messageId: "m1", text, done };
 }
 
 /** A result frame closing a turn with the given subtype. */
@@ -85,6 +92,19 @@ function tool(): ConversationItem {
     toolUseId: "t1",
     messageId: "m1",
     toolName: "Bash",
+    inputJson: "{}",
+    input: {},
+    inputDone: true,
+  };
+}
+
+/** A tool call the feed draws no card for at all (see SUPPRESSED_TOOLS). */
+function suppressedTool(): ConversationItem {
+  return {
+    kind: "tool",
+    toolUseId: "t2",
+    messageId: "m1",
+    toolName: "ToolSearch",
     inputJson: "{}",
     input: {},
     inputDone: true,
@@ -602,6 +622,24 @@ describe("renderItem", () => {
       text: "on it",
       done: true,
     };
+    // Act
+    const html = renderItem(item, undefined, undefined, false);
+    // Assert
+    expect(html).not.toContain("pulsing");
+  });
+
+  it("pulses a prompt bubble flagged as the feed's newest drawn thing", () => {
+    // Arrange
+    const item = userTurnAt(9, 0);
+    // Act
+    const html = renderItem(item, undefined, undefined, true);
+    // Assert
+    expect(html).toContain(`class="bubble user pulsing"`);
+  });
+
+  it("withholds the pulse from a prompt the agent has already answered", () => {
+    // Arrange
+    const item = userTurnAt(9, 0);
     // Act
     const html = renderItem(item, undefined, undefined, false);
     // Assert
@@ -1629,30 +1667,30 @@ describe("swallowed chips", () => {
   });
 });
 
-describe("pulsingBlockId", () => {
+describe("pulseTarget: the working frontier", () => {
   it("pulses the finished response of a turn still running a tool", () => {
     // Arrange — the agent said its piece and went off to work.
     const items = [userTurnAt(9, 0), text("b1"), tool()];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBe("b1");
+    expect(pulse).toEqual({ kind: "text", blockId: "b1" });
   });
 
   it("pulses only the LAST finished response of the in-flight turn", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), tool(), text("b2")];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBe("b2");
+    expect(pulse).toEqual({ kind: "text", blockId: "b2" });
   });
 
   it("stills the pulse once the turn ends", () => {
     // Arrange — an idle session is working on nothing, so nothing breathes.
     const items = [userTurnAt(9, 0), text("b1"), result()];
     // Act
-    const pulse = pulsingBlockId(items, false);
+    const pulse = pulseTarget(items, false);
     // Assert
     expect(pulse).toBeNull();
   });
@@ -1661,7 +1699,7 @@ describe("pulsingBlockId", () => {
     // Arrange — the bubble's own cursor is the live signal there.
     const items = [userTurnAt(9, 0), text("b1", false)];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
     expect(pulse).toBeNull();
   });
@@ -1670,7 +1708,7 @@ describe("pulsingBlockId", () => {
     // Arrange — the thinking spinner is the live signal there.
     const items = [userTurnAt(9, 0), text("b1"), thinking("k1", false)];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
     expect(pulse).toBeNull();
   });
@@ -1679,27 +1717,243 @@ describe("pulsingBlockId", () => {
     // Arrange
     const items = [userTurnAt(9, 0), text("b1"), thinking("k1", true)];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBe("b1");
+    expect(pulse).toEqual({ kind: "text", blockId: "b1" });
   });
 
-  it("withholds the pulse from a fresh prompt's turn that has written nothing yet", () => {
-    // Arrange — the previous turn's answer is not this turn's frontier.
-    const items = [userTurnAt(9, 0), text("b1"), result(), userTurnAt(9, 5)];
+  it("never breathes life back into the previous turn's answer", () => {
+    // Arrange — that answer belongs to a question already answered.
+    const items = [userTurnAt(9, 0), text("b1"), result(), userTurnAt(9, 5), tool()];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).not.toEqual({ kind: "text", blockId: "b1" });
+  });
+});
+
+describe("pulseTarget: the prompt just sent", () => {
+  it("pulses a prompt whose turn has yet to draw anything", () => {
+    // Arrange — the send itself, with the agent not yet on the page.
+    const items = [userTurnAt(9, 0)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+  });
+
+  it("pulses the NEWEST prompt when a second one follows the first", () => {
+    // Arrange
+    const items = [
+      userTurnAt(9, 0, "first", "r1"),
+      text("b1"),
+      result(),
+      userTurnAt(9, 5, "second", "r2"),
+    ];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "user-turn", requestId: "r2" });
+  });
+
+  it("stills the prompt once the turn is no longer in flight", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0)];
+    // Act
+    const pulse = pulseTarget(items, false);
     // Assert
     expect(pulse).toBeNull();
   });
 
-  it("withholds the pulse from an in-flight turn that has only run tools", () => {
+  it("stills the prompt when the agent starts streaming a response", () => {
+    // Arrange — the bubble's own cursor takes the beat over.
+    const items = [userTurnAt(9, 0), text("b1", false)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when the thinking indicator renders", () => {
+    // Arrange — the thinking spinner takes the beat over.
+    const items = [userTurnAt(9, 0), thinking("k1", false)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when a tool card takes the feed's tail", () => {
     // Arrange
     const items = [userTurnAt(9, 0), tool()];
     // Act
-    const pulse = pulsingBlockId(items, true);
+    const pulse = pulseTarget(items, true);
     // Assert
     expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when a permission card takes the feed's tail", () => {
+    // Arrange
+    const permission: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: {},
+    };
+    const items = [userTurnAt(9, 0), permission];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when an error banner takes the feed's tail", () => {
+    // Arrange
+    const error: ConversationItem = {
+      kind: "error",
+      code: "overloaded",
+      message: "too busy",
+      recoverable: true,
+    };
+    const items = [userTurnAt(9, 0), error];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when a retry badge takes the feed's tail", () => {
+    // Arrange
+    const retry: ConversationItem = {
+      kind: "retry",
+      attempt: 2,
+      reason: "overloaded",
+      fatal: false,
+    };
+    const items = [userTurnAt(9, 0), retry];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when a system note takes the feed's tail", () => {
+    // Arrange
+    const items: ConversationItem[] = [
+      userTurnAt(9, 0),
+      { kind: "system", subtype: "init" },
+    ];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the prompt when a compaction divider takes the feed's tail", () => {
+    // Arrange
+    const items: ConversationItem[] = [
+      userTurnAt(9, 0),
+      { kind: "compact-boundary", trigger: "auto", preTokens: 9, postTokens: 3 },
+    ];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("keeps breathing behind a tool call the feed draws no card for", () => {
+    // Arrange — a suppressed tool supersedes the prompt in NOTHING the user
+    // can see, so stilling the pulse there would leave the feed dead.
+    const items = [userTurnAt(9, 0), suppressedTool()];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+  });
+
+  it("keeps breathing behind a textless thinking block that has closed", () => {
+    // Arrange — its spinner is gone from the feed, so the beat comes back.
+    const items = [userTurnAt(9, 0), thinking("k1", true, "")];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+  });
+});
+
+describe("rendersEmpty", () => {
+  it("counts a turn that is nothing but injected spans as undrawn", () => {
+    // Arrange
+    const item = userTurnAt(9, 0, `${META_OPEN}injected${META_CLOSE}`);
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts a suppressed tool call as undrawn", () => {
+    // Arrange + Act + Assert
+    expect(rendersEmpty(suppressedTool())).toBe(true);
+  });
+
+  it("counts a closed textless thinking block as undrawn", () => {
+    // Arrange + Act + Assert
+    expect(rendersEmpty(thinking("k1", true, ""))).toBe(true);
+  });
+
+  it("counts an OPEN textless thinking block as drawn, since its spinner shows", () => {
+    // Arrange + Act + Assert
+    expect(rendersEmpty(thinking("k1", false, ""))).toBe(false);
+  });
+
+  it("counts a result whose chip a response bubble swallowed as undrawn", () => {
+    // Arrange
+    const closer = result();
+    const finals = finalResponses([userTurnAt(9, 0), text("b1"), closer]);
+    // Act + Assert
+    expect(rendersEmpty(closer, finals)).toBe(true);
+  });
+
+  it("counts a tool card the feed does draw as drawn", () => {
+    // Arrange + Act + Assert
+    expect(rendersEmpty(tool())).toBe(false);
+  });
+});
+
+describe("isPulsed", () => {
+  it("marks the text block the pulse names", () => {
+    // Arrange + Act + Assert
+    expect(isPulsed(text("b1"), { kind: "text", blockId: "b1" })).toBe(true);
+  });
+
+  it("spares a text block the pulse does not name", () => {
+    // Arrange + Act + Assert
+    expect(isPulsed(text("b2"), { kind: "text", blockId: "b1" })).toBe(false);
+  });
+
+  it("marks the prompt the pulse names", () => {
+    // Arrange
+    const pulse = { kind: "user-turn", requestId: "r1" } as const;
+    // Act + Assert
+    expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(true);
+  });
+
+  it("spares a prompt the pulse does not name", () => {
+    // Arrange
+    const pulse = { kind: "user-turn", requestId: "r2" } as const;
+    // Act + Assert
+    expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(false);
+  });
+
+  it("spares a prompt when the pulse names a text block instead", () => {
+    // Arrange — the two targets never land on one bubble.
+    const pulse = { kind: "text", blockId: "b1" } as const;
+    // Act + Assert
+    expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(false);
+  });
+
+  it("spares every item when nothing pulses at all", () => {
+    // Arrange + Act + Assert
+    expect(isPulsed(text("b1"), null)).toBe(false);
   });
 });
 
