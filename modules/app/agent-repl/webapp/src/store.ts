@@ -212,12 +212,17 @@ export interface StoreState {
    * tab re-derives the same anchor from the replayed results.
    */
   lastFinalResponseAt: string | null;
-  usage: Usage | null;
   /**
    * The session's context size as last reported by an API request, which
    * a `/clear` (`system: init`) and a compaction both invalidate: neither
    * reports the context it leaves behind, so the figure reverts to `null`
    * (unknown) until the next request declares the new one.
+   *
+   * This is the ONLY token figure the store keeps, and deliberately so.
+   * A `result`'s usage is the turn's CUMULATIVE spend across every API
+   * request it made, which re-counts the cached prefix once per request
+   * and so runs past the context window without bound. It is not a
+   * context size and must never be mistaken for one.
    */
   contextTokens: number | null;
   costUsd: number | null;
@@ -237,7 +242,6 @@ function initialState(): StoreState {
     turnInFlight: false,
     turnStartedAt: null,
     lastFinalResponseAt: null,
-    usage: null,
     contextTokens: null,
     costUsd: null,
     lastSeq: 0,
@@ -360,7 +364,6 @@ export class ConversationStore {
     s.turnInFlight = false;
     s.turnStartedAt = null;
     s.lastFinalResponseAt = null;
-    s.usage = null;
     s.contextTokens = null;
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
@@ -525,7 +528,9 @@ export class ConversationStore {
         if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
         s.turnInFlight = false;
         s.turnStartedAt = null;
-        s.usage = frame.usage;
+        // `contextTokens` is deliberately NOT moved here: this frame's usage
+        // is the turn's cumulative spend, not the context it left behind.
+        // The standing figure is the one the turn's last request declared.
         s.costUsd = frame.total_cost_usd;
         break;
       }
@@ -542,7 +547,6 @@ export class ConversationStore {
         s.contextTokens = null;
         break;
       case "usage":
-        s.usage = frame.usage;
         s.contextTokens = contextTokens(frame.usage);
         if (frame.cost_usd !== undefined) s.costUsd = frame.cost_usd;
         break;

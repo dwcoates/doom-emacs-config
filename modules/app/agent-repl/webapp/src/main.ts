@@ -140,7 +140,7 @@ async function boot(): Promise<void> {
     // sessionInfoHtml escapes every value it interpolates.
     infoEl.innerHTML = sessionInfoHtml(
       parentWs,
-      s.usage,
+      s.contextTokens,
       sessionSubagents(s.items),
       agentsOpen,
       timerLabel,
