@@ -177,6 +177,16 @@ export interface StoreState {
   permissionMode: PermissionMode;
   items: ConversationItem[];
   turnInFlight: boolean;
+  /**
+   * When the in-flight turn started, as the daemon stamped its `user-turn`
+   * frame (§2.1 envelope ts), and `null` whenever no turn is running. Set
+   * and cleared in lockstep with `turnInFlight`.
+   *
+   * The daemon's stamp rather than this tab's own clock: the stamp rides
+   * the retained frame through a replay, so a tab that reconnects mid-turn
+   * resumes the count where the turn actually is.
+   */
+  turnStartedAt: string | null;
   usage: Usage | null;
   /**
    * The session's context size as last reported by an API request, which
@@ -200,6 +210,7 @@ function initialState(): StoreState {
     permissionMode: "default",
     items: [],
     turnInFlight: false,
+    turnStartedAt: null,
     usage: null,
     contextTokens: null,
     costUsd: null,
@@ -321,6 +332,7 @@ export class ConversationStore {
     // request everything the daemon still retains.
     s.items = [];
     s.turnInFlight = false;
+    s.turnStartedAt = null;
     s.usage = null;
     s.contextTokens = null;
     s.costUsd = null;
@@ -353,6 +365,7 @@ export class ConversationStore {
           ts: frame.ts,
         });
         s.turnInFlight = true;
+        s.turnStartedAt = frame.ts;
         break;
       case "text-start":
         s.items.push({
@@ -471,6 +484,7 @@ export class ConversationStore {
           context: this.resultContext(),
         });
         s.turnInFlight = false;
+        s.turnStartedAt = null;
         s.usage = frame.usage;
         s.costUsd = frame.total_cost_usd;
         break;
@@ -509,7 +523,10 @@ export class ConversationStore {
           message: frame.message,
           recoverable: frame.recoverable,
         });
-        if (!frame.recoverable) s.turnInFlight = false;
+        if (!frame.recoverable) {
+          s.turnInFlight = false;
+          s.turnStartedAt = null;
+        }
         break;
       case "retry":
         s.items.push({
