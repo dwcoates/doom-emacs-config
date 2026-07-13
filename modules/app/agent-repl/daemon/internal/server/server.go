@@ -8,9 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -137,6 +139,11 @@ type Server struct {
 	// interrupt) spawns a shim with --resume. A restart never fans out N
 	// shims eagerly.
 	dormant map[string]registry.Record
+	// switching marks sessions mid account-switch: their shim shutdown is
+	// a planned respawn, not a conversation death, so the registrar must
+	// leave their records non-terminal — the per-session analogue of the
+	// daemon-wide draining flag.
+	switching map[string]struct{}
 }
 
 // Config assembles a Server.
@@ -221,8 +228,9 @@ func New(cfg Config) *Server {
 			// permissive by design.
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
-		sessions: map[string]*session.Session{},
-		dormant:  map[string]registry.Record{},
+		sessions:  map[string]*session.Session{},
+		dormant:   map[string]registry.Record{},
+		switching: map[string]struct{}{},
 	}
 	// A -fake daemon must leave the registry untouched: fake sessions
 	// have no transcripts, so the prune below would destroy every REAL
@@ -293,8 +301,11 @@ func (r registrar) ModelChanged(sessionID, model string) {
 func (r registrar) SessionTerminal(sessionID, deathReason string) {
 	// A daemon-wide drain is not a conversation death: the registry
 	// exists precisely so these sessions rehydrate on the next boot, so
-	// the drain must leave their records non-terminal.
-	if r.s.draining.Load() {
+	// the drain must leave their records non-terminal. An account switch
+	// is the per-session analogue — its shim shutdown is a planned
+	// respawn under a new root, so the record must stay non-terminal for
+	// the relaunch to carry the conversation over.
+	if r.s.draining.Load() || r.s.isSwitching(sessionID) {
 		return
 	}
 	r.s.updateRegistry(sessionID, "terminal transition", func(rec *registry.Record) {
@@ -331,6 +342,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
+	mux.HandleFunc("POST /sessions/{id}/account", s.handleAccountSwitch)
 	mux.HandleFunc("GET /accounts", s.handleAccounts)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
@@ -597,6 +609,210 @@ func (s *Server) handleAccounts(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, s.logf, map[string][]accountStatus{"accounts": roster})
+}
+
+// switchDrainTimeout bounds how long an account switch waits for the old
+// shim to drain before giving up. A package var so tests can shorten it.
+var switchDrainTimeout = 10 * time.Second
+
+// isSwitching reports whether id's shim shutdown is a planned
+// account-switch respawn rather than a conversation death.
+func (s *Server) isSwitching(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.switching[id]
+	return ok
+}
+
+// setSwitching marks or clears id's account-switch window.
+func (s *Server) setSwitching(id string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on {
+		s.switching[id] = struct{}{}
+	} else {
+		delete(s.switching, id)
+	}
+}
+
+// migrateTranscript copies the conversation's durable transcript into
+// the target root so a --resume there finds it. An already-present dst
+// wins — switching BACK to a root the conversation has lived under must
+// not overwrite the newer history there with the stale copy.
+func migrateTranscript(src, dst string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src) //nolint:gosec // path is daemon-derived, not user input
+	if err != nil {
+		return fmt.Errorf("open source transcript: %w", err)
+	}
+	defer func() {
+		// Read-side close: the copy's success is decided by out's write
+		// and close below, so this error is log-free but non-fatal.
+		_ = in.Close()
+	}()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create target project dir: %w", err)
+	}
+	out, err := os.Create(dst) //nolint:gosec // path is daemon-derived, not user input
+	if err != nil {
+		return fmt.Errorf("create target transcript: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("copy transcript: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close target transcript: %w", err)
+	}
+	return nil
+}
+
+// handleAccountSwitch moves a session onto another canonical account
+// root: migrate the transcript so --resume finds it, stop the old shim
+// NON-terminally, and relaunch under the target CLAUDE_CONFIG_DIR with
+// the same s_ id — the id every frontend holds keeps resolving, exactly
+// as it does across a daemon restart.
+//
+// The target must be on the -accounts roster: which roots exist is
+// operator policy, and a typo'd free-form dir would strand the session
+// on an unauthenticated root.
+func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if len(s.accounts) == 0 {
+		httpError(w, http.StatusServiceUnavailable, "accounts are not configured")
+		return
+	}
+	if s.registry == nil {
+		httpError(w, http.StatusServiceUnavailable, "account switching requires the session registry")
+		return
+	}
+	var body struct {
+		ConfigDir string `json:"config_dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	target, ok := s.rosterEntry(body.ConfigDir)
+	if !ok {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("config_dir %q is not on the account roster", body.ConfigDir))
+		return
+	}
+	rec, ok := s.registry.Get(id)
+	if !ok {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if rec.Terminal {
+		httpError(w, http.StatusConflict, "session has ended")
+		return
+	}
+	if rec.ConfigDir == target.ConfigDir {
+		s.respondSwitched(w, http.StatusOK, false, target)
+		return
+	}
+
+	sess := s.lookup(id)
+	if sess != nil && sess.Info().TurnActive {
+		httpError(w, http.StatusConflict, "a turn is in flight; retry when it settles")
+		return
+	}
+
+	// The live translator's claude_session_id is fresher than the
+	// registry's (a --resume mints a new id that write-through may still
+	// be chasing), and the transcript to migrate is the CURRENT one.
+	csid := rec.ClaudeSessionID
+	if sess != nil {
+		if live := sess.Info().ClaudeSessionID; live != "" {
+			csid = live
+		}
+	}
+	if csid != "" {
+		src := session.TranscriptPath(session.ClaudeConfigDir(rec.ConfigDir), rec.CWD, csid)
+		dst := session.TranscriptPath(session.ClaudeConfigDir(target.ConfigDir), rec.CWD, csid)
+		if err := migrateTranscript(src, dst); err != nil {
+			httpError(w, http.StatusConflict, fmt.Sprintf("transcript migration: %v", err))
+			return
+		}
+	}
+
+	// Stop the old shim inside the switching window, so its terminal
+	// transition registers as a planned respawn rather than a
+	// conversation death.
+	if sess != nil {
+		s.setSwitching(id, true)
+		defer s.setSwitching(id, false)
+		if err := sess.Shutdown("account switch"); err != nil {
+			httpError(w, http.StatusInternalServerError, fmt.Sprintf("shutdown for account switch: %v", err))
+			return
+		}
+		select {
+		case <-sess.Done():
+		case <-time.After(switchDrainTimeout):
+			httpError(w, http.StatusGatewayTimeout, "old shim did not drain in time; the session is unchanged")
+			return
+		}
+	}
+
+	// Persist the new root (and the freshest claude_session_id) BEFORE
+	// the relaunch: if the spawn fails, the record still rehydrates
+	// under the target root on the next access instead of the old one.
+	s.updateRegistry(id, "account switch", func(rec *registry.Record) {
+		rec.ConfigDir = target.ConfigDir
+		if csid != "" {
+			rec.ClaudeSessionID = csid
+		}
+	})
+
+	// Relaunch under the same id. A session that never reported a
+	// claude_session_id has no transcript to carry, so it starts fresh —
+	// there is no history to lose.
+	opts := CreateOpts{
+		CWD:            rec.CWD,
+		Model:          rec.Model,
+		PermissionMode: rec.PermissionMode,
+		ConfigDir:      target.ConfigDir,
+		Resume:         csid,
+	}
+	fresh, err := s.launchSession(id, opts, true)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("relaunch under %q: %v", target.ConfigDir, err))
+		return
+	}
+	s.mu.Lock()
+	delete(s.dormant, id)
+	s.sessions[id] = fresh
+	s.mu.Unlock()
+	go fresh.Run()
+	s.logf("session %s: switched to account %q (%s), resume %s", id, target.Label, target.ConfigDir, csid)
+	s.respondSwitched(w, http.StatusAccepted, true, target)
+}
+
+// rosterEntry resolves dir against the canonical account roster.
+func (s *Server) rosterEntry(dir string) (Account, bool) {
+	for _, acct := range s.accounts {
+		if acct.ConfigDir == dir {
+			return acct, true
+		}
+	}
+	return Account{}, false
+}
+
+// respondSwitched reports a switch outcome with the target root's live
+// identity, so the caller can render the account it now runs as.
+func (s *Server) respondSwitched(w http.ResponseWriter, status int, switched bool, target Account) {
+	entry := accountStatus{Account: target}
+	identity, err := account.Read(target.ConfigDir)
+	if err != nil {
+		entry.Error = err.Error()
+	} else {
+		entry.Email = identity.Email
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	writeJSON(w, s.logf, map[string]any{"switched": switched, "account": entry})
 }
 
 // sessionConfigDir returns id's CLAUDE_CONFIG_DIR — the ACCOUNT it runs as
