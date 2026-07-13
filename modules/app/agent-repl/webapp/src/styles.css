@@ -58,6 +58,13 @@
      spawned agent from a skill handoff. styles.test.ts pins them apart. */
   --agent-card: #a7e8dd;
   --agent-border: #4fb8a8;
+  /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
+     floats on, so a `token` inside a sentence of prose reads as typeable at a
+     glance. A transparent BLACK wash, never a --fg one: --fg flips light in the
+     dark theme, which would lighten the chip instead of darkening it. The dark
+     theme's percentage is deeper, because the same wash over a dark bubble
+     moves the eye far less than it does over a white one. */
+  --code-bg: color-mix(in srgb, #000000 13%, transparent);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -85,6 +92,7 @@
     --skill-border: #1f6b62;
     --agent-card: #0f6b60;
     --agent-border: #4fc4b0;
+    --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 }
 
@@ -281,7 +289,7 @@ pre {
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .md li { margin: 0.15em 0; }
 .md blockquote { margin: 0.4em 0; padding: 0.1em 0.8em; border-left: 3px solid var(--accent); color: var(--muted); }
-.md code { background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
+.md code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
 .md pre.md-code code { background: none; padding: 0; font-size: 0.85rem; }
 .md a { color: var(--accent); }
