@@ -70,6 +70,7 @@
 (defvar persp-auto-save-opt)
 (defvar persp-kill-foreign-buffer-behaviour)
 (defvar persp-set-frame-buffer-predicate)
+(defvar persp-autokill-buffer-on-remove)
 (defvar +workspaces-switch-project-function)
 (defvar agent-repl--restored-workspaces)
 
@@ -1302,11 +1303,22 @@ or wrapping it themselves with `fboundp'."
   "Detach BUFFER from its perspective via `persp-remove-buffer'.
 No-op when `persp-remove-buffer' is unbound (persp-mode not loaded).
 
+Detach means DETACH: `persp-autokill-buffer-on-remove' is bound to nil
+for the call, so persp-mode's autokill never escalates the removal into
+a `kill-buffer'.  Doom ships that option as `kill-weak', under which
+persp-mode kills any removed buffer belonging to no perspective — and
+the frontend webview is exactly such a buffer, since it is mounted as a
+raw xwidget-webkit session and never `persp-add-buffer'ed.  Left
+unbound, detaching a foreign panel on a workspace switch would kill the
+OTHER workspace's live GUI, and `xwidget-kill-buffer-query-function'
+would raise a blocking \"has xwidgets; kill it?\" prompt mid-switch.
+
 This is the persp-mode buffer-detach boundary owned by `workspace.el'.
 Callers must use this function instead of calling `persp-remove-buffer'
 directly or wrapping it themselves with `fboundp'."
   (when (fboundp 'persp-remove-buffer)
-    (persp-remove-buffer buffer)))
+    (let ((persp-autokill-buffer-on-remove nil))
+      (persp-remove-buffer buffer))))
 
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
