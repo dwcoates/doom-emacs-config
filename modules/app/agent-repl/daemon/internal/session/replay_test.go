@@ -249,6 +249,41 @@ func TestBuildReplayFramesAssistantTextBlock(t *testing.T) {
 	}
 }
 
+func TestBuildReplayFramesAssistantTextCarriesTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"assistant","timestamp":"2026-05-24T14:33:00.000Z","message":{"id":"msg_1","content":[{"type":"text","text":"answer"}]}}`)
+	// Assert — the response's own emit time, so its bubble is not stamped with
+	// the (much later) resume time.
+	wantTypes(t, frames, "text-start", "text-delta", "text-end")
+	if got := frames[0].Env().TS; got != "2026-05-24T14:33:00.000Z" {
+		t.Fatalf("TS = %q, want the transcript entry's timestamp", got)
+	}
+}
+
+func TestBuildReplayFramesAssistantWithoutTimestampLeavesTSUnstamped(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"answer"}]}}`)
+	// Assert — an empty TS is the hub's cue to stamp its own.
+	wantTypes(t, frames, "text-start", "text-delta", "text-end")
+	if got := frames[0].Env().TS; got != "" {
+		t.Fatalf("TS = %q, want empty so the hub stamps it", got)
+	}
+}
+
+func TestBuildReplayFramesToolResultCarriesTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act — a tool result is translated, so it takes the same
+	// pre-stamping path the assistant blocks do.
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T14:31:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`)
+	// Assert
+	wantTypes(t, frames, "tool-use-result")
+	if got := frames[0].Env().TS; got != "2026-05-24T14:31:00.000Z" {
+		t.Fatalf("TS = %q, want the transcript entry's timestamp", got)
+	}
+}
+
 func TestBuildReplayFramesAdoptsTheLastAssistantModel(t *testing.T) {
 	// Arrange / Act — the model moved mid-conversation.
 	_, tr := buildFrames(t,
