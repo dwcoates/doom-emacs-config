@@ -350,6 +350,67 @@ describe("working-frontier pulse", () => {
   });
 });
 
+describe("turn stamp", () => {
+  const bubble = blockAfter(css, ".bubble ");
+  const body = blockAfter(css, ".bubble-body");
+  const stamp = blockAfter(css, ".turn-ts");
+  const bodyText = blockAfter(css, "pre {");
+
+  it("lays every bubble out as a body column beside its stamp", () => {
+    // Arrange / Act — the shared .bubble rule, so user and assistant match.
+    // Assert
+    expect(bubble).toMatch(/display:\s*flex/);
+  });
+
+  it("pins the stamp to the bubble's top rather than its first baseline", () => {
+    // Arrange / Act
+    // Assert
+    expect(bubble).toMatch(/align-items:\s*flex-start/);
+  });
+
+  it("kerns the stamp off the body column it labels", () => {
+    // Arrange
+    const gap = bubble.match(/gap:\s*([\d.]+)rem/);
+    // Act / Assert
+    expect(Number(gap?.[1])).toBeGreaterThan(0);
+  });
+
+  it("gives the body the whole column the stamp does not take", () => {
+    // Arrange / Act — flex:1 with min-width:0 so long content wraps instead of
+    // pushing the stamp off the bubble's right edge.
+    // Assert
+    expect(body).toMatch(/flex:\s*1/);
+    expect(body).toMatch(/min-width:\s*0/);
+  });
+
+  it("holds the stamp at its natural width while the body wraps", () => {
+    // Arrange / Act
+    // Assert
+    expect(stamp).toMatch(/flex:\s*none/);
+  });
+
+  it("sets the stamp smaller than the text it dates", () => {
+    // Arrange
+    const stampSize = Number(stamp.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    const textSize = Number(bodyText.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    // Act / Assert
+    expect(stampSize).toBeLessThan(textSize);
+  });
+
+  it("mutes the stamp below the text it dates", () => {
+    // Arrange / Act
+    // Assert
+    expect(stamp).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("reaches the markdown through the body column for its flush-edge margins", () => {
+    // Arrange / Act — the first/last child of the markdown now sits one level in.
+    // Assert
+    expect(css).toMatch(/\.md \.bubble-body > :first-child \{ margin-top: 0; \}/);
+    expect(css).toMatch(/\.md \.bubble-body > :last-child \{ margin-bottom: 0; \}/);
+  });
+});
+
 describe("skill-launch card", () => {
   const skillCard = blockAfter(css, ".tool-card.tool-skill");
 

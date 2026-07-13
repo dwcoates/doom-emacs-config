@@ -181,6 +181,24 @@ describe("ConversationStore text blocks", () => {
     expect(item).toMatchObject({ kind: "text", text: "hello", done: true });
   });
 
+  it("stamps a text block with the time its start frame carried", () => {
+    // Arrange
+    const store = newStore();
+    // Act — the stamp is the block's OPENING time, so the end frame cannot move it.
+    store.applyRaw(
+      frame("text-start", {
+        block_id: "b1",
+        message_id: "m1",
+        ts: "2026-05-24T14:33:00Z",
+      }),
+    );
+    store.applyRaw(
+      frame("text-end", { block_id: "b1", final_text: "hello", ts: "2026-05-24T14:35:00Z" }),
+    );
+    // Assert
+    expect((store.state.items[0] as TextItem).ts).toBe("2026-05-24T14:33:00Z");
+  });
+
   it("replaces accumulated text with the canonical final_text", () => {
     // Arrange
     const store = newStore();

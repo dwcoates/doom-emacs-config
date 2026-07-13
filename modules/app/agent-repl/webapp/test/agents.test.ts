@@ -77,7 +77,7 @@ describe("sessionSubagents", () => {
   it("ignores non-tool items", () => {
     // Arrange
     const items: ConversationItem[] = [
-      { kind: "text", blockId: "b1", messageId: "m1", text: "hi", done: true },
+      { kind: "text", blockId: "b1", messageId: "m1", text: "hi", done: true, ts: "2026-05-24T09:05:00Z" },
     ];
     // Act + Assert
     expect(sessionSubagents(items)).toHaveLength(0);

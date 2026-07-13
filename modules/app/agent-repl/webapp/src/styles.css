@@ -265,22 +265,28 @@ pre {
    bubble reserves its border box up front, so a turn's final response
    gaining the green border on completion recolors 2px that were already
    laid out rather than reflowing the feed under a reader mid-sentence. */
-.bubble { padding: 0.6rem 0.9rem; border-radius: 8px; border: 2px solid transparent; }
-/* Prompt text and its send-time stamp share one row: the stamp is pinned
-   to the bubble's top-right corner, baseline-aligned with the prompt's
-   first line, and never shrinks the way the wrapping prompt does. */
-.bubble.user {
-  background: var(--user);
-  align-self: flex-end;
+/* Every bubble — the user's prompt and the agent's response alike — is a
+   body column plus the turn's time stamped into the top-right corner. The
+   stamp holds its own column rather than overlaying the body, so a
+   full-width response line never runs beneath it. */
+.bubble {
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  border: 2px solid transparent;
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 0.9rem;
 }
-.bubble.user > pre { flex: 1; min-width: 0; }
+.bubble-body { flex: 1; min-width: 0; }
+.bubble.user { background: var(--user); align-self: flex-end; }
+/* Smaller and quieter than the text it dates, and lifted clear of the
+   body's first line: a corner label rather than a word in the sentence.
+   It never shrinks the way the wrapping body does. */
 .turn-ts {
   flex: none;
   color: var(--muted);
   font-size: 0.7rem;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 .bubble.assistant { background: var(--assistant); }
@@ -302,8 +308,10 @@ pre {
 
 /* Markdown-rendered assistant text */
 .md { font-size: 0.9rem; line-height: 1.5; }
-.md > :first-child { margin-top: 0; }
-.md > :last-child { margin-bottom: 0; }
+/* The markdown lives one level in, inside the bubble's body column, so the
+   flush-with-the-bubble-edge rules reach through it. */
+.md .bubble-body > :first-child { margin-top: 0; }
+.md .bubble-body > :last-child { margin-bottom: 0; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.6em 0 0.3em; line-height: 1.25; }
 .md h1 { font-size: 1.3rem; } .md h2 { font-size: 1.15rem; } .md h3 { font-size: 1.05rem; }
 .md p { margin: 0.4em 0; }

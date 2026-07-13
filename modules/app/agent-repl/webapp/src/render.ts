@@ -172,6 +172,21 @@ export function formatTurnTime(ts: string): string {
 }
 
 /**
+ * The one bubble shape, shared by the user's prompt and the agent's
+ * response: a body column, then the turn's time stamped into the
+ * top-right corner. CSS pins and shrinks the stamp (see `.turn-ts`); the
+ * markup only has to hand it the same corner in both bubbles.
+ *
+ * The stamp holds its own flex column rather than floating over the body,
+ * so a full-width response line never runs beneath it.
+ */
+function Bubble(cls: string, body: string, ts: string): string {
+  return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-ts">${escapeHtml(
+    formatTurnTime(ts),
+  )}</span></div>`;
+}
+
+/**
  * A user turn's prompt text, non-text blocks standing in as `[kind]`.
  *
  * The host's injected spans (the metaprompt read-directive, the
@@ -204,9 +219,7 @@ function UserTurn(item: UserTurnItem): string {
   const divider = isClearTurn(item)
     ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
     : "";
-  return `<div class="bubble user"><pre>${escapeHtml(text)}</pre><span class="turn-ts">${escapeHtml(
-    formatTurnTime(item.ts),
-  )}</span></div>${divider}`;
+  return `${Bubble("bubble user", `<pre>${escapeHtml(text)}</pre>`, item.ts)}${divider}`;
 }
 
 /**
@@ -217,6 +230,11 @@ function UserTurn(item: UserTurnItem): string {
  * The working frontier gets the pulse instead (see `pulsingBlockId`). The
  * two never land on the same bubble: a final response only exists once the
  * turn has ended, and the pulse only runs while it has not.
+ *
+ * The bubble is stamped with the time the agent OPENED the block (the
+ * `text-start` envelope), not the time it closed it: the stamp then dates
+ * the response the same way the user bubble's dates the prompt, and it
+ * does not jump while the block streams.
  */
 function TextStream(item: TextItem, isFinal: boolean, isPulsing = false): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
@@ -227,12 +245,9 @@ function TextStream(item: TextItem, isFinal: boolean, isPulsing = false): string
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
   if (!item.text.includes("```") && isMetapromptTree(item.text)) {
-    return `<div class="${cls}"><div class="mp-tree">${renderTreeHtml(
-      item.text,
-      inline,
-    )}</div>${cursor}</div>`;
+    return Bubble(cls, `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}`, item.ts);
   }
-  return `<div class="${cls}">${renderMarkdown(item.text)}${cursor}</div>`;
+  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}`, item.ts);
 }
 
 function Thinking(item: ThinkingItem): string {
