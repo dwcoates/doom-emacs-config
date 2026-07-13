@@ -2,10 +2,12 @@ package registry
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -245,5 +247,68 @@ func TestFileIsValidVersionedJSON(t *testing.T) {
 	}
 	if doc.Version != 1 || len(doc.Sessions) != 1 {
 		t.Errorf("doc = %+v", doc)
+	}
+}
+
+func TestTwoDaemonsRacingOnOneRegistryLoseNoRecords(t *testing.T) {
+	// Arrange — two Registry instances on ONE path, exactly as a daemon
+	// that is still draining and its freshly-rebuilt replacement would
+	// hold it. Each writes its own sessions concurrently.
+	path := testPath(t)
+	daemonA := Open(path, discardLogf)
+	daemonB := Open(path, discardLogf)
+	const perDaemon = 25
+	var wg sync.WaitGroup
+	for i := range perDaemon {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := daemonA.Put(Record{SessionID: fmt.Sprintf("s_a%02d", i), ClaudeSessionID: "uuid-a"}); err != nil {
+				t.Errorf("daemon A Put: %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := daemonB.Put(Record{SessionID: fmt.Sprintf("s_b%02d", i), ClaudeSessionID: "uuid-b"}); err != nil {
+				t.Errorf("daemon B Put: %v", err)
+			}
+		}()
+	}
+	// Act
+	wg.Wait()
+	// Assert — every record from BOTH daemons survives on disk. Without
+	// the locked read-modify-write, each process rewrites the file from
+	// its own map and silently drops the other's sessions.
+	reopened := Open(path, discardLogf)
+	if got := len(reopened.All()); got != perDaemon*2 {
+		t.Fatalf("records on disk = %d, want %d (lost update: one daemon clobbered the other)", got, perDaemon*2)
+	}
+}
+
+func TestConcurrentWritersLeaveTheFileParseable(t *testing.T) {
+	// Arrange — hammer one path from many goroutines across two
+	// registries; a torn write would surface as a corrupt-file log.
+	path := testPath(t)
+	writers := []*Registry{Open(path, discardLogf), Open(path, discardLogf)}
+	var wg sync.WaitGroup
+	for i := range 40 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := writers[i%2].Put(Record{SessionID: fmt.Sprintf("s_%02d", i)}); err != nil {
+				t.Errorf("Put: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	// Act — a fresh reader parses whatever the racers left behind.
+	var logged []string
+	reopened := Open(path, collectLogf(&logged))
+	// Assert
+	if strings.Contains(strings.Join(logged, "\n"), "CORRUPT") {
+		t.Fatalf("concurrent writers tore the file: %q", logged)
+	}
+	if got := len(reopened.All()); got != 40 {
+		t.Fatalf("records = %d, want 40", got)
 	}
 }
