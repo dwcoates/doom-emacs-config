@@ -24,6 +24,13 @@ export interface Usage {
   cache_read_input_tokens?: number;
 }
 
+/** One selectable model (§1.2 `models`). */
+export interface ModelInfo {
+  value: string;
+  displayName: string;
+  description: string;
+}
+
 export interface ContentBlockText {
   type: "text";
   text: string;
@@ -55,7 +62,13 @@ export interface HelloFrame extends WsEnvelope {
   daemon_version: string;
   resume_from_seq: number;
   permission_mode: PermissionMode;
+  /**
+   * The session's model. NOT frozen at hello: it moves whenever the model
+   * moves, and §2.8's `model-changed` carries every move after this.
+   */
   model: string;
+  /** The `set-model` menu; absent until the shim reports it. */
+  models?: ModelInfo[];
   cwd: string;
   /** Durable CLI session uuid (resume target); absent until system:init. */
   claude_session_id?: string;
@@ -224,6 +237,29 @@ export interface PermissionModeChangedFrame extends WsEnvelope {
   origin: "user" | "shim" | "daemon";
 }
 
+/** The selectable-model menu, for a client already attached when it lands. */
+export interface ModelsFrame extends WsEnvelope {
+  type: "models";
+  models: ModelInfo[];
+}
+
+/**
+ * The session's model moved. The ONLY frame that moves `model` after the
+ * hello, and it fires for every way the model can move — picking one in
+ * the topbar is merely the least interesting of them:
+ *
+ * - `init`:      the SDK's system:init named the model it started on
+ * - `user`:      a `set-model` the shim acked
+ * - `agent`:     a main-chain assistant message reported a different model,
+ *                i.e. the CLI moved it without being asked
+ * - `reconcile`: the daemon's periodic transcript check caught a drifted mirror
+ */
+export interface ModelChangedFrame extends WsEnvelope {
+  type: "model-changed";
+  model: string;
+  origin: "init" | "user" | "agent" | "reconcile";
+}
+
 // --- §2.9 system ---------------------------------------------------------------------
 
 export interface SystemFrame extends WsEnvelope {
@@ -254,6 +290,8 @@ export type L2Frame =
   | PermissionResolvedFrame
   | UsageFrame
   | PermissionModeChangedFrame
+  | ModelsFrame
+  | ModelChangedFrame
   | SystemFrame;
 
 /** The set of frame types this client version understands. */
@@ -279,6 +317,8 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "permission-resolved",
   "usage",
   "permission-mode-changed",
+  "models",
+  "model-changed",
   "system",
 ]);
 
@@ -331,6 +371,19 @@ export interface SetPermissionModeCmd {
   mode: PermissionMode;
 }
 
+/**
+ * Switch the model mid-flight. `model` is always a concrete id from the
+ * `models` menu: the SDK's "back to the default" form is not exposed,
+ * because the id it resolves to is unknowable until the next assistant
+ * message, and a picker that cannot name what it just selected is worse
+ * than one offering only nameable choices.
+ */
+export interface SetModelCmd {
+  type: "set-model";
+  request_id: string;
+  model: string;
+}
+
 export interface ReplayRequestCmd {
   type: "replay-request";
   from_seq: number;
@@ -341,4 +394,5 @@ export type ClientCommand =
   | PermissionDecisionCmd
   | InterruptCmd
   | SetPermissionModeCmd
+  | SetModelCmd
   | ReplayRequestCmd;

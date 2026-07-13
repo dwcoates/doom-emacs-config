@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AsyncQueue } from "../src/input-queue.js";
-import { PermissionMode, ShimEvent } from "../src/protocol.js";
+import { ModelInfo, PermissionMode, ShimEvent } from "../src/protocol.js";
 import {
   CanUseToolLike,
   PermissionResultLike,
@@ -27,19 +27,33 @@ interface Harness {
   canUseTool: () => CanUseToolLike;
   interruptCalls: () => number;
   modeCalls: () => PermissionMode[];
+  modelCalls: () => string[];
   exitCode: () => number | null;
   pump: Promise<void>;
   send: (frame: Record<string, unknown>) => void;
   eventsOfType: <T extends ShimEvent["type"]>(t: T) => Array<Extract<ShimEvent, { type: T }>>;
 }
 
-function makeHarness(opts?: { setPermissionModeError?: Error }): Harness {
+interface HarnessOpts {
+  setPermissionModeError?: Error;
+  setModelError?: Error;
+  supportedModels?: ModelInfo[];
+  supportedModelsError?: Error;
+}
+
+const FAKE_MODELS: ModelInfo[] = [
+  { value: "claude-opus-4-5", displayName: "Opus 4.5", description: "smartest" },
+  { value: "claude-haiku-4-5", displayName: "Haiku 4.5", description: "fastest" },
+];
+
+function makeHarness(opts?: HarnessOpts): Harness {
   const emitted: ShimEvent[] = [];
   const sdkOut = new AsyncQueue<SdkMessageLike>();
   const userMessages: SdkUserMessageLike[] = [];
   let capturedCanUseTool: CanUseToolLike | null = null;
   let interruptCount = 0;
   const modes: PermissionMode[] = [];
+  const models: string[] = [];
   let exit: number | null = null;
   let requestCounter = 0;
 
@@ -51,6 +65,14 @@ function makeHarness(opts?: { setPermissionModeError?: Error }): Harness {
     setPermissionMode: async (mode) => {
       if (opts?.setPermissionModeError) throw opts.setPermissionModeError;
       modes.push(mode);
+    },
+    setModel: async (model) => {
+      if (opts?.setModelError) throw opts.setModelError;
+      models.push(model);
+    },
+    supportedModels: async () => {
+      if (opts?.supportedModelsError) throw opts.supportedModelsError;
+      return opts?.supportedModels ?? FAKE_MODELS;
     },
   };
 
@@ -82,6 +104,7 @@ function makeHarness(opts?: { setPermissionModeError?: Error }): Harness {
     canUseTool: () => capturedCanUseTool!,
     interruptCalls: () => interruptCount,
     modeCalls: () => modes,
+    modelCalls: () => models,
     exitCode: () => exit,
     pump,
     send: (frame) => session.handleLine(JSON.stringify(frame)),
@@ -176,6 +199,8 @@ describe("ShimSession lifecycle", () => {
       }),
       interrupt: async () => {},
       setPermissionMode: async () => {},
+      setModel: async () => {},
+      supportedModels: async () => [],
     };
     const session = new ShimSession({
       sessionId: "sess-1",
@@ -285,6 +310,100 @@ describe("ShimSession command handling", () => {
       code: "sdk_throw",
       request_id: "r1",
     });
+  });
+
+  it("applies set-model to the query", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    h.send({ type: "set-model", request_id: "r1", model: "claude-haiku-4-5" });
+    await until(() => h.modelCalls().length === 1);
+    // Assert
+    expect(h.modelCalls()).toEqual(["claude-haiku-4-5"]);
+  });
+
+  it("acks set-model once the query has applied it", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    h.send({ type: "set-model", request_id: "r1", model: "claude-haiku-4-5" });
+    await until(() => h.eventsOfType("ack").length === 1);
+    // Assert — the ack is what licenses the daemon to emit model-changed.
+    expect(h.eventsOfType("ack")[0]).toEqual({
+      type: "ack",
+      session_id: "sess-1",
+      request_id: "r1",
+    });
+  });
+
+  it("emits error sdk_throw with the request_id when set-model fails", async () => {
+    // Arrange
+    const h = makeHarness({ setModelError: new Error("nope") });
+    // Act
+    h.send({ type: "set-model", request_id: "r1", model: "claude-haiku-4-5" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    expect(h.eventsOfType("error")[0]).toMatchObject({
+      code: "sdk_throw",
+      request_id: "r1",
+    });
+  });
+
+  it("does not ack a set-model the query rejected", async () => {
+    // Arrange — a failed switch must not look like a successful one, or
+    // the daemon would broadcast a model the session is not actually on.
+    const h = makeHarness({ setModelError: new Error("nope") });
+    // Act
+    h.send({ type: "set-model", request_id: "r1", model: "claude-haiku-4-5" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    expect(h.eventsOfType("ack")).toEqual([]);
+  });
+});
+
+describe("ShimSession model menu", () => {
+  it("publishes the SDK's supported models on start", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await until(() => h.eventsOfType("models").length === 1);
+    // Assert
+    expect(h.eventsOfType("models")[0]).toEqual({
+      type: "models",
+      session_id: "sess-1",
+      models: FAKE_MODELS,
+    });
+  });
+
+  it("publishes the model menu without being asked for it", async () => {
+    // Arrange — no command is sent at all.
+    const h = makeHarness();
+    // Act
+    await until(() => h.eventsOfType("models").length === 1);
+    // Assert — the list rides on startup, not on a request.
+    expect(h.eventsOfType("models")).toHaveLength(1);
+  });
+
+  it("surfaces a supportedModels failure as a recoverable sdk_throw", async () => {
+    // Arrange — an unpopulated picker is a degraded session, not a dead
+    // one, so the error carries a request_id (which is what marks it
+    // recoverable to the daemon) rather than reading as a shim death.
+    const h = makeHarness({ supportedModelsError: new Error("no models") });
+    // Act
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    const err = h.eventsOfType("error")[0];
+    expect(err).toMatchObject({ code: "sdk_throw" });
+    expect(err.request_id).toBeTruthy();
+  });
+
+  it("emits no models event when supportedModels fails", async () => {
+    // Arrange
+    const h = makeHarness({ supportedModelsError: new Error("no models") });
+    // Act
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert — an empty menu is never asserted as if it were the truth.
+    expect(h.eventsOfType("models")).toEqual([]);
   });
 });
 
@@ -747,8 +866,10 @@ describe("ShimSession SDK message mapping", () => {
   });
 
   it("drops SDK message types with no Layer-1 representation", async () => {
-    // Arrange
+    // Arrange — let the startup `models` event land first, so the window
+    // sampled below holds only what the driven SDK message produced.
     const h = makeHarness();
+    await until(() => h.eventsOfType("models").length === 1);
     const before = h.emitted.length;
     // Act
     await drive(h, { type: "auth_status", uuid: "u11", isAuthenticating: true, output: [] });

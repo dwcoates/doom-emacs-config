@@ -150,6 +150,25 @@ interface SetPermissionModeCmd {
 }
 ```
 
+#### `set-model`
+
+Switch the model the session answers with, mid-flight. Maps to
+`query.setModel(model)`.
+
+`model` is a concrete model id (a `value` from the `models` event), never
+empty: the SDK's `setModel(undefined)` "restore the default" form is
+deliberately NOT exposed, because the id it resolves to is unknowable
+until the next assistant message and a topbar that cannot name the model
+it just selected is worse than one that offers only nameable choices.
+
+```ts
+interface SetModelCmd {
+  type: "set-model";
+  request_id: RequestId;
+  model: string;                      // non-empty model id
+}
+```
+
 #### `shutdown`
 
 Ask the shim to drain, close the SDK query, and exit cleanly. Go then
@@ -188,18 +207,43 @@ interface ReadyEvt {
 #### `ack`
 
 Success acknowledgement for a command that has no richer response event
-of its own (`set-permission-mode`, `shutdown`). Commands whose effect is
-observable through a dedicated event stream (`user-message` → stream
-events, `permission-decision` → the unblocked turn) do not produce an
-`ack`. In particular, the daemon emits the Layer-2
-`permission-mode-changed` frame only after receiving the `ack` for the
-corresponding `set-permission-mode` command.
+of its own (`set-permission-mode`, `set-model`, `shutdown`). Commands
+whose effect is observable through a dedicated event stream
+(`user-message` → stream events, `permission-decision` → the unblocked
+turn) do not produce an `ack`. In particular, the daemon emits the
+Layer-2 `permission-mode-changed` and `model-changed` frames only after
+receiving the `ack` for the corresponding `set-permission-mode` /
+`set-model` command.
 
 ```ts
 interface AckEvt {
   type: "ack";
   session_id: SessionId;
   request_id: RequestId;              // matches the acknowledged command
+}
+```
+
+#### `models`
+
+The models this session may switch to, from the SDK's
+`query.supportedModels()`. Emitted once, unsolicited, after the SDK's
+init handshake resolves — the list is a property of the account and CLI,
+not of any command, so no `set-model` is needed to learn it.
+
+The daemon caches the list on the translator and republishes it in every
+`hello`, so a client attaching later never has to ask for it.
+
+```ts
+interface ModelInfo {
+  value: string;                      // model id, the `set-model` argument
+  displayName: string;                // human label, e.g. "Opus 4.8"
+  description: string;
+}
+
+interface ModelsEvt {
+  type: "models";
+  session_id: SessionId;
+  models: ModelInfo[];
 }
 ```
 
@@ -452,6 +496,7 @@ interface HelloFrame extends WsEnvelope {
   resume_from_seq: number;            // 0 if no prior history
   permission_mode: PermissionMode;
   model: string;
+  models?: ModelInfo[];               // selectable models; absent until §1.2 `models` arrives
   cwd: string;
   claude_session_id?: string;         // durable CLI session uuid; absent until system:init
 }
@@ -462,6 +507,12 @@ overwritten by the authoritative `system:init` payload once the SDK
 reports in. `claude_session_id` is the CLI-assigned uuid captured from
 `system:init` — the DURABLE id usable as a resume target across daemon
 restarts, unlike the ephemeral daemon session id in `session_id`.
+
+`model` is NOT frozen at hello, and a client that treats it as frozen
+goes stale: it moves whenever the model moves, and §2.8's `model-changed`
+is what carries every move after the hello. `models` is the menu the
+`set-model` command draws from; it is republished in each hello so a
+reconnecting client never has to ask.
 
 #### `result`
 
@@ -796,6 +847,48 @@ interface PermissionModeChangedFrame extends WsEnvelope {
 }
 ```
 
+#### `models`
+
+The selectable-model menu (§1.2 `models`), forwarded the moment the shim
+reports it so a client already attached populates its picker without
+reconnecting. The same list rides on every subsequent `hello`.
+
+```ts
+interface ModelsFrame extends WsEnvelope {
+  type: "models";
+  models: ModelInfo[];
+}
+```
+
+#### `model-changed`
+
+The session's model moved. This is the ONLY frame that moves `model`
+after the hello, and it fires for every way the model can move —
+selecting one in the UI is merely the least interesting of them:
+
+| `origin`    | what moved the model                                                     |
+|-------------|--------------------------------------------------------------------------|
+| `user`      | a `set-model` command, emitted once the shim `ack`s it                    |
+| `agent`     | a main-chain assistant message reported a different `model` than the mirror — the agent switched itself (`/model`, a fallback, a downgrade under load) |
+| `reconcile` | the daemon's periodic transcript check (§2.11) caught a drifted mirror    |
+
+`agent` exists because the model is NOT the daemon's to decide: the CLI
+owns it and can move it without being asked. The mirror therefore FOLLOWS
+observed truth rather than asserting remembered truth.
+
+Only MAIN-CHAIN assistant messages count. A subagent's message reports the
+subagent's own model (a Haiku `Explore` under an Opus session), and
+letting that through would flip the topbar to Haiku for the length of every
+subagent — the same reason the Emacs mode-line filters `isSidechain`.
+
+```ts
+interface ModelChangedFrame extends WsEnvelope {
+  type: "model-changed";
+  model: string;
+  origin: "user" | "agent" | "reconcile";
+}
+```
+
 ### 2.9 System / slash-command frames
 
 Layer-1 `system` events with subtype `tool_use_progress` are NOT
@@ -888,6 +981,36 @@ records non-terminal on purpose — only session-scoped ends (DELETE,
 shim death, SDK end) mark a record terminal and stop it rehydrating.
 Fake sessions are never registered, and a `-fake` daemon neither
 rehydrates nor prunes.
+
+### 2.12 Model drift reconciliation
+
+The daemon's `model` is a MIRROR of a value the CLI owns, and every
+mirror can drift. The event path (`system:init`, `set-model` acks,
+main-chain assistant messages) is what normally keeps it true, but each
+of those is a push: a dropped, malformed, or never-sent event leaves the
+mirror confidently wrong, and a wrong model in the topbar is the kind of
+wrong nobody notices until it has cost them a turn.
+
+So the mirror is also PULLED, every 30s, from a source that owes nothing
+to the event stream: the CLI's own transcript JSONL — the same file the
+Emacs mode-line has always trusted, which is exactly why reconciling
+against it means the two frontends cannot disagree.
+
+- Read the last `32 KiB` of `<configDir>/projects/<cwd-slug>/<uuid>.jsonl`
+  (a tail read: transcripts grow without bound, the answer is at the end).
+- Take the `message.model` of the last `type: "assistant"` line that is
+  neither `isSidechain` nor `isMeta` — main-chain only, per §2.8.
+- Differs from the mirror? Adopt it and broadcast `model-changed` with
+  `origin: "reconcile"`. Agrees? Emit nothing.
+
+Silence is the steady state: the check broadcasts only on genuine drift,
+so a healthy session pays one tail read per 30s and puts no frame on the
+wire. A session whose `claude_session_id` has not arrived yet (no init) has
+no transcript path to read, and is skipped rather than guessed at.
+
+This is a self-healing loop, NOT a fallback that papers over a broken
+event path: a `reconcile`-origin frame is evidence the push path missed
+something, and it is visible on the wire precisely so it can be noticed.
 
 ---
 

@@ -10,6 +10,7 @@ import {
   ContentBlock,
   HelloFrame,
   L2Frame,
+  ModelInfo,
   PermissionMode,
   PermissionPreview,
   RenderHint,
@@ -151,7 +152,14 @@ export type ConversationItem =
 export interface StoreState {
   sessionId: string;
   daemonVersion: string;
+  /**
+   * The session's live model. Moved by the hello AND by every
+   * `model-changed` frame — the CLI owns this value and can move it
+   * without being asked, so the store follows rather than remembers.
+   */
   model: string;
+  /** The `set-model` menu; empty until the daemon reports it. */
+  models: ModelInfo[];
   cwd: string;
   /**
    * Durable CLI session uuid from the hello frame (empty until the
@@ -180,6 +188,7 @@ function initialState(): StoreState {
     sessionId: "",
     daemonVersion: "",
     model: "",
+    models: [],
     cwd: "",
     claudeSessionId: "",
     permissionMode: "default",
@@ -282,6 +291,9 @@ export class ConversationStore {
     s.sessionId = hello.session_id;
     s.daemonVersion = hello.daemon_version;
     s.model = hello.model;
+    // The hello republishes the menu, so a reconnect never empties a
+    // populated picker.
+    if (hello.models !== undefined) s.models = hello.models;
     s.cwd = hello.cwd;
     s.claudeSessionId = hello.claude_session_id ?? "";
     s.permissionMode = hello.permission_mode;
@@ -474,6 +486,14 @@ export class ConversationStore {
         break;
       case "permission-mode-changed":
         s.permissionMode = frame.mode;
+        break;
+      case "models":
+        s.models = frame.models;
+        break;
+      case "model-changed":
+        // Every origin lands here: a switch the user picked, one the agent
+        // made itself, and one the daemon's transcript reconcile caught.
+        s.model = frame.model;
         break;
       case "error":
         s.items.push({

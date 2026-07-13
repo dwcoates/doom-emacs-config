@@ -111,10 +111,10 @@ describe("decodeCommandLine", () => {
   });
 
   it("accepts the CLI-era permission modes the topbar offers", () => {
-    // Arrange — `auto` is a real, selectable mode. The decoder carried its
-    // own 4-mode copy of the enum and rejected all four CLI-era modes, so
-    // picking one in the GUI produced a bad_command and silently left the
-    // mode unchanged.
+    // Arrange — `auto` is a real, selectable mode. The decoder used to
+    // carry its own 4-mode copy of the enum and rejected all four
+    // CLI-era modes, so picking one in the GUI produced a bad_command
+    // and silently left the mode unchanged.
     const line = JSON.stringify({
       type: "set-permission-mode",
       request_id: "r1",
@@ -124,6 +124,38 @@ describe("decodeCommandLine", () => {
     const cmd = decodeCommandLine(line);
     // Assert
     expect(cmd).toMatchObject({ type: "set-permission-mode", mode: "auto" });
+  });
+
+  it("decodes a set-model command", () => {
+    // Arrange
+    const line = JSON.stringify({
+      type: "set-model",
+      request_id: "r1",
+      model: "claude-opus-4-5",
+    });
+    // Act
+    const cmd = decodeCommandLine(line);
+    // Assert
+    expect(cmd).toEqual({
+      type: "set-model",
+      request_id: "r1",
+      model: "claude-opus-4-5",
+    });
+  });
+
+  it("throws ProtocolError on set-model with an empty model", () => {
+    // Arrange — empty is a caller who forgot to say which model, not a
+    // request for the default one.
+    const line = JSON.stringify({ type: "set-model", request_id: "r1", model: "" });
+    // Act + Assert
+    expect(() => decodeCommandLine(line)).toThrow(/non-empty model/);
+  });
+
+  it("throws ProtocolError on set-model with no model field", () => {
+    // Arrange
+    const line = JSON.stringify({ type: "set-model", request_id: "r1" });
+    // Act + Assert
+    expect(() => decodeCommandLine(line)).toThrow(/non-empty model/);
   });
 });
 

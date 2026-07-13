@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
+import { FAKE_MODELS, MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import {
   CanUseToolLike,
@@ -162,5 +162,40 @@ describe("createFakeQuery", () => {
     const msgs = await h.collect();
     // Assert — collect() returning at all proves termination
     expect(msgs.length).toBeGreaterThan(0);
+  });
+
+  it("offers a supported-model menu", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    const models = await h.query.supportedModels();
+    // Assert
+    expect(models).toEqual(FAKE_MODELS);
+  });
+
+  it("reports the model set by setModel on subsequent assistant messages", async () => {
+    // Arrange — this is the whole drift path in miniature: the model the
+    // agent ANSWERS with is what the topbar mirrors.
+    const h = makeFake();
+    // Act
+    await h.query.setModel("fake-model-fast");
+    h.input.push(userMsg("hello"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const assistant = msgs.find((m) => m.type === "assistant")!;
+    expect((assistant.message as { model: string }).model).toBe("fake-model-fast");
+  });
+
+  it("leaves the model at the default until setModel moves it", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("hello"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const assistant = msgs.find((m) => m.type === "assistant")!;
+    expect((assistant.message as { model: string }).model).toBe("fake-model");
   });
 });

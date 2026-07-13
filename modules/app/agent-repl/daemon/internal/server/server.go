@@ -679,6 +679,13 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 		Logf:          s.logf,
 		Sentinel:      s.sentinel,
 	}
+	// A fake session's CLI is a scripted stand-in that writes no
+	// transcript, so there is nothing to reconcile its model against; a
+	// reconciler here could only log, twice a minute, that the file it
+	// wants does not exist.
+	if opts.Fake || s.forceFake {
+		cfg.ModelReconcileInterval = -1
+	}
 	if registrable {
 		cfg.Registrar = registrar{s}
 	}

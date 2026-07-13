@@ -21,6 +21,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { createFakeQuery } from "./fake-query.js";
 import {
+  ModelInfo,
   PermissionMode,
   ShimEvent,
   encodeEvent,
@@ -208,6 +209,9 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
     interrupt: async (): Promise<void> => (await queryPromise).interrupt(),
     setPermissionMode: async (mode): Promise<void> =>
       (await queryPromise).setPermissionMode(mode),
+    setModel: async (model): Promise<void> => (await queryPromise).setModel(model),
+    supportedModels: async (): Promise<ModelInfo[]> =>
+      (await queryPromise).supportedModels(),
   };
 }
 

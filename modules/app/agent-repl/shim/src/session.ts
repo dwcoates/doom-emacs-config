@@ -10,6 +10,7 @@ import { AsyncQueue } from "./input-queue.js";
 import {
   ContentBlock,
   ContentBlockToolResult,
+  ModelInfo,
   PermissionDecisionCmd,
   PermissionMode,
   ProtocolError,
@@ -30,6 +31,8 @@ import {
 export interface QueryLike extends AsyncIterable<SdkMessageLike> {
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  setModel(model: string): Promise<void>;
+  supportedModels(): Promise<ModelInfo[]>;
 }
 
 /** Structural subset of the SDK message union the shim consumes. */
@@ -124,6 +127,10 @@ export class ShimSession {
       sdk_version: this.deps.sdkVersion,
       permission_mode: this.deps.initialPermissionMode,
     });
+    // Fire-and-forget on purpose: the model menu resolves off the SDK's
+    // init handshake, and blocking `ready` (or the pump) on it would
+    // delay every command behind a list nothing needs synchronously.
+    this.publishSupportedModels();
     return this.pump();
   }
 
@@ -184,21 +191,10 @@ export class ShimSession {
         });
         break;
       case "set-permission-mode":
-        void this.query!.setPermissionMode(cmd.mode)
-          .then(() => {
-            this.deps.emit({
-              type: "ack",
-              session_id: this.deps.sessionId,
-              request_id: cmd.request_id,
-            });
-          })
-          .catch((err: unknown) => {
-            this.emitError(
-              "sdk_throw",
-              `set-permission-mode failed: ${errMessage(err)}`,
-              cmd.request_id,
-            );
-          });
+        this.ackOnSettled(cmd.type, cmd.request_id, this.query!.setPermissionMode(cmd.mode));
+        break;
+      case "set-model":
+        this.ackOnSettled(cmd.type, cmd.request_id, this.query!.setModel(cmd.model));
         break;
       case "shutdown":
         this.shutdownRequestId = cmd.request_id;
@@ -211,6 +207,58 @@ export class ShimSession {
         this.input.end();
         break;
     }
+  }
+
+  /**
+   * The §1.2 contract for a command whose only success signal is an
+   * `ack`: acknowledge when the SDK call settles, surface an
+   * `sdk_throw` carrying the request_id when it rejects.
+   *
+   * The request_id on the failure path is load-bearing — the daemon
+   * reads its presence as "this error is command-scoped and the session
+   * is still usable" (an error without one precedes a shim death).
+   */
+  private ackOnSettled(type: string, requestId: RequestId, call: Promise<void>): void {
+    void call
+      .then(() => {
+        this.deps.emit({
+          type: "ack",
+          session_id: this.deps.sessionId,
+          request_id: requestId,
+        });
+      })
+      .catch((err: unknown) => {
+        this.emitError("sdk_throw", `${type} failed: ${errMessage(err)}`, requestId);
+      });
+  }
+
+  /**
+   * Publish the selectable-model menu (§1.2 `models`). Fired once at
+   * startup: `supportedModels()` resolves off the SDK's init handshake,
+   * so awaiting it here costs nothing and no command has to ask.
+   *
+   * A failure is NOT fatal — the session runs fine, only the picker goes
+   * unpopulated — so it is surfaced as a recoverable, command-scoped
+   * error rather than silently swallowed. The synthetic request_id is
+   * what makes it recoverable: the daemon treats a request_id-less error
+   * as the prelude to a shim death, which this very much is not.
+   */
+  private publishSupportedModels(): void {
+    void this.query!.supportedModels()
+      .then((models) => {
+        this.deps.emit({
+          type: "models",
+          session_id: this.deps.sessionId,
+          models,
+        });
+      })
+      .catch((err: unknown) => {
+        this.emitError(
+          "sdk_throw",
+          `supportedModels failed: ${errMessage(err)}`,
+          this.deps.newRequestId(),
+        );
+      });
   }
 
   private handleUserMessage(cmd: UserMessageCmd): void {

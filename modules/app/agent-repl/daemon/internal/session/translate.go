@@ -38,13 +38,22 @@ type Translator struct {
 	turnActive bool
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
+	// pending set-model request_id → requested model.
+	pendingModels map[string]string
 
 	// Session-info mirror for hello frames. Model and CWD are seeded
 	// with the CreateOpts-requested values and overwritten by the
 	// authoritative system:init payload once the SDK reports in.
+	//
+	// Model is a MIRROR of a value the CLI owns, never a value the daemon
+	// decides. It therefore follows observed truth from every direction:
+	// system:init, an acked set-model, the model reported on each
+	// main-chain assistant message, and the periodic transcript reconcile.
 	Model          string
 	CWD            string
 	PermissionMode protocol.PermissionMode
+	// Models is the selectable-model menu from the shim's `models` event.
+	Models []protocol.ModelInfo
 	// ClaudeSessionID is the CLI-assigned session uuid captured from
 	// system:init. Empty until init arrives. This is the DURABLE id
 	// (usable as CreateOpts.Resume across daemon restarts), unlike the
@@ -84,7 +93,24 @@ func NewTranslator() *Translator {
 		tools:          map[string]*toolMeta{},
 		pendingPerms:   map[string]*permMeta{},
 		pendingModes:   map[string]protocol.PermissionMode{},
+		pendingModels:  map[string]string{},
 		PermissionMode: protocol.PermissionModeDefault,
+	}
+}
+
+// SetModel adopts MODEL as the session's model and yields the frame
+// announcing the move, or nil when MODEL is empty or already the mirror's
+// value. The single funnel for every origin, so a no-op switch can never
+// put a frame on the wire and each origin cannot drift from the others.
+func (t *Translator) SetModel(model, origin string) protocol.L2Frame {
+	if model == "" || model == t.Model {
+		return nil
+	}
+	t.Model = model
+	return &protocol.ModelChangedFrame{
+		Envelope: protocol.Envelope{Type: "model-changed"},
+		Model:    model,
+		Origin:   origin,
 	}
 }
 
@@ -103,6 +129,8 @@ func (t *Translator) OnEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		return nil
 	case "ack":
 		return t.onAck(evt)
+	case "models":
+		return t.onModels(evt)
 	case "stream-event":
 		return t.onStreamEvent(evt)
 	case "assistant-message":
@@ -197,19 +225,47 @@ func (t *Translator) OnSetPermissionModeCmd(cmd *protocol.L1Command) {
 	t.pendingModes[cmd.RequestID] = protocol.PermissionMode(cmd.Mode)
 }
 
+// OnSetModelCmd records the pending model change; the model-changed
+// frame is emitted only once the shim acks (§1.2). Gating on the ack is
+// what keeps the topbar from announcing a switch the SDK went on to
+// reject.
+func (t *Translator) OnSetModelCmd(cmd *protocol.L1Command) {
+	t.pendingModels[cmd.RequestID] = cmd.Model
+}
+
 // --- Layer-1 event handlers -------------------------------------------------
 
+// onAck resolves whichever pending command the ack belongs to. A
+// request_id lives in at most one pending map, so the two lookups cannot
+// both hit.
 func (t *Translator) onAck(evt *protocol.L1Event) []protocol.L2Frame {
-	mode, ok := t.pendingModes[evt.RequestID]
-	if !ok {
+	if mode, ok := t.pendingModes[evt.RequestID]; ok {
+		delete(t.pendingModes, evt.RequestID)
+		t.PermissionMode = mode
+		return []protocol.L2Frame{&protocol.PermissionModeChangedFrame{
+			Envelope: protocol.Envelope{Type: "permission-mode-changed"},
+			Mode:     mode,
+			Origin:   "user",
+		}}
+	}
+	if model, ok := t.pendingModels[evt.RequestID]; ok {
+		delete(t.pendingModels, evt.RequestID)
+		if frame := t.SetModel(model, "user"); frame != nil {
+			return []protocol.L2Frame{frame}
+		}
 		return nil
 	}
-	delete(t.pendingModes, evt.RequestID)
-	t.PermissionMode = mode
-	return []protocol.L2Frame{&protocol.PermissionModeChangedFrame{
-		Envelope: protocol.Envelope{Type: "permission-mode-changed"},
-		Mode:     mode,
-		Origin:   "user",
+	return nil
+}
+
+// onModels caches the selectable-model menu (so every later hello carries
+// it) and forwards it, so a client already attached populates its picker
+// without reconnecting.
+func (t *Translator) onModels(evt *protocol.L1Event) []protocol.L2Frame {
+	t.Models = evt.Models
+	return []protocol.L2Frame{&protocol.ModelsFrame{
+		Envelope: protocol.Envelope{Type: "models"},
+		Models:   evt.Models,
 	}}
 }
 
@@ -426,7 +482,11 @@ func (t *Translator) closeDanglingBlocks() []protocol.L2Frame {
 
 // assistantMessageBody is the assistant-message event's message payload.
 type assistantMessageBody struct {
-	ID      string `json:"id"`
+	ID string `json:"id"`
+	// Model is the model that actually produced this message — the
+	// authoritative answer to "what model is this session on", and the
+	// one the CLI can move without telling anybody.
+	Model   string `json:"model"`
 	Content []struct {
 		Type      string          `json:"type"`
 		Text      string          `json:"text"`
@@ -441,6 +501,10 @@ type assistantMessageBody struct {
 // onAssistantMessage synthesizes block frames for messages that did not
 // stream (includePartialMessages off, or replayed history). Messages
 // whose blocks already streamed are deduplicated by message id.
+//
+// It is also where the model mirror learns that the AGENT moved the
+// model out from under it: every assistant message names the model that
+// produced it, which is the only truth the daemon gets for free.
 func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Frame {
 	var msg assistantMessageBody
 	if err := json.Unmarshal(evt.Message, &msg); err != nil {
@@ -451,10 +515,23 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 			Recoverable: true,
 		}}
 	}
-	if t.streamed[msg.ID] {
-		return nil
-	}
+	// Deliberately BEFORE the streamed-dedup below: a message whose blocks
+	// already streamed still carries the authoritative model, and skipping
+	// it would blind the mirror to the common case (every streamed turn).
+	//
+	// Main-chain only. A subagent's message names the SUBAGENT's model (a
+	// Haiku Explore under an Opus session), so trusting it would flip the
+	// topbar to Haiku for the length of every subagent — the same reason
+	// the Emacs mode-line filters isSidechain.
 	var frames []protocol.L2Frame
+	if evt.ParentToolUseID == "" {
+		if frame := t.SetModel(msg.Model, "agent"); frame != nil {
+			frames = append(frames, frame)
+		}
+	}
+	if t.streamed[msg.ID] {
+		return frames
+	}
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
@@ -578,9 +655,13 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 			PermissionMode  string `json:"permissionMode"`
 			ClaudeSessionID string `json:"session_id"`
 		}
+		var frames []protocol.L2Frame
 		if err := json.Unmarshal(evt.Data, &init); err == nil {
-			if init.Model != "" {
-				t.Model = init.Model
+			// Announced, not just recorded: a client that attached before
+			// init would otherwise sit on the hello's empty model until it
+			// reconnected or the first turn landed.
+			if frame := t.SetModel(init.Model, "init"); frame != nil {
+				frames = append(frames, frame)
 			}
 			if init.CWD != "" {
 				t.CWD = init.CWD
@@ -592,11 +673,11 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 				t.ClaudeSessionID = init.ClaudeSessionID
 			}
 		}
-		return []protocol.L2Frame{&protocol.SystemFrame{
+		return append(frames, &protocol.SystemFrame{
 			Envelope: protocol.Envelope{Type: "system"},
 			Subtype:  "init",
 			Data:     evt.Data,
-		}}
+		})
 	case "slash_command":
 		return []protocol.L2Frame{&protocol.SystemFrame{
 			Envelope: protocol.Envelope{Type: "system"},

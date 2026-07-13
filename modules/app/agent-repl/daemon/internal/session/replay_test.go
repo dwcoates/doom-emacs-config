@@ -241,10 +241,22 @@ func TestBuildReplayFramesAssistantTextBlock(t *testing.T) {
 	// Arrange / Act
 	frames, _ := buildFrames(t,
 		`{"type":"assistant","message":{"id":"msg_1","model":"claude-fable-5","content":[{"type":"text","text":"answer"}]}}`)
-	// Assert
-	wantTypes(t, frames, "text-start", "text-delta", "text-end")
-	if start := frames[0].(*protocol.TextStartFrame); start.MessageID != "msg_1" {
+	// Assert — the replayed history also teaches the client the model that
+	// produced it, so a resumed session's topbar is right on arrival.
+	wantTypes(t, frames, "model-changed", "text-start", "text-delta", "text-end")
+	if start := frames[1].(*protocol.TextStartFrame); start.MessageID != "msg_1" {
 		t.Fatalf("MessageID = %q, want msg_1", start.MessageID)
+	}
+}
+
+func TestBuildReplayFramesAdoptsTheLastAssistantModel(t *testing.T) {
+	// Arrange / Act — the model moved mid-conversation.
+	_, tr := buildFrames(t,
+		`{"type":"assistant","message":{"id":"m1","model":"opus","content":[{"type":"text","text":"a"}]}}`,
+		`{"type":"assistant","message":{"id":"m2","model":"haiku","content":[{"type":"text","text":"b"}]}}`)
+	// Assert — the mirror lands on the LAST model, not the first.
+	if tr.Model != "haiku" {
+		t.Errorf("mirror = %q, want haiku", tr.Model)
 	}
 }
 
@@ -379,8 +391,9 @@ func TestSeedFromTranscriptRetainsFramesForReplay(t *testing.T) {
 	if err := sess.HandleClientFrame(client, req); err != nil {
 		t.Fatalf("replay-request: %v", err)
 	}
+	want := []string{"user-turn", "model-changed", "text-start", "text-delta", "text-end"}
 	var types []string
-	for len(types) < 4 { // user-turn + text trio
+	for len(types) < len(want) { // user-turn + the model it was answered on + text trio
 		var env struct {
 			Type string `json:"type"`
 		}
@@ -390,7 +403,6 @@ func TestSeedFromTranscriptRetainsFramesForReplay(t *testing.T) {
 		}
 		types = append(types, env.Type)
 	}
-	want := []string{"user-turn", "text-start", "text-delta", "text-end"}
 	for i := range want {
 		if types[i] != want[i] {
 			t.Fatalf("replayed frame types = %v, want %v", types, want)
