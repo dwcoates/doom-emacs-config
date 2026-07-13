@@ -128,6 +128,22 @@ body {
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
 
+/* The login button is the far-right topbar control, sitting immediately
+   right of the permission-mode dropdown. It is deliberately quiet chrome:
+   an escape hatch reached when the account's credentials lapse, not a
+   thing to draw the eye during a normal turn. */
+#login-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+#login-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
+#login-btn:disabled { opacity: 0.5; cursor: default; }
+
 #session-info { color: var(--muted); margin-left: auto; }
 #session-info .info-ws { color: var(--info-ws); }
 #session-info .info-model { color: var(--info-model); }

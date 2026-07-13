@@ -170,3 +170,47 @@ func TestWriteSelfHealsWipedDir(t *testing.T) {
 		t.Fatalf("expected self-healed write: %v", err)
 	}
 }
+
+func TestLoginRequestedWritesTheDispatchableFilename(t *testing.T) {
+	// Arrange
+	w, dir := newTestWriter(t)
+	// Act
+	w.LoginRequested("/repo", "sid")
+	w.Close()
+	// Assert — Emacs prefix-matches `login_request'.
+	if _, err := os.Stat(filepath.Join(dir, "login_request_sid")); err != nil {
+		t.Fatalf("expected login_request_sid: %v", err)
+	}
+}
+
+func TestLoginRequestedCarriesCWDAndOwnershipMarker(t *testing.T) {
+	// Arrange
+	w, dir := newTestWriter(t)
+	// Act
+	w.LoginRequested("/repo", "sid")
+	w.Close()
+	// Assert — the cwd is what Emacs resolves the account from.
+	raw, err := os.ReadFile(filepath.Join(dir, "login_request_sid"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(raw) != "/repo\nsid\nowned\n" {
+		t.Fatalf("contents = %q, want the 3-line owned sentinel format", raw)
+	}
+}
+
+func TestLoginRequestedBeforeSystemInitStillNamesTheCWD(t *testing.T) {
+	// Arrange — a session whose claude uuid has not landed yet.
+	w, dir := newTestWriter(t)
+	// Act
+	w.LoginRequested("/repo", "")
+	w.Close()
+	// Assert — the id is empty but the cwd (the account selector) is not.
+	raw, err := os.ReadFile(filepath.Join(dir, "login_request_"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(raw) != "/repo\n\nowned\n" {
+		t.Fatalf("contents = %q, want the cwd with an empty session id", raw)
+	}
+}

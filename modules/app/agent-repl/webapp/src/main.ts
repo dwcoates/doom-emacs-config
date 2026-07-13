@@ -11,6 +11,7 @@ import { sessionSubagents } from "./agents.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
+import { loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
@@ -100,6 +101,7 @@ async function boot(): Promise<void> {
   const statusEl = must("conn-status");
   const infoEl = must("session-info");
   const modeEl = must<HTMLSelectElement>("mode-select");
+  const loginEl = must<HTMLButtonElement>("login-btn");
   const spinnerEl = must("spinner");
   const remediationEl = must("remediation");
   const parentWs = params.get("parent_ws");
@@ -273,6 +275,29 @@ async function boot(): Promise<void> {
       request_id: crypto.randomUUID(),
       mode: modeEl.value as PermissionMode,
     });
+  });
+
+  // Login is the one topbar control that does not talk to the SDK session:
+  // the OAuth flow needs a TTY, so it goes over HTTP to the daemon, which
+  // hands it to Emacs to run in a vterm. The button is disabled for the
+  // round trip so a double-click cannot ask for two login terminals.
+  //
+  // The notice reuses #remediation, the topbar's one status-line slot.
+  loginEl.addEventListener("click", () => {
+    loginEl.disabled = true;
+    void requestLogin(httpBase, activeSessionId)
+      .then((phase) => {
+        remediationEl.textContent = loginNotice(phase);
+      })
+      .catch((err: unknown) => {
+        // A login that never opened must say so: leaving the topbar silent
+        // would send the user off to look for a terminal that is not coming.
+        remediationEl.textContent = loginNotice("failed");
+        console.error("login request failed", err);
+      })
+      .finally(() => {
+        loginEl.disabled = false;
+      });
   });
 }
 

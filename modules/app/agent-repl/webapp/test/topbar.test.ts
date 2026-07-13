@@ -36,4 +36,17 @@ describe("topbar", () => {
     // Assert
     expect(topbar).toMatch(/<span id="remediation"><\/span>/);
   });
+
+  it("carries a login button", () => {
+    // Arrange / Act — the topbar markup.
+    // Assert
+    expect(topbar).toContain(`id="login-btn"`);
+  });
+
+  it("places the login button to the right of the permission-mode dropdown", () => {
+    // Arrange / Act — source order is layout order in the flex row, and the
+    // button is the last control, so it lands at the far right of the topbar.
+    // Assert
+    expect(topbar.indexOf(`id="login-btn"`)).toBeGreaterThan(topbar.indexOf(`id="mode-select"`));
+  });
 });

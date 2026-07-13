@@ -970,11 +970,21 @@ fallback + filename-prefix dispatch) is unchanged machinery.
   | `permission_request_<sid>_<reqid>` | `permission-request` |
   | `permission_resolved_<sid>_<reqid>` | `permission-resolved` (webapp decision or turn-end/interrupt/close/death auto-cancel) |
   | `session_dead_<sid>` | `error` with `code: "shim_died"` (both abnormal death paths; never on clean shutdown) |
+  | `login_request_<sid>` | `POST /sessions/{id}/login` (the webapp topbar's login button) |
 
   Everything else (`prompt_submit_*`, `stop_*`, `subagent_*`,
   `stop_failure_*`, `session_start_*`) keeps coming from the real
   global hooks, which fire for SDK sessions.
 
+  `login_request_<sid>` is the one entry that is not a broadcast tap: it
+  is a REQUEST travelling daemon → Emacs rather than a state report. The
+  Claude OAuth flow is an interactive TUI needing a controlling terminal,
+  which neither the browser nor the daemon (pipes only) has — Emacs does,
+  so the daemon's job is to name the session's `cwd` and hand it over.
+  Emacs opens a vterm running `CLAUDE_CONFIG_DIR=<dir> claude /login`,
+  with `<dir>` resolved from that `cwd` (see below). The `sid` may be
+  empty when `system:init` has not landed; the `cwd`, not the id, is what
+  the Emacs dispatcher keys on.
 - **Consumer gates**: the Emacs handlers are state-gated and
   idempotent (`permission_request` acts only from `:thinking`,
   `permission_resolved` only from `:permission`), which makes

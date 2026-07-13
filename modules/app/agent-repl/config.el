@@ -324,6 +324,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
 (agent-repl--load-module "frontend")
+;; WHY here: login.el's account resolver is session.el's
+;; `agent-repl--compute-config-dir', and its terminal is opened with
+;; core.el's buffer factory — both already loaded above.  The sentinel
+;; dispatch entry that reaches it (sentinel.el, loaded earlier) names the
+;; callback as an unquoted symbol resolved at call time, so the load order
+;; between the two does not matter.
+(agent-repl--load-module "login")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "ai-title")
 (agent-repl--load-module "model")
