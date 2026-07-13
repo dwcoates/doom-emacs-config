@@ -9,11 +9,11 @@ import { formatDuration } from "./duration.js";
 import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
-import { stripMetaSpans } from "./meta.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, Usage } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
+import { isClearTurn, userTurnText } from "./turn.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -195,32 +195,6 @@ function Bubble(cls: string, body: string, ts: string): string {
   return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-ts">${escapeHtml(
     formatTurnTime(ts),
   )}</span></div>`;
-}
-
-/**
- * A user turn's prompt text, non-text blocks standing in as `[kind]`.
- *
- * The host's injected spans (the metaprompt read-directive, the
- * workspace-generation preamble and wrap-up gate) are marked at their
- * injection site and dropped here: a user turn reads as the user's own
- * words, both in the bubble and to `isClearTurn`.
- */
-function userTurnText(item: UserTurnItem): string {
-  return stripMetaSpans(
-    item.content
-      .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
-      .join("\n"),
-  );
-}
-
-/**
- * Whether a user turn is the `/clear` command — the prompt that drops the
- * CLI's context and re-inits the session. Its bubble carries the context
- * boundary rule beneath it, splitting the discarded conversation above from
- * the re-initialized one (`system: init`, then a contextless reply) below.
- */
-export function isClearTurn(item: UserTurnItem): boolean {
-  return userTurnText(item).trim() === "/clear";
 }
 
 /**
