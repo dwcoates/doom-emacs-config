@@ -127,6 +127,48 @@ signals `user-error' rather than silently returning a bogus path."
   (agent-repl-test--with-temp-buffer "*repl-test-non-agent-buf*"
     (should-not (agent-repl--agent-buffer-p))))
 
+;;;; ---- Tests: agent-view-buffer-name-p (the RENDERING predicate) ----
+
+(ert-deftest agent-repl-test-agent-view-name-matches-the-vterm-output ()
+  "A vterm workspace shows its agent in the vterm output buffer."
+  (should (agent-repl--agent-view-buffer-name-p "*agent-panel-my-ws*")))
+
+(ert-deftest agent-repl-test-agent-view-name-matches-the-gui-webview ()
+  "A gui workspace shows its agent in the webview.
+This is the whole point of the predicate: the tab-bar asks \"is the agent
+view open\", and answering nil for every gui workspace is what left their
+tabs permanently drawn as though the panels were closed."
+  (should (agent-repl--agent-view-buffer-name-p "*agent-frontend-my-ws*")))
+
+(ert-deftest agent-repl-test-agent-view-name-excludes-the-input-panel ()
+  "The input panel alone is not a workspace showing its agent."
+  (should-not (agent-repl--agent-view-buffer-name-p "*agent-panel-input-my-ws*")))
+
+(ert-deftest agent-repl-test-agent-view-name-excludes-the-explain-config-popup ()
+  "`SPC j h c' mounts a webview too, but it is not any workspace's agent view."
+  (should-not (agent-repl--agent-view-buffer-name-p "*agent-explain-config*")))
+
+(ert-deftest agent-repl-test-agent-view-name-excludes-an-unrelated-buffer ()
+  "An ordinary buffer is not an agent view."
+  (should-not (agent-repl--agent-view-buffer-name-p "*repl-test-non-agent-buf*")))
+
+(ert-deftest agent-repl-test-agent-view-name-tolerates-a-non-string ()
+  "A `window-state-get' tree can hold a non-string where a buffer name went."
+  (should-not (agent-repl--agent-view-buffer-name-p nil)))
+
+(ert-deftest agent-repl-test-agent-view-buffer-p-reads-the-current-buffer ()
+  "The buffer-shaped form defers to the name-shaped one."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
+    (should (agent-repl--agent-view-buffer-p))))
+
+(ert-deftest agent-repl-test-agent-buffer-p-still-refuses-the-webview ()
+  "The PANEL predicate must NOT widen to the webview.
+The input-panel bounce and the orphan sweep key off it, and frontend.el
+keeps the webview out of that namespace on purpose."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
+    (should-not (agent-repl--agent-buffer-p))
+    (should-not (agent-repl--agent-panel-buffer-p))))
+
 ;;;; ---- Tests: Logging ----
 
 (ert-deftest agent-repl-test-log-respects-debug-flag ()

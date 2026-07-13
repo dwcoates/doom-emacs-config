@@ -1533,6 +1533,24 @@ purpose is the alternating-space cache-bust."
   (let ((wconf '((buffer "*scratch*"))))
     (should-not (agent-repl--wconf-has-agent-p wconf))))
 
+(ert-deftest agent-repl-test-wconf-has-agent-gui-webview ()
+  "A BACKGROUND gui workspace's saved layout counts as agent-open.
+This is the half of the fix that reaches every tab the user is not
+currently looking at: the webview is genuinely present in the saved
+window config, it simply was not recognized."
+  (let ((wconf '((buffer "*agent-frontend-my-ws*"))))
+    (should (agent-repl--wconf-has-agent-p wconf))))
+
+(ert-deftest agent-repl-test-wconf-has-agent-gui-webview-nested ()
+  "The gui webview is found however deep the saved layout nests it."
+  (let ((wconf '((child ((child ((buffer "*agent-frontend-my-ws*"))))))))
+    (should (agent-repl--wconf-has-agent-p wconf))))
+
+(ert-deftest agent-repl-test-wconf-has-agent-gui-input-only ()
+  "A gui layout holding ONLY the input panel is not a workspace showing its agent."
+  (let ((wconf '((buffer "*agent-panel-input-my-ws*"))))
+    (should-not (agent-repl--wconf-has-agent-p wconf))))
+
 ;;;; ---- Tests: visible-agent-buffer-p ----
 
 (ert-deftest agent-repl-test-visible-agent-buffer-dead-buffer ()
@@ -1558,6 +1576,54 @@ purpose is the alternating-space cache-bust."
     (cl-letf (((symbol-function 'get-buffer-window)
                (lambda (_buf) 'fake-window)))
       (should (agent-repl--visible-agent-buffer-p (current-buffer))))))
+
+(ert-deftest agent-repl-test-visible-agent-buffer-gui-webview-with-window ()
+  "A displayed gui webview IS a visible agent view.
+The CURRENT workspace's half of the fix: the tab-bar walks live buffers
+asking whether the agent view is on screen, and a gui workspace's answer
+is its webview."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
+    (cl-letf (((symbol-function 'get-buffer-window)
+               (lambda (_buf) 'fake-window)))
+      (should (agent-repl--visible-agent-buffer-p (current-buffer))))))
+
+(ert-deftest agent-repl-test-visible-agent-buffer-gui-webview-no-window ()
+  "A gui webview that is not on screen is not a visible agent view."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
+    (should-not (agent-repl--visible-agent-buffer-p (current-buffer)))))
+
+;;;; ---- Tests: the gui tab fills, end to end ----
+;;
+;; The bug this closes: a gui workspace's `:agent-state' was always correct,
+;; but `--ws-display-state' suppressed it because `--ws-agent-open-p' could
+;; only see a vterm.  Every gui tab was therefore drawn in the bracket-only
+;; "panels closed" style forever, whatever the agent was doing.
+
+(ert-deftest agent-repl-test-display-state-gui-webview-open-renders-thinking ()
+  "A gui workspace whose webview is up gets the FULL :thinking tab."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl-test--with-temp-buffer "*agent-frontend-ws1*"
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "ws1"))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (buf &rest _)
+                   (when (equal (buffer-name buf) "*agent-frontend-ws1*")
+                     'fake-window))))
+        (should (eq :thinking (agent-repl--ws-display-state "ws1")))))))
+
+(ert-deftest agent-repl-test-display-state-gui-webview-closed-renders-nil ()
+  "A gui workspace whose webview is dismissed falls back to bracket-only.
+The state survives on the plist, exactly as it does for a vterm workspace
+whose panels are closed."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1"))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) nil)))
+      (should-not (agent-repl--ws-display-state "ws1"))
+      ;; The bracket keeps the colour, which is the whole point of the split.
+      (should (eq :thinking (agent-repl--ws-bracket-state "ws1"))))))
 
 ;;;; ---- Tests: agent-visible-in-current-ws-p ----
 

@@ -1465,22 +1465,26 @@ notification while dropping the leading workspace list."
 
 ;; Walk saved window-configuration tree to find agent buffers.
 (defun agent-repl--wconf-has-agent-p (wconf)
-  "Return non-nil if WCONF (a `window-state-get' tree) contains an agent vterm buffer.
-Excludes input buffers: presence of only the input panel in a saved
-config (e.g. from a placeholder layout) should not count as agent open."
+  "Return non-nil if WCONF (a `window-state-get' tree) shows a workspace's agent.
+The agent view is the vterm output buffer for a vterm workspace and the
+webview for a gui one, so both count — see
+`agent-repl--agent-view-buffer-name-p'.  Excludes input buffers: presence
+of only the input panel in a saved config (e.g. from a placeholder layout)
+should not count as agent open."
   (when (and wconf (proper-list-p wconf))
     (let ((buf-entry (alist-get 'buffer wconf)))
-      (if (and buf-entry (stringp (car-safe buf-entry))
-               (string-match-p agent-repl--vterm-buffer-re (car buf-entry))
-               (not (string-match-p agent-repl--input-buffer-re (car buf-entry))))
+      (if (and buf-entry
+               (agent-repl--agent-view-buffer-name-p (car-safe buf-entry)))
           t
         (cl-some #'agent-repl--wconf-has-agent-p
                  (cl-remove-if-not #'proper-list-p wconf))))))
 
 (defun agent-repl--visible-agent-buffer-p (buf)
-  "Return non-nil if BUF is a live, visible agent buffer."
+  "Return non-nil if BUF is a live, visible agent VIEW buffer.
+The view is a vterm output buffer for a vterm workspace and a webview for
+a gui one — see `agent-repl--agent-view-buffer-p'."
   (and (buffer-live-p buf)
-       (agent-repl--agent-buffer-p buf)
+       (agent-repl--agent-view-buffer-p buf)
        (get-buffer-window buf)))
 
 (defun agent-repl--agent-visible-in-current-ws-p ()
