@@ -2,10 +2,11 @@
 ;;
 ;; Pluggable agent-CLI backend registry.
 ;;
-;; agent-repl drives an interactive coding-agent CLI inside a vterm
-;; panel.  Historically that CLI was hardwired to Claude Code; this file
-;; is the seam that makes the CLI pluggable.  A backend bundles every
-;; CLI-specific decision behind a small struct:
+;; agent-repl drives an interactive coding-agent CLI as a session's
+;; agent backend.  Historically that CLI was hardwired to Claude Code
+;; and driven inside a vterm panel; this file is the seam that makes
+;; the CLI pluggable.  A backend bundles every CLI-specific decision
+;; behind a small struct:
 ;;
 ;;   - how to build the interactive start command for a workspace
 ;;     (binary, resume/fork flags, permission flags, config-dir env)
@@ -37,7 +38,7 @@ START-CMD-FN builds the interactive start command: called with one
 plist argument carrying `:session-id', `:fork-session-id',
 `:project-dir' and `:model' (any of which may be nil except
 `:project-dir'), it returns the full shell command string used to
-launch the agent inside the workspace vterm.
+launch the agent's interactive CLI session.
 HEADLESS-CMD-FN builds the argv for a one-shot (non-interactive) run:
 called with (MODEL EXTRA-ARGS), it returns the process command list
 (the prompt is delivered on stdin by the caller).  Optional — a

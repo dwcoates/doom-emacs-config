@@ -1,10 +1,18 @@
-;;; context.el --- Context-window utilization in vterm mode-line -*- lexical-binding: t; -*-
+;;; context.el --- Context-window usage transcript reader -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Render the context-window utilization of a workspace's Claude session
-;; in the vterm mode-line, alongside the model, prompt-summary, and
-;; aiTitle segments.
+;; Read the context-window utilization of a workspace's Claude session
+;; from its own session jsonl.  This file used to ALSO render that
+;; figure as a segment in the vterm mode-line, alongside the model and
+;; aiTitle segments; the vterm frontend is gone, and the sole surviving
+;; frontend (the xwidget webview) has no mode-line of its own — the
+;; webapp topbar already renders model + tokens directly
+;; (`webapp/src/render.ts').  What remains here is the reading
+;; capability itself: `backend.el' registers
+;; `agent-repl--context-read-from-jsonl' as the claude backend's
+;; TRANSCRIPT-CONTEXT-FN capability, and `agent-repl--context-for-ws'
+;; is the cached per-workspace lookup any future caller can use.
 ;;
 ;; Source of truth: the workspace's own session jsonl under
 ;; `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl' — the same
@@ -13,27 +21,24 @@
 ;; whose input-side counters describe the tokens that were in context
 ;; when that turn was served:
 ;;   input_tokens + cache_creation_input_tokens + cache_read_input_tokens
-;; We surface the most recent such total as a raw token count, rendered
-;; with comma thousands separators (e.g. `tokens 53,179').  We do not
-;; divide by a context-window size: the effective window depends on the
-;; model and whether a long-context (1M) mode is active, and that figure
-;; is not recorded anywhere in the session data, so any percentage would
-;; rest on a brittle assumption.  `output_tokens' is deliberately
-;; excluded: it is the freshly-generated response, not part of the
-;; context that turn consumed.
+;; We surface the most recent such total as a raw token count.  We do
+;; not divide by a context-window size: the effective window depends on
+;; the model and whether a long-context (1M) mode is active, and that
+;; figure is not recorded anywhere in the session data, so any
+;; percentage would rest on a brittle assumption.  `output_tokens' is
+;; deliberately excluded: it is the freshly-generated response, not
+;; part of the context that turn consumed.
 ;;
-;; Mode-line layout (left-to-right): parent label → model → tokens.
-;;
-;; Reading the jsonl on every mode-line redraw would re-stat and
-;; re-scan a multi-MB file; we cache (mtime, path, used) on the
-;; workspace plist and only re-scan the last
-;; `agent-repl-context-scan-bytes' of the file when mtime changes.
+;; Reading the jsonl on every lookup would re-stat and re-scan a
+;; multi-MB file; we cache (mtime, path, used) on the workspace plist
+;; and only re-scan the last `agent-repl-context-scan-bytes' of the
+;; file when mtime changes.
 ;;
 ;; Path resolution and mtime keying are deliberately reused from
 ;; `ai-title.el' (`agent-repl--ai-title-jsonl-path' /
-;; `agent-repl--ai-title-mtime') since all three segments resolve the
-;; exact same per-workspace jsonl; this file is loaded after
-;; `ai-title.el' so those helpers are available.
+;; `agent-repl--ai-title-mtime') since every session-transcript reader
+;; resolves the exact same per-workspace jsonl; this file is loaded
+;; after `ai-title.el' so those helpers are available.
 
 ;;; Code:
 
@@ -42,16 +47,11 @@
 
 ;;;; Defcustoms
 
-(defcustom agent-repl-context-enabled t
-  "Non-nil to render context-window utilization in the vterm mode-line."
-  :type 'boolean
-  :group 'agent-repl)
-
 (defcustom agent-repl-context-scan-bytes 32768
   "Number of bytes to read from the end of the session jsonl when scanning
 for the most recent assistant usage.  Each entry's usage object is short,
 so the tail of the file is enough; reading the whole file on every
-mode-line refresh would be wasteful for large transcripts."
+lookup would be wasteful for large transcripts."
   :type 'integer
   :group 'agent-repl)
 
@@ -126,80 +126,6 @@ key and WS's backend TRANSCRIPT-CONTEXT-FN reader (this file's
 nil when no usage is available."
   (agent-repl--transcript-cached
    ws :context-cache #'agent-repl-backend-transcript-context-fn))
-
-;;;; Formatting
-
-(defun agent-repl--context-commafy (n)
-  "Return non-negative integer N as a string with comma thousands separators.
-E.g. 53179 → \"53,179\" and 1000000 → \"1,000,000\"."
-  (let ((s (number-to-string n)))
-    (while (string-match "\\([0-9]+\\)\\([0-9]\\{3\\}\\)" s)
-      (setq s (replace-match "\\1,\\2" nil nil s)))
-    s))
-
-(defun agent-repl--context-format (used)
-  "Return the display string for USED context tokens, e.g. `tokens 53,179'."
-  (format "tokens %s" (agent-repl--context-commafy used)))
-
-;;;; Mode-line segment
-
-(defun agent-repl--context-segment ()
-  "Return a propertized string for the mode-line's context-tokens segment.
-Reads `agent-repl--owning-workspace' from the current buffer (set on
-every agent-owned vterm buffer) and pulls the workspace's used context
-token count.  Returns the empty string when disabled, the workspace is
-unknown, or no usage is yet available."
-  (if (not agent-repl-context-enabled)
-      ""
-    (let ((ws (agent-repl--buffer-owner (current-buffer))))
-      (if (not ws)
-          ""
-        (let ((used (agent-repl--context-for-ws ws)))
-          (if (not (numberp used))
-              ""
-            (concat "  "
-                    (propertize (agent-repl--context-format used)
-                                'face '(:foreground "medium sea green"
-                                        :weight normal)))))))))
-
-;;;; Mode-line attachment
-
-(defconst agent-repl--context-mode-line-spec
-  '(:eval (agent-repl--context-segment))
-  "Trailing `:eval' mode-line segment that paints context utilization.
-Captured as a constant so the attach helper can detect (via `equal')
-whether a buffer's mode-line already contains it.")
-
-(defun agent-repl--context-attach-to-mode-line (buf)
-  "Append the context segment to BUF's `mode-line-format' if missing.
-Idempotent — does nothing when the segment is already present, the
-buffer is dead, or the buffer's mode-line is not a list."
-  (when (buffer-live-p buf)
-    (with-current-buffer buf
-      (when (and (listp mode-line-format)
-                 (not (member agent-repl--context-mode-line-spec
-                              mode-line-format)))
-        (setq-local mode-line-format
-                    (append mode-line-format
-                            (list agent-repl--context-mode-line-spec)))
-        (force-mode-line-update t)))))
-
-(defun agent-repl-context-attach-all ()
-  "Attach the context segment to every live workspace vterm buffer.
-Run automatically when this file loads so reloading agent-repl upgrades
-pre-existing vterm buffers.  Also exposed interactively for manual
-recovery."
-  (interactive)
-  (when (and (boundp 'agent-repl--workspaces)
-             (hash-table-p agent-repl--workspaces))
-    (maphash
-     (lambda (_ws plist)
-       (let ((buf (plist-get plist :vterm-buffer)))
-         (when (and buf (buffer-live-p buf))
-           (agent-repl--context-attach-to-mode-line buf))))
-     agent-repl--workspaces)))
-
-(agent-repl-context-attach-all)
 
 (provide 'agent-repl-context)
 ;;; context.el ends here

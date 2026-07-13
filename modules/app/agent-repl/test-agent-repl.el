@@ -38,13 +38,11 @@
   (load (expand-file-name "test-magit.el" dir) nil t)
   (load (expand-file-name "test-merge-handlers.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
-  (load (expand-file-name "test-overlay.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
   (load (expand-file-name "test-prompt-summary.el" dir) nil t)
   (load (expand-file-name "test-sentinel.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)
-  (load (expand-file-name "test-vterm-freeze.el" dir) nil t)
   (load (expand-file-name "test-workspace.el" dir) nil t)
   (load (expand-file-name "test-worktree.el" dir) nil t))
 

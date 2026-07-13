@@ -346,19 +346,5 @@ a future refactor doesn't accidentally start reading the whole file."
       ;; Should not signal.
       (agent-repl-ai-title-attach-all))))
 
-;;;; ---- Tests: workspace-mode-line does NOT wire the ai-title segment ----
-
-(ert-deftest agent-repl-test-workspace-mode-line-omits-ai-title-segment ()
-  "`agent-repl--workspace-mode-line' does NOT wire the ai-title (nor the
-prompt-summary) :eval segment: both were intentionally dropped from the
-status bar.  Pins the drop so a refactor doesn't silently re-add either
-to newly-created vterm buffers."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name)
-               (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "ws1")))
-        (should-not (member '(:eval (agent-repl--ai-title-segment)) result))
-        (should-not (member '(:eval (agent-repl--prompt-summary-segment)) result))))))
-
 (provide 'test-ai-title)
 ;;; test-ai-title.el ends here

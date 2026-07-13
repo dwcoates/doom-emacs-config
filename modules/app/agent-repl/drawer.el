@@ -71,7 +71,7 @@ affect the drawer's window width, which is constant (see
 The :dead entry is used when `:repl-state' is `:dead' (overrides
 :agent-state).  The :merged entry is used when `:repl-state' is
 `:merged' and takes precedence over `:dead' (so a merged workspace
-whose vterm has since died still reads as merged).  The :merge-failed
+whose session has since died still reads as merged).  The :merge-failed
 entry is used when `:repl-state' is `:merge-failed' (a workspace that
 landed in the MERGED bucket but whose cherry-pick reported failure);
 it uses the ⛔ glyph (distinct from :dead's ❌) to signal a blocked
@@ -2293,9 +2293,9 @@ artifact.")
   "Show the workspace drawer in a left-side window.
 Positions the drawer cursor on the currently selected workspace
 (falling back to the first entry) WITHOUT selecting the drawer
-window — the drawer mirrors the claude-output (vterm) panel's
-keyboard-inaccessible policy, so callers stay where they are and
-must mouse-click into the drawer to operate it directly.  Sets the
+window — the drawer is keyboard-inaccessible by policy, so callers
+stay where they are and must mouse-click into the drawer to operate
+it directly.  Sets the
 global visible-flag so the drawer follows the user across workspace
 switches.  Self-heals if an existing drawer buffer pre-dates the
 current mode init by ensuring the overlay-driving post-command hook
@@ -2693,18 +2693,18 @@ switches with no cursor disruption."
 
 ;;;; Keyboard-inaccessibility bounce ----------------------------------------
 ;;
-;; Mirrors `agent-repl--bounce-from-vterm' (panels.el).  Same mechanism,
-;; different target buffer and bounce destination: the vterm bounce
-;; redirects to the workspace's input window (a well-known per-workspace
-;; target); the drawer bounce has no comparable single target, so it
-;; redirects to the most-recently-used non-drawer window — i.e. wherever
-;; the user came from before keyboard nav landed in the drawer.
+;; The drawer is a frame-level listing, not a per-workspace panel, so
+;; it has no single well-known redirect target the way a workspace's
+;; own input window serves its panels.  Keyboard-driven selection
+;; landing here (`windmove', `other-window', the `select-window'
+;; previously inside `agent-repl-drawer-show', ...) is instead
+;; redirected to the most-recently-used non-drawer window — i.e.
+;; wherever the user came from before keyboard nav landed in the
+;; drawer.
 ;;
 ;; Mouse clicks are exempt (checked via `last-input-event') so the user
 ;; can still click into the drawer to operate entries via RET/j/k/etc.;
-;; only keyboard-driven selection (`windmove', `other-window', the
-;; `select-window' previously inside `agent-repl-drawer-show', ...) is
-;; redirected away.
+;; only keyboard-driven selection is redirected away.
 
 (defun agent-repl-drawer--buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is the drawer buffer.
@@ -2719,9 +2719,9 @@ on `last-input-event') so clicking entries to visit a workspace works.
 When no other live window exists on the frame, emits a warning via
 `message' rather than leaving point stranded silently.
 
-Predicate is buffer-identity (`agent-repl-drawer--buffer-p'), mirroring
-the vterm bounce — buffer-name match is cheap and unambiguous since the
-drawer buffer name is a defcustom-controlled singleton.
+Predicate is buffer-identity (`agent-repl-drawer--buffer-p') —
+buffer-name match is cheap and unambiguous since the drawer buffer
+name is a defcustom-controlled singleton.
 
 Hook target is `window-selection-change-functions', so this fires
 during redisplay after a selection change rather than synchronously

@@ -58,7 +58,7 @@
 (declare-function agent-repl--frontend-require-xwidget "agent-repl-frontend" ())
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--delete-buffer-windows "agent-repl-window" (buf &rest args))
-(declare-function agent-repl--configure-vterm-window "agent-repl-panels" (win))
+(declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 
 (defvar agent-repl-frontend-permission-mode)
 (defvar xwidget-webkit-buffer-name-format)
@@ -223,13 +223,13 @@ changed.  This forces the resize on every show — mirrors the drawer's
 (defun agent-repl--explain-config-current-agent-output-window ()
   "Return the live agent output window in the selected frame, or nil.
 Looks up the current workspace's agent output panel via
-`agent-repl-window--panel-window' with the `:vterm' key (the
+`agent-repl-window--panel-window' with the `:view' key (the
 existing panel-lookup key — note we do NOT introduce that name
 here, the popup itself only deals in \"agent output\").  Guards
-on `fboundp' so callers in load order before panels.el (e.g. early
+on `fboundp' so callers in load order before window.el (e.g. early
 test harnesses) get nil instead of a void-function error."
   (and (fboundp 'agent-repl-window--panel-window)
-       (agent-repl-window--panel-window :vterm)))
+       (agent-repl-window--panel-window :view)))
 
 (defun agent-repl--explain-config-take-over-agent-output-window (output-win buf)
   "Swap OUTPUT-WIN's buffer for BUF and record the original for restoration.
@@ -248,17 +248,21 @@ the swap errors.  The pre-swap buffer is stashed in
 (defun agent-repl--explain-config-restore-replaced-window ()
   "Restore the buffer in the window the popup took over, if any.
 No-op when no window was replaced or when the window or its prior
-buffer is no longer live.  Re-applies the agent output window
-hardening (dedicate / size-fix / delete-protect) on success so the
-restored window matches its original recipe."
+buffer is no longer live.  Re-applies the agent output window's
+hardening recipe (dedicate / width-fixed / delete-protect — the same
+recipe the agent output window is always given, whether it hosts the
+gui webview or, transiently, this popup) on success so the restored
+window matches its original recipe."
   (when-let ((cell agent-repl--explain-config-replaced-window))
     (setq agent-repl--explain-config-replaced-window nil)
     (let ((win (car cell))
           (prev (cdr cell)))
       (when (and (window-live-p win) (buffer-live-p prev))
         (set-window-buffer win prev)
-        (when (fboundp 'agent-repl--configure-vterm-window)
-          (agent-repl--configure-vterm-window win))))))
+        (agent-repl-window--harden win
+                                   :dedicate t
+                                   :size-fix 'width
+                                   :delete-protect t)))))
 
 (defun agent-repl--explain-config-show ()
   "Display the explain-config webview in the current workspace.

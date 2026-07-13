@@ -486,11 +486,11 @@ guaranteed to fire only on genuine API errors."
       (should-not timer-armed))))
 
 (ert-deftest agent-repl-test-on-stop-failure-event-sends-no-auto-input ()
-  "on-stop-failure-event does NOT auto-send any prompt to the vterm.
+  "on-stop-failure-event does NOT auto-send any prompt to the agent.
 Recovery from a stop-failure is left entirely to the user."
   (agent-repl-test--with-clean-state
     (let ((input-sent nil))
-      (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm)
+      (cl-letf (((symbol-function 'agent-repl--send)
                  (lambda (&rest _args) (setq input-sent t))))
         (agent-repl--on-stop-failure-event "ws1" "/some/dir"))
       (should-not input-sent))))
@@ -607,7 +607,7 @@ against the Stop hook's :done."
 
 (ert-deftest agent-repl-test-on-session-dead-respects-merged ()
   "on-session-dead-event must not clobber a :merged badge.
-Inherits mark-dead-vterm's precedence guard."
+Inherits mark-dead's precedence guard."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :repl-state :merged)
     (agent-repl--on-session-dead-event "ws1" "/some/dir")
@@ -821,7 +821,7 @@ lookup is never dropped."
   "ws-for-dir-fast skips workspaces whose :project-dir is nil."
   (agent-repl-test--with-clean-state
     (let ((target (agent-repl--path-canonical "/home/user/project")))
-      (agent-repl--ws-put "no-dir-ws" :vterm-buffer nil) ; registered, :project-dir nil
+      (agent-repl--ws-put "no-dir-ws" :active-env nil) ; registered, :project-dir nil
       (agent-repl--ws-put "real-ws" :project-dir target)
       (cl-letf (((symbol-function 'agent-repl--git-root)
                  (lambda (_d) target)))
@@ -1700,78 +1700,28 @@ the module does not manage."
 
 ;;;; ---- Tests: on-session-start-event ----
 
-(ert-deftest agent-repl-test-on-session-start-event-sets-ready ()
-  "on-session-start-event should set agent-repl--ready on the vterm buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((fake-buf (generate-new-buffer " *test-session-start-vterm*"))
-          (timer-cancelled nil)
-          (panels-opened nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf
-              (setq-local agent-repl--ready nil))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                       (lambda (_ws) (setq timer-cancelled t)))
-                      ((symbol-function 'agent-repl--open-panels-after-ready)
-                       (lambda (_ws) (setq panels-opened t))))
-              (agent-repl--on-session-start-event "ws1" "/some/dir")
-              (should (buffer-local-value 'agent-repl--ready fake-buf))
-              (should timer-cancelled)
-              (should panels-opened)))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
-
-(ert-deftest agent-repl-test-on-session-start-event-idempotent ()
-  "on-session-start-event should be a no-op when already ready."
-  (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-idem*"))
-          (panels-opened nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf
-              (setq-local agent-repl--ready t))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--open-panels-after-ready)
-                       (lambda (_ws) (setq panels-opened t))))
-              (agent-repl--on-session-start-event "ws1" "/some/dir")
-              (should-not panels-opened)))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
-
 (ert-deftest agent-repl-test-on-session-start-event-fires-after-ready-hook ()
   "on-session-start-event runs `agent-repl-after-ready-functions' with the ws name."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-hook*"))
-          (hook-called-with nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf (setq-local agent-repl--ready nil))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
-              (let ((agent-repl-after-ready-functions
-                     (list (lambda (ws) (push ws hook-called-with)))))
-                (agent-repl--on-session-start-event "ws1" "/some/dir")
-                (should (equal hook-called-with '("ws1"))))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+    (let ((hook-called-with nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+        (let ((agent-repl-after-ready-functions
+               (list (lambda (ws) (push ws hook-called-with)))))
+          (agent-repl--on-session-start-event "ws1" "/some/dir")
+          (should (equal hook-called-with '("ws1"))))))))
 
 (ert-deftest agent-repl-test-on-session-start-event-hook-handler-error-isolated ()
   "A broken after-ready handler must not prevent later handlers from running."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-hook-err*"))
-          (second-called nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf (setq-local agent-repl--ready nil))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
-              (let ((agent-repl-after-ready-functions
-                     (list (lambda (_ws) (error "boom"))
-                           (lambda (_ws) (setq second-called t)))))
-                (agent-repl--on-session-start-event "ws1" "/some/dir")
-                (should second-called))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+    (let ((second-called nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+        (let ((agent-repl-after-ready-functions
+               (list (lambda (_ws) (error "boom"))
+                     (lambda (_ws) (setq second-called t)))))
+          (agent-repl--on-session-start-event "ws1" "/some/dir")
+          (should second-called))))))
 
 (ert-deftest agent-repl-test-on-session-start-gui-no-error-spam ()
   "on-session-start-event must NOT emit the vterm-inconsistency ERROR for gui.
@@ -1838,81 +1788,14 @@ prompt there; without the drain the dispatch silently never executes."
         (agent-repl--on-session-start-event "ws1" "/some/dir")
         (should (equal drained "ws1"))))))
 
-(ert-deftest agent-repl-test-on-session-start-event-no-vterm-warns ()
-  "on-session-start-event emits a loud WARNING when no vterm buffer exists.
-Reaching this branch means ws is registered (caller chain checks that)
-but its :vterm-buffer slot is nil — a structural inconsistency that
-must surface, not be silently swallowed."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((messages '())
-          (agent-state-written nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
-                ((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (&rest _) (setq agent-state-written t))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not agent-state-written)
-        (should (cl-some (lambda (m)
-                           (and (string-match-p "\\[agent-repl\\] WARNING" m)
-                                (string-match-p "session_start" m)
-                                (string-match-p "ws1" m)
-                                (string-match-p "null/dead" m)))
-                         messages))))))
-
-(ert-deftest agent-repl-test-on-session-start-event-no-vterm-reaches-echo-area ()
-  "The missing-vterm warning is LOUD: it must reach the echo area / modeline,
-not just the log, because it reports a broken structural invariant."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((echoed nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args)
-                   (when (and (null inhibit-message)
-                              (string-match-p "null/dead" (apply #'format fmt args)))
-                     (setq echoed t))))
-                ((symbol-function 'agent-repl--ws-set-agent-state) #'ignore))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should echoed)))))
-
-(ert-deftest agent-repl-test-on-session-start-event-dead-vterm-warns ()
-  "on-session-start-event emits a loud WARNING when the vterm buffer is dead."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((fake-buf (generate-new-buffer " *test-session-start-dead*"))
-          (messages '())
-          (agent-state-written nil))
-      (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-      (kill-buffer fake-buf)
-      (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
-                ((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (&rest _) (setq agent-state-written t))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not agent-state-written)
-        (should (cl-some (lambda (m)
-                           (and (string-match-p "\\[agent-repl\\] WARNING" m)
-                                (string-match-p "session_start" m)
-                                (string-match-p "ws1" m)
-                                (string-match-p "null/dead" m)))
-                         messages))))))
-
 (ert-deftest agent-repl-test-on-session-start-event-sets-idle ()
   "on-session-start-event writes :agent-state :idle (transition from :init)."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-set-agent-state "ws1" :init)
-    (let ((fake-buf (generate-new-buffer " *test-session-start-idle*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
-              (agent-repl--on-session-start-event "ws1" "/some/dir")
-              (should (eq (agent-repl--ws-agent-state "ws1") :idle))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
+      (agent-repl--on-session-start-event "ws1" "/some/dir")
+      (should (eq (agent-repl--ws-agent-state "ws1") :idle)))))
 
 ;;;; ---- Tests: ws-fully-loaded latch ----
 
@@ -2002,38 +1885,26 @@ watchdog path to signal `:timed-out'."
 (ert-deftest agent-repl-test-on-session-start-event-flips-agent-ready ()
   "on-session-start-event flips the `:agent-ready' latch bit on the ws plist."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-latch*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
-              (agent-repl--on-session-start-event "ws1" "/some/dir")
-              ;; :ws-loaded is nil, so the latch shouldn't have fired+cleared yet.
-              (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--on-session-start-event "ws1" "/some/dir")
+    ;; :ws-loaded is nil, so the latch shouldn't have fired+cleared yet.
+    (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))
 
 (ert-deftest agent-repl-test-on-session-start-event-duplicate-still-fires-hooks ()
-  "Even when `agent-repl--ready' is already t (duplicate session_start),
+  "Even when `:agent-state' has already left `:init' (duplicate session_start),
 both `after-ready-functions' and the `:agent-ready' latch flip still fire.
 This is the stall fix: a swallowed duplicate must not block loader advance."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-session-start-dup*"))
-          (after-ready-fires 0))
-      (unwind-protect
-          (progn
-            (with-current-buffer fake-buf (setq-local agent-repl--ready t))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer) #'ignore)
-                      ((symbol-function 'agent-repl--open-panels-after-ready) #'ignore))
-              (let ((agent-repl-after-ready-functions
-                     (list (lambda (_ws) (cl-incf after-ready-fires)))))
-                (agent-repl--on-session-start-event "ws1" "/some/dir")
-                ;; Hook fired despite duplicate.
-                (should (= after-ready-fires 1))
-                ;; Latch bit set despite duplicate.
-                (should (eq (agent-repl--ws-get "ws1" :agent-ready) t)))))
-        (when (buffer-live-p fake-buf) (kill-buffer fake-buf))))))
+    (let ((after-ready-fires 0))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (agent-repl--ws-set-agent-state "ws1" :idle)
+      (let ((agent-repl-after-ready-functions
+             (list (lambda (_ws) (cl-incf after-ready-fires)))))
+        (agent-repl--on-session-start-event "ws1" "/some/dir")
+        ;; Hook fired despite duplicate.
+        (should (= after-ready-fires 1))
+        ;; Latch bit set despite duplicate.
+        (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))))
 
 ;;;; ---- Tests: permission-notify.sh sentinel writing ----
 ;;

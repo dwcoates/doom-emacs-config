@@ -319,11 +319,11 @@ Guards against the untracked-fallback regressing the tracked path."
 ;;;; ---- Tests: +dwc/magit-status-workspace (fullscreen panel handling) ----
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-closes-input-window ()
-  "When the panels are visible, closes the input window so magit can fill the vterm window."
+  "When the panels are visible, closes the input window so magit can fill the webview window."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
     (agent-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
-    (agent-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (agent-repl--ws-put "test-ws" :frontend-buffer 'fake-webview-buf)
     (let ((closed-bufs '()))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
@@ -331,55 +331,55 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'agent-repl--close-buffer-window)
                  (lambda (buf) (push buf closed-bufs)))
                 ((symbol-function 'get-buffer-window)
-                 (lambda (_buf) 'fake-vterm-win))
+                 (lambda (_buf) 'fake-webview-win))
                 ((symbol-function 'set-window-dedicated-p) #'ignore)
                 ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
         (should (memq 'fake-input-buf closed-bufs))))))
 
-(ert-deftest agent-repl-test-magit-status-workspace-fullscreen-undedicates-vterm-window ()
-  "When the panels are visible, un-dedicates the vterm window so same-window display succeeds."
+(ert-deftest agent-repl-test-magit-status-workspace-fullscreen-undedicates-webview-window ()
+  "When the panels are visible, un-dedicates the webview window so same-window display succeeds."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
     (agent-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
-    (agent-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (agent-repl--ws-put "test-ws" :frontend-buffer 'fake-webview-buf)
     (let ((dedicate-args nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'agent-repl--close-buffer-window) #'ignore)
                 ((symbol-function 'get-buffer-window)
-                 (lambda (_buf) 'fake-vterm-win))
+                 (lambda (_buf) 'fake-webview-win))
                 ((symbol-function 'set-window-dedicated-p)
                  (lambda (win dedicated) (setq dedicate-args (list win dedicated))))
                 ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
-        (should (equal dedicate-args '(fake-vterm-win nil)))))))
+        (should (equal dedicate-args '(fake-webview-win nil)))))))
 
-(ert-deftest agent-repl-test-magit-status-workspace-fullscreen-selects-vterm-window ()
-  "When the panels are visible, selects the vterm window before calling magit-status."
+(ert-deftest agent-repl-test-magit-status-workspace-fullscreen-selects-webview-window ()
+  "When the panels are visible, selects the webview window before calling magit-status."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
     (agent-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
-    (agent-repl--ws-put "test-ws" :vterm-buffer 'fake-vterm-buf)
+    (agent-repl--ws-put "test-ws" :frontend-buffer 'fake-webview-buf)
     (let ((selected-wins '()))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'agent-repl--close-buffer-window) #'ignore)
                 ((symbol-function 'get-buffer-window)
-                 (lambda (_buf) 'fake-vterm-win))
+                 (lambda (_buf) 'fake-webview-win))
                 ((symbol-function 'set-window-dedicated-p) #'ignore)
                 ((symbol-function 'select-window)
                  (lambda (w) (push w selected-wins)))
                 ((symbol-function 'magit-status) #'ignore))
         (+dwc/magit-status-workspace)
-        (should (memq 'fake-vterm-win selected-wins))))))
+        (should (memq 'fake-webview-win selected-wins))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-not-fullscreen-no-panel-close ()
-  "When the panels are NOT visible, does not close the input window or un-dedicate vterm."
+  "When the panels are NOT visible, does not close the input window or un-dedicate the webview."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
     (agent-repl--ws-put "test-ws" :input-buffer 'fake-input-buf)
@@ -397,7 +397,7 @@ Guards against the untracked-fallback regressing the tracked path."
   "When the panels are visible but no input buffer stored, does not error and skips close."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    ;; :input-buffer and :vterm-buffer left nil
+    ;; :input-buffer and :frontend-buffer left nil
     (let ((close-calls 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))

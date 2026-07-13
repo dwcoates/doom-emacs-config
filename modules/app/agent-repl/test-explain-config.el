@@ -717,6 +717,22 @@ flag must not exist at all."
           (should-not drawer-hide-called))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
+;;;; ---- Popup: current agent output window lookup --------------------------------
+
+(ert-deftest agent-repl-ecfg-test-current-agent-output-window/queries-the-view-panel ()
+  "The popup's takeover target is looked up via the `:view' panel kind,
+not the retired `:vterm' key — `window.el' renamed the panel kind to
+`:view' (resolving to `:frontend-buffer') when the vterm frontend was
+removed, and explain-config.el was updated to pass the new key."
+  ;; Arrange
+  (let (queried-kind)
+    (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+               (lambda (kind &rest _) (setq queried-kind kind) 'fake-win)))
+      ;; Act
+      (agent-repl--explain-config-current-agent-output-window)
+      ;; Assert
+      (should (eq queried-kind :view)))))
+
 ;;;; ---- Popup: agent output window takeover -------------------------------------------
 
 (ert-deftest agent-repl-ecfg-test-show/takes-over-agent-output-window-when-visible ()
@@ -840,7 +856,7 @@ the drawer in the first place, so it has nothing to restore."
         (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                   ((symbol-function 'set-window-buffer)
                    (lambda (w b) (setq set-window-buffer-args (list w b))))
-                  ((symbol-function 'agent-repl--configure-vterm-window) #'ignore)
+                  ((symbol-function 'agent-repl-window--harden) #'ignore)
                   ((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore))
           (agent-repl--explain-config-hide)
           (should (equal set-window-buffer-args (list 'fake-output-win prev))))
@@ -857,19 +873,20 @@ double-restore an already-rehydrated agent output window."
       (should-not agent-repl--explain-config-replaced-window))))
 
 (ert-deftest agent-repl-ecfg-test-hide/reapplies-agent-output-window-hardening ()
-  "Hide re-applies `--configure-vterm-window' on successful restore so the
+  "Hide re-applies `agent-repl-window--harden' on successful restore so the
 agent output window regains its dedicate/size-fix/delete-protect recipe."
   (let* ((prev (get-buffer-create " *test-explain-reharden-prev*"))
          (agent-repl--explain-config-replaced-window (cons 'fake-output-win prev))
-         (configure-called-with nil))
+         (harden-called-with nil))
     (unwind-protect
         (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                   ((symbol-function 'set-window-buffer) #'ignore)
-                  ((symbol-function 'agent-repl--configure-vterm-window)
-                   (lambda (w) (setq configure-called-with w)))
+                  ((symbol-function 'agent-repl-window--harden)
+                   (lambda (w &rest recipe) (setq harden-called-with (cons w recipe))))
                   ((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore))
           (agent-repl--explain-config-hide)
-          (should (eq configure-called-with 'fake-output-win)))
+          (should (equal harden-called-with
+                         '(fake-output-win :dedicate t :size-fix width :delete-protect t))))
       (when (buffer-live-p prev) (kill-buffer prev)))))
 
 (ert-deftest agent-repl-ecfg-test-hide/skips-restore-when-window-dead ()

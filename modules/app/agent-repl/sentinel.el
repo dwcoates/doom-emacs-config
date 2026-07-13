@@ -6,8 +6,7 @@
 
 (declare-function agent-repl--do-log "core")
 (declare-function agent-repl--mark-ws-thinking "input")
-(declare-function agent-repl--mark-dead-vterm "status")
-(declare-function agent-repl--ws-gui-frontend-p "frontends")
+(declare-function agent-repl--mark-dead "status")
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -157,12 +156,13 @@ Falls back to container-path matching for Docker sandbox workspaces."
 
 (defconst agent-repl--sentinel-owned-marker "owned"
   "Line-3 value marking a sentinel as written by a MODULE-LAUNCHED CLI.
-The hook scripts emit it when `AGENT_REPL_OWNED' (exported by the vterm
-start command and the daemon's shim spawn) or `DOOM_SANDBOX' is set;
-the daemon's own sentinel writer emits it unconditionally.  Its absence
-means a FOREIGN claude — e.g. a terminal session run by hand in a
-workspace's directory — whose session id must never be adopted onto the
-workspace (see `agent-repl--update-session-id-from-sentinel').")
+The hook scripts emit it when `AGENT_REPL_OWNED' (exported by the
+interactive start command — see `agent-repl--assemble-cmd' — and the
+daemon's shim spawn) or `DOOM_SANDBOX' is set; the daemon's own
+sentinel writer emits it unconditionally.  Its absence means a FOREIGN
+claude — e.g. a terminal session run by hand in a workspace's
+directory — whose session id must never be adopted onto the workspace
+\(see `agent-repl--update-session-id-from-sentinel').")
 
 (defun agent-repl--read-sentinel-file (file)
   "Read sentinel FILE and return a plist (:dir DIR :session-id SID :owned BOOL), or nil.
@@ -352,10 +352,9 @@ either a stale idle nudge or a duplicate, and we leave state alone."
 (defun agent-repl--on-permission-resolved-event (ws _dir)
   "Flip WS back to `:thinking' after a permission prompt was resolved.
 Callback for `permission_resolved_*' sentinels, written by the DAEMON
-\(never by a hook): for gui sessions the user answers permission
-prompts in the webview, so the vterm send-path flip
-\(`agent-repl--note-permission-answered-by-send') never runs and the
-daemon's permission-resolved frame is the only resolution signal.
+\(never by a hook): the user answers permission prompts in the webview,
+so the daemon's permission-resolved frame is the only resolution
+signal Emacs ever receives for it.
 
 Gates on `:permission' exactly as `agent-repl--on-permission-event'
 gates on `:thinking' — the gate is what makes the daemon's
@@ -374,15 +373,15 @@ state and no-ops)."
   "Record that WS's agent backend died (daemon-written shim death).
 Callback for `session_dead_*' sentinels, written by the DAEMON when a
 gui session's shim dies abnormally (SIGKILL/crash/fatal_error) — the
-gui counterpart of the vterm process sentinel, and the only death
+gui counterpart of the old vterm process sentinel, and the only death
 signal a gui workspace ever gets (the 1Hz poll deliberately never
 marks gui workspaces dead).
 
-Delegates to `agent-repl--mark-dead-vterm', which owns the guarded
-`:dead' transition (idempotent, respects `:merged'/`:merge-failed'
-precedence and the `:init' grace)."
+Delegates to `agent-repl--mark-dead', which owns the guarded `:dead'
+transition (idempotent, respects `:merged'/`:merge-failed' precedence
+and the `:init' grace)."
   (agent-repl--log ws "on-session-dead-event: ws=%s agent-state=%s" ws (agent-repl--ws-get ws :agent-state))
-  (agent-repl--mark-dead-vterm ws))
+  (agent-repl--mark-dead ws))
 
 (defun agent-repl--maybe-finalize-stop (ws)
   "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
@@ -424,7 +423,7 @@ the turn."
 (defun agent-repl--on-stop-failure-event (ws dir)
   "Handle a StopFailure event for workspace WS with directory DIR.
 Sets `:agent-state' to `:stop-failed' (visually distinct from `:dead'
-since the vterm session is still alive and re-promptable) and clears
+since the agent session is still alive and re-promptable) and clears
 the Stop / SubagentStop tracking so a subsequent successful turn isn't
 gated on a stale pending-subagent counter from this aborted turn.
 
@@ -449,75 +448,40 @@ recovery is left to the user."
 
 (defun agent-repl--on-session-start-event (ws _dir)
   "Handle a session_start event for workspace WS.
-When WS has a live vterm buffer, this is the agent becoming ready:
-transitions `:agent-state' from `:init' to `:idle', sets
-`agent-repl--ready' on the vterm buffer, cancels the ready timer,
-and opens panels (via `open-panels-after-ready').
+This is the agent becoming ready.  Flips `:agent-state' from nil/`:init'
+to `:idle' (guarded so a lagging/re-fired session_start never clobbers
+an in-flight turn), drains any prompts queued before the session came
+up (the workspace-generation dispatch enqueues a new workspace's
+initial prompt as `:pending-prompts'; the drain is frontend-aware, so
+delivery goes through WS's send path), then fires the frontend-agnostic
+after-ready hook and flips the agent-side bit on the ws-fully-loaded
+latch.
 
-When WS is registered but its vterm buffer is null or dead, that is a
-structural inconsistency — by the time this callback runs, the caller
-chain has confirmed WS is non-nil and registered in
-`agent-repl--workspaces'.  We emit a loud `message' (but do not
-`error', since we run from a file-notify callback and a hard error
-would kill the watcher) so the condition is visible.
-
-State transition (the inner `unless') runs at most once per load
-cycle, gated on `agent-repl--ready'.  Hook firing (after-ready and
-the ws-fully-loaded latch flip) runs UNCONDITIONALLY on every
-observed `session_start' for a live vterm — duplicate or stale
-events still flip the latch and fire the narrow hook so observers
-waiting on them are never stalled by a swallowed duplicate."
-  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-    (agent-repl--log ws "on-session-start-event: ENTER ws=%s vterm-buf=%S vterm-live=%s"
-                      ws (when vterm-buf (buffer-name vterm-buf))
-                      (if (and vterm-buf (buffer-live-p vterm-buf)) "yes" "no"))
-    (cond
-     ;; gui frontend: there is no vterm buffer BY DESIGN, so the
-     ;; structural-inconsistency branch below must not fire.  The vterm
-     ;; readiness choreography (ready flag, ready timer, panel opening)
-     ;; is handled synchronously by the gui open path; here we flip
-     ;; to :idle at session start (guarded so a lagging/re-fired
-     ;; session_start never clobbers an in-flight turn), drain any
-     ;; pending prompts through the gui send path, and fire the
-     ;; frontend-agnostic ready hooks + latch.
-     ((agent-repl--ws-gui-frontend-p ws)
-      (agent-repl--log ws "on-session-start-event: gui ws=%s agent-state=%s"
-                        ws (agent-repl--ws-get ws :agent-state))
-      (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
-        (agent-repl--ws-set-agent-state ws :idle))
-      ;; Flush prompts queued before the session was up (the
-      ;; workspace-generation dispatch enqueues the new workspace's
-      ;; initial prompt as `:pending-prompts').  The drain is
-      ;; frontend-aware, so delivery goes through the gui send path.
-      (agent-repl--drain-pending-prompts ws)
-      (agent-repl--run-after-ready-hooks ws)
-      (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready))
-     ((or (null vterm-buf) (not (buffer-live-p vterm-buf)))
-      (agent-repl--warn ws "session_start for ws=%s but vterm buffer is null/dead" ws)
-      (agent-repl--log ws
-                        "on-session-start-event: ERROR ws=%s vterm buffer is null/dead — structural inconsistency"
-                        ws))
-     (t
-      (unless (buffer-local-value 'agent-repl--ready vterm-buf)
-        (agent-repl--log ws "on-session-start-event: marking ready ws=%s" ws)
-        (agent-repl--ws-set-agent-state ws :idle)
-        (with-current-buffer vterm-buf
-          (setq agent-repl--ready t))
-        (agent-repl--cancel-ready-timer ws)
-        (agent-repl--open-panels-after-ready ws))
-      ;; Fire narrow after-ready hook (every observed session_start).
-      (agent-repl--run-after-ready-hooks ws)
-      ;; Flip the agent-side bit on the fully-loaded latch.  If
-      ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
-      ;; hook; otherwise we just record the bit and wait for switch settle.
-      (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready)))))
+Hook firing (after-ready and the ws-fully-loaded latch flip) runs
+UNCONDITIONALLY on every observed `session_start' for WS — duplicate
+or stale events still flip the latch and fire the narrow hook so
+observers waiting on them are never stalled by a swallowed duplicate."
+  (agent-repl--log ws "on-session-start-event: ENTER ws=%s agent-state=%s"
+                    ws (agent-repl--ws-get ws :agent-state))
+  (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
+    (agent-repl--ws-set-agent-state ws :idle))
+  ;; Flush prompts queued before the session was up (the
+  ;; workspace-generation dispatch enqueues the new workspace's
+  ;; initial prompt as `:pending-prompts').  The drain is
+  ;; frontend-aware, so delivery goes through the gui send path.
+  (agent-repl--drain-pending-prompts ws)
+  ;; Fire narrow after-ready hook (every observed session_start).
+  (agent-repl--run-after-ready-hooks ws)
+  ;; Flip the agent-side bit on the fully-loaded latch.  If
+  ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
+  ;; hook; otherwise we just record the bit and wait for switch settle.
+  (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready))
 
 (defun agent-repl--run-after-ready-hooks (ws)
   "Run `agent-repl-after-ready-functions' for WS, isolating hook errors.
 Each erroring hook is logged and skipped rather than rethrown — this
 runs from a file-notify callback where a hard error would kill the
-sentinel watcher.  Shared by the vterm and gui branches of
-`agent-repl--on-session-start-event'."
+sentinel watcher.  Called from `agent-repl--on-session-start-event'."
   (run-hook-wrapped 'agent-repl-after-ready-functions
                     (lambda (fn ws)
                       (condition-case err
@@ -536,8 +500,8 @@ whose agent process printed `session_start'.
 
 Unlike `agent-repl-ws-fully-loaded-functions', this hook is the
 NARROW signal — it fires on every observed `session_start' event,
-including duplicates that arrive after `agent-repl--ready' is
-already t.  Use this only when you specifically need the
+including duplicates that arrive after WS's `:agent-state' has
+already left `:init'.  Use this only when you specifically need the
 agent-side ready event; prefer `agent-repl-ws-fully-loaded-functions'
 for anything that needs the workspace to also be settled on the
 Emacs side.

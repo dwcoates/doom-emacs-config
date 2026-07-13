@@ -11,7 +11,6 @@
 (declare-function agent-repl--drain-merge-queue "worktree")
 (declare-function agent-repl--merge-queue-target-dirs "worktree")
 (declare-function agent-repl--merge-queue-front-for-target "worktree")
-(declare-function agent-repl--ws-gui-frontend-p "frontends")
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
@@ -109,11 +108,6 @@ First %s is the change-spec, second %s is the prompt."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-interrupt-escape-count 2
-  "Number of Escape key presses sent to interrupt Claude."
-  :type 'integer
-  :group 'agent-repl)
-
 (defcustom agent-repl-interrupt-reinsert-delay 0.25
   "Seconds to wait after interrupting before re-entering insert mode."
   :type 'number
@@ -123,24 +117,19 @@ First %s is the change-spec, second %s is the prompt."
 
 (defun agent-repl--send-to-agent (text)
   "Send TEXT to Claude, starting it if needed.
-The `:permission' -> `:thinking' flip is inherited from
-`agent-repl--send-input-to-vterm' (the lowest-level send primitive),
-so predefined-prompt sends (e.g. `agent-repl-create-or-update-pr')
-answer permission prompts the same way every other send path does
-even though this path does NOT funnel through `agent-repl--do-send'.
-
-A gui workspace routes through the frontend registry instead: booting
-a vterm here would put a second claude process on the same directory
-as the workspace's daemon session, which is exactly the
-two-processes-one-dir state the frontend axis forbids."
+Dispatches unconditionally through the frontend registry's `:send-fn'
+\(`agent-repl--gui-send-turn', the gui being the only registered
+frontend) rather than branching on frontend here.  The gui's send path
+ensures the daemon session itself
+\(`agent-repl--frontend-ensure-session', via
+`agent-repl--frontend-send-user-message'), healing a stale binding or
+creating a fresh one on demand, so no separate not-running check or
+manual boot is needed at this call site.  Used by every
+predefined-prompt command (e.g. `agent-repl-create-or-update-pr') as
+well as `agent-repl-explain' and friends."
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "send-to-agent len=%d" (length text))
-    (if (agent-repl--ws-gui-frontend-p ws)
-        (agent-repl--frontend-dispatch-send ws text text)
-      (unless (agent-repl--agent-running-p ws)
-        (agent-repl--initialize-agent ws))
-      (agent-repl--send-input-to-vterm
-       (agent-repl--ws-get ws :vterm-buffer) text))))
+    (agent-repl--frontend-dispatch-send ws text text)))
 
 ;;;; File reference helpers
 
@@ -418,25 +407,16 @@ Without region: pre-fills with file path and current line."
       (agent-repl--send-to-agent msg))))
 
 
-(defun agent-repl--send-interrupt-escape (ws vterm-buf)
-  "Send two Escape key presses to VTERM-BUF to interrupt Claude.
-WS is the current workspace name for logging."
-  (agent-repl--log ws "send-interrupt-escape: sending %dx <escape> to vterm=%s" agent-repl-interrupt-escape-count (buffer-name vterm-buf))
-  (with-current-buffer vterm-buf
-    (dotimes (_ agent-repl-interrupt-escape-count)
-      (vterm-send-key "<escape>"))))
-
 (defun agent-repl--enter-insert-mode (ws)
   "Re-enter evil insert state in WS's input buffer after an interrupt.
 Switches the Emacs-side input buffer back to evil insert state so the
 user can keep typing where they left off.
 
-Does NOT send a literal \"i\" keystroke to the Claude vterm.  The input
-buffer — not the vterm — is the surface the user types into, so
-forwarding \"i\" to the terminal both double-dispatches the mode switch
-\(evil already owns insert mode) and leaks a stray \"i\" character onto
-Claude's prompt line, which then prefixes the next message the user
-sends.
+Does NOT send a literal \"i\" keystroke to Claude.  The input buffer is
+the only surface the user types into, so forwarding \"i\" anywhere else
+would both double-dispatch the mode switch (evil already owns insert
+mode) and leak a stray \"i\" character onto Claude's prompt line, which
+then prefixes the next message the user sends.
 
 No-op when WS is not the current workspace (a drawer-triggered
 interrupt on a background workspace must not steal focus or flip a
@@ -458,7 +438,7 @@ Sends Escape to stop the current operation, then automatically returns
 the input buffer to evil insert state after
 `agent-repl-interrupt-reinsert-delay' seconds (via
 `agent-repl--enter-insert-mode', which switches evil state rather than
-forwarding a literal \"i\" keystroke to the vterm).  Defaults to the
+forwarding a literal \"i\" keystroke to Claude).  Defaults to the
 current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); the drawer passes the entry-at-point so interrupts target
 the selected entry.
@@ -473,8 +453,8 @@ is the sole observer here."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "interrupt")
     ;; The frontend's interrupt capability returns non-nil only when the
-    ;; interrupt was actually issued (a dead vterm returns nil); the
-    ;; done-marking must not fire for an undelivered interrupt.
+    ;; interrupt was actually issued (a dead/unbound session returns nil);
+    ;; the done-marking must not fire for an undelivered interrupt.
     (if (agent-repl--frontend-dispatch-interrupt ws 'escape)
         (progn
           (agent-repl--ws-clear-stop-tracking ws)
@@ -482,55 +462,6 @@ is the sole observer here."
           (run-at-time agent-repl-interrupt-reinsert-delay nil
                        #'agent-repl--enter-insert-mode ws))
       (agent-repl--log ws "interrupt: frontend reported not delivered, skipping"))))
-
-(defun agent-repl--agent-process-pid (ws)
-  "Return the PID of the `claude' process running in WS's vterm, or nil.
-`claude' runs as the child of the workspace vterm's shell.  It is
-identified STRUCTURALLY as that shell's child rather than by name,
-because the native `claude' binary reports its version (e.g. \"2.1.206\",
-from `~/.local/share/claude/versions/<v>') as its process `comm' — not
-\"claude\".  Among the shell's children a agent-ish `args'/`comm' match
-is preferred (in case the shell ever has more than one child), otherwise
-the sole child is taken.  A pure query over `list-system-processes' /
-`process-attributes' with no side effects; returns nil when the vterm is
-dead or the shell has no children."
-  (let* ((buf (agent-repl--ws-get ws :vterm-buffer))
-         (proc (and (buffer-live-p buf) (get-buffer-process buf)))
-         (shell-pid (and proc (process-id proc))))
-    (when shell-pid
-      (let ((children (seq-filter
-                       (lambda (pid)
-                         (eq (alist-get 'ppid (process-attributes pid)) shell-pid))
-                       (list-system-processes))))
-        (or (seq-find
-             (lambda (pid)
-               (let ((attrs (process-attributes pid)))
-                 (or (string-match-p "claude" (or (alist-get 'args attrs) ""))
-                     (string-match-p "claude" (or (alist-get 'comm attrs) "")))))
-             children)
-            (and (= (length children) 1) (car children)))))))
-
-(defun agent-repl-kill-agent-process (&optional ws)
-  "Kill ONLY the `claude' process in WS's vterm, leaving panels and buffers intact.
-Unlike `agent-repl-kill' (which tears down the session's windows and
-buffers via `agent-repl--kill-session'), this sends SIGTERM to the
-`claude' CLI child of the workspace vterm's shell.  The vterm, input
-buffer, drawer entry, and perspective all survive, so the process can be
-restarted manually (e.g. `agent-repl-restart' or `SPC o c') without
-disturbing the layout — useful for debugging or working around a wedged
-session.  Defaults to the current workspace; signals a `user-error' when
-no active workspace or no live `claude' process is found."
-  (interactive)
-  (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (user-error "agent-repl-kill-agent-process: no active workspace"))
-    (let ((pid (agent-repl--agent-process-pid ws)))
-      (if (not pid)
-          (progn
-            (agent-repl--log ws "kill-agent-process: no claude child process for ws=%s" ws)
-            (user-error "agent-repl: no live claude process found for %s" ws))
-        (agent-repl--log ws "kill-agent-process: SIGTERM pid=%s ws=%s" pid ws)
-        (agent-repl--signal-process pid 'TERM)
-        (message "agent-repl: killed claude (pid %s) in %s — panels left intact" pid ws)))))
 
 (defun agent-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."
@@ -1524,10 +1455,16 @@ enough that a wedged workspace doesn't lock the entire load."
   :group 'agent-repl)
 
 (defun agent-repl--snapshot-load-ws-ready-p (ws)
-  "Return non-nil when WS's vterm buffer reports ready."
-  (when-let ((buf (agent-repl--ws-get ws :vterm-buffer)))
-    (and (buffer-live-p buf)
-         (buffer-local-value 'agent-repl--ready buf))))
+  "Return non-nil when WS already has a live agent session.
+Dispatches through `agent-repl--agent-running-p' (the frontend-agnostic
+liveness check), rather than reading a vterm-specific readiness flag —
+this used to read the vterm buffer-local `agent-repl--ready', which is
+always nil for a gui workspace, so this predicate always reported
+not-ready and the snapshot loader always fell through to arming its
+per-entry watchdog timer instead of recognizing a workspace that was
+already up (e.g. the origin ws the user was sitting in when load
+began)."
+  (agent-repl--agent-running-p ws))
 
 (defun agent-repl--snapshot-load-cancel-timer ()
   "Cancel the pending per-entry watchdog timer, if any."

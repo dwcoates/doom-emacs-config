@@ -546,44 +546,5 @@ OVERRIDES is a plist of slot keywords accepted by
     (should (eq (agent-repl-backend-transcript-context-fn b)
                 #'agent-repl--context-read-from-jsonl))))
 
-;;;; ---- Tests: build-start-cmd delegation ----
-
-(ert-deftest agent-repl-test-backend-build-start-cmd-uses-ws-backend ()
-  "`agent-repl--build-start-cmd' routes cmd assembly through the ws backend."
-  (agent-repl-test--with-backends
-    (agent-repl-test--with-clean-state
-      (agent-repl-register-backend
-       (agent-repl-backend-create
-        :name 'sentinel-backend :binary "sb"
-        :start-cmd-fn (lambda (_opts) "SENTINEL-CMD")))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
-      (agent-repl--ws-put "ws1" :backend 'sentinel-backend)
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal
-                           (make-agent-repl-instantiation :session-id nil))
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (equal (plist-get result :cmd) "SENTINEL-CMD"))))))
-
-(ert-deftest agent-repl-test-backend-build-start-cmd-passes-opts ()
-  "The ws's session-id / fork / project-dir / model reach the backend fn."
-  (agent-repl-test--with-backends
-    (agent-repl-test--with-clean-state
-      (let (captured)
-        (agent-repl-register-backend
-         (agent-repl-backend-create
-          :name 'capture-backend :binary "cb"
-          :start-cmd-fn (lambda (opts) (setq captured opts) "X")))
-        (agent-repl--ws-put "ws1" :project-dir "/tmp/proj")
-        (agent-repl--ws-put "ws1" :backend 'capture-backend)
-        (agent-repl--ws-put "ws1" :fork-session-id "fork-9")
-        (agent-repl--ws-put "ws1" :model "sonnet")
-        (agent-repl--ws-put "ws1" :active-env :bare-metal)
-        (agent-repl--ws-put "ws1" :bare-metal
-                             (make-agent-repl-instantiation :session-id nil))
-        (agent-repl--build-start-cmd "ws1")
-        (should (equal (plist-get captured :project-dir) "/tmp/proj"))
-        (should (equal (plist-get captured :fork-session-id) "fork-9"))
-        (should (equal (plist-get captured :model) "sonnet"))))))
-
 (provide 'test-backend)
 ;;; test-backend.el ends here

@@ -3,35 +3,17 @@
 ;;; Code:
 
 (declare-function agent-repl--ws-dir-owner "agent-repl-workspace" (dir &optional except))
-(declare-function agent-repl--mark-start-failed "agent-repl-worktree" (ws err))
 (declare-function agent-repl--ws-gui-frontend-p "frontends" (ws))
 (declare-function agent-repl--gui-running-p "frontend-client" (ws))
 (declare-function agent-repl--ws-frontend "frontends" (ws))
 (declare-function agent-repl-frontend-running-p-fn "frontends" (frontend))
+(declare-function agent-repl--frontend-dispatch-show "frontends" (ws))
 
 ;; Defined in worktree.el, which may load after this file; referenced only
 ;; at call time by `agent-repl--doom-config-tree-p'.
 (defvar agent-repl-worktree-dir-suffix)
 
-(defconst agent-repl--start-failure-marker "AGENT_REPL_START_FAILURE:"
-  "Marker a start command (e.g. `claude-sandbox') prints to its vterm when it
-cannot launch — Docker daemon down, image missing, etc.  The start command
-runs inside a vterm whose exit code agent-repl cannot observe, so
-`agent-repl--detect-start-failure' scrapes this line and the ready-timer
-routes the failure to `agent-repl--mark-start-failed'.  The text after the
-marker on its line is surfaced to the user as the failure reason.")
-
-(defconst agent-repl--start-failure-patterns
-  '(("Cannot connect to the Docker daemon" . "Docker daemon is not running — start Docker Desktop, then retry"))
-  "Alist of (SUBSTRING . REASON) for known fatal start-command output that
-lacks an explicit `agent-repl--start-failure-marker' line — e.g. Docker's
-native daemon-down error.  Lets agent-repl surface the failure even when the
-start command itself has not been taught to print the marker.")
-
 ;;;; Session readiness
-
-(defvar-local agent-repl--ready nil
-  "Non-nil once Claude Code has set its terminal title, indicating startup is complete.")
 
 (defcustom agent-repl-managed-project-pattern "ChessCom"
   "Pattern matched against the project directory to determine permission mode.
@@ -85,11 +67,6 @@ The mode treats this directory, everything under it, and every worktree
 of it (the sibling `<root>`+`agent-repl-worktree-dir-suffix' directory)
 as lying under the multi-repo root for agent-config selection."
   :type 'directory
-  :group 'agent-repl)
-
-(defcustom agent-repl-startup-prefix "clear && "
-  "Shell command prefix prepended before the agent command at startup."
-  :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-system-prompt "."
@@ -151,17 +128,6 @@ rather than looping forever."
   :type 'integer
   :group 'agent-repl)
 
-(defcustom agent-repl-ready-timeout-seconds 30.0
-  "Maximum seconds to wait for the agent to signal readiness before giving up."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-ready-poll-interval 0.5
-  "Seconds between readiness-poll timer ticks."
-  :type 'number
-  :group 'agent-repl)
-
-
 ;;;; Workspace environment initialization
 
 (defun agent-repl--apply-display-state (ws saved)
@@ -202,7 +168,7 @@ remaining keys are written only when SAVED carries them."
   ;; mid-session `/model' switch — e.g. `opus' to `fable' — survives
   ;; restart), falling back to whatever is already in the plist (the
   ;; workspace-generation model, set by `--finalize-worktree-workspace'
-  ;; before any state-save happened).  `agent-repl--build-start-cmd'
+  ;; before any state-save happened).  `agent-repl--claude-start-cmd'
   ;; reads `:model' to pass `--model' when booting, so restoring it here
   ;; re-launches the session under the same model.
   (agent-repl--ws-put ws :model
@@ -219,14 +185,14 @@ remaining keys are written only when SAVED carries them."
   ;; Frontend: restored ONLY when the saved plist marks it as a
   ;; DELIBERATE choice (`:frontend-explicit', written by
   ;; `agent-repl--ws-choose-frontend' — `SPC o F' and friends).  Anything
-  ;; else in the saved `:frontend' is an INCIDENTAL stamp left by a vterm
-  ;; boot (`agent-repl--initialize-agent'), and honoring it would pin
-  ;; every workspace that ever booted a vterm — i.e. every workspace
-  ;; predating the gui — to vterm forever, so a restored workspace could
-  ;; never follow `agent-repl-default-frontend' forward.  Left unset, the
+  ;; else in the saved `:frontend' is an INCIDENTAL stamp from an older
+  ;; boot, and honoring it would pin every such workspace to whatever it
+  ;; happened to boot under forever, so a restored workspace could never
+  ;; follow `agent-repl-default-frontend' forward.  Left unset, the
   ;; frontend re-resolves from the default (constrained by the workspace's
   ;; backend and env — see `agent-repl--frontend-default-for-ws', which is
-  ;; what still brings a codex workspace back up in vterm).
+  ;; also what makes a codex workspace fail loudly now that no frontend
+  ;; can drive it).
   (when (and saved (plist-get saved :frontend-explicit))
     (agent-repl--ws-put ws :frontend-explicit t)
     (agent-repl--ws-put ws :frontend
@@ -645,134 +611,6 @@ prefix.  `-p' makes `claude' exit after a single turn; the prompt is
 delivered on the process's stdin by the caller."
   (append (list "claude" "-p" "--model" model) extra-args))
 
-(defun agent-repl--build-start-cmd (ws)
-  "Build the shell command string to start the agent for workspace WS.
-Returns a plist (:cmd CMD :session-id ID :fork-session-id ID
-:worktree-p BOOL :active-env ENV :inst INST) with everything the caller
-needs for logging and mode-line setup.
-
-The CLI-specific command assembly is delegated to WS's resolved
-backend (see `agent-repl--ws-backend' and `agent-repl-backend'); this
-function owns only the backend-agnostic plumbing (instantiation
-lookup, session-id resolution, mode-line metadata)."
-  (agent-repl--log ws "build-start-cmd: ws=%s" ws)
-  (let* ((inst (agent-repl--active-inst ws))
-         ;; FIXME we have to ensure that every time we start the agent process for any reason, we have sentinel watching for a session-id update. we can't eb always blindly reading session-id from a file, because chance
-         (session-id (agent-repl-instantiation-session-id inst))
-         (worktree-p (agent-repl--ws-get ws :worktree-p))
-         (project-dir (agent-repl--ws-get ws :project-dir))
-         (active-env (agent-repl--ws-get ws :active-env))
-         (fork-session-id (agent-repl--ws-get ws :fork-session-id))
-         (model (agent-repl--ws-get ws :model))
-         (backend (agent-repl--ws-backend ws))
-         (cmd (funcall (agent-repl-backend-start-cmd-fn backend)
-                       (list :session-id session-id
-                             :fork-session-id fork-session-id
-                             :project-dir project-dir
-                             :model model))))
-    (list :cmd cmd
-          :session-id session-id
-          :fork-session-id fork-session-id
-          :worktree-p worktree-p
-          :active-env active-env
-          :inst inst)))
-
-;;;; Session startup
-
-(defun agent-repl--merge-target-name (ws)
-  "Return the basename of the workspace `SPC TAB M' would merge WS into.
-Mirrors the resolution logic in `agent-repl--workspace-merge-into-source':
-prefers WS's `:source-ws-dir' as the parent, then asks
-`agent-repl--resolve-merge-into-source-target' whether to redirect to
-the master worktree (when the parent's branch is already on master via
-patch-id equivalence).
-
-Returns nil when WS has no `:project-dir' (unknown workspace), or when
-the resolved target equals WS's own dir (nothing to merge into).  This
-is a snapshot at call time — the `git cherry' check runs once when the
-mode-line is constructed, not on every redisplay."
-  (when-let* ((source-dir (agent-repl--ws-get ws :project-dir)))
-    (let* ((recorded (agent-repl--ws-get ws :source-ws-dir))
-           (parent-dir (or (and recorded (file-directory-p recorded) recorded)
-                           (agent-repl--master-worktree-path source-dir)))
-           (master-dir (agent-repl--master-worktree-path source-dir))
-           (target-dir (agent-repl--resolve-merge-into-source-target parent-dir master-dir)))
-      (when (and target-dir
-                 (not (string= (agent-repl--path-canonical target-dir)
-                               (agent-repl--path-canonical source-dir))))
-        (file-name-nondirectory (directory-file-name target-dir))))))
-
-(defun agent-repl--parent-label (parent-name merge-name)
-  "Return (GREEN-STR YELLOW-STR) for the parent mode-line label, or nil.
-PARENT-NAME is the basename of `:source-ws-dir' (the recorded parent
-worktree, or nil if none).  MERGE-NAME is the basename of the
-workspace `SPC TAB M' would target (or nil if none).
-
-GREEN-STR is the always-green leading part (\" <parent>\" or empty when
-no parent).  YELLOW-STR is the parens-wrapped merge target with a
-leading space (\" (<merge>)\"), or nil when the merge target is absent
-or matches the parent (parens omitted to avoid the redundant
-\" foo (foo)\" form).  Returns nil overall when both inputs are nil —
-caller should render an empty segment.
-
-The split is so callers can propertize each part with a different face
-\(green for the parent, yellow for the (...) suffix) without having to
-parse a single composed string.  The label has no textual prefix; the
-green/yellow coloring is the sole signal that the segment denotes the
-parent/merge-target relationship."
-  (cond
-   ((and (null parent-name) (null merge-name)) nil)
-   ((null parent-name) (list "" (format " (%s)" merge-name)))
-   ((or (null merge-name) (string= parent-name merge-name))
-    (list (format " %s" parent-name) nil))
-   (t (list (format " %s" parent-name) (format " (%s)" merge-name)))))
-
-(defun agent-repl--workspace-mode-line (ws)
-  "Return a mode-line format list for workspace WS's vterm.
-Segments, in order:
-  1. Composed parent label: green ` <parent>' followed by a yellow
-     ` (<merge-target>)' suffix when `SPC TAB M' would redirect to a
-     different workspace than the recorded parent (typically master).
-     When the merge target equals the parent, the yellow suffix is
-     omitted.  Empty when WS has neither a recorded parent nor a
-     resolvable merge target.  The green/yellow coloring is the sole
-     signal that the segment denotes the parent/merge-target
-     relationship — there is no textual prefix.
-  2. `:eval' segment that renders the Claude model serving the active
-     session (see `agent-repl--model-segment'), reading from the
-     project's session jsonl under `~/.claude/projects/'.
-  3. `:eval' segment that renders the used context token count for the
-     active session (see `agent-repl--context-segment'), reading from
-     the project's session jsonl under `~/.claude/projects/'.
-
-The parent segment is computed once when the vterm is initialized; it
-is not reactive to later state changes."
-  (let* ((source-dir (agent-repl--ws-get ws :source-ws-dir))
-         (parent-name (when (and source-dir (not (string-empty-p source-dir)))
-                        (file-name-nondirectory (directory-file-name source-dir))))
-         (merge-name (agent-repl--merge-target-name ws))
-         (parts (agent-repl--parent-label parent-name merge-name))
-         (green (car parts))
-         (yellow (cadr parts)))
-    (list (cond
-           ((null parts) "")
-           (yellow (concat (propertize green 'face '(:foreground "green" :weight bold))
-                           (propertize yellow 'face '(:foreground "yellow" :weight bold))))
-           (t (propertize green 'face '(:foreground "green" :weight bold))))
-          '(:eval (agent-repl--model-segment))
-          '(:eval (agent-repl--context-segment)))))
-
-(defun agent-repl--log-session-start (ws start-info)
-  "Log session startup details for workspace WS from START-INFO plist."
-  (let ((cmd             (plist-get start-info :cmd))
-        (session-id      (plist-get start-info :session-id))
-        (fork-session-id (plist-get start-info :fork-session-id))
-        (worktree-str    (if (plist-get start-info :worktree-p) "yes" "no"))
-        (active-env      (plist-get start-info :active-env)))
-    (agent-repl--log ws "log-session-start ws=%s session-id=%s fork-session-id=%s worktree=%s env=%s cmd=%s dir=%s"
-                      ws session-id fork-session-id worktree-str active-env cmd
-                      (agent-repl--ws-get ws :project-dir))))
-
 ;;;; Session completion handling
 
 (defun agent-repl--maybe-notify-finished (ws)
@@ -810,18 +648,6 @@ timestamp (orthogonal to `:repl-state'):
   (let ((current (agent-repl--current-ws-p ws)))
     (agent-repl--ws-put ws :done-acked current)
     (agent-repl--ws-put ws :done-acked-at (and current (float-time)))))
-
-(defun agent-repl--refresh-vterm-after-finish (vterm-buf)
-  "Refresh display and scroll position for VTERM-BUF if it is still live."
-  (let ((ws (agent-repl--buffer-owner vterm-buf)))
-    (agent-repl--log ws "refresh-vterm-after-finish: buf=%s" (buffer-name vterm-buf))
-    (if (buffer-live-p vterm-buf)
-        (progn
-          (with-current-buffer vterm-buf
-            (agent-repl--do-refresh)
-            (agent-repl--update-hide-overlay))
-          (agent-repl--fix-vterm-scroll vterm-buf))
-      (agent-repl--log ws "refresh-vterm-after-finish: buffer is dead buf=%s" (buffer-name vterm-buf)))))
 
 (defun agent-repl--refresh-magit-status-for-dir (dir &optional ws)
   "Refresh any magit-status buffer whose `default-directory' canonicalizes to DIR.
@@ -863,24 +689,20 @@ target workspace) share the same buffer-matching logic."
 Errors hard if WS is not registered in `agent-repl--workspaces' — a
 stop event arriving for an unknown workspace indicates a race (e.g.
 sentinel firing after kill cleared state) that we surface rather than
-silently absorb.  Otherwise: marks agent-state as :done, refreshes the
-vterm display if the buffer is still live, refreshes any open
-magit-status buffer for the workspace's repo, notifies the user if the
-frame is unfocused, emits a finished-in-workspace message when the
+silently absorb.  Otherwise: marks agent-state as :done, refreshes any
+open magit-status buffer for the workspace's repo, notifies the user if
+the frame is unfocused, emits a finished-in-workspace message when the
 current workspace is different, and drains any deferred-prompt queue
 \(see `agent-repl--drain-deferred-prompts')."
   (unless (gethash ws agent-repl--workspaces)
     (error "agent-repl--handle-agent-finished: ws=%S not registered in agent-repl--workspaces" ws))
-  (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-    (agent-repl--log ws "handle-agent-finished ws=%s" ws)
-    (agent-repl--mark-agent-done ws)
-    (when vterm-buf
-      (agent-repl--refresh-vterm-after-finish vterm-buf))
-    (agent-repl--refresh-magit-status ws)
-    (agent-repl--maybe-notify-finished ws)
-    (unless (agent-repl--current-ws-p ws)
-      (agent-repl--info ws "Agent finished in workspace: %s" ws))
-    (agent-repl--drain-deferred-prompts ws)))
+  (agent-repl--log ws "handle-agent-finished ws=%s" ws)
+  (agent-repl--mark-agent-done ws)
+  (agent-repl--refresh-magit-status ws)
+  (agent-repl--maybe-notify-finished ws)
+  (unless (agent-repl--current-ws-p ws)
+    (agent-repl--info ws "Agent finished in workspace: %s" ws))
+  (agent-repl--drain-deferred-prompts ws))
 
 ;;;; Deferred prompt queue
 ;;
@@ -980,7 +802,7 @@ time, pinning the delivery to that specific session) is live."
       (agent-repl--gui-running-p ws)
     (buffer-live-p vterm-buf)))
 
-(defun agent-repl--deliver-pending-prompts (vterm-buf pending ws &optional retries)
+(defun agent-repl--deliver-pending-prompts (pending ws &optional retries)
   "Deliver PENDING prompts to WS if its frontend can still receive them.
 Sends the first prompt via `agent-repl--send' with an ON-SETTLE that
 schedules `agent-repl--maybe-retry-or-continue' after
@@ -991,15 +813,11 @@ to `agent-repl-prompt-delivery-max-retries' times when the verify
 fails — closing the race between `SessionStart' (which flips Emacs
 to ready) and the agent's TUI input-area becoming interactive.
 
-VTERM-BUF is the vterm buffer captured at drain time for a vterm
-workspace, or nil for a gui workspace (whose liveness is its daemon
-session binding — see `agent-repl--pending-delivery-alive-p').
-
 RETRIES is the number of resends already performed for the prompt at
 the head of PENDING; nil/0 on the first attempt."
   (agent-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
                     ws (length pending) (or retries 0))
-  (unless (agent-repl--pending-delivery-alive-p ws vterm-buf)
+  (unless (agent-repl--pending-delivery-alive-p ws nil)
     (error "agent-repl--deliver-pending-prompts: frontend session is gone for ws=%s — %d prompt(s) lost"
            ws (length pending)))
   (when pending
@@ -1010,9 +828,9 @@ the head of PENDING; nil/0 on the first attempt."
          (run-at-time
           agent-repl-prompt-delivery-verify-seconds nil
           #'agent-repl--maybe-retry-or-continue
-          vterm-buf pending ws retries))))))
+          pending ws retries))))))
 
-(defun agent-repl--maybe-retry-or-continue (vterm-buf pending ws retries)
+(defun agent-repl--maybe-retry-or-continue (pending ws retries)
   "Verify the current preemptive prompt was acknowledged; retry or continue.
 Called by a timer scheduled in `agent-repl--deliver-pending-prompts'
 after the send's `on-settle' fires.  Inspects `:agent-state' on WS
@@ -1027,11 +845,10 @@ via `agent-repl--prompt-acknowledged-p':
   the prompt is still in input history for the user to resend
   manually.
 
-When the frontend session has died in the meantime (vterm buffer
-killed, or a gui workspace's daemon binding released), abandons
-silently."
+When the frontend session has died in the meantime (a gui workspace's
+daemon binding released), abandons silently."
   (cond
-   ((not (agent-repl--pending-delivery-alive-p ws vterm-buf))
+   ((not (agent-repl--pending-delivery-alive-p ws nil))
     (agent-repl--log ws
                       "deliver-verify: frontend session gone for ws=%s — abandoning %d prompt(s)"
                       ws (length pending)))
@@ -1040,14 +857,14 @@ silently."
                       "deliver-verify: ws=%s prompt acknowledged after %d retries — continuing"
                       ws retries)
     (when (cdr pending)
-      (agent-repl--deliver-pending-prompts vterm-buf (cdr pending) ws 0)))
+      (agent-repl--deliver-pending-prompts (cdr pending) ws 0)))
    ((< retries agent-repl-prompt-delivery-max-retries)
     (let ((next-retries (1+ retries)))
       (agent-repl--log ws
                         "deliver-verify: ws=%s NOT acknowledged after %.1fs — retry %d/%d"
                         ws agent-repl-prompt-delivery-verify-seconds
                         next-retries agent-repl-prompt-delivery-max-retries)
-      (agent-repl--deliver-pending-prompts vterm-buf pending ws next-retries)))
+      (agent-repl--deliver-pending-prompts pending ws next-retries)))
    (t
     (agent-repl--log ws
                       "deliver-verify: ws=%s GIVING UP after %d retries — prompt may be lost"
@@ -1059,18 +876,16 @@ silently."
 (defun agent-repl--drain-pending-prompts (ws)
   "Drain queued prompts for workspace WS after the agent becomes ready.
 Clears :pending-prompts and schedules them for delivery with a 0.3s delay
-so the terminal has time to settle.  Works for both frontends: a gui
-workspace has no vterm buffer, so delivery liveness is judged by its
-daemon session binding instead (see
+so the daemon session has time to settle.  Delivery liveness is judged
+by WS's daemon session binding (see
 `agent-repl--pending-delivery-alive-p')."
   (let ((pending (agent-repl--ws-get ws :pending-prompts)))
     (when pending
       (agent-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
       (agent-repl--ws-put ws :pending-prompts nil)
-      (let ((vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
-        (run-at-time agent-repl-pending-prompt-deliver-delay nil
-                     #'agent-repl--deliver-pending-prompts
-                     vterm-buf pending ws)))
+      (run-at-time agent-repl-pending-prompt-deliver-delay nil
+                   #'agent-repl--deliver-pending-prompts
+                   pending ws))
     pending))
 
 (defun agent-repl--loading-placeholder-visible-p ()
@@ -1082,12 +897,12 @@ daemon session binding instead (see
   "Open panels if WS is the current workspace, otherwise defer until switch.
 `agent-repl--on-workspace-switch' checks :pending-show-panels.
 Skip if the loading placeholder is still visible — showing panels
-here would trigger `--show-existing-panels' with the wrong selected
-window."
+here would race the placeholder's teardown and mount the frontend
+view against the wrong selected window."
   (if (agent-repl--current-ws-p ws)
       (unless (agent-repl--loading-placeholder-visible-p)
         (agent-repl--log ws "show-panels-or-defer: current ws=%s — showing panels" ws)
-        (agent-repl--show-hidden-panels))
+        (agent-repl--frontend-dispatch-show ws))
     (agent-repl--log ws "show-panels-or-defer: other ws=%s — deferring" ws)
     (agent-repl--ws-put ws :pending-show-panels t)))
 
@@ -1100,9 +915,11 @@ that the user wants panels closed (hide-mode survives restart: when
 `--initialize-ws-env' hydrated either value from the saved file, we
 honor it here by skipping the panel-open call).
 
-Since `--initialize-agent' opens panels at launch, after-ready is
-usually the SECOND show — and re-running the show path while panels
-are already visible is not safe (it can resolve both windows onto the
+WS's panels may already have been shown by the workspace-switch's own
+`:pending-show-panels' drain (`agent-repl--drain-pending-show-panels'
+in panels.el), so this after-ready call is often a SECOND show attempt
+rather than the first — and re-running the show path while panels are
+already visible is not safe (it can resolve both windows onto the
 input buffer and die on its window-dedication mid-layout, leaving a
 broken input-only frame), so an already-visible current-workspace
 layout is left untouched in both branches."
@@ -1123,24 +940,16 @@ layout is left untouched in both branches."
      ((and (agent-repl--current-ws-p ws)
            (not (agent-repl--loading-placeholder-visible-p)))
       (agent-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
-      (agent-repl--show-hidden-panels))
+      (agent-repl--frontend-dispatch-show ws))
      (t
       (agent-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws)))))
 
-;; Readiness is handled by the session_start hook via sentinel.el.
+;; Readiness is handled entirely by the session_start hook via sentinel.el.
 ;; The hook fires when Claude Code initializes, delivering session-id and
-;; triggering agent-repl--on-session-start-event which sets ready state,
-;; drains pending prompts, and opens panels.  No vterm title-change advice
-;; is needed.
+;; triggering agent-repl--on-session-start-event, which sets ready state,
+;; drains pending prompts, and opens panels.  No polling is needed.
 
 ;;;; Process state predicates
-
-(defun agent-repl--vterm-process-alive-p (ws)
-  "Return non-nil if WS has a live vterm buffer with an active process."
-  (let* ((buf (agent-repl--ws-get ws :vterm-buffer))
-         (result (and buf (buffer-live-p buf) (get-buffer-process buf))))
-    (agent-repl--log-verbose ws "vterm-process-alive-p: ws=%s alive=%s" ws (if result "yes" "no"))
-    result))
 
 (defun agent-repl--agent-running-p (&optional ws)
   "Return non-nil when WS has a live agent session on ITS OWN frontend.
@@ -1155,101 +964,13 @@ guard keyed to it: the refusal to switch backend under a live agent
 \(`agent-repl-select-backend'), the kill-before-workspace-delete advice,
 and the status poll's liveness gate.
 
-The vterm frontend's `:running-p-fn' must therefore point at
-`agent-repl--vterm-process-alive-p' rather than back at this function,
-or the dispatch closes a loop on itself."
+Each registered frontend's `:running-p-fn' must point at a concrete
+liveness check (e.g. `agent-repl--gui-running-p' for the gui frontend)
+rather than back at this function, or the dispatch closes a loop on
+itself."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
     (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ws)) ws)))
-
-(defun agent-repl--session-starting-p (&optional ws)
-  "Return t if vterm exists with a live process but the agent is not yet ready.
-WS defaults to the current workspace name.  Signals an error if no
-workspace can be determined."
-  (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (error "agent-repl--session-starting-p: no workspace specified and no current workspace"))
-    (let ((result (and (agent-repl--vterm-process-alive-p ws)
-                       (not (buffer-local-value 'agent-repl--ready
-                                                (agent-repl--ws-get ws :vterm-buffer))))))
-      (agent-repl--log-verbose ws "session-starting-p: ws=%s starting=%s" ws (if result "yes" "no"))
-      result)))
-
-;;;; Readiness timer (fallback polling)
-
-(defun agent-repl--cancel-ready-timer (ws)
-  "Cancel the readiness-poll timer for workspace WS, if any."
-  (let ((timer (agent-repl--ws-get ws :ready-timer)))
-    (if timer
-        (progn
-          (agent-repl--log ws "cancel-ready-timer: canceling timer for ws=%s" ws)
-          (when (timerp timer) (cancel-timer timer))
-          (agent-repl--ws-put ws :ready-timer nil))
-      (agent-repl--log ws "cancel-ready-timer: no timer to cancel for ws=%s" ws))))
-
-(defun agent-repl--detect-start-failure (ws)
-  "Return a failure reason string if WS's vterm shows a start failure, else nil.
-Prefers an explicit `agent-repl--start-failure-marker' line (returning the
-trimmed text after it); otherwise matches a known fatal substring from
-`agent-repl--start-failure-patterns'.  Returns nil when the vterm buffer is
-absent/dead or shows no failure.  This is how a start command running in a
-vterm (whose exit code agent-repl cannot observe) reports an unrecoverable
-launch failure — e.g. `claude-sandbox' when Docker is down."
-  (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
-    (when (and buf (buffer-live-p buf))
-      (with-current-buffer buf
-        (save-excursion
-          (goto-char (point-max))
-          (if (search-backward agent-repl--start-failure-marker nil t)
-              (let ((reason (string-trim
-                             (buffer-substring-no-properties
-                              (+ (point) (length agent-repl--start-failure-marker))
-                              (line-end-position)))))
-                (if (string-empty-p reason)
-                    "start command reported a failure"
-                  reason))
-            (let (found)
-              (dolist (pair agent-repl--start-failure-patterns found)
-                (when (and (not found)
-                           (progn (goto-char (point-max))
-                                  (search-backward (car pair) nil t)))
-                  (setq found (cdr pair)))))))))))
-
-(defun agent-repl--ready-timer-tick (ws start-time)
-  "Handle one tick of the readiness-poll timer for workspace WS.
-START-TIME is the `float-time' when polling began.  Cancels the timer and
-gives up after 30 seconds, surfaces a start-failure marker as `:start-failed'
-the moment it appears, or cancels and opens panels once the agent is ready."
-  (let ((elapsed (- (float-time) start-time))
-        (failure (agent-repl--detect-start-failure ws)))
-    (agent-repl--log-verbose ws "ready-timer-tick: ws=%s elapsed=%.1fs" ws elapsed)
-    (cond
-     ;; A start command (e.g. `claude-sandbox') printed an explicit failure
-     ;; marker into the vterm — surface it loudly as `:start-failed' instead
-     ;; of silently waiting out the timeout.
-     (failure
-      (agent-repl--cancel-ready-timer ws)
-      (agent-repl--mark-start-failed ws (list 'error failure)))
-     ((> elapsed agent-repl-ready-timeout-seconds)
-      (agent-repl--cancel-ready-timer ws)
-      (agent-repl--log ws "ready-timer: timed out for ws=%s" ws))
-     ((agent-repl--session-starting-p ws) nil)
-     (t
-      (agent-repl--cancel-ready-timer ws)
-      (agent-repl--info ws "ready-timer catch-all for ws=%s (session no longer starting)" ws)
-      (agent-repl--log ws "ready-timer: catch-all branch hit for ws=%s — not starting but not timed out" ws)
-      (when (agent-repl--current-ws-p ws)
-        (agent-repl))))))
-
-(defun agent-repl--schedule-ready-timer (ws)
-  "Poll every 0.5s until the agent is ready in WS, then auto-open panels.
-Gives up after 30s. This is a fallback — the title-change path is the happy path."
-  (agent-repl--cancel-ready-timer ws)
-  (let ((start-time (float-time)))
-    (agent-repl--ws-put ws :ready-timer
-                         (run-at-time
-                          agent-repl-ready-poll-interval agent-repl-ready-poll-interval
-                          #'agent-repl--ready-timer-tick
-                          ws start-time))))
 
 ;;;; Alt-account config-dir hook provisioning
 ;;

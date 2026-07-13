@@ -9,6 +9,8 @@
 (declare-function agent-repl--ws-set-agent-state "status")
 (declare-function agent-repl--frontend-boot-session "frontends" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--ws-frontend-name "frontends" (ws))
+(declare-function agent-repl--ws-frontend "frontends" (ws))
+(declare-function agent-repl-frontend-kill-fn "frontends" (frontend))
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -951,10 +953,9 @@ or creating ghost state."
                                (list prompt))))
       (message "Amended-oneshot prompt queued for in-flight %s workspace." flavor))
      ((stringp state)
-      (unless (agent-repl--ws-get state :vterm-buffer)
-        (unless (member state (agent-repl--ws-all-names))
-          (user-error "Tracked oneshot workspace '%s' no longer exists — press `SPC j %s' to create a new one"
-                      state (if (eq flavor :doom) "o" "O"))))
+      (unless (member state (agent-repl--ws-all-names))
+        (user-error "Tracked oneshot workspace '%s' no longer exists — press `SPC j %s' to create a new one"
+                    state (if (eq flavor :doom) "o" "O")))
       (agent-repl--log state
                         "oneshot-amend: dispatching prompt to flavor=%s ws=%s"
                         flavor state)
@@ -1852,16 +1853,20 @@ overridden by any saved priority for the same project)."
 (defun agent-repl--dispatch-prompt-command (ws prompt)
   "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
 WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
-it is normalized to the dirname before lookup."
-  (let* ((ws (agent-repl--bare-workspace-name ws))
-         (vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+it is normalized to the dirname before lookup.
+
+Readiness is `agent-repl--agent-running-p', which dispatches through
+the frontend registry rather than reading a vterm-specific buffer-local
+— this predicate used to test the vterm buffer-local `agent-repl--ready',
+which is always nil for a gui workspace, so every dispatch silently fell
+through to the enqueue branch instead of ever sending directly."
+  (let ((ws (agent-repl--bare-workspace-name ws)))
     (cond
-     ((and vterm-buf (buffer-local-value 'agent-repl--ready vterm-buf))
+     ((agent-repl--agent-running-p ws)
       (agent-repl--log ws "dispatch-prompt-command: ws=%s ready, sending prompt" ws)
       (agent-repl--send prompt ws))
      (t
-      (agent-repl--log ws "dispatch-prompt-command: ws=%s %s, enqueuing"
-                        ws (if vterm-buf "not ready" "not in registry"))
+      (agent-repl--log ws "dispatch-prompt-command: ws=%s not ready, enqueuing" ws)
       (agent-repl--ws-put ws :pending-prompts
                            (append (agent-repl--ws-get ws :pending-prompts)
                                    (list prompt)))))))
@@ -1954,8 +1959,8 @@ performed or scheduled."
 
 (defun agent-repl--close-workspace (ws &optional preserve-entry)
   "Close the editor workspace WS: kill session, buffers, persp.
-Editor-only teardown — tears down vterm session, workspace buffers,
-the Doom perspective, and (unless PRESERVE-ENTRY is non-nil) the
+Editor-only teardown — tears down the agent session, workspace
+buffers, the Doom perspective, and (unless PRESERVE-ENTRY is non-nil) the
 `agent-repl--workspaces' hashmap entry.  The git worktree on disk
 is intentionally left in place; full teardown including the worktree
 is `agent-repl--finish-workspace's job.
@@ -1978,14 +1983,16 @@ WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
 it is normalized to the dirname before lookup."
   (let* ((ws (agent-repl--bare-workspace-name ws))
          (worktree-p (agent-repl--ws-get ws :worktree-p))
-         (project-dir (agent-repl--ws-get ws :project-dir))
-         (vterm-buf (agent-repl--ws-get ws :vterm-buffer)))
+         (project-dir (agent-repl--ws-get ws :project-dir)))
     (agent-repl--log ws "finish-workspace ws=%s worktree-p=%s path=%s"
                       ws worktree-p (or project-dir "nil"))
-    ;; Kill the agent vterm process.
-    (agent-repl--log ws "finish-workspace: killing vterm process vterm-buf=%s" (if vterm-buf "present" "nil"))
-    (when vterm-buf
-      (agent-repl--kill-vterm-process vterm-buf))
+    ;; Kill the agent session through its frontend's registry `:kill-fn'
+    ;; dispatch — NOT a direct `agent-repl--kill-vterm-process' call,
+    ;; which only ever tore down a vterm process and silently left a
+    ;; gui workspace's daemon session (and its webview buffer/windows)
+    ;; running forever past `finish'.
+    (agent-repl--log ws "finish-workspace: killing agent session ws=%s" ws)
+    (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
     ;; Remove all agent-repl tracking state.
     (agent-repl--log ws "finish-workspace: removing ws state ws=%s" ws)
     (agent-repl--ws-del ws)
@@ -2233,7 +2240,7 @@ Requires that WS was previously closed via
 in particular `:project-dir' — survived the close.  Wraps
 `agent-repl--establish-workspace', which creates the perspective,
 activates it, registers projectile, loads dir-locals, opens the recentf
-entry, and starts a fresh agent session in a new vterm panel.
+entry, and starts a fresh agent session under the workspace's frontend.
 
 Used by `agent-repl--workspace-merge-async' to bring back a workspace
 whose async merge attempt failed — the user pressed `SPC TAB M', the
@@ -2552,7 +2559,7 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
 (defcustom agent-repl-gns-sockets-close-prompt "/gns-sockets close"
   "Prompt sent to a workspace's agent session before tearing it down.
 Sent by `agent-repl--gns-sockets-close-then' so the in-workspace
-agent can release any held GNS sockets before its vterm process is
+agent can release any held GNS sockets before its session is
 killed by close or merge."
   :type 'string
   :group 'agent-repl)
@@ -2605,35 +2612,31 @@ Falls back to immediate invocation after
 (defun agent-repl--gns-sockets-close-then (ws teardown-fn)
   "Send `agent-repl-gns-sockets-close-prompt' to WS, then run TEARDOWN-FN.
 TEARDOWN-FN is a zero-arg thunk that performs the actual teardown
-\(persp kill, vterm kill, etc).  When WS has no live ready vterm,
-TEARDOWN-FN runs immediately — there is no agent session to drain.
-Otherwise the prompt is sent and a poll loop waits for
-`:agent-state' to become `:done' or `:idle' before running
-TEARDOWN-FN, with `agent-repl-gns-sockets-close-timeout' as a hard
-fallback so a hung session cannot stall close indefinitely.
+\(persp kill, session kill, etc).  When WS has no live agent session
+\(per `agent-repl--agent-running-p'), TEARDOWN-FN runs immediately —
+there is no agent session to drain.  Otherwise the prompt is sent and
+a poll loop waits for `:agent-state' to become `:done' or `:idle'
+before running TEARDOWN-FN, with `agent-repl-gns-sockets-close-timeout'
+as a hard fallback so a hung session cannot stall close indefinitely.
 
 The settle delay (`agent-repl-gns-sockets-close-settle-delay') is
 inserted between the on-settle callback and the first state poll so
 the `prompt_submit' hook has time to transition the workspace to
 `:thinking'; otherwise a workspace that was already `:done' or
 `:idle' before the send would short-circuit teardown immediately."
-  (let* ((vterm-buf (agent-repl--ws-get ws :vterm-buffer))
-         (ready (and vterm-buf
-                     (buffer-live-p vterm-buf)
-                     (buffer-local-value 'agent-repl--ready vterm-buf))))
-    (cond
-     ((not ready)
-      (agent-repl--log ws "gns-sockets-close-then: ws=%s no live ready vterm — tearing down directly" ws)
-      (funcall teardown-fn))
-     (t
-      (agent-repl--log ws "gns-sockets-close-then: ws=%s sending %S and awaiting :done/:idle"
-                        ws agent-repl-gns-sockets-close-prompt)
-      (agent-repl--send agent-repl-gns-sockets-close-prompt ws nil
-                         (lambda ()
-                           (run-at-time
-                            agent-repl-gns-sockets-close-settle-delay nil
-                            #'agent-repl--gns-sockets-close-poll
-                            ws teardown-fn (float-time))))))))
+  (cond
+   ((not (agent-repl--agent-running-p ws))
+    (agent-repl--log ws "gns-sockets-close-then: ws=%s no live agent session — tearing down directly" ws)
+    (funcall teardown-fn))
+   (t
+    (agent-repl--log ws "gns-sockets-close-then: ws=%s sending %S and awaiting :done/:idle"
+                      ws agent-repl-gns-sockets-close-prompt)
+    (agent-repl--send agent-repl-gns-sockets-close-prompt ws nil
+                       (lambda ()
+                         (run-at-time
+                          agent-repl-gns-sockets-close-settle-delay nil
+                          #'agent-repl--gns-sockets-close-poll
+                          ws teardown-fn (float-time)))))))
 
 (defun agent-repl--handle-close-command (cmd)
   "Handle a \"close\" workspace command CMD.
@@ -2646,7 +2649,7 @@ respectively.  Skill-invoked from `/workspace-close'.
 Before tearing down, sends `agent-repl-gns-sockets-close-prompt' to
 the workspace's agent session via `agent-repl--gns-sockets-close-then'
 and waits for `:done'/`:idle' so the agent can release any held GNS
-sockets before the vterm process is killed."
+sockets before its session is killed."
   (let ((ws (alist-get 'workspace cmd)))
     (agent-repl--log ws "workspace-commands-file close: ws=%s" ws)
     (agent-repl--gns-sockets-close-then
@@ -3046,7 +3049,7 @@ appended so the receiving agent knows the output was clipped.
 
 Set to 0 to disable truncation entirely (not recommended — a runaway
 `(dotimes (i 100000) (message ...))' can otherwise dump megabytes into
-the vterm)."
+the agent's conversation)."
   :type 'integer
   :group 'agent-repl)
 
@@ -4230,7 +4233,7 @@ cherry-pick already succeeded; a tag-write failure shouldn't undo that."
 (defun agent-repl--mark-merge-failed (target-ws err)
   "Mark TARGET-WS as dead because its merge attempt failed with ERR.
 Sets `:repl-state :dead' and clears `:agent-state' — the same state
-shape used by vterm-death detection — so the drawer surfaces the ❌
+shape used by agent-death detection — so the drawer surfaces the ❌
 badge.  Also marks `:merge-completed' nil so the workspace cannot land
 in the MERGED bucket on the strength of a partial earlier success, and
 clears `:merging' so it exits the MERGING bucket too.
@@ -4258,7 +4261,7 @@ Distinct from `agent-repl--mark-merge-failed': set only on real
 cherry-pick conflicts (CHERRY_PICK_HEAD existed, auto-resolver
 declined OR interactive `--check-cherry-pick-conflict' aborted).  The
 drawer surfaces the 💥 badge so the user can tell a conflict failure
-from a vterm-death or silent git failure.
+from an agent-death or silent git failure.
 
 Clears `:merging' and `:merge-completed' so the workspace's
 render-status resolves to `:merge-conflict'.  This is NOT re-enqueued
@@ -4267,8 +4270,8 @@ awaits human resolution), so the workspace is no longer a merge-queue
 member and the drawer buckets it under MERGED — never MERGING, which
 holds queue members only — distinguished there by the 💥 glyph.  Keeps
 `:agent-state' untouched (unlike `--mark-merge-failed') because the
-workspace's vterm is still alive — the user can keep typing into it
-after they resolve the conflict outside.
+workspace's agent session is still alive — the user can keep typing
+into it after they resolve the conflict outside.
 
 Set via the conflict-specific signal `agent-repl-merge-conflict-error'
 raised by `agent-repl--check-cherry-pick-conflict' and
@@ -4295,8 +4298,9 @@ how Doom resolved the post-switch workspace name.
 After a successful cherry-pick, tags HEAD as `merge/TARGET-WS' so the
 final commit of the merged-in workspace is recoverable by name,
 records `:merge-completed t' on TARGET-WS, and auto-finishes the
-workspace (kills its perspective + vterm + worktree) — the cherry-pick
-has landed on the parent so the source branch has served its purpose.
+workspace (kills its perspective + agent session + worktree) — the
+cherry-pick has landed on the parent so the source branch has served
+its purpose.
 
 When the cherry-pick silently fails (git exits non-zero with no
 CHERRY_PICK_HEAD remaining — commits never landed), TARGET-WS is
@@ -4410,7 +4414,7 @@ off so the user resolves in magit directly."
               (agent-repl--record-merged-in-workspace project-root target-ws)
               ;; Flip the repl-state so the 🔀 badge survives the
               ;; post-nuke poll cycle that would otherwise mark the
-              ;; (now-vterm-less) preserved hash entry `:dead'.
+              ;; (now-session-less) preserved hash entry `:dead'.
               (agent-repl--ws-put target-ws :repl-state :merged)
               (agent-repl--ws-put target-ws :agent-state nil)
               (agent-repl--tag-merge-completion project-root target-ws)
@@ -4421,13 +4425,13 @@ off so the user resolves in magit directly."
               ;; the user explicitly `x' (which runs
               ;; `--finish-workspace' and removes the worktree).
               ;; Gate the close on `/gns-sockets close' so the agent can
-              ;; release any held GNS sockets before the vterm dies.
+              ;; release any held GNS sockets before its session dies.
               ;;
               ;; Deferred to the main thread because this function can
               ;; run on the worker thread spawned by
               ;; `agent-repl--workspace-merge-async' — the teardown
-              ;; chain ultimately kills the perspective + vterm, which
-              ;; must happen on main.  The trailing
+              ;; chain ultimately kills the perspective + agent session,
+              ;; which must happen on main.  The trailing
               ;; `--refresh-magit-status-for-dir' call forces a final
               ;; magit-refresh of the merge target (PROJECT-ROOT, e.g.
               ;; the master worktree) AFTER the cherry-pick has fully

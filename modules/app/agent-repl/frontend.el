@@ -15,11 +15,13 @@
 ;;
 ;; Buffer identity rules (hard-won from the panel machinery's naming
 ;; regexes in core.el):
-;;   - Webview buffers use the `*agent-frontend-WS*' prefix, which
-;;     deliberately does NOT match `agent-repl--vterm-buffer-re' /
-;;     `--input-buffer-re': the bounce-from-vterm guard, the orphan
-;;     sweep, and close-panels-on-open must all treat the webview as an
-;;     ordinary buffer, not an agent panel.
+;;   - Webview buffers use the `*agent-frontend-WS*' prefix, matched by
+;;     `agent-repl--frontend-buffer-re'.  Now that vterm is gone, the
+;;     webview is simply one of a workspace's two buffers —
+;;     `agent-repl--agent-panel-buffer-p' matches it alongside the
+;;     input composer, and the orphan sweep / close-panels-on-open
+;;     treat it as the agent panel it is, with no special-casing left
+;;     to carve out.
 ;;   - xwidget-webkit renames its buffer on every document-title change
 ;;     (the webapp sets document.title per model); the buffer-local
 ;;     `xwidget-webkit-buffer-name-format' is pinned to the fixed name
@@ -179,16 +181,14 @@ the tail anyway."
 
 (defun agent-repl--frontend-snap-webview-to-tail (ws)
   "Snap WS's webview feed to its newest message, with no scroll animation.
-The gui counterpart of the vterm path's
-`agent-repl--snap-vterm-window-to-cursor' (panels.el): switching TO a
-workspace must show its agent's latest output immediately, not the
-middle of the history the user happened to leave the feed scrolled up
-to.  The snap is a scrollTop assignment inside the page, so the tail is
-simply THERE on the next frame.
+Switching TO a workspace must show its agent's latest output
+immediately, not the middle of the history the user happened to leave
+the feed scrolled up to.  The snap is a scrollTop assignment inside the
+page, so the tail is simply THERE on the next frame.
 
-No-op when WS has no live webview — a vterm workspace has no
-`:frontend-buffer' at all, and a gui workspace whose panel is closed
-mounts a fresh webview (already tail-parked) on its next open."
+No-op when WS has no live webview — e.g. a workspace whose panel is
+closed, which mounts a fresh webview (already tail-parked) on its next
+open."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (when (buffer-live-p buf)
       (agent-repl--log ws "snap-webview-to-tail: buf=%s" (buffer-name buf))
@@ -335,27 +335,26 @@ Falls back to the selected window (always live) when nothing matches."
 
 (defun agent-repl--frontend-display-webview (ws buf)
   "Display BUF as the workspace's frontend view filling the frame's main area.
-When the vterm/input panels are visible they are HIDDEN first through
+When the webview/input panels are visible they are HIDDEN first through
 the module's own path (`agent-repl--hide-panels') rather than swapped
 under: replacing the buffer of the strongly-dedicated output window
 would (a) leave the input panel orphaned for the sync-panels sweep to
-reap and (b) break the next `agent-repl--show-panels' against the
-still-dedicated window.  The webview then takes a live main-area
-window, and — exactly like the vterm layout, for which fullscreen is
-the sole display format — every OTHER main-area window is cleared
-\(`agent-repl--clear-main-area-for-panels', drawer excluded), so the
-webview + input panels end up the only main-area windows.  Without
-the clear, whatever the frame carried before the mount (magit, the
-dashboard, a previous workspace's leftovers) stayed up beside the
+reap and (b) break the next display against the still-dedicated
+window.  The webview then takes a live main-area window, and — since
+fullscreen is the sole display format — every OTHER main-area window is
+cleared \(`agent-repl--clear-main-area-for-panels', drawer excluded),
+so the webview + input panels end up the only main-area windows.
+Without the clear, whatever the frame carried before the mount (magit,
+the dashboard, a previous workspace's leftovers) stayed up beside the
 panels — the extra-windows-on-first-switch bug."
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
-  ;; Save the pre-panel layout exactly like the vterm show path: the
-  ;; gui hide/close paths restore it, which is what removes BOTH gui
-  ;; windows (deleting them directly is impossible once the input
-  ;; window is the frame's sole survivor). Guarded like show-panels so
-  ;; re-shows never clobber the saved work layout.
+  ;; Save the pre-panel layout before mounting: the gui hide/close
+  ;; paths restore it, which is what removes BOTH gui windows
+  ;; (deleting them directly is impossible once the input window is
+  ;; the frame's sole survivor). Guarded so re-shows never clobber the
+  ;; saved work layout.
   (unless (or (agent-repl--ws-get ws :fullscreen-config)
               (let ((webview (agent-repl--ws-get ws :frontend-buffer)))
                 (and (buffer-live-p webview) (get-buffer-window webview))))
@@ -376,8 +375,8 @@ panels — the extra-windows-on-first-switch bug."
       (select-window win)
       (agent-repl--clear-main-area-for-panels)
       (set-window-buffer win buf)
-      ;; Hybrid UI: the classic input panel sits below the webview, with
-      ;; the same window recipe the vterm layout uses (dedicated,
+      ;; Hybrid UI: the classic input panel sits below the webview,
+      ;; hardened with the standard panel recipe (dedicated,
       ;; height-locked, delete-protected, mini-window-shrink-proof).
       ;; Focus lands there — typing is the whole point of the panel.
       (let ((input-win (split-window
@@ -419,19 +418,19 @@ current one, and mounting its webview here would evict the user's
 windows).  The view arrives later, when the user switches to WS and the
 `:pending-show-panels' drain shows it through the frontend.
 
-Booting the session eagerly (rather than lazily at first open) is what
-gives a generated gui workspace the same contract the vterm boot has:
-the agent starts immediately, its `session_start' hook fires, and the
-`:pending-prompts' queued by the workspace-generation dispatch drain
-into it (`agent-repl--on-session-start-event').
+Booting the session eagerly (rather than lazily at first open) means a
+generated gui workspace starts its agent immediately: its
+`session_start' hook fires, and the `:pending-prompts' queued by the
+workspace-generation dispatch drain into it
+(`agent-repl--on-session-start-event').
 
-Writes `:agent-state :init' before the session exists — the same
-documented lifecycle exception `agent-repl--initialize-agent' takes (no
-hook fires between \"the session is being created\" and session_start,
-so Emacs is the only observer of it).  Without it a generated gui
+Writes `:agent-state :init' before the session exists — there is a
+brief window between \"the session is being created\" and the daemon's
+own `session_start' event firing where Emacs is the only observer of
+the workspace's existence.  Without this write a generated gui
 workspace would render NO state in the tab and drawer until its agent
-answered, where the vterm-born one showed a loading badge; the gui
-branch of `agent-repl--on-session-start-event' flips `:init' to `:idle'.
+answered; the gui branch of `agent-repl--on-session-start-event' flips
+`:init' to `:idle' once that event lands.
 
 The hints are unused: `agent-repl--frontend-boot-session' has already
 hydrated the environment with them, and the gui reads WS's
@@ -444,10 +443,8 @@ hydrated the environment with them, and the gui reads WS's
   "Return the webapp URL for WS's webview attached to SESSION-ID.
 composer=0: Emacs owns input (the panel below), so the webview hides
 its own composer and stays output-only.  parent_ws: the recorded
-parent worktree's basename (the same source
-`agent-repl--workspace-mode-line' renders green) — the webapp's status
-bar shows it for vterm parity.  Omitted when the workspace has no
-recorded parent."
+parent worktree's basename — the webapp's status bar shows it in its
+topbar.  Omitted when the workspace has no recorded parent."
   (concat (agent-repl--frontend-session-url session-id)
           "&composer=0"
           (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
@@ -473,8 +470,8 @@ binding already matches."
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
-Reads `:source-ws-dir' exactly like the vterm mode-line's parent label;
-nil when no parent was recorded or the recorded value is empty."
+Reads WS's `:source-ws-dir'; nil when no parent was recorded or the
+recorded value is empty."
   (let ((source-dir (agent-repl--ws-get ws :source-ws-dir)))
     (when (and source-dir (not (string-empty-p source-dir)))
       (file-name-nondirectory (directory-file-name source-dir)))))
@@ -489,13 +486,13 @@ Remounts the live webview (or opens fresh when it died)."
 
 (defun agent-repl--gui-hide (ws)
   "The gui frontend's hide capability (registry `:hide-fn').
-Restores the pre-panel window layout saved at display time (the same
-contract as the vterm close paths — restoring is what removes BOTH gui
-windows, since the input window cannot be deleted once it is the sole
-survivor).  Buffers and the daemon session survive.  Falls back to
-closing the individual windows when no layout was saved, resolving the
-input buffer by NAME too since the plist key can go stale nil across
-frontend switches while the named buffer stays displayed."
+Restores the pre-panel window layout saved at display time — restoring
+is what removes BOTH gui windows, since the input window cannot be
+deleted once it is the sole survivor.  Buffers and the daemon session
+survive.  Falls back to closing the individual windows when no layout
+was saved, resolving the input buffer by NAME too as a defensive
+fallback since the plist key can go stale nil while the named buffer
+stays displayed."
   (unless (agent-repl--restore-fullscreen-config ws)
     (agent-repl--close-buffer-windows
      (agent-repl--ws-get ws :frontend-buffer)
@@ -506,11 +503,11 @@ frontend switches while the named buffer stays displayed."
   "The gui frontend's kill capability (registry `:kill-fn').
 Tears down the LAYOUT first (webview + dedicated input windows), then
 deletes the daemon session (best-effort) and kills the webview.  The
-window teardown is contractual: `agent-repl-switch-frontend' opens the
-next frontend immediately after kill, and a leftover dedicated input
-window aborts the vterm launch mid-initialize (the observed
-\"vterm buffer is null/dead\" cascade).  The input buffer itself
-survives — it is workspace furniture, not session state."
+window teardown is contractual: the registry's `:restart-fn' composes
+this kill immediately followed by `agent-repl--gui-open', and a
+leftover dedicated input window aborts that reopen mid-initialize (the
+observed \"webview buffer is null/dead\" cascade).  The input buffer
+itself survives — it is workspace furniture, not session state."
   (agent-repl--gui-hide ws)
   (agent-repl--frontend-release-workspace-session ws)
   (agent-repl--frontend-release-workspace-webview ws)

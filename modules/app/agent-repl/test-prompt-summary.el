@@ -730,11 +730,13 @@ while the user's interactive Claude is still mid-turn."
       ;; Pending also unchanged — stale path doesn't touch it
       (should (agent-repl--ws-get "ws1" :last-prompt-summary-pending)))))
 
-(ert-deftest agent-repl-test-apply-prompt-summary-redisplays-vterm ()
-  "Apply forces a mode-line update on the workspace's vterm buffer."
+(ert-deftest agent-repl-test-apply-prompt-summary-redisplays-frontend-buffer ()
+  "Apply forces a mode-line update on the workspace's frontend (webview)
+buffer.  `--prompt-summary-redisplay' reads `:frontend-buffer' now that
+`:vterm-buffer' no longer exists."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*agent-panel-apply-redisp*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
+      (agent-repl--ws-put "ws1" :frontend-buffer (current-buffer))
       (agent-repl--ws-put "ws1" :last-prompt-text "raw")
       (let ((called nil))
         (cl-letf (((symbol-function 'force-mode-line-update)
@@ -742,22 +744,28 @@ while the user's interactive Claude is still mid-turn."
           (agent-repl--prompt-summary-apply "ws1" "raw" "Title")
           (should called))))))
 
-;;;; ---- Tests: do-send invokes kickoff ----
+;;;; ---- Tests: gui send-turn invokes kickoff ----
 
-(ert-deftest agent-repl-test-do-send-kicks-off-prompt-summary ()
-  "`agent-repl--do-send' invokes `agent-repl--kickoff-prompt-summary'
-with the workspace and raw input."
+(ert-deftest agent-repl-test-gui-send-turn-kicks-off-prompt-summary ()
+  "`agent-repl--gui-send-turn' invokes `agent-repl--kickoff-prompt-summary'
+with the workspace and raw input.
+
+This is the send path's actual entry point into the prompt-summary
+feature now that the vterm frontend is gone: `agent-repl--do-send'
+(input.el) is a pure one-line delegation to
+`agent-repl--frontend-dispatch-send', which resolves the workspace's
+registered frontend and calls its `:send-fn' — for the (only
+remaining) gui frontend, that is `agent-repl--gui-send-turn'
+\(frontend-client.el), which is where the kickoff call now lives."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl-test--with-temp-buffer "*agent-panel-do-send-summary*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (let ((kickoff-args nil))
-        (cl-letf (((symbol-function 'agent-repl--send-input-to-vterm) #'ignore)
-                  ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
-                  ((symbol-function 'agent-repl--kickoff-prompt-summary)
-                   (lambda (ws raw) (setq kickoff-args (list ws raw)))))
-          (agent-repl--do-send "ws1" "decorated-input" "raw-input"))
-        (should (equal kickoff-args '("ws1" "raw-input")))))))
+    (let ((kickoff-args nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message) #'ignore)
+                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary)
+                 (lambda (ws raw) (setq kickoff-args (list ws raw)))))
+        (agent-repl--gui-send-turn "ws1" "decorated-input" "raw-input"))
+      (should (equal kickoff-args '("ws1" "raw-input"))))))
 
 ;;;; ---- Tests: mode-line migration (attach-to-mode-line) ----
 

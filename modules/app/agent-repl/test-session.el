@@ -14,49 +14,6 @@
 
 ;;;; ---- Migrated tests ----
 
-(ert-deftest agent-repl-test-finished-from-hook-hidden-sets-done ()
-  "handle-agent-finished sets agent-state :done when vterm buffer is not visible."
-  (agent-repl-test--with-clean-state
-    (let ((done-set nil)
-          (fake-buf (generate-new-buffer " *test-hook-hidden*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'get-buffer-window)
-                       (lambda (_buf &rest _) nil))
-                      ((symbol-function 'agent-repl--do-refresh) #'ignore)
-                      ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                      ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'agent-repl--ws-set-agent-state)
-                       (lambda (ws state)
-                         (when (eq state :done) (setq done-set ws)))))
-              (agent-repl--handle-agent-finished "ws1")
-              (should (equal done-set "ws1"))))
-        (kill-buffer fake-buf)))))
-
-(ert-deftest agent-repl-test-finished-from-hook-visible-also-sets-done ()
-  "handle-agent-finished sets :done regardless of vterm visibility.
-Visibility is no longer a gate; the renderer decides the display via
-the composed-state rule with :repl-state."
-  (agent-repl-test--with-clean-state
-    (let ((done-set nil)
-          (fake-buf (generate-new-buffer " *test-hook-visible*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'get-buffer-window)
-                       (lambda (_buf &rest _) (selected-window)))
-                      ((symbol-function 'agent-repl--do-refresh) #'ignore)
-                      ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                      ((symbol-function 'agent-repl--fix-vterm-scroll) #'ignore)
-                      ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-                      ((symbol-function 'agent-repl--ws-set-agent-state)
-                       (lambda (ws state)
-                         (when (eq state :done) (setq done-set ws)))))
-              (agent-repl--handle-agent-finished "ws1")
-              (should (equal done-set "ws1"))))
-        (kill-buffer fake-buf)))))
-
 (ert-deftest agent-repl-test-maybe-notify-debounce ()
   "maybe-notify-finished should debounce within 2 seconds."
   (agent-repl-test--with-clean-state
@@ -87,19 +44,15 @@ the composed-state rule with :repl-state."
         (agent-repl--maybe-notify-finished "ws1")
         (should (= notify-count 0))))))
 
-(ert-deftest agent-repl-test-finished-from-hook-nil-vterm-sets-done ()
-  "handle-agent-finished still sets :done when vterm-buf is nil.
-The Stop signal's intent is \"the agent finished\" — unrelated to whether
-the vterm buffer is still around.  Refresh-vterm-after-finish is guarded
-by vterm-buf presence; the :done write is not."
+(ert-deftest agent-repl-test-finished-from-hook-sets-done ()
+  "handle-agent-finished sets :agent-state :done unconditionally.
+There is no vterm buffer or visibility concept left in the gui-only
+world; the Stop signal's intent is simply \"the agent finished\"."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
-      ;; Register ws1 (required by handle-agent-finished guard) but
-      ;; do NOT set :vterm-buffer.
+      ;; Register ws1 (required by handle-agent-finished guard).
       (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
-      (cl-letf (((symbol-function 'agent-repl--do-refresh) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
@@ -188,9 +141,7 @@ by vterm-buf presence; the :done write is not."
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (agent-repl--ws-put "ws1" :deferred-prompts '("first-deferred" "second"))
     (let ((sent nil))
-      (cl-letf (((symbol-function 'agent-repl--do-refresh) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function 'agent-repl--refresh-magit-status) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--send)
@@ -208,9 +159,7 @@ by vterm-buf presence; the :done write is not."
     (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
     (agent-repl--ws-put "ws1" :deferred-prompts nil)
     (let ((sent nil))
-      (cl-letf (((symbol-function 'agent-repl--do-refresh) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function 'agent-repl--refresh-magit-status) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--send)
@@ -620,174 +569,6 @@ workspace's durable session id."
           (should-not (agent-repl--compute-config-dir "/home/user/.config/doom")))
       (agent-repl-doom-multi-repo-mode (if was 1 -1)))))
 
-;;;; ---- Tests: Workspace mode-line ----
-
-(ert-deftest agent-repl-test-workspace-mode-line-with-parent-no-merge ()
-  "Parent segment shows just the parent name when no merge target is resolvable."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "child-ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name) (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "child-ws")))
-        (should (listp result))
-        (should (string-match-p " feature-foo\\'" (car result)))
-        (should-not (string-match-p "PARENT" (car result)))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-without-parent ()
-  "First segment is empty when there is neither parent nor merge target."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name) (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "ws-no-parent")))
-        (should (listp result))
-        (should (equal (car result) ""))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-empty-source-dir-treated-as-no-parent ()
-  "Empty-string :source-ws-dir is treated the same as nil for parent resolution."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-blank" :source-ws-dir "")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name) (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "ws-blank")))
-        (should (equal (car result) ""))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-is-parent-model-tokens ()
-  "Mode-line list has 3 elements: the parent label, then the model :eval
-segment, then the context-tokens :eval segment.  The prompt-summary and
-ai-title segments were dropped from the status bar, so neither appears."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name) (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "ws")))
-        (should (= (length result) 3))
-        (should (equal (nth 1 result) '(:eval (agent-repl--model-segment))))
-        (should (equal (nth 2 result) '(:eval (agent-repl--context-segment))))
-        (should-not (member '(:eval (agent-repl--prompt-summary-segment)) result))
-        (should-not (member '(:eval (agent-repl--ai-title-segment)) result))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-strips-trailing-slash ()
-  "A trailing slash on :source-ws-dir does not leak into the parent name."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-bar/")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name) (lambda (_ws) nil)))
-      (let ((result (agent-repl--workspace-mode-line "ws")))
-        (should (string-match-p " feature-bar\\'" (car result)))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-merge-shown-in-parens-when-different ()
-  "When merge target differs from parent, it appears in parens after the parent."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name)
-               (lambda (_ws) "explanation-engine")))
-      (let ((result (agent-repl--workspace-mode-line "ws")))
-        (should (string-match-p " feature-foo (explanation-engine)" (car result)))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-merge-omitted-when-equal-to-parent ()
-  "When merge target equals parent, no parens are appended (avoids redundant ` foo (foo)`)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name)
-               (lambda (_ws) "feature-foo")))
-      (let ((result (agent-repl--workspace-mode-line "ws")))
-        (should (string-match-p " feature-foo\\'" (car result)))
-        (should-not (string-match-p "(feature-foo)" (car result)))))))
-
-;;;; ---- Tests: parent-label ----
-
-(ert-deftest agent-repl-test-parent-label-both-nil ()
-  "Returns nil when both inputs are nil."
-  (should (null (agent-repl--parent-label nil nil))))
-
-(ert-deftest agent-repl-test-parent-label-parent-only ()
-  "Returns (\" <parent>\" nil) when only parent is set."
-  (should (equal (agent-repl--parent-label "feature-foo" nil)
-                 '(" feature-foo" nil))))
-
-(ert-deftest agent-repl-test-parent-label-merge-only ()
-  "Returns (\"\" \" (<merge>)\") when only merge is set (rare fallback case)."
-  (should (equal (agent-repl--parent-label nil "explanation-engine")
-                 '("" " (explanation-engine)"))))
-
-(ert-deftest agent-repl-test-parent-label-equal-omits-parens ()
-  "Returns (green-only nil) when parent equals merge — parens would be redundant."
-  (should (equal (agent-repl--parent-label "feature-foo" "feature-foo")
-                 '(" feature-foo" nil))))
-
-(ert-deftest agent-repl-test-parent-label-different-splits-parts ()
-  "Returns (\" <parent>\" \" (<merge>)\") when they differ (master-redirect case)."
-  (should (equal (agent-repl--parent-label "feature-foo" "explanation-engine")
-                 '(" feature-foo" " (explanation-engine)"))))
-
-;;;; ---- Tests: workspace-mode-line face splitting ----
-
-(ert-deftest agent-repl-test-workspace-mode-line-yellow-face-on-merge-suffix ()
-  "When merge differs from parent, the (...) suffix is yellow while PARENT: <parent> stays green."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name)
-               (lambda (_ws) "explanation-engine")))
-      (let* ((seg (car (agent-repl--workspace-mode-line "ws")))
-             (paren-start (string-match-p " (" seg)))
-        (should paren-start)
-        (let ((face-before (get-text-property (1- paren-start) 'face seg))
-              (face-at-paren (get-text-property paren-start 'face seg)))
-          (should (equal face-before '(:foreground "green" :weight bold)))
-          (should (equal face-at-paren '(:foreground "yellow" :weight bold))))))))
-
-(ert-deftest agent-repl-test-workspace-mode-line-green-throughout-when-no-merge-suffix ()
-  "When merge equals parent (no suffix), the entire segment is green."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :source-ws-dir "/tmp/parent-worktrees/feature-foo")
-    (cl-letf (((symbol-function 'agent-repl--merge-target-name)
-               (lambda (_ws) "feature-foo")))
-      (let ((seg (car (agent-repl--workspace-mode-line "ws"))))
-        (should (equal (get-text-property 0 'face seg)
-                       '(:foreground "green" :weight bold)))
-        (should (equal (get-text-property (1- (length seg)) 'face seg)
-                       '(:foreground "green" :weight bold)))))))
-
-;;;; ---- Tests: merge-target-name ----
-
-(ert-deftest agent-repl-test-merge-target-name-no-project-dir ()
-  "Returns nil when the workspace has no :project-dir."
-  (agent-repl-test--with-clean-state
-    (should (null (agent-repl--merge-target-name "unknown-ws")))))
-
-(ert-deftest agent-repl-test-merge-target-name-uses-resolved-target ()
-  "Returns the basename of resolve-merge-into-source-target's output."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
-    (agent-repl--ws-put "wt-ws" :source-ws-dir "/tmp/parent-dir/")
-    (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-              ((symbol-function 'agent-repl--master-worktree-path)
-               (lambda (_root) "/tmp/master-dir/"))
-              ((symbol-function 'agent-repl--resolve-merge-into-source-target)
-               (lambda (_p _m) "/tmp/parent-dir/"))
-              ((symbol-function 'agent-repl--path-canonical) #'identity))
-      (should (equal (agent-repl--merge-target-name "wt-ws") "parent-dir")))))
-
-(ert-deftest agent-repl-test-merge-target-name-nil-when-target-equals-source ()
-  "Returns nil when the resolved target equals the workspace's own dir
-\(nothing to merge into — typically the master worktree)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "self-ws" :project-dir "/tmp/self-dir/")
-    (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
-               (lambda (_root) "/tmp/self-dir/"))
-              ((symbol-function 'agent-repl--resolve-merge-into-source-target)
-               (lambda (_p _m) "/tmp/self-dir/"))
-              ((symbol-function 'agent-repl--path-canonical) #'identity))
-      (should (null (agent-repl--merge-target-name "self-ws"))))))
-
-(ert-deftest agent-repl-test-merge-target-name-redirects-to-master-via-resolver ()
-  "When resolve-merge-into-source-target redirects to master, the basename
-shown is the master worktree's, not the recorded parent's."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
-    (agent-repl--ws-put "wt-ws" :source-ws-dir "/tmp/parent-dir/")
-    (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-              ((symbol-function 'agent-repl--master-worktree-path)
-               (lambda (_root) "/tmp/explanation-engine/"))
-              ((symbol-function 'agent-repl--resolve-merge-into-source-target)
-               (lambda (_p m) m))
-              ((symbol-function 'agent-repl--path-canonical) #'identity))
-      (should (equal (agent-repl--merge-target-name "wt-ws") "explanation-engine")))))
-
 ;;;; ---- Tests: Session completion handling ----
 
 (ert-deftest agent-repl-test-mark-agent-done-sets-done ()
@@ -858,36 +639,6 @@ new :done lifecycle."
                (lambda (_ws) nil)))
       (agent-repl--mark-agent-done "ws1")
       (should (null (agent-repl--ws-get "ws1" :done-acked-at))))))
-
-(ert-deftest agent-repl-test-refresh-vterm-after-finish-live ()
-  "refresh-vterm-after-finish should call do-refresh and update-hide-overlay for live buffer."
-  (let ((refreshed nil)
-        (overlay-updated nil)
-        (scroll-fixed nil)
-        (fake-buf (generate-new-buffer " *test-refresh*")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--do-refresh)
-                   (lambda () (setq refreshed t)))
-                  ((symbol-function 'agent-repl--update-hide-overlay)
-                   (lambda () (setq overlay-updated t)))
-                  ((symbol-function 'agent-repl--fix-vterm-scroll)
-                   (lambda (_buf) (setq scroll-fixed t))))
-          (agent-repl--refresh-vterm-after-finish fake-buf)
-          (should refreshed)
-          (should overlay-updated)
-          (should scroll-fixed))
-      (kill-buffer fake-buf))))
-
-(ert-deftest agent-repl-test-refresh-vterm-after-finish-dead ()
-  "refresh-vterm-after-finish should be a no-op for a dead buffer."
-  (let ((refreshed nil)
-        (fake-buf (generate-new-buffer " *test-refresh-dead*")))
-    (kill-buffer fake-buf)
-    (cl-letf (((symbol-function 'agent-repl--do-refresh)
-               (lambda () (setq refreshed t)))
-              ((symbol-function 'agent-repl--fix-vterm-scroll) #'ignore))
-      (agent-repl--refresh-vterm-after-finish fake-buf)
-      (should-not refreshed))))
 
 (ert-deftest agent-repl-test-handle-agent-finished-notifies-other-ws ()
   "handle-agent-finished should record a line when WS is not the current workspace."
@@ -1033,7 +784,7 @@ default-directory matches the workspace."
   "handle-agent-finished calls refresh-magit-status as part of the done policy."
   (agent-repl-test--with-clean-state
     (let ((refresh-ws nil))
-      (agent-repl--ws-put "ws1" :vterm-buffer nil)
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
       (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
                 ((symbol-function 'agent-repl--refresh-magit-status)
@@ -1188,19 +939,14 @@ directory-keyed primitive."
 (ert-deftest agent-repl-test-drain-pending-prompts-sends ()
   "drain-pending-prompts should clear prompts and schedule delivery."
   (agent-repl-test--with-clean-state
-    (let ((timer-scheduled nil)
-          (fake-buf (generate-new-buffer " *test-drain*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :pending-prompts '("prompt1" "prompt2"))
-            (agent-repl--ws-put "ws1" :vterm-buffer fake-buf)
-            (cl-letf (((symbol-function 'run-at-time)
-                       (lambda (_delay _repeat fn &rest args)
-                         (setq timer-scheduled t))))
-              (should (agent-repl--drain-pending-prompts "ws1"))
-              (should timer-scheduled)
-              (should-not (agent-repl--ws-get "ws1" :pending-prompts))))
-        (kill-buffer fake-buf)))))
+    (let ((timer-scheduled nil))
+      (agent-repl--ws-put "ws1" :pending-prompts '("prompt1" "prompt2"))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq timer-scheduled t))))
+        (should (agent-repl--drain-pending-prompts "ws1"))
+        (should timer-scheduled)
+        (should-not (agent-repl--ws-get "ws1" :pending-prompts))))))
 
 ;; Test helper: install mocks that capture sends into SEND-SLOT (a cons
 ;; cell; the caller reads (car send-slot) for the reverse-chronological
@@ -1225,108 +971,81 @@ TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
 (ert-deftest agent-repl-test-deliver-pending-prompts-sends-first ()
   "deliver-pending-prompts sends the first prompt immediately."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent (list nil))
-          (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver*")))
-      (unwind-protect
-          (progn
-            (agent-repl-test--with-deliver-mocks sent timer-slot
-              (agent-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1"))
-            (should (equal (car sent) '("a"))))
-        (kill-buffer fake-buf)))))
+          (timer-slot (list nil)))
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts '("a" "b") "ws1"))
+      (should (equal (car sent) '("a"))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-schedules-verify ()
   "deliver-pending-prompts schedules a verify timer via on-settle."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent (list nil))
-          (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver-verify*")))
-      (unwind-protect
-          (progn
-            (agent-repl-test--with-deliver-mocks sent timer-slot
-              (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1"))
-            (should (functionp (car timer-slot))))
-        (kill-buffer fake-buf)))))
+          (timer-slot (list nil)))
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts '("a") "ws1"))
+      (should (functionp (car timer-slot))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-chains-on-ack ()
   "When the verify step sees an acknowledged state, the next prompt is sent."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent (list nil))
-          (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver-chain*")))
-      (unwind-protect
-          (agent-repl-test--with-deliver-mocks sent timer-slot
-            (agent-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
-            (should (equal (car sent) '("a")))
-            ;; Simulate `prompt_submit' arrival between paste and verify.
-            (agent-repl--ws-put "ws1" :agent-state :thinking)
-            (funcall (car timer-slot))
-            (should (equal (reverse (car sent)) '("a" "b"))))
-        (kill-buffer fake-buf)))))
+          (timer-slot (list nil)))
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts '("a" "b") "ws1")
+        (should (equal (car sent) '("a")))
+        ;; Simulate `prompt_submit' arrival between paste and verify.
+        (agent-repl--ws-put "ws1" :agent-state :thinking)
+        (funcall (car timer-slot))
+        (should (equal (reverse (car sent)) '("a" "b")))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-resends-when-not-acked ()
   "When verify sees :idle (no ack), the same prompt is resent."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent (list nil))
-          (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver-resend*")))
-      (unwind-protect
-          (agent-repl-test--with-deliver-mocks sent timer-slot
-            (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
-            (should (equal (car sent) '("a")))
-            ;; State remains :idle — the agent never saw the paste.
-            (agent-repl--ws-put "ws1" :agent-state :idle)
-            (funcall (car timer-slot))
-            ;; Same prompt resent.
-            (should (equal (car sent) '("a" "a"))))
-        (kill-buffer fake-buf)))))
+          (timer-slot (list nil)))
+      (agent-repl-test--with-deliver-mocks sent timer-slot
+        (agent-repl--deliver-pending-prompts '("a") "ws1")
+        (should (equal (car sent) '("a")))
+        ;; State remains :idle — the agent never saw the paste.
+        (agent-repl--ws-put "ws1" :agent-state :idle)
+        (funcall (car timer-slot))
+        ;; Same prompt resent.
+        (should (equal (car sent) '("a" "a")))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-gives-up-after-max-retries ()
   "After `agent-repl-prompt-delivery-max-retries' failed resends, give up
 without sending again."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent (list nil))
           (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver-giveup*"))
           (agent-repl-prompt-delivery-max-retries 2))
-      (unwind-protect
-          (agent-repl-test--with-deliver-mocks sent timer-slot
-            (agent-repl--ws-put "ws1" :agent-state :idle)
-            (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
-            ;; First send + 2 retries = 3 total.
-            (funcall (car timer-slot))   ; retry 1
-            (funcall (car timer-slot))   ; retry 2
-            (funcall (car timer-slot))   ; give up — no further send
-            (should (equal (car sent) '("a" "a" "a"))))
-        (kill-buffer fake-buf)))))
-
-(ert-deftest agent-repl-test-deliver-pending-prompts-abandons-on-dead-vterm-at-verify ()
-  "If the vterm buffer dies between send and verify, abandon silently."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((sent (list nil))
-          (timer-slot (list nil))
-          (fake-buf (generate-new-buffer " *test-deliver-dead-verify*")))
       (agent-repl-test--with-deliver-mocks sent timer-slot
-        (agent-repl--deliver-pending-prompts fake-buf '("a" "b") "ws1")
-        (should (equal (car sent) '("a")))
-        ;; Kill the buffer before verify fires.
-        (kill-buffer fake-buf)
-        (agent-repl--ws-put "ws1" :agent-state :thinking)
-        (funcall (car timer-slot))
-        ;; "b" was never sent — vterm-buf is dead.
-        (should (equal (car sent) '("a")))))))
+        (agent-repl--ws-put "ws1" :agent-state :idle)
+        (agent-repl--deliver-pending-prompts '("a") "ws1")
+        ;; First send + 2 retries = 3 total.
+        (funcall (car timer-slot))   ; retry 1
+        (funcall (car timer-slot))   ; retry 2
+        (funcall (car timer-slot))   ; give up — no further send
+        (should (equal (car sent) '("a" "a" "a")))))))
 
-(ert-deftest agent-repl-test-deliver-pending-prompts-dead-buf ()
-  "deliver-pending-prompts should signal an error when buffer is dead."
-  (let ((fake-buf (generate-new-buffer " *test-deliver-dead*")))
-    (kill-buffer fake-buf)
-    (should-error (agent-repl--deliver-pending-prompts fake-buf '("a") "ws1")
+(ert-deftest agent-repl-test-deliver-pending-prompts-errors-when-not-alive ()
+  "deliver-pending-prompts signals an error immediately when the frontend
+session is not alive — the caller has queued prompts for a session that
+is already gone (e.g. a released gui binding)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (should-error (agent-repl--deliver-pending-prompts '("a") "ws1")
                   :type 'error)))
 
 ;;;; ---- Frontend-aware delivery liveness ----
@@ -1344,33 +1063,36 @@ without sending again."
     (agent-repl--ws-put "ws1" :frontend 'gui)
     (should-not (agent-repl--pending-delivery-alive-p "ws1" nil))))
 
-(ert-deftest agent-repl-test-pending-delivery-alive-p-vterm-live-buf ()
-  "A vterm workspace is deliverable while the captured buffer is live."
+(ert-deftest agent-repl-test-pending-delivery-alive-p-non-gui-live-buf ()
+  "A non-gui workspace is deliverable while its passed-in buffer is live.
+`:frontend' is set to an arbitrary unregistered symbol purely to exercise
+the predicate's non-gui branch (`--ws-gui-frontend-p' only inspects the
+plist key, never the frontend registry, so no such frontend need exist)."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-alive-vterm*")))
+    (let ((fake-buf (generate-new-buffer " *test-alive-non-gui*")))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "ws1" :frontend 'vterm)
+            (agent-repl--ws-put "ws1" :frontend 'other)
             (should (agent-repl--pending-delivery-alive-p "ws1" fake-buf)))
         (kill-buffer fake-buf)))))
 
-(ert-deftest agent-repl-test-pending-delivery-alive-p-vterm-dead-buf ()
-  "A vterm workspace with a dead captured buffer is not deliverable."
+(ert-deftest agent-repl-test-pending-delivery-alive-p-non-gui-dead-buf ()
+  "A non-gui workspace with a dead passed-in buffer is not deliverable."
   (agent-repl-test--with-clean-state
-    (let ((fake-buf (generate-new-buffer " *test-dead-vterm*")))
+    (let ((fake-buf (generate-new-buffer " *test-dead-non-gui*")))
       (kill-buffer fake-buf)
-      (agent-repl--ws-put "ws1" :frontend 'vterm)
+      (agent-repl--ws-put "ws1" :frontend 'other)
       (should-not (agent-repl--pending-delivery-alive-p "ws1" fake-buf)))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-gui-sends-without-vterm ()
-  "A gui workspace delivers pending prompts with no vterm buffer at all."
+  "A gui workspace delivers pending prompts — no buffer is ever involved."
   (agent-repl-test--with-clean-state
     (let ((sent (list nil))
           (timer-slot (list nil)))
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
       (agent-repl-test--with-deliver-mocks sent timer-slot
-        (agent-repl--deliver-pending-prompts nil '("a") "ws1"))
+        (agent-repl--deliver-pending-prompts '("a") "ws1"))
       (should (equal (car sent) '("a"))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-gui-abandons-when-released ()
@@ -1381,7 +1103,7 @@ without sending again."
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
       (agent-repl-test--with-deliver-mocks sent timer-slot
-        (agent-repl--deliver-pending-prompts nil '("a" "b") "ws1")
+        (agent-repl--deliver-pending-prompts '("a" "b") "ws1")
         (should (equal (car sent) '("a")))
         ;; Session released (workspace nuke / daemon death) before verify.
         (agent-repl--ws-put "ws1" :frontend-session-id nil)
@@ -1391,7 +1113,7 @@ without sending again."
         (should (equal (car sent) '("a")))))))
 
 (ert-deftest agent-repl-test-drain-pending-prompts-gui-schedules ()
-  "drain-pending-prompts schedules delivery for a gui workspace (nil vterm)."
+  "drain-pending-prompts schedules delivery for a gui workspace."
   (agent-repl-test--with-clean-state
     (let ((scheduled-args nil))
       (agent-repl--ws-put "ws1" :frontend 'gui)
@@ -1402,8 +1124,8 @@ without sending again."
                    (setq scheduled-args args))))
         (should (agent-repl--drain-pending-prompts "ws1"))
         (should-not (agent-repl--ws-get "ws1" :pending-prompts))
-        ;; Scheduled with (VTERM-BUF PENDING WS) — vterm-buf nil for gui.
-        (should (equal scheduled-args '(nil ("task prompt") "ws1")))))))
+        ;; Scheduled with (PENDING WS) — no buffer parameter any more.
+        (should (equal scheduled-args '(("task prompt") "ws1")))))))
 
 (ert-deftest agent-repl-test-prompt-acknowledged-p-states ()
   "prompt-acknowledged-p recognizes thinking/permission/done as ack'd."
@@ -1439,8 +1161,8 @@ without sending again."
       (cl-letf (((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--loading-placeholder-visible-p)
                  (lambda () nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq panels-opened t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq panels-opened t))))
         (agent-repl--show-panels-or-defer "ws1")
         (should panels-opened)))))
 
@@ -1472,8 +1194,8 @@ dedication mid-layout (input-only frame), so the guard skips it."
                  (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq panels-opened t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq panels-opened t))))
         (agent-repl--open-panels-after-ready "ws1")
         (should-not panels-opened)))))
 
@@ -1499,8 +1221,8 @@ dedication mid-layout (input-only frame), so the guard skips it."
                 ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--loading-placeholder-visible-p)
                  (lambda () nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq panels-opened t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq panels-opened t))))
         (agent-repl--open-panels-after-ready "ws1")
         (should panels-opened)))))
 
@@ -1511,8 +1233,8 @@ dedication mid-layout (input-only frame), so the guard skips it."
       (cl-letf (((symbol-function 'agent-repl--drain-pending-prompts)
                  (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq panels-opened t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq panels-opened t))))
         (agent-repl--open-panels-after-ready "ws1")
         (should-not panels-opened)))))
 
@@ -1563,205 +1285,6 @@ they want to see the result; hide-mode is overridden."
                  (lambda (_ws) (setq shown t))))
         (agent-repl--open-panels-after-ready "ws1")
         (should shown)))))
-
-;;;; ---- Tests: Process state predicates ----
-
-(ert-deftest agent-repl-test-vterm-process-alive-no-buffer ()
-  "vterm-process-alive-p should return nil when no vterm buffer is set."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--vterm-process-alive-p "ws1"))))
-
-(ert-deftest agent-repl-test-vterm-process-alive-dead-buffer ()
-  "vterm-process-alive-p should return nil when buffer has been killed."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-dead-vterm*")))
-      (agent-repl--ws-put "ws1" :vterm-buffer buf)
-      (kill-buffer buf)
-      (should-not (agent-repl--vterm-process-alive-p "ws1")))))
-
-(ert-deftest agent-repl-test-vterm-process-alive-no-process ()
-  "vterm-process-alive-p should return nil when buffer has no process."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-no-process*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should-not (agent-repl--vterm-process-alive-p "ws1")))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-session-starting-p-not-running ()
-  "session-starting-p should return nil when vterm is not running."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
-               (lambda (_ws) nil)))
-      (should-not (agent-repl--session-starting-p "ws1")))))
-
-(ert-deftest agent-repl-test-session-starting-p-ready ()
-  "session-starting-p should return nil when process is alive but already ready."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-starting-ready*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf (setq-local agent-repl--ready t))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
-                       (lambda (_ws) t)))
-              (should-not (agent-repl--session-starting-p "ws1"))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-session-starting-p-true ()
-  "session-starting-p should return t when process alive but not ready."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-starting*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf (setq-local agent-repl--ready nil))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
-                       (lambda (_ws) t)))
-              (should (agent-repl--session-starting-p "ws1"))))
-        (kill-buffer buf)))))
-
-;;;; ---- Tests: Readiness timer ----
-
-(ert-deftest agent-repl-test-cancel-ready-timer-no-timer ()
-  "cancel-ready-timer should be a no-op when no timer is set."
-  (agent-repl-test--with-clean-state
-    (agent-repl--cancel-ready-timer "ws1")
-    (should-not (agent-repl--ws-get "ws1" :ready-timer))))
-
-(ert-deftest agent-repl-test-cancel-ready-timer-with-timer ()
-  "cancel-ready-timer should cancel and clear the timer."
-  (agent-repl-test--with-clean-state
-    (let ((cancelled nil)
-          (fake-timer (run-at-time 999 nil #'ignore)))
-      (agent-repl--ws-put "ws1" :ready-timer fake-timer)
-      (agent-repl--cancel-ready-timer "ws1")
-      (should-not (agent-repl--ws-get "ws1" :ready-timer)))))
-
-(ert-deftest agent-repl-test-ready-timer-tick-timeout ()
-  "ready-timer-tick should cancel timer after 30s timeout."
-  (agent-repl-test--with-clean-state
-    (let ((cancelled nil))
-      (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                 (lambda (_ws) (setq cancelled t))))
-        (agent-repl--ready-timer-tick "ws1" (- (float-time) 31.0))
-        (should cancelled)))))
-
-(ert-deftest agent-repl-test-detect-start-failure-finds-marker ()
-  "detect-start-failure returns the reason text following the marker in the vterm."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-start-fail*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (insert "some output\nAGENT_REPL_START_FAILURE: Docker daemon is not running\n"))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (equal (agent-repl--detect-start-failure "ws1")
-                           "Docker daemon is not running")))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-detect-start-failure-matches-native-docker-error ()
-  "detect-start-failure recognizes Docker's native daemon-down error even with
-no explicit marker, so a sandbox start failure surfaces before the script is
-taught to print the marker."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-docker-down*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (insert "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n"))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (string-match-p "Docker daemon is not running"
-                                    (agent-repl--detect-start-failure "ws1"))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-detect-start-failure-nil-without-marker ()
-  "detect-start-failure returns nil when the vterm shows no failure marker."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-no-fail*")))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf (insert "normal claude output\n"))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should-not (agent-repl--detect-start-failure "ws1")))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-ready-timer-tick-marks-start-failed-on-marker ()
-  "A start-failure marker in the vterm makes ready-timer-tick cancel the timer
-and route to mark-start-failed with the scraped reason, before any timeout."
-  (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-tick-fail*"))
-          (cancelled nil)
-          (failed nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (insert "AGENT_REPL_START_FAILURE: Docker daemon is not running\n"))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                       (lambda (_ws) (setq cancelled t)))
-                      ((symbol-function 'agent-repl--mark-start-failed)
-                       (lambda (_ws err) (setq failed (error-message-string err)))))
-              (agent-repl--ready-timer-tick "ws1" (float-time))
-              (should cancelled)
-              (should (equal failed "Docker daemon is not running"))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-ready-timer-tick-still-starting ()
-  "ready-timer-tick should do nothing when session is still starting."
-  (agent-repl-test--with-clean-state
-    (let ((cancelled nil))
-      (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                 (lambda (_ws) (setq cancelled t)))
-                ((symbol-function 'agent-repl--session-starting-p)
-                 (lambda (_ws) t)))
-        (agent-repl--ready-timer-tick "ws1" (float-time))
-        (should-not cancelled)))))
-
-(ert-deftest agent-repl-test-ready-timer-tick-ready-current-ws ()
-  "ready-timer-tick should cancel timer and open panels when ready and current."
-  (agent-repl-test--with-clean-state
-    (let ((cancelled nil)
-          (panels-opened nil))
-      (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                 (lambda (_ws) (setq cancelled t)))
-                ((symbol-function 'agent-repl--session-starting-p)
-                 (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl)
-                 (lambda () (setq panels-opened t))))
-        (agent-repl--ready-timer-tick "ws1" (float-time))
-        (should cancelled)
-        (should panels-opened)))))
-
-(ert-deftest agent-repl-test-ready-timer-tick-ready-other-ws ()
-  "ready-timer-tick should cancel timer but not open panels when ready and not current."
-  (agent-repl-test--with-clean-state
-    (let ((cancelled nil)
-          (panels-opened nil))
-      (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                 (lambda (_ws) (setq cancelled t)))
-                ((symbol-function 'agent-repl--session-starting-p)
-                 (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl)
-                 (lambda () (setq panels-opened t))))
-        (agent-repl--ready-timer-tick "ws1" (float-time))
-        (should cancelled)
-        (should-not panels-opened)))))
-
-(ert-deftest agent-repl-test-schedule-ready-timer ()
-  "schedule-ready-timer should cancel existing timer and schedule new one."
-  (agent-repl-test--with-clean-state
-    (let ((cancel-count 0))
-      (cl-letf (((symbol-function 'agent-repl--cancel-ready-timer)
-                 (lambda (_ws) (cl-incf cancel-count)))
-                ((symbol-function 'run-at-time)
-                 (lambda (_delay _repeat _fn &rest _args) 'fake-timer)))
-        (agent-repl--schedule-ready-timer "ws1")
-        (should (= cancel-count 1))
-        (should (eq (agent-repl--ws-get "ws1" :ready-timer) 'fake-timer))))))
 
 ;;;; ---- Tests: Workspace environment initialization ----
 
@@ -2121,215 +1644,24 @@ restart (the lazy-start path applies its defaults instead)."
             (should (equal (agent-repl--ws-get "ws1" :priority) "p2")))
         (delete-directory tmpdir t)))))
 
-;;;; ---- Tests: build-start-cmd ----
-
-(ert-deftest agent-repl-test-build-start-cmd-bare-metal-no-session ()
-  "build-start-cmd for bare-metal with no session should produce claude --permission-mode auto."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model nil))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (equal (plist-get result :cmd)
-                       "AGENT_REPL_OWNED=1 claude --permission-mode auto"))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-uses-ws-model ()
-  "build-start-cmd emits `--model <ws :model>' when the workspace has one."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model "opus"))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (agent-repl--ws-put "ws1" :model "sonnet")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--model sonnet" (plist-get result :cmd)))
-        (should-not (string-match-p "--model opus" (plist-get result :cmd)))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-defaults-model-to-interactive-model ()
-  "build-start-cmd falls back to `agent-repl-interactive-model' when ws has no :model."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model "opus"))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--model opus" (plist-get result :cmd)))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-ws-haiku-model-skips-permissions ()
-  "build-start-cmd downgrades to --dangerously-skip-permissions when ws :model is haiku."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model "opus"))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (agent-repl--ws-put "ws1" :model "haiku")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
-        (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd)))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-interactive-haiku-skips-permissions ()
-  "build-start-cmd downgrades to --dangerously-skip-permissions when the interactive model is haiku and ws has no :model."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model "haiku"))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))
-        (should-not (string-match-p "--permission-mode auto" (plist-get result :cmd)))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-opus-keeps-permission-mode-auto ()
-  "build-start-cmd keeps --permission-mode auto when the interactive model is opus."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt nil)
-          (agent-repl-interactive-model "opus"))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (string-match-p "--permission-mode auto" (plist-get result :cmd)))
-        (should-not (string-match-p "--dangerously-skip-permissions" (plist-get result :cmd)))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-bare-metal-includes-system-prompt-default ()
-  "build-start-cmd for bare-metal with default `agent-repl-system-prompt' includes --system-prompt \".\"."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-system-prompt ".")
-          (agent-repl-interactive-model nil))
-      (agent-repl--ws-put "ws1" :active-env :bare-metal)
-      (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :worktree-p nil)
-      (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-      (let ((result (agent-repl--build-start-cmd "ws1")))
-        (should (equal (plist-get result :cmd)
-                       "AGENT_REPL_OWNED=1 claude --permission-mode auto --system-prompt \".\""))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-worktree-session-uses-plain-claude ()
-  "A worktree with a saved session launches plain `claude' + --continue.
-Never a claude-sandbox wrapper: agent-repl has only ever launched plain
-`claude', which is why the `:sandbox' environment could be retired
-without losing any runtime behavior."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal
-                         (make-agent-repl-instantiation :session-id "sess-123"))
-    (agent-repl--ws-put "ws1" :worktree-p t)
-    (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
-    (let ((result (agent-repl--build-start-cmd "ws1")))
-      (should-not (string-match-p "claude-sandbox" (plist-get result :cmd)))
-      ;; The ownership env prefix leads; the invocation itself is plain claude.
-      (should (string-match-p "\\`AGENT_REPL_OWNED=1 claude " (plist-get result :cmd)))
-      (should (string-match-p "--continue" (plist-get result :cmd))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-fork-session ()
-  "build-start-cmd with fork-session-id should include --fork-session flag."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws1" :worktree-p nil)
-    (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (agent-repl--ws-put "ws1" :fork-session-id "fork-abc")
-    (let ((result (agent-repl--build-start-cmd "ws1")))
-      (should (string-match-p "--resume fork-abc --fork-session" (plist-get result :cmd)))
-      (should (equal (plist-get result :fork-session-id) "fork-abc")))))
-
-(ert-deftest agent-repl-test-build-start-cmd-nil-project-dir ()
-  "build-start-cmd with personal :project-dir should produce a command."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws1" :worktree-p nil)
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/personal/project")
-    (let* ((result (agent-repl--build-start-cmd "ws1")))
-      (should (stringp (plist-get result :cmd)))
-      (should (string-match-p "claude" (plist-get result :cmd))))))
-
-(ert-deftest agent-repl-test-build-start-cmd-empty-session-id ()
-  "build-start-cmd with nil session-id should not include --resume or --continue."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation :session-id nil))
-    (agent-repl--ws-put "ws1" :worktree-p nil)
-    (agent-repl--ws-put "ws1" :project-dir "/home/user/personal/project")
-    (let ((result (agent-repl--build-start-cmd "ws1")))
-      (should-not (string-match-p "--resume" (plist-get result :cmd)))
-      (should-not (string-match-p "--continue" (plist-get result :cmd))))))
-
-;;;; ---- Tests: log-session-start ----
-
-(ert-deftest agent-repl-test-log-session-start-all-fields ()
-  "log-session-start should format message with all fields present."
-  (let ((logged-msg nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (setq logged-msg (apply #'format fmt args)))))
-      (agent-repl--log-session-start "ws1"
-                                      '(:cmd "claude --resume abc"
-                                        :session-id "abc"
-                                        :fork-session-id "fork-1"
-                                        :worktree-p t
-                                        :active-env :bare-metal))
-      (should (string-match-p "ws=ws1" logged-msg))
-      (should (string-match-p "session-id=abc" logged-msg))
-      (should (string-match-p "fork-session-id=fork-1" logged-msg))
-      (should (string-match-p "worktree=yes" logged-msg))
-      (should (string-match-p "env=:bare-metal" logged-msg)))))
-
-(ert-deftest agent-repl-test-log-session-start-nil-optional-fields ()
-  "log-session-start should handle nil session-id and fork-session-id."
-  (let ((logged-msg nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (setq logged-msg (apply #'format fmt args)))))
-      (agent-repl--log-session-start "ws1"
-                                      '(:cmd "claude"
-                                        :session-id nil
-                                        :fork-session-id nil
-                                        :worktree-p nil
-                                        :active-env :bare-metal))
-      (should (string-match-p "session-id=nil" logged-msg))
-      (should (string-match-p "fork-session-id=nil" logged-msg)))))
-
-(ert-deftest agent-repl-test-log-session-start-worktree-formatting ()
-  "log-session-start should format worktree-p as yes/no strings."
-  (let ((msg-yes nil)
-        (msg-no nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (setq msg-yes (apply #'format fmt args)))))
-      (agent-repl--log-session-start "ws1"
-                                      '(:cmd "claude" :worktree-p t :active-env :bare-metal
-                                        :session-id nil :fork-session-id nil)))
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (setq msg-no (apply #'format fmt args)))))
-      (agent-repl--log-session-start "ws1"
-                                      '(:cmd "claude" :worktree-p nil :active-env :bare-metal
-                                        :session-id nil :fork-session-id nil)))
-    (should (string-match-p "worktree=yes" msg-yes))
-    (should (string-match-p "worktree=no" msg-no))))
-
 ;;;; ---- Tests: agent-running-p ----
 
 ;; `--agent-running-p' asks the workspace's OWN frontend.  While it looked
 ;; only at `:vterm-buffer' it answered "not running" for every gui
 ;; workspace, which silently disarmed every guard keyed to it.
 
-(ert-deftest agent-repl-test-agent-running-p-asks-the-vterm-frontend ()
-  "A vterm workspace's liveness is its vterm process check."
+(ert-deftest agent-repl-test-agent-running-p-asks-an-arbitrary-frontend ()
+  "Dispatch asks WHATEVER frontend struct WS resolves to, not a hardcoded one.
+Proven by resolving WS to a fake, unregistered frontend struct and
+checking its `running-p-fn' — not gui's — is the one invoked."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((checked-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--vterm-process-alive-p)
-                 (lambda (ws) (setq checked-ws ws) t)))
+    (let* ((checked-ws nil)
+           (fake-frontend (agent-repl-frontend-create
+                           :name 'fake
+                           :running-p-fn (lambda (ws) (setq checked-ws ws) t))))
+      (cl-letf (((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws) fake-frontend)))
         ;; Act / Assert
         (should (agent-repl--agent-running-p "my-ws"))
         (should (equal checked-ws "my-ws"))))))
@@ -2372,30 +1704,21 @@ guard, the kill-before-workspace-delete advice, and the status poll."
   "Two calls to handle-agent-finished within 2s should only produce one notification."
   (agent-repl-test--with-clean-state
     (let ((notify-count 0))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
       (cl-letf (((symbol-function 'agent-repl--notify)
                  (lambda (&rest _) (cl-incf notify-count)))
-                ((symbol-function 'agent-repl--do-refresh) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--fix-vterm-scroll) #'ignore)
                 ((symbol-function 'frame-focus-state) (lambda () nil))
                 ((symbol-function 'run-at-time)
                  (lambda (_delay _repeat fn &rest args)
                    (apply fn args)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil)))
-        ;; Create a hidden vterm buffer for ws1
-        (let ((vterm-buf (generate-new-buffer "*agent-panel-testfinish*")))
-          (unwind-protect
-              (progn
-                (agent-repl--ws-put "ws1" :vterm-buffer vterm-buf)
-                ;; First call — should notify
-                (agent-repl--handle-agent-finished "ws1")
-                (should (= notify-count 1))
-                ;; Second call within 2s window — should be debounced
-                (agent-repl--handle-agent-finished "ws1")
-                (should (= notify-count 1)))
-            (when (buffer-live-p vterm-buf)
-              (kill-buffer vterm-buf))))))))
+        ;; First call — should notify
+        (agent-repl--handle-agent-finished "ws1")
+        (should (= notify-count 1))
+        ;; Second call within 2s window — should be debounced
+        (agent-repl--handle-agent-finished "ws1")
+        (should (= notify-count 1))))))
 
 ;;;; ---- Tests: set-session-id ----
 

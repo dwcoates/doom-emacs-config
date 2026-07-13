@@ -111,27 +111,7 @@ signals `user-error' rather than silently returning a bogus path."
 
 ;;;; ---- Tests: Buffer predicates ----
 
-(ert-deftest agent-repl-test-agent-buffer-p ()
-  "agent-buffer-p should match *agent-panel-WS* pattern only (excluding input)."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
-    (should (agent-repl--agent-buffer-p)))
-  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234*"
-    (should-not (agent-repl--agent-buffer-p)))
-  ;; Use a name that does NOT begin with `*agent-panel-' so the vterm regex
-  ;; can't match.  The real `*scratch*' is the current buffer when the
-  ;; aggregate test runner starts, so naming a temp buffer `*scratch*' and
-  ;; then killing it swaps us out of the original buffer and leaves
-  ;; `default-directory' pointing at whatever buffer ert lands in next
-  ;; (Emacs.app/Contents/MacOS on macOS).  That breaks subsequent tests
-  ;; that call git without a -C flag.
-  (agent-repl-test--with-temp-buffer "*repl-test-non-agent-buf*"
-    (should-not (agent-repl--agent-buffer-p))))
-
 ;;;; ---- Tests: agent-view-buffer-name-p (the RENDERING predicate) ----
-
-(ert-deftest agent-repl-test-agent-view-name-matches-the-vterm-output ()
-  "A vterm workspace shows its agent in the vterm output buffer."
-  (should (agent-repl--agent-view-buffer-name-p "*agent-panel-my-ws*")))
 
 (ert-deftest agent-repl-test-agent-view-name-matches-the-gui-webview ()
   "A gui workspace shows its agent in the webview.
@@ -161,14 +141,6 @@ tabs permanently drawn as though the panels were closed."
   (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
     (should (agent-repl--agent-view-buffer-p))))
 
-(ert-deftest agent-repl-test-agent-buffer-p-still-refuses-the-webview ()
-  "The PANEL predicate must NOT widen to the webview.
-The input-panel bounce and the orphan sweep key off it, and frontend.el
-keeps the webview out of that namespace on purpose."
-  (agent-repl-test--with-temp-buffer "*agent-frontend-my-ws*"
-    (should-not (agent-repl--agent-buffer-p))
-    (should-not (agent-repl--agent-panel-buffer-p))))
-
 ;;;; ---- Tests: Logging ----
 
 (ert-deftest agent-repl-test-log-respects-debug-flag ()
@@ -187,55 +159,6 @@ When t, it should call `message'."
         (agent-repl--log nil "test %s" "hello")
         (should message-called)))))
 
-;;;; ---- Tests: vterm buffer predicates ----
-
-(ert-deftest agent-repl-test-vterm-live-p-nil ()
-  "Returns nil when no vterm buffer is stored for the workspace."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (should-not (agent-repl--vterm-live-p)))))
-
-(ert-deftest agent-repl-test-vterm-live-p-dead ()
-  "Returns nil for a killed buffer."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (let ((buf (get-buffer-create " *test-dead-buf*")))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (kill-buffer buf)
-        (should-not (agent-repl--vterm-live-p))))))
-
-(ert-deftest agent-repl-test-vterm-live-p-live ()
-  "Returns non-nil for a live buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer " *test-live-buf*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-        (should (agent-repl--vterm-live-p))))))
-
-;; Both pin the workspace to vterm: `--agent-running-p' dispatches through
-;; the frontend registry, so without the pin these resolve to the gui
-;; default and never reach the vterm process check they mean to exercise.
-
-(ert-deftest agent-repl-test-agent-running-p-no-process ()
-  "Returns nil when the vterm buffer is live but has no process."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl-test--with-temp-buffer " *test-no-proc*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-        (should-not (agent-repl--agent-running-p))))))
-
-(ert-deftest agent-repl-test-agent-running-p-with-process ()
-  "Returns non-nil when the vterm buffer has a live process."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl-test--with-temp-buffer " *test-with-proc*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'get-buffer-process)
-                 (lambda (_buf) 'fake-process)))
-        (should (agent-repl--agent-running-p))))))
-
 ;;;; ---- Tests: Deferred macro ----
 
 (ert-deftest agent-repl-test-deferred-macro ()
@@ -253,17 +176,11 @@ When t, it should call `message'."
 
 ;;;; ---- Bug regression tests ----
 
-(ert-deftest agent-repl-test-bug9-paste-delay-configurable ()
-  "Bug 9: agent-repl-paste-delay should be a configurable variable."
-  (should (boundp 'agent-repl-paste-delay))
-  (should (numberp agent-repl-paste-delay)))
-
 (ert-deftest agent-repl-test-bug10-defvar-declarations ()
   "Bug 10: All key variables should be properly declared.
 Note: agent-repl--notification-backend may not be bound in headless
 environments without notification tools (terminal-notifier or osascript)."
   (should (boundp 'agent-repl--workspaces))
-  (should (boundp 'agent-repl-hide-input-box))
   ;; notification-backend requires osascript or terminal-notifier at load time
   (when (or (executable-find "terminal-notifier") (executable-find "osascript"))
     (should (boundp 'agent-repl--notification-backend)))
@@ -290,14 +207,6 @@ environments without notification tools (terminal-notifier or osascript)."
   "When `persp-mode' is nil, `workspace-for-buffer' should return nil."
   (let ((persp-mode nil))
     (should-not (agent-repl--workspace-for-buffer (current-buffer)))))
-
-;;;; ---- Tests: Misc declared variables ----
-
-(ert-deftest agent-repl-test-in-redraw-advice-declared-core ()
-  "`agent-repl--in-redraw-advice' should be `boundp' (loaded via overlay.el)."
-  ;; Renamed from agent-repl-test-in-redraw-advice-declared to avoid duplicate
-  ;; with the canonical copy in test-overlay.el.
-  (should (boundp 'agent-repl--in-redraw-advice)))
 
 ;;;; ---- Tests: cancel-all-timers ----
 
@@ -1154,8 +1063,11 @@ before return so we don't accumulate hidden buffers across many git calls."
 
 ;;;; ---- Tests: create-buffer ----
 
-(ert-deftest agent-repl-test-create-buffer-vterm-name ()
-  "create-buffer with no suffix produces the vterm buffer name."
+(ert-deftest agent-repl-test-create-buffer-bare-name ()
+  "create-buffer with no suffix produces the bare *agent-panel-WS* name.
+No current production caller creates a buffer through this path (the
+input buffer, via \"-input\", is the only one that does), but the
+capability is still part of the function's contract."
   (let ((buf nil))
     (unwind-protect
         (progn
@@ -1321,57 +1233,13 @@ ownership intact across that transition."
     (should (equal (agent-repl--buffer-name "-debug") "*agent-panel-debug-abcd1234*"))
     (should (equal (agent-repl--buffer-name "-log") "*agent-panel-log-abcd1234*"))))
 
-(ert-deftest agent-repl-test-buffer-name-matches-regexps ()
-  "Buffer names should match their respective regexp patterns.
-Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
-`agent-repl--vterm-buffer-re' is a superset that also matches input names."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "abcd1234")))
-    (let ((vterm-name (agent-repl--buffer-name))
-          (input-name (agent-repl--buffer-name "-input")))
-      (should (string-match-p agent-repl--vterm-buffer-re vterm-name))
-      (should (string-match-p agent-repl--input-buffer-re input-name))
-      ;; Vterm name does NOT match input-re; predicate on vterm name is true.
-      (should-not (string-match-p agent-repl--input-buffer-re vterm-name))
-      (with-temp-buffer
-        (rename-buffer vterm-name t)
-        (should (agent-repl--agent-buffer-p)))
-      ;; Input name matches vterm-re (superset), but the predicate correctly
-      ;; excludes it.
-      (should (string-match-p agent-repl--vterm-buffer-re input-name))
-      (with-temp-buffer
-        (rename-buffer input-name t)
-        (should-not (agent-repl--agent-buffer-p))))))
-
-;;;; ---- Tests: agent-buffer-p edge cases ----
-
-(ert-deftest agent-repl-test-agent-buffer-p-no-hash ()
-  "agent-buffer-p should not match *agent-panel-* without hex chars."
-  (agent-repl-test--with-temp-buffer "*agent-panel-*"
-    (should-not (agent-repl--agent-buffer-p))))
-
-(ert-deftest agent-repl-test-agent-buffer-p-extra-after-pattern ()
-  "agent-buffer-p should not match buffer with extra characters after pattern."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*extra"
-    (should-not (agent-repl--agent-buffer-p))))
-
-(ert-deftest agent-repl-test-agent-buffer-p-nil-uses-current ()
-  "agent-buffer-p with nil should use current buffer."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
-    (should (agent-repl--agent-buffer-p nil))))
-
-(ert-deftest agent-repl-test-agent-buffer-p-explicit-buffer ()
-  "agent-buffer-p with explicit buffer argument."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
-    (let ((buf (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*scratch-test*"
-        ;; Current buffer is *scratch-test*, but pass buf explicitly
-        (should (agent-repl--agent-buffer-p buf))))))
-
 ;;;; ---- Tests: agent-panel-buffer-p ----
 
-(ert-deftest agent-repl-test-agent-panel-buffer-p-vterm ()
-  "agent-panel-buffer-p should match vterm buffer names."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
+(ert-deftest agent-repl-test-agent-panel-buffer-p-frontend ()
+  "agent-panel-buffer-p should match the gui webview buffer name too.
+The predicate widened to cover the two buffers a workspace actually has
+now that vterm is gone: the input composer and the webview."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-abcd1234*"
     (should (agent-repl--agent-panel-buffer-p))))
 
 (ert-deftest agent-repl-test-agent-panel-buffer-p-input ()
@@ -1392,8 +1260,8 @@ Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
 ;;;; ---- Tests: non-user-buffer-p ----
 
 (ert-deftest agent-repl-test-non-user-buffer-p-agent-panel ()
-  "non-user-buffer-p should return non-nil for claude panel buffer."
-  (agent-repl-test--with-temp-buffer "*agent-panel-abcd1234*"
+  "non-user-buffer-p should return non-nil for the agent's own panel buffers."
+  (agent-repl-test--with-temp-buffer "*agent-frontend-abcd1234*"
     (should (agent-repl--non-user-buffer-p (current-buffer)))))
 
 (ert-deftest agent-repl-test-non-user-buffer-p-minibuffer ()
@@ -1433,7 +1301,7 @@ Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
 
 (ert-deftest agent-repl-test-non-agent-buffers-all-claude ()
   "non-agent-buffers with all claude buffers should return empty list."
-  (agent-repl-test--with-temp-buffer "*agent-panel-aaaa1111*"
+  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
     (let ((buf1 (current-buffer)))
       (agent-repl-test--with-temp-buffer "*agent-panel-input-bbbb2222*"
         (let ((buf2 (current-buffer)))
@@ -1450,7 +1318,7 @@ Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
 
 (ert-deftest agent-repl-test-non-agent-buffers-mixed ()
   "non-agent-buffers with mixed list should filter correctly."
-  (agent-repl-test--with-temp-buffer "*agent-panel-aaaa1111*"
+  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
     (let ((agent-buf (current-buffer)))
       (agent-repl-test--with-temp-buffer "*normal-buf*"
         (let ((normal-buf (current-buffer)))
@@ -1491,79 +1359,6 @@ Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
     (should-not (agent-repl--current-ws-p ""))))
 
-;;;; ---- Tests: current-ws-live-vterm ----
-
-(ert-deftest agent-repl-test-current-ws-live-vterm-no-buffer ()
-  "current-ws-live-vterm should return nil when no vterm buffer is stored."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (should-not (agent-repl--current-ws-live-vterm)))))
-
-(ert-deftest agent-repl-test-current-ws-live-vterm-dead-buffer ()
-  "current-ws-live-vterm should return nil for a killed buffer."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (let ((buf (get-buffer-create " *test-dead-vterm*")))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (kill-buffer buf)
-        (should-not (agent-repl--current-ws-live-vterm))))))
-
-(ert-deftest agent-repl-test-current-ws-live-vterm-live-buffer ()
-  "current-ws-live-vterm should return the buffer when live."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer " *test-live-vterm*"
-      (let ((buf (current-buffer)))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-          (should (eq (agent-repl--current-ws-live-vterm) buf)))))))
-
-;;;; ---- Tests: vterm-live-p edge case ----
-
-(ert-deftest agent-repl-test-vterm-live-p-nil-explicit ()
-  "vterm-live-p should return nil when buffer is explicitly set to nil."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (agent-repl--ws-put "ws1" :vterm-buffer nil)
-      (should-not (agent-repl--vterm-live-p)))))
-
-;;;; ---- Tests: with-vterm-buf macro ----
-
-(ert-deftest agent-repl-test-with-vterm-buf-no-live-buffer ()
-  "with-vterm-buf should return nil when no live vterm buffer exists."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-      (should-not (agent-repl--with-vterm-buf 'should-not-reach)))))
-
-(ert-deftest agent-repl-test-with-vterm-buf-live-buffer ()
-  "with-vterm-buf should execute body when live vterm buffer exists."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer " *test-vterm-macro*"
-      (let ((buf (current-buffer)))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-          (let ((executed nil))
-            (agent-repl--with-vterm-buf
-              (setq executed t))
-            (should executed)))))))
-
-(ert-deftest agent-repl-test-with-vterm-buf-binds-vterm-buf ()
-  "with-vterm-buf should bind `vterm-buf' to the live buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer " *test-vterm-bind*"
-      (let ((buf (current-buffer)))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-          (should (eq (agent-repl--with-vterm-buf vterm-buf) buf)))))))
-
-(ert-deftest agent-repl-test-with-vterm-buf-returns-value ()
-  "with-vterm-buf should return the value of the body."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer " *test-vterm-ret*"
-      (let ((buf (current-buffer)))
-        (agent-repl--ws-put "ws1" :vterm-buffer buf)
-        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
-          (should (equal (agent-repl--with-vterm-buf 42) 42)))))))
-
 ;;;; ---- Tests: instantiation struct ----
 
 (ert-deftest agent-repl-test-instantiation-create ()
@@ -1596,16 +1391,6 @@ Use `agent-repl--agent-buffer-p' for the vterm-vs-input distinction —
   (should (boundp 'agent-repl-debug))
   ;; Note: default-value because tests may let-bind it
   (should-not (default-value 'agent-repl-debug)))
-
-(ert-deftest agent-repl-test-vterm-buffer-re-matches ()
-  "`agent-repl--vterm-buffer-re' matches vterm and input names (superset by design).
-Callers that need a vterm-only check must use `agent-repl--agent-buffer-p'."
-  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-abcd1234*"))
-  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-my-workspace*"))
-  ;; Vterm-re intentionally also matches input buffers (workspace names can
-  ;; contain hyphens, so the regex can't cheaply exclude "input-*").
-  (should (string-match-p agent-repl--vterm-buffer-re "*agent-panel-input-abcd1234*"))
-  (should-not (string-match-p agent-repl--vterm-buffer-re "*scratch*")))
 
 (ert-deftest agent-repl-test-input-buffer-re-matches ()
   "`agent-repl--input-buffer-re' should match expected input buffer patterns."
@@ -2014,6 +1799,55 @@ The master kill-switch overrides the always-on file-write decoupling."
   (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
     (should (equal (agent-repl--workspace-prefix-slash) ""))))
 
+;;;; ---- Tests: Buffer background color (moved from overlay.el) ----
+
+(ert-deftest agent-repl-test-grey-hex-format ()
+  "grey-hex should format N as a #rrggbb hex string with equal channels."
+  (should (equal (agent-repl--grey-hex 0) "#000000"))
+  (should (equal (agent-repl--grey-hex 255) "#ffffff"))
+  (should (equal (agent-repl--grey-hex 15) "#0f0f0f")))
+
+(ert-deftest agent-repl-test-grey-hex-boundary-128 ()
+  "grey-hex for 128 (middle grey) should return #808080."
+  (should (equal (agent-repl--grey-hex 128) "#808080")))
+
+(ert-deftest agent-repl-test-set-buffer-background-remaps-default-and-fringe ()
+  "set-buffer-background remaps both the default and fringe faces."
+  (agent-repl-test--with-temp-buffer " *test-bg*"
+    (let ((remapped-faces nil))
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (face &rest props)
+                   (push (list face props) remapped-faces))))
+        (agent-repl--set-buffer-background 30)
+        (should (= (length remapped-faces) 2))
+        (should (assq 'default remapped-faces))
+        (should (assq 'fringe remapped-faces))))))
+
+(ert-deftest agent-repl-test-set-buffer-background-uses-grey-hex ()
+  "set-buffer-background passes grey-hex's output as the :background value."
+  (agent-repl-test--with-temp-buffer " *test-bg-hex*"
+    (let ((hex-used nil))
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (_face &rest props)
+                   (setq hex-used (plist-get props :background)))))
+        (agent-repl--set-buffer-background 15)
+        (should (equal hex-used "#0f0f0f"))))))
+
+(ert-deftest agent-repl-test-set-buffer-background-different-levels-differ ()
+  "Different grey levels passed to set-buffer-background produce different hex colors."
+  (let (hex-a hex-b)
+    (agent-repl-test--with-temp-buffer " *test-bg-diff-a*"
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (_face &rest props)
+                   (setq hex-a (plist-get props :background)))))
+        (agent-repl--set-buffer-background 15)))
+    (agent-repl-test--with-temp-buffer " *test-bg-diff-b*"
+      (cl-letf (((symbol-function 'face-remap-add-relative)
+                 (lambda (_face &rest props)
+                   (setq hex-b (plist-get props :background)))))
+        (agent-repl--set-buffer-background 30)))
+    (should-not (equal hex-a hex-b))))
+
 ;;;; ---- Tests: harness-injected (meta) prompt spans ----
 
 (ert-deftest agent-repl-test-meta-wrap-brackets-the-text ()
@@ -2032,24 +1866,6 @@ The master kill-switch overrides the always-on file-write decoupling."
   (should (string-suffix-p "-->" agent-repl--meta-open))
   (should (string-prefix-p "<!--" agent-repl--meta-close))
   (should (string-suffix-p "-->" agent-repl--meta-close)))
-
-(ert-deftest agent-repl-test-meta-unmark-drops-markers-keeps-text ()
-  "`agent-repl--meta-unmark' removes the markers but keeps the span's text."
-  (should (equal (agent-repl--meta-unmark
-                  (concat (agent-repl--meta-wrap "directive") "\n\nuser prompt"))
-                 "directive\n\nuser prompt")))
-
-(ert-deftest agent-repl-test-meta-unmark-drops-every-marked-span ()
-  "Unmarking handles multiple spans in one prompt (prefix AND suffix)."
-  (should (equal (agent-repl--meta-unmark
-                  (concat (agent-repl--meta-wrap "preamble: ")
-                          "the task"
-                          (agent-repl--meta-wrap " wrap-up gate")))
-                 "preamble: the task wrap-up gate")))
-
-(ert-deftest agent-repl-test-meta-unmark-leaves-unmarked-text-alone ()
-  "Text carrying no markers passes through unmarking unchanged."
-  (should (equal (agent-repl--meta-unmark "plain prompt") "plain prompt")))
 
 (provide 'test-core)
 

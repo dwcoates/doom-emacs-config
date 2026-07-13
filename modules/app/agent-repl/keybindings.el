@@ -71,7 +71,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
       :detail-last-commit-time :detail-master-ahead :detail-source-ahead
       :detail-source-branch :git-clean :git-proc))
     ("🧠 Session"
-     (:session-id :fork-session-id :vterm-buffer :active-env
+     (:session-id :fork-session-id :frontend-buffer :active-env
       :bare-metal :agent-ready :ws-loaded :ready-timer))
     ("💬 Prompts"
      (:last-prompt-time :last-prompt-text :last-prompt-summary
@@ -189,14 +189,15 @@ the original ALIST order."
   "Before-advice for `+workspace/kill': tear down any running agent session.
 NAME is the workspace `+workspace/kill' was invoked on.  Only fire when
 NAME refers to the current workspace — `agent-repl--agent-running-p'
-inspects the current ws's vterm, so applying it cross-workspace would
-kill the wrong session (e.g. when the hide-mode sweep persp-kills a
-background `:hidden' workspace from inside a workspace-switch handler,
-the named workspace's session has already been torn down by the sweep
-and the current workspace's session must be left alone).  Callers that
-need to kill a specific named workspace's session (the nuke / kill /
-sweep paths) handle teardown explicitly via `agent-repl--kill-session'
-before invoking `+workspace/kill'."
+(called here with no WS argument) inspects the CURRENT workspace's
+frontend, so applying it cross-workspace would kill the wrong session
+(e.g. when the hide-mode sweep persp-kills a background `:hidden'
+workspace from inside a workspace-switch handler, the named workspace's
+session has already been torn down by the sweep and the current
+workspace's session must be left alone).  Callers that need to kill a
+specific named workspace's session (the nuke / kill / sweep paths)
+handle teardown explicitly through the frontend registry's kill
+dispatch before invoking `+workspace/kill'."
   (let ((target (or name (agent-repl--ws-current-name)))
         (current (agent-repl--ws-current-name)))
     (agent-repl--log current
@@ -207,10 +208,10 @@ before invoking `+workspace/kill'."
       (agent-repl--log current
                         "kill-before-workspace-delete: target!=current, skipping (caller handles teardown)"))
      ((agent-repl--agent-running-p)
-      (agent-repl--log current "kill-before-workspace-delete: vterm running, killing session")
+      (agent-repl--log current "kill-before-workspace-delete: agent running, killing session")
       (agent-repl-kill))
      (t
-      (agent-repl--log current "kill-before-workspace-delete: vterm not running, no-op")))))
+      (agent-repl--log current "kill-before-workspace-delete: agent not running, no-op")))))
 
 (defun agent-repl--read-workspace (prompt)
   "Prompt for a workspace name with PROMPT.  Requires an exact match."
@@ -272,34 +273,7 @@ Ensures the output directory exists.  Returns the full path of the written file.
       (insert (json-encode content)))
     file))
 
-(defun agent-repl--list-agent-vterm-buffers ()
-  "Return a list of live agent vterm buffers (matching `agent-repl--vterm-buffer-re')."
-  (cl-remove-if-not #'agent-repl--agent-buffer-p (buffer-list)))
-
 ;;; Section 2: Utility commands used by keybindings
-
-;; SPC o 0-9: send a digit character to the agent from the leader keymap.
-(defun agent-repl--send-digit-char ()
-  "Send the digit from the current key event to the agent.
-Extracts the trailing digit from the key sequence (e.g. SPC o 3 -> \"3\")."
-  (interactive)
-  (let* ((keys (this-command-keys-vector))
-         (last-key (aref keys (1- (length keys)))))
-    (agent-repl--log (agent-repl--ws-current-name) "send-digit-char: digit=%s" (string last-key))
-    (agent-repl-send-char (string last-key))))
-
-;; C-v paste forwarding to vterm
-(defun agent-repl-paste-to-vterm ()
-  "Forward a Ctrl-V keystroke to the agent vterm buffer.
-This lets the agent CLI handle paste natively, including images."
-  (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "paste-to-vterm: entry")
-  (if (agent-repl--vterm-live-p)
-      (progn
-        (agent-repl--log (agent-repl--ws-current-name) "paste-to-vterm: vterm live, forwarding C-v")
-        (with-current-buffer (agent-repl--ws-get (agent-repl--ws-current-name) :vterm-buffer)
-          (vterm-send-key "v" nil nil t)))
-    (user-error "No live Claude session — paste not forwarded")))
 
 ;; TODO: agent-repl-set-priority belongs in commands.el rather than
 ;; keybindings.el.  Do not move yet -- other agents are modifying that file.
@@ -485,9 +459,9 @@ Use this to verify the processor works independently of the file watcher."
              (mapconcat #'agent-repl--format-workspace-state states "\n"))))
 
 (defun agent-repl-debug/buffer-info ()
-  "Display all agent vterm buffers with their owning and persp workspaces."
+  "Display all agent view (webview) buffers with their owning and persp workspaces."
   (interactive)
-  (let* ((bufs (agent-repl--list-agent-vterm-buffers))
+  (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
          (lines (mapcar #'agent-repl--format-buffer-info bufs)))
     (message "Claude buffers:\n%s"
              (if lines (mapconcat #'identity lines "\n") "  (none)"))))
@@ -524,9 +498,9 @@ Kills agent buffers, closes windows, and removes all state."
   (message "Obliterated all agent-repl state for %s" ws))
 
 (defun agent-repl-debug/set-owning-workspace ()
-  "Set the owning workspace for an agent vterm buffer."
+  "Set the owning workspace for an agent view (webview) buffer."
   (interactive)
-  (let* ((bufs (agent-repl--list-agent-vterm-buffers))
+  (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
          (buf-name (completing-read "Buffer: " (mapcar #'buffer-name bufs) nil t))
          (ws (agent-repl--read-workspace "Owning workspace: ")))
     (with-current-buffer buf-name
@@ -619,22 +593,23 @@ Uses `agent-repl--workspace-clean-p' -- the same function used in production."
 
 (defun agent-repl-debug/--gather-ws-diagnostics (ws-name)
   "Gather diagnostic information about workspace WS-NAME.
-Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
-:agent-open :dirty."
+Returns a plist with keys :owning-ws :has-window :agent-open :dirty.
+`:owning-ws' and `:has-window' are derived from WS-NAME's agent view
+\(webview) buffer, independently re-derived from the persp's actual
+buffer list rather than trusted from the `:frontend-buffer' plist
+entry — this is a diagnostic tool for exactly the buffer-ownership
+drift it would otherwise be trying to take on faith."
   (let* ((open (agent-repl--ws-agent-open-p ws-name))
          (dirty (not (agent-repl--workspace-clean-p ws-name)))
          (persp (agent-repl--ws-resolve-persp ws-name))
          (persp-bufs (agent-repl--ws-buffers persp))
-         (vterm-buf (cl-loop for buf in persp-bufs
-                             when (and (buffer-live-p buf)
-                                       (agent-repl--agent-buffer-p buf))
-                             return buf))
-         (proc (and vterm-buf (get-buffer-process vterm-buf)))
-         (proc-alive (and proc (process-live-p proc)))
-         (owning-ws (agent-repl--buffer-owner vterm-buf))
-         (has-window (and vterm-buf (get-buffer-window vterm-buf t))))
-    (list :vterm-buf vterm-buf :proc-alive proc-alive
-          :owning-ws owning-ws :has-window has-window
+         (view-buf (cl-loop for buf in persp-bufs
+                            when (and (buffer-live-p buf)
+                                      (agent-repl--agent-view-buffer-p buf))
+                            return buf))
+         (owning-ws (agent-repl--buffer-owner view-buf))
+         (has-window (and view-buf (get-buffer-window view-buf t))))
+    (list :owning-ws owning-ws :has-window has-window
           :agent-open open :dirty dirty)))
 
 (defun agent-repl-debug/--apply-state-refresh (ws-name agent-open)
@@ -642,26 +617,22 @@ Returns a plist with keys :vterm-buf :proc-alive :owning-ws :has-window
 Mirrors the logic in `agent-repl--update-all-workspace-states'."
   (if agent-open
       (agent-repl--update-ws-state ws-name)
-    (agent-repl--mark-dead-vterm ws-name)))
+    (agent-repl--mark-dead ws-name)))
 
 (defun agent-repl-debug/--format-diagnostics (ws-name diag before after)
   "Format a diagnostic summary string for WS-NAME.
 DIAG is the plist from `agent-repl-debug/--gather-ws-diagnostics'.
 BEFORE and AFTER are the workspace states before and after refresh."
-  (let ((vterm-buf (plist-get diag :vterm-buf)))
-    (format (concat "Workspace %s:\n"
-                    "  vterm-buf=%s process=%s\n"
-                    "  owning-ws=%s has-window=%s\n"
-                    "  agent-open=%s dirty=%s\n"
-                    "  state=%s -> %s")
-            ws-name
-            (and vterm-buf (buffer-name vterm-buf))
-            (if (plist-get diag :proc-alive) "alive" "dead/nil")
-            (or (plist-get diag :owning-ws) "nil")
-            (if (plist-get diag :has-window) "yes" "no")
-            (if (plist-get diag :agent-open) "yes" "no")
-            (if (plist-get diag :dirty) "yes" "no")
-            (or before "nil") (or after "nil"))))
+  (format (concat "Workspace %s:\n"
+                  "  owning-ws=%s has-window=%s\n"
+                  "  agent-open=%s dirty=%s\n"
+                  "  state=%s -> %s")
+          ws-name
+          (or (plist-get diag :owning-ws) "nil")
+          (if (plist-get diag :has-window) "yes" "no")
+          (if (plist-get diag :agent-open) "yes" "no")
+          (if (plist-get diag :dirty) "yes" "no")
+          (or before "nil") (or after "nil")))
 
 (defun agent-repl-debug/refresh-state (ws-name)
   "Force a full state refresh for workspace WS-NAME.
@@ -700,51 +671,14 @@ Reports comprehensive diagnostics."
 (map! "C-S-+"        #'agent-repl-drawer-global-priority-up)
 (map! "C-S--"        #'agent-repl-drawer-global-priority-down)
 
-;; `C-S-j' / `C-S-k' need a stronger binding than the plain global-map
-;; entry the rest of the drawer chords use, because `config.el' wires
-;; `:nv "C-j" -> evil-window-down' / `:nv "C-k" -> evil-window-up' into
-;; `general-override-mode-map''s evil intercept aux maps for
-;; normal/visual.  When the user presses `C-S-j' in normal state,
-;; `read-key-sequence' looks up `[?\C-\S-j]' across the active keymaps;
-;; if no map binds the shifted key, Emacs performs shift-translation,
-;; retrying as `[?\C-j]' -- which HITS the intercept aux map and fires
-;; `evil-window-down', shadowing the global-map binding to
-;; `agent-repl-scroll-output-down'.  Defeat the fallback by planting
-;; explicit `C-S-j' / `C-S-k' entries in the same intercept aux maps
-;; (for every evil state), and a matching top-level entry in
-;; `general-override-mode-map' for non-evil contexts.
-(defconst agent-repl--scroll-output-chords
-  '(("C-S-j" . agent-repl-scroll-output-down)
-    ("C-S-k" . agent-repl-scroll-output-up))
-  "Alist of (KEY-STRING . COMMAND) for scroll-output chords that must
-win key lookup above any minor-mode-map and any evil intercept aux map
--- specifically defeating shift-translation back to `C-j' / `C-k' which
-would otherwise route the chord to `evil-window-down/up'.")
-
 (defconst agent-repl--scroll-output-intercept-states
   '(normal visual insert emacs operator motion replace)
-  "Evil states for which `agent-repl--scroll-output-chords' install
-intercept aux map entries on `general-override-mode-map'.  Covers every
-evil state so the chord wins regardless of which state is current.")
-
-(defun agent-repl--install-scroll-output-overrides ()
-  "Install `agent-repl--scroll-output-chords' into
-`general-override-mode-map' at top-level AND into its evil intercept
-aux maps for every state in `agent-repl--scroll-output-intercept-states'.
-The top-level entry covers non-evil contexts; the per-state aux entries
-beat any same-state evil binding and prevent shift-translation fallback.
-Idempotent."
-  (dolist (entry agent-repl--scroll-output-chords)
-    (let ((seq (kbd (car entry)))
-          (cmd (cdr entry)))
-      (define-key general-override-mode-map seq cmd)
-      (when (fboundp 'evil-get-auxiliary-keymap)
-        (dolist (state agent-repl--scroll-output-intercept-states)
-          (define-key (evil-get-auxiliary-keymap
-                       general-override-mode-map state t t)
-                      seq cmd))))))
-
-(agent-repl--install-scroll-output-overrides)
+  "Canonical list of every evil state.  Originally introduced so the
+\(now-removed) scroll-output chords could install intercept aux map
+entries on `general-override-mode-map' uniformly across all of them;
+reused as-is by `agent-repl--install-drawer-visit-override' and
+`agent-repl--install-workspace-jump-overrides' below so a chord wins
+key lookup regardless of which evil state is current.")
 
 ;; `C-S-<return>' -> `agent-repl-drawer-global-visit' needs the same
 ;; override treatment as the scroll chords -- a plain `(map! ... )' lands
@@ -776,33 +710,6 @@ at top-level AND into its evil intercept aux maps for every state in
 
 (agent-repl--install-drawer-visit-override)
 
-;; vterm-mode-map binds every `C-S-<letter>' to `vterm--self-insert' via
-;; its define-keys loop over '("C-" "M-" "C-S-").  That major-mode
-;; binding shadows our global-map entries whenever point lands in a
-;; vterm buffer (e.g. immediately after `C-S-<return>' visits a
-;; workspace and selects its Agent REPL output window), causing the
-;; chord to be sent to the shell instead of triggering drawer nav.
-;; Strip the conflicting keys from `vterm-mode-map' so global-map sees
-;; them.  Done lazily inside `after! vterm' so it survives package
-;; reloads.
-
-(defconst agent-repl--vterm-shadow-keys
-  '("C-S-n" "C-S-p" "C-S-j" "C-S-k" "C-S-x" "C-S-d"
-    "C-S-i" "C-S-m" "C-S-h" "C-S-t" "C-S-u")
-  "C-S-<letter> chords that `vterm-mode-map' would otherwise capture
-via `vterm--self-insert', shadowing our global drawer-mirror bindings.
-Non-letter chords like `C-S-<return>', `C-S-+', `C-S--' are not in
-vterm's exclusion loop and need no stripping.")
-
-(defun agent-repl--strip-vterm-shadow-keys ()
-  "Unmap `agent-repl--vterm-shadow-keys' from `vterm-mode-map' so the
-global drawer-mirror bindings win in vterm buffers."
-  (dolist (key agent-repl--vterm-shadow-keys)
-    (define-key vterm-mode-map (kbd key) nil)))
-
-(after! vterm
-  (agent-repl--strip-vterm-shadow-keys))
-
 (map! :leader :prefix "w" :n "f" #'agent-repl-fullscreen-and-focus)
 
 ;; SPC o -- agent session control (open, focus, kill, interrupt, utilities)
@@ -810,17 +717,9 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Agent REPL (simple)" "o c" #'agent-repl-simple
       :desc "Agent REPL (deprio)" "o C" #'agent-repl
       :desc "Kill Claude" "o C-c" #'agent-repl-kill
-      :desc "Kill claude process (keep panels)" "o k" #'agent-repl-kill-agent-process
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
-      ;; `agent-repl-select-frontend' is deliberately UNBOUND: flipping a
-      ;; workspace's presentation without killing its session invites two
-      ;; agent processes on one directory.  `SPC o F' (kill-then-open,
-      ;; conversation carried via the durable session id) is the only
-      ;; user-facing frontend switch; select-frontend remains available
-      ;; to internal callers.
-      :desc "Switch frontend (kill + carry conversation)" "o F" #'agent-repl-switch-frontend
       :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'agent-repl-toggle-hide-mode
       :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'agent-repl-toggle-hide-project-dirs
       :desc "Toggle workspace drawer" "o d" #'agent-repl-drawer-toggle)
@@ -875,13 +774,9 @@ global drawer-mirror bindings win in vterm buffers."
 ;;     (modules/config/default/config.el:328) which would otherwise
 ;;     route Cmd+0 to `text-scale-set' and emit "The font hasn't been
 ;;     resized" when font size is already default.
-;;   - `vterm-mode-map's blanket `M-X' -> `vterm--self-insert-meta'
-;;     binding (vterm.el:633-660) which would swallow `M-1..M-9 / M-0'
-;;     inside vterm buffers and send the byte to the shell.
 ;;
 ;; A plain `(map! :g ...)' binding lands in `global-map' and loses to
-;; both the Doom `:n' entry (in `evil-normal-state-map') and the vterm
-;; major-mode entry.  Mirror the
+;; the Doom `:n' entry (in `evil-normal-state-map').  Mirror the
 ;; `agent-repl--install-drawer-visit-override' pattern instead:
 ;; install the chord into `general-override-mode-map' at top-level AND
 ;; into its evil aux maps for every evil state, so the binding wins
@@ -913,12 +808,11 @@ global drawer-mirror bindings win in vterm buffers."
     ("s-9" . agent-repl-workspace-switch-to-8)
     ("s-0" . agent-repl-workspace-switch-to-final))
   "Alist of (KEY-STRING . COMMAND) for the workspace-jump chords that
-must win key lookup above Doom default's `:n s-9' / `s-0', above
-`vterm-mode-map's `M-X' blanket bindings, and across every evil
-state.  Command `s-1..s-9' address the FIRST nine workspaces and Option
-`M-1..M-9' address the SECOND nine (workspaces 10-18); `M-0'/`s-0' both
-address the final workspace.  Each KEY-STRING is passed to `kbd' at
-install time.")
+must win key lookup above Doom default's `:n s-9' / `s-0' and across
+every evil state.  Command `s-1..s-9' address the FIRST nine
+workspaces and Option `M-1..M-9' address the SECOND nine (workspaces
+10-18); `M-0'/`s-0' both address the final workspace.  Each KEY-STRING
+is passed to `kbd' at install time.")
 
 (defun agent-repl--install-workspace-jump-overrides ()
   "Install `agent-repl--workspace-jump-chords' into
@@ -1007,10 +901,6 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
           :desc "uncommitted" "u" #'agent-repl-test-coverage-uncommitted
           :desc "HEAD"        "h" #'agent-repl-test-coverage-head
           :desc "branch"      "b" #'agent-repl-test-coverage-branch)))))
-
-(dotimes (i 10)
-  (define-key doom-leader-map (kbd (format "o %s" i))
-    #'agent-repl--send-digit-char))
 
 (map! :leader "b R" #'agent-repl-revert-and-eval-buffer)
 (map! :leader "m e B" #'agent-repl-revert-and-eval-buffer)

@@ -428,7 +428,8 @@ one.  Trailing \".\" is preserved as-is."
   "Apply SUMMARY for prompt RAW to workspace WS.
 Drops the write when WS's :last-prompt-text no longer matches RAW
 (meaning a newer send has displaced the bookmark).  Forces a mode-line
-update on the vterm buffer so the new segment paints immediately."
+update on the workspace's webview buffer so the new segment paints
+immediately."
   (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
     (if (not (equal current-raw raw))
         (agent-repl--log ws "prompt-summary: drop stale summary (raw mismatched)")
@@ -441,8 +442,15 @@ update on the vterm buffer so the new segment paints immediately."
       (agent-repl--state-save ws))))
 
 (defun agent-repl--prompt-summary-redisplay (ws)
-  "Force a mode-line redisplay for WS's vterm buffer."
-  (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
+  "Force a mode-line redisplay for WS's webview buffer.
+Historically targeted the vterm buffer, whose mode-line carried the
+prompt-summary segment; that segment was dropped from the status bar
+before the vterm frontend itself was removed (see the note at the end
+of this file), so this has already been a quiet no-op for a while.
+Retargeted at `:frontend-buffer' (the surviving buffer) now that
+`:vterm-buffer' no longer exists, so this at least redraws a real,
+live buffer instead of always missing one."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (when (and buf (buffer-live-p buf))
       (with-current-buffer buf
         (force-mode-line-update t)))))

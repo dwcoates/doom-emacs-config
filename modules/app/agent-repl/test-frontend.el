@@ -38,14 +38,36 @@
 
 ;;;; ---- Buffer naming -------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-webview-name-outside-panel-namespace ()
-  "Webview names must not match the agent-panel regexes."
+(ert-deftest agent-repl-test-frontend-webview-name-format ()
+  "The webview buffer name follows the pinned `*agent-frontend-WS*' format."
   ;; Act
   (let ((name (agent-repl--frontend-webview-buffer-name "myws")))
     ;; Assert
-    (should (equal name "*agent-frontend-myws*"))
-    (should-not (string-match-p agent-repl--vterm-buffer-re name))
+    (should (equal name "*agent-frontend-myws*"))))
+
+(ert-deftest agent-repl-test-frontend-webview-name-distinct-from-input-namespace ()
+  "The webview name does not collide with the input buffer's naming scheme.
+The two buffers are named by entirely different schemes
+\(`agent-panel-input-' vs `agent-frontend-'), so a workspace's webview is
+never mistaken for its input composer."
+  ;; Act
+  (let ((name (agent-repl--frontend-webview-buffer-name "myws")))
+    ;; Assert
     (should-not (string-match-p agent-repl--input-buffer-re name))))
+
+(ert-deftest agent-repl-test-frontend-webview-name-is-an-agent-panel-buffer ()
+  "The webview name is recognized as an agent panel buffer.
+Now that vterm is gone, the webview is one of a workspace's two panel
+buffers (alongside the input composer) — `agent-repl--agent-panel-buffer-p'
+matches it so the orphan sweep and close-panels-on-open treat it as the
+agent panel it is, with no special-casing left to carve out."
+  ;; Arrange
+  (let* ((name (agent-repl--frontend-webview-buffer-name "myws"))
+         (buf (get-buffer-create name)))
+    (unwind-protect
+        ;; Act / Assert
+        (should (agent-repl--agent-panel-buffer-p buf))
+      (kill-buffer buf))))
 
 ;;;; ---- ensure-webview-buffer ------------------------------------------------
 
@@ -331,8 +353,9 @@ rename on either side silently turns the snap into a no-op."
              source))))
 
 (ert-deftest agent-repl-test-frontend-snap-to-tail-without-webview-is-noop ()
-  "A workspace with no webview (a vterm one) is never asked to snap.
-The wrapper is left guarded, so any call would fail the test loudly."
+  "A workspace with no webview yet (never opened, or its panel closed) is
+never asked to snap.  The wrapper is left guarded, so any call would fail
+the test loudly."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
@@ -636,7 +659,7 @@ exact failure seen live in the fresh instance."
 
 (ert-deftest agent-repl-test-frontend-open-carries-parent-ws-param ()
   "gui-open appends parent_ws (url-encoded :source-ws-dir basename) to the URL.
-The webapp status bar renders it for vterm mode-line parity."
+The webapp status bar renders it in its topbar."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1"
       '(:project-dir "/w" :source-ws-dir "/repos/parent dir/")
@@ -723,9 +746,9 @@ would evict the caller's windows."
         (should-not displayed)))))
 
 (ert-deftest agent-repl-test-frontend-gui-boot-marks-the-workspace-starting ()
-  "The gui boot marks :init so a generated workspace shows a loading badge.
-The vterm boot does the same; without it a gui-born workspace would render
-no state at all until its agent answered."
+  "The gui boot marks :init before the session exists, so a generated
+workspace shows a loading badge immediately instead of rendering no
+state at all until its agent answered."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
@@ -787,7 +810,8 @@ deadlock the non-interactive nuke hook."
 
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.
-Restoring is what removes BOTH gui windows — the vterm close contract."
+Restoring is what removes BOTH gui windows, since the input window
+cannot be deleted once it is the sole survivor."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((restored nil)
@@ -845,8 +869,9 @@ resolving the input buffer by name when the plist key is stale nil."
 
 (ert-deftest agent-repl-test-frontend-gui-kill-tears-down-layout-first ()
   "gui kill hides the webview/input windows BEFORE releasing state.
-`agent-repl-switch-frontend' opens the next frontend right after kill;
-a leftover dedicated input window aborts the vterm launch."
+The registry's `:restart-fn' composes this kill immediately followed by
+`agent-repl--gui-open'; a leftover dedicated input window aborts that
+reopen mid-initialize (the \"webview buffer is null/dead\" cascade)."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (let ((order nil))

@@ -3,13 +3,13 @@
 ;;; Commentary:
 
 ;; Display-buffer helpers for "sibling" popups that should NOT span
-;; under the agent panels (vterm + input column on the right) when
-;; those panels are open.
+;; under the agent panels (the webview + input column on the right)
+;; when those panels are open.
 ;;
 ;; The Doom popup default for `:side 'bottom' uses a frame-wide side
 ;; window, so a bottom popup (e.g. the normal `*doom:vterm*' opened by
 ;; `SPC o t') spans the entire frame width — overlapping the agent
-;; vterm / input column on the right.
+;; view / input column on the right.
 ;;
 ;; `agent-repl-sibling-popup-display-fn' is a `display-buffer' action
 ;; that, when agent panels are visible, instead splits BELOW the
@@ -32,16 +32,16 @@
   "Return the work window to split below for a sibling bottom popup.
 
 Returns the leftmost live, non-side, non-agent-panel window on FRAME
-\(defaults to the selected frame\) when the agent vterm panel is
+\(defaults to the selected frame\) when the agent view panel is
 visible — that is the work column whose width the popup should match.
 
 Returns nil when agent panels are not visible, signalling to callers
 that the default frame-wide bottom popup behavior should apply."
-  (let* ((vterm-buf (agent-repl-window--panel-buffer :vterm))
-         (vterm-win (and vterm-buf
-                         (buffer-live-p vterm-buf)
-                         (get-buffer-window vterm-buf frame))))
-    (when (window-live-p vterm-win)
+  (let* ((view-buf (agent-repl-window--panel-buffer :view))
+         (view-win (and view-buf
+                        (buffer-live-p view-buf)
+                        (get-buffer-window view-buf frame))))
+    (when (window-live-p view-win)
       (let* ((input-buf (agent-repl-window--panel-buffer :input))
              (best nil)
              (best-x most-positive-fixnum))
@@ -49,7 +49,7 @@ that the default frame-wide bottom popup behavior should apply."
           (let* ((buf (window-buffer win))
                  (x (car (window-edges win nil nil t)))
                  (is-side (agent-repl-window--side-window-p win))
-                 (is-agent (or (eq buf vterm-buf)
+                 (is-agent (or (eq buf view-buf)
                                 (and input-buf (eq buf input-buf)))))
             (when (and (not is-side) (not is-agent) (< x best-x))
               (setq best win
@@ -88,7 +88,7 @@ when the popup module is loaded; otherwise uses the plain
 (defun agent-repl-sibling-popup-display-fn (buffer alist)
   "`display-buffer' action that respects claude panels for bottom popups.
 
-When the claude vterm panel is visible, splits BELOW the leftmost
+When the claude agent view panel is visible, splits BELOW the leftmost
 work (non-side, non-agent-panel) window and displays BUFFER there;
 the popup width matches the work column, leaving claude panels
 untouched.  When claude panels are absent, defers to the Doom

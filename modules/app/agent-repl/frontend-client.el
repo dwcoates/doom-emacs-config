@@ -54,7 +54,7 @@
 
 (defcustom agent-repl-frontend-permission-mode "auto"
   "Permission mode for gui-created sessions (POST /sessions).
-Defaults to `auto' to match the vterm start flags
+Defaults to `auto' to match the CLI's own permission-mode config
 (`agent-repl-personal-permission-flag' /
 `agent-repl-managed-permission-flag'), which requires the daemon to
 drive the SYSTEM claude binary (daemon.el's -claude-bin) — the
@@ -159,7 +159,8 @@ passthroughs.  Signals on HTTP failure or a malformed response.
 
 The account the session's CLI runs as travels in the `config_dir' field,
 computed from CWD by `agent-repl--compute-config-dir' — the SAME resolver
-the vterm start command uses, so both frontends land on the same account
+`ai-title.el' uses to locate a workspace's transcript, so a session
+always lands on the same account as the rest of the module resolves
 for the same project (~/.claude-chesscom under $MULTI_REPO_ROOT,
 ~/.claude elsewhere).  Sending it per-session is not optional: ONE daemon
 serves every workspace, so the daemon's own environment cannot encode a
@@ -254,21 +255,22 @@ contract)."
         ;; :active-env and no instantiation structs, so the durable-id
         ;; lookup below resolves nil and the created session silently
         ;; starts a BLANK conversation (observed as "SPC o c doesn't
-        ;; restore the gui session").  The vterm boot restores env from
+        ;; restore the gui session").  A gui-first open is now the ONLY
+        ;; boot path a workspace has, so it must restore env itself from
         ;; the persisted state file via `agent-repl--initialize-ws-env'
-        ;; in `agent-repl--initialize-agent'; a gui-first open must do
-        ;; the same.  Env presence also heals the sentinel handlers,
+        ;; rather than relying on some other boot path having already
+        ;; done it.  Env presence also heals the sentinel handlers,
         ;; which error on a nil :active-env.
         (unless (agent-repl--ws-get ws :active-env)
           (agent-repl--initialize-ws-env ws dir))
         ;; Resume the workspace's durable claude session so a
         ;; recreated daemon binding (daemon restart, Emacs restart,
-        ;; panel close/reopen, vterm->gui switch) CONTINUES the
-        ;; conversation — the frontend is presentation, the session
-        ;; is the shared backend.  nil (no session ever recorded)
-        ;; starts fresh.
+        ;; panel close/reopen) CONTINUES the conversation — the
+        ;; frontend is presentation, the session is the shared backend.
+        ;; nil (no session ever recorded) starts fresh.
         (let* ((resume (agent-repl--ws-durable-claude-session-id ws))
-               (id (agent-repl--frontend-create-session dir nil resume)))
+               (id (agent-repl--frontend-create-session
+                    dir (agent-repl--ws-get ws :model) resume)))
           (agent-repl--ws-put ws :frontend-session-id id)
           (agent-repl--ws-put ws :reattach-failed nil)
           (agent-repl--ws-put ws :reattach-failures nil)
@@ -420,10 +422,12 @@ so every attached tab renders the user-turn echo."
 (defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
   "The gui frontend's send capability (registry `:send-fn').
 INPUT (the prepared text, which may carry the metaprompt prefix —
-genuine message content) goes to the daemon session.  Only the
-owning-workspace pin is vterm-specific machinery skipped here; the
-prefix counter still increments so metaprompt periodicity matches the
-vterm frontend.  Posthooks and prompt summary key on RAW, identically.
+genuine message content) goes to the daemon session.  There is no
+owning-workspace pin to apply here — WS's daemon session id already
+identifies the target unambiguously, unlike a shared vterm buffer that
+once needed disambiguating — but the prefix counter still increments
+so metaprompt periodicity is tracked the same way for every workspace.
+Posthooks and prompt summary key on RAW, identically.
 
 Sets `:thinking' optimistically BEFORE the HTTP send: the
 UserPromptSubmit hook remains the authoritative confirmation, but a
@@ -442,8 +446,14 @@ dropped."
 
 (defun agent-repl--gui-interrupt (ws _kind)
   "The gui frontend's interrupt capability (registry `:interrupt-fn').
-One wire-level interrupt serves both TUI gestures; returns non-nil
-since the HTTP route either delivers or signals."
+KIND is ignored: it distinguished the vterm TUI's two interrupt
+gestures (`ctrl-c' clearing the prompt line vs `escape' stopping
+generation), and with vterm gone no registered frontend still needs
+that distinction — one wire-level HTTP interrupt serves the single
+gesture the gui exposes.  The parameter itself stays (unused) so the
+registry's `:interrupt-fn' shape stays uniform for whatever frontend
+lands next.  Returns non-nil since the HTTP route either delivers or
+signals."
   (let ((id (agent-repl--ws-get ws :frontend-session-id)))
     (agent-repl--log ws "interrupt[gui]: session=%s" id)
     (agent-repl--frontend-interrupt-session id)
@@ -478,7 +488,8 @@ the subsequent open attaches to the continued conversation."
   (agent-repl--frontend-wait-ready)
   (let* ((dir (or (agent-repl--ws-get ws :project-dir)
                   (agent-repl--resolve-current-git-root)))
-         (id (agent-repl--frontend-create-session dir nil claude-session-id)))
+         (id (agent-repl--frontend-create-session
+              dir (agent-repl--ws-get ws :model) claude-session-id)))
     (agent-repl--ws-put ws :frontend-session-id id)
     (agent-repl--log ws "gui adopted claude session %s as %s" claude-session-id id)
     id))

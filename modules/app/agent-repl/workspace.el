@@ -54,7 +54,8 @@
 ;; warn about a free variable / unknown function.
 (declare-function agent-repl--priority-rank "agent-repl-status" (priority))
 (declare-function agent-repl--state-save "agent-repl-history" (ws))
-(declare-function agent-repl--kill-session "agent-repl-panels" (ws))
+(declare-function agent-repl--ws-frontend "frontends" (ws))
+(declare-function agent-repl-frontend-kill-fn "frontends" (frontend))
 (declare-function agent-repl--kill-workspace-buffers "agent-repl-commands" (ws))
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
 (declare-function +workspace/kill "ext:persp-mode" (name))
@@ -91,7 +92,7 @@ environment, which today means one for :bare-metal."
 ;; :project-dir from this hash and run `git rev-parse --abbrev-ref HEAD' there.
 (defvar agent-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name -> state plist.
-Keys: :vterm-buffer :input-buffer
+Keys: :frontend-buffer :input-buffer
       :prefix-counter :agent-state :repl-state
       :git-clean :git-proc :worktree-p :project-dir
       :active-env :bare-metal :fork-session-id
@@ -168,7 +169,7 @@ debug logging on."
          (list ws key val trace))))))
 
 (defconst agent-repl--ws-runtime-keys
-  '(:agent-state :repl-state :vterm-buffer :input-buffer :vterm-status
+  '(:agent-state :repl-state :input-buffer
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
@@ -234,7 +235,7 @@ errors would abort the nuke midway.")
 (defun agent-repl--ws-del (ws)
   "Tombstone workspace WS instead of removing its hash entry.
 Stamps `:nuked-at' with the current time, clears every key in
-`agent-repl--ws-runtime-keys' (vterm buffer / proc refs, timers,
+`agent-repl--ws-runtime-keys' (frontend buffer / proc refs, timers,
 session-bound state), and preserves identity/historical keys
 (`:project-dir', `:created-at', `:last-killed-at', `:priority',
 `:worktree-p', `:source-ws-dir', `:ws-id', merge metadata).  The entry
@@ -609,8 +610,8 @@ Returns one of (in precedence order; first match wins):
 
   :merging        — `:merging' plist key is `t' (worker thread is
                     actively running cherry-pick).  Beats :dead so a
-                    workspace whose vterm has been torn down (the
-                    standard pre-merge `--close-workspace'
+                    workspace whose agent session has been torn down
+                    (the standard pre-merge `--close-workspace'
                     `preserve-entry' path) still surfaces the
                     in-flight signal until cherry-pick resolves.
 
@@ -618,7 +619,7 @@ Returns one of (in precedence order; first match wins):
                     `agent-repl--merge-queue' waiting for an
                     in-flight cherry-pick to clear).
 
-  :dead           — `:repl-state' is `:dead' (vterm process is gone).
+  :dead           — `:repl-state' is `:dead' (agent process is gone).
                     Ranks below merge-states because merge state is
                     more actionable; ranks above agent-states
                     because no live process means no agent activity
@@ -641,7 +642,7 @@ Returns one of (in precedence order; first match wins):
                     reason-specific predicate
                     `--ws-hide-tombstoned-p').
 
-Precedence rationale: a workspace that crashed its vterm *while a
+Precedence rationale: a workspace whose agent session crashed *while a
 merge was in flight* still needs to surface the merge signal — the
 merge is the actionable concern.  Same logic stacks all the way up:
 merge-conflict is more important than merge-failed (an active
@@ -696,7 +697,7 @@ than whether the agent was thinking when the merge hit it)."
 
 (defun agent-repl--nuke-one-workspace (ws &optional preserve-entry)
   "Tear down a single agent-repl workspace WS without prompting.
-Kills any in-flight git-diff process, tears down the vterm session
+Kills any in-flight git-diff process, tears down the agent session
 and buffers, removes WS from `agent-repl--workspaces', kills every
 remaining buffer (and attached process) that belongs to the persp via
 `agent-repl--kill-workspace-buffers', and finally kills the persp
@@ -706,8 +707,8 @@ workspace via `+workspace/kill'.  Designed to be reusable from
 `agent-repl-kill-workspace'.
 
 When PRESERVE-ENTRY is non-nil, the `agent-repl--workspaces' hashmap
-entry is retained — every other teardown step runs as usual (vterm,
-buffers, persp), but the ws plist survives so the drawer's MERGED
+entry is retained — every other teardown step runs as usual (agent
+session, buffers, persp), but the ws plist survives so the drawer's MERGED
 section can keep rendering the entry until the user explicitly
 `finish'es it.  This is the merge-completed teardown path; standard
 nuke/kill callers pass nil and the entry is dropped.
@@ -720,10 +721,11 @@ even if downstream teardown errors before the redundant state-save in
 `--teardown-session-state' can fire.
 
 The hashmap removal (`ws-del') runs inside an `unwind-protect' cleanup
-so it always happens, even when kill-session errors partway through.
-The persp kill is the very last step so all internal state is already
-cleaned up before the UI workspace disappears.  Callers can rely on
-the post-condition: after the call returns \(or throws), WS is not in
+so it always happens, even when the frontend kill dispatch errors
+partway through.  The persp kill is the very last step so all internal
+state is already cleaned up before the UI workspace disappears.
+Callers can rely on the post-condition: after the call returns \(or
+throws), WS is not in
 `agent-repl--workspaces' (unless PRESERVE-ENTRY was non-nil) and its
 on-disk state.el is up-to-date.
 
@@ -757,11 +759,11 @@ finish-workspace path."
             (condition-case err
                 (delete-process proc)
               (error (agent-repl--log ws "nuke-one-workspace: git-proc kill error: %S" err)))))
-        (agent-repl--log ws "nuke-one-workspace: calling kill-session ws=%s" ws)
+        (agent-repl--log ws "nuke-one-workspace: calling frontend kill-fn ws=%s" ws)
         (condition-case err
-            (agent-repl--kill-session ws)
-          (error (agent-repl--log ws "nuke-one-workspace: kill-session error: %S" err)))
-        (agent-repl--log ws "nuke-one-workspace: kill-session returned ws=%s" ws))
+            (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
+          (error (agent-repl--log ws "nuke-one-workspace: frontend kill-fn error: %S" err)))
+        (agent-repl--log ws "nuke-one-workspace: frontend kill-fn returned ws=%s" ws))
     ;; Cleanup: always remove the hashmap entry regardless of any error
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
     ;; Persisted state.el is intentionally NOT touched here — see the
@@ -779,9 +781,9 @@ finish-workspace path."
     (setq agent-repl--restored-workspaces
           (delete ws agent-repl--restored-workspaces))
     ;; Kill every remaining buffer (and attached process) that belongs to
-    ;; the persp before tearing down the persp itself.  `kill-session'
-    ;; only handles the vterm/input panels it tracks in the hashmap;
-    ;; this sweep catches file buffers, magit buffers, auxiliary shells,
+    ;; the persp before tearing down the persp itself.  The frontend kill
+    ;; dispatch only handles the webview/input panels it tracks in the
+    ;; hashmap; this sweep catches file buffers, magit buffers, auxiliary shells,
     ;; or anything else the user opened while inside the workspace so
     ;; nothing is orphaned after the persp goes away.
     (agent-repl--log ws "nuke-one-workspace: calling kill-workspace-buffers ws=%s" ws)

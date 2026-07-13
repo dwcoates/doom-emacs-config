@@ -37,10 +37,10 @@ inside BODY."
 
 ;;;; ---- Skip predicate ----
 
-(ert-deftest agent-repl-prevent-select-test-skip-vterm-panel ()
-  "Predicate returns non-nil for the *agent-panel-WS* vterm buffer."
+(ert-deftest agent-repl-prevent-select-test-skip-webview-panel ()
+  "Predicate returns non-nil for the *agent-frontend-WS* webview buffer."
   (agent-repl-prevent-select-test--with-buffers
-      ((buf "*agent-panel-myws*"))
+      ((buf "*agent-frontend-myws*"))
     (should (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
 (ert-deftest agent-repl-prevent-select-test-skip-input-panel ()
@@ -65,8 +65,10 @@ like *agent-repl-dump* should still be reachable via cycling."
 
 (ert-deftest agent-repl-prevent-select-test-dead-buffer-not-skipped ()
   "Predicate returns nil for a killed buffer — guards against acting on
-a dead reference if Emacs ever hands one to the skip function."
-  (let ((buf (get-buffer-create "*agent-panel-dead*")))
+a dead reference if Emacs ever hands one to the skip function.  The name
+matches `agent-repl--input-buffer-re' so a live buffer of this name WOULD
+be skipped — liveness alone must be what defeats it here."
+  (let ((buf (get-buffer-create "*agent-panel-input-dead*")))
     (kill-buffer buf)
     (should-not (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
@@ -86,7 +88,7 @@ plain buffer, kills the current buffer, and asserts the window did not
 land on the panel."
   (agent-repl-prevent-select-test--with-buffers
       ((victim "*prevent-select-victim*")
-       (panel  "*agent-panel-skipme*")
+       (panel  "*agent-frontend-skipme*")
        (plain  "*prevent-select-plain*"))
     (let ((wconf (current-window-configuration)))
       (unwind-protect
@@ -103,7 +105,7 @@ land on the panel."
   "`previous-buffer' walks past a panel buffer in the window history."
   (agent-repl-prevent-select-test--with-buffers
       ((plain "*prevent-select-prev-plain*")
-       (panel "*agent-panel-prev-skipme*")
+       (panel "*agent-frontend-prev-skipme*")
        (curr  "*prevent-select-prev-curr*"))
     (let ((wconf (current-window-configuration)))
       (unwind-protect

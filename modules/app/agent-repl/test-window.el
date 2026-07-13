@@ -59,15 +59,15 @@ against a stale window reference after teardown."
 
 ;;;; ---- Panel finders ----
 
-(ert-deftest agent-repl-window-test-panel-buffer-vterm-returns-ws-buffer ()
-  "`--panel-buffer :vterm WS' returns the buffer stored under `:vterm-buffer'
+(ert-deftest agent-repl-window-test-panel-buffer-view-returns-ws-buffer ()
+  "`--panel-buffer :view WS' returns the buffer stored under `:frontend-buffer'
 in WS's workspace plist."
   (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-panel-vterm*")))
+    (let ((buf (generate-new-buffer " *test-panel-view*")))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "ws" :vterm-buffer buf)
-            (should (eq (agent-repl-window--panel-buffer :vterm "ws") buf)))
+            (agent-repl--ws-put "ws" :frontend-buffer buf)
+            (should (eq (agent-repl-window--panel-buffer :view "ws") buf)))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-window-test-panel-buffer-input-returns-ws-buffer ()
@@ -103,14 +103,14 @@ at call time."
 (ert-deftest agent-repl-window-test-panel-window-returns-displaying-window ()
   "`--panel-window' returns the live window displaying the panel buffer."
   (agent-repl-test--with-clean-state
-    (let* ((buf (generate-new-buffer " *test-panel-win-vterm*"))
+    (let* ((buf (generate-new-buffer " *test-panel-win-view*"))
            (wconf (current-window-configuration)))
       (unwind-protect
           (progn
             (delete-other-windows)
-            (agent-repl--ws-put "ws" :vterm-buffer buf)
+            (agent-repl--ws-put "ws" :frontend-buffer buf)
             (let ((win (display-buffer buf)))
-              (should (eq (agent-repl-window--panel-window :vterm "ws") win))))
+              (should (eq (agent-repl-window--panel-window :view "ws") win))))
         (set-window-configuration wconf)
         (kill-buffer buf)))))
 
@@ -121,8 +121,8 @@ displayed in any window."
     (let ((buf (generate-new-buffer " *test-panel-win-hidden*")))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "ws" :vterm-buffer buf)
-            (should-not (agent-repl-window--panel-window :vterm "ws")))
+            (agent-repl--ws-put "ws" :frontend-buffer buf)
+            (should-not (agent-repl-window--panel-window :view "ws")))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-window-test-panel-window-nil-when-buffer-killed ()
@@ -131,9 +131,9 @@ buffer reference (killed buffer) — defensive for races against
 teardown that nils plist entries after killing buffers."
   (agent-repl-test--with-clean-state
     (let ((buf (generate-new-buffer " *test-panel-win-killed*")))
-      (agent-repl--ws-put "ws" :vterm-buffer buf)
+      (agent-repl--ws-put "ws" :frontend-buffer buf)
       (kill-buffer buf)
-      (should-not (agent-repl-window--panel-window :vterm "ws")))))
+      (should-not (agent-repl-window--panel-window :view "ws")))))
 
 ;;;; ---- Hardening ----
 

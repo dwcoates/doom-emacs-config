@@ -126,7 +126,7 @@ swallowed, and does not abort the remaining migrations."
 (defcustom agent-repl-debug nil
   "Controls debug logging level.
 nil means no logging; t means standard logging; \\='verbose also enables
-high-frequency events (window changes, resolve-root, vterm-process-alive
+high-frequency events (window changes, resolve-root, process-alive
 predicates, sentinel re-entry).  Verbose mode also gates
 `agent-repl--log-verbose's file writes: when debug is anything other
 than \\='verbose, those calls are a no-op.  Use
@@ -258,7 +258,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (cstate   (plist-get plist :agent-state))
                (rstate   (plist-get plist :repl-state))
                (env      (plist-get plist :active-env))
-               (vbuf     (plist-get plist :vterm-buffer))
+               (fbuf     (plist-get plist :frontend-buffer))
                (ibuf     (plist-get plist :input-buffer))
                (pcnt     (plist-get plist :prefix-counter))
                (gclean   (plist-get plist :git-clean))
@@ -271,7 +271,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (pshow    (plist-get plist :pending-show-panels))
                (dprompts (plist-get plist :deferred-prompts)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
-                          " vt=%s in=%s cnt=%s"
+                          " fe=%s in=%s cnt=%s"
                           " git=%s gproc=%s wt=%s fork=%s"
                           " rtmr=%s pri=%s pend=%s pshow=%s defq=%s}")
                   ws
@@ -280,7 +280,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (or cstate "-")
                   (or rstate "-")
                   (or env "-")
-                  (if vbuf (if (buffer-live-p vbuf) "live" "dead") "-")
+                  (if fbuf (if (buffer-live-p fbuf) "live" "dead") "-")
                   (if ibuf (if (buffer-live-p ibuf) "live" "dead") "-")
                   (or pcnt "-")
                   (or gclean "-")
@@ -896,12 +896,11 @@ both must be initialized by `agent-repl--initialize-ws-env' before this is calle
 (defun agent-repl--ws-durable-claude-session-id (ws)
   "Return WS's durable claude session uuid, or nil when none is recorded.
 Reads the active instantiation's `session-id' — the hook-captured CLI
-session uuid both frontends share as their resume currency: the vterm
-frontend resumes it via `--continue'/`--resume' at the next launch, the
-gui frontend via POST /sessions' `resume' field.  Unlike
-`agent-repl--active-inst' this returns nil instead of signaling when WS
-has no `:active-env' or no instantiation struct yet — a workspace that
-never booted a session legitimately has no durable id."
+session uuid the gui frontend uses as its resume currency, via POST
+/sessions' `resume' field.  Unlike `agent-repl--active-inst' this
+returns nil instead of signaling when WS has no `:active-env' or no
+instantiation struct yet — a workspace that never booted a session
+legitimately has no durable id."
   (when-let* ((env (agent-repl--ws-get ws :active-env))
               (inst (agent-repl--ws-get ws env)))
     (agent-repl-instantiation-session-id inst)))
@@ -932,26 +931,26 @@ which would otherwise nuke that workspace's session along with WS's own."
 
 ;;; Buffer naming and predicates
 
-;; Panel buffers use the "agent-panel-" prefix to distinguish them from
-;; other agent-repl utility buffers (e.g. *agent-repl-dump*,
-;; *agent-repl-log-bug*).  The vterm regex is still a superset that
-;; matches input buffers too; `agent-repl--agent-buffer-p' explicitly
-;; excludes them.
-(defconst agent-repl--vterm-buffer-re "^\\*agent-panel-[[:alnum:]_-]+\\*$"
-  "Regexp matching agent panel buffer names (e.g. *agent-panel-my-workspace*).
-Caveat: also matches input buffer names.  Use `agent-repl--agent-buffer-p'
-for the combined check.")
+;; The input buffer uses the "agent-panel-input-" prefix to distinguish
+;; it from other agent-repl utility buffers (e.g. *agent-repl-dump*,
+;; *agent-repl-log-bug*).  The webview buffer lives in its own
+;; "agent-frontend-" namespace (see `agent-repl--frontend-buffer-re'
+;; below) — a workspace's only two buffers are the input composer and
+;; the webview, so between them these two regexes cover every agent
+;; panel buffer that exists.
 
 (defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
   "Regexp matching agent input buffer names (e.g. *agent-panel-input-my-workspace*).")
 
 (defconst agent-repl--frontend-buffer-re "^\\*agent-frontend-[[:alnum:]_-]+\\*$"
   "Regexp matching gui webview buffer names (e.g. *agent-frontend-my-workspace*).
-Mirrors `agent-repl-frontend-buffer-name-format'.  DELIBERATELY a separate
-namespace from the two panel regexes above rather than a widening of them:
-the panel regexes key real behavior (the input-panel bounce, the orphan
-sweep), and the webview must stay out of that.  It exists so RENDERING can
-ask a different question — see `agent-repl--agent-view-buffer-name-p'.")
+Mirrors `agent-repl-frontend-buffer-name-format'.  Kept as its own
+namespace rather than folded into `agent-repl--input-buffer-re' because
+the two buffers are named by entirely different schemes
+\(\"agent-panel-input-\" vs \"agent-frontend-\"); predicates that need
+both — `agent-repl--agent-panel-buffer-p' and
+`agent-repl--agent-view-buffer-name-p' — OR the two regexes together
+rather than matching either name against one shared pattern.")
 
 (defun agent-repl--sanitize-ws-name (name)
   "Return NAME with unsafe characters replaced by underscores.
@@ -964,10 +963,10 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
 Signals an error when the resolved workspace name is nil or empty — an
-empty id produces buffer names like *agent-panel-*, which the
-`agent-repl--vterm-buffer-re' / `agent-repl--input-buffer-re' regexes
-mis-classify (input names match the vterm regex with id=\"input-\"),
-causing `agent-repl--sync-panels' to delete the input panel as orphaned."
+empty id produces a degenerate name like *agent-panel-input-*, which
+fails to match `agent-repl--input-buffer-re' (it requires at least one
+character after the \"-input-\" segment), causing `agent-repl--sync-panels'
+to delete the input panel as orphaned."
   (let* ((ws-name (or ws (agent-repl--ws-current-name)))
          (safe (agent-repl--sanitize-ws-name ws-name)))
     (when (or (null safe) (string-empty-p safe))
@@ -980,8 +979,9 @@ causing `agent-repl--sync-panels' to delete the input panel as orphaned."
 (defun agent-repl--create-buffer (ws &optional suffix)
   "Create a workspace-owned buffer for WS and return it.
 SUFFIX is passed to `agent-repl--buffer-name' to select the buffer's
-role: nil for the vterm buffer (*agent-panel-WS*), \"-input\" for the input
-buffer (*agent-panel-input-WS*).
+role: nil for the bare *agent-panel-WS* form, \"-input\" for the input
+buffer (*agent-panel-input-WS*) — the input buffer is the only one any
+current caller creates through this path.
 
 Single entry point for every workspace-owned buffer.  Derives the
 canonical name, sets `agent-repl--owning-workspace' buffer-locally
@@ -1001,32 +1001,21 @@ no perspective named WS exists (e.g. early in session startup)."
         (agent-repl--ws-add-buffer buf persp nil)))
     buf))
 
-(defun agent-repl--agent-buffer-p (&optional buf)
-  "Return non-nil if BUF (default: current buffer) is an agent vterm buffer.
-Excludes agent input buffers (which share a common prefix)."
-  (let ((name (buffer-name (or buf (current-buffer)))))
-    (and (string-match-p agent-repl--vterm-buffer-re name)
-         (not (string-match-p agent-repl--input-buffer-re name)))))
-
 (defun agent-repl--agent-panel-buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is any agent panel buffer.
-Matches both vterm and input buffers."
+Matches the input composer and the webview — the two buffers a workspace has."
   (let ((name (buffer-name (or buf (current-buffer)))))
-    (or (string-match-p agent-repl--vterm-buffer-re name)
-        (string-match-p agent-repl--input-buffer-re name))))
+    (or (string-match-p agent-repl--input-buffer-re name)
+        (string-match-p agent-repl--frontend-buffer-re name))))
 
 (defun agent-repl--agent-view-buffer-name-p (name)
   "Return non-nil when NAME is the buffer a workspace SHOWS its agent in.
-That is the vterm output buffer for a vterm workspace and the webview for
-a gui one — the two answers to \"where does the user watch this agent\".
-
-This is the RENDERING question, and it is deliberately not
-`agent-repl--agent-buffer-p'.  That predicate answers \"is this a vterm
-output buffer\", which the input-panel bounce and the orphan sweep key
-off, and which the webview must therefore stay outside of.  Asking it the
-rendering question is what left every gui workspace's tab permanently
-drawn as though its panels were closed: the state was right, the tab just
-could not see the view.
+Now that the vterm frontend is gone, that is simply the webview buffer —
+the only place a workspace renders its agent — so this collapses to
+`agent-repl--frontend-buffer-re' alone.  Kept as its own named predicate
+(rather than inlining the regex at call sites) so callers ask the
+semantic RENDERING question — \"where does the user watch this agent\"
+— instead of matching a regex directly.
 
 Takes a NAME rather than a buffer because both callers need it that way —
 one walks live buffers, the other walks a saved `window-state-get' tree,
@@ -1034,9 +1023,7 @@ where buffers survive only as their names.  The input panel is excluded
 for the same reason it always was: a saved layout holding only the input
 panel is not a workspace showing its agent."
   (and (stringp name)
-       (or (and (string-match-p agent-repl--vterm-buffer-re name)
-                (not (string-match-p agent-repl--input-buffer-re name)))
-           (string-match-p agent-repl--frontend-buffer-re name))))
+       (string-match-p agent-repl--frontend-buffer-re name)))
 
 (defun agent-repl--agent-view-buffer-p (&optional buf)
   "Return non-nil if BUF (default: current buffer) is a workspace's agent view.
@@ -1059,6 +1046,23 @@ BUF may be a buffer object or a name string."
 BUFFERS may be buffer objects or name strings."
   (cl-remove-if #'agent-repl--non-user-buffer-p buffers))
 
+;;; Buffer background color
+;;
+;; Moved here from the now-deleted overlay.el, which otherwise existed
+;; only for the vterm hide-overlay / font-scale / color-advice machinery.
+;; These two survive because `agent-repl-input-mode' (input.el) calls
+;; `agent-repl--set-buffer-background' to tint the input composer.
+
+(defun agent-repl--grey-hex (n)
+  "Return a hex color string for greyscale value N (0=black, 255=white)."
+  (format "#%02x%02x%02x" n n n))
+
+(defun agent-repl--set-buffer-background (grey-level)
+  "Set default and fringe background to greyscale GREY-LEVEL in current buffer."
+  (let ((hex (agent-repl--grey-hex grey-level)))
+    (face-remap-add-relative 'default :background hex)
+    (face-remap-add-relative 'fringe :background hex)))
+
 ;;; Harness-injected (meta) prompt spans
 ;;
 ;; Every prompt agent-repl sends carries text the USER never typed: the
@@ -1070,9 +1074,8 @@ BUFFERS may be buffer objects or name strings."
 ;; So each injected span is bracketed with inert HTML-comment markers at
 ;; the point it is composed.  The markers are the ONE source of truth for
 ;; "this text is harness-injected": the gui frontend (webapp) hides marked
-;; spans from the user-turn bubble, and the vterm frontend strips the
-;; markers (keeping their text) before pasting into the terminal, so the
-;; TUI echo reads exactly as it did before markers existed.
+;; spans from the user-turn bubble so the human only ever sees their own
+;; words.
 
 (defconst agent-repl--meta-open "<!--agent-repl:meta-->"
   "Opening marker bracketing a harness-injected span of a sent prompt.
@@ -1089,41 +1092,10 @@ TEXT reaches the agent verbatim; the markers only tell a frontend that
 the span was injected rather than typed by the user."
   (concat agent-repl--meta-open text agent-repl--meta-close))
 
-(defun agent-repl--meta-unmark (text)
-  "Remove every meta marker from TEXT, keeping the text they bracket.
-The vterm frontend's terminal echo shows the prompt raw, so the markers
-(meaningless to a human) are dropped there while the injected spans they
-bracket stay, exactly as the agent must receive them."
-  (replace-regexp-in-string
-   (regexp-opt (list agent-repl--meta-open agent-repl--meta-close))
-   "" text t t))
-
-;;; Workspace and vterm helpers
+;;; Workspace helpers
 
 (defun agent-repl--current-ws-p (ws)
   "Return non-nil when WS is the currently active workspace name."
   (string= ws (agent-repl--ws-current-name)))
-
-(defun agent-repl--current-ws-live-vterm ()
-  "Return the live vterm buffer for the current workspace, or nil.
-Looks up :vterm-buffer in the current workspace state and returns it only if
-the buffer object is still live."
-  (let* ((ws (agent-repl--ws-current-name))
-         (buf (agent-repl--ws-get ws :vterm-buffer))
-         (live (and buf (buffer-live-p buf))))
-    (agent-repl--log-verbose ws "current-ws-live-vterm: buf=%s live=%s" buf live)
-    (when live buf)))
-
-(defun agent-repl--vterm-live-p ()
-  "Return non-nil if the agent vterm buffer for the current workspace exists and is live."
-  (not (null (agent-repl--current-ws-live-vterm))))
-
-(defmacro agent-repl--with-vterm-buf (&rest body)
-  "Execute BODY with `vterm-buf' bound to the current workspace's live vterm buffer.
-If the vterm buffer does not exist or is dead, BODY is not executed and the
-form returns nil."
-  (declare (indent 0) (debug body))
-  `(when-let ((vterm-buf (agent-repl--current-ws-live-vterm)))
-     ,@body))
 
 

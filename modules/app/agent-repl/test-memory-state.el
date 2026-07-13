@@ -134,8 +134,8 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
   (let ((buf (get-buffer-create " *memstate-render-buf*")))
     (unwind-protect
         (let ((out (agent-repl--memory-state-render
-                    "ws1" `(:vterm-buffer ,buf))))
-          (should (equal (plist-get out :vterm-buffer)
+                    "ws1" `(:frontend-buffer ,buf))))
+          (should (equal (plist-get out :frontend-buffer)
                          (format "#<buffer %s live>" (buffer-name buf)))))
       (kill-buffer buf))))
 
