@@ -74,7 +74,8 @@
 
 (cl-defstruct agent-repl-instantiation
   "Per-environment session state for a Agent REPL workspace.
-Each workspace has one instantiation for :sandbox and one for :bare-metal."
+Each workspace has one instantiation per `agent-repl--environment-keys'
+environment, which today means one for :bare-metal."
   session-id    ; Claude Code session ID, captured from the `session_start' hook payload via `agent-repl--update-session-id-from-sentinel'
   start-cmd)    ; last startup command (for logging/display)
 
@@ -93,11 +94,12 @@ Each workspace has one instantiation for :sandbox and one for :bare-metal."
 Keys: :vterm-buffer :input-buffer
       :prefix-counter :agent-state :repl-state
       :git-clean :git-proc :worktree-p :project-dir
-      :active-env :sandbox :bare-metal :fork-session-id
+      :active-env :bare-metal :fork-session-id
       :ready-timer :priority
       :pending-prompts :pending-show-panels :deferred-prompts
-:active-env is :sandbox or :bare-metal; :sandbox and :bare-metal are
-`agent-repl-instantiation' structs holding per-environment session state.")
+:active-env names the workspace's environment (`:bare-metal'), and
+:bare-metal is an `agent-repl-instantiation' struct holding that
+environment's session state.")
 
 (defvar agent-repl--workspace-history nil
   "Workspace names ordered by most-recently-visited first.
@@ -168,7 +170,7 @@ debug logging on."
 (defconst agent-repl--ws-runtime-keys
   '(:agent-state :repl-state :vterm-buffer :input-buffer :vterm-status
     :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
-    :fork-session-id :fullscreen-config :active-env :sandbox :bare-metal
+    :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
     :frontend-buffer :frontend-buffer-session-id)

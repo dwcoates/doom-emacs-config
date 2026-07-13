@@ -4,9 +4,16 @@
 
 ;;;; Constants
 
-(defconst agent-repl--environment-keys '(:bare-metal :sandbox)
+(defconst agent-repl--environment-keys '(:bare-metal)
   "List of per-workspace environment keys.
-Each workspace has one `agent-repl-instantiation' struct per environment.")
+Each workspace has one `agent-repl-instantiation' struct per environment.
+
+The `:sandbox' environment was retired: it never actually sandboxed
+anything (`agent-repl--build-start-cmd' always returned a hardcoded
+`:sandboxed-p nil'), so it was a label rather than a container, and it
+survives only as the migration in `agent-repl--migrate-saved-state'.
+The axis is kept — rather than collapsed away — because it is still the
+seam a real containerized environment would land on.")
 
 ;; These are defconsts (not defcustoms) so they update on every load — a
 ;; defcustom does NOT reset already-bound values, which leaves a running
@@ -99,6 +106,48 @@ Returns a fresh empty instantiation when SAVED is nil."
          :session-id (plist-get saved :session-id)))
     (agent-repl--log nil "make-instantiation-from-plist: nil saved, creating empty")
     (make-agent-repl-instantiation)))
+
+;;;; State migration
+
+(defun agent-repl--migrate-saved-state (saved)
+  "Return the SAVED state plist with retired values migrated forward.
+Returns SAVED untouched when it is nil or carries neither retired value.
+Never mutates SAVED.
+
+Two persisted values were retired, and each one HARD-ERRORS on hydration
+if it survives into the current schema:
+
+`:active-env :sandbox' — the environment axis collapsed to `:bare-metal'
+alone (`agent-repl--environment-keys'), so a saved `:sandbox' fails
+`agent-repl--validate-ws-env'.  Relabeling it is NOT sufficient: the
+workspace's claude session id lives in its `:sandbox' instantiation while
+`:bare-metal' sits empty beside it, so the `:sandbox' instantiation is
+PROMOTED into `:bare-metal' rather than dropped.  Relabeling without
+promoting would strand every sandbox-era conversation on a nil session id,
+silently destroying the one thing the state file exists to protect.
+
+Promoting is sound because `:sandbox' never actually sandboxed anything:
+`agent-repl--build-start-cmd' always returned a hardcoded `:sandboxed-p
+nil' and `agent-repl--assemble-cmd' always launched plain `claude', so the
+promoted session is the same host session it has been all along.
+
+`:frontend vterm' — the vterm frontend is no longer registered, and
+`agent-repl-frontend-get' signals on an unregistered name.  Dropping the
+key (and its `:frontend-explicit' marker) lets the workspace re-resolve
+through `agent-repl-default-frontend'."
+  (if (null saved)
+      saved
+    (let ((out (copy-sequence saved)))
+      (when (eq (plist-get out :active-env) :sandbox)
+        (agent-repl--log nil "migrate-saved-state: :active-env :sandbox -> :bare-metal, promoting instantiation session-id=%s"
+                         (plist-get (plist-get out :sandbox) :session-id))
+        (setq out (plist-put out :bare-metal (plist-get out :sandbox)))
+        (setq out (plist-put out :active-env :bare-metal)))
+      (when (eq (plist-get out :frontend) 'vterm)
+        (agent-repl--log nil "migrate-saved-state: dropping retired :frontend vterm")
+        (setq out (plist-put out :frontend nil))
+        (setq out (plist-put out :frontend-explicit nil)))
+      out)))
 
 ;;;; Persistence file paths
 

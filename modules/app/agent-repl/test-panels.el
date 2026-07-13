@@ -1520,85 +1520,6 @@ whole layout (which would duplicate the already-visible output window)."
         (should focused)
         (should-not shown-hidden)))))
 
-;;;; ---- Tests: validate-env-switch ----
-;;
-;; Environment switching is vterm machinery, so every case below pins
-;; the workspace to the vterm frontend: without the pin the workspace
-;; rides `agent-repl-default-frontend' (the gui), and the gui guard
-;; would be the thing that errors — passing these tests for a reason
-;; that has nothing to do with the precondition each one is about.
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-no-worktree ()
-  "validate-env-switch errors when not a worktree workspace."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (should-error
-     (agent-repl--validate-env-switch "test-ws" :sandbox nil "session-123")
-     :type 'user-error)))
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-no-session-id ()
-  "validate-env-switch errors when no session ID is available."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (should-error
-     (agent-repl--validate-env-switch "test-ws" :sandbox t nil)
-     :type 'user-error)))
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-thinking ()
-  "validate-env-switch errors when the agent is thinking."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (agent-repl--ws-put "test-ws" :thinking t)
-    (should-error
-     (agent-repl--validate-env-switch "test-ws" :sandbox t "session-123")
-     :type 'user-error)))
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-no-sandbox-config ()
-  "validate-env-switch errors when switching to sandbox with no config."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (cl-letf (((symbol-function 'agent-repl--resolve-sandbox-config) (lambda (_) nil))
-              ((symbol-function 'agent-repl--git-root) (lambda (_) "/tmp")))
-      (should-error
-       (agent-repl--validate-env-switch "test-ws" :sandbox t "session-123")
-       :type 'user-error))))
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-gui-frontend ()
-  "validate-env-switch refuses a gui workspace: env switching is vterm-only."
-  (agent-repl-test--with-clean-state
-    ;; Arrange — a gui workspace that satisfies every OTHER precondition.
-    (agent-repl--ws-put "test-ws" :frontend 'gui)
-    ;; Act / Assert
-    (should-error
-     (agent-repl--validate-env-switch "test-ws" :bare-metal t "session-123")
-     :type 'user-error)))
-
-(ert-deftest agent-repl-test-panels-validate-env-switch-bare-metal-ok ()
-  "validate-env-switch succeeds for bare-metal switch with valid args."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    ;; Should not error
-    (agent-repl--validate-env-switch "test-ws" :bare-metal t "session-123")))
-
-;;;; ---- Tests: seed-new-env-session ----
-
-(ert-deftest agent-repl-test-panels-seed-new-env-creates-inst ()
-  "seed-new-env-session creates an instantiation and copies session-id."
-  (agent-repl-test--with-clean-state
-    (agent-repl--seed-new-env-session "test-ws" :sandbox "sess-abc")
-    (let ((inst (agent-repl--ws-get "test-ws" :sandbox)))
-      (should inst)
-      (should (equal (agent-repl-instantiation-session-id inst) "sess-abc")))))
-
-(ert-deftest agent-repl-test-panels-seed-new-env-does-not-overwrite ()
-  "seed-new-env-session does not overwrite an existing session-id."
-  (agent-repl-test--with-clean-state
-    (let ((existing (make-agent-repl-instantiation :session-id "existing-id")))
-      (agent-repl--ws-put "test-ws" :sandbox existing)
-      (agent-repl--seed-new-env-session "test-ws" :sandbox "new-id")
-      (let ((inst (agent-repl--ws-get "test-ws" :sandbox)))
-        (should (equal (agent-repl-instantiation-session-id inst) "existing-id"))))))
-
 ;;;; ---- Tests: kill-vterm-process ----
 
 (ert-deftest agent-repl-test-panels-kill-vterm-process-nil ()
@@ -3133,19 +3054,6 @@ into this persp, and nuking it would wipe that workspace's running session."
       (dolist (b (list b1 b2 b3))
         (when (buffer-live-p b) (kill-buffer b))))))
 
-;;;; ---- Tests: seed-new-env-session existing inst without session-id ----
-
-(ert-deftest agent-repl-test-panels-seed-new-env-existing-no-session-id ()
-  "seed-new-env-session seeds an existing instantiation that has no session-id."
-  (agent-repl-test--with-clean-state
-    (let ((existing (make-agent-repl-instantiation)))
-      ;; existing has nil session-id
-      (agent-repl--ws-put "test-ws" :sandbox existing)
-      (agent-repl--seed-new-env-session "test-ws" :sandbox "new-sess-id")
-      (let ((inst (agent-repl--ws-get "test-ws" :sandbox)))
-        ;; Should have been seeded since there was no existing session-id
-        (should (equal (agent-repl-instantiation-session-id inst) "new-sess-id"))))))
-
 ;;;; ---- Tests: show-existing-panels no workspace ----
 
 (ert-deftest agent-repl-test-panels-show-existing-panels-no-workspace ()
@@ -3186,8 +3094,6 @@ from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
               (lambda (_ws &optional _s) ,vterm-buf-var))
              ((symbol-function 'agent-repl--build-start-cmd)
               (lambda (_ws) (list :cmd "claude"
-                                  :sandboxed-p nil
-                                  :docker-image nil
                                   :session-id nil
                                   :fork-session-id nil
                                   :worktree-p nil
@@ -3289,14 +3195,16 @@ wait for ready."
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 (ert-deftest agent-repl-test-panels-initialize-agent-build-error-creates-no-buffer ()
-  "A build-start-cmd abort (e.g. sandbox image not built) happens before any
-buffer is created, so no orphan panel buffer is left behind."
+  "A build-start-cmd abort (e.g. the project dir is not inside a git
+repository, which `--compute-perm-flag' signals through `--git-root')
+happens before any buffer is created, so no orphan panel buffer is left
+behind."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :active-env :bare-metal)
     (let ((created nil))
       (agent-repl-test--initialize-agent-stubs nil
         (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
-                   (lambda (_ws) (user-error "Sandbox image not built")))
+                   (lambda (_ws) (user-error "agent-repl: /tmp is not inside a git repository")))
                   ((symbol-function 'agent-repl--create-buffer)
                    (lambda (_ws &optional _s) (setq created t) nil)))
           (should-error (agent-repl--initialize-agent) :type 'user-error)
@@ -3370,19 +3278,17 @@ buffer is created, so no orphan panel buffer is left behind."
 (ert-deftest agent-repl-test-panels-initialize-agent-sets-workspace-mode-line ()
   "initialize-agent sets mode-line-format via workspace-mode-line, passing ws."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :sandbox)
+    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
     (let ((vterm-buf (generate-new-buffer " *init-agent-ml*"))
           (mode-line-ws :unset))
       (unwind-protect
           (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
-                       (lambda (_ws) (list :cmd "claude-sandbox"
-                                           :sandboxed-p t
-                                           :docker-image "img:latest"
+                       (lambda (_ws) (list :cmd "claude"
                                            :session-id nil
                                            :fork-session-id nil
                                            :worktree-p t
-                                           :active-env :sandbox
+                                           :active-env :bare-metal
                                            :inst (make-agent-repl-instantiation))))
                       ((symbol-function 'agent-repl--workspace-mode-line)
                        (lambda (ws) (setq mode-line-ws ws) '("WS-ML"))))
@@ -3402,8 +3308,6 @@ buffer is created, so no orphan panel buffer is left behind."
           (agent-repl-test--initialize-agent-stubs vterm-buf
             (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
                        (lambda (_ws) (list :cmd "claude"
-                                           :sandboxed-p nil
-                                           :docker-image nil
                                            :session-id nil
                                            :fork-session-id "fork-abc"
                                            :worktree-p nil
@@ -3441,9 +3345,9 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
                        (lambda (_ws &optional dir env)
                          (setq got-hint dir)
                          (setq got-env env))))
-              (agent-repl--initialize-agent "test-ws" "/tmp/worktree" :sandbox)
+              (agent-repl--initialize-agent "test-ws" "/tmp/worktree" :bare-metal)
               (should (equal got-hint "/tmp/worktree"))
-              (should (eq got-env :sandbox))))
+              (should (eq got-env :bare-metal))))
         (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
 
 (ert-deftest agent-repl-test-panels-initialize-agent-persists-state-on-success ()
@@ -4997,11 +4901,14 @@ needs a separate enter-fullscreen step."
 
 ;;;; ---- Tests: vterm frontend registration ----
 
-(ert-deftest agent-repl-test-panels-vterm-declares-both-environments ()
-  "The vterm frontend declares both environments: it is the only sandbox-capable one."
+(ert-deftest agent-repl-test-panels-vterm-declares-bare-metal-only ()
+  "The vterm frontend declares `:bare-metal' alone.
+The `:sandbox' environment was retired (it never sandboxed anything —
+`agent-repl--build-start-cmd' always returned `:sandboxed-p nil'), so the
+environment axis collapsed to a single value and no frontend declares more."
   ;; Act / Assert
   (should (equal (agent-repl-frontend-supported-envs (agent-repl-frontend-get 'vterm))
-                 '(:bare-metal :sandbox))))
+                 '(:bare-metal))))
 
 (ert-deftest agent-repl-test-panels-vterm-boot-threads-the-creation-hints ()
   "The vterm boot capability passes the project-dir and env hints to initialize-agent."
@@ -5012,8 +4919,8 @@ needs a separate enter-fullscreen step."
                  (lambda (ws &optional dir env) (setq got (list ws dir env)))))
         ;; Act
         (funcall (agent-repl-frontend-boot-fn (agent-repl-frontend-get 'vterm))
-                 "ws1" "/tmp/wt" :sandbox)
+                 "ws1" "/tmp/wt" :bare-metal)
         ;; Assert
-        (should (equal got '("ws1" "/tmp/wt" :sandbox)))))))
+        (should (equal got '("ws1" "/tmp/wt" :bare-metal)))))))
 
 ;;; test-panels.el ends here

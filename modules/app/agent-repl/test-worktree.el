@@ -2022,7 +2022,7 @@ silently return a colliding name."
       (should (equal "DWC/clean" (nth 1 scheduled-args))))))
 
 (ert-deftest agent-repl-test-handle-create-command-forwards-model-from-json ()
-  "A `model' field in the create JSON is scheduled as the 8th timer arg."
+  "A `model' field in the create JSON is scheduled as the 7th timer arg."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
         (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
         (agent-repl-worktree-start-tag-prefix nil)
@@ -2035,8 +2035,8 @@ silently return a colliding name."
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/mdl") (git_root . "/tmp/repo") (model . "sonnet"))
        0)
-      ;; Args are (git-root name prompt priority fork-session-id base-commit force-sandbox model)
-      (should (equal "sonnet" (nth 7 scheduled-args))))))
+      ;; Args are (git-root name prompt priority fork-session-id base-commit model)
+      (should (equal "sonnet" (nth 6 scheduled-args))))))
 
 (ert-deftest agent-repl-test-handle-create-command-model-nil-when-absent ()
   "When the create JSON omits `model', the scheduled model arg is nil."
@@ -2052,7 +2052,7 @@ silently return a colliding name."
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/nomdl") (git_root . "/tmp/repo"))
        0)
-      (should (null (nth 7 scheduled-args))))))
+      (should (null (nth 6 scheduled-args))))))
 
 (ert-deftest agent-repl-test-handle-create-command-model-nil-when-empty-string ()
   "An empty-string `model' field is normalized to nil (falls back to default)."
@@ -2068,7 +2068,7 @@ silently return a colliding name."
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/emptymdl") (git_root . "/tmp/repo") (model . ""))
        0)
-      (should (null (nth 7 scheduled-args))))))
+      (should (null (nth 6 scheduled-args))))))
 
 (ert-deftest agent-repl-test-handle-create-command-disambiguates-collision ()
   "When the desired name collides (existing branch), the timer is scheduled with a suffixed name."
@@ -2143,37 +2143,37 @@ silently return a colliding name."
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id bare-metal _cb &optional source-dir no-agent model)
-                 (setq finalized (list path dirname prompt priority fork-id bare-metal source-dir no-agent model)))))
+               (lambda (path dirname prompt priority fork-id _cb &optional source-dir no-agent model)
+                 (setq finalized (list path dirname prompt priority fork-id source-dir no-agent model)))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil nil "/src/dir" nil "sonnet" t "ok")
-      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet"))))))
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet" t "ok")
+      (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" "/src/dir" nil "sonnet"))))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-no-agent ()
   "NO-AGENT is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src no-agent _model)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src no-agent _model)
                  (setq captured no-agent))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" t nil t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" t nil t "ok")
       (should (eq captured t)))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-model ()
   "MODEL is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _bm _cb &optional _src _no-agent model)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent model)
                  (setq captured model))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil "/src/dir" nil "haiku" t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil "haiku" t "ok")
       (should (equal captured "haiku")))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
@@ -5105,21 +5105,10 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model)
+                 (lambda (_name _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-from-command-forwards-force-sandbox ()
-  "FORCE-SANDBOX from the JSON command flows through to
-`agent-repl--do-create-worktree-workspace' as the second positional arg."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name force-sandbox &rest _)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5 nil nil t)
-        (should captured-force-sandbox)))))
 
 (ert-deftest agent-repl-test-create-worktree-from-command-forwards-model ()
   "MODEL flows through to `agent-repl--do-create-worktree-workspace' as the
@@ -5127,10 +5116,10 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command
-         "/tmp/repo/" "name" "prompt" 5 nil nil nil "opus")
+         "/tmp/repo/" "name" "prompt" 5 nil nil "opus")
         (should (equal captured-model "opus"))))))
 
 (ert-deftest agent-repl-test-create-worktree-from-command-passes-nil-model-when-absent ()
@@ -5139,21 +5128,10 @@ receives nil so the session uses the interactive-model default."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fs _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
         (should (null captured-model))))))
-
-(ert-deftest agent-repl-test-create-worktree-from-command-passes-nil-force-sandbox-when-absent ()
-  "When FORCE-SANDBOX is not supplied, `agent-repl--do-create-worktree-workspace'
-receives nil so the workspace uses bare-metal by default."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name force-sandbox &rest _)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
-        (should (null captured-force-sandbox))))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-stores-source-ws-dir ()
   "Finalize persists :source-ws-dir on the new workspace's plist."
@@ -5166,7 +5144,7 @@ receives nil so the workspace uses bare-metal by default."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/")
+       "/tmp/new-wt" "new-ws" nil nil nil nil "/tmp/source-repo/")
       (should (equal (agent-repl--ws-get "new-ws" :source-ws-dir)
                      "/tmp/source-repo/")))))
 
@@ -5181,7 +5159,7 @@ receives nil so the workspace uses bare-metal by default."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil)
       (should (null (agent-repl--ws-get "new-ws" :source-ws-dir))))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-stores-model ()
@@ -5195,7 +5173,7 @@ receives nil so the workspace uses bare-metal by default."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil "sonnet")
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil "sonnet")
       (should (equal (agent-repl--ws-get "new-ws" :model) "sonnet")))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-omits-model-when-nil ()
@@ -5209,7 +5187,7 @@ receives nil so the workspace uses bare-metal by default."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil nil)
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil nil)
       (should (null (agent-repl--ws-get "new-ws" :model))))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-forwards-no-agent ()
@@ -5220,12 +5198,12 @@ receives nil so the workspace uses bare-metal by default."
                  (lambda (&rest _) nil))
                 ((symbol-function '+workspace-new) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--setup-worktree-session)
-                 (lambda (_ws-id _path _ws _force-sandbox &optional no-agent)
+                 (lambda (_ws-id _path _ws &optional no-agent)
                    (setq captured no-agent)))
                 ((symbol-function 'agent-repl--path-canonical) #'identity)
                 ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source-repo/" t)
+         "/tmp/new-wt" "new-ws" nil nil nil nil "/tmp/source-repo/" t)
         (should (eq captured t))))))
 
 ;;;; ---- Tests: setup-worktree-session no-agent branch ----
@@ -5236,8 +5214,8 @@ receives nil so the workspace uses bare-metal by default."
 Stubs the env hydration faithfully — the real
 `agent-repl--initialize-ws-env' is the sole writer of `:active-env',
 and `agent-repl--frontend-boot-session' RESOLVES THE FRONTEND against
-that value, so a stub that dropped it would hand every test a
-bare-metal workspace and quietly defeat the sandbox cases.
+that value, so a stub that dropped it would leave every test's
+workspace with no resolvable frontend.
 
 BINDINGS are extra `cl-letf' bindings and are spliced in FIRST, ahead
 of the defaults: when one `cl-letf' binds the same place twice, the
@@ -5270,7 +5248,7 @@ override must precede the default it replaces."
          ((symbol-function 'agent-repl--initialize-agent)
           (lambda (&rest _) (setq vterm-booted t))))
       ;; Act
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws")
       ;; Assert — the generated workspace is born in the gui, not the vterm.
       (should (equal gui-booted "ws"))
       (should-not vterm-booted))))
@@ -5287,39 +5265,21 @@ override must precede the default it replaces."
           (lambda (&rest _) (setq gui-booted t))))
       (agent-repl--ws-choose-frontend "ws" 'vterm)
       ;; Act
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
-      ;; Assert
-      (should (equal vterm-booted "ws"))
-      (should-not gui-booted))))
-
-(ert-deftest agent-repl-test-setup-worktree-session-force-sandbox-boots-vterm ()
-  "A force-sandbox worktree boots the vterm even though the gui is the default.
-The gui daemon spawns the agent on the host, so presenting a sandboxed
-workspace through it would run it outside the container it asked for."
-  ;; Arrange
-  (let ((vterm-booted nil)
-        (gui-booted nil))
-    (agent-repl-test--with-worktree-boot-stubs
-        (((symbol-function 'agent-repl--initialize-agent)
-          (lambda (ws &rest _) (setq vterm-booted ws)))
-         ((symbol-function 'agent-repl--gui-boot)
-          (lambda (&rest _) (setq gui-booted t))))
-      ;; Act — force-sandbox = t.
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws")
       ;; Assert
       (should (equal vterm-booted "ws"))
       (should-not gui-booted))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-does-not-escape ()
-  "A boot failure (e.g. sandbox image not built) is caught,
+  "A boot failure (e.g. the agent binary is missing) is caught,
 so it cannot escape and crash the `--async-git-sentinel' that calls this."
   (agent-repl-test--with-worktree-boot-stubs
       (((symbol-function 'agent-repl--gui-boot)
-        (lambda (&rest _) (user-error "Sandbox image not built")))
+        (lambda (&rest _) (user-error "Agent binary not found")))
        ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
        ((symbol-function 'message) (lambda (&rest _) nil)))
     ;; Returns normally rather than signaling.
-    (should (progn (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil) t))))
+    (should (progn (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws") t))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-marks-start-failed ()
   "A caught boot failure sets :agent-state :start-failed so
@@ -5327,11 +5287,11 @@ the tab/drawer surface the failure instead of it vanishing silently."
   (let ((recorded nil))
     (agent-repl-test--with-worktree-boot-stubs
         (((symbol-function 'agent-repl--gui-boot)
-          (lambda (&rest _) (user-error "Sandbox image not built")))
+          (lambda (&rest _) (user-error "Agent binary not found")))
          ((symbol-function 'agent-repl--ws-set-agent-state)
           (lambda (ws state) (setq recorded (cons ws state))))
          ((symbol-function 'message) (lambda (&rest _) nil)))
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil)
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws")
       (should (equal recorded '("ws" . :start-failed))))))
 
 (ert-deftest agent-repl-test-mark-start-failed-sets-start-failed-state ()
@@ -5353,7 +5313,7 @@ the tab/drawer surface the failure instead of it vanishing silently."
                (lambda (&rest _) (setq init-agent-called t)))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) (setq init-env-called t))))
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil t)
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
       (should-not init-agent-called)
       (should init-env-called))))
 
@@ -5366,7 +5326,7 @@ the tab/drawer surface the failure instead of it vanishing silently."
                (lambda (&rest _) (error "should not boot Claude")))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) nil)))
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" nil t)
+      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
       (should registered))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-calls-reorder-by-priority ()
@@ -5387,7 +5347,7 @@ Reorder must run after `apply-workspace-properties' so the new workspace's
                    (setq reorder-called-with
                          (cons ws (agent-repl--ws-get ws :priority))))))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/new-wt" "new-ws" nil "p1" nil nil nil nil)
+         "/tmp/new-wt" "new-ws" nil "p1" nil nil nil)
         (should (equal reorder-called-with '("new-ws" . "p1")))))))
 
 (ert-deftest agent-repl-test-finalize-tags-workspace-project ()
@@ -5410,7 +5370,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+         "/tmp/new-wt" "new-ws" nil nil nil nil nil)
         (should (equal param-call
                        '(+workspace-project "/canonical/new-wt" a-persp)))))))
 
@@ -5468,7 +5428,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+       "/tmp/new-wt" "child-ws" nil nil nil nil "/tmp/parent/")
       (should (equal (agent-repl--ws-get "child-ws" :priority) "p1")))))
 
 (ert-deftest agent-repl-test-finalize-child-explicit-priority-wins ()
@@ -5486,7 +5446,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil "p3" nil nil nil "/tmp/parent/")
+       "/tmp/new-wt" "child-ws" nil "p3" nil nil "/tmp/parent/")
       (should (equal (agent-repl--ws-get "child-ws" :priority) "p3")))))
 
 (ert-deftest agent-repl-test-finalize-no-parent-priority-stays-nil ()
@@ -5505,7 +5465,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+       "/tmp/new-wt" "child-ws" nil nil nil nil "/tmp/parent/")
       (should-not (agent-repl--ws-get "child-ws" :priority)))))
 
 ;;;; ---- Tests: finalize-worktree-workspace falls back to repo-default priority ----
@@ -5527,7 +5487,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+       "/tmp/new-wt" "child-ws" nil nil nil nil "/tmp/parent/")
       (should (equal (agent-repl--ws-get "child-ws" :priority) "p3")))))
 
 (ert-deftest agent-repl-test-finalize-explicit-priority-wins-over-repo-default ()
@@ -5545,7 +5505,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil "p1" nil nil nil nil)
+       "/tmp/new-wt" "child-ws" nil "p1" nil nil nil)
       (should (equal (agent-repl--ws-get "child-ws" :priority) "p1")))))
 
 (ert-deftest agent-repl-test-finalize-parent-priority-wins-over-repo-default ()
@@ -5565,7 +5525,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
               ((symbol-function 'agent-repl--path-canonical) #'identity)
               ((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "")))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "child-ws" nil nil nil nil nil "/tmp/parent/")
+       "/tmp/new-wt" "child-ws" nil nil nil nil "/tmp/parent/")
       (should (equal (agent-repl--ws-get "child-ws" :priority) "p2")))))
 
 ;;;; ---- Tests: new-workspace applies repo-default priority ----
@@ -5662,8 +5622,8 @@ from `default-directory' via `agent-repl--git-root'."
 
 ;;;; ---- Tests: setup-worktree-session ----
 
-(ert-deftest agent-repl-test-setup-worktree-session-passes-sandbox-hint-when-forced ()
-  "When force-sandbox is t, the env hydration receives :sandbox as the env hint."
+(ert-deftest agent-repl-test-setup-worktree-session-passes-bare-metal-hint ()
+  "A worktree session's env hydration always receives :bare-metal as the env hint."
   ;; Arrange
   (let ((captured-env nil))
     (agent-repl-test--with-worktree-boot-stubs
@@ -5672,21 +5632,7 @@ from `default-directory' via `agent-repl--git-root'."
             (setq captured-env env)
             (agent-repl--ws-put ws :active-env env))))
       ;; Act
-      (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" t)
-      ;; Assert
-      (should (eq captured-env :sandbox)))))
-
-(ert-deftest agent-repl-test-setup-worktree-session-passes-bare-metal-hint-by-default ()
-  "When force-sandbox is nil, the env hydration receives :bare-metal as the env hint."
-  ;; Arrange
-  (let ((captured-env nil))
-    (agent-repl-test--with-worktree-boot-stubs
-        (((symbol-function 'agent-repl--initialize-ws-env)
-          (lambda (ws &optional _dir env)
-            (setq captured-env env)
-            (agent-repl--ws-put ws :active-env env))))
-      ;; Act
-      (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1" nil)
+      (agent-repl--setup-worktree-session "abc123" "/tmp/path" "ws1")
       ;; Assert
       (should (eq captured-env :bare-metal)))))
 
@@ -5700,7 +5646,7 @@ from `default-directory' via `agent-repl--git-root'."
             (setq captured-dir-hint dir)
             (agent-repl--ws-put ws :active-env (or env :bare-metal)))))
       ;; Act
-      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1")
       ;; Assert
       (should (equal captured-dir-hint "/tmp/my-worktree")))))
 
@@ -5712,7 +5658,7 @@ from `default-directory' via `agent-repl--git-root'."
         (((symbol-function 'agent-repl--gui-boot)
           (lambda (_ws &optional dir _env) (setq captured-dir-hint dir))))
       ;; Act
-      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1")
       ;; Assert
       (should (equal captured-dir-hint "/tmp/my-worktree")))))
 
@@ -5724,7 +5670,7 @@ from `default-directory' via `agent-repl--git-root'."
         (((symbol-function 'agent-repl--gui-boot)
           (lambda (&rest _) (setq captured-dir default-directory))))
       ;; Act
-      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1" nil)
+      (agent-repl--setup-worktree-session "abc123" "/tmp/my-worktree" "ws1")
       ;; Assert
       (should (equal captured-dir "/tmp/my-worktree/")))))
 
@@ -6019,42 +5965,9 @@ from `default-directory' via `agent-repl--git-root'."
         (agent-repl--handle-create-command
          '((type . "create") (name . "DWC/new-ws") (git_root . "/explicit/root"))
          0)
-        ;; captured-args = (git-root name prompt priority fork-session-id)
+        ;; captured-args = (git-root name prompt priority fork-session-id base-commit model)
         (should (equal (nth 0 captured-args) "/explicit/root/"))
-        (should (equal resolve-calls 0)))))
-
-(ert-deftest agent-repl-test-handle-create-command-passes-force-sandbox-true ()
-  "handle-create-command with force_sandbox: true in cmd forwards it as the
-last positional arg to `agent-repl--create-worktree-from-command'."
-  (agent-repl-test--with-clean-state
-    (let ((captured-args nil))
-      (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat _fn &rest args)
-                   (setq captured-args args))))
-        (agent-repl--handle-create-command
-         '((type . "create") (name . "DWC/new-ws")
-           (git_root . "/fake/root") (force_sandbox . t))
-         0)
-        ;; captured-args = (git-root name prompt priority fork-session-id base-commit force-sandbox)
-        (should (nth 6 captured-args))))))
-
-(ert-deftest agent-repl-test-handle-create-command-passes-force-sandbox-nil-when-absent ()
-  "handle-create-command with no force_sandbox field passes nil so the
-workspace defaults to bare-metal."
-  (agent-repl-test--with-clean-state
-    (let ((captured-args nil))
-      (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat _fn &rest args)
-                   (setq captured-args args))))
-        (agent-repl--handle-create-command
-         '((type . "create") (name . "DWC/new-ws") (git_root . "/fake/root"))
-         0)
-        ;; captured-args = (git-root name prompt priority fork-session-id base-commit force-sandbox)
-        (should (null (nth 6 captured-args))))))))
+        (should (equal resolve-calls 0))))))
 
 (ert-deftest agent-repl-test-handle-create-command-expands-tilde-in-git-root ()
   "handle-create-command should expand `~' in an explicit git_root before dispatch."
@@ -6226,7 +6139,7 @@ timer callback — letting the workspace-generation flow request HEAD without fo
   (agent-repl-test--with-clean-state
     (let ((captured-base :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority base &rest _)
+                 (lambda (_name _fork _prompt _cb _priority base &rest _)
                    (setq captured-base base))))
         (agent-repl--create-worktree-from-command
          "/tmp/cmd-repo/" "name" "prompt" 5 nil "HEAD")
@@ -6237,7 +6150,7 @@ timer callback — letting the workspace-generation flow request HEAD without fo
   (agent-repl-test--with-clean-state
     (let ((captured-base :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority base &rest _)
+                 (lambda (_name _fork _prompt _cb _priority base &rest _)
                    (setq captured-base base))))
         (agent-repl--create-worktree-from-command
          "/tmp/cmd-repo/" "name" "prompt" 5 nil nil)
@@ -6257,7 +6170,7 @@ nests it under a parent that shares no commits with it."
                    (setq master-lookup-root root)
                    "/tmp/master/"))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
@@ -6276,7 +6189,7 @@ correct outcome since `SPC TAB N' branches off master, not the caller."
       (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
                  (lambda (_root) nil))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "master")
@@ -6294,7 +6207,7 @@ the calling workspace, captured as GIT-ROOT at enqueue time."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "HEAD")
@@ -6313,7 +6226,7 @@ the master special case only kicks in for an explicit `master' value."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil nil)
@@ -6334,7 +6247,7 @@ default path so the parent is the originating workspace."
                    (setq master-path-called t)
                    "/tmp/master/"))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "origin/master")
@@ -6354,7 +6267,7 @@ triggers the master-worktree lookup."
                    (setq master-path-called t)
                    "/tmp/trunk/"))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _bare _fork _prompt _cb _priority _base _git source-dir &rest _)
+                 (lambda (_name _fork _prompt _cb _priority _base _git source-dir &rest _)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command
          "/tmp/calling-ws/" "name" "prompt" 5 nil "trunk")
@@ -6483,20 +6396,6 @@ when `dolist' iterated the alist's cons cells."
   (let ((out (agent-repl--workspace-generation-prompt
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
     (should (string-match-p "MUST be an array" out))))
-
-(ert-deftest agent-repl-test-workspace-generation-prompt-emits-force-sandbox-when-set ()
-  "When FORCE-SANDBOX is non-nil the prompt instructs the model to emit
-`\"force_sandbox\": true' so the spawned workspace runs in the sandbox."
-  (let ((out (agent-repl--workspace-generation-prompt
-              "raw" "prefixed" "/tmp/repo/" "HEAD" nil t)))
-    (should (string-match-p "\"force_sandbox\": true" out))))
-
-(ert-deftest agent-repl-test-workspace-generation-prompt-omits-force-sandbox-when-nil ()
-  "When FORCE-SANDBOX is nil the prompt does not mention force_sandbox
-at all — no false field emitted for non-sandboxed repos."
-  (let ((out (agent-repl--workspace-generation-prompt
-              "raw" "prefixed" "/tmp/repo/" "HEAD" nil nil)))
-    (should-not (string-match-p "force_sandbox" out))))
 
 (ert-deftest agent-repl-test-workspace-generation-prompt-slug-uses-prefix-when-set ()
   "The slug instruction includes the `<prefix>/' form when
@@ -6961,7 +6860,7 @@ not auto-booted) instead of spawning name generation."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (name &optional _fs _fork _prompt _cb _prio _base _root _src no-agent)
+                 (lambda (name &optional _fork _prompt _cb _prio _base _root _src no-agent)
                    (setq captured-name name)
                    (setq captured-no-agent no-agent)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
@@ -6998,7 +6897,7 @@ resolved GIT-ROOT (so a source-ws selection is honored)."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base git-root &rest _)
+                 (lambda (_name &optional _fork _prompt _cb _prio _base git-root &rest _)
                    (setq captured-root git-root)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
@@ -7021,7 +6920,7 @@ source-dir (drawer parent), never the master worktree."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base _root src &rest _)
+                 (lambda (_name &optional _fork _prompt _cb _prio _base _root src &rest _)
                    (setq captured-src src)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
@@ -7044,7 +6943,7 @@ from the master worktree (mirroring `--create-worktree-from-command')."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fs _fork _prompt _cb _prio _base _root src &rest _)
+                 (lambda (_name &optional _fork _prompt _cb _prio _base _root src &rest _)
                    (setq captured-src src)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
@@ -7064,7 +6963,7 @@ newly created worktree."
                      (setq n (1+ n))
                      (if (= n 1) "" "my-ws"))))
                 ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fs _fork _prompt cb &rest _)
+                 (lambda (_name &optional _fork _prompt cb &rest _)
                    (setq captured-cb cb)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
                  (lambda (&rest _) (error "should not be called"))))
@@ -7196,7 +7095,7 @@ local master keeps any local-only commits, while the fetch keeps
                (lambda (_label _root args _cb) (setq add-args args)))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) nil)))
-      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil nil)
+      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil)
       ;; Fetch is still scheduled for origin master even though the branch
       ;; will be rooted in local master.
       (should (equal add-args '("fetch" "origin" "master"))))))
@@ -7226,7 +7125,7 @@ new branch is rooted in."
                (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (_root _branch _path base &rest _) (setq add-base base))))
-      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil "master")
+      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil "master")
       (should (equal add-base "master")))))
 
 (ert-deftest agent-repl-test-do-create-local-master-base-fetches-origin-counterpart ()
@@ -7249,7 +7148,7 @@ branching point, so the worktree-add proper uses local master, but
                (lambda (_label _root args _cb) (setq fetch-args args)))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) nil)))
-      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil "master")
+      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil "master")
       (should (equal fetch-args '("fetch" "origin" "master"))))))
 
 (ert-deftest agent-repl-test-do-create-base-commit-default-with-fork-is-head ()
@@ -7268,7 +7167,7 @@ reset that context."
               ((symbol-function '+workspace-current-name) (lambda () "ws"))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (_root _branch _path base &rest _) (setq add-base base))))
-      (agent-repl--do-create-worktree-workspace "name" nil "sid-1" nil nil nil nil)
+      (agent-repl--do-create-worktree-workspace "name" "sid-1" nil nil nil nil)
       (should (equal add-base "HEAD")))))
 
 (ert-deftest agent-repl-test-do-create-base-commit-explicit-wins ()
@@ -7287,7 +7186,7 @@ force HEAD even without a fork-session-id."
               ((symbol-function '+workspace-current-name) (lambda () "ws"))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (_root _branch _path base &rest _) (setq add-base base))))
-      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil "HEAD")
+      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil "HEAD")
       (should (equal add-base "HEAD")))))
 
 (ert-deftest agent-repl-test-do-create-skips-fetch-when-base-is-head ()
@@ -7307,7 +7206,7 @@ force HEAD even without a fork-session-id."
                (lambda (&rest _) (setq fetch-called t)))
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) (setq add-called t))))
-      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil nil "HEAD")
+      (agent-repl--do-create-worktree-workspace "name" nil nil nil nil "HEAD")
       (should-not fetch-called)
       (should add-called))))
 
@@ -7327,7 +7226,7 @@ Supports bases other than origin/master without hard-coding the ref."
               ((symbol-function 'agent-repl--async-git)
                (lambda (_label _root args _cb) (setq fetch-args args))))
       (agent-repl--do-create-worktree-workspace
-       "name" nil nil nil nil nil "origin/develop")
+       "name" nil nil nil nil "origin/develop")
       (should (equal fetch-args '("fetch" "origin" "develop"))))))
 
 (ert-deftest agent-repl-test-do-create-fork-skips-fetch-regardless-of-base ()
@@ -7349,7 +7248,7 @@ path short-circuits to avoid disturbing the fork source's refs."
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) nil)))
       (agent-repl--do-create-worktree-workspace
-       "name" nil "sid-1" nil nil nil "origin/master")
+       "name" "sid-1" nil nil nil "origin/master")
       (should-not fetch-called))))
 
 (ert-deftest agent-repl-test-do-create-uses-explicit-git-root-and-skips-resolver ()
@@ -7372,7 +7271,7 @@ enqueue and must not have it re-resolved at timer-fire time."
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) nil)))
       (agent-repl--do-create-worktree-workspace
-       "name" nil nil nil nil nil "HEAD" "/explicit/root/")
+       "name" nil nil nil nil "HEAD" "/explicit/root/")
       (should-not resolver-called)
       (should (equal resolve-paths-root "/explicit/root/")))))
 
@@ -7395,24 +7294,24 @@ and its result is threaded into `--resolve-worktree-paths'."
               ((symbol-function 'agent-repl--async-worktree-add)
                (lambda (&rest _) nil)))
       (agent-repl--do-create-worktree-workspace
-       "name" nil nil nil nil nil "HEAD")
+       "name" nil nil nil nil "HEAD")
       (should (= resolver-calls 1))
       (should (equal resolve-paths-root "/resolved/root/")))))
 
 (ert-deftest agent-repl-test-create-worktree-from-command-forwards-git-root ()
-  "`--create-worktree-from-command' forwards GIT-ROOT as the 8th arg to
+  "`--create-worktree-from-command' forwards GIT-ROOT as the 7th arg to
 `--do-create-worktree-workspace', preserving the value captured at enqueue."
   (let ((forwarded-args nil))
     (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
                (lambda (&rest args) (setq forwarded-args args))))
       (agent-repl--create-worktree-from-command
        "/captured/root/" "ws-name" "some prompt" :high "fork-sid")
-      ;; args: (name force-bare fork-sid prompt cb priority base-commit git-root)
+      ;; args: (name fork-sid prompt cb priority base-commit git-root)
       (should (equal (nth 0 forwarded-args) "ws-name"))
-      (should (equal (nth 2 forwarded-args) "fork-sid"))
-      (should (equal (nth 3 forwarded-args) "some prompt"))
-      (should (equal (nth 5 forwarded-args) :high))
-      (should (equal (nth 7 forwarded-args) "/captured/root/")))))
+      (should (equal (nth 1 forwarded-args) "fork-sid"))
+      (should (equal (nth 2 forwarded-args) "some prompt"))
+      (should (equal (nth 4 forwarded-args) :high))
+      (should (equal (nth 6 forwarded-args) "/captured/root/")))))
 
 ;;;; ---- Tests: async-worktree-add base-commit ----
 
@@ -8879,7 +8778,7 @@ were reached without the wrapper stub."
                    (`("-C" "/tmp/new-wt" "rev-parse" "--abbrev-ref" "HEAD") "my-branch")
                    (_ "")))))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil)
       (should (equal (agent-repl--ws-get "new-ws" :branch-name) "my-branch")))))
 
 (ert-deftest agent-repl-test-finalize-worktree-workspace-caches-parent-branch-name ()
@@ -8898,7 +8797,7 @@ were reached without the wrapper stub."
                    (`("-C" "/tmp/source/" "rev-parse" "--abbrev-ref" "HEAD") "master")
                    (_ "")))))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil "/tmp/source/")
+       "/tmp/new-wt" "new-ws" nil nil nil nil "/tmp/source/")
       (should (equal (agent-repl--ws-get "new-ws" :branch-name) "child"))
       (should (equal (agent-repl--ws-get "new-ws" :parent-branch-name) "master")))))
 
@@ -8917,7 +8816,7 @@ were reached without the wrapper stub."
                    (`("-C" "/tmp/new-wt" "rev-parse" "--abbrev-ref" "HEAD") "my-branch")
                    (_ "")))))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/new-wt" "new-ws" nil nil nil nil nil nil)
+       "/tmp/new-wt" "new-ws" nil nil nil nil nil)
       (should-not (agent-repl--ws-get "new-ws" :parent-branch-name)))))
 
 ;;;; ---- Tests: merge-base-ancestor-args branch hints ----
@@ -9247,7 +9146,7 @@ here would open it in the caller's workspace layout, not the new one."
                  (lambda (&rest _) "DWC/test-ws"))
                 ((symbol-function 'agent-repl--setup-worktree-session) #'ignore))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/fake" "test-ws" nil nil nil nil nil)
+         "/tmp/fake" "test-ws" nil nil nil nil)
         (should (agent-repl--ws-get "test-ws" :pending-magit))
         (should-not magit-called)))))
 
@@ -9271,7 +9170,7 @@ here would open it in the caller's workspace layout, not the new one."
                (lambda (&rest _) "DWC/test-ws"))
               ((symbol-function 'agent-repl--setup-worktree-session) #'ignore))
       (agent-repl--finalize-worktree-workspace
-       "/tmp/fake" "test-ws" "do something" nil nil nil nil)
+       "/tmp/fake" "test-ws" "do something" nil nil nil)
       (should (agent-repl--ws-get "test-ws" :pending-magit)))))
 
 ;;;; ---- Tests: finalize-worktree-workspace defers initial buffers ----
@@ -9301,7 +9200,7 @@ leaking the opened buffers into the wrong workspace."
                  (lambda (&rest _) "DWC/test-ws"))
                 ((symbol-function 'agent-repl--setup-worktree-session) #'ignore))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/fake" "test-ws" nil nil nil nil nil)
+         "/tmp/fake" "test-ws" nil nil nil nil)
         (should (agent-repl--ws-get "test-ws" :pending-initial-buffers))
         (should-not open-called)))))
 
@@ -9399,7 +9298,7 @@ must not steal focus away from whatever the user is currently doing."
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority) #'ignore)
                 ((symbol-function 'agent-repl--setup-worktree-session) #'ignore))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/fake" "test-ws" nil nil nil nil nil)
+         "/tmp/fake" "test-ws" nil nil nil nil)
         (should (equal current-persp "caller-ws"))
         (should (member "caller-ws" switch-log))))))
 
@@ -9429,7 +9328,7 @@ by the restore step."
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority) #'ignore)
                 ((symbol-function 'agent-repl--setup-worktree-session) #'ignore))
         (agent-repl--finalize-worktree-workspace
-         "/tmp/fake" "test-ws" nil nil nil nil
+         "/tmp/fake" "test-ws" nil nil nil
          (lambda (_path dirname)
            ;; Callback deliberately switches to the new ws.
            (+workspace-switch dirname)
@@ -9465,7 +9364,7 @@ leave the user stranded on a half-built workspace."
                  (lambda (&rest _) (error "setup boom"))))
         (should-error
          (agent-repl--finalize-worktree-workspace
-          "/tmp/fake" "test-ws" nil nil nil nil nil))
+          "/tmp/fake" "test-ws" nil nil nil nil))
         (should (equal current-persp "caller-ws"))))))
 
 ;;;; ---- Tests: agent-repl-create-doom-oneshot-workspace ----
@@ -9483,7 +9382,7 @@ edit the doom config."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
                    (setq captured-git-root git-root))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-git-root agent-repl--doom-config-dir))
@@ -9498,7 +9397,7 @@ edit the doom config."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -9512,7 +9411,7 @@ spawned agent's first message) so the inner agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -9529,7 +9428,7 @@ for slug generation and should not get polluted with skill names like
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-raw "tweak the modeline"))
@@ -9543,7 +9442,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -9570,36 +9469,10 @@ starts a fresh agent session rather than resuming someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root _base fork-from)
                    (setq captured-fork-from fork-from))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (null captured-fork-from))))))
-
-(ert-deftest agent-repl-test-create-doom-oneshot-passes-force-sandbox-t ()
-  "doom-oneshot passes force-sandbox = t so the spawned workspace runs in
-the Docker sandbox rather than bare-metal."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'read-from-minibuffer)
-                 (lambda (&rest _) "tweak the modeline"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl-create-doom-oneshot-workspace)
-        (should captured-force-sandbox)))))
-
-(ert-deftest agent-repl-test-create-doom-oneshot-from-current-branch-passes-force-sandbox-t ()
-  "The current-branch variant also passes force-sandbox = t — both doom
-oneshot flavours run in the sandbox, regardless of which base ref is used."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'read-from-minibuffer)
-                 (lambda (&rest _) "tweak the modeline"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl-create-doom-oneshot-workspace-from-current-branch)
-        (should captured-force-sandbox)))))
 
 (ert-deftest agent-repl-test-oneshot-merge-suffix-mentions-stop-on-ambiguity ()
   "The merge suffix tells the spawned agent to STOP (not push on) when it
@@ -9625,7 +9498,7 @@ top of in-flight doom-config work."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-base "HEAD"))))))
@@ -9643,7 +9516,7 @@ changes from `master' to HEAD."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
                    (setq captured-git-root git-root))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-git-root agent-repl--doom-config-dir))))))
@@ -9657,7 +9530,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -9673,7 +9546,7 @@ generation — same constraint as the master variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-raw "tweak the modeline"))
@@ -9702,7 +9575,7 @@ and existing call sites that pass no arguments."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -10621,7 +10494,7 @@ workspace's project, so SPC j O always dispatches into that repo."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
                    (setq captured-git-root git-root))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-git-root
@@ -10639,7 +10512,7 @@ workspace's project, so SPC j O always dispatches into that repo."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root base _fork-from)
                    (setq captured-base base))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -10654,7 +10527,7 @@ the spawned agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (string-match-p
@@ -10675,7 +10548,7 @@ must mention `/workspace-merge', and it must appear textually AFTER the
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (let ((pr-pos (string-match
@@ -10695,7 +10568,7 @@ commands like `/create-or-update-pr', which would derail the slug."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (raw _prefixed _git-root _base _fork-from)
                    (setq captured-raw raw))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-raw "add caching to thing"))
@@ -10710,7 +10583,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -10739,23 +10612,10 @@ someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed _git-root _base fork-from)
                    (setq captured-fork-from fork-from))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (null captured-fork-from))))))
-
-(ert-deftest agent-repl-test-explanation-engine-oneshot-passes-no-force-sandbox ()
-  "The explanation-engine one-shot does NOT pass force-sandbox — that repo
-uses bare-metal Claude, not the Docker sandbox."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'read-from-minibuffer)
-                 (lambda (&rest _) "add caching to thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl-create-explanation-engine-oneshot-workspace)
-        (should (null captured-force-sandbox))))))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-command-has-expected-flags ()
   "The PR command string must match exactly what the user specified for
@@ -10931,7 +10791,7 @@ variant inherits the validation — no caller can accidentally skip it."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw _prefixed git-root _base _fork-from)
                    (setq captured-git-root git-root))))
         (agent-repl--create-pinned-oneshot-workspace
          "/tmp/some-pinned-repo/" 'master "SUFFIX" "test-tag")
@@ -10947,7 +10807,7 @@ workspace-name slug clean across every one-shot variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (raw prefixed _git-root _base _fork-from)
                    (setq captured-raw raw)
                    (setq captured-prefixed prefixed))))
         (agent-repl--create-pinned-oneshot-workspace
@@ -11050,41 +10910,13 @@ to the spawned agent."
                    (concat "do a thing"
                            agent-repl--oneshot-no-action-suffix)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _force-sandbox)
+                 (lambda (_raw prefixed _git-root _base _fork-from)
                    (setq captured-prefixed prefixed))))
         (agent-repl--create-pinned-oneshot-workspace
          "/tmp/repo/" 'master "SUFFIX" "test-tag")
         (should (string-match-p
                  (regexp-quote agent-repl--oneshot-no-action-suffix)
                  captured-prefixed))))))
-
-(ert-deftest agent-repl-test-create-pinned-oneshot-forwards-force-sandbox ()
-  "FORCE-SANDBOX passed to `agent-repl--create-pinned-oneshot-workspace'
-is forwarded verbatim to `agent-repl--spawn-workspace-generation'."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'read-from-minibuffer)
-                 (lambda (&rest _) "do a thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl--create-pinned-oneshot-workspace
-         "/tmp/repo/" 'master "SUFFIX" "test-tag" t)
-        (should captured-force-sandbox)))))
-
-(ert-deftest agent-repl-test-create-pinned-oneshot-no-force-sandbox-by-default ()
-  "When FORCE-SANDBOX is omitted, `agent-repl--spawn-workspace-generation'
-receives nil — the default is bare-metal for repos that do not opt in."
-  (agent-repl-test--with-clean-state
-    (let ((captured-force-sandbox :unset))
-      (cl-letf (((symbol-function 'read-from-minibuffer)
-                 (lambda (&rest _) "do a thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base _fork-from &optional force-sandbox)
-                   (setq captured-force-sandbox force-sandbox))))
-        (agent-repl--create-pinned-oneshot-workspace
-         "/tmp/repo/" 'master "SUFFIX" "test-tag")
-        (should (null captured-force-sandbox))))))
 
 ;;;; ---- Tests: eval-code-string ----
 

@@ -515,10 +515,10 @@ tests can observe which frontend boot fired.
 
 The env hydration is stubbed but kept FAITHFUL: the boot
 \(`agent-repl--frontend-boot-session') hydrates before it resolves the
-frontend, and `:active-env' is one of the axes it resolves against, so
-a stub that wrote nothing would misrepresent a restored sandbox
-workspace as bare-metal.  Stubbing it also keeps the restore path from
-writing a state file into the fake project dir."
+frontend, and `:active-env' is one of the two axes it resolves against, so
+a stub that wrote nothing would hand the resolution an unhydrated
+workspace.  Stubbing it also keeps the restore path from writing a state
+file into the fake project dir."
   (declare (indent 0))
   `(cl-letf (((symbol-function 'agent-repl--ws-create) #'ignore)
              ((symbol-function 'agent-repl--ws-frame-switch) #'ignore)
@@ -597,26 +597,25 @@ rather than staying pinned to the vterm it happened to boot once."
           (should (equal ensured "ws-old"))
           (should-not init-called))))))
 
-(ert-deftest agent-repl-cmd-test-establish-workspace/sandbox-restores-under-vterm ()
-  "A restored :sandbox workspace boots the vterm despite the gui default.
-The gui cannot run a sandboxed session, so resolving it to the default
-would re-launch the workspace outside its container."
+(ert-deftest agent-repl-cmd-test-establish-workspace/codex-restores-under-vterm ()
+  "A restored codex workspace boots the vterm despite the gui default.
+The gui drives only claude, so resolving the restore to the raw default
+would hand the workspace a presentation that cannot run its agent at all.
+The restore routes by CAPABILITY, not just by an explicit `:frontend'."
   (let (init-ws ensured)
     (agent-repl-test--with-clean-state
+      ;; Arrange — a codex workspace carrying no deliberate frontend choice.
+      (agent-repl--ws-put "ws-cx" :backend 'codex)
       (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-                   ;; The state file said :sandbox; hydration is what surfaces it.
-                   (lambda (ws &optional _dir _env)
-                     (agent-repl--ws-put ws :active-env :sandbox)))
-                  ((symbol-function 'agent-repl--frontend-ensure-session)
+        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
                    (lambda (ws) (setq ensured ws)))
                   ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                   ((symbol-function 'agent-repl--initialize-agent)
                    (lambda (ws &optional _dir _env) (setq init-ws ws))))
           ;; Act
-          (agent-repl--establish-workspace "ws-sb" "/tmp/ws-sb")
+          (agent-repl--establish-workspace "ws-cx" "/tmp/ws-cx")
           ;; Assert
-          (should (equal init-ws "ws-sb"))
+          (should (equal init-ws "ws-cx"))
           (should-not ensured))))))
 
 ;;;; ---- agent-repl-explain ----

@@ -20,7 +20,12 @@
 ;;;; ---- Helpers -------------------------------------------------------------
 
 (defun agent-repl-test--make-frontend (name &rest overrides)
-  "Return a fully-populated test frontend NAME with optional OVERRIDES."
+  "Return a fully-populated test frontend NAME with optional OVERRIDES.
+Supports the sole surviving environment (`:bare-metal') by default.  A
+frontend that must NOT be able to run it overrides `:supported-envs' with
+`(:containerized)' — the stand-in for the containerized environment the
+env axis remains the seam for, and the only way left to exercise an
+env-axis REJECTION now that every registered frontend runs `:bare-metal'."
   (apply #'agent-repl-frontend-create
          (append overrides
                  (list :name name
@@ -33,7 +38,7 @@
                        :show-fn #'ignore
                        :hide-fn #'ignore
                        :supported-backends '(claude)
-                       :supported-envs '(:bare-metal :sandbox)))))
+                       :supported-envs '(:bare-metal)))))
 
 (defmacro agent-repl-test--with-frontend-registry (&rest body)
   "Run BODY against a scratch copy of the frontend registry.
@@ -179,13 +184,25 @@ cannot make this pass by accident."
     ;; Act / Assert
     (should (eq (agent-repl--frontend-default-for-ws "ws1") 'vterm))))
 
-(ert-deftest agent-repl-test-frontends-default-for-ws-sandbox-resolves-to-vterm ()
-  "A :sandbox workspace resolves to vterm: the gui runs the agent on the host."
-  ;; Arrange
+(ert-deftest agent-repl-test-frontends-default-for-ws-env-rules-out-the-default ()
+  "An environment the default frontend cannot run resolves to one that can.
+The default is capability-constrained on `:active-env' exactly as it is on
+the backend; both shipped frontends run the sole surviving environment, so
+the rejection is staged with a frontend that declares it cannot."
+  ;; Arrange — the default runs only a containerized env; the ws is bare-metal.
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    ;; Act / Assert
-    (should (eq (agent-repl--frontend-default-for-ws "ws1") 'vterm))))
+    (agent-repl-test--with-frontend-registry
+     (let ((agent-repl--frontends (make-hash-table :test #'eq)))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend 'bare-metal-capable))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend 'containerized-only
+                                        :supported-envs '(:containerized)))
+       (setq agent-repl-default-frontend 'containerized-only)
+       (agent-repl--ws-put "ws1" :active-env :bare-metal)
+       ;; Act / Assert
+       (should (eq (agent-repl--frontend-default-for-ws "ws1")
+                   'bare-metal-capable))))))
 
 (ert-deftest agent-repl-test-frontends-default-for-ws-signals-when-nothing-capable ()
   "When NO registered frontend can drive the workspace, resolution signals."
@@ -202,9 +219,9 @@ cannot make this pass by accident."
 
 (ert-deftest agent-repl-test-frontends-ws-resolution-explicit-beats-the-constraint ()
   "An explicit `:frontend' is honored even where the constrained default differs."
-  ;; Arrange — a sandbox workspace would otherwise resolve to vterm.
+  ;; Arrange — a codex workspace would otherwise resolve to vterm.
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
+    (agent-repl--ws-put "ws1" :backend 'codex)
     (agent-repl--ws-put "ws1" :frontend 'gui)
     ;; Act / Assert — resolution reports the choice; validation is what refuses it.
     (should (eq (agent-repl--ws-frontend-name "ws1") 'gui))))
@@ -248,30 +265,46 @@ choice — only a marked choice survives a restart."
                 :type 'user-error))
 
 (ert-deftest agent-repl-test-frontends-validate-pair-accepts-supported-env ()
-  "A frontend that supports the environment validates against it."
+  "A frontend that supports the environment validates against it.
+Both shipped frontends run the sole surviving environment, so the env axis
+rules nothing out today — but it is still checked, on both of them."
   ;; Act / Assert
   (should (agent-repl--frontend-validate-pair 'gui 'claude :bare-metal))
-  (should (agent-repl--frontend-validate-pair 'vterm 'claude :sandbox)))
+  (should (agent-repl--frontend-validate-pair 'vterm 'codex :bare-metal)))
 
 (ert-deftest agent-repl-test-frontends-validate-pair-rejects-unsupported-env ()
-  "gui+:sandbox fails loudly: the daemon spawns the agent on the host."
-  ;; Act / Assert
-  (should-error (agent-repl--frontend-validate-pair 'gui 'claude :sandbox)
-                :type 'user-error))
+  "An environment the frontend cannot run fails loudly, even on a valid backend.
+Staged with a containerized-only frontend: the env axis is what a
+containerized environment would be gated on, and it must still bite."
+  ;; Arrange
+  (agent-repl-test--with-frontend-registry
+   (agent-repl-register-frontend
+    (agent-repl-test--make-frontend 'containerized-only
+                                    :supported-envs '(:containerized)))
+   ;; Act / Assert — the backend axis passes; the env axis is what refuses.
+   (should-error (agent-repl--frontend-validate-pair
+                  'containerized-only 'claude :bare-metal)
+                 :type 'user-error)))
 
 (ert-deftest agent-repl-test-frontends-validate-pair-nil-env-skips-the-env-axis ()
   "A nil ENV validates the backend axis only."
   ;; Act / Assert
   (should (agent-repl--frontend-validate-pair 'gui 'claude nil)))
 
-(ert-deftest agent-repl-test-frontends-validate-for-ws-rejects-gui-on-sandbox ()
-  "The ws-shaped validator reads the workspace's env and refuses gui+:sandbox."
-  ;; Arrange
+(ert-deftest agent-repl-test-frontends-validate-for-ws-reads-the-ws-env ()
+  "The ws-shaped validator reads the workspace's env and refuses on it.
+The backend axis alone would have let this pair through, so a validator
+that forgot to pass `:active-env' would silently accept it."
+  ;; Arrange — a bare-metal workspace, and a frontend that cannot run one.
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    ;; Act / Assert
-    (should-error (agent-repl--frontend-validate-for-ws 'gui "ws1")
-                  :type 'user-error)))
+    (agent-repl-test--with-frontend-registry
+     (agent-repl-register-frontend
+      (agent-repl-test--make-frontend 'containerized-only
+                                      :supported-envs '(:containerized)))
+     (agent-repl--ws-put "ws1" :active-env :bare-metal)
+     ;; Act / Assert
+     (should-error (agent-repl--frontend-validate-for-ws 'containerized-only "ws1")
+                   :type 'user-error))))
 
 ;;;; ---- Dispatch ---------------------------------------------------------------------
 
@@ -373,21 +406,25 @@ write it."
        (should-not hydrated)))))
 
 (ert-deftest agent-repl-test-frontends-boot-session-hydrates-before-resolving ()
-  "The env hint reaches hydration BEFORE the frontend is picked.
-A `:sandbox' hint must therefore land the boot on vterm even though the
-default is the gui — the resolution reads the `:active-env' the
-hydration just wrote."
-  ;; Arrange
+  "The workspace is hydrated BEFORE the booting frontend is picked.
+A restored codex workspace carries its `:backend' in its STATE FILE, not on
+its plist — the hydration is the only thing that surfaces it.  Resolve
+first and the workspace still looks like a claude one, so the boot lands on
+the gui default: a frontend that cannot drive codex at all."
+  ;; Arrange — nothing on the plist says codex; the hydration is what does.
   (agent-repl-test--with-clean-state
     (let ((vterm-booted nil)
           (gui-booted nil))
-      (cl-letf (((symbol-function 'agent-repl--initialize-agent)
+      (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
+                 (lambda (ws &optional _dir env)
+                   (agent-repl--ws-put ws :active-env (or env :bare-metal))
+                   (agent-repl--ws-put ws :backend 'codex)))
+                ((symbol-function 'agent-repl--initialize-agent)
                  (lambda (ws &rest _) (setq vterm-booted ws)))
                 ((symbol-function 'agent-repl--gui-boot)
                  (lambda (&rest _) (setq gui-booted t))))
-        (agent-repl-test--with-boot-env-stub
-          ;; Act
-          (agent-repl--frontend-boot-session "ws1" "/tmp/wt" :sandbox))
+        ;; Act
+        (agent-repl--frontend-boot-session "ws1" "/tmp/wt" :bare-metal)
         ;; Assert
         (should (equal vterm-booted "ws1"))
         (should-not gui-booted)))))
