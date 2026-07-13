@@ -953,3 +953,33 @@ describe("inline-code chip", () => {
     expect(fencedInner).toMatch(/background:\s*none/);
   });
 });
+
+/* The task timer is the one topbar datapoint that rewrites itself while the
+   user is looking at it, so its styling has a job the other datapoints do not:
+   hold the strip still as the digits move. */
+const taskTimer = blockAfter(css, "#session-info .info-time {");
+
+describe("task timer styles", () => {
+  it("colors the timer with its own datapoint token", () => {
+    // Arrange / Act — it joins the parent-workspace/tokens/agents run.
+    // Assert
+    expect(taskTimer).toMatch(/color:\s*var\(--info-time\)/);
+  });
+
+  it("binds the timer's token in the light palette", () => {
+    // Arrange / Act + Assert
+    expect(token(lightTheme, "--info-time")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("binds the timer's token in the dark palette", () => {
+    // Arrange / Act + Assert
+    expect(token(darkTheme, "--info-time")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("holds the digits to a fixed width so a tick cannot twitch the strip", () => {
+    // Arrange / Act — proportional digits would nudge tokens and agents on
+    // every repaint.
+    // Assert
+    expect(taskTimer).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+});

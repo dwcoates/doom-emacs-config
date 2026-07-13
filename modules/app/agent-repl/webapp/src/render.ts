@@ -5,6 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
+import { formatDuration } from "./duration.js";
 import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
@@ -12,6 +13,7 @@ import { stripMetaSpans } from "./meta.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, Usage } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
+import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -95,11 +97,11 @@ function formatTokens(n: number): string {
 }
 
 /**
- * Topbar session datapoints: `parent workspace: <ws> · tokens: <n> ·
- * <k> agents ▾` (the vterm modeline's context mirror). The parent
- * workspace entry is omitted entirely when PARENT-WS is absent or empty,
- * as is the agents chip before the session spawns one; each value gets
- * its own color via the info-* classes.
+ * Topbar session datapoints: `parent workspace: <ws> · time: <elapsed> ·
+ * tokens: <n> · <k> agents ▾` (the vterm modeline's context mirror). The
+ * parent workspace entry is omitted entirely when PARENT-WS is absent or
+ * empty, as is the agents chip before the session spawns one; each value
+ * gets its own color via the info-* classes.
  *
  * The model is NOT here. It moved into the #model-select picker, which
  * both names the live model and switches it — printing it again as text
@@ -107,17 +109,26 @@ function formatTokens(n: number): string {
  *
  * AGENTS-OPEN is the caller's disclosure state for the agents chip, which
  * drops the subagent roster as an overlay.
+ *
+ * TIMER-LABEL is how long the running task has taken so far (`IDLE_LABEL`
+ * when none is). Its span is marked so the caller's once-a-second tick can
+ * repaint that one value without rewriting the whole strip — the two paint
+ * paths agree because the tick writes exactly what this would have.
  */
 export function sessionInfoHtml(
   parentWs: string | null,
   usage: Usage | null,
   agents: readonly SubagentEntry[] = [],
   agentsOpen = false,
+  timerLabel: string = IDLE_LABEL,
 ): string {
   const parts: string[] = [];
   if (parentWs) {
     parts.push(`parent workspace: <span class="info-ws">${escapeHtml(parentWs)}</span>`);
   }
+  parts.push(
+    `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(timerLabel)}</span>`,
+  );
   parts.push(`tokens: <span class="info-tokens">${formatTokens(contextTokens(usage))}</span>`);
   const menu = agentsMenuHtml(agents, agentsOpen);
   if (menu !== "") parts.push(menu);
@@ -642,46 +653,6 @@ export function pulsingBlockId(
     if (item.kind === "text") return item.done ? item.blockId : null;
   }
   return null;
-}
-
-/** Duration units, coarsest-first. Each scale is a whole multiple of the next. */
-const DURATION_UNITS: ReadonlyArray<{ suffix: string; scale: number }> = [
-  { suffix: "h", scale: 3_600_000 },
-  { suffix: "m", scale: 60_000 },
-  { suffix: "s", scale: 1000 },
-  { suffix: "ms", scale: 1 },
-];
-
-/**
- * A duration in whole units: the coarsest unit whose magnitude reaches 1,
- * with the leftover carried by the next unit down rather than by a
- * fraction of the coarse one (330000ms → `5m 30s`, 12300ms → `12s 300ms`,
- * 5400000ms → `1h 30m`).
- *
- * The leftover is dropped when it is zero (120000ms → `2m`), and rounding
- * it up past its own unit promotes the coarse magnitude instead
- * (3599999ms → `1h`, never `59m 60s`).
- */
-export function formatDuration(ms: number): string {
-  const total = Math.round(ms);
-  const found = DURATION_UNITS.findIndex((unit) => total >= unit.scale);
-  // A sub-millisecond duration reaches no unit's magnitude, so milliseconds
-  // (the finest unit) carry it.
-  const index = found === -1 ? DURATION_UNITS.length - 1 : found;
-  const major = DURATION_UNITS[index];
-  const minor = DURATION_UNITS[index + 1];
-  if (!minor) return `${total}${major.suffix}`;
-
-  // Snap to a whole minor unit first, so a leftover that rounds up to a
-  // full major unit re-picks the coarser unit instead of overflowing.
-  const snapped = Math.round(total / minor.scale) * minor.scale;
-  if (snapped !== total) return formatDuration(snapped);
-
-  const majorValue = Math.floor(total / major.scale);
-  const minorValue = (total - majorValue * major.scale) / minor.scale;
-  return minorValue === 0
-    ? `${majorValue}${major.suffix}`
-    : `${majorValue}${major.suffix} ${minorValue}${minor.suffix}`;
 }
 
 /** A context increase as a signed figure: `+100,000`, `-40,000`, `+0`. */

@@ -30,6 +30,9 @@
   --info-ws: #15803d;
   --info-model: #0e7490;
   --info-tokens: #b45309;
+  /* The running task's timer: blue, the one datapoint hue not already spoken
+     for, so a live count never reads as a token figure or a subagent. */
+  --info-time: #1d4ed8;
   /* The subagent roster chip: the --tool-title purple the tool cards title
      themselves with, since a subagent IS a tool call the session made. */
   --info-agents: #7c3aed;
@@ -90,6 +93,7 @@
     --info-ws: #4ade80;
     --info-model: #22d3ee;
     --info-tokens: #fbbf24;
+    --info-time: #93c5fd;
     --info-agents: #c4b5fd;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
@@ -174,6 +178,14 @@ body {
 #session-info .info-ws { color: var(--info-ws); }
 #session-info .info-model { color: var(--info-model); }
 #session-info .info-tokens { color: var(--info-tokens); }
+
+/* The running task's timer: the one datapoint that rewrites itself once a
+   second, so fixed-width digits keep everything to its right from twitching
+   on every tick. */
+#session-info .info-time {
+  color: var(--info-time);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Subagent roster: a chip in the session-datapoint run that drops the full
    list. The menu anchors the overlay, which hangs below the topbar without

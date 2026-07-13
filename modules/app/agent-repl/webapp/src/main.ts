@@ -20,6 +20,7 @@ import { remediationNotice, requestRemediation } from "./remediation.js";
 import { FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
+import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import "./styles.css";
 
@@ -119,6 +120,21 @@ async function boot(): Promise<void> {
   // would otherwise collapse an overlay the user is reading mid-turn.
   let agentsOpen = false;
 
+  // The running task's timer. Its tick writes the one span it owns rather
+  // than re-rendering the topbar: a whole-strip rewrite once a second, on
+  // top of the per-frame rewrites a streaming turn already drives, would be
+  // churn in service of a single changing digit.
+  //
+  // The span is re-created by every renderChrome, so the tick looks it up
+  // each time instead of holding a node that will not survive the turn.
+  let timerLabel = IDLE_LABEL;
+  const timer = new TaskTimer(windowHost(window), (label) => {
+    timerLabel = label;
+    const slot = infoEl.querySelector(`[${TIMER_SLOT}]`);
+    if (!slot) throw new Error(`topbar has no ${TIMER_SLOT} span`);
+    slot.textContent = label;
+  });
+
   const renderChrome = (): void => {
     const s = store.state;
     // sessionInfoHtml escapes every value it interpolates.
@@ -127,7 +143,11 @@ async function boot(): Promise<void> {
       s.usage,
       sessionSubagents(s.items),
       agentsOpen,
+      timerLabel,
     );
+    // After the strip exists, so the paint on a starting turn has a span to
+    // land in. Only the edges of a turn touch the interval.
+    timer.sync(s.turnStartedAt);
     // Rebuilt only when the menu or the selection actually moved: this runs
     // on EVERY frame, and blowing the options away mid-turn would slam shut
     // a dropdown the user had open.
@@ -173,6 +193,9 @@ async function boot(): Promise<void> {
     activeSessionId = next;
     rememberedClaudeId = "";
     store.reset();
+    // The successor's turn is not this one's: stop the clock now rather than
+    // letting it run on the dead session until the successor's hello lands.
+    timer.stop();
     const url = new URL(location.href);
     url.searchParams.set("session", next);
     history.replaceState(null, "", url.toString());
