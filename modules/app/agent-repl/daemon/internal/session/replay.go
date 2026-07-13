@@ -160,12 +160,24 @@ func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *tra
 		if err := json.Unmarshal(entry.Message, &meta); err == nil {
 			*lastMeta = meta
 		}
-		return t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
+		frames := t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
+		return stampReplay(frames, entry.Timestamp)
 	case "user":
 		return replayUserFrames(t, entry.Message, entry.Timestamp, replaySeq)
 	default:
 		return nil
 	}
+}
+
+// stampReplay pre-stamps translated frames with the transcript entry's own
+// time (§2.1), which the hub then preserves instead of stamping the (much
+// later) replay time. Without it a resumed session's response bubbles all
+// read as having been written the moment the webapp attached.
+func stampReplay(frames []protocol.L2Frame, ts string) []protocol.L2Frame {
+	for _, f := range frames {
+		f.Env().TS = ts
+	}
+	return frames
 }
 
 // The CLI does not store a slash command as the user typed it. It
@@ -238,12 +250,12 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 			continue
 		}
 		if block.Type == "tool_result" {
-			frames = append(frames, t.OnEvent(&protocol.L1Event{
+			frames = append(frames, stampReplay(t.OnEvent(&protocol.L1Event{
 				Type:      "tool-result",
 				ToolUseID: block.ToolUseID,
 				IsError:   block.IsError,
 				Content:   block.Content,
-			})...)
+			}), ts)...)
 			continue
 		}
 		turnBlocks = append(turnBlocks, raw)
