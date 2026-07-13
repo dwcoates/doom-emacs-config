@@ -195,6 +195,26 @@ silently run as whichever account the daemon happened to inherit."
   (seq-find (lambda (entry) (equal (alist-get 'session_id entry) id))
             (agent-repl--frontend-list-sessions)))
 
+(defun agent-repl--frontend-fetch-commands (session-id)
+  "Return SESSION-ID's slash-command menu as a list of alists.
+Each entry carries the symbol keys `name', `description', and
+`argumentHint'.  The list may be empty when the daemon has not yet
+resolved the menu off the SDK's init handshake, which is a transient
+startup state rather than an error.  Signals on an HTTP or decode
+failure, per `agent-repl--frontend-api'."
+  (alist-get 'commands
+             (agent-repl--frontend-api
+              "GET" (format "/sessions/%s/commands" session-id))))
+
+(defun agent-repl--frontend-refresh-commands (session-id)
+  "Ask the daemon to re-resolve SESSION-ID's slash-command menu.
+Fire-and-forget: the daemon answers 202 immediately and the fresh list
+lands on its cache asynchronously once its re-probe completes, so this
+never blocks on the probe.  Signals on HTTP failure."
+  (agent-repl--frontend-api
+   "POST" (format "/sessions/%s/commands/refresh" session-id))
+  t)
+
 (defun agent-repl--frontend-session-live-p (id)
   "Return non-nil when ID is listed by the daemon and not terminal."
   (let ((entry (agent-repl--frontend-session-entry id)))
