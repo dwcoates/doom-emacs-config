@@ -498,6 +498,80 @@ path removes or reclaims it instead of erroring \"Window is dedicated\"."
       ;; Act / Assert
       (should (eq (agent-repl--frontend-main-area-window) sel)))))
 
+;;;; ---- require-xwidget: the one error with no way forward --------------------
+
+;; The gui is the only frontend, so an Emacs without xwidget-webkit cannot
+;; open a workspace at all.  There is nothing to fall back to, which is why
+;; this error is required to carry the recipe out, not just the diagnosis.
+
+(ert-deftest agent-repl-test-frontend-require-xwidget-signals-when-unavailable ()
+  "require-xwidget signals a `user-error' on a build without xwidget support."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+             (lambda () nil)))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-require-xwidget) :type 'user-error)))
+
+(ert-deftest agent-repl-test-frontend-require-xwidget-passes-when-available ()
+  "require-xwidget is a no-op on a build that has xwidget support."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+             (lambda () t)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-require-xwidget))))
+
+(ert-deftest agent-repl-test-frontend-require-xwidget-message-carries-the-remedy ()
+  "The error names the flag that fixes it, not merely the capability that is missing.
+A user hitting this has no working frontend, so a bare diagnosis strands them."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+             (lambda () nil)))
+    ;; Act
+    (let ((msg (condition-case err
+                   (agent-repl--frontend-require-xwidget)
+                 (user-error (error-message-string err)))))
+      ;; Assert
+      (should (string-match-p "--with-xwidgets" msg)))))
+
+(ert-deftest agent-repl-test-frontend-require-xwidget-message-carries-the-verification ()
+  "The error tells the user how to confirm the rebuild worked."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+             (lambda () nil)))
+    ;; Act
+    (let ((msg (condition-case err
+                   (agent-repl--frontend-require-xwidget)
+                 (user-error (error-message-string err)))))
+      ;; Assert
+      (should (string-match-p "featurep 'xwidget-internal" msg)))))
+
+(ert-deftest agent-repl-test-frontend-xwidget-remedy-offers-homebrew-on-darwin ()
+  "On darwin the remedy names the two Homebrew formulae that carry xwidgets."
+  ;; Arrange
+  (let ((system-type 'darwin))
+    ;; Act
+    (let ((remedy (agent-repl--xwidget-remedy)))
+      ;; Assert
+      (should (string-match-p "brew reinstall emacs-mac" remedy)))))
+
+(ert-deftest agent-repl-test-frontend-xwidget-remedy-omits-homebrew-off-darwin ()
+  "Off darwin the remedy does not advertise Homebrew formulae that do not apply."
+  ;; Arrange
+  (let ((system-type 'gnu/linux))
+    ;; Act
+    (let ((remedy (agent-repl--xwidget-remedy)))
+      ;; Assert
+      (should-not (string-match-p "brew" remedy)))))
+
+(ert-deftest agent-repl-test-frontend-xwidget-remedy-always-offers-the-source-build ()
+  "Every platform gets the from-source configure flag, Homebrew or not."
+  ;; Arrange
+  (let ((system-type 'gnu/linux))
+    ;; Act
+    (let ((remedy (agent-repl--xwidget-remedy)))
+      ;; Assert
+      (should (string-match-p "\\./configure --with-xwidgets" remedy)))))
+
 ;;;; ---- open-panel ------------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-open-panel-errors-without-xwidgets ()

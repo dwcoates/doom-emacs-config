@@ -55,7 +55,7 @@
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
 (declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name))
 (declare-function agent-repl--frontend-kill-webview "agent-repl-frontend" (buf))
-(declare-function agent-repl--frontend-xwidget-available-p "agent-repl-frontend" ())
+(declare-function agent-repl--frontend-require-xwidget "agent-repl-frontend" ())
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--delete-buffer-windows "agent-repl-window" (buf &rest args))
 (declare-function agent-repl--configure-vterm-window "agent-repl-panels" (win))
@@ -378,8 +378,7 @@ outside.  The fresh buffer is handed to the shared
 `agent-repl--frontend-adopt-webview-buffer' (frontend.el), which pins
 its name, drops the browser header-line, and arms the copy chords — the
 popup is chrome, not a browser."
-  (unless (agent-repl--frontend-xwidget-available-p)
-    (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
+  (agent-repl--frontend-require-xwidget)
   (let ((existing (get-buffer agent-repl-explain-config-buffer-name)))
     (if (and (buffer-live-p existing)
              (equal agent-repl--explain-config-webview-session-id session-id))

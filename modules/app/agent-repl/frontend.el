@@ -99,6 +99,36 @@ build that has not happened to load xwidget.el yet."
        (require 'xwidget nil t)
        (fboundp 'xwidget-webkit--create-new-session-buffer)))
 
+(defun agent-repl--xwidget-remedy ()
+  "Return the recipe, as indented lines, for obtaining an xwidget Emacs.
+The Homebrew formulae are offered only on darwin, where they are the two
+builds that actually carry `--with-xwidgets'; every platform gets the
+from-source flag."
+  (concat
+   (when (eq system-type 'darwin)
+     (concat
+      "  brew reinstall emacs-mac  --with-xwidgets    (railwaycat/emacsmacport)\n"
+      "  brew reinstall emacs-plus --with-xwidgets    (d12frosted/emacs-plus)\n"))
+   "  ./configure --with-xwidgets                  (building from source)\n"))
+
+(defun agent-repl--frontend-require-xwidget ()
+  "Signal a `user-error' unless this Emacs can host WKWebView xwidgets.
+
+The gui is the only frontend agent-repl has, so an Emacs without
+xwidget-webkit cannot open a workspace AT ALL — there is nothing to fall
+back to (vterm was the fallback, and it is gone).  That makes this the
+one error in the module a user can hit with no way forward, so it hands
+back the recipe out instead of just the diagnosis."
+  (unless (agent-repl--frontend-xwidget-available-p)
+    (user-error
+     "%s"
+     (concat
+      "agent-repl: this Emacs has no xwidget-webkit support, which the gui "
+      "frontend requires — and the gui is the only frontend.\n\n"
+      "Rebuild Emacs with xwidgets:\n"
+      (agent-repl--xwidget-remedy)
+      "\nThen verify with:  M-: (featurep 'xwidget-internal)  =>  t"))))
+
 ;;;; ---- Webview buffer lifecycle ---------------------------------------------
 
 (defun agent-repl--frontend-webview-buffer-name (ws)
@@ -373,8 +403,7 @@ xwidget support, ensures the daemon (built if stale, launched if
 absent), ensures WS's daemon session (rooted at its worktree), mounts
 the webview attached to that session, and places it over the input
 panel."
-  (unless (agent-repl--frontend-xwidget-available-p)
-    (user-error "agent-repl: this Emacs build lacks xwidget-webkit support"))
+  (agent-repl--frontend-require-xwidget)
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (let* ((session-id (agent-repl--frontend-ensure-session ws))
          (url (agent-repl--frontend-webview-url ws session-id))
