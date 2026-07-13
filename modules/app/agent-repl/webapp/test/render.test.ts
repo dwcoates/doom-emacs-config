@@ -1100,6 +1100,7 @@ describe("ResultChip", () => {
       totalCostUsd: 0.5,
       usage: { input_tokens: 3, output_tokens: 4 },
       isError,
+      context: { total: 300_000, delta: 100_000 },
     };
   }
 
@@ -1110,11 +1111,25 @@ describe("ResultChip", () => {
     expect(html).toContain(`class="result ok done"`);
   });
 
-  it("still labels a successful turn's chip 'turn complete'", () => {
+  it("withholds the 'turn complete' label from a successful turn's chip", () => {
+    // Arrange + Act — the done wash says it, so the words never do.
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).not.toContain("turn complete");
+  });
+
+  it("withholds the turn's cost from the chip", () => {
     // Arrange + Act
     const html = renderItem(resultItem("success"));
     // Assert
-    expect(html).toContain("turn complete");
+    expect(html).not.toContain("$0.5000");
+  });
+
+  it("withholds the turn's own in/out token pair from the chip", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).not.toContain("3in/4out");
   });
 
   it("renders the turn's duration in whole units", () => {
@@ -1123,7 +1138,55 @@ describe("ResultChip", () => {
     // Act
     const html = renderItem(item);
     // Assert — whole minutes and seconds, never the fractional 5.5m.
-    expect(html).toContain("turn complete · 5m 30s ·");
+    expect(html).toContain("5m 30s ·");
+  });
+
+  it("renders the session's standing input tokens after the duration", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).toContain("12ms · 300,000 in · ");
+  });
+
+  it("signs a context increase with a plus", () => {
+    // Arrange + Act
+    const html = renderItem(resultItem("success"));
+    // Assert
+    expect(html).toContain("300,000 in · +100,000");
+  });
+
+  it("signs a context decrease with a minus", () => {
+    // Arrange — the first turn after a /compact stands below the last one.
+    const item = { ...resultItem("success"), context: { total: 60_000, delta: -140_000 } };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("60,000 in · -140,000");
+  });
+
+  it("renders a zero increase as a signed zero", () => {
+    // Arrange
+    const item = { ...resultItem("success"), context: { total: 300_000, delta: 0 } };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("300,000 in · +0");
+  });
+
+  it("withholds the token figures when the turn's context size is unknown", () => {
+    // Arrange — a /clear turn: it re-inits the session and reports no new size.
+    const item = { ...resultItem("success"), context: null };
+    // Act
+    const html = renderItem(item);
+    // Assert — the duration alone, with no figure to stand beside it.
+    expect(html).not.toMatch(/\bin\b/);
+  });
+
+  it("labels an aborted turn's chip with its subtype", () => {
+    // Arrange + Act — only a turn that ended some other way names how.
+    const html = renderItem(resultItem("aborted"));
+    // Assert
+    expect(html).toContain("aborted · 12ms");
   });
 
   it("withholds the done class from an aborted turn's chip", () => {
@@ -1157,6 +1220,7 @@ describe("finalResponseBlockIds", () => {
       totalCostUsd: 0.5,
       usage: { input_tokens: 3, output_tokens: 4 },
       isError: subtype === "error_during_execution",
+      context: { total: 300_000, delta: 100_000 },
     };
   }
 
@@ -1286,6 +1350,7 @@ describe("itemKey", () => {
       totalCostUsd: 0,
       usage: { input_tokens: 0, output_tokens: 0 },
       isError: false,
+      context: null,
     };
     // Act + Assert
     expect(itemKey(item, 5)).toBe("result:5");
