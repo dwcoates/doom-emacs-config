@@ -10,7 +10,7 @@ import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
-import { ModelInfo, Usage } from "./protocol.js";
+import { ModelInfo } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { isClearTurn, userTurnText } from "./turn.js";
@@ -27,7 +27,6 @@ import {
   ThinkingItem,
   ToolItem,
   UserTurnItem,
-  contextTokens,
 } from "./store.js";
 
 export interface Actions {
@@ -114,10 +113,15 @@ function formatTokens(n: number): string {
  * when none is). Its span is marked so the caller's once-a-second tick can
  * repaint that one value without rewriting the whole strip — the two paint
  * paths agree because the tick writes exactly what this would have.
+ *
+ * CONTEXT-TOKENS is the conversation's CURRENT size (what the next request
+ * will carry), never the session's cumulative spend. `null` means the size
+ * is genuinely unknown — a `/clear` and a compaction each leave one behind
+ * without reporting it — and prints as a dash rather than a lying `0`.
  */
 export function sessionInfoHtml(
   parentWs: string | null,
-  usage: Usage | null,
+  contextTokens: number | null,
   agents: readonly SubagentEntry[] = [],
   agentsOpen = false,
   timerLabel: string = IDLE_LABEL,
@@ -129,7 +133,8 @@ export function sessionInfoHtml(
   parts.push(
     `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(timerLabel)}</span>`,
   );
-  parts.push(`tokens: <span class="info-tokens">${formatTokens(contextTokens(usage))}</span>`);
+  const tokens = contextTokens === null ? "—" : formatTokens(contextTokens);
+  parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
   const menu = agentsMenuHtml(agents, agentsOpen);
   if (menu !== "") parts.push(menu);
   return parts.join(" · ");
