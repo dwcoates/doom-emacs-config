@@ -9,6 +9,12 @@
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
+  /* The far end of the breath the working frontier takes (see
+     .bubble.assistant.pulsing): the SAME purple one shade deeper, never a
+     second hue — the pulse is a sign of life on a bubble the reader is
+     mid-sentence in, so it must be readable as motion out of the corner of the
+     eye and invisible to the eye reading the words. */
+  --assistant-pulse: #ddd2f6;
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
@@ -79,6 +85,7 @@
     --card: #1a1d24;
     --user: #1e2a44;
     --assistant: #292040;
+    --assistant-pulse: #372c57;
     --thinking: #fb923c;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -279,6 +286,18 @@ pre {
 .bubble.assistant { background: var(--assistant); }
 /* The answer the turn landed on, as against the commentary above it. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
+/* The working frontier: the last response a still-running turn has finished,
+   breathing between its own wash and one shade deeper, so a reader who has
+   caught up sees the agent is still writing rather than that it went quiet.
+   SLOW (a full breath takes seconds, where every other indicator in the app
+   ticks in around one) and SHALLOW on purpose — this is the only motion the
+   app puts under a block of prose the user is reading, so it must never pull
+   the eye the way the spinners are meant to. A turn that has ENDED never
+   pulses: see pulsingBlockId. */
+.bubble.assistant.pulsing { animation: response-breathe 4s ease-in-out infinite; }
+@keyframes response-breathe {
+  50% { background: var(--assistant-pulse); }
+}
 .cursor { animation: pulse 1s infinite; color: var(--accent); }
 
 /* Markdown-rendered assistant text */
@@ -646,6 +665,12 @@ pre {
      is exactly the motion this query exists to drop. */
   .agent-dot.agent-starting,
   .agent-dot.agent-running {
+    animation: none;
+  }
+  /* The frontier's breath is a hint, never the sole liveness signal (the
+     topbar spinner and the running tool arcs both still say a turn is in
+     flight), so it drops entirely rather than degrading to something slower. */
+  .bubble.assistant.pulsing {
     animation: none;
   }
 }

@@ -213,10 +213,16 @@ function UserTurn(item: UserTurnItem): string {
  * A turn's FINAL response gets the green border (§2.4): the answer the
  * turn actually landed on, set apart from the running commentary the
  * agent emits between its tool calls.
+ *
+ * The working frontier gets the pulse instead (see `pulsingBlockId`). The
+ * two never land on the same bubble: a final response only exists once the
+ * turn has ended, and the pulse only runs while it has not.
  */
-function TextStream(item: TextItem, isFinal: boolean): string {
+function TextStream(item: TextItem, isFinal: boolean, isPulsing = false): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
-  const cls = `bubble assistant md${isFinal ? " final-response" : ""}`;
+  const cls = `bubble assistant md${isFinal ? " final-response" : ""}${
+    isPulsing ? " pulsing" : ""
+  }`;
   // A bare metaprompt TLDR tree (no code fence — fenced trees are the
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
@@ -563,6 +569,36 @@ export function finalResponseBlockIds(items: readonly ConversationItem[]): Set<s
   return finals;
 }
 
+/**
+ * Block id of the text bubble that BREATHES — the working frontier: the last
+ * response the agent has finished while the turn keeps running, so the reader
+ * knows more is still being written rather than that the agent went quiet.
+ *
+ * Four states forfeit the pulse, each because something else already carries
+ * the beat (or because there is no beat to carry):
+ * - the turn is not in flight, so nothing more is coming at all;
+ * - a later response is streaming, and its cursor is the live signal;
+ * - a thinking indicator is running, and its spinner is the live signal;
+ * - the in-flight turn has written no response yet, so there is nothing to pulse.
+ *
+ * The scan stops at the newest user turn: the previous turn's answer belongs
+ * to a question already answered, so a fresh prompt never breathes life back
+ * into it.
+ */
+export function pulsingBlockId(
+  items: readonly ConversationItem[],
+  turnInFlight: boolean,
+): string | null {
+  if (!turnInFlight) return null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user-turn") return null;
+    if (item.kind === "thinking" && !item.done) return null;
+    if (item.kind === "text") return item.done ? item.blockId : null;
+  }
+  return null;
+}
+
 /** Duration units, coarsest-first. Each scale is a whole multiple of the next. */
 const DURATION_UNITS: ReadonlyArray<{ suffix: string; scale: number }> = [
   { suffix: "h", scale: 3_600_000 },
@@ -654,12 +690,13 @@ export function renderItem(
   item: ConversationItem,
   selections?: QuestionSelections,
   isFinal = false,
+  isPulsing = false,
 ): string {
   switch (item.kind) {
     case "user-turn":
       return UserTurn(item);
     case "text":
-      return TextStream(item, isFinal);
+      return TextStream(item, isFinal, isPulsing);
     case "thinking":
       return Thinking(item);
     case "tool":
@@ -818,12 +855,20 @@ export class FeedRenderer {
     if (this.lastState) this.render(this.lastState);
   }
 
-  /** One item's HTML, green-bordered when FINALS marks it a turn's answer. */
-  private itemHtml(item: ConversationItem, finals: ReadonlySet<string>): string {
+  /**
+   * One item's HTML: green-bordered when FINALS marks it a turn's answer, and
+   * pulsing when PULSE-ID marks it the working frontier.
+   */
+  private itemHtml(
+    item: ConversationItem,
+    finals: ReadonlySet<string>,
+    pulseId: string | null,
+  ): string {
     return renderItem(
       item,
       this.questionSelections,
       item.kind === "text" && finals.has(item.blockId),
+      item.kind === "text" && item.blockId === pulseId,
     );
   }
 
@@ -863,6 +908,7 @@ export class FeedRenderer {
     this.container.innerHTML = "";
     this.nodes.clear();
     const finals = finalResponseBlockIds(state.items);
+    const pulseId = pulsingBlockId(state.items, state.turnInFlight);
     const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
@@ -877,7 +923,7 @@ export class FeedRenderer {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
         const { el, item } = shells[i];
-        const html = this.itemHtml(item, finals);
+        const html = this.itemHtml(item, finals, pulseId);
         el.innerHTML = html;
         const entry = this.nodes.get(el.dataset.key ?? "");
         if (entry) entry.html = html;
@@ -926,11 +972,12 @@ export class FeedRenderer {
     });
     this.lastUserTurn = turnId;
     const finals = finalResponseBlockIds(state.items);
+    const pulseId = pulsingBlockId(state.items, state.turnInFlight);
     const seen = new Set<string>();
     state.items.forEach((item, i) => {
       const key = itemKey(item, i);
       seen.add(key);
-      const html = this.itemHtml(item, finals);
+      const html = this.itemHtml(item, finals, pulseId);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");
