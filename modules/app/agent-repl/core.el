@@ -722,13 +722,6 @@ gh (see AGENTS.md \"No External Processes or External State in Tests\")."
              (kill-buffer (process-buffer p)))
            (funcall callback (zerop (process-exit-status p)) (or output ""))))))))
 
-(defun agent-repl--docker-exit-code (&rest args)
-  "Run `docker ARGS' synchronously and return its exit code (stdout discarded).
-This IS the external-boundary wrapper for the Docker CLI: tests must
-mock this function via `cl-letf' rather than invoke real `docker'
-\(see AGENTS.md \"No External Processes or External State in Tests\")."
-  (apply #'call-process "docker" nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
-
 (defun agent-repl--signal-process (pid sig)
   "Send signal SIG to process PID (an external-state mutation).
 This IS the external-boundary wrapper for `signal-process': tests must
@@ -795,7 +788,6 @@ introducing a sibling raw `make-process' site."
     agent-repl--gh-string-quiet
     agent-repl--early-git-string
     agent-repl--early-git-exit-code
-    agent-repl--docker-exit-code
     agent-repl--make-process-git
     agent-repl--async-gh
     agent-repl--signal-process

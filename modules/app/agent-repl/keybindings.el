@@ -72,7 +72,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
       :detail-source-branch :git-clean :git-proc))
     ("🧠 Session"
      (:session-id :fork-session-id :vterm-buffer :active-env
-      :sandbox :bare-metal :agent-ready :ws-loaded :ready-timer))
+      :bare-metal :agent-ready :ws-loaded :ready-timer))
     ("💬 Prompts"
      (:last-prompt-time :last-prompt-text :last-prompt-summary
       :last-prompt-summary-pending :deferred-prompts :pending-prompts
@@ -814,7 +814,6 @@ global drawer-mirror bindings win in vterm buffers."
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
-      :desc "Switch sandbox/bare-metal" "o s" #'agent-repl-switch-environment
       ;; `agent-repl-select-frontend' is deliberately UNBOUND: flipping a
       ;; workspace's presentation without killing its session invites two
       ;; agent processes on one directory.  `SPC o F' (kill-then-open,

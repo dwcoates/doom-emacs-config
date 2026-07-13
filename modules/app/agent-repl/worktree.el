@@ -548,19 +548,17 @@ otherwise crash the sentinel as an opaque \"error in process sentinel\"."
     (when ws (agent-repl--ws-set-agent-state ws :start-failed))
     (agent-repl--warn ws "Claude failed to start for %s — %s" ws msg)))
 
-(defun agent-repl--setup-worktree-session (ws-id path ws force-sandbox &optional no-agent)
+(defun agent-repl--setup-worktree-session (ws-id path ws &optional no-agent)
   "Register WS as a worktree at PATH and start its agent session.
 
 The session boots through WS's OWN FRONTEND
 \(`agent-repl--frontend-boot-session'), not through the vterm boot
 directly: a workspace born here is born under `agent-repl-default-frontend'
 like any other, so the generated / hand-created worktree comes up in the
-gui when the gui is the default.  PATH and the desired environment are
-passed as hints, which the boot threads into `initialize-ws-env' (the
+gui when the gui is the default.  PATH and the `:bare-metal' environment
+are passed as hints, which the boot threads into `initialize-ws-env' (the
 sole writer of `:project-dir', `:active-env', and per-env instantiation
-structs) BEFORE resolving the frontend — FORCE-SANDBOX is precisely one
-of the things that resolution depends on, since only the vterm can run a
-sandboxed session.
+structs) BEFORE resolving the frontend.
 
 When NO-AGENT is non-nil, the worktree is still registered as a
 worktree workspace but the agent is NOT booted: only the env state is
@@ -569,15 +567,14 @@ threaded through), mirroring `agent-repl--new-workspace'.  This is the
 `SPC TAB n/N' empty-preemptive-prompt path — a worktree created exactly
 as usual, minus the auto-started agent session."
   (agent-repl--register-worktree-ws ws-id ws)
-  (let ((default-directory (file-name-as-directory path))
-        (env-hint (if force-sandbox :sandbox :bare-metal)))
+  (let ((default-directory (file-name-as-directory path)))
     (if no-agent
         (progn
-          (agent-repl--initialize-ws-env ws path env-hint)
+          (agent-repl--initialize-ws-env ws path :bare-metal)
           (agent-repl--log ws "worktree NOT starting agent (no-agent) ws=%s" ws))
       (condition-case err
           (progn
-            (agent-repl--frontend-boot-session ws path env-hint)
+            (agent-repl--frontend-boot-session ws path :bare-metal)
             (agent-repl--log ws "worktree pre-started agent ws=%s frontend=%s"
                               ws (agent-repl--ws-frontend-name ws)))
         ;; Runs from `agent-repl--async-git-sentinel'; a non-local exit here
@@ -1037,7 +1034,7 @@ When CAP is nil, returns S unchanged.  S may be nil; treated as \"\"."
         (concat (substring s 0 cap) "...[truncated]")
       s)))
 
-(defun agent-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from &optional force-sandbox)
+(defun agent-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from)
   "Build the prompt sent to headless claude for workspace generation.
 RAW-PROMPT is the user's preemptive prompt — used purely as the source
 material for the slugified workspace name.
@@ -1046,10 +1043,7 @@ new workspace's first message; emitted verbatim into the JSON `prompt'
 field.
 GIT-ROOT, BASE-COMMIT, FORK-FROM are the deterministic values the
 caller already knows; the model is told to copy them through unchanged
-rather than re-derive them.
-When FORCE-SANDBOX is non-nil, the prompt instructs the model to emit
-`\"force_sandbox\": true' so the spawned workspace runs inside the
-Docker sandbox rather than bare-metal."
+rather than re-derive them."
   (concat
    "Use the /workspace-generation skill to create a workspace (or, rarely, multiple"
    " workspaces) for the provided user prompt..\n"
@@ -1067,8 +1061,6 @@ Docker sandbox rather than bare-metal."
    (format "  \"base_commit\": %S\n" base-commit)
    (when fork-from
      (format "  \"fork_from\": %S\n" fork-from))
-   (when force-sandbox
-     (format "  \"force_sandbox\": true\n"))
    "\n"
    (let ((prefix (agent-repl--workspace-prefix-slash)))
      (if (string-empty-p prefix)
@@ -1134,12 +1126,10 @@ stays unit-testable without a real process."
             (agent-repl--workspace-generation-finalize gen-id status event raw-out git-root))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
-(defun agent-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from &optional force-sandbox)
+(defun agent-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
   "Async-spawn `claude -p --model haiku' to generate a workspace command file.
 RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM are
 threaded through to `agent-repl--workspace-generation-prompt'.
-When FORCE-SANDBOX is non-nil it is forwarded to the prompt builder so
-the emitted JSON includes `\"force_sandbox\": true'.
 
 A short correlation ID (GEN-ID) is generated per spawn and embedded in
 every log line — spawn-time summary, prompt-body dump, sentinel exit,
@@ -1159,7 +1149,7 @@ asynchronously."
                agent-repl-workspace-generation-model
                agent-repl-workspace-generation-extra-args))
          (proc-input (agent-repl--workspace-generation-prompt
-                      raw-prompt prefixed-prompt git-root base-commit fork-from force-sandbox))
+                      raw-prompt prefixed-prompt git-root base-commit fork-from))
          (prompt-snippet (agent-repl--workspace-generation-truncate
                           proc-input
                           agent-repl-workspace-generation-prompt-log-cap)))
@@ -1215,13 +1205,13 @@ not resolve to a known workspace, or that workspace has no priority."
           (agent-repl--ws-get src-ws :priority)))))
 
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
-                                                       priority fork-session-id force-sandbox
+                                                       priority fork-session-id
                                                        callback &optional source-dir no-agent model)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
-settings, starts the agent session (with FORCE-SANDBOX controlling the
-environment), and invokes CALLBACK with (PATH DIRNAME) when done.
+settings, starts the agent session, and invokes CALLBACK with
+(PATH DIRNAME) when done.
 SOURCE-DIR, when non-nil, is the canonical project-dir of the workspace
 this worktree was created from; stored under `:source-ws-dir' so
 `SPC TAB M' can route the merge back to its source.
@@ -1256,8 +1246,8 @@ workspace-generation JSON's `model' field); stored under `:model' so
 `agent-repl--build-start-cmd' passes it as `--model' when booting the
 session.  When nil, the session falls back to
 `agent-repl-interactive-model' (default \"opus\")."
-  (agent-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s force-sandbox=%s source-dir=%s model=%s"
-                    path dirname priority fork-session-id force-sandbox (or source-dir "nil") (or model "nil"))
+  (agent-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s source-dir=%s model=%s"
+                    path dirname priority fork-session-id (or source-dir "nil") (or model "nil"))
   (agent-repl--with-preserved-focus
     (agent-repl--register-projectile-project path dirname)
     (let* ((canonical (agent-repl--path-canonical path))
@@ -1299,7 +1289,7 @@ session.  When nil, the session falls back to
           (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
             (agent-repl--ws-put ws :parent-branch-name parent-branch))))
       (agent-repl--reorder-workspace-by-priority ws)
-      (agent-repl--setup-worktree-session ws-id path ws force-sandbox no-agent)
+      (agent-repl--setup-worktree-session ws-id path ws no-agent)
       (agent-repl--info ws "Worktree '%s' ready." dirname)))
   ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only
   ;; production caller (`agent-repl--worktree-creation-switch-callback')
@@ -1310,7 +1300,7 @@ session.  When nil, the session falls back to
   (when callback (funcall callback path dirname)))
 
 (defun agent-repl--worktree-add-callback (path dirname preemptive-prompt
-                                               priority fork-session-id force-sandbox
+                                               priority fork-session-id
                                                callback source-dir no-agent model ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
@@ -1325,14 +1315,14 @@ per-workspace agent model alias)."
         (agent-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (agent-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
-         priority fork-session-id force-sandbox callback source-dir no-agent model))
+         priority fork-session-id callback source-dir no-agent model))
     (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (agent-repl--warn dirname "git worktree add failed: %s" output)))
 
 (defun agent-repl--async-worktree-add (git-root branch-name path base-commit
                                               fork-session-id
                                               dirname preemptive-prompt
-                                              priority force-sandbox callback
+                                              priority callback
                                               &optional source-dir no-agent model)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
@@ -1353,7 +1343,7 @@ so the booted session runs under `--model MODEL'."
                          git-root branch-name base-commit))
                       (agent-repl--worktree-add-callback
                        path dirname preemptive-prompt
-                       priority fork-session-id force-sandbox callback source-dir
+                       priority fork-session-id callback source-dir
                        no-agent model ok output))))
     (agent-repl--log dirname "worktree async git add: %S" add-args)
     (agent-repl--async-git "worktree-add" git-root add-args after-add)))
@@ -1400,7 +1390,7 @@ report the new path as an existing project."
       (agent-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun agent-repl--do-create-worktree-workspace (name &optional force-sandbox fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model)
+(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
@@ -1454,7 +1444,7 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
                                    git-root branch-name path base-commit
                                    fork-session-id
                                    dirname preemptive-prompt
-                                   priority force-sandbox callback source-dir
+                                   priority callback source-dir
                                    no-agent model)))
       (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
@@ -1611,7 +1601,7 @@ the JSON file lands and the file-watcher dispatches it."
             (agent-repl--log nil "create-worktree-workspace: empty preemptive prompt, creating worktree '%s' (claude not started) rooted at %s source-dir=%s"
                               name git-root (or worktree-source-dir "nil"))
             (agent-repl--do-create-worktree-workspace
-             name nil nil nil
+             name nil nil
              #'agent-repl--worktree-creation-switch-callback
              nil base-commit git-root worktree-source-dir t)))
       (let ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt)))
@@ -1663,7 +1653,7 @@ Inherits `minibuffer-local-map' so `RET' submits the typed text
 unchanged; `C-RET' submits it with `agent-repl--oneshot-no-action-suffix'
 appended via `agent-repl--oneshot-prompt-submit-no-action'.")
 
-(defun agent-repl--create-pinned-oneshot-workspace (git-root base suffix tag &optional force-sandbox)
+(defun agent-repl--create-pinned-oneshot-workspace (git-root base suffix tag)
   "Internal helper for one-shot workspace creators pinned to GIT-ROOT.
 Shared by every `agent-repl-create-<repo>-oneshot-workspace' command —
 do not duplicate this body in a new one-shot, dispatch through here.
@@ -1691,12 +1681,7 @@ explicit.
 The preemptive prompt is read with `agent-repl--oneshot-prompt-map':
 `RET' submits the typed text as-is, while `C-RET' submits it with
 `agent-repl--oneshot-no-action-suffix' appended so the spawned agent
-investigates and reports without making changes.
-
-When FORCE-SANDBOX is non-nil, the spawned workspace runs inside the
-Docker sandbox rather than bare-metal (forwarded to
-`agent-repl--spawn-workspace-generation' and thence into the emitted
-JSON command as `\"force_sandbox\": true')."
+investigates and reports without making changes."
   (let* ((base-commit (agent-repl--resolve-worktree-base base))
          (raw-prompt (read-from-minibuffer
                       (format "One-shot %s prompt: " tag)
@@ -1704,8 +1689,8 @@ JSON command as `\"force_sandbox\": true')."
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let* ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt suffix)))
-      (agent-repl--log nil "%s: base=%s git-root=%s base-commit=%s force-sandbox=%s"
-                        tag base git-root base-commit (if force-sandbox "t" "nil"))
+      (agent-repl--log nil "%s: base=%s git-root=%s base-commit=%s"
+                        tag base git-root base-commit)
       ;; Reset tracking BEFORE the spawn so any `SPC j C-o' / `SPC j C-O'
       ;; pressed while generation is in-flight queues onto this oneshot
       ;; rather than the previous one's workspace.
@@ -1714,7 +1699,7 @@ JSON command as `\"force_sandbox\": true')."
       (agent-repl--info nil "Generating %s workspace name via `claude -p --model %s'..."
                         tag agent-repl-workspace-generation-model)
       (agent-repl--spawn-workspace-generation
-       raw-prompt prefixed-prompt git-root base-commit nil force-sandbox))))
+       raw-prompt prefixed-prompt git-root base-commit nil))))
 
 (defun agent-repl-create-doom-oneshot-workspace (&optional base)
   "Create a one-shot worktree workspace rooted in `~/.config/doom'.
@@ -1738,8 +1723,7 @@ symbol key in `agent-repl--worktree-base-commits':
    agent-repl--doom-config-dir
    (or base 'master)
    agent-repl--oneshot-merge-suffix
-   "doom-oneshot"
-   t))
+   "doom-oneshot"))
 
 (defun agent-repl-create-doom-oneshot-workspace-from-current-branch ()
   "Create a one-shot doom-config worktree branched off HEAD.
@@ -2291,7 +2275,7 @@ silently degrade to the default base when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit force-sandbox model)
+(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `agent-repl--handle-create-command'); it is threaded through so the
@@ -2301,8 +2285,6 @@ When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
 resumes the fork source's agent session.
 BASE-COMMIT, when non-nil, overrides the default base ref (which is
 \"HEAD\" for forks and `agent-repl-worktree-default-base' otherwise).
-When FORCE-SANDBOX is non-nil, the new workspace's agent session is
-launched inside the Docker sandbox rather than bare-metal.
 MODEL, when non-nil, is the per-workspace agent model alias forwarded so
 the booted session runs under `--model MODEL'.
 
@@ -2322,11 +2304,11 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
          (if (and base-commit (equal base-commit agent-repl-master-branch-name))
              (agent-repl--master-worktree-path git-root)
            git-root)))
-    (agent-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s force-sandbox=%s model=%s"
+    (agent-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s model=%s"
                       name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil")
-                      (if force-sandbox "t" "nil") (or model "nil"))
+                      (or model "nil"))
     (agent-repl--do-create-worktree-workspace
-     name force-sandbox fork-session-id prompt nil priority base-commit git-root source-dir nil model)))
+     name fork-session-id prompt nil priority base-commit git-root source-dir nil model)))
 
 (defcustom agent-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -2486,7 +2468,6 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
          (fork-from (alist-get 'fork_from cmd nil))
-         (force-sandbox (alist-get 'force_sandbox cmd nil))
          (cmd-git-root (alist-get 'git_root cmd nil))
          (cmd-base-commit (alist-get 'base_commit cmd nil))
          (base-commit (and (stringp cmd-base-commit)
@@ -2549,12 +2530,12 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
         (when effective-name
           (agent-repl--reserve-workspace-name effective-name)
           (agent-repl--log effective-name
-                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s force-sandbox=%s model=%s"
+                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s model=%s"
                             effective-name delay name priority fork-session-id git-root (or base-commit "nil")
-                            (if force-sandbox "t" "nil") (or model "nil"))
+                            (or model "nil"))
           (run-with-timer delay nil
                           #'agent-repl--create-worktree-from-command
-                          git-root effective-name prompt priority fork-session-id base-commit force-sandbox model)))))))
+                          git-root effective-name prompt priority fork-session-id base-commit model)))))))
 
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."

@@ -85,11 +85,11 @@ can drive; selection validates the pair against it.
 
 SUPPORTED-ENVS is the same idea on the environment axis: the list of
 `agent-repl--environment-keys' values this frontend can run a session
-in.  The gui drives the daemon, which spawns the agent on the HOST —
-it cannot run a `:sandbox' session, and a workspace that asked for one
-must never be silently presented (and re-launched) outside its
-sandbox.  Resolution (`agent-repl--frontend-default-for-ws') and
-validation (`agent-repl--frontend-validate-pair') both honor it.
+in.  Every registered frontend currently supports the sole surviving
+environment (`:bare-metal'), so the axis rules nothing out today; it
+remains the seam a containerized environment would be gated on.
+Resolution (`agent-repl--frontend-default-for-ws') and validation
+(`agent-repl--frontend-validate-pair') both honor it.
 
 DURABLE-SESSION-ID-FN (WS): the DURABLE claude session uuid of WS's
 live session on this frontend, or nil — the cross-frontend resume
@@ -156,8 +156,8 @@ dispatch), hand-created (`SPC TAB n'), restored from a snapshot or a
 state file, or opened cold with `SPC o c'.  vterm is the opt-in.
 
 The default is CAPABILITY-CONSTRAINED, not absolute: a workspace whose
-backend or environment the gui cannot drive (a codex workspace, a
-`:sandbox' workspace) resolves to the frontend that can — see
+backend the gui cannot drive (a codex workspace) resolves to the
+frontend that can — see
 `agent-repl--frontend-default-for-ws'.  Set this to `vterm' to restore
 the TUI as the universal presentation."
   :type 'symbol
@@ -179,9 +179,8 @@ workspace has actually declared one."
 environment; otherwise the first registered frontend that can.
 
 The second clause is capability RESOLUTION, not a fallback that papers
-over an error: a codex workspace has no gui to be presented under, and
-a `:sandbox' workspace's session must run inside its container, so for
-those the default names a presentation that does not exist.  Picking
+over an error: a codex workspace has no gui to be presented under, so
+for it the default names a presentation that does not exist.  Picking
 the frontend that CAN present them is the only correct reading of
 \"the default\"; there is no failure here to swallow.  When NO
 registered frontend can drive the pair, that IS a failure, and it
@@ -235,10 +234,10 @@ registered."
 
 (defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env)
   "Signal `user-error' unless FRONTEND-NAME can drive BACKEND-NAME in ENV.
-ENV, when non-nil, is the workspace's `:active-env': the gui cannot run
-a `:sandbox' session (the daemon spawns the agent on the host), and
-silently presenting a sandboxed workspace outside its container is
-exactly the downgrade this check exists to prevent.
+ENV, when non-nil, is the workspace's `:active-env'.  Every registered
+frontend supports the sole surviving environment, so today only the
+BACKEND axis can rule a pair out; the ENV check is what a containerized
+environment would be gated on.
 Returns t when the combination is valid."
   (let ((fe (agent-repl-frontend-get frontend-name)))
     (unless (memq backend-name (agent-repl-frontend-supported-backends fe))
@@ -302,9 +301,8 @@ vterm boot and stranding the gui default.
 Order matters: the environment is hydrated (PROJECT-DIR-HINT and
 ACTIVE-ENV-HINT are `agent-repl--initialize-ws-env' hints) BEFORE the
 booting frontend is picked, because `:active-env' is one of the two
-axes the frontend resolves against — a `:sandbox' workspace must be
-recognized as sandboxed before its frontend is chosen, or the gui would
-boot it on the host, outside its container.
+axes the frontend resolves against, so a workspace must have declared
+its environment before a frontend is chosen for it.
 
 No-op when WS's frontend already has a live session — the restore path
 re-establishes workspaces that may already be running.  The
@@ -346,7 +344,7 @@ Two effects, strictly in this order:
      re-present itself under the new one.  The pinned value is the
      RESOLVED name rather than `agent-repl-default-frontend' itself,
      because the two diverge for a workspace the default cannot drive
-     (a codex or `:sandbox' workspace already resolves to vterm — see
+     (a codex workspace already resolves to vterm — see
      `agent-repl--frontend-default-for-ws'), and pinning such a
      workspace to the raw default would hand it a presentation it
      cannot have.
@@ -393,7 +391,7 @@ With prefix argument SET-DEFAULT, set `agent-repl-default-frontend'
 \(for workspaces without a `:frontend' override) instead.
 
 Validates the choice against the workspace's backend and environment
-\(the gui drives only claude, and only outside the sandbox) and refuses
+\(the gui drives only claude) and refuses
 to change a workspace whose current frontend has a RUNNING session —
 use `agent-repl-switch-frontend' for a live, conversation-preserving
 switch.  The choice is recorded as DELIBERATE

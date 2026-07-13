@@ -630,9 +630,9 @@ session is still alive and re-promptable).")
 
 (defconst agent-repl--label-start-failed     "🚫"
   "Bracket label shown adjacent to the numeric index when starting
-the agent failed (e.g. the sandbox Docker image is not built).  Distinct
-from `:stop-failed' (⚠, a live re-promptable session) and `:dead' (❌, a
-vterm that died) — the session never came up at all.")
+the agent failed.  Distinct from `:stop-failed' (⚠, a live re-promptable
+session) and `:dead' (❌, a vterm that died) — the session never came up
+at all.")
 
 (defconst agent-repl--label-merge-conflict   "💥"
   "Bracket label shown adjacent to the numeric index when a workspace's

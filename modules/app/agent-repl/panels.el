@@ -1345,11 +1345,9 @@ path later for pending-prompt draining; its panel-show is idempotent."
     (let* ((root (agent-repl--ws-dir ws))
            (default-directory root))
       (agent-repl--kill-stale-vterm ws)
-      ;; Build the start command BEFORE creating the vterm buffer.
-      ;; `build-start-cmd' can make a non-local exit — most notably a
-      ;; `user-error' from `get-sandbox-image' when the sandbox image still
-      ;; needs building — so computing it first means such an abort happens
-      ;; before any buffer exists and leaves no orphan panel buffer behind.
+      ;; Build the start command BEFORE creating the vterm buffer, so a
+      ;; non-local exit out of `build-start-cmd' aborts before any buffer
+      ;; exists and leaves no orphan panel buffer behind.
       (let* ((start-info (agent-repl--build-start-cmd ws))
              (cmd         (plist-get start-info :cmd))
              (inst        (plist-get start-info :inst))
@@ -1857,73 +1855,6 @@ real main-area window — see
     (with-current-buffer (agent-repl--ws-get (agent-repl--ws-current-name) :vterm-buffer)
       (vterm-send-key "<backtab>"))))
 
-(defun agent-repl--validate-env-switch (ws new-env worktree-p session-id)
-  "Validate that workspace WS can switch to NEW-ENV.
-WORKTREE-P and SESSION-ID describe the current workspace state.
-Signals `user-error' if any precondition is not met.
-
-The frontend check is the first one: `agent-repl-switch-environment' is
-vterm machinery end to end (`--kill-session', then `--initialize-agent'
-under the other environment), and the gui — which cannot present a
-`:sandbox' session at all (`agent-repl-frontend' SUPPORTED-ENVS) — has
-no counterpart.  Running it on a gui workspace would leave the daemon
-session orphaned and boot a second agent on the same directory, so it
-refuses out loud instead.  Switch the workspace to vterm first
-\(`SPC o F')."
-  (agent-repl--log ws "validate-env-switch: ws=%s new-env=%s" ws new-env)
-  (when (agent-repl--ws-gui-frontend-p ws)
-    (user-error "Environment switching is a vterm capability — switch %s to the vterm frontend first (SPC o F)" ws))
-  (unless worktree-p
-    (user-error "Sandbox switching requires a worktree workspace"))
-  (unless session-id
-    (user-error "No session ID captured yet — session may still be starting"))
-  (when (agent-repl--ws-get ws :thinking)
-    (user-error "Cannot switch environment while Claude is thinking"))
-  (when (and (eq new-env :sandbox)
-             (not (agent-repl--resolve-sandbox-config
-                   (agent-repl--ws-get ws :project-dir))))
-    (user-error "No sandbox configuration found for this workspace")))
-
-(defun agent-repl--seed-new-env-session (ws new-env session-id)
-  "Ensure the NEW-ENV instantiation for WS has a session-id.
-If this is the first switch, seeds the new environment's session-id
-from SESSION-ID.  The value signals to `compute-claude-flags' that
-the env should emit `--continue' on start — which picks up the most
-recent session in the worktree's cwd (i.e. the one we just left)."
-  (let ((new-inst (or (agent-repl--ws-get ws new-env)
-                      (make-agent-repl-instantiation))))
-    (if (agent-repl-instantiation-session-id new-inst)
-        (agent-repl--log ws "seed-new-env-session: ws=%s new-env=%s reusing existing session-id" ws new-env)
-      (agent-repl--log ws "seed-new-env-session: ws=%s new-env=%s seeding new session-id=%s"
-                        ws new-env session-id)
-      (setf (agent-repl-instantiation-session-id new-inst) session-id))
-    (agent-repl--ws-put ws new-env new-inst)))
-
-(defun agent-repl-switch-environment ()
-  "Switch the current workspace between Docker sandbox and bare-metal.
-Kills the current agent process and resumes it in the other environment.
-On the first switch, the new environment seeds its session-id from the
-current one so `--continue' in the other env picks up the conversation.
-On subsequent switches each environment resumes its own prior session
-independently.  Requires a worktree workspace with a captured session ID."
-  (interactive)
-  (let* ((ws (agent-repl--ws-current-name))
-         (active-env (agent-repl--ws-get ws :active-env))
-         (_ (agent-repl--log ws "switch-environment: ws=%s active-env=%s" ws active-env))
-         (worktree-p (agent-repl--ws-get ws :worktree-p))
-         (inst (agent-repl--active-inst ws))
-         (session-id (agent-repl-instantiation-session-id inst))
-         (new-env (if (eq active-env :sandbox) :bare-metal :sandbox)))
-    (agent-repl--validate-env-switch ws new-env worktree-p session-id)
-    (agent-repl--seed-new-env-session ws new-env session-id)
-    (agent-repl--kill-session ws)
-    (agent-repl--ws-put ws :active-env new-env)
-    (agent-repl--info ws "Switching to %s (resuming session %s...)"
-                      (if (eq new-env :sandbox) "Docker sandbox" "bare-metal")
-                      (substring session-id 0 agent-repl-session-id-display-length))
-    (agent-repl--initialize-agent ws)
-    (agent-repl--show-panels-and-focus)))
-
 ;;;; ---- Frontend registration (vterm) -----------------------------------------
 ;;
 ;; The vterm frontend wraps the classic machinery this file and
@@ -1981,10 +1912,7 @@ actually delivered to a live vterm."
                 (agent-repl--vterm-kill ws)
                 (agent-repl--initialize-agent ws))
   :supported-backends '(claude codex)
-  ;; The vterm launches the agent through `--build-start-cmd', which
-  ;; wraps it in `docker run' for `:sandbox' — so the TUI is the only
-  ;; presentation a sandboxed workspace can have.
-  :supported-envs '(:bare-metal :sandbox)
+  :supported-envs '(:bare-metal)
   ;; Durable-resume currency: the hook-captured instantiation session
   ;; id IS the CLI session uuid; adopting one persists it so the next
   ;; initialize resumes through the state file.

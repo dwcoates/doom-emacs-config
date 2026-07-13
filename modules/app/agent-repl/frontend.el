@@ -505,11 +505,6 @@ survives — it is workspace furniture, not session state."
   ;; The gui drives sessions through the claude Agent SDK; a codex
   ;; shim does not exist (yet), so the pair validation fails loudly.
   :supported-backends '(claude)
-  ;; The daemon spawns the agent on the HOST — there is no docker
-  ;; wrapper on this path (`agent-repl--build-start-cmd', the vterm's
-  ;; sandbox launcher, has no counterpart here).  A `:sandbox'
-  ;; workspace therefore cannot be presented by the gui: doing so would
-  ;; quietly re-launch it outside the container it asked for.
   :supported-envs '(:bare-metal)
   :durable-session-id-fn #'agent-repl--gui-durable-session-id
   :adopt-session-fn #'agent-repl--gui-adopt-session))

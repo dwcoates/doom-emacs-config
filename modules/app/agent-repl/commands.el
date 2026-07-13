@@ -1518,9 +1518,8 @@ Non-nil means a load is in flight — concurrent invocations of
   "Per-entry watchdog in seconds for the recursive snapshot loader.
 If the awaited workspace's `agent-repl--on-session-start-event' hasn't
 fired by then, the loader advances to the next entry anyway and logs
-a warning.  Tuned long enough for sandbox image build / first-time
-claude startup but short enough that a wedged workspace doesn't lock
-the entire load."
+a warning.  Tuned long enough for a first-time claude startup but short
+enough that a wedged workspace doesn't lock the entire load."
   :type 'number
   :group 'agent-repl)
 

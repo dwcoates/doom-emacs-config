@@ -154,7 +154,7 @@ chain produced."
          (agent-repl-system-prompt nil)
          (opts (list :session-id "s" :fork-session-id nil
                      :project-dir "/home/user/personal-proj" :model nil))
-         (perm  (agent-repl--compute-perm-flag nil "/home/user/personal-proj"))
+         (perm  (agent-repl--compute-perm-flag "/home/user/personal-proj"))
          (cfg   (agent-repl--compute-config-dir "/home/user/personal-proj"))
          (flags (agent-repl--compute-claude-flags "s" nil perm nil))
          (legacy (agent-repl--assemble-cmd flags cfg)))
@@ -254,8 +254,6 @@ UUID in place would make the next start run `codex resume <claude-id>'."
       (agent-repl--ws-put "ws1" :fork-session-id "fork-1")
       (agent-repl--ws-put "ws1" :bare-metal
                            (make-agent-repl-instantiation :session-id "claude-sid"))
-      (agent-repl--ws-put "ws1" :sandbox
-                           (make-agent-repl-instantiation :session-id "claude-sbx"))
       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "codex"))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
@@ -263,8 +261,6 @@ UUID in place would make the next start run `codex resume <claude-id>'."
         (agent-repl-select-backend nil)
         (should-not (agent-repl-instantiation-session-id
                      (agent-repl--ws-get "ws1" :bare-metal)))
-        (should-not (agent-repl-instantiation-session-id
-                     (agent-repl--ws-get "ws1" :sandbox)))
         (should-not (agent-repl--ws-get "ws1" :fork-session-id))))))
 
 (ert-deftest agent-repl-test-backend-select-same-backend-keeps-session-ids ()
@@ -290,36 +286,29 @@ UUID in place would make the next start run `codex resume <claude-id>'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :bare-metal
                          (make-agent-repl-instantiation :session-id "bm"))
-    (agent-repl--ws-put "ws1" :sandbox
-                         (make-agent-repl-instantiation :session-id "sb"))
     (agent-repl--ws-put "ws1" :fork-session-id "fk")
     (let ((snap (agent-repl--capture-backend-session-ids "ws1")))
       (should (equal (plist-get snap :bare-metal) "bm"))
-      (should (equal (plist-get snap :sandbox) "sb"))
       (should (equal (plist-get snap :fork-session-id) "fk")))))
 
 (ert-deftest agent-repl-test-backend-capture-session-ids-nil-for-missing-struct ()
   "capture-backend-session-ids records nil for an env lacking a struct."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :bare-metal
-                         (make-agent-repl-instantiation :session-id "bm"))
+    ;; Arrange — the ws carries the fork pointer but no instantiation struct.
+    (agent-repl--ws-put "ws1" :fork-session-id "fk")
     (let ((snap (agent-repl--capture-backend-session-ids "ws1")))
-      (should (equal (plist-get snap :bare-metal) "bm"))
-      (should (null (plist-get snap :sandbox))))))
+      (should (null (plist-get snap :bare-metal)))
+      (should (equal (plist-get snap :fork-session-id) "fk")))))
 
 (ert-deftest agent-repl-test-backend-apply-session-ids-restores-envs-and-fork ()
   "apply-backend-session-ids writes the sids and fork back onto the ws."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
     (agent-repl--apply-backend-session-ids
-     "ws1" '(:bare-metal "bm" :sandbox "sb" :fork-session-id "fk"))
+     "ws1" '(:bare-metal "bm" :fork-session-id "fk"))
     (should (equal (agent-repl-instantiation-session-id
                     (agent-repl--ws-get "ws1" :bare-metal))
                    "bm"))
-    (should (equal (agent-repl-instantiation-session-id
-                    (agent-repl--ws-get "ws1" :sandbox))
-                   "sb"))
     (should (equal (agent-repl--ws-get "ws1" :fork-session-id) "fk"))))
 
 (ert-deftest agent-repl-test-backend-apply-session-ids-nil-clears ()
@@ -344,14 +333,13 @@ UUID in place would make the next start run `codex resume <claude-id>'."
 (ert-deftest agent-repl-test-backend-session-ids-present-p-nil-when-empty ()
   "session-ids-present-p is nil when every slot is nil or the empty string."
   (should-not (agent-repl--backend-session-ids-present-p
-               '(:bare-metal nil :sandbox "" :fork-session-id nil))))
+               '(:bare-metal "" :fork-session-id nil))))
 
 (ert-deftest agent-repl-test-backend-switch-stashes-outgoing-under-old ()
   "switch-backend-session-ids stashes the live sids under the OLD backend."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :bare-metal
                          (make-agent-repl-instantiation :session-id "claude-sid"))
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
     (agent-repl--ws-switch-backend-session-ids "ws1" 'claude 'codex)
     (let ((stash (agent-repl--ws-get "ws1" :backend-session-stash)))
       (should (equal (plist-get (plist-get stash 'claude) :bare-metal)
@@ -362,7 +350,6 @@ UUID in place would make the next start run `codex resume <claude-id>'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :bare-metal
                          (make-agent-repl-instantiation :session-id "claude-sid"))
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
     (let ((restored (agent-repl--ws-switch-backend-session-ids
                      "ws1" 'claude 'codex)))
       (should-not restored)
@@ -374,7 +361,6 @@ UUID in place would make the next start run `codex resume <claude-id>'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :bare-metal
                          (make-agent-repl-instantiation :session-id "claude-sid"))
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
     (agent-repl--ws-switch-backend-session-ids "ws1" 'claude 'codex)
     (let ((restored (agent-repl--ws-switch-backend-session-ids
                      "ws1" 'codex 'claude)))
@@ -393,7 +379,6 @@ start must resume (`--continue') rather than start fresh."
       (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
       (agent-repl--ws-put "ws1" :bare-metal
                            (make-agent-repl-instantiation :session-id "claude-sid"))
-      (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) target))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
@@ -415,7 +400,6 @@ start must resume (`--continue') rather than start fresh."
           (target "codex"))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
       (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-      (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
       (agent-repl--ws-put "ws1" :fork-session-id "fork-1")
       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) target))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))

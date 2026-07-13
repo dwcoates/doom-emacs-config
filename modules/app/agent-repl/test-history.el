@@ -327,6 +327,82 @@ new path does not exist but the legacy one does."
   "read-sexp-file-if-exists returns nil when file does not exist."
   (should-not (agent-repl--read-sexp-file-if-exists "/nonexistent/path/file.el")))
 
+;;;; ---- Tests: saved-state migration ----
+
+(ert-deftest agent-repl-test-migrate-saved-state-nil ()
+  "migrate-saved-state passes nil straight through."
+  (should-not (agent-repl--migrate-saved-state nil)))
+
+(ert-deftest agent-repl-test-migrate-saved-state-relabels-sandbox-env ()
+  "A saved :active-env of :sandbox migrates to :bare-metal."
+  ;; Arrange
+  (let ((saved '(:active-env :sandbox :bare-metal nil :sandbox (:session-id "s1"))))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should (eq (plist-get out :active-env) :bare-metal)))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-promotes-sandbox-instantiation ()
+  "The :sandbox instantiation is PROMOTED into :bare-metal, preserving the session id.
+This is the whole point of the migration: relabeling the env without
+promoting would strand the conversation on the empty :bare-metal slot."
+  ;; Arrange — the real shape on disk: a live session id in :sandbox, nil beside it.
+  (let ((saved '(:active-env :sandbox
+                 :bare-metal (:session-id nil)
+                 :sandbox (:session-id "acf5badc-c47f-430e-a6d9-f6a70e505e15"))))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should (equal (plist-get out :bare-metal)
+                     '(:session-id "acf5badc-c47f-430e-a6d9-f6a70e505e15"))))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-leaves-bare-metal-env-alone ()
+  "A saved :active-env of :bare-metal is not disturbed."
+  ;; Arrange
+  (let ((saved '(:active-env :bare-metal :bare-metal (:session-id "keep-me"))))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should (equal (plist-get out :bare-metal) '(:session-id "keep-me"))))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-drops-retired-vterm-frontend ()
+  "A saved :frontend of vterm is dropped, since vterm is no longer registered."
+  ;; Arrange
+  (let ((saved '(:frontend vterm :frontend-explicit nil)))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should-not (plist-get out :frontend)))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-clears-explicit-marker-with-vterm ()
+  "Dropping a retired :frontend vterm also clears its :frontend-explicit marker.
+Left set, the marker would re-pin the workspace to a frontend that no
+longer exists on the next hydration."
+  ;; Arrange
+  (let ((saved '(:frontend vterm :frontend-explicit t)))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should-not (plist-get out :frontend-explicit)))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-leaves-gui-frontend-alone ()
+  "A saved :frontend of gui survives the migration untouched."
+  ;; Arrange
+  (let ((saved '(:frontend gui :frontend-explicit t)))
+    ;; Act
+    (let ((out (agent-repl--migrate-saved-state saved)))
+      ;; Assert
+      (should (eq (plist-get out :frontend) 'gui)))))
+
+(ert-deftest agent-repl-test-migrate-saved-state-does-not-mutate-input ()
+  "migrate-saved-state never mutates the plist it is handed."
+  ;; Arrange
+  (let ((saved (list :active-env :sandbox :sandbox (list :session-id "s1"))))
+    ;; Act
+    (agent-repl--migrate-saved-state saved)
+    ;; Assert
+    (should (eq (plist-get saved :active-env) :sandbox))))
+
 ;;;; ---- Tests: instantiation serialization ----
 
 (ert-deftest agent-repl-test-instantiation-to-plist-nil ()
@@ -417,24 +493,19 @@ new path does not exist but the legacy one does."
 ;;;; ---- Tests: collect-env-state ----
 
 (ert-deftest agent-repl-test-collect-env-state ()
-  "collect-env-state returns plists for each environment key."
+  "collect-env-state returns a plist for each environment key."
   (agent-repl-test--with-clean-state
-    (let ((sandbox-inst (make-agent-repl-instantiation :session-id "s1"))
-          (bare-inst (make-agent-repl-instantiation :session-id "b1")))
-      (agent-repl--ws-put "ws" :sandbox sandbox-inst)
+    (let ((bare-inst (make-agent-repl-instantiation :session-id "b1")))
       (agent-repl--ws-put "ws" :bare-metal bare-inst)
       (let ((state (agent-repl--collect-env-state "ws")))
         (should (equal (plist-get state :bare-metal)
-                       '(:session-id "b1")))
-        (should (equal (plist-get state :sandbox)
-                       '(:session-id "s1")))))))
+                       '(:session-id "b1")))))))
 
 (ert-deftest agent-repl-test-collect-env-state-nil-envs ()
   "collect-env-state returns nil plists when no envs are initialized."
   (agent-repl-test--with-clean-state
     (let ((state (agent-repl--collect-env-state "ws")))
-      (should-not (plist-get state :bare-metal))
-      (should-not (plist-get state :sandbox)))))
+      (should-not (plist-get state :bare-metal)))))
 
 ;;;; ---- Tests: state-save ----
 
@@ -448,8 +519,6 @@ new path does not exist but the legacy one does."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal
                                  (make-agent-repl-instantiation :session-id "s1"))
-            (agent-repl--ws-put "ws" :sandbox
-                                 (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -473,7 +542,6 @@ new path does not exist but the legacy one does."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :priority "p1")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -490,7 +558,6 @@ new path does not exist but the legacy one does."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :backend 'codex)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -510,7 +577,6 @@ deliberate `SPC o F' choice back to the default."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--ws-choose-frontend "ws" 'vterm)
             ;; Act
             (agent-repl--state-save "ws")
@@ -533,7 +599,6 @@ is — nothing chosen — and the workspace follows the default forward."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--ws-put "ws" :frontend 'vterm)
             ;; Act
             (agent-repl--state-save "ws")
@@ -554,10 +619,8 @@ session ids survive restart and switching back still resumes."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :backend-session-stash
                                  '(claude (:bare-metal "claude-sid"
-                                           :sandbox nil
                                            :fork-session-id nil)))
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -577,7 +640,6 @@ session ids survive restart and switching back still resumes."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -594,7 +656,6 @@ session ids survive restart and switching back still resumes."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :last-prompt-time 1700000000.5)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -611,7 +672,6 @@ session ids survive restart and switching back still resumes."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :source-ws-dir "/tmp/source-repo/")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -627,7 +687,6 @@ session ids survive restart and switching back still resumes."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -645,7 +704,6 @@ to its prior tab-bar slot after Emacs restart."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :saved-tab-index 3)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -664,7 +722,6 @@ claude session never started before quit can still launch with
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :fork-session-id "fork-sid-123")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -682,7 +739,6 @@ survives Emacs restart."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :last-prompt-summary "fix login bug")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -702,7 +758,6 @@ explicitly `x's it (which routes to `--finish-workspace')."
             (agent-repl--ws-put "ws" :merge-completed t)
             (agent-repl--ws-put "ws" :merge-completed-at 1234567890.0)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -723,7 +778,6 @@ regressing to the clean :merged 🔀 badge."
             (agent-repl--ws-put "ws" :merge-completed t)
             (agent-repl--ws-put "ws" :merge-failed t)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -741,7 +795,6 @@ regressing to the clean :merged 🔀 badge."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :worktree-p t)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -758,7 +811,6 @@ regressing to the clean :merged 🔀 badge."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :repl-state :inactive)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -778,7 +830,6 @@ to fable mid-session), so a restore re-launches under fable."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :model "opus")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -797,7 +848,6 @@ no session model yet (no assistant turn produced)."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :model "opus")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -815,7 +865,6 @@ generation `:model' yields a model."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -835,7 +884,6 @@ survives a crash that beats kill-emacs-hook.  Roster carries only
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :priority "p3")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let ((data (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
                                    :workspaces)))
@@ -855,7 +903,6 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -869,16 +916,14 @@ write is the primary obligation; snapshot is the piggyback)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :active-env :bare-metal)
     (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     ;; Should not error
     (agent-repl--validate-ws-env "ws")))
 
 (ert-deftest agent-repl-test-validate-ws-env-valid-with-session ()
   "validate-ws-env passes when instantiation has a string session-id."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :active-env :sandbox)
-    (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox
+    (agent-repl--ws-put "ws" :active-env :bare-metal)
+    (agent-repl--ws-put "ws" :bare-metal
                          (make-agent-repl-instantiation :session-id "abc"))
     (agent-repl--validate-ws-env "ws")))
 
@@ -887,22 +932,19 @@ write is the primary obligation; snapshot is the piggyback)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :active-env :bogus)
     (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     (should-error (agent-repl--validate-ws-env "ws"))))
 
 (ert-deftest agent-repl-test-validate-ws-env-nil-active-env ()
   "validate-ws-env errors when :active-env is nil."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     (should-error (agent-repl--validate-ws-env "ws"))))
 
 (ert-deftest agent-repl-test-validate-ws-env-missing-struct ()
   "validate-ws-env errors when an environment has no instantiation struct."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :active-env :bare-metal)
-    (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    ;; :sandbox is missing
+    ;; :bare-metal's instantiation struct is missing
     (should-error (agent-repl--validate-ws-env "ws"))))
 
 (ert-deftest agent-repl-test-validate-ws-env-invalid-session-id ()
@@ -911,7 +953,6 @@ write is the primary obligation; snapshot is the piggyback)."
     (agent-repl--ws-put "ws" :active-env :bare-metal)
     (agent-repl--ws-put "ws" :bare-metal
                          (make-agent-repl-instantiation :session-id 42))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     (should-error (agent-repl--validate-ws-env "ws"))))
 
 ;;;; ---- Tests: initialize-ws-env integration ----
@@ -925,18 +966,41 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--write-sexp-file
              (agent-repl--state-file tmpdir)
              '(:project-dir "/restored/root"
-               :active-env :sandbox
-               :bare-metal (:session-id "bm-id")
-               :sandbox (:session-id "sb-id")))
+               :active-env :bare-metal
+               :bare-metal (:session-id "bm-id")))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--initialize-ws-env "ws")
-            (should (eq (agent-repl--ws-get "ws" :active-env) :sandbox))
+            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
             (should (equal (agent-repl--ws-get "ws" :project-dir) "/restored/root"))
             (should (equal (agent-repl-instantiation-session-id
                             (agent-repl--ws-get "ws" :bare-metal))
-                           "bm-id"))
+                           "bm-id")))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-initialize-ws-env-migrates-retired-sandbox-env ()
+  "A state file left behind by the retired :sandbox env hydrates as :bare-metal.
+The hydration runs the saved plist through `agent-repl--migrate-saved-state',
+so the sandbox-era session id is PROMOTED into the surviving env instead of
+failing validation (`:sandbox' is no longer a legal `:active-env') or
+stranding the conversation on an empty :bare-metal instantiation."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-migrate-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — the shape a pre-retirement Emacs wrote to disk.
+            (agent-repl--write-sexp-file
+             (agent-repl--state-file tmpdir)
+             '(:project-dir "/restored/root"
+               :active-env :sandbox
+               :bare-metal (:session-id nil)
+               :sandbox (:session-id "sb-id")))
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            ;; Act
+            (agent-repl--initialize-ws-env "ws")
+            ;; Assert
+            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
             (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws" :sandbox))
+                            (agent-repl--ws-get "ws" :bare-metal))
                            "sb-id")))
         (delete-directory tmpdir t)))))
 
@@ -950,7 +1014,6 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--initialize-ws-env "ws")
             (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
             (should (agent-repl-instantiation-p (agent-repl--ws-get "ws" :bare-metal)))
-            (should (agent-repl-instantiation-p (agent-repl--ws-get "ws" :sandbox)))
             (should-not (agent-repl-instantiation-session-id
                          (agent-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
@@ -961,23 +1024,21 @@ write is the primary obligation; snapshot is the piggyback)."
     (let ((tmpdir (make-temp-file "test-state-env-" t)))
       (unwind-protect
           (progn
-            ;; Simulate pre-restart state: sandbox was active
+            ;; Simulate pre-restart state
             (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :sandbox)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal
                                  (make-agent-repl-instantiation :session-id "bm1"))
-            (agent-repl--ws-put "ws" :sandbox
-                                 (make-agent-repl-instantiation :session-id "sb1"))
             (agent-repl--state-save "ws")
             ;; Simulate post-restart: clear in-memory state
             (clrhash agent-repl--workspaces)
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--initialize-ws-env "ws")
-            ;; :active-env should be restored to :sandbox
-            (should (eq (agent-repl--ws-get "ws" :active-env) :sandbox))
+            ;; :active-env and the env's session id survive the restart
+            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
             (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws" :sandbox))
-                           "sb1")))
+                            (agent-repl--ws-get "ws" :bare-metal))
+                           "bm1")))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-source-ws-dir ()
@@ -991,8 +1052,7 @@ write is the primary obligation; snapshot is the piggyback)."
              '(:project-dir "/restored/root"
                :active-env :bare-metal
                :source-ws-dir "/tmp/recorded-source/"
-               :bare-metal (:session-id nil)
-               :sandbox (:session-id nil)))
+               :bare-metal (:session-id nil)))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--initialize-ws-env "ws")
             (should (equal (agent-repl--ws-get "ws" :source-ws-dir)
@@ -1009,8 +1069,7 @@ write is the primary obligation; snapshot is the piggyback)."
              (agent-repl--state-file tmpdir)
              '(:project-dir "/restored/root"
                :active-env :bare-metal
-               :bare-metal (:session-id nil)
-               :sandbox (:session-id nil)))
+               :bare-metal (:session-id nil)))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--initialize-ws-env "ws")
             (should (null (agent-repl--ws-get "ws" :source-ws-dir))))
@@ -1026,7 +1085,6 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :source-ws-dir "/tmp/source-roundtrip/")
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             ;; Simulate restart
             (clrhash agent-repl--workspaces)
@@ -1085,9 +1143,11 @@ write is the primary obligation; snapshot is the piggyback)."
 ;;;; ---- Tests: environment-keys constant ----
 
 (ert-deftest agent-repl-test-environment-keys-value ()
-  "environment-keys should contain :bare-metal and :sandbox."
-  (should (memq :bare-metal agent-repl--environment-keys))
-  (should (memq :sandbox agent-repl--environment-keys)))
+  "environment-keys is :bare-metal alone — the retired :sandbox env is gone.
+Every per-env iteration (state serialization, validation, the backend
+session stash) is driven by this list, so a resurrected `:sandbox' would
+silently start round-tripping back onto disk."
+  (should (equal agent-repl--environment-keys '(:bare-metal))))
 
 ;;;; ---- Tests: history-restore with no file ----
 
@@ -1262,16 +1322,19 @@ write is the primary obligation; snapshot is the piggyback)."
 
 ;;;; ---- Tests: collect-env-state edge cases ----
 
-(ert-deftest agent-repl-test-collect-env-state-partial ()
-  "collect-env-state handles only one environment initialized."
+(ert-deftest agent-repl-test-collect-env-state-omits-retired-env ()
+  "collect-env-state serializes ONLY the `agent-repl--environment-keys' envs.
+A stray instantiation under the retired `:sandbox' key must not be written
+back into the state file — the serializer is keyed by the env list, not by
+whatever the workspace plist happens to carry."
   (agent-repl-test--with-clean-state
     (let ((inst (make-agent-repl-instantiation :session-id "s1")))
       (agent-repl--ws-put "ws" :sandbox inst)
-      ;; :bare-metal is not set
+      (agent-repl--ws-put "ws" :bare-metal
+                           (make-agent-repl-instantiation :session-id "b1"))
       (let ((state (agent-repl--collect-env-state "ws")))
-        (should (equal (plist-get state :sandbox)
-                       '(:session-id "s1")))
-        (should-not (plist-get state :bare-metal))))))
+        (should (equal (plist-get state :bare-metal) '(:session-id "b1")))
+        (should-not (plist-member state :sandbox))))))
 
 ;;;; ---- Tests: state-save edge cases ----
 
@@ -1284,7 +1347,6 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             ;; :active-env is NOT set (defaults to nil)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -1298,7 +1360,6 @@ write is the primary obligation; snapshot is the piggyback)."
     ;; Point :project-dir to a nonexistent directory to trigger write error
     (agent-repl--ws-put "ws" :project-dir "/nonexistent/dir/for/test")
     (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-    (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
     ;; Should not signal an error thanks to with-error-logging
     (agent-repl--state-save "ws")))
 
@@ -1561,7 +1622,6 @@ existing state file is present."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -1583,7 +1643,6 @@ of stamping a fresh timestamp on every write."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -1602,7 +1661,6 @@ of stamping a fresh timestamp on every write."
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :last-killed-at killed)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -1623,7 +1681,6 @@ the ws plist has no value, so non-kill saves don't clear the field."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
@@ -1640,7 +1697,6 @@ been killed (both the ws plist and the existing file lack the field)."
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--ws-put "ws" :sandbox (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
