@@ -41,9 +41,9 @@ type HelloFrame struct {
 	BootID          string         `json:"boot_id"`
 	ProtocolVersion int            `json:"protocol_version"`
 	ResumeFromSeq   int64          `json:"resume_from_seq"`
-	PermissionMode PermissionMode `json:"permission_mode"`
-	Model          string         `json:"model"`
-	CWD            string         `json:"cwd"`
+	PermissionMode  PermissionMode `json:"permission_mode"`
+	Model           string         `json:"model"`
+	CWD             string         `json:"cwd"`
 	// ClaudeSessionID is the durable CLI-assigned session uuid (usable
 	// as a resume target); empty until the SDK's system:init arrives.
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
