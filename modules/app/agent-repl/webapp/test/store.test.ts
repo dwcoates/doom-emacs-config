@@ -438,6 +438,66 @@ describe("ConversationStore turn lifecycle", () => {
     expect(store.state.permissionMode).toBe("plan");
   });
 
+  it("moves the model on a user-origin model-changed frame", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("model-changed", { model: "haiku", origin: "user" }));
+    // Assert
+    expect(store.state.model).toBe("haiku");
+  });
+
+  it("moves the model when the AGENT switched it, not the user", () => {
+    // Arrange — the /model-switch staleness this whole path exists to fix.
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("model-changed", { model: "haiku", origin: "agent" }));
+    // Assert
+    expect(store.state.model).toBe("haiku");
+  });
+
+  it("moves the model when the daemon's periodic reconcile caught drift", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("model-changed", { model: "haiku", origin: "reconcile" }));
+    // Assert
+    expect(store.state.model).toBe("haiku");
+  });
+
+  it("stores the selectable-model menu from a models frame", () => {
+    // Arrange
+    const store = newStore();
+    const models = [{ value: "opus", displayName: "Opus", description: "d" }];
+    // Act
+    store.applyRaw(frame("models", { models }));
+    // Assert
+    expect(store.state.models).toEqual(models);
+  });
+
+  it("takes the model menu from the hello", () => {
+    // Arrange
+    const store = newStore();
+    const models = [{ value: "opus", displayName: "Opus", description: "d" }];
+    // Act
+    store.applyRaw(hello({ models }));
+    // Assert
+    expect(store.state.models).toEqual(models);
+  });
+
+  it("keeps a populated menu across a hello that carries none", () => {
+    // Arrange — a reconnect before the shim has re-reported its models must
+    // not empty a picker that already works.
+    const store = newStore();
+    store.applyRaw(frame("models", {
+      models: [{ value: "opus", displayName: "Opus", description: "d" }],
+    }));
+    // Act
+    store.applyRaw(hello({ seq: 0 }));
+    // Assert
+    expect(store.state.models).toHaveLength(1);
+  });
+
   it("adds a compact-boundary divider item", () => {
     // Arrange
     const store = newStore();

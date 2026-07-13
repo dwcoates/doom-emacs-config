@@ -53,6 +53,13 @@ export interface Usage {
   cache_read_input_tokens?: number;
 }
 
+/** One selectable model, from the SDK's `query.supportedModels()`. */
+export interface ModelInfo {
+  value: string;
+  displayName: string;
+  description: string;
+}
+
 export interface ContentBlockText {
   type: "text";
   text: string;
@@ -114,6 +121,18 @@ export interface SetPermissionModeCmd {
   mode: PermissionMode;
 }
 
+/**
+ * Switch the model mid-flight (§1.1). `model` is always a concrete id:
+ * the SDK's `setModel(undefined)` "back to the default" form is not
+ * exposed, because the id it lands on is unknowable until the next
+ * assistant message.
+ */
+export interface SetModelCmd {
+  type: "set-model";
+  request_id: RequestId;
+  model: string;
+}
+
 export interface ShutdownCmd {
   type: "shutdown";
   request_id: RequestId;
@@ -125,6 +144,7 @@ export type ShimCommand =
   | PermissionDecisionCmd
   | InterruptCmd
   | SetPermissionModeCmd
+  | SetModelCmd
   | ShutdownCmd;
 
 const COMMAND_TYPES: ReadonlySet<string> = new Set([
@@ -132,6 +152,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set([
   "permission-decision",
   "interrupt",
   "set-permission-mode",
+  "set-model",
   "shutdown",
 ]);
 
@@ -151,6 +172,17 @@ export interface AckEvt {
   type: "ack";
   session_id: SessionId;
   request_id: RequestId;
+}
+
+/**
+ * The models this session may switch to (§1.2). Emitted once,
+ * unsolicited, after the SDK's init handshake resolves: the list belongs
+ * to the account and CLI, not to any command.
+ */
+export interface ModelsEvt {
+  type: "models";
+  session_id: SessionId;
+  models: ModelInfo[];
 }
 
 /** Inlined subset of the Anthropic Messages streaming event union. */
@@ -294,6 +326,7 @@ export interface ClosedEvt {
 export type ShimEvent =
   | ReadyEvt
   | AckEvt
+  | ModelsEvt
   | StreamEventEvt
   | AssistantMessageEvt
   | ResultEvt
@@ -372,6 +405,15 @@ export function decodeCommandLine(line: string): ShimCommand | null {
     case "set-permission-mode": {
       if (!isPermissionMode(frame.mode)) {
         throw new ProtocolError(`set-permission-mode invalid mode: ${String(frame.mode)}`);
+      }
+      break;
+    }
+    case "set-model": {
+      // Empty is not "the default model" here, it is a caller who forgot
+      // to say which model — and silently reading it as "default" would
+      // switch the session to a model nobody asked for.
+      if (typeof frame.model !== "string" || frame.model === "") {
+        throw new ProtocolError("set-model requires a non-empty model id");
       }
       break;
     }

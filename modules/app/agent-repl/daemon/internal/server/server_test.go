@@ -371,10 +371,12 @@ func TestStreamBroadcastsShimFrames(t *testing.T) {
 	readFrame(t, conn) // hello
 	// Act
 	shim.pushEvent(t, fmt.Sprintf(`{"type":"system","session_id":%q,"uuid":"u","subtype":"init","data":{"model":"m"}}`, id))
-	// Assert
-	frame := readFrame(t, conn)
-	if frame["type"] != "system" || frame["seq"] != float64(1) {
-		t.Errorf("frame = %v", frame)
+	// Assert — init announces the model it reports, then the system frame.
+	if frame := readFrame(t, conn); frame["type"] != "model-changed" || frame["seq"] != float64(1) {
+		t.Errorf("frame = %v, want model-changed at seq 1", frame)
+	}
+	if frame := readFrame(t, conn); frame["type"] != "system" || frame["seq"] != float64(2) {
+		t.Errorf("frame = %v, want system at seq 2", frame)
 	}
 }
 

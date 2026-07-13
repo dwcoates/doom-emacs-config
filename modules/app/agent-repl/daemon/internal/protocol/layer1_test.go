@@ -173,6 +173,19 @@ func TestDecodeCommand(t *testing.T) {
 			line:    `{"type":"set-permission-mode","request_id":"r1","mode":"yolo"}`,
 			wantErr: "invalid mode",
 		},
+		{
+			// Empty is a caller who forgot to name a model, not a request
+			// for the default one: reading it as "default" would switch the
+			// session to a model nobody chose.
+			name:    "set-model with an empty model errors",
+			line:    `{"type":"set-model","request_id":"r1","model":""}`,
+			wantErr: "non-empty model",
+		},
+		{
+			name:    "set-model with no model field errors",
+			line:    `{"type":"set-model","request_id":"r1"}`,
+			wantErr: "non-empty model",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,5 +259,33 @@ func TestValidPermissionMode(t *testing.T) {
 				t.Errorf("ValidPermissionMode(%q) = %v, want %v", tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDecodeCommandSetModel(t *testing.T) {
+	// Arrange
+	line := `{"type":"set-model","request_id":"r1","model":"claude-opus-4-5"}`
+	// Act
+	cmd, err := DecodeCommand([]byte(line))
+	// Assert
+	if err != nil {
+		t.Fatalf("DecodeCommand: %v", err)
+	}
+	if cmd.Type != "set-model" || cmd.Model != "claude-opus-4-5" {
+		t.Errorf("cmd = %+v, want set-model claude-opus-4-5", cmd)
+	}
+}
+
+func TestDecodeL1EventModels(t *testing.T) {
+	// Arrange
+	line := `{"type":"models","session_id":"s1","models":[{"value":"opus","displayName":"Opus 4.5","description":"smartest"}]}`
+	// Act
+	evt, err := DecodeL1Event([]byte(line))
+	// Assert
+	if err != nil {
+		t.Fatalf("DecodeL1Event: %v", err)
+	}
+	if len(evt.Models) != 1 || evt.Models[0].Value != "opus" || evt.Models[0].DisplayName != "Opus 4.5" {
+		t.Errorf("models = %+v, want one Opus 4.5 entry", evt.Models)
 	}
 }

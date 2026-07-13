@@ -11,13 +11,23 @@
  * Every turn ends with a `result` message.
  */
 import { AsyncQueue } from "./input-queue.js";
-import { PermissionMode } from "./protocol.js";
+import { ModelInfo, PermissionMode } from "./protocol.js";
 import {
   CanUseToolLike,
   QueryLike,
   SdkMessageLike,
   SdkUserMessageLike,
 } from "./session.js";
+
+/**
+ * The offline stand-in for `query.supportedModels()`. Two entries, not
+ * one: a single-entry menu cannot express a SWITCH, and switching is the
+ * whole thing the fake exists to let the webapp exercise.
+ */
+export const FAKE_MODELS: ModelInfo[] = [
+  { value: "fake-model", displayName: "Fake Sonnet", description: "the offline default" },
+  { value: "fake-model-fast", displayName: "Fake Haiku", description: "the offline fast one" },
+];
 
 export interface FakeQueryOpts {
   sessionId: string;
@@ -71,6 +81,10 @@ export function createFakeQuery(
   const out = new AsyncQueue<SdkMessageLike>();
   let interrupted = false;
   let permissionMode: PermissionMode = "default";
+  // Mutable, and reported by init AND by every assistant message, so a
+  // fake session exercises the real thing the topbar depends on: the
+  // model the agent ANSWERS with is what moves, and the mirror follows it.
+  let model = "fake-model";
   let turn = 0;
 
   // Defaults first so a message may carry its own session_id (the
@@ -120,7 +134,7 @@ export function createFakeQuery(
         : `echo: ${text} [mode=${permissionMode}]`;
     emitStream({
       type: "message_start",
-      message: { id: messageId, role: "assistant", model: "fake-model", usage },
+      message: { id: messageId, role: "assistant", model, usage },
     });
     emitTextBlock(messageId, 0, reply);
     emitStream({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage });
@@ -131,7 +145,7 @@ export function createFakeQuery(
       message: {
         id: messageId,
         role: "assistant",
-        model: "fake-model",
+        model,
         stop_reason: "end_turn",
         content: [{ type: "text", text: reply }],
         usage,
@@ -144,7 +158,7 @@ export function createFakeQuery(
     const toolUseId = `toolu_fake_${turn}`;
     emitStream({
       type: "message_start",
-      message: { id: messageId, role: "assistant", model: "fake-model", usage },
+      message: { id: messageId, role: "assistant", model, usage },
     });
     emitStream({
       type: "content_block_start",
@@ -195,7 +209,7 @@ export function createFakeQuery(
       message: {
         id: messageId,
         role: "assistant",
-        model: "fake-model",
+        model,
         stop_reason: "end_turn",
         content: [{ type: "text", text: closing }],
         usage,
@@ -209,7 +223,7 @@ export function createFakeQuery(
       type: "system",
       subtype: "init",
       cwd: process.cwd(),
-      model: "fake-model",
+      model,
       permissionMode,
       tools: ["Bash"],
       // Resume continuation: init reports the RESUMED session uuid, as
@@ -252,5 +266,9 @@ export function createFakeQuery(
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
       permissionMode = mode;
     },
+    setModel: async (next: string): Promise<void> => {
+      model = next;
+    },
+    supportedModels: async (): Promise<ModelInfo[]> => FAKE_MODELS,
   };
 }

@@ -17,7 +17,7 @@ import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
-import { FeedRenderer, sessionInfoHtml } from "./render.js";
+import { FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
@@ -103,6 +103,7 @@ async function boot(): Promise<void> {
   const statusEl = must("conn-status");
   const infoEl = must("session-info");
   const modeEl = must<HTMLSelectElement>("mode-select");
+  const modelEl = must<HTMLSelectElement>("model-select");
   const loginEl = must<HTMLButtonElement>("login-btn");
   const spinnerEl = must("spinner");
   const remediationEl = must("remediation");
@@ -123,11 +124,15 @@ async function boot(): Promise<void> {
     // sessionInfoHtml escapes every value it interpolates.
     infoEl.innerHTML = sessionInfoHtml(
       parentWs,
-      s.model,
       s.usage,
       sessionSubagents(s.items),
       agentsOpen,
     );
+    // Rebuilt only when the menu or the selection actually moved: this runs
+    // on EVERY frame, and blowing the options away mid-turn would slam shut
+    // a dropdown the user had open.
+    const nextOptions = modelOptionsHtml(s.models, s.model);
+    if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
     if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
@@ -281,6 +286,18 @@ async function boot(): Promise<void> {
       type: "set-permission-mode",
       request_id: crypto.randomUUID(),
       mode: modeEl.value as PermissionMode,
+    });
+  });
+
+  // Picking a model ASKS for the switch; it does not assert it. The topbar
+  // moves only when the `model-changed` frame comes back, so a switch the
+  // SDK rejects leaves the picker showing the model still in force rather
+  // than one the session never adopted.
+  modelEl.addEventListener("change", () => {
+    ws.send({
+      type: "set-model",
+      request_id: crypto.randomUUID(),
+      model: modelEl.value,
     });
   });
 

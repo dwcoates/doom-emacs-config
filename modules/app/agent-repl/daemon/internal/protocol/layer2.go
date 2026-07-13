@@ -43,7 +43,11 @@ type HelloFrame struct {
 	ResumeFromSeq   int64          `json:"resume_from_seq"`
 	PermissionMode  PermissionMode `json:"permission_mode"`
 	Model           string         `json:"model"`
-	CWD             string         `json:"cwd"`
+	// Models is the selectable-model menu (§1.2 `models`), republished on
+	// every hello so a reconnecting client never has to ask for it.
+	// Absent until the shim reports it.
+	Models []ModelInfo `json:"models,omitempty"`
+	CWD    string      `json:"cwd"`
 	// ClaudeSessionID is the durable CLI-assigned session uuid (usable
 	// as a resume target); empty until the SDK's system:init arrives.
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
@@ -247,6 +251,32 @@ type PermissionModeChangedFrame struct {
 	Envelope
 	Mode   PermissionMode `json:"mode"`
 	Origin string         `json:"origin"` // user | shim | daemon
+}
+
+// ModelsFrame carries the selectable-model menu to clients already
+// attached when the shim reports it (the same list rides on every
+// subsequent hello).
+type ModelsFrame struct {
+	Envelope
+	Models []ModelInfo `json:"models"`
+}
+
+// ModelChangedFrame is the ONLY frame that moves the session's model
+// after the hello, and it fires for every way the model can move.
+//
+// Origin says which:
+//   - "user":      a set-model command the shim acked
+//   - "agent":     a main-chain assistant message reported a different
+//     model than the mirror, i.e. the CLI moved it without
+//     being asked (a /model, a fallback, a downgrade)
+//   - "reconcile": the periodic transcript check caught a drifted mirror
+//
+// The model is the CLI's to decide, not the daemon's, so the mirror
+// FOLLOWS observed truth rather than asserting remembered truth.
+type ModelChangedFrame struct {
+	Envelope
+	Model  string `json:"model"`
+	Origin string `json:"origin"` // user | agent | reconcile
 }
 
 // --- §2.9 system ------------------------------------------------------------

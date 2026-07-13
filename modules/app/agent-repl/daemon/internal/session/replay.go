@@ -131,9 +131,9 @@ func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
 			break
 		}
 	}
-	if lastMeta.Model != "" {
-		t.Model = lastMeta.Model
-	}
+	// No model assignment here: each assistant entry is translated through
+	// t.OnEvent, which adopts the model it reports, so the mirror has
+	// already landed on the LAST main-chain entry's model by this point.
 	if lastMeta.Usage != nil {
 		frames = append(frames, &protocol.UsageFrame{
 			Envelope:  protocol.Envelope{Type: "usage"},

@@ -10,7 +10,7 @@ import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { stripMetaSpans } from "./meta.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
-import { Usage } from "./protocol.js";
+import { ModelInfo, Usage } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import {
   CompactBoundaryItem,
@@ -95,19 +95,21 @@ function formatTokens(n: number): string {
 }
 
 /**
- * Topbar session datapoints: `parent workspace: <ws> · model: <m> ·
- * tokens: <n> · <k> agents ▾` (the vterm modeline's context mirror). The
- * parent workspace entry is omitted entirely when PARENT-WS is absent or
- * empty, as is model before hello delivers one and the agents chip before
- * the session spawns one; each value gets its own color via the info-*
- * classes.
+ * Topbar session datapoints: `parent workspace: <ws> · tokens: <n> ·
+ * <k> agents ▾` (the vterm modeline's context mirror). The parent
+ * workspace entry is omitted entirely when PARENT-WS is absent or empty,
+ * as is the agents chip before the session spawns one; each value gets
+ * its own color via the info-* classes.
+ *
+ * The model is NOT here. It moved into the #model-select picker, which
+ * both names the live model and switches it — printing it again as text
+ * immediately left of a dropdown showing the same thing is noise.
  *
  * AGENTS-OPEN is the caller's disclosure state for the agents chip, which
  * drops the subagent roster as an overlay.
  */
 export function sessionInfoHtml(
   parentWs: string | null,
-  model: string,
   usage: Usage | null,
   agents: readonly SubagentEntry[] = [],
   agentsOpen = false,
@@ -116,13 +118,43 @@ export function sessionInfoHtml(
   if (parentWs) {
     parts.push(`parent workspace: <span class="info-ws">${escapeHtml(parentWs)}</span>`);
   }
-  if (model !== "") {
-    parts.push(`model: <span class="info-model">${escapeHtml(model)}</span>`);
-  }
   parts.push(`tokens: <span class="info-tokens">${formatTokens(contextTokens(usage))}</span>`);
   const menu = agentsMenuHtml(agents, agentsOpen);
   if (menu !== "") parts.push(menu);
   return parts.join(" · ");
+}
+
+/**
+ * The #model-select options: the live model SELECTED, every alternative
+ * the daemon offers, and nothing invented.
+ *
+ * Two cases the picker must not lie about:
+ * - No model known yet (pre-hello): a disabled placeholder is selected,
+ *   rather than letting the browser auto-select the first option and
+ *   claim a model the session is not on.
+ * - The live model is not in the menu (an id the CLI accepts but does not
+ *   advertise): it is prepended as its own option, so the picker still
+ *   names what the session is ACTUALLY running.
+ */
+export function modelOptionsHtml(
+  models: readonly ModelInfo[],
+  current: string,
+): string {
+  const opts: string[] = [];
+  if (current === "") {
+    opts.push(`<option value="" disabled selected>model…</option>`);
+  } else if (!models.some((m) => m.value === current)) {
+    opts.push(
+      `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}</option>`,
+    );
+  }
+  for (const m of models) {
+    const selected = m.value === current ? " selected" : "";
+    opts.push(
+      `<option value="${escapeHtml(m.value)}"${selected} title="${escapeHtml(m.description)}">${escapeHtml(m.displayName)}</option>`,
+    );
+  }
+  return opts.join("");
 }
 
 // --- per-item components ------------------------------------------------------
