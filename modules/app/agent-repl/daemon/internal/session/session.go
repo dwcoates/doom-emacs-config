@@ -359,6 +359,18 @@ func (s *Session) helloLocked() []byte {
 }
 
 // HandleClientFrame processes one webapp→daemon NDJSON frame from c.
+// Commands returns the session's slash-command menu, or nil before the
+// shim's `commands` event has landed.
+//
+// A nil result is a real answer meaning "not resolved yet", not a failure:
+// the menu arrives asynchronously off the SDK's init handshake, so a client
+// that asks in the moments before it lands is simply early.
+func (s *Session) Commands() []protocol.SlashCommand {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.translator.Commands
+}
+
 func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	cmd, err := protocol.DecodeCommand(raw)
 	if err != nil {
@@ -400,6 +412,10 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 		return s.shim.SendRaw(ndjson(raw))
 	case "set-model":
 		s.translator.OnSetModelCmd(cmd)
+		return s.shim.SendRaw(ndjson(raw))
+	case "refresh-commands":
+		// No frame is broadcast here: the answer arrives asynchronously as
+		// the shim's `commands` event, which onCommands lands on the cache.
 		return s.shim.SendRaw(ndjson(raw))
 	}
 	// `shutdown` is deliberately NOT forwarded: the §2 preamble limits

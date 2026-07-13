@@ -57,6 +57,18 @@ type ModelInfo struct {
 	Description string `json:"description"`
 }
 
+// SlashCommand is one invocable slash command, from the SDK's
+// supportedCommands(). Shared by both layers exactly as ModelInfo is: the
+// shim reports it, the daemon caches it, and clients read it back.
+//
+// Name carries no leading slash. ArgumentHint is empty for a command that
+// takes no arguments, which is a real answer rather than a missing one.
+type SlashCommand struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+}
+
 // PermissionDenial is one entry of ResultEvt.permission_denials.
 type PermissionDenial struct {
 	ToolUseID string `json:"tool_use_id"`
@@ -82,6 +94,9 @@ type L1Event struct {
 
 	// models
 	Models []ModelInfo `json:"models,omitempty"`
+
+	// commands
+	Commands []SlashCommand `json:"commands,omitempty"`
 
 	// stream-event / assistant-message / tool-result
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
@@ -139,6 +154,7 @@ var l1EventKnownTypes = map[string]bool{
 	"ready":              true,
 	"ack":                true,
 	"models":             true,
+	"commands":           true,
 	"stream-event":       true,
 	"assistant-message":  true,
 	"result":             true,
@@ -231,6 +247,7 @@ var l1CommandKnownTypes = map[string]bool{
 	"interrupt":           true,
 	"set-permission-mode": true,
 	"set-model":           true,
+	"refresh-commands":    true,
 	"shutdown":            true,
 	"replay-request":      true,
 }

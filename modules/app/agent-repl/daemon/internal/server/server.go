@@ -286,6 +286,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
+	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)
+	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands)
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
@@ -447,6 +449,61 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 //
 // A logged-out account is a 200 with an empty email, not an error — the
 // topbar renders that state rather than reporting a failure.
+// handleCommands answers the session's slash-command menu, which the Emacs
+// input panel completes against.
+//
+// An unresolved menu answers `[]` with a 200 rather than an error: the list
+// lands asynchronously off the SDK's init handshake, so a client asking in
+// the moments before it does is early, not broken. It is serialized as an
+// empty array rather than JSON null so the reader never has to tell the two
+// apart.
+func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	commands := sess.Commands()
+	if commands == nil {
+		commands = []protocol.SlashCommand{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string]any{"commands": commands})
+}
+
+// handleRefreshCommands asks the shim to re-resolve the menu, and returns
+// immediately without waiting for it.
+//
+// The refresh is asynchronous by design. It costs the shim a process spawn
+// (the SDK memoizes the list against its init handshake, so re-resolving
+// means performing a fresh one), and its caller is a filesystem watcher
+// reacting to a skill being edited — nobody is blocked on the answer, so
+// making them wait for it would buy nothing. The fresh list lands on the
+// cache when the shim's `commands` event arrives, and the next GET sees it.
+func (s *Server) handleRefreshCommands(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       "refresh-commands",
+		"request_id": newRequestID(),
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	configDir, known := s.sessionConfigDir(id)
