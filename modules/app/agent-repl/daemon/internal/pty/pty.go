@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -59,6 +60,7 @@ func Start(cmd *exec.Cmd) (*os.File, error) {
 	defer func() { _ = slave.Close() }()
 
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
+	cmd.Env = withoutInheritedSize(cmd.Env)
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -70,6 +72,35 @@ func Start(cmd *exec.Cmd) (*os.File, error) {
 		return nil, fmt.Errorf("pty: start %s: %w", cmd.Path, err)
 	}
 	return master, nil
+}
+
+// withoutInheritedSize returns ENV with COLUMNS and LINES stripped,
+// defaulting to the process environment when ENV is nil (cmd.Env's own
+// "inherit" convention).
+//
+// The PTY is the ONLY authority on its child's size, and COLUMNS/LINES
+// inherited from the parent are a competing one. Programs that consult
+// them — `tput`, and terminal-size libraries generally — prefer them
+// OVER the TIOCSWINSZ ioctl, so a stale COLUMNS in the daemon's own
+// environment silently overrides Setsize inside the child.
+//
+// On the login path that is not cosmetic. It is precisely what re-wraps
+// the ~350-character OAuth URL that the 400-column pty (login.DefaultCols)
+// exists to keep on one line: the daemon sets 400, the child reads
+// COLUMNS=134 from the environment its parent was launched with, and the
+// URL shreds across three lines exactly as it did before the pty existed.
+func withoutInheritedSize(env []string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "COLUMNS=") || strings.HasPrefix(kv, "LINES=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // Setsize sets the window size on F, a PTY master.
