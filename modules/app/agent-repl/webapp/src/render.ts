@@ -236,7 +236,7 @@ function TextStream(item: TextItem, chip: ResultItem | null, isPulsing = false):
   const cls = `bubble assistant md${chip ? " final-response" : ""}${
     isPulsing ? " pulsing" : ""
   }`;
-  const closer = chip ? ResultChip(chip) : "";
+  const closer = chip ? ResultChip(chip, chip.sincePrevFinalMs) : "";
   // A bare metaprompt TLDR tree (no code fence — fenced trees are the
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
@@ -711,6 +711,12 @@ function formatTokenDelta(n: number): string {
  * A turn's closing chip: how long the turn took, then where the session's
  * input tokens now stand and how far this turn moved them.
  *
+ * DURATION-MS is the span the chip reports, which differs by where the chip
+ * is drawn: a final-response chip reads the turn's elapsed time SINCE THE
+ * PREVIOUS final response (`sincePrevFinalMs`), while a standalone chip
+ * reads the SDK's whole-task figure (`durationMs`). The caller passes
+ * whichever it means, so this renderer never has to know which it is.
+ *
  * A completed turn is labelled by the chip's own wash rather than by a
  * word, so only a turn that ended some OTHER way (aborted, errored) names
  * its subtype. A turn that ended with the context size unknown (a
@@ -722,10 +728,10 @@ function formatTokenDelta(n: number): string {
  * bubble swallowed it: an aborted or errored turn, or a completed turn
  * that wrote no answer at all.
  */
-function ResultChip(item: ResultItem): string {
+function ResultChip(item: ResultItem, durationMs: number): string {
   const done = isTurnComplete(item);
   const parts = done ? [] : [escapeHtml(item.subtype)];
-  parts.push(formatDuration(item.durationMs));
+  parts.push(formatDuration(durationMs));
   if (item.context) {
     parts.push(`${formatTokens(item.context.total)} in`);
     parts.push(formatTokenDelta(item.context.delta));
@@ -783,7 +789,7 @@ export function renderItem(
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
-      return ResultChip(item);
+      return ResultChip(item, item.durationMs);
     case "compact-boundary":
       return CompactDivider(item);
     case "error":

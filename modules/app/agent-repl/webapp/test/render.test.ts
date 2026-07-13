@@ -76,7 +76,11 @@ function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
   return {
     kind: "result",
     subtype,
+    // Distinct from sincePrevFinalMs so a chip that reads the wrong field
+    // is caught: the whole-task figure the standalone chip shows.
     durationMs: 12,
+    // The since-previous-final figure the final-response chip shows.
+    sincePrevFinalMs: 7,
     numTurns: 1,
     totalCostUsd: 0.5,
     usage: { input_tokens: 3, output_tokens: 4 },
@@ -1396,7 +1400,10 @@ describe("ResultChip", () => {
     return {
       kind: "result",
       subtype,
+      // Distinct from sincePrevFinalMs: the standalone chip must read this,
+      // the whole-task figure, and never the since-previous-final one.
       durationMs: 12,
+      sincePrevFinalMs: 7,
       numTurns: 1,
       totalCostUsd: 0.5,
       usage: { input_tokens: 3, output_tokens: 4 },
@@ -1502,6 +1509,40 @@ describe("ResultChip", () => {
     const html = renderItem(resultItem("error_during_execution", true));
     // Assert
     expect(html).toContain(`class="result err"`);
+  });
+
+  it("reads the standalone chip from the whole-task duration, not the since-previous-final elapsed", () => {
+    // Arrange — an aborted turn's chip stands alone in the feed.
+    const item = { ...resultItem("aborted"), durationMs: 12, sincePrevFinalMs: 7 };
+    // Act
+    const html = renderItem(item);
+    // Assert — 12ms is durationMs; 7ms (sincePrevFinalMs) must not surface.
+    expect(html).toContain("aborted · 12ms");
+    expect(html).not.toContain("7ms");
+  });
+
+  it("reads a final-response chip from the since-previous-final elapsed, not the whole-task duration", () => {
+    // Arrange — a completed answer whose whole-task figure differs from its
+    // since-previous-final elapsed, nested inside the response it closes.
+    const answer: TextItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "done",
+      done: true,
+      ts: TEXT_TS,
+    };
+    const closing: ResultItem = {
+      ...result("success"),
+      durationMs: 330_000,
+      sincePrevFinalMs: 30_000,
+    };
+    const finals = finalResponses([userTurnAt(9, 0), answer, closing]);
+    // Act
+    const html = renderItem(answer, undefined, finals);
+    // Assert — 30s is sincePrevFinalMs; the 5m 30s whole-task figure never shows.
+    expect(html).toContain("30s · 300,000 in");
+    expect(html).not.toContain("5m 30s");
   });
 });
 
@@ -1978,6 +2019,7 @@ describe("itemKey", () => {
       kind: "result",
       subtype: "success",
       durationMs: 1,
+      sincePrevFinalMs: 1,
       numTurns: 1,
       totalCostUsd: 0,
       usage: { input_tokens: 0, output_tokens: 0 },

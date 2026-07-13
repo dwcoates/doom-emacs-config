@@ -772,3 +772,121 @@ describe("ConversationStore task-timer start", () => {
     expect(store.state.turnStartedAt).toBeNull();
   });
 });
+
+describe("ConversationStore final-response chip elapsed", () => {
+  /** A user-turn frame carrying the daemon's stamp TS. */
+  function userTurnAt(ts: string): string {
+    return JSON.stringify({
+      type: "user-turn",
+      seq: ++autoSeq,
+      ts,
+      session_id: "s1",
+      request_id: "r" + autoSeq,
+      content: [{ type: "text", text: "hi" }],
+    });
+  }
+
+  /** A result frame stamped at TS, closing a turn with the given subtype. */
+  function resultAt(ts: string, subtype = "success"): string {
+    return JSON.stringify({
+      type: "result",
+      seq: ++autoSeq,
+      ts,
+      session_id: "s1",
+      subtype,
+      // Distinct from every elapsed delta below, so a chip that read the
+      // SDK figure instead of the timestamp delta would stand out.
+      duration_ms: 999,
+      duration_api_ms: 3,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 1, output_tokens: 2 },
+      is_error: subtype !== "success",
+    });
+  }
+
+  it("measures the first final response from the turn's own start", () => {
+    // Arrange
+    const store = newStore();
+    // Act — 30s from the prompt to the answer.
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // Assert — the first response has no prior anchor, so it reads the whole
+    // task time so far, not the SDK's duration_ms.
+    expect(resultItems(store)[0].sincePrevFinalMs).toBe(30_000);
+  });
+
+  it("measures a second final response from the first, not the task start", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // Act — a follow-up turn, answered 40s after the first answer.
+    store.applyRaw(userTurnAt("2026-07-13T12:00:35.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:01:10.000Z"));
+    // Assert — 12:01:10 − 12:00:30, the delta since the first final response.
+    expect(resultItems(store)[1].sincePrevFinalMs).toBe(40_000);
+  });
+
+  it("keeps the anchor on the previous final response, not the intervening prompt", () => {
+    // Arrange — a first answer, then a queued follow-up picked up much later.
+    const store = newStore();
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // Act — the follow-up prompt lands at 12:00:50, answered at 12:01:10.
+    store.applyRaw(userTurnAt("2026-07-13T12:00:50.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:01:10.000Z"));
+    // Assert — 40s from the first result, NOT 20s from the follow-up prompt:
+    // a queued or follow-up prompt never advances the anchor.
+    expect(resultItems(store)[1].sincePrevFinalMs).toBe(40_000);
+  });
+
+  it("does not let an aborted turn between two answers advance the anchor", () => {
+    // Arrange — a first answer, then an interrupted turn, then a real answer.
+    const store = newStore();
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    store.applyRaw(userTurnAt("2026-07-13T12:00:40.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:50.000Z", "aborted"));
+    // Act
+    store.applyRaw(userTurnAt("2026-07-13T12:01:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:01:30.000Z"));
+    // Assert — measured from the last real answer (12:00:30), across the abort.
+    expect(resultItems(store)[2].sincePrevFinalMs).toBe(60_000);
+  });
+
+  it("computes the same elapsed for a tab that joins mid-session as one present all along", () => {
+    // Arrange — the daemon's stamps for a two-answer session.
+    const ut1 = "2026-07-13T12:00:00.000Z";
+    const r1 = "2026-07-13T12:00:30.000Z";
+    const ut2 = "2026-07-13T12:00:50.000Z";
+    const r2 = "2026-07-13T12:01:10.000Z";
+    const live = newStore();
+    live.applyRaw(userTurnAt(ut1));
+    live.applyRaw(resultAt(r1));
+    live.applyRaw(userTurnAt(ut2));
+    live.applyRaw(resultAt(r2));
+    // A tab that joins mid-session: a fresh join, then the same frames replayed.
+    autoSeq = 0;
+    const joined = new ConversationStore();
+    joined.applyRaw(hello({ seq: 4, resume_from_seq: 1 }));
+    joined.applyRaw(userTurnAt(ut1));
+    joined.applyRaw(resultAt(r1));
+    joined.applyRaw(userTurnAt(ut2));
+    joined.applyRaw(resultAt(r2));
+    // Act + Assert — derived from the daemon stamps, so the two agree.
+    expect(resultItems(joined)[1].sincePrevFinalMs).toBe(
+      resultItems(live)[1].sincePrevFinalMs,
+    );
+  });
+
+  it("falls back to the SDK's whole-task figure when the turn's start is unknown", () => {
+    // Arrange — a result with no preceding user-turn (e.g. a replay that
+    // began after the turn's start): no timestamp anchor to measure from.
+    const store = newStore();
+    // Act
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // Assert — the SDK's duration_ms stands in.
+    expect(resultItems(store)[0].sincePrevFinalMs).toBe(999);
+  });
+});
