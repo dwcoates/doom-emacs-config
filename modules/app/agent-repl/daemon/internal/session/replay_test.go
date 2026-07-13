@@ -529,3 +529,25 @@ func TestNoteResumeUnavailableRingsRecoverableError(t *testing.T) {
 		t.Fatalf("message %q does not name the resume target", frame.Message)
 	}
 }
+
+func TestClaudeConfigDirPrefersThePerSessionDir(t *testing.T) {
+	// Arrange — the daemon's own env names a DIFFERENT account.
+	t.Setenv("CLAUDE_CONFIG_DIR", "/daemon/.claude")
+	// Act
+	got := ClaudeConfigDir("/home/u/.claude-chesscom")
+	// Assert
+	if got != "/home/u/.claude-chesscom" {
+		t.Fatalf("ClaudeConfigDir = %q, want the session's own dir", got)
+	}
+}
+
+func TestClaudeConfigDirFallsBackToTheDaemonDefault(t *testing.T) {
+	// Arrange
+	t.Setenv("CLAUDE_CONFIG_DIR", "/daemon/.claude")
+	// Act — a session that carries no dir of its own.
+	got := ClaudeConfigDir("")
+	// Assert
+	if got != "/daemon/.claude" {
+		t.Fatalf("ClaudeConfigDir = %q, want the daemon default", got)
+	}
+}

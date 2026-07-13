@@ -891,6 +891,38 @@ rehydrates nor prunes.
 
 ---
 
+## Account selection (`CLAUDE_CONFIG_DIR`)
+
+WHICH Claude account a session's CLI runs as is chosen **per session, by
+Emacs**, and travels to the daemon in the `config_dir` field of the
+`POST /sessions` body.
+
+This cannot be left to the daemon's own environment. One daemon serves
+every workspace, so its environment can encode at most one account, while
+account selection is a function of the project directory:
+`agent-repl--compute-config-dir` (session.el) returns
+`~/.claude-chesscom` for a project under `$MULTI_REPO_ROOT` and
+`~/.claude` (the CLI's own default, sent as an absent field) elsewhere.
+The vterm frontend applies the same resolver as a shell env prefix on its
+start command, so both frontends land on the same account for the same
+project.
+
+- **To the CLI**: `config_dir` becomes `CLAUDE_CONFIG_DIR` in the shim's
+  spawn environment (`server.ShimEnv`), which the SDK's claude
+  subprocess inherits. An empty `config_dir` exports NOTHING rather than
+  an empty override, which the CLI would read as a config root literally
+  named `""`.
+- **To transcript lookup**: every `TranscriptPath` call resolves its root
+  through `session.ClaudeConfigDir(<the session's dir>)`, never the
+  daemon's own env. A session whose CLI writes into `~/.claude-chesscom`
+  has no transcript under `~/.claude`, so resolving against the daemon's
+  environment would fail the resume-viability gate and silently downgrade
+  a resume into a fresh conversation.
+- **Across restarts**: the registry record persists `config_dir`, so a
+  rehydration stats the transcript under the same root that minted it.
+
+---
+
 ## Agent-state sentinels (daemon → Emacs side channel)
 
 Not part of the NDJSON wire: a file-based side channel through which
@@ -942,6 +974,7 @@ fallback + filename-prefix dispatch) is unchanged machinery.
   Everything else (`prompt_submit_*`, `stop_*`, `subagent_*`,
   `stop_failure_*`, `session_start_*`) keeps coming from the real
   global hooks, which fire for SDK sessions.
+
 - **Consumer gates**: the Emacs handlers are state-gated and
   idempotent (`permission_request` acts only from `:thinking`,
   `permission_resolved` only from `:permission`), which makes

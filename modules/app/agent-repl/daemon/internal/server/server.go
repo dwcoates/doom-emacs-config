@@ -30,6 +30,15 @@ type CreateOpts struct {
 	PermissionMode string `json:"permission_mode,omitempty"`
 	Resume         string `json:"resume,omitempty"`
 	Fake           bool   `json:"fake,omitempty"`
+	// ConfigDir is the CLAUDE_CONFIG_DIR the session's CLI runs under —
+	// i.e. WHICH ACCOUNT it uses. Emacs computes it per workspace
+	// (agent-repl--compute-config-dir: ~/.claude-chesscom under
+	// $MULTI_REPO_ROOT, ~/.claude elsewhere) and sends it here, because
+	// one shared daemon serves every workspace and its own environment
+	// therefore cannot encode a per-workspace account.
+	//
+	// Empty means "the daemon's own default", NOT "no config dir".
+	ConfigDir string `json:"config_dir,omitempty"`
 }
 
 // SpawnFunc launches a shim for a new session; injected so tests can
@@ -58,6 +67,26 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 		argv = append(argv, "--resume", opts.Resume)
 	}
 	return argv
+}
+
+// ShimEnv assembles the KEY=VALUE overlay every shim spawn adds to the
+// inherited environment. The SDK's claude subprocess inherits it from
+// the shim, so this is the ONLY channel by which per-session account
+// selection reaches the CLI. Shared by cmd/claude-repld and the e2e
+// harness for the same reason ShimArgv is: two spawn paths that assemble
+// the environment separately would drift.
+//
+// AGENT_REPL_OWNED marks the CLI as module-launched for the hook scripts.
+// CLAUDE_CONFIG_DIR is set only when the session carries one; an empty
+// ConfigDir deliberately leaves the daemon's own value (or its absence)
+// inherited rather than exporting an empty override, which the CLI would
+// read as a config root literally named "".
+func ShimEnv(opts CreateOpts) []string {
+	env := []string{"AGENT_REPL_OWNED=1"}
+	if opts.ConfigDir != "" {
+		env = append(env, "CLAUDE_CONFIG_DIR="+opts.ConfigDir)
+	}
+	return env
 }
 
 // Remediator dispatches the headless analyst for a session that has
@@ -170,7 +199,6 @@ func New(cfg Config) *Server {
 // hard-kills the CLI). Runs at construction, before the HTTP surface is
 // up, so no locking is needed.
 func (s *Server) loadDormant() {
-	configDir := session.DefaultClaudeConfigDir()
 	kept, pruned := 0, 0
 	prune := func(rec registry.Record, why string) {
 		s.logf("registry: pruning session %s (%s)", rec.SessionID, why)
@@ -188,7 +216,7 @@ func (s *Server) loadDormant() {
 			prune(rec, "no claude_session_id ever arrived; it cannot be resumed")
 			continue
 		}
-		path := session.TranscriptPath(configDir, rec.CWD, rec.ClaudeSessionID)
+		path := session.TranscriptPath(session.ClaudeConfigDir(rec.ConfigDir), rec.CWD, rec.ClaudeSessionID)
 		if _, err := os.Stat(path); err != nil {
 			prune(rec, fmt.Sprintf("transcript %s missing: %v", path, err))
 			continue
@@ -379,7 +407,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var droppedResume string
 	var droppedPath string
 	if opts.Resume != "" && !opts.Fake && !s.forceFake {
-		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
+		path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
 		if _, statErr := os.Stat(path); statErr != nil {
 			s.logf("session %s: resume target %s has no transcript at %s — starting fresh instead of a doomed --resume: %v",
 				id, opts.Resume, path, statErr)
@@ -399,6 +427,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			CWD:             opts.CWD,
 			Model:           opts.Model,
 			PermissionMode:  opts.PermissionMode,
+			ConfigDir:       opts.ConfigDir,
 			ClaudeSessionID: opts.Resume,
 			CreatedAt:       s.now().UTC().Format(time.RFC3339),
 		}); err != nil {
@@ -456,7 +485,7 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 	// so without this every rebind (daemon restart, frontend switch)
 	// attaches to a blank conversation.
 	if opts.Resume != "" {
-		path := session.TranscriptPath(session.DefaultClaudeConfigDir(), opts.CWD, opts.Resume)
+		path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
 		if err := sess.SeedFromTranscript(path, opts.Resume); err != nil {
 			s.logf("session %s: transcript replay seed from %s failed (history will not render): %v", id, path, err)
 		} else {
@@ -647,7 +676,7 @@ func (s *Server) resolve(id string) (*session.Session, error) {
 // since boot; a record that fails the gate is pruned and reports
 // unknown, which routes the client to its own rebind path.
 func (s *Server) rehydrateLocked(rec registry.Record) (*session.Session, error) {
-	path := session.TranscriptPath(session.DefaultClaudeConfigDir(), rec.CWD, rec.ClaudeSessionID)
+	path := session.TranscriptPath(session.ClaudeConfigDir(rec.ConfigDir), rec.CWD, rec.ClaudeSessionID)
 	if _, err := os.Stat(path); err != nil {
 		s.logf("session %s: rehydration target %s lost its transcript at %s — pruning: %v",
 			rec.SessionID, rec.ClaudeSessionID, path, err)
@@ -661,6 +690,7 @@ func (s *Server) rehydrateLocked(rec registry.Record) (*session.Session, error) 
 		CWD:            rec.CWD,
 		Model:          rec.Model,
 		PermissionMode: rec.PermissionMode,
+		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
 	}
 	sess, err := s.launchSession(rec.SessionID, opts, true)

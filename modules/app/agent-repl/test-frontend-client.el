@@ -126,6 +126,34 @@ Captured requests accumulate in the anaphoric variable `requests' as
       ;; Assert
       (should-not (string-match-p "permission_mode" (nth 2 (car requests)))))))
 
+(ert-deftest agent-repl-test-frontend-create-sends-multi-repo-config-dir ()
+  "A cwd under the multi-repo root carries that account's CLAUDE_CONFIG_DIR."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
+      ;; Act
+      (agent-repl--frontend-create-session "/home/user/multi/repoA")
+      ;; Assert — the gui session must run as the SAME account the vterm
+      ;; start command would select for this project.
+      (should (string-match-p (format "\"config_dir\":\"%s\""
+                                      (expand-file-name "~/.claude-chesscom"))
+                              (nth 2 (car requests)))))))
+
+(ert-deftest agent-repl-test-frontend-create-omits-config-dir-outside-multi-repo ()
+  "A personal project omits config_dir so the CLI uses its own default root."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (agent-repl-default-config-dir nil)
+          (agent-repl-doom-multi-repo-mode nil))
+      ;; Act
+      (agent-repl--frontend-create-session "/home/user/personal/proj")
+      ;; Assert
+      (should-not (string-match-p "config_dir" (nth 2 (car requests)))))))
+
 (ert-deftest agent-repl-test-frontend-create-requires-cwd ()
   "Create without a cwd signals instead of minting a cwd-less session."
   ;; Act / Assert — no HTTP boundary shadow needed: must fail before I/O.

@@ -1390,3 +1390,86 @@ func TestRemediationRefusesADormantSession(t *testing.T) {
 		t.Fatalf("status = %d, want 409 for a rehydratable session", resp.StatusCode)
 	}
 }
+
+// --- per-session account selection (CLAUDE_CONFIG_DIR) ------------------------
+
+func TestShimEnvAlwaysMarksOwnership(t *testing.T) {
+	// Arrange / Act
+	env := ShimEnv(CreateOpts{})
+	// Assert
+	if !slices.Contains(env, "AGENT_REPL_OWNED=1") {
+		t.Fatalf("env = %v, want the ownership marker", env)
+	}
+}
+
+func TestShimEnvExportsSessionConfigDir(t *testing.T) {
+	// Arrange / Act
+	env := ShimEnv(CreateOpts{ConfigDir: "/home/u/.claude-chesscom"})
+	// Assert
+	if !slices.Contains(env, "CLAUDE_CONFIG_DIR=/home/u/.claude-chesscom") {
+		t.Fatalf("env = %v, want the session's CLAUDE_CONFIG_DIR", env)
+	}
+}
+
+func TestShimEnvOmitsConfigDirWhenUnset(t *testing.T) {
+	// Arrange / Act — an empty ConfigDir must leave the inherited value
+	// alone, NOT export CLAUDE_CONFIG_DIR="" (a config root named "").
+	env := ShimEnv(CreateOpts{})
+	// Assert
+	for _, e := range env {
+		if strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
+			t.Fatalf("env = %v, want no CLAUDE_CONFIG_DIR entry", env)
+		}
+	}
+}
+
+func TestCreateSessionForwardsConfigDirToTheShimSpawn(t *testing.T) {
+	// Arrange
+	h, captured := resumeGateHarness(t)
+	// Act
+	postCreate(t, h, `{"cwd":"/w","config_dir":"/home/u/.claude-chesscom"}`)
+	// Assert — the account reaches the process that launches the CLI.
+	if captured.ConfigDir != "/home/u/.claude-chesscom" {
+		t.Fatalf("spawn opts.ConfigDir = %q, want /home/u/.claude-chesscom", captured.ConfigDir)
+	}
+}
+
+func TestCreateSessionPersistsConfigDirOnTheRegistryRecord(t *testing.T) {
+	// Arrange
+	h, reg := registryHarness(t)
+	// Act
+	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/home/u/.claude-chesscom"}`)
+	// Assert — a restart must resolve this session's transcript under the
+	// SAME account root, so the dir has to survive on disk.
+	rec, ok := reg.Get(id)
+	if !ok {
+		t.Fatalf("no registry record for %s", id)
+	}
+	if rec.ConfigDir != "/home/u/.claude-chesscom" {
+		t.Fatalf("record.ConfigDir = %q, want /home/u/.claude-chesscom", rec.ConfigDir)
+	}
+}
+
+func TestResumeGateStatsTranscriptUnderTheSessionConfigDir(t *testing.T) {
+	// Arrange — the transcript lives under the SESSION's config dir, while
+	// the daemon's own CLAUDE_CONFIG_DIR points somewhere else entirely.
+	// Resolving against the daemon's env would find nothing and silently
+	// downgrade the resume into a fresh conversation.
+	sessionCfg := t.TempDir()
+	dir := filepath.Join(sessionCfg, "projects", "-w")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "uuid-1.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	h, captured := resumeGateHarness(t)
+	// Act
+	postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","resume":"uuid-1","config_dir":%q}`, sessionCfg))
+	// Assert
+	if captured.Resume != "uuid-1" {
+		t.Fatalf("spawn opts.Resume = %q, want uuid-1 (the gate looked in the wrong config dir)", captured.Resume)
+	}
+}

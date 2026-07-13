@@ -46,6 +46,23 @@ func DefaultClaudeConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
+// ClaudeConfigDir resolves the config root for ONE session: its
+// per-session dir when Emacs supplied one (agent-repl--compute-config-dir
+// picks the account from the project dir — ~/.claude-chesscom under
+// $MULTI_REPO_ROOT, ~/.claude elsewhere), else the daemon-wide default.
+//
+// Every transcript lookup MUST route through here rather than
+// DefaultClaudeConfigDir: a session whose CLI writes into
+// ~/.claude-chesscom has no transcript under ~/.claude, so resolving
+// against the daemon's own env would fail the resume-viability gate and
+// silently downgrade a resume into a fresh conversation.
+func ClaudeConfigDir(dir string) string {
+	if dir != "" {
+		return dir
+	}
+	return DefaultClaudeConfigDir()
+}
+
 var transcriptSlugRe = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 // TranscriptPath returns the transcript JSONL path for claudeSessionID
