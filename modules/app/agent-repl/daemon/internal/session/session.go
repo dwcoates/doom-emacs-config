@@ -59,6 +59,9 @@ type retained struct {
 type Session struct {
 	ID            string
 	DaemonVersion string
+	// BootID is the owning daemon instance's boot identity (see
+	// protocol.HelloFrame.BootID); stamped into every hello.
+	BootID string
 
 	shim       ShimHandle
 	translator *Translator
@@ -94,7 +97,9 @@ type SentinelSink interface {
 type Config struct {
 	ID            string
 	DaemonVersion string
-	Shim          ShimHandle
+	// BootID is the daemon instance identity minted at startup.
+	BootID string
+	Shim   ShimHandle
 	// CWD and Model are the CreateOpts-requested values; they seed the
 	// translator's hello mirror so introspection works before the SDK's
 	// system:init overwrites them with authoritative values.
@@ -128,6 +133,7 @@ func New(cfg Config) *Session {
 	return &Session{
 		ID:            cfg.ID,
 		DaemonVersion: cfg.DaemonVersion,
+		BootID:        cfg.BootID,
 		shim:          cfg.Shim,
 		translator:    translator,
 		retention:     cfg.Retention,
@@ -255,6 +261,8 @@ func (s *Session) helloLocked() []byte {
 			SessionID: s.ID,
 		},
 		DaemonVersion:   s.DaemonVersion,
+		BootID:          s.BootID,
+		ProtocolVersion: protocol.Layer2Version,
 		ResumeFromSeq:   resumeFrom,
 		PermissionMode:  s.translator.PermissionMode,
 		Model:           s.translator.Model,
