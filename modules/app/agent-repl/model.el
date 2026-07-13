@@ -1,33 +1,42 @@
-;;; model.el --- Agent model in vterm mode-line -*- lexical-binding: t; -*-
+;;; model.el --- Agent model transcript reader -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Render the agent model actually in use by a workspace's session in
-;; the vterm mode-line, alongside the prompt-summary and aiTitle
-;; segments.
+;; Read the model actually in use by a workspace's session from its own
+;; session jsonl.  This file used to ALSO render that model as a
+;; segment in the vterm mode-line; the vterm frontend is gone, and the
+;; sole surviving frontend (the xwidget webview) has no mode-line of
+;; its own — the webapp topbar already renders model + tokens directly
+;; (`webapp/src/render.ts').  What remains here is the reading
+;; capability itself, which two callers still depend on:
+;;
+;;   - `backend.el' registers `agent-repl--model-read-from-jsonl' as
+;;     the claude backend's TRANSCRIPT-MODEL-FN capability.
+;;   - `history.el' calls `agent-repl--model-persist-value' when saving
+;;     a workspace snapshot, so a restored session relaunches under the
+;;     model it was actually last running (captured from the transcript
+;;     in case a mid-session `/model' switch happened, rather than the
+;;     stale workspace-generation model).
 ;;
 ;; Source of truth: the workspace's own session jsonl under
 ;; `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl' — the same
 ;; "corresponding workspace's ~/.claude/* file" that `ai-title.el' reads.
 ;; Every main-chain `type:assistant' line carries the model that served
 ;; it under `message.model' (e.g. `claude-opus-4-8'); we surface the
-;; most recent one so the segment reflects the live model even after a
+;; most recent one so callers see the live model even after a
 ;; mid-session `/model' switch.
 ;;
-;; Mode-line layout (left-to-right): parent label → model →
-;; prompt-summary → ai-title.
-;;
-;; Reading the jsonl on every mode-line redraw would re-stat and
-;; re-scan a multi-MB file; we cache (mtime, path, model) on the
-;; workspace plist and only re-scan the last
-;; `agent-repl-model-scan-bytes' of the file when mtime changes.  Each
-;; assistant line is small so scanning the file tail is sufficient.
+;; Reading the jsonl on every lookup would re-stat and re-scan a
+;; multi-MB file; we cache (mtime, path, model) on the workspace plist
+;; and only re-scan the last `agent-repl-model-scan-bytes' of the file
+;; when mtime changes.  Each assistant line is small so scanning the
+;; file tail is sufficient.
 ;;
 ;; Path resolution and mtime keying are deliberately reused from
 ;; `ai-title.el' (`agent-repl--ai-title-jsonl-path' /
-;; `agent-repl--ai-title-mtime') since both segments resolve the exact
-;; same per-workspace jsonl; this file is loaded after `ai-title.el' so
-;; those helpers are available.
+;; `agent-repl--ai-title-mtime') since every session-transcript reader
+;; resolves the exact same per-workspace jsonl; this file is loaded
+;; after `ai-title.el' so those helpers are available.
 
 ;;; Code:
 
@@ -36,16 +45,11 @@
 
 ;;;; Defcustoms
 
-(defcustom agent-repl-model-enabled t
-  "Non-nil to render the agent model in the vterm mode-line."
-  :type 'boolean
-  :group 'agent-repl)
-
 (defcustom agent-repl-model-scan-bytes 32768
   "Number of bytes to read from the end of the session jsonl when scanning
 for the most recent assistant model.  Each entry's model field is short,
 so the tail of the file is enough; reading the whole file on every
-mode-line refresh would be wasteful for large transcripts."
+lookup would be wasteful for large transcripts."
   :type 'integer
   :group 'agent-repl)
 
@@ -142,66 +146,6 @@ source yields a model.  Callers persist the result via
 under the same model."
   (or (agent-repl--model-for-ws ws)
       (agent-repl--ws-get ws :model)))
-
-;;;; Mode-line segment
-
-(defun agent-repl--model-segment ()
-  "Return a propertized string for the mode-line's model segment.
-Reads `agent-repl--owning-workspace' from the current buffer (set on
-every agent-owned vterm buffer) and pulls the workspace's model.
-Returns the empty string when disabled, the workspace is unknown, or no
-model is yet available."
-  (if (not agent-repl-model-enabled)
-      ""
-    (let ((ws (agent-repl--buffer-owner (current-buffer))))
-      (if (not ws)
-          ""
-        (let ((label (agent-repl--model-prettify (agent-repl--model-for-ws ws))))
-          (if (or (null label) (string-empty-p label))
-              ""
-            (concat "  "
-                    (propertize label
-                                'face '(:foreground "deep sky blue"
-                                        :weight normal)))))))))
-
-;;;; Mode-line attachment
-
-(defconst agent-repl--model-mode-line-spec
-  '(:eval (agent-repl--model-segment))
-  "Trailing `:eval' mode-line segment that paints the agent model.
-Captured as a constant so the attach helper can detect (via `equal')
-whether a buffer's mode-line already contains it.")
-
-(defun agent-repl--model-attach-to-mode-line (buf)
-  "Append the model segment to BUF's `mode-line-format' if missing.
-Idempotent — does nothing when the segment is already present, the
-buffer is dead, or the buffer's mode-line is not a list."
-  (when (buffer-live-p buf)
-    (with-current-buffer buf
-      (when (and (listp mode-line-format)
-                 (not (member agent-repl--model-mode-line-spec
-                              mode-line-format)))
-        (setq-local mode-line-format
-                    (append mode-line-format
-                            (list agent-repl--model-mode-line-spec)))
-        (force-mode-line-update t)))))
-
-(defun agent-repl-model-attach-all ()
-  "Attach the model segment to every live workspace vterm buffer.
-Run automatically when this file loads so reloading agent-repl upgrades
-pre-existing vterm buffers.  Also exposed interactively for manual
-recovery."
-  (interactive)
-  (when (and (boundp 'agent-repl--workspaces)
-             (hash-table-p agent-repl--workspaces))
-    (maphash
-     (lambda (_ws plist)
-       (let ((buf (plist-get plist :vterm-buffer)))
-         (when (and buf (buffer-live-p buf))
-           (agent-repl--model-attach-to-mode-line buf))))
-     agent-repl--workspaces)))
-
-(agent-repl-model-attach-all)
 
 (provide 'agent-repl-model)
 ;;; model.el ends here

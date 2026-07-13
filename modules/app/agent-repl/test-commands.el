@@ -442,68 +442,19 @@
 
 ;;;; ---- agent-repl--send-to-agent ----
 
-(ert-deftest agent-repl-cmd-test-send-to-agent/not-running-initializes-first ()
-  "send-to-agent calls initialize-agent when the agent is not running."
-  (let (init-called sent-text)
-    (agent-repl-test--with-clean-state
-      (agent-repl-test--use-vterm-frontend)
-      (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-              (cl-letf (((symbol-function '+workspace-current-name)
-                         (lambda () "test-ws"))
-                        ((symbol-function 'agent-repl--agent-running-p)
-                         (lambda (_ws) nil))
-                        ((symbol-function 'agent-repl--initialize-agent)
-                         (lambda (_ws) (setq init-called t)))
-                        ((symbol-function 'agent-repl--send-input-to-vterm)
-                         (lambda (_buf text) (setq sent-text text))))
-                (agent-repl--send-to-agent "hello claude")
-                (should init-called)
-                (should (equal sent-text "hello claude"))))
-          (kill-buffer fake-vterm-buf))))))
-
-(ert-deftest agent-repl-cmd-test-send-to-agent/running-skips-init ()
-  "send-to-agent skips initialize-agent when the agent is already running."
-  (let (init-called sent-buf sent-text)
-    (agent-repl-test--with-clean-state
-      (agent-repl-test--use-vterm-frontend)
-      (let ((fake-vterm-buf (get-buffer-create " *test-vterm*")))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-              (cl-letf (((symbol-function '+workspace-current-name)
-                         (lambda () "test-ws"))
-                        ((symbol-function 'agent-repl--agent-running-p)
-                         (lambda (_ws) t))
-                        ((symbol-function 'agent-repl--initialize-agent)
-                         (lambda (_ws) (setq init-called t)))
-                        ((symbol-function 'agent-repl--send-input-to-vterm)
-                         (lambda (buf text)
-                           (setq sent-buf buf sent-text text))))
-                (agent-repl--send-to-agent "hello claude")
-                (should-not init-called)
-                (should (eq sent-buf fake-vterm-buf))
-                (should (equal sent-text "hello claude"))))
-          (kill-buffer fake-vterm-buf))))))
-
-(ert-deftest agent-repl-cmd-test-send-to-agent/gui-routes-through-frontend ()
-  "send-to-agent on a gui workspace dispatches via the frontend registry.
-Booting a vterm here would put a second claude process on the same
-directory as the workspace's daemon session."
-  (let (init-called dispatched)
+(ert-deftest agent-repl-cmd-test-send-to-agent/dispatches-through-frontend-registry ()
+  "send-to-agent dispatches unconditionally through the frontend registry.
+There is no vterm branch anymore: every workspace, gui or otherwise, goes
+through `agent-repl--frontend-dispatch-send'."
+  (let (dispatched)
     (agent-repl-test--with-clean-state
       (agent-repl--ws-put "test-ws" :frontend 'gui)
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws) (setq init-called t)))
                 ((symbol-function 'agent-repl--frontend-dispatch-send)
                  (lambda (ws input raw &optional _on-settle)
                    (setq dispatched (list ws input raw)))))
         (agent-repl--send-to-agent "hello claude")
-        (should-not init-called)
         (should (equal dispatched '("test-ws" "hello claude" "hello claude")))))))
 
 ;;;; ---- agent-repl--establish-workspace frontend routing ----
@@ -533,20 +484,15 @@ file into the fake project dir."
      ,@body))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/gui-ensures-daemon-session ()
-  "Restoring a gui workspace ensures a background daemon session.
-Booting a vterm would re-present (and re-stamp) the workspace as vterm,
-silently undoing the user's frontend choice on every restart."
-  (let (ensured init-called)
+  "Restoring a gui workspace ensures a background daemon session."
+  (let (ensured)
     (agent-repl-test--with-clean-state
       (agent-repl--ws-put "ws-gui" :frontend 'gui)
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws)))
-                  ((symbol-function 'agent-repl--initialize-agent)
-                   (lambda (&rest _) (setq init-called t))))
+                   (lambda (ws) (setq ensured ws))))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
-          (should (equal ensured "ws-gui"))
-          (should-not init-called))))))
+          (should (equal ensured "ws-gui")))))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/gui-skips-ensure-when-bound ()
   "A gui workspace already holding a daemon binding is not re-ensured."
@@ -556,24 +502,8 @@ silently undoing the user's frontend choice on every restart."
       (agent-repl--ws-put "ws-gui" :frontend-session-id "s_live")
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws)))
-                  ((symbol-function 'agent-repl--initialize-agent) #'ignore))
+                   (lambda (ws) (setq ensured ws))))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
-          (should-not ensured))))))
-
-(ert-deftest agent-repl-cmd-test-establish-workspace/vterm-boots-agent ()
-  "Restoring a vterm workspace still pre-starts claude via initialize-agent."
-  (let (init-ws ensured)
-    (agent-repl-test--with-clean-state
-      (agent-repl--ws-put "ws-vt" :frontend 'vterm)
-      (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws)))
-                  ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl--initialize-agent)
-                   (lambda (ws &optional _dir _env) (setq init-ws ws))))
-          (agent-repl--establish-workspace "ws-vt" "/tmp/ws-vt")
-          (should (equal init-ws "ws-vt"))
           (should-not ensured))))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/no-choice-restores-under-default ()
@@ -582,41 +512,17 @@ This is the old-workspace case: every workspace predating the gui carries
 an incidental `:frontend vterm' stamp in its state file, which the restore
 deliberately ignores — so it follows `agent-repl-default-frontend' forward
 rather than staying pinned to the vterm it happened to boot once."
-  (let (ensured init-called)
+  (let (ensured)
     (agent-repl-test--with-clean-state
       ;; Arrange — no :frontend at all (what the restore leaves behind for a
       ;; workspace whose save carried no :frontend-explicit marker).
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws)))
-                  ((symbol-function 'agent-repl--initialize-agent)
-                   (lambda (&rest _) (setq init-called t))))
+                   (lambda (ws) (setq ensured ws))))
           ;; Act
           (agent-repl--establish-workspace "ws-old" "/tmp/ws-old")
           ;; Assert
-          (should (equal ensured "ws-old"))
-          (should-not init-called))))))
-
-(ert-deftest agent-repl-cmd-test-establish-workspace/codex-restores-under-vterm ()
-  "A restored codex workspace boots the vterm despite the gui default.
-The gui drives only claude, so resolving the restore to the raw default
-would hand the workspace a presentation that cannot run its agent at all.
-The restore routes by CAPABILITY, not just by an explicit `:frontend'."
-  (let (init-ws ensured)
-    (agent-repl-test--with-clean-state
-      ;; Arrange — a codex workspace carrying no deliberate frontend choice.
-      (agent-repl--ws-put "ws-cx" :backend 'codex)
-      (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws)))
-                  ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl--initialize-agent)
-                   (lambda (ws &optional _dir _env) (setq init-ws ws))))
-          ;; Act
-          (agent-repl--establish-workspace "ws-cx" "/tmp/ws-cx")
-          ;; Assert
-          (should (equal init-ws "ws-cx"))
-          (should-not ensured))))))
+          (should (equal ensured "ws-old")))))))
 
 ;;;; ---- agent-repl-explain ----
 
@@ -669,17 +575,6 @@ The restore routes by CAPABILITY, not just by an explicit `:frontend'."
       (should (null sent-text)))))
 
 
-;;;; ---- agent-repl--send-interrupt-escape ----
-
-(ert-deftest agent-repl-cmd-test-send-interrupt-escape/sends-two-escapes ()
-  "send-interrupt-escape sends two escape key presses to vterm buffer."
-  (let ((keys-sent '()))
-    (agent-repl-test--with-temp-buffer " *test-vterm-interrupt*"
-      (cl-letf (((symbol-function 'vterm-send-key)
-                 (lambda (key) (push key keys-sent))))
-        (agent-repl--send-interrupt-escape "test-ws" (current-buffer))
-        (should (equal (nreverse keys-sent) '("<escape>" "<escape>")))))))
-
 ;;;; ---- agent-repl--enter-insert-mode ----
 
 (ert-deftest agent-repl-cmd-test-enter-insert-mode/live-input-buffer ()
@@ -696,22 +591,24 @@ The restore routes by CAPABILITY, not just by an explicit `:frontend'."
           (agent-repl--enter-insert-mode "test-ws")
           (should insert-called))))))
 
-(ert-deftest agent-repl-cmd-test-enter-insert-mode/never-sends-i-to-vterm ()
-  "enter-insert-mode must NOT forward a literal \"i\" keystroke to the vterm.
+(ert-deftest agent-repl-cmd-test-enter-insert-mode/never-sends-text-to-agent ()
+  "enter-insert-mode must NOT forward a literal \"i\" keystroke to the agent.
 Regression: sending \"i\" double-dispatched the mode switch and leaked a
-stray \"i\" onto the agent's prompt line."
+stray \"i\" onto the agent's prompt line.  Asserts nothing reaches
+`agent-repl--frontend-dispatch-send' -- the single channel every agent
+send now funnels through, vterm or otherwise."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-input-no-i*"
       (let ((input-buf (current-buffer))
-            (sent-string nil))
+            (dispatched nil))
         (agent-repl--ws-put "test-ws" :input-buffer input-buf)
         (cl-letf (((symbol-function '+workspace-current-name)
                    (lambda () "test-ws"))
                   ((symbol-function 'evil-insert-state) #'ignore)
-                  ((symbol-function 'vterm-send-string)
-                   (lambda (str) (setq sent-string str))))
+                  ((symbol-function 'agent-repl--frontend-dispatch-send)
+                   (lambda (&rest args) (setq dispatched args))))
           (agent-repl--enter-insert-mode "test-ws")
-          (should-not sent-string))))))
+          (should-not dispatched))))))
 
 (ert-deftest agent-repl-cmd-test-enter-insert-mode/noop-when-ws-not-current ()
   "enter-insert-mode is a no-op when WS is not the current workspace.
@@ -745,101 +642,65 @@ focus or flip a hidden buffer's evil state."
 
 ;;;; ---- agent-repl-interrupt ----
 
-(ert-deftest agent-repl-cmd-test-interrupt/sends-escape-when-vterm-live ()
-  "interrupt sends escape keys when vterm is live."
-  (let (escape-called)
+(ert-deftest agent-repl-cmd-test-interrupt/dispatches-escape-through-frontend ()
+  "interrupt dispatches an `escape' interrupt through WS's frontend registry."
+  (let (dispatched)
     (agent-repl-test--with-clean-state
-      (agent-repl-test--use-vterm-frontend)
-      (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-vterm*")))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-              ;; NOTE: do NOT stub `agent-repl--ws-get' here.  A blanket
-              ;; stub that returns `fake-vterm-buf' for every key would
-              ;; hand the interrupt path (via `--mark-agent-done') a
-              ;; buffer where it expects other value types, risking
-              ;; wrong-type errors.  The real `--ws-get' reads the value
-              ;; `--ws-put' just stored for `:vterm-buffer' and returns
-              ;; nil for unknown keys, which is exactly what the interrupt
-              ;; path expects.
-              (cl-letf (((symbol-function 'agent-repl--vterm-live-p)
-                         (lambda () t))
-                        ((symbol-function '+workspace-current-name)
-                         (lambda () "test-ws"))
-                        ((symbol-function 'agent-repl--send-interrupt-escape)
-                         (lambda (_ws _buf) (setq escape-called t)))
-                        ((symbol-function 'run-at-time)
-                         (lambda (_time _repeat _fn _arg) nil)))
-                (agent-repl-interrupt)
-                (should escape-called)))
-          (kill-buffer fake-vterm-buf))))))
+      (agent-repl--ws-put "test-ws" :frontend 'gui)
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "test-ws"))
+                ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+                 (lambda (ws kind) (setq dispatched (list ws kind)) t))
+                ((symbol-function 'run-at-time)
+                 (lambda (_time _repeat _fn _arg) nil)))
+        (agent-repl-interrupt)
+        (should (equal dispatched '("test-ws" escape)))))))
 
-(ert-deftest agent-repl-cmd-test-interrupt/noop-when-vterm-not-live ()
-  "interrupt is a no-op when vterm is not live."
-  ;; Arrange — a vterm-world test, so pin the frontend (the shipped
-  ;; default is `gui'); no `with-clean-state' here to hold the binding.
-  (let ((agent-repl-default-frontend 'vterm)
-        escape-called)
-    (cl-letf (((symbol-function 'agent-repl--vterm-live-p)
-               (lambda () nil))
-              ((symbol-function 'agent-repl--send-interrupt-escape)
-               (lambda (_ws _buf) (setq escape-called t))))
-      (agent-repl-interrupt)
-      (should-not escape-called))))
-
-(ert-deftest agent-repl-cmd-test-interrupt/marks-agent-state-done-when-vterm-live ()
-  "interrupt sets the workspace's :agent-state to :done after sending escape."
+(ert-deftest agent-repl-cmd-test-interrupt/marks-agent-state-done-when-delivered ()
+  "interrupt sets the workspace's :agent-state to :done when the frontend
+reports the interrupt was delivered."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-done-vterm*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-            (agent-repl--ws-set-agent-state "test-ws" :thinking)
-            (cl-letf (((symbol-function '+workspace-current-name)
-                       (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl--send-interrupt-escape)
-                       (lambda (_ws _buf) nil))
-                      ((symbol-function 'run-at-time)
-                       (lambda (_time _repeat _fn _arg) nil)))
-              (agent-repl-interrupt)
-              (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done))))
-        (kill-buffer fake-vterm-buf)))))
-
-(ert-deftest agent-repl-cmd-test-interrupt/clears-stop-tracking-when-vterm-live ()
-  "interrupt clears :stop-received and :pending-subagents after sending escape.
-The interrupted turn will never see a Stop hook, so leftover tracking
-state from the previous turn must be reset by Emacs."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((fake-vterm-buf (get-buffer-create " *test-interrupt-clear-vterm*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :vterm-buffer fake-vterm-buf)
-            (agent-repl--ws-set-stop-received "test-ws" t)
-            (agent-repl--ws-incf-pending-subagents "test-ws")
-            (cl-letf (((symbol-function '+workspace-current-name)
-                       (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl--send-interrupt-escape)
-                       (lambda (_ws _buf) nil))
-                      ((symbol-function 'run-at-time)
-                       (lambda (_time _repeat _fn _arg) nil)))
-              (agent-repl-interrupt)
-              (should-not (agent-repl--ws-stop-received-p "test-ws"))
-              (should (= 0 (agent-repl--ws-pending-subagents "test-ws")))))
-        (kill-buffer fake-vterm-buf)))))
-
-(ert-deftest agent-repl-cmd-test-interrupt/does-not-mark-done-when-vterm-not-live ()
-  "interrupt does not mark :done when vterm is not live.
-No interrupt was actually delivered, so the state should not change."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl--ws-put "test-ws" :vterm-buffer nil)
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
     (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name)
                (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--send-interrupt-escape)
-               (lambda (_ws _buf) nil)))
+              ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+               (lambda (_ws _kind) t))
+              ((symbol-function 'run-at-time)
+               (lambda (_time _repeat _fn _arg) nil)))
+      (agent-repl-interrupt)
+      (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done)))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/clears-stop-tracking-when-delivered ()
+  "interrupt clears :stop-received and :pending-subagents when the frontend
+reports the interrupt was delivered.
+The interrupted turn will never see a Stop hook, so leftover tracking
+state from the previous turn must be reset by Emacs."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (agent-repl--ws-set-stop-received "test-ws" t)
+    (agent-repl--ws-incf-pending-subagents "test-ws")
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "test-ws"))
+              ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+               (lambda (_ws _kind) t))
+              ((symbol-function 'run-at-time)
+               (lambda (_time _repeat _fn _arg) nil)))
+      (agent-repl-interrupt)
+      (should-not (agent-repl--ws-stop-received-p "test-ws"))
+      (should (= 0 (agent-repl--ws-pending-subagents "test-ws"))))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/does-not-mark-done-when-not-delivered ()
+  "interrupt does not mark :done when the frontend reports the interrupt
+was NOT delivered.  No interrupt actually reached the agent, so the
+state must not change."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :frontend 'gui)
+    (agent-repl--ws-set-agent-state "test-ws" :thinking)
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () "test-ws"))
+              ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+               (lambda (_ws _kind) nil)))
       (agent-repl-interrupt)
       (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking)))))
 
@@ -1297,7 +1158,7 @@ tombstones out of the drawer/picker."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
+                ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (setq session-killed ws)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
@@ -1323,7 +1184,7 @@ are recoverable by reopening the project."
                  (lambda (_prompt) (setq prompted t) t))
                 ((symbol-function 'yes-or-no-p)
                  (lambda (_prompt) (setq prompted t) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-workspace)
@@ -1341,7 +1202,7 @@ are recoverable by reopening the project."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore)
@@ -1362,7 +1223,7 @@ are recoverable by reopening the project."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
@@ -1378,7 +1239,7 @@ are recoverable by reopening the project."
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_prompt _coll &rest _) "ghost"))
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-              ((symbol-function 'agent-repl--kill-session) #'ignore)
+              ((symbol-function 'agent-repl--gui-kill) #'ignore)
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (agent-repl-nuke-workspace)
@@ -1410,7 +1271,7 @@ returns nil for a missing workspace."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "ghost"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ;; Simulate persp-mode's actual broken-guard behavior:
                 ;; persp-get-by-name returns `:nil' for a missing persp.
                 ((symbol-function 'persp-get-by-name)
@@ -1424,8 +1285,9 @@ returns nil for a missing workspace."
         (agent-repl-nuke-workspace)
         (should-not kill-called)))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-kill-session-errors ()
-  "nuke-workspace still tombstones the hashmap entry when kill-session errors.
+(ert-deftest agent-repl-cmd-test-nuke-workspace/tombstones-hashmap-when-frontend-kill-errors ()
+  "nuke-workspace still tombstones the hashmap entry when the frontend's
+kill dispatch errors.
 The teardown error must not prevent the tombstone — otherwise the entry
 would stay `live' from `--ws-live-p''s perspective while its runtime
 state is corrupted, leaving the drawer/picker showing a half-dead row."
@@ -1434,8 +1296,8 @@ state is corrupted, leaving the drawer/picker showing a half-dead row."
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_prompt _coll &rest _) "doomed"))
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-              ((symbol-function 'agent-repl--kill-session)
-               (lambda (_ws) (error "simulated kill-session failure")))
+              ((symbol-function 'agent-repl--gui-kill)
+               (lambda (_ws) (error "simulated frontend-kill failure")))
               ((symbol-function '+workspace-exists-p) (lambda (_n) nil))
               ((symbol-function 'force-mode-line-update) #'ignore))
       (agent-repl-nuke-workspace)
@@ -1449,7 +1311,7 @@ state is corrupted, leaving the drawer/picker showing a half-dead row."
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_prompt _coll &rest _) "doomed"))
               ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-              ((symbol-function 'agent-repl--kill-session) #'ignore)
+              ((symbol-function 'agent-repl--gui-kill) #'ignore)
               ((symbol-function '+workspace-current-name) (lambda () "other"))
               ((symbol-function '+workspace-exists-p) (lambda (_n) t))
               ((symbol-function '+workspace/kill)
@@ -1475,11 +1337,11 @@ is the regression this test pins."
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "doomed"))
                       ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                      ;; Stub kill-session so its embedded state-save can't
-                      ;; rewrite the file with empty session-id — we want
-                      ;; to verify the up-front state-save (or the no-purge
-                      ;; guarantee) preserves the seeded contents.
-                      ((symbol-function 'agent-repl--kill-session) #'ignore)
+                      ;; Stub the frontend kill dispatch so it can't touch
+                      ;; the real gui machinery (daemon session, webview) —
+                      ;; we want to verify the up-front state-save (or the
+                      ;; no-purge guarantee) preserves the seeded contents.
+                      ((symbol-function 'agent-repl--gui-kill) #'ignore)
                       ;; Stub state-save too so the seeded content is what
                       ;; the test asserts on; this isolates the "no purge"
                       ;; property from the orthogonal "save before tear
@@ -1493,9 +1355,9 @@ is the regression this test pins."
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/saves-state-before-teardown ()
   "nuke-workspace runs `--state-save' BEFORE any teardown so session-id
-is persisted even if a downstream step (kill-session, ws-del, persp
-kill) signals.  Order assertion: state-save called at least once
-before kill-session."
+is persisted even if a downstream step (the frontend kill dispatch,
+ws-del, persp kill) signals.  Order assertion: state-save called at
+least once before the frontend kill dispatch."
   (agent-repl-test--with-clean-state
     (let ((events nil))
       (agent-repl--ws-put "doomed" :project-dir "/tmp/whatever")
@@ -1504,18 +1366,18 @@ before kill-session."
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
                 ((symbol-function 'agent-repl--state-save)
                  (lambda (_ws) (push 'state-save events)))
-                ((symbol-function 'agent-repl--kill-session)
-                 (lambda (_ws) (push 'kill-session events)))
+                ((symbol-function 'agent-repl--gui-kill)
+                 (lambda (_ws) (push 'frontend-kill events)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-workspace)
         ;; Reverse so events are in chronological order.
         (let ((ordered (reverse events)))
           (should (memq 'state-save ordered))
-          (should (memq 'kill-session ordered))
-          ;; state-save must precede kill-session.
+          (should (memq 'frontend-kill ordered))
+          ;; state-save must precede the frontend kill dispatch.
           (should (< (cl-position 'state-save ordered)
-                     (cl-position 'kill-session ordered))))))))
+                     (cl-position 'frontend-kill ordered))))))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/kills-workspace-buffers ()
   "nuke-workspace invokes kill-workspace-buffers so every persp buffer is torn down."
@@ -1525,7 +1387,7 @@ before kill-session."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
                  (lambda (ws) (setq kwb-arg ws)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
@@ -1533,8 +1395,9 @@ before kill-session."
         (agent-repl-nuke-workspace)
         (should (equal kwb-arg "doomed"))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-buffers-even-when-kill-session-errors ()
-  "nuke-workspace still sweeps persp buffers when kill-session throws.
+(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-buffers-even-when-frontend-kill-errors ()
+  "nuke-workspace still sweeps persp buffers when the frontend kill
+dispatch throws.
 kill-workspace-buffers lives in the `unwind-protect' cleanup so the
 buffer sweep is not skipped by an earlier teardown failure."
   (agent-repl-test--with-clean-state
@@ -1543,8 +1406,8 @@ buffer sweep is not skipped by an earlier teardown failure."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
-                 (lambda (_ws) (error "simulated kill-session failure")))
+                ((symbol-function 'agent-repl--gui-kill)
+                 (lambda (_ws) (error "simulated frontend-kill failure")))
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
                  (lambda (_ws) (setq kwb-called t)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
@@ -1563,7 +1426,7 @@ persp would already be gone before the buffer sweep ran."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
                  (lambda (_ws) (push 'kwb call-order)))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
@@ -1598,7 +1461,7 @@ persp would already be gone before the buffer sweep ran."
     (let ((torn-down nil)
           (persp-mode nil))
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
+                ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-all-workspaces)
@@ -1647,7 +1510,7 @@ persp would already be gone before the buffer sweep ran."
     (let ((torn-down nil)
           (persp-mode nil))
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
+                ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-restored-workspaces)
@@ -1688,7 +1551,7 @@ the live hash (e.g., by individual nuke) but stayed on the list."
     (let ((torn-down nil)
           (persp-mode nil))
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
+                ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (push ws torn-down)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-restored-workspaces)
@@ -1701,7 +1564,7 @@ the live hash (e.g., by individual nuke) but stayed on the list."
     (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
     (setq agent-repl--restored-workspaces '("ws1" "ws2"))
     (let ((persp-mode nil))
-      (cl-letf (((symbol-function 'agent-repl--kill-session) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl--nuke-one-workspace "ws1")
         (should (equal agent-repl--restored-workspaces '("ws2")))))))
@@ -1714,7 +1577,7 @@ other teardown step still runs."
     (agent-repl--ws-put "merged-ws" :project-dir "/tmp/merged-ws")
     (agent-repl--ws-put "merged-ws" :merge-completed t)
     (let ((persp-mode nil))
-      (cl-letf (((symbol-function 'agent-repl--kill-session) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl--nuke-one-workspace "merged-ws" 'preserve-entry)
         (should (gethash "merged-ws" agent-repl--workspaces))
@@ -1729,7 +1592,7 @@ predicate that keeps it out of every UI/runtime iterator."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-mode nil))
-      (cl-letf (((symbol-function 'agent-repl--kill-session) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl--nuke-one-workspace "ws1")
         (should-not (agent-repl--ws-live-p "ws1"))
@@ -2033,7 +1896,7 @@ are recoverable by reopening the project."
                  (lambda (_prompt) (setq prompted t) t))
                 ((symbol-function 'yes-or-no-p)
                  (lambda (_prompt) (setq prompted t) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-kill-workspace)
@@ -2054,7 +1917,7 @@ primitive both routes through."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session)
+                ((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (setq session-killed ws)))
                 ((symbol-function '+workspace-current-name) (lambda () "other-ws"))
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
@@ -2081,7 +1944,7 @@ kill so the workspace can be re-opened with its identity intact."
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (_prompt _coll &rest _) "doomed"))
                       ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                      ((symbol-function 'agent-repl--kill-session) #'ignore)
+                      ((symbol-function 'agent-repl--gui-kill) #'ignore)
                       ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                       ((symbol-function 'force-mode-line-update) #'ignore))
               (agent-repl-kill-workspace)
@@ -2096,7 +1959,7 @@ kill so the workspace can be re-opened with its identity intact."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
                  (lambda (ws) (setq kwb-arg ws)))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
@@ -2114,7 +1977,7 @@ kill so the workspace can be re-opened with its identity intact."
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
                 ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--kill-session) #'ignore)
+                ((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore)
@@ -2132,7 +1995,7 @@ still in `+workspace-list-names', so the picker offers it and the
 dispatcher chooses the plain-kill branch."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil)
-          (kill-session-called nil)
+          (frontend-kill-called nil)
           (persp-mode t))
       (cl-letf (((symbol-function '+workspace-list-names)
                  (lambda () '("stray-persp")))
@@ -2142,20 +2005,20 @@ dispatcher chooses the plain-kill branch."
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
-                ((symbol-function 'agent-repl--kill-session)
-                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'agent-repl--gui-kill)
+                 (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-workspace)
         (should (equal persp-killed "stray-persp"))
         ;; The agent-repl teardown MUST NOT run for a non-live ws.
-        (should-not kill-session-called)))))
+        (should-not frontend-kill-called)))))
 
 (ert-deftest agent-repl-cmd-test-kill-workspace/tabbar-only-routes-to-persp-kill ()
   "kill-workspace on a tab-bar-only ws routes through `+workspace/kill'
 \(symmetric with the nuke-workspace test above)."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil)
-          (kill-session-called nil)
+          (frontend-kill-called nil)
           (persp-mode t))
       (cl-letf (((symbol-function '+workspace-list-names)
                  (lambda () '("stray-persp")))
@@ -2165,12 +2028,12 @@ dispatcher chooses the plain-kill branch."
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
-                ((symbol-function 'agent-repl--kill-session)
-                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'agent-repl--gui-kill)
+                 (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-kill-workspace)
         (should (equal persp-killed "stray-persp"))
-        (should-not kill-session-called)))))
+        (should-not frontend-kill-called)))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/tombstoned-with-persp-routes-to-persp-kill ()
   "nuke-workspace on a tombstoned ws (agent killed but persp still in
@@ -2181,7 +2044,7 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
     (agent-repl--ws-put "tomb" :project-dir "/tmp/tomb")
     (agent-repl--ws-put "tomb" :nuked-at (current-time))
     (let ((persp-killed nil)
-          (kill-session-called nil)
+          (frontend-kill-called nil)
           (persp-mode t))
       (cl-letf (((symbol-function '+workspace-list-names)
                  (lambda () '("tomb")))
@@ -2191,12 +2054,12 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
                 ((symbol-function '+workspace-exists-p) (lambda (_n) t))
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (setq persp-killed ws)))
-                ((symbol-function 'agent-repl--kill-session)
-                 (lambda (_ws) (setq kill-session-called t)))
+                ((symbol-function 'agent-repl--gui-kill)
+                 (lambda (_ws) (setq frontend-kill-called t)))
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-nuke-workspace)
         (should (equal persp-killed "tomb"))
-        (should-not kill-session-called)))))
+        (should-not frontend-kill-called)))))
 
 ;;;; ---- Tests: workspace snapshot save/load ----
 
@@ -2223,7 +2086,7 @@ the ws via the tab-bar branch and the dispatcher does the plain kill."
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-            (agent-repl--ws-put "ws2" :vterm-buffer nil)
+            (agent-repl--ws-put "ws2" :frontend-buffer nil)
             (agent-repl-save-workspace-snapshot)
             (let ((data (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
                                    :workspaces)))
@@ -2529,7 +2392,11 @@ snapshot's `:default-frontend' key, so workspaces created after a restart
 are born under the last-chosen frontend."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
-          (agent-repl-default-frontend 'vterm))
+          ;; Arbitrary value distinct from `gui', just to prove the load
+          ;; below actually overwrites it rather than finding it already
+          ;; equal.  `gui' is the only registered frontend today; this is
+          ;; not meant to name a real one.
+          (agent-repl-default-frontend 'placeholder))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file
@@ -2598,11 +2465,7 @@ encodes on save."
                 ((symbol-function 'agent-repl--load-display-state)
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (ws) (push ws reorder-calls)))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--agent-running-p)
-                 (lambda (_ws) t)))
+                 (lambda (ws) (push ws reorder-calls))))
         ;; Simulate an in-flight snapshot load.
         (let ((agent-repl--snapshot-load-state '(:queue nil)))
           (agent-repl--establish-workspace "ws-a" "/tmp/ws-a"))
@@ -2628,11 +2491,7 @@ behavior for ad-hoc creations."
                 ((symbol-function 'agent-repl--load-display-state)
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (ws) (push ws reorder-calls)))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--agent-running-p)
-                 (lambda (_ws) t)))
+                 (lambda (ws) (push ws reorder-calls))))
         (let ((agent-repl--snapshot-load-state nil))
           (agent-repl--establish-workspace "ws-a" "/tmp/ws-a"))
         (should (equal reorder-calls '("ws-a")))))))
@@ -3636,39 +3495,6 @@ sourced from each project's state file, not the snapshot roster."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
-(ert-deftest agent-repl-cmd-test-establish-workspace/starts-claude-when-not-running ()
-  "establish-workspace starts the agent for the workspace unless it's already running."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
-           (started-for nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-agent)
-                     (lambda (ws &rest _) (setq started-for ws)))
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
-                    ((symbol-function 'persp-add-new) #'ignore)
-                    ((symbol-function 'persp-frame-switch) #'ignore)
-                    ((symbol-function 'projectile-add-known-project) #'ignore))
-            (agent-repl--establish-workspace "test-ws" tmp-dir)
-            (should (equal started-for "test-ws")))
-        (delete-directory tmp-dir t)))))
-
-(ert-deftest agent-repl-cmd-test-establish-workspace/skips-claude-when-running ()
-  "establish-workspace skips agent-init when the agent is already running for ws."
-  (agent-repl-test--with-clean-state
-    (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-" t)))
-           (started nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-agent)
-                     (lambda (&rest _) (setq started t)))
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
-                    ((symbol-function 'persp-add-new) #'ignore)
-                    ((symbol-function 'persp-frame-switch) #'ignore)
-                    ((symbol-function 'projectile-add-known-project) #'ignore))
-            (agent-repl--establish-workspace "test-ws" tmp-dir)
-            (should-not started))
-        (delete-directory tmp-dir t)))))
-
 (ert-deftest agent-repl-cmd-test-establish-workspace/calls-switch-project-function ()
   "establish-workspace invokes `+workspaces-switch-project-function' (magit lambda)."
   (agent-repl-test--with-clean-state
@@ -3677,9 +3503,7 @@ sourced from each project's state file, not the snapshot roster."
       (unwind-protect
           (let ((+workspaces-switch-project-function
                  (lambda (d) (setq called-with d))))
-            (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
-                      ((symbol-function 'persp-add-new) #'ignore)
+            (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
               (agent-repl--establish-workspace "test-ws" tmp-dir)
@@ -3697,8 +3521,6 @@ root from every persp (a cross-persp bleed)."
            (sentinel-dir "/sentinel-original-dir/"))
       (unwind-protect
           (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
-                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -3725,8 +3547,6 @@ depend on it).  After the hook returns it's restored."
                    (setq observed-dir
                          (buffer-local-value 'default-directory fb)))))
             (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fb))
-                      ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -3752,8 +3572,6 @@ depend on it).  After the hook returns it's restored."
                        (lambda (_d) tmp-file))
                       ((symbol-function 'find-file)
                        (lambda (f) (setq opened f)))
-                      ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                      ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                       ((symbol-function 'persp-add-new) #'ignore)
                       ((symbol-function 'persp-frame-switch) #'ignore)
                       ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -3776,9 +3594,7 @@ of ui/workspaces/autoload/workspaces.el."
            (set-with-val nil)
            (set-with-persp nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
-                    ((symbol-function 'persp-add-new) (lambda (&rest _) fake-persp))
+          (cl-letf (((symbol-function 'persp-add-new) (lambda (&rest _) fake-persp))
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
                     ((symbol-function 'set-persp-parameter)
@@ -3798,9 +3614,7 @@ A nil persp would crash `set-persp-parameter'."
     (let* ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-est-wp-nil-" t)))
            (set-called nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
-                    ((symbol-function 'persp-add-new) #'ignore)
+          (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
                     ((symbol-function 'set-persp-parameter)
@@ -3819,8 +3633,6 @@ A nil persp would crash `set-persp-parameter'."
                      (lambda (_d) "/nonexistent/gone.el"))
                     ((symbol-function 'find-file)
                      (lambda (&rest _) (setq find-file-called t)))
-                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore))
@@ -3839,8 +3651,6 @@ so the badge restores from the per-project state file rather than the roster."
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl--load-display-state)
                      (lambda (ws d) (setq loaded-ws ws loaded-with d))))
             (agent-repl--establish-workspace "test-ws" tmp-dir)
@@ -3860,8 +3670,6 @@ sit in file order even when state.el carries priorities."
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch) #'ignore)
                     ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl--load-display-state)
                      (lambda (&rest _) (push 'load events)))
                     ((symbol-function 'agent-repl--reorder-workspace-by-priority)
@@ -3885,9 +3693,7 @@ so persp-mode begins capturing a window configuration for that persp."
           (cl-letf (((symbol-function 'persp-add-new) #'ignore)
                     ((symbol-function 'persp-frame-switch)
                      (lambda (n) (setq switched-to n)))
-                    ((symbol-function 'projectile-add-known-project) #'ignore)
-                    ((symbol-function 'agent-repl--initialize-agent) #'ignore)
-                    ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) nil)))
+                    ((symbol-function 'projectile-add-known-project) #'ignore))
             (agent-repl--establish-workspace "DC/CV-494738/worker-suite" tmp-dir)
             (should (equal switched-to "DC/CV-494738/worker-suite")))
         (delete-directory tmp-dir t)))))
@@ -5228,7 +5034,7 @@ to the top and color the kill-date column."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-mode nil))
-      (cl-letf (((symbol-function 'agent-repl--kill-session) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--state-save) #'ignore)
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl--nuke-one-workspace "ws1" 'preserve-entry)
@@ -5242,7 +5048,7 @@ even if downstream teardown errors before the redundant save fires."
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((saw-killed-at nil)
           (persp-mode nil))
-      (cl-letf (((symbol-function 'agent-repl--kill-session) #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function 'agent-repl--state-save)
                  (lambda (ws)
                    (setq saw-killed-at (agent-repl--ws-get ws :last-killed-at))))
@@ -6063,109 +5869,6 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (should-not switched)
         (should-not agent-repl--opened-recent-workspaces)))))
 
-(ert-deftest agent-repl-test-send-to-agent-transitions-permission-to-thinking ()
-  "`agent-repl--send-to-agent' flips :permission -> :thinking after dispatching.
-This predefined-prompt path goes straight to vterm and does NOT funnel
-through `agent-repl--do-send'; the flip is inherited from the real
-`agent-repl--send-input-to-vterm' (the lowest-level string-send
-primitive), so only the bracketed transport beneath it is stubbed."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-perm*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-agent-state "ws1" :permission)
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
-                ((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
-        (agent-repl--send-to-agent "do the thing"))
-      (should (eq (agent-repl--ws-agent-state "ws1") :thinking)))))
-
-(ert-deftest agent-repl-test-send-to-agent-leaves-non-permission-state-unchanged ()
-  "`agent-repl--send-to-agent' only transitions :permission, not other states."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl-test--with-temp-buffer "*agent-panel-send-to-agent-idle*"
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--ws-set-agent-state "ws1" :idle)
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda (&rest _) t))
-                ((symbol-function 'agent-repl--send-input-bracketed) #'ignore))
-        (agent-repl--send-to-agent "do the thing"))
-      (should (eq (agent-repl--ws-agent-state "ws1") :idle)))))
-
-;;;; ---- agent-repl-kill-agent-process ----
-
-(ert-deftest agent-repl-cmd-test-kill-agent-process/signals-term ()
-  "kill-agent-process sends SIGTERM to the found agent pid via the boundary wrapper."
-  (let ((sent nil))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) 4242))
-              ((symbol-function 'agent-repl--signal-process)
-               (lambda (pid sig) (setq sent (cons pid sig)))))
-      (agent-repl-kill-agent-process)
-      (should (equal sent '(4242 . TERM))))))
-
-(ert-deftest agent-repl-cmd-test-kill-agent-process/no-process-errors ()
-  "kill-agent-process signals user-error and signals nothing when no agent process is found."
-  (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--agent-process-pid) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--signal-process)
-               (lambda (&rest _) (setq called t))))
-      (should-error (agent-repl-kill-agent-process) :type 'user-error)
-      (should-not called))))
-
-(ert-deftest agent-repl-cmd-test-agent-process-pid/finds-claude-child ()
-  "agent-process-pid returns the vterm shell's child whose comm matches claude, not a sibling."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create " *test-vterm-kill*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
-                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
-                    ((symbol-function 'list-system-processes) (lambda () '(100 200 300)))
-                    ((symbol-function 'process-attributes)
-                     (lambda (pid)
-                       (pcase pid
-                         (100 '((comm . "zsh")    (ppid . 1)))
-                         (200 '((comm . "node")   (ppid . 100)))
-                         (300 '((comm . "claude") (ppid . 100)))))))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (equal (agent-repl--agent-process-pid "ws1") 300)))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-cmd-test-agent-process-pid/version-comm-sole-child ()
-  "agent-process-pid returns the shell's sole child even when its comm is a version string, not \"claude\" (the native-binary case)."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create " *test-vterm-kill2*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
-                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
-                    ((symbol-function 'list-system-processes) (lambda () '(100 555)))
-                    ((symbol-function 'process-attributes)
-                     (lambda (pid)
-                       (pcase pid
-                         (100 '((comm . "zsh")     (ppid . 1)))
-                         (555 '((comm . "2.1.206") (ppid . 100)))))))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should (equal (agent-repl--agent-process-pid "ws1") 555)))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-cmd-test-agent-process-pid/no-children-nil ()
-  "agent-process-pid returns nil when the vterm shell has no child process."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create " *test-vterm-kill3*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
-                    ((symbol-function 'process-id) (lambda (p) (when (eq p 'fake-proc) 100)))
-                    ((symbol-function 'list-system-processes) (lambda () '(100 999)))
-                    ((symbol-function 'process-attributes)
-                     (lambda (pid)
-                       (pcase pid
-                         (100 '((comm . "zsh")   (ppid . 1)))
-                         (999 '((comm . "other") (ppid . 42)))))))
-            (agent-repl--ws-put "ws1" :vterm-buffer buf)
-            (should-not (agent-repl--agent-process-pid "ws1")))
-        (kill-buffer buf)))))
 
 (provide 'test-commands)
 

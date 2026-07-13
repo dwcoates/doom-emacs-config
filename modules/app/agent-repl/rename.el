@@ -3,11 +3,13 @@
 ;;; Commentary:
 
 ;; End-to-end workspace rename: git branch, companion start tag,
-;; worktree directory, projectile entry, perspective, vterm/input
+;; worktree directory, projectile entry, perspective, input/webview
 ;; buffers, owning-workspace buffer-locals, and `:source-ws-dir'
 ;; back-references in peer workspaces.
 
 ;;; Code:
+
+(declare-function agent-repl--frontend-webview-buffer-name "agent-repl-frontend" (ws))
 
 (defun agent-repl--rename-derive-branch (old-branch new-name)
   "Derive the new branch name from OLD-BRANCH given user-supplied NEW-NAME.
@@ -194,26 +196,35 @@ collision can't abort the rename mid-flight."
          nil)))))
 
 (defun agent-repl--rename-update-buffers (old-ws new-ws new-path)
-  "Update vterm/input buffers tracked by NEW-WS after the hash rehash.
+  "Update input/webview buffers tracked by NEW-WS after the hash rehash.
 Renames each buffer to its NEW-WS-derived name, repoints
 `default-directory' to NEW-PATH, and sets the buffer-local
 `agent-repl--owning-workspace' to NEW-WS so future lookups resolve
-to the new identity."
-  (let ((vbuf (agent-repl--ws-get new-ws :vterm-buffer))
-        (ibuf (agent-repl--ws-get new-ws :input-buffer))
+to the new identity.
+
+The webview buffer (`:frontend-buffer') is named via
+`agent-repl--frontend-webview-buffer-name' rather than
+`agent-repl--buffer-name' — it lives in its own `*agent-frontend-WS*'
+namespace, deliberately outside the `*agent-panel-WS*' scheme the
+latter produces (see frontend.el's buffer-identity commentary).  This
+function used to rename only the vterm/input pair, so a renamed
+workspace's webview kept its old name — a pre-existing gui bug fixed
+here now that the webview is one of a workspace's two buffers."
+  (let ((ibuf (agent-repl--ws-get new-ws :input-buffer))
+        (wbuf (agent-repl--ws-get new-ws :frontend-buffer))
         (new-dir (file-name-as-directory new-path)))
-    (when vbuf
-      (agent-repl--rename-buffer-safe
-       vbuf (agent-repl--buffer-name nil new-ws))
-      (when (buffer-live-p vbuf)
-        (with-current-buffer vbuf
-          (setq default-directory new-dir)
-          (setq-local agent-repl--owning-workspace new-ws))))
     (when ibuf
       (agent-repl--rename-buffer-safe
        ibuf (agent-repl--buffer-name "-input" new-ws))
       (when (buffer-live-p ibuf)
         (with-current-buffer ibuf
+          (setq default-directory new-dir)
+          (setq-local agent-repl--owning-workspace new-ws))))
+    (when wbuf
+      (agent-repl--rename-buffer-safe
+       wbuf (agent-repl--frontend-webview-buffer-name new-ws))
+      (when (buffer-live-p wbuf)
+        (with-current-buffer wbuf
           (setq default-directory new-dir)
           (setq-local agent-repl--owning-workspace new-ws))))
     ;; Also catch any other agent-panel-* buffers that claim OLD-WS as
@@ -272,8 +283,8 @@ the common-dir cannot be resolved or its parent does not exist."
   "Rename workspace OLD-WS to NEW-NAME.
 Renames the git branch (preserving any directory prefix when NEW-NAME
 is bare), the companion start tag (when configured), the worktree
-directory, the projectile entry, the perspective, vterm/input buffers,
-and any peer workspace's `:source-ws-dir' back-reference.
+directory, the projectile entry, the perspective, input/webview
+buffers, and any peer workspace's `:source-ws-dir' back-reference.
 Signals `user-error' on validation failures and surfaces git-level
 errors verbatim after attempting a best-effort rollback."
   (let* ((old-ws (agent-repl--bare-workspace-name old-ws))

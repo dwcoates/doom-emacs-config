@@ -41,43 +41,17 @@
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
         (should-not (agent-repl--input-visible-p))))))
 
-(ert-deftest agent-repl-test-panels-vterm-visible-p-no-buffer ()
-  "vterm-visible-p returns nil when no vterm buffer is set."
+(ert-deftest agent-repl-test-panels-view-visible-p-no-buffer ()
+  "view-visible-p returns nil when no frontend (webview) buffer is set."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-      (should-not (agent-repl--vterm-visible-p)))))
+      (should-not (agent-repl--view-visible-p)))))
 
 (ert-deftest agent-repl-test-panels-panels-visible-p-both-nil ()
   "panels-visible-p returns nil when neither panel exists."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
       (should-not (agent-repl--panels-visible-p)))))
-
-;;;; ---- Tests: output-visible-input-hidden-p ----
-
-(ert-deftest agent-repl-test-panels-output-visible-input-hidden-p-true ()
-  "output-visible-input-hidden-p is t when output is visible but input is not."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--vterm-visible-p) (lambda () t))
-              ((symbol-function 'agent-repl--input-visible-p) (lambda () nil)))
-      (should (agent-repl--output-visible-input-hidden-p)))))
-
-(ert-deftest agent-repl-test-panels-output-visible-input-hidden-p-both-visible ()
-  "output-visible-input-hidden-p is nil when both panels are visible."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--vterm-visible-p) (lambda () t))
-              ((symbol-function 'agent-repl--input-visible-p) (lambda () t)))
-      (should-not (agent-repl--output-visible-input-hidden-p)))))
-
-(ert-deftest agent-repl-test-panels-output-visible-input-hidden-p-output-hidden ()
-  "output-visible-input-hidden-p is nil when the output panel is not visible."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--vterm-visible-p) (lambda () nil))
-              ((symbol-function 'agent-repl--input-visible-p) (lambda () nil)))
-      (should-not (agent-repl--output-visible-input-hidden-p)))))
 
 ;;;; ---- Tests: Safe buffer name ----
 
@@ -93,11 +67,11 @@
 
 ;;;; ---- Tests: Extract panel hex ----
 
-(ert-deftest agent-repl-test-panels-extract-id-from-vterm ()
-  "extract-panel-id returns workspace identifier from a vterm buffer name."
-  (should (equal (agent-repl--extract-panel-id "*agent-panel-abcd1234*")
+(ert-deftest agent-repl-test-panels-extract-id-from-frontend-buffer ()
+  "extract-panel-id returns workspace identifier from a frontend webview buffer name."
+  (should (equal (agent-repl--extract-panel-id "*agent-frontend-abcd1234*")
                  "abcd1234"))
-  (should (equal (agent-repl--extract-panel-id "*agent-panel-my-workspace*")
+  (should (equal (agent-repl--extract-panel-id "*agent-frontend-my-workspace*")
                  "my-workspace")))
 
 (ert-deftest agent-repl-test-panels-extract-id-from-input ()
@@ -115,58 +89,46 @@
 
 ;;;; ---- Tests: Partner buffer name ----
 
-(ert-deftest agent-repl-test-panels-partner-of-vterm ()
-  "partner-buffer-name of a vterm buffer is the input buffer."
-  (should (equal (agent-repl--partner-buffer-name "*agent-panel-abcd1234*" "abcd1234")
+(ert-deftest agent-repl-test-panels-partner-of-frontend-buffer ()
+  "partner-buffer-name of a frontend webview buffer is the input buffer."
+  (should (equal (agent-repl--partner-buffer-name "*agent-frontend-abcd1234*" "abcd1234")
                  "*agent-panel-input-abcd1234*")))
 
 (ert-deftest agent-repl-test-panels-partner-of-input ()
-  "partner-buffer-name of an input buffer is the vterm buffer."
+  "partner-buffer-name of an input buffer is the frontend webview buffer."
   (should (equal (agent-repl--partner-buffer-name "*agent-panel-input-abcd1234*" "abcd1234")
-                 "*agent-panel-abcd1234*")))
+                 "*agent-frontend-abcd1234*")))
 
 ;;;; ---- Tests: Orphaned panel detection (migrated) ----
 
-(ert-deftest agent-repl-test-panels-orphaned-vterm-p ()
-  "A vterm buffer whose input partner is not visible is orphaned."
+(ert-deftest agent-repl-test-panels-orphaned-frontend-buffer-p ()
+  "A frontend (webview) buffer whose input partner is not visible is orphaned."
   (agent-repl-test--with-clean-state
     ;; Mock: not one-window-p, no partner window visible
     (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
-      ;; Vterm with no visible input partner is orphaned
-      (should (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*"))
+      ;; Frontend buffer with no visible input partner is orphaned
+      (should (agent-repl--orphaned-panel-p "*agent-frontend-abcd1234*"))
       ;; Non-agent buffers are never orphaned
       (should-not (agent-repl--orphaned-panel-p "*some-other*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-p ()
-  "An input buffer whose vterm partner is not visible is orphaned (no loading placeholder)."
+  "An input buffer whose frontend partner is not visible is orphaned (no loading placeholder)."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
               ((symbol-function 'get-buffer-window) (lambda (_buf) nil))
               ((symbol-function 'get-buffer) (lambda (_name) nil)))
-      ;; Input with no visible vterm partner and no loading placeholder is orphaned
+      ;; Input with no visible frontend partner and no loading placeholder is orphaned
       (should (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*"))
       ;; Non-agent buffers are never orphaned
       (should-not (agent-repl--orphaned-panel-p "*scratch*")))))
 
-(ert-deftest agent-repl-test-panels-input-not-orphaned-under-webview ()
-  "Hybrid UI: an input panel under the workspace's visible webview is a live pair."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
-              ((symbol-function 'get-buffer-window)
-               (lambda (buf) (and (equal buf "*agent-frontend-abcd1234*") 'fake-window)))
-              ((symbol-function 'get-buffer) (lambda (_name) nil)))
-      ;; The input panel is protected by the visible webview...
-      (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*"))
-      ;; ...but the webview does NOT protect a vterm panel.
-      (should (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
-
-(ert-deftest agent-repl-test-panels-orphaned-vterm-one-window ()
+(ert-deftest agent-repl-test-panels-orphaned-frontend-buffer-one-window ()
   "When one-window-p returns t, no panel is considered orphaned."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () t)))
-      (should-not (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-frontend-abcd1234*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-with-loading ()
   "When loading placeholder buffer exists, input panel is not orphaned."
@@ -178,8 +140,8 @@
                                                  'fake-buffer))))
       (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*")))))
 
-(ert-deftest agent-repl-test-panels-orphaned-vterm-partner-visible ()
-  "A vterm buffer whose input partner IS visible is not orphaned."
+(ert-deftest agent-repl-test-panels-orphaned-frontend-buffer-partner-visible ()
+  "A frontend buffer whose input partner IS visible is not orphaned."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
               ((symbol-function 'get-buffer-window)
@@ -187,131 +149,33 @@
                  ;; The input partner window is visible
                  (when (equal buf "*agent-panel-input-abcd1234*")
                    'fake-window))))
-      (should-not (agent-repl--orphaned-panel-p "*agent-panel-abcd1234*")))))
+      (should-not (agent-repl--orphaned-panel-p "*agent-frontend-abcd1234*")))))
 
 (ert-deftest agent-repl-test-panels-orphaned-input-partner-visible ()
-  "An input buffer whose vterm partner IS visible is not orphaned."
+  "An input buffer whose frontend (webview) partner IS visible is not orphaned."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'one-window-p) (lambda () nil))
               ((symbol-function 'get-buffer-window)
                (lambda (buf)
-                 ;; The vterm partner window is visible
-                 (when (equal buf "*agent-panel-abcd1234*")
-                   'fake-window))))
+                 ;; The frontend partner window is visible
+                 (when (equal buf "*agent-frontend-abcd1234*")
+                   'fake-window)))
+              ((symbol-function 'get-buffer) (lambda (_name) nil)))
       (should-not (agent-repl--orphaned-panel-p "*agent-panel-input-abcd1234*")))))
 
 ;;;; ---- Tests: Defcustom defaults ----
 
-;;;; ---- Tests: Docstring accuracy (migrated) ----
-
-(ert-deftest agent-repl-test-panels-show-panels-docstring ()
-  "show-panels docstring should describe the fullscreen (frame-filling) layout."
-  (let ((doc (documentation 'agent-repl--show-panels)))
-    (should (string-match-p "fullscreen" doc))
-    (should (string-match-p "fill" doc))))
-
-;;;; ---- Tests: show-input-beside-output ----
-
-(ert-deftest agent-repl-test-panels-show-input-beside-output-splits-output ()
-  "show-input-beside-output splits the output window and shows the input buffer."
-  (agent-repl-test--with-clean-state
-    (let* ((input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
-           (vterm-win (selected-window))
-           (split-arg nil)
-           (set-win nil)
-           (set-buf nil)
-           (hardened nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl-window--panel-window)
-                       (lambda (_kind &rest _) vterm-win))
-                      ((symbol-function 'split-window)
-                       (lambda (win &rest _) (setq split-arg win) 'input-win))
-                      ((symbol-function 'window-total-height) (lambda (_w) 40))
-                      ((symbol-function 'set-window-buffer)
-                       (lambda (w b) (setq set-win w set-buf b)))
-                      ((symbol-function 'agent-repl-window--harden)
-                       (lambda (w &rest _) (setq hardened w))))
-              (should (eq (agent-repl--show-input-beside-output) 'input-win))
-              ;; Split happens on the existing output window.
-              (should (eq split-arg vterm-win))
-              ;; Input buffer is shown in the new window and it is hardened.
-              (should (eq set-win 'input-win))
-              (should (eq set-buf input-buf))
-              (should (eq hardened 'input-win))))
-        (kill-buffer input-buf)))))
-
-(ert-deftest agent-repl-test-panels-show-input-beside-output-noop-no-output-window ()
-  "show-input-beside-output is a no-op when the output window is not visible."
-  (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
-          (split-called nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'agent-repl-window--panel-window)
-                       (lambda (_kind &rest _) nil))
-                      ((symbol-function 'split-window)
-                       (lambda (&rest _) (setq split-called t) 'input-win)))
-              (should-not (agent-repl--show-input-beside-output))
-              (should-not split-called)))
-        (kill-buffer input-buf)))))
-
-(ert-deftest agent-repl-test-panels-show-input-beside-output-noop-dead-input ()
-  "show-input-beside-output is a no-op when the input buffer is not live."
-  (agent-repl-test--with-clean-state
-    (let ((split-called nil))
-      ;; No :input-buffer set — buffer is nil/dead.
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl-window--panel-window)
-                 (lambda (_kind &rest _) (selected-window)))
-                ((symbol-function 'split-window)
-                 (lambda (&rest _) (setq split-called t) 'input-win)))
-        (should-not (agent-repl--show-input-beside-output))
-        (should-not split-called)))))
-
-;;;; ---- Tests: ensure-input-beside-output ----
-
-(ert-deftest agent-repl-test-panels-ensure-input-beside-output-repairs ()
-  "ensure-input-beside-output adds the input window when output is up, input down."
-  (agent-repl-test--with-clean-state
-    (let ((shown nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--output-visible-input-hidden-p)
-                 (lambda () t))
-                ((symbol-function 'agent-repl--show-input-beside-output)
-                 (lambda () (setq shown t))))
-        (agent-repl--ensure-input-beside-output)
-        (should shown)))))
-
-(ert-deftest agent-repl-test-panels-ensure-input-beside-output-noop ()
-  "ensure-input-beside-output is a no-op when the layout is not half-shown."
-  (agent-repl-test--with-clean-state
-    (let ((shown nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--output-visible-input-hidden-p)
-                 (lambda () nil))
-                ((symbol-function 'agent-repl--show-input-beside-output)
-                 (lambda () (setq shown t))))
-        (agent-repl--ensure-input-beside-output)
-        (should-not shown)))))
-
 ;;;; ---- Tests: drain-pending-show-panels ----
 
 (ert-deftest agent-repl-test-panels-drain-pending-when-set-and-ready ()
-  "drain-pending-show-panels shows panels and clears the flag when the agent is ready."
+  "drain-pending-show-panels dispatches through WS's frontend and clears the flag."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
-    (let ((called nil))
-      (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq called t))))
+    (let ((shown nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (ws) (setq shown ws))))
         (agent-repl--drain-pending-show-panels "test-ws")
-        (should called)
+        (should (equal shown "test-ws"))
         (should-not (agent-repl--ws-get "test-ws" :pending-show-panels))))))
 
 (ert-deftest agent-repl-test-panels-drain-pending-shows-gui-frontend ()
@@ -321,39 +185,21 @@
     ;; deferred to the first switch, which is where this drain runs.
     (agent-repl--ws-put "test-ws" :frontend 'gui)
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
-    (let ((shown nil)
-          (vterm-panels nil))
-      (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--gui-show)
-                 (lambda (ws) (setq shown ws)))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq vterm-panels t))))
+    (let ((shown nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-show)
+                 (lambda (ws) (setq shown ws))))
         ;; Act
         (agent-repl--drain-pending-show-panels "test-ws")
         ;; Assert
         (should (equal shown "test-ws"))
-        (should-not vterm-panels)
         (should-not (agent-repl--ws-get "test-ws" :pending-show-panels))))))
-
-(ert-deftest agent-repl-test-panels-drain-pending-when-set-but-starting ()
-  "drain-pending-show-panels defers (leaves flag set, no show) when session is starting."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (agent-repl--ws-put "test-ws" :pending-show-panels t)
-    (let ((called nil))
-      (cl-letf (((symbol-function 'agent-repl--session-starting-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq called t))))
-        (agent-repl--drain-pending-show-panels "test-ws")
-        (should-not called)
-        (should (agent-repl--ws-get "test-ws" :pending-show-panels))))))
 
 (ert-deftest agent-repl-test-panels-drain-pending-when-not-set ()
   "drain-pending-show-panels does nothing when flag is nil."
   (agent-repl-test--with-clean-state
     (let ((called nil))
-      (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq called t))))
+      (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq called t))))
         (agent-repl--drain-pending-show-panels "test-ws")
         (should-not called)))))
 
@@ -523,61 +369,6 @@ path must not error."
       (kill-buffer buf)
       ;; Should not error with a dead buffer
       (agent-repl--close-buffer-windows buf))))
-
-;;;; ---- Tests: configure-vterm-window ----
-
-(ert-deftest agent-repl-test-panels-configure-vterm-window ()
-  "configure-vterm-window sets dedicated + width-fixed + no-delete-other-windows.
-Does NOT set `no-other-window' — keyboard isolation now comes from
-`agent-repl--bounce-from-vterm', so vterm stays visible to
-`other-window'/`windmove' but any non-mouse landing is auto-corrected."
-  (let ((win (selected-window)))
-    (unwind-protect
-        (progn
-          (agent-repl--configure-vterm-window win)
-          (should (window-dedicated-p win))
-          (should-not (window-parameter win 'no-other-window))
-          (should (eq (window-parameter win 'window-size-fixed) 'width))
-          (should (window-parameter win 'no-delete-other-windows)))
-      ;; Clean up window parameters
-      (set-window-dedicated-p win nil)
-      (set-window-parameter win 'window-size-fixed nil)
-      (set-window-parameter win 'no-delete-other-windows nil))))
-
-;;;; ---- Tests: resolve-vterm-buffer ----
-
-(ert-deftest agent-repl-test-panels-resolve-vterm-buffer-from-non-vterm ()
-  "resolve-vterm-buffer looks up workspace vterm when not in vterm-mode."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*test-vterm-resolve*"
-      (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-        (should (eq (agent-repl--resolve-vterm-buffer) (current-buffer)))))))
-
-(ert-deftest agent-repl-test-panels-resolve-vterm-buffer-no-workspace ()
-  "resolve-vterm-buffer returns nil when no workspace is active."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-      (should-not (agent-repl--resolve-vterm-buffer)))))
-
-;;;; ---- Tests: kill-placeholder ----
-
-(ert-deftest agent-repl-test-panels-kill-placeholder-when-exists ()
-  "kill-placeholder kills the loading placeholder buffer."
-  (agent-repl-test--with-clean-state
-    (get-buffer-create " *agent-loading*")
-    (should (get-buffer " *agent-loading*"))
-    (agent-repl--kill-placeholder)
-    (should-not (get-buffer " *agent-loading*"))))
-
-(ert-deftest agent-repl-test-panels-kill-placeholder-when-absent ()
-  "kill-placeholder does nothing when no placeholder exists."
-  (agent-repl-test--with-clean-state
-    ;; Ensure no placeholder exists
-    (when-let ((buf (get-buffer " *agent-loading*")))
-      (kill-buffer buf))
-    ;; Should not error
-    (agent-repl--kill-placeholder)))
 
 ;;;; ---- Tests: sigkill-if-alive ----
 
@@ -866,44 +657,10 @@ from the restored splitscreen layout rather than from the full-frame one."
     (let ((restore-called 0))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'set-window-configuration)
-                 (lambda (_cfg) (cl-incf restore-called)))
-                ((symbol-function 'agent-repl--replace-panels-with-fallback) #'ignore))
+                 (lambda (_cfg) (cl-incf restore-called))))
         ;; No :fullscreen-config set on test-ws.
         (agent-repl--on-simple-close)
         (should (= 0 restore-called))))))
-
-(ert-deftest agent-repl-test-panels-on-simple-close-no-config-routes-to-fallback ()
-  "on-simple-close with no saved layout replaces panels with the fallback buffer.
-Rather than `hide-panels' (which would strand the output window), the
-no-`:fullscreen-config' branch routes to
-`agent-repl--replace-panels-with-fallback'."
-  (agent-repl-test--with-clean-state
-    (let ((hide-called 0) (replace-ws 'unset))
-      (agent-repl--ws-put "test-ws" :frontend 'vterm)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'set-window-configuration) #'ignore)
-                ((symbol-function 'agent-repl--hide-panels)
-                 (lambda () (cl-incf hide-called)))
-                ((symbol-function 'agent-repl--replace-panels-with-fallback)
-                 (lambda (ws) (setq replace-ws ws))))
-        ;; No :fullscreen-config set on test-ws.
-        (agent-repl--on-simple-close)
-        (should (equal replace-ws "test-ws"))
-        (should (= 0 hide-called))))))
-
-(ert-deftest agent-repl-test-panels-on-simple-close-with-config-does-not-fallback ()
-  "on-simple-close with a saved layout hides panels and does NOT use the fallback.
-The restore-succeeded branch keeps the historical `hide-panels' behavior."
-  (agent-repl-test--with-clean-state
-    (let ((replace-called 0))
-      (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'set-window-configuration) #'ignore)
-                ((symbol-function 'agent-repl--hide-panels) #'ignore)
-                ((symbol-function 'agent-repl--replace-panels-with-fallback)
-                 (lambda (_ws) (cl-incf replace-called))))
-        (agent-repl--on-simple-close)
-        (should (= 0 replace-called))))))
 
 (ert-deftest agent-repl-test-panels-on-simple-close-fullscreen-leaves-work-window ()
   "on-simple-close on a fullscreen ws removes panels and leaves the work window.
@@ -913,19 +670,19 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
   (agent-repl-test--with-clean-state
     (let ((wconf (current-window-configuration))
           (work-buf (generate-new-buffer "*fsclose-work*"))
-          (vterm-buf (generate-new-buffer "*agent-panel-fsclose*"))
+          (frontend-buf (generate-new-buffer "*agent-frontend-fsclose*"))
           (input-buf (generate-new-buffer "*agent-panel-input-fsclose*")))
       (agent-repl--ws-put "test-ws" :frontend 'vterm)
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
             (delete-other-windows)
             (let* ((work-win (selected-window))
-                   (vterm-win (split-window work-win nil 'right))
-                   (input-win (split-window vterm-win nil 'below)))
+                   (view-win (split-window work-win nil 'right))
+                   (input-win (split-window view-win nil 'below)))
               (set-window-buffer work-win work-buf)
-              (set-window-buffer vterm-win vterm-buf)
+              (set-window-buffer view-win frontend-buf)
               (set-window-buffer input-win input-buf)
-              (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+              (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
               (agent-repl--ws-put "test-ws" :input-buffer input-buf)
               ;; Capture the splitscreen layout as the pre-fullscreen config.
               (agent-repl--ws-put "test-ws" :fullscreen-config
@@ -936,7 +693,7 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
               ;; SPC o c.
               (agent-repl--on-simple-close)
               ;; Panels are gone.
-              (should-not (get-buffer-window vterm-buf))
+              (should-not (get-buffer-window frontend-buf))
               (should-not (get-buffer-window input-buf))
               ;; The work window's buffer is back onscreen.
               (should (get-buffer-window work-buf))
@@ -944,7 +701,7 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
               (should-not (agent-repl--ws-get "test-ws" :fullscreen-config))))
         (set-window-configuration wconf)
         (kill-buffer work-buf)
-        (kill-buffer vterm-buf)
+        (kill-buffer frontend-buf)
         (kill-buffer input-buf)))))
 
 ;;;; ---- Tests: restore-fullscreen-config ----
@@ -976,130 +733,6 @@ panels, leaving just the work window — the `SPC o c' goes-away contract."
                (lambda (_cfg) (error "should not restore"))))
       (should-not (agent-repl--restore-fullscreen-config nil)))))
 
-;;;; ---- Tests: workspace-magit-status-buffer ----
-
-(ert-deftest agent-repl-test-panels-workspace-magit-status-buffer-finds-match ()
-  "workspace-magit-status-buffer returns a magit-status buffer whose dir matches."
-  (agent-repl-test--with-clean-state
-    (let ((magit-buf (generate-new-buffer "*magit-match*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :project-dir "/repo")
-            (with-current-buffer magit-buf
-              (setq major-mode 'magit-status-mode)
-              (setq default-directory "/repo/"))
-            (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_) "/repo"))
-                      ((symbol-function 'agent-repl--path-canonical)
-                       (lambda (p) (directory-file-name p))))
-              (should (eq magit-buf
-                          (agent-repl--workspace-magit-status-buffer "test-ws")))))
-        (kill-buffer magit-buf)))))
-
-(ert-deftest agent-repl-test-panels-workspace-magit-status-buffer-dir-mismatch-nil ()
-  "workspace-magit-status-buffer returns nil when the only magit buffer's dir differs."
-  (agent-repl-test--with-clean-state
-    (let ((magit-buf (generate-new-buffer "*magit-other*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :project-dir "/repo")
-            (with-current-buffer magit-buf
-              (setq major-mode 'magit-status-mode)
-              (setq default-directory "/other/"))
-            (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_) "/repo"))
-                      ((symbol-function 'agent-repl--path-canonical)
-                       (lambda (p) (directory-file-name p))))
-              (should-not (agent-repl--workspace-magit-status-buffer "test-ws"))))
-        (kill-buffer magit-buf)))))
-
-(ert-deftest agent-repl-test-panels-workspace-magit-status-buffer-non-magit-nil ()
-  "workspace-magit-status-buffer ignores a matching-dir buffer that is not magit-status."
-  (agent-repl-test--with-clean-state
-    (let ((plain-buf (generate-new-buffer "*plain-repo*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :project-dir "/repo")
-            (with-current-buffer plain-buf
-              (setq major-mode 'fundamental-mode)
-              (setq default-directory "/repo/"))
-            (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (_) "/repo"))
-                      ((symbol-function 'agent-repl--path-canonical)
-                       (lambda (p) (directory-file-name p))))
-              (should-not (agent-repl--workspace-magit-status-buffer "test-ws"))))
-        (kill-buffer plain-buf)))))
-
-;;;; ---- Tests: panel-fallback-buffer ----
-
-(ert-deftest agent-repl-test-panels-panel-fallback-buffer-prefers-magit ()
-  "panel-fallback-buffer returns the workspace magit-status buffer when one exists."
-  (agent-repl-test--with-clean-state
-    (let ((magit-buf (generate-new-buffer "*magit-pref*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--workspace-magit-status-buffer)
-                     (lambda (_ws) magit-buf)))
-            (should (eq magit-buf (agent-repl--panel-fallback-buffer "test-ws"))))
-        (kill-buffer magit-buf)))))
-
-(ert-deftest agent-repl-test-panels-panel-fallback-buffer-falls-back-to-doom ()
-  "panel-fallback-buffer returns the Doom splash when no magit-status buffer exists."
-  (agent-repl-test--with-clean-state
-    (let ((splash (generate-new-buffer "*splash-fb*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--workspace-magit-status-buffer)
-                     (lambda (_ws) nil))
-                    ((symbol-function 'doom-fallback-buffer) (lambda () splash)))
-            (should (eq splash (agent-repl--panel-fallback-buffer "test-ws"))))
-        (kill-buffer splash)))))
-
-(ert-deftest agent-repl-test-panels-panel-fallback-buffer-errors-when-none ()
-  "panel-fallback-buffer signals when neither a magit nor a Doom fallback exists."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--workspace-magit-status-buffer)
-               (lambda (_ws) nil))
-              ((symbol-function 'doom-fallback-buffer) (lambda () nil)))
-      (should-error (agent-repl--panel-fallback-buffer "test-ws")))))
-
-;;;; ---- Tests: replace-panels-with-fallback ----
-
-(ert-deftest agent-repl-test-panels-replace-panels-with-fallback-swaps-output ()
-  "replace-panels-with-fallback closes the input window and swaps the output
-window's buffer to the fallback, leaving a single window on the fallback buffer."
-  (agent-repl-test--with-clean-state
-    (let ((wconf (current-window-configuration))
-          (vterm-buf (generate-new-buffer "*agent-panel-repl-fb*"))
-          (input-buf (generate-new-buffer "*agent-panel-input-repl-fb*"))
-          (fallback-buf (generate-new-buffer "*repl-fb-fallback*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--panel-fallback-buffer)
-                     (lambda (_ws) fallback-buf)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (let* ((vterm-win (selected-window))
-                   (input-win (split-window vterm-win nil 'below)))
-              (set-window-buffer vterm-win vterm-buf)
-              (set-window-buffer input-win input-buf)
-              (agent-repl--replace-panels-with-fallback "test-ws")
-              ;; Input window is gone.
-              (should-not (get-buffer-window input-buf))
-              ;; The output window survives but now shows the fallback buffer.
-              (should (get-buffer-window fallback-buf))
-              (should-not (get-buffer-window vterm-buf))))
-        (set-window-configuration wconf)
-        (kill-buffer vterm-buf)
-        (kill-buffer input-buf)
-        (kill-buffer fallback-buf)))))
-
-(ert-deftest agent-repl-test-panels-replace-panels-with-fallback-noop-no-buffers ()
-  "replace-panels-with-fallback is a no-op when the workspace has no panel buffers."
-  (agent-repl-test--with-clean-state
-    (let ((fallback-called 0))
-      (cl-letf (((symbol-function 'agent-repl--panel-fallback-buffer)
-                 (lambda (_ws) (cl-incf fallback-called) nil)))
-        ;; No :vterm-buffer / :input-buffer on test-ws.
-        (agent-repl--replace-panels-with-fallback "test-ws")
-        ;; Fallback buffer is never computed when there is no output window.
-        (should (= 0 fallback-called))))))
-
 ;;;; ---- Tests: simple-hide-and-preserve-status ----
 
 (ert-deftest agent-repl-test-panels-simple-hide-routes-through-on-simple-close ()
@@ -1121,42 +754,49 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
 ;;;; ---- Tests: agent-repl-simple toggle ----
 
 (ert-deftest agent-repl-test-panels-agent-repl-simple-uses-simple-hide ()
-  "agent-repl-simple dispatches the visible-panels case to simple-hide."
+  "agent-repl-simple dispatches the visible-view case to simple-hide.
+The webview must be both live and displayed for `agent-repl--toggle' to
+reach the close branch (no `:always-close', so the running/open branches
+are the alternative if the view isn't visible)."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((simple-called 0)
+    (let ((frontend-buf (generate-new-buffer "*agent-frontend-test-ws*"))
+          (simple-called 0)
           (full-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
-                 (lambda () (cl-incf simple-called)))
-                ((symbol-function 'agent-repl--hide-and-preserve-status)
-                 (lambda () (cl-incf full-called))))
-        (agent-repl-simple)
-        (should (= 1 simple-called))
-        (should (= 0 full-called))))))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
+            (switch-to-buffer frontend-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'use-region-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
+                       (lambda () (cl-incf simple-called)))
+                      ((symbol-function 'agent-repl--hide-and-preserve-status)
+                       (lambda () (cl-incf full-called))))
+              (agent-repl-simple)
+              (should (= 1 simple-called))
+              (should (= 0 full-called))))
+        (kill-buffer frontend-buf)))))
 
 (ert-deftest agent-repl-test-panels-agent-repl-uses-full-hide ()
-  "agent-repl (deprio variant) dispatches the visible-panels case to hide-and-preserve."
+  "agent-repl (deprio variant) dispatches the visible-view case to hide-and-preserve."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((simple-called 0)
+    (let ((frontend-buf (generate-new-buffer "*agent-frontend-test-ws*"))
+          (simple-called 0)
           (full-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
-                 (lambda () (cl-incf simple-called)))
-                ((symbol-function 'agent-repl--hide-and-preserve-status)
-                 (lambda () (cl-incf full-called))))
-        (agent-repl)
-        (should (= 0 simple-called))
-        (should (= 1 full-called))))))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
+            (switch-to-buffer frontend-buf)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                      ((symbol-function 'use-region-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
+                       (lambda () (cl-incf simple-called)))
+                      ((symbol-function 'agent-repl--hide-and-preserve-status)
+                       (lambda () (cl-incf full-called))))
+              (agent-repl)
+              (should (= 0 simple-called))
+              (should (= 1 full-called))))
+        (kill-buffer frontend-buf)))))
 
 ;;;; ---- Tests: save-tab-index ----
 
@@ -1183,54 +823,6 @@ window's buffer to the fallback, leaving a single window on the fallback buffer.
       (fmakunbound 'persp-names-current-frame-fast-ordered))
     (agent-repl--save-tab-index "test-ws")
     (should-not (agent-repl--ws-get "test-ws" :saved-tab-index))))
-
-;;;; ---- Tests: restore-tab-index ----
-
-(ert-deftest agent-repl-test-panels-restore-tab-index-moves-ws-to-saved-slot ()
-  "restore-tab-index reorders names so WS is at its saved index."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-c" :saved-tab-index 1)
-    (let ((reordered nil))
-      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-                 (lambda () '("ws-a" "ws-b" "ws-c")))  ; ws-c is at end
-                ((symbol-function 'persp-update-names-cache)
-                 (lambda (names) (setq reordered names))))
-        (agent-repl--restore-tab-index "ws-c")
-        (should (equal reordered '("ws-a" "ws-c" "ws-b")))))))
-
-(ert-deftest agent-repl-test-panels-restore-tab-index-clears-saved-index ()
-  "restore-tab-index clears :saved-tab-index after a successful restore."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-c" :saved-tab-index 0)
-    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-               (lambda () '("ws-a" "ws-b" "ws-c")))
-              ((symbol-function 'persp-update-names-cache) (lambda (_) nil)))
-      (agent-repl--restore-tab-index "ws-c")
-      (should-not (agent-repl--ws-get "ws-c" :saved-tab-index)))))
-
-(ert-deftest agent-repl-test-panels-restore-tab-index-clamps-past-tail ()
-  "restore-tab-index clamps a saved index larger than the new list length."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-c" :saved-tab-index 99)
-    (let ((reordered nil))
-      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-                 (lambda () '("ws-a" "ws-b" "ws-c")))
-                ((symbol-function 'persp-update-names-cache)
-                 (lambda (names) (setq reordered names))))
-        (agent-repl--restore-tab-index "ws-c")
-        ;; Clamped: ws-c lands at the tail of the without-ws list.
-        (should (equal reordered '("ws-a" "ws-b" "ws-c")))))))
-
-(ert-deftest agent-repl-test-panels-restore-tab-index-noop-when-no-saved-index ()
-  "restore-tab-index does nothing when no :saved-tab-index is set."
-  (agent-repl-test--with-clean-state
-    (let ((called 0))
-      (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-                 (lambda () '("a")))
-                ((symbol-function 'persp-update-names-cache)
-                 (lambda (_) (cl-incf called))))
-        (agent-repl--restore-tab-index "no-saved-ws")
-        (should (= 0 called))))))
 
 ;;;; ---- Tests: hide-and-preserve-status ----
 
@@ -1277,71 +869,6 @@ is on."
         (agent-repl--hide-and-preserve-status)
         (should (equal on-close-ws "test-ws"))))))
 
-;;;; ---- Tests: show-hidden-panels ----
-
-(ert-deftest agent-repl-test-panels-show-hidden-calls-show-existing ()
-  "show-hidden-panels calls show-existing-panels."
-  (agent-repl-test--with-clean-state
-    (let ((show-called nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--show-existing-panels)
-                 (lambda () (setq show-called t))))
-        (agent-repl--show-hidden-panels)
-        (should show-called)))))
-
-(ert-deftest agent-repl-test-panels-show-hidden-sets-active ()
-  "show-hidden-panels (via show-existing-panels) sets :repl-state :active."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-repl-state "test-ws" :inactive)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'delete-other-windows) #'ignore)
-              ((symbol-function 'agent-repl--show-panels-and-focus) #'ignore)
-              ((symbol-function 'agent-repl--update-hide-overlay) #'ignore))
-      (agent-repl--show-hidden-panels)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :active)))))
-
-(ert-deftest agent-repl-test-panels-show-existing-sets-active ()
-  "show-existing-panels sets :repl-state :active."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-repl-state "test-ws" :inactive)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'delete-other-windows) #'ignore)
-              ((symbol-function 'agent-repl--show-panels-and-focus) #'ignore)
-              ((symbol-function 'agent-repl--update-hide-overlay) #'ignore))
-      (agent-repl--show-existing-panels)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :active)))))
-
-(ert-deftest agent-repl-test-panels-show-existing-restores-tab-index ()
-  "show-existing-panels calls restore-tab-index for the current workspace."
-  (agent-repl-test--with-clean-state
-    (let ((restored-ws nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'delete-other-windows) #'ignore)
-                ((symbol-function 'agent-repl--show-panels-and-focus) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--restore-tab-index)
-                 (lambda (ws) (setq restored-ws ws))))
-        (agent-repl--show-existing-panels)
-        (should (equal restored-ws "test-ws"))))))
-
-(ert-deftest agent-repl-test-panels-show-existing-flashes-tab ()
-  "show-existing-panels pulses the workspace tab so reopen is visually marked."
-  (agent-repl-test--with-clean-state
-    (let ((flashed-ws nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'delete-other-windows) #'ignore)
-                ((symbol-function 'agent-repl--show-panels-and-focus) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--restore-tab-index) #'ignore)
-                ((symbol-function 'agent-repl-flash-tab)
-                 (lambda (ws &rest _) (setq flashed-ws ws))))
-        (agent-repl--show-existing-panels)
-        (should (equal flashed-ws "test-ws"))))))
-
 ;;;; ---- Tests: deferred macro ----
 
 (ert-deftest agent-repl-test-panels-deferred-debounces ()
@@ -1367,77 +894,20 @@ is on."
 
 ;;;; ---- Tests: Entry point (agent-repl) dispatch ----
 
-(ert-deftest agent-repl-test-panels-entry-point-not-running-hides ()
-  "agent-repl (SPC o C, always-close) hides the workspace even when no
-agent session is running.  Skips the initialize-agent branch the
-plain `agent-repl-simple' (SPC o c) toggle would otherwise take."
+(ert-deftest agent-repl-test-panels-entry-point-always-close-hides-unconditionally ()
+  "agent-repl (SPC o C, always-close) always routes straight to the close
+path without ever consulting the frontend's running/open capabilities —
+pressing it hides the workspace whether or not an agent session exists."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((started nil) (hidden nil))
+    (let ((opened nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--initialize-agent) (lambda (&rest _) (setq started t)))
+                ((symbol-function 'agent-repl--gui-open) (lambda (&rest _) (setq opened t)))
                 ((symbol-function 'agent-repl--hide-and-preserve-status)
                  (lambda () (setq hidden t))))
         (agent-repl)
         (should hidden)
-        (should-not started)))))
-
-(ert-deftest agent-repl-test-panels-entry-point-session-starting-hides ()
-  "agent-repl hides the workspace mid-startup rather than showing a loading
-message — always-close skips the loading branch."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((messages nil) (hidden nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () t))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'message) (lambda (fmt &rest _) (push fmt messages)))
-                ((symbol-function 'agent-repl--hide-and-preserve-status)
-                 (lambda () (setq hidden t))))
-        (agent-repl)
-        (should hidden)
-        (should-not (cl-some (lambda (m) (and m (string-match-p "loading" m))) messages))))))
-
-(ert-deftest agent-repl-test-panels-entry-point-visible-hides ()
-  "agent-repl hides panels when they are visible."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((hidden nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--hide-and-preserve-status)
-                 (lambda () (setq hidden t))))
-        (agent-repl)
-        (should hidden)))))
-
-(ert-deftest agent-repl-test-panels-entry-point-hidden-still-hides ()
-  "agent-repl hides the workspace even when panels are already hidden — the
-always-close contract: pressing SPC o C on a hidden workspace re-asserts
-:hidden + push-to-back instead of re-showing the panels."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((shown nil) (hidden nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq shown t)))
-                ((symbol-function 'agent-repl--hide-and-preserve-status)
-                 (lambda () (setq hidden t))))
-        (agent-repl)
-        (should hidden)
-        (should-not shown)))))
+        (should-not opened)))))
 
 (ert-deftest agent-repl-test-panels-entry-point-selection-sends ()
   "agent-repl sends selected text to the agent when region is active.
@@ -1445,9 +915,6 @@ Selection-handling stays orthogonal to the always-close hide path."
   (agent-repl-test--with-clean-state
     (let ((sent-text nil) (hidden nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'use-region-p) (lambda () t))
                 ((symbol-function 'region-beginning) (lambda () 1))
                 ((symbol-function 'region-end) (lambda () 12))
@@ -1464,75 +931,44 @@ Selection-handling stays orthogonal to the always-close hide path."
 
 (ert-deftest agent-repl-test-panels-entry-point-simple-not-running-initializes ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
-nothing is running, it initializes the agent (in contrast to SPC o C)."
+nothing is running, it opens the agent through the workspace's frontend
+\(in contrast to SPC o C, which always hides)."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((started nil))
+    (let ((opened nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () nil))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (&rest _) (setq started t))))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws)
+                   (agent-repl-frontend-create
+                    :name 'probe
+                    :open-fn (lambda (ws) (setq opened ws))
+                    :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                    :running-p-fn (lambda (_ws) nil)
+                    :supported-backends '(claude)))))
         (agent-repl-simple)
-        (should started)))))
+        (should (equal opened "test-ws"))))))
 
 (ert-deftest agent-repl-test-panels-entry-point-simple-hidden-shows ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
-the session is running but panels are hidden, it re-shows them (in
-contrast to SPC o C, which hides further)."
+the session is running but its view isn't visible, it shows the view
+through the workspace's frontend (in contrast to SPC o C, which always
+hides)."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
     (let ((shown nil))
+      ;; No :frontend-buffer set on test-ws, so the view is not visible.
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq shown t))))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws)
+                   (agent-repl-frontend-create
+                    :name 'probe
+                    :open-fn #'ignore :kill-fn #'ignore :send-fn #'ignore
+                    :interrupt-fn #'ignore
+                    :running-p-fn (lambda (_ws) t)
+                    :show-fn (lambda (ws) (setq shown ws))
+                    :supported-backends '(claude)))))
         (agent-repl-simple)
-        (should shown)))))
-
-(ert-deftest agent-repl-test-panels-entry-point-simple-output-only-adds-input ()
-  "agent-repl-simple (SPC o c): when only the output window is visible, it
-adds the input window beside it and focuses it — rather than rebuilding the
-whole layout (which would duplicate the already-visible output window)."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((added nil) (focused nil) (shown-hidden nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--agent-running-p) (lambda () t))
-                ((symbol-function 'agent-repl--session-starting-p) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--output-visible-input-hidden-p)
-                 (lambda () t))
-                ((symbol-function 'use-region-p) (lambda () nil))
-                ((symbol-function 'agent-repl--show-input-beside-output)
-                 (lambda () (setq added t)))
-                ((symbol-function 'agent-repl--focus-input-panel)
-                 (lambda () (setq focused t)))
-                ((symbol-function 'agent-repl--show-hidden-panels)
-                 (lambda () (setq shown-hidden t))))
-        (agent-repl-simple)
-        (should added)
-        (should focused)
-        (should-not shown-hidden)))))
-
-;;;; ---- Tests: kill-vterm-process ----
-
-(ert-deftest agent-repl-test-panels-kill-vterm-process-nil ()
-  "kill-vterm-process does nothing for nil buffer."
-  ;; Should not error
-  (agent-repl--kill-vterm-process nil))
-
-(ert-deftest agent-repl-test-panels-kill-vterm-process-dead-buffer ()
-  "kill-vterm-process does nothing for a dead buffer."
-  (let ((buf (get-buffer-create "*kill-proc-test*")))
-    (kill-buffer buf)
-    ;; Should not error
-    (agent-repl--kill-vterm-process buf)))
+        (should (equal shown "test-ws"))))))
 
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
 
@@ -1550,68 +986,75 @@ whole layout (which would duplicate the already-visible output window)."
         (when (buffer-live-p buf) (kill-buffer buf))
         (when (get-buffer "*other-buf*") (kill-buffer "*other-buf*"))))))
 
-;;;; ---- Tests: vterm-visible-p with visible and dead buffer ----
+;;;; ---- Tests: view-visible-p with visible and dead buffer ----
 
-(ert-deftest agent-repl-test-panels-vterm-visible-p-with-visible-buffer ()
-  "vterm-visible-p returns non-nil when the vterm buffer is displayed in a window."
+(ert-deftest agent-repl-test-panels-view-visible-p-with-visible-buffer ()
+  "view-visible-p returns non-nil when the frontend buffer is displayed in a window."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*test-vterm*"
-      (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
+    (agent-repl-test--with-temp-buffer "*test-frontend*"
+      (agent-repl--ws-put "test-ws" :frontend-buffer (current-buffer))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'get-buffer-window)
                  (lambda (_buf &rest _) (selected-window))))
         ;; Mock get-buffer-window: batch mode has no real display
-        (should (agent-repl--vterm-visible-p))))))
+        (should (agent-repl--view-visible-p))))))
 
-(ert-deftest agent-repl-test-panels-vterm-visible-p-dead-buffer ()
-  "vterm-visible-p returns nil when the vterm buffer has been killed."
+(ert-deftest agent-repl-test-panels-view-visible-p-dead-buffer ()
+  "view-visible-p returns nil when the frontend buffer has been killed."
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*test-dead-vterm*")))
-      (agent-repl--ws-put "test-ws" :vterm-buffer buf)
+    (let ((buf (get-buffer-create "*test-dead-frontend*")))
+      (agent-repl--ws-put "test-ws" :frontend-buffer buf)
       (kill-buffer buf)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-        (should-not (agent-repl--vterm-visible-p))))))
+        (should-not (agent-repl--view-visible-p))))))
 
 ;;;; ---- Tests: panels-visible-p multi-window cases ----
 
 (ert-deftest agent-repl-test-panels-panels-visible-p-only-input ()
-  "panels-visible-p returns nil when only input panel is visible."
+  "panels-visible-p returns nil when only the input panel is visible."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer "*test-input-only*"
-      (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
-      ;; No vterm buffer set
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-        (should-not (agent-repl--panels-visible-p))))))
+      (let ((input-buf (current-buffer)))
+        (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+        ;; No :frontend-buffer set
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buf &rest _) (and (eq buf input-buf) (selected-window)))))
+          (should-not (agent-repl--panels-visible-p)))))))
 
-(ert-deftest agent-repl-test-panels-panels-visible-p-only-vterm ()
-  "panels-visible-p returns nil when only vterm panel is visible."
+(ert-deftest agent-repl-test-panels-panels-visible-p-only-view ()
+  "panels-visible-p returns nil when only the agent view is visible."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*test-vterm-only*"
-      (agent-repl--ws-put "test-ws" :vterm-buffer (current-buffer))
-      ;; No input buffer set
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-        (should-not (agent-repl--panels-visible-p))))))
+    (agent-repl-test--with-temp-buffer "*test-view-only*"
+      (let ((frontend-buf (current-buffer)))
+        (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
+        ;; No :input-buffer set
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buf &rest _) (and (eq buf frontend-buf) (selected-window)))))
+          (should-not (agent-repl--panels-visible-p)))))))
 
 (ert-deftest agent-repl-test-panels-panels-visible-p-both-visible ()
-  "panels-visible-p returns t when both panels are displayed in windows."
+  "panels-visible-p returns t when both the input panel and the agent view
+are displayed in windows."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*test-both-vterm*"))
+    (let ((frontend-buf (get-buffer-create "*test-both-frontend*"))
           (input-buf (get-buffer-create "*test-both-input*"))
           (new-win nil))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+            (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              ;; Show vterm in current window
-              (switch-to-buffer vterm-buf)
+              ;; Show the agent view in current window
+              (switch-to-buffer frontend-buf)
               ;; Split and show input in new window
               (setq new-win (split-window))
               (set-window-buffer new-win input-buf)
               (should (agent-repl--panels-visible-p))))
         (when (and new-win (window-live-p new-win))
           (delete-window new-win))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
+        (when (buffer-live-p frontend-buf) (kill-buffer frontend-buf))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
 ;;;; ---- Tests: safe-buffer-name dead buffer ----
@@ -1680,209 +1123,6 @@ whole layout (which would duplicate the already-visible output window)."
           (ignore-errors (delete-window new-win)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-;;;; ---- Tests: show-panels edge cases ----
-
-(ert-deftest agent-repl-test-panels-show-panels-normal-operation ()
-  "show-panels splits windows and displays vterm and input buffers."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-panels-vterm*"))
-          (input-buf (get-buffer-create "*show-panels-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (agent-repl--show-panels)
-            ;; Both buffers should now be visible in windows
-            (should (get-buffer-window vterm-buf))
-            (should (get-buffer-window input-buf)))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-fills-frame-clearing-work-windows ()
-  "show-panels clears existing work windows so the panels fill the frame.
-Fullscreen is the sole display format: after show-panels the only
-non-side windows are the two agent panels — no work window remains."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-up-vterm*"))
-          (input-buf (get-buffer-create "*show-up-input*"))
-          (work-buf (get-buffer-create "*show-up-work*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            ;; Create an extra work window alongside the starting one.
-            (let ((extra (split-window (selected-window) nil 'below)))
-              (set-window-buffer extra work-buf))
-            (agent-repl--show-panels)
-            ;; Both panels visible …
-            (should (get-buffer-window vterm-buf))
-            (should (get-buffer-window input-buf))
-            ;; … and the work window is gone (panels fill the frame).
-            (should-not (get-buffer-window work-buf))
-            (should (= 2 (length (cl-remove-if #'agent-repl-window--side-window-p
-                                               (window-list))))))
-        ;; Clean up
-        (delete-other-windows)
-        (dolist (b (list vterm-buf input-buf work-buf))
-          (when (buffer-live-p b) (kill-buffer b)))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-saves-pre-panel-config ()
-  "show-panels saves the pre-panel window layout as :fullscreen-config.
-The close path restores it so the work windows the panels covered come
-back rather than the close stranding a panel onscreen."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-noop-vterm*"))
-          (input-buf (get-buffer-create "*show-noop-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (should-not (agent-repl--ws-get "test-ws" :fullscreen-config))
-            (agent-repl--show-panels)
-            (should (agent-repl--ws-get "test-ws" :fullscreen-config))
-            (should (get-buffer-window vterm-buf))
-            (should (get-buffer-window input-buf)))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-does-not-overwrite-saved-config ()
-  "show-panels does NOT overwrite an already-saved :fullscreen-config.
-Re-show paths (workspace-switch reclaim, half-shown repair) call through
-show-panels too and must not clobber the saved work layout."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-keep-vterm*"))
-          (input-buf (get-buffer-create "*show-keep-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (agent-repl--ws-put "test-ws" :fullscreen-config 'preexisting)
-            (delete-other-windows)
-            (agent-repl--show-panels)
-            (should (eq 'preexisting
-                        (agent-repl--ws-get "test-ws" :fullscreen-config))))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-sets-no-delete-other-windows ()
-  "show-panels sets `no-delete-other-windows' on both vterm and input windows
-so that commands like magit-status cannot destroy panel layout."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-ndow-vterm*"))
-          (input-buf (get-buffer-create "*show-ndow-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (agent-repl--show-panels)
-            (let ((vterm-win (get-buffer-window vterm-buf))
-                  (input-win (get-buffer-window input-buf)))
-              (should (window-parameter vterm-win 'no-delete-other-windows))
-              (should (window-parameter input-win 'no-delete-other-windows))))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-locks-input-height ()
-  "show-panels sets `window-size-fixed' to height on the input window
-so that window management operations cannot shrink it."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-hfix-vterm*"))
-          (input-buf (get-buffer-create "*show-hfix-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (agent-repl--show-panels)
-            (let ((input-win (get-buffer-window input-buf)))
-              (should (eq (window-parameter input-win 'window-size-fixed) 'height))))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-preserves-input-height ()
-  "show-panels calls `window-preserve-size' on the input window so a
-multi-line minibuffer cannot shrink it.  `window-size-fixed' alone is
-bypassed by `window--resize-mini-window' (ignore=t), so the stronger
-`window-preserved-size' parameter is required."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*show-preserve-vterm*"))
-          (input-buf (get-buffer-create "*show-preserve-input*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            (agent-repl--show-panels)
-            (let* ((input-win (get-buffer-window input-buf))
-                   (param (window-parameter input-win 'window-preserved-size)))
-              (should param)
-              (should (eq (nth 0 param) input-buf))
-              ;; Height is preserved (3rd element non-nil), width is not.
-              (should (numberp (nth 2 param)))))
-        ;; Clean up
-        (delete-other-windows)
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-no-output-dup-on-dead-input ()
-  "show-panels must NOT duplicate the output window when the input buffer is
-dead and the output window is already selected/visible.
-
-Regression for the panel-corruption bug: the input window is split off
-the output window and inherits the vterm buffer until reassigned, so a
-dead input buffer used to strand the vterm in that adjacent window (the
-duplicated-output corruption seen switching to a freshly generated
-workspace with the drawer open)."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
-          (input-buf (get-buffer-create "*agent-panel-input-test-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                    ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                    ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil)))
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (delete-other-windows)
-            ;; Output already visible AND selected, so the split inherits it.
-            (set-window-buffer (selected-window) vterm-buf)
-            ;; Input buffer dies before the show.
-            (kill-buffer input-buf)
-            (agent-repl--show-panels)
-            ;; Exactly one window shows the vterm buffer — not duplicated.
-            (should (= 1 (length (get-buffer-window-list vterm-buf nil nil)))))
-        (delete-other-windows)
-        (dolist (b (list vterm-buf input-buf
-                         (get-buffer "*agent-panel-input-test-ws*")))
-          (when (buffer-live-p b) (kill-buffer b)))))))
-
 ;;;; ---- Tests: ensure-input-buffer ----
 
 (ert-deftest agent-repl-test-panels-ensure-input-buffer-returns-live ()
@@ -1923,64 +1163,6 @@ recorded :input-buffer nor the canonically-named buffer is live."
             (should (string= (buffer-name result) "*agent-panel-input-test-ws*"))))
       (when-let ((b (get-buffer "*agent-panel-input-test-ws*")))
         (kill-buffer b)))))
-
-;;;; ---- Tests: focus-input-panel edge cases ----
-
-(ert-deftest agent-repl-test-panels-focus-input-panel-nil-buffer ()
-  "focus-input-panel signals an error when input buffer is nil."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-      (should-error (agent-repl--focus-input-panel) :type 'error))))
-
-(ert-deftest agent-repl-test-panels-focus-input-panel-no-window ()
-  "focus-input-panel signals an error when input buffer exists but has no window."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*focus-no-win*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer buf)
-            (switch-to-buffer (get-buffer-create "*other*"))
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              (should-error (agent-repl--focus-input-panel) :type 'error)))
-        (when (buffer-live-p buf) (kill-buffer buf))
-        (when (get-buffer "*other*") (kill-buffer "*other*"))))))
-
-(ert-deftest agent-repl-test-panels-focus-input-panel-with-window ()
-  "focus-input-panel selects the window displaying the input buffer."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*focus-input-win*"))
-          (new-win nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer buf)
-            (setq new-win (split-window))
-            (set-window-buffer new-win buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              (agent-repl--focus-input-panel)
-              (should (eq (window-buffer (selected-window)) buf))))
-        (when (and new-win (window-live-p new-win))
-          (ignore-errors (delete-window new-win)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-panels-focus-input-panel-no-insert-state ()
-  "focus-input-panel does NOT enter evil insert state on focus."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*focus-input-no-insert*"))
-          (new-win nil)
-          (insert-called nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer buf)
-            (setq new-win (split-window))
-            (set-window-buffer new-win buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'evil-insert-state)
-                       (lambda (&rest _) (setq insert-called t))))
-              (agent-repl--focus-input-panel)
-              (should-not insert-called)))
-        (when (and new-win (window-live-p new-win))
-          (ignore-errors (delete-window new-win)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
 
 ;;;; ---- Tests: focus-input show-or-focus branch ----
 
@@ -2025,92 +1207,6 @@ recorded :input-buffer nor the canonically-named buffer is live."
           (ignore-errors (delete-window new-win)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-;;;; ---- Tests: show-panels-and-focus ----
-
-(ert-deftest agent-repl-test-panels-show-panels-and-focus-delegates ()
-  "show-panels-and-focus calls show-panels and focus-input-panel."
-  (agent-repl-test--with-clean-state
-    (let ((show-called nil)
-          (focus-called nil))
-      (cl-letf (((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t)))
-                ((symbol-function 'agent-repl--focus-input-panel)
-                 (lambda () (setq focus-called t))))
-        (agent-repl--show-panels-and-focus)
-        (should show-called)
-        (should focus-called)))))
-
-;;;; ---- Tests: vterm-redraw with nil vterm--term ----
-
-(ert-deftest agent-repl-test-panels-vterm-redraw-nil-term ()
-  "vterm-redraw is a no-op when vterm--term is nil."
-  (let ((vterm--term nil)
-        (redraw-called nil))
-    (cl-letf (((symbol-function 'vterm--redraw)
-               (lambda (&rest _) (setq redraw-called t))))
-      (agent-repl--vterm-redraw)
-      ;; vterm--term is nil, so vterm--redraw should not be called
-      (should-not redraw-called))))
-
-;;;; ---- Tests: fix-vterm-scroll edge cases ----
-
-(ert-deftest agent-repl-test-panels-fix-vterm-scroll-no-window ()
-  "fix-vterm-scroll is a no-op when the buffer has no window."
-  (agent-repl-test--with-temp-buffer "*no-vterm-win*"
-    ;; Display a different buffer so our buffer has no window
-    (let ((buf (current-buffer)))
-      (switch-to-buffer (get-buffer-create "*other-scroll*"))
-      (unwind-protect
-          ;; Should not error -- the when guard skips the body
-          (agent-repl--fix-vterm-scroll buf)
-        (when (get-buffer "*other-scroll*") (kill-buffer "*other-scroll*"))))))
-
-(ert-deftest agent-repl-test-panels-fix-vterm-scroll-same-window ()
-  "fix-vterm-scroll is a no-op when vterm window is the selected window."
-  (agent-repl-test--with-temp-buffer "*same-vterm-win*"
-    ;; The buffer is displayed in the selected window
-    ;; vterm-win eq orig-win, so the when body is skipped
-    (agent-repl--fix-vterm-scroll (current-buffer))))
-
-;;;; ---- Tests: resolve-vterm-buffer current buffer is vterm-mode ----
-
-(ert-deftest agent-repl-test-panels-resolve-vterm-buffer-is-vterm-mode ()
-  "resolve-vterm-buffer returns the current buffer when it is in vterm-mode."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*test-vterm-mode*"
-      ;; Simulate vterm-mode by setting major-mode directly
-      (let ((major-mode 'vterm-mode))
-        (should (eq (agent-repl--resolve-vterm-buffer) (current-buffer)))))))
-
-;;;; ---- Tests: refresh-vterm edge cases ----
-
-(ert-deftest agent-repl-test-panels-refresh-vterm-resolve-nil ()
-  "refresh-vterm is a no-op when resolve-vterm-buffer returns nil."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--resolve-vterm-buffer) (lambda () nil)))
-      ;; Should not error
-      (should-not (agent-repl--refresh-vterm)))))
-
-(ert-deftest agent-repl-test-panels-refresh-vterm-dead-buffer ()
-  "refresh-vterm is a no-op when the resolved buffer is dead."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*dead-refresh*")))
-      (kill-buffer buf)
-      (cl-letf (((symbol-function 'agent-repl--resolve-vterm-buffer) (lambda () buf)))
-        ;; buffer-live-p check prevents action
-        (should-not (agent-repl--refresh-vterm))))))
-
-(ert-deftest agent-repl-test-panels-refresh-vterm-not-vterm-mode ()
-  "refresh-vterm is a no-op when the resolved buffer is not in vterm-mode."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*not-vterm-mode*"
-      (let ((buf (current-buffer)))
-        (cl-letf (((symbol-function 'agent-repl--resolve-vterm-buffer) (lambda () buf))
-                  ((symbol-function 'agent-repl--do-refresh)
-                   (lambda () (error "should not be called"))))
-          ;; Buffer is live but not in vterm-mode, so do-refresh is skipped
-          (agent-repl--refresh-vterm))))))
-
 ;;;; ---- Tests: on-workspace-switch ws nil ----
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-nil-ws ()
@@ -2118,8 +1214,6 @@ recorded :input-buffer nor the canonically-named buffer is live."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil))
-              ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-              ((symbol-function 'agent-repl--reset-vterm-cursors) (lambda () nil))
               ((symbol-function 'agent-repl--drain-pending-magit) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--drain-pending-show-panels) (lambda (_ws) nil))
@@ -2134,8 +1228,6 @@ on the ws plist (via `--latch-and-maybe-fire-loaded')."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2152,8 +1244,6 @@ the ws-plist hash with a nil key in test/init environments."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2172,8 +1262,6 @@ merge request is pulled from the queue on activation."
                 ((symbol-function 'agent-repl--dequeue-merge)
                  (lambda (ws) (setq dequeued ws)))
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2190,8 +1278,6 @@ the gui counterpart of the vterm window's snap to the cursor."
                 ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
                 ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2210,8 +1296,6 @@ just became visible on the switch is snapped to its tail too."
                 ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
                 ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels)
@@ -2230,8 +1314,6 @@ can start."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2250,8 +1332,6 @@ can start."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-              ((symbol-function 'agent-repl--reset-vterm-cursors) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -2304,8 +1384,6 @@ latest one."
                 ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch)
                  (lambda (ws) (push (cons :sweep ws) received-ws)))
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil))
-                ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil))
-                ((symbol-function 'agent-repl--reset-vterm-cursors) (lambda () nil))
                 ((symbol-function 'agent-repl--drain-pending-magit)
                  (lambda (ws) (push (cons :magit ws) received-ws)))
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers)
@@ -2395,86 +1473,11 @@ latest one."
         (agent-repl--maybe-autoselect-input "test-ws")
         (should (eq (selected-window) orig-win))))))
 
-(ert-deftest agent-repl-test-panels-maybe-autoselect-input-snaps-vterm-then-selects-input ()
-  "maybe-autoselect-input snaps the vterm window to its cursor (via
-`--snap-vterm-window-to-cursor') and then selects only the input
-window.  Replaces the old brief-select hack — the previous transient
-`select-window vterm-win' was the source of the visible scroll-down
-animation, so the new flow snaps `window-start' directly and selects
-only the input window."
-  (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*autoselect-input-snap*"))
-          (vterm-buf (get-buffer-create "*autoselect-vterm-snap*"))
-          (vterm-win nil)
-          (input-win nil)
-          (selections nil)
-          (snap-arg nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (setq input-win (split-window))
-            (set-window-buffer input-win input-buf)
-            (setq vterm-win (split-window))
-            (set-window-buffer vterm-win vterm-buf)
-            (with-current-buffer vterm-buf (setq major-mode 'vterm-mode))
-            (select-window (car (window-list)))
-            (let ((agent-repl-autoselect-input-on-workspace-switch t)
-                  (orig-select-window (symbol-function 'select-window)))
-              (cl-letf (((symbol-function 'select-window)
-                         (lambda (win &optional norecord)
-                           (push win selections)
-                           (funcall orig-select-window win norecord)))
-                        ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
-                         (lambda (win) (setq snap-arg win))))
-                (agent-repl--maybe-autoselect-input "test-ws"))
-              (setq selections (nreverse selections))
-              ;; Snap runs on vterm-win; only input-win is selected.
-              (should (eq snap-arg vterm-win))
-              (should (equal selections (list input-win)))
-              (should (eq (selected-window) input-win))))
-        (when (and vterm-win (window-live-p vterm-win))
-          (ignore-errors (delete-window vterm-win)))
-        (when (and input-win (window-live-p input-win))
-          (ignore-errors (delete-window input-win)))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-maybe-autoselect-input-no-vterm-hack-when-hidden ()
-  "maybe-autoselect-input skips the vterm hack when vterm is not displayed."
-  (agent-repl-test--with-clean-state
-    (let ((input-buf (get-buffer-create "*autoselect-input-no-vterm*"))
-          (vterm-buf (get-buffer-create "*autoselect-vterm-hidden*"))
-          (input-win nil)
-          (selections nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-            (setq input-win (split-window))
-            (set-window-buffer input-win input-buf)
-            ;; vterm-buf intentionally not displayed in any window
-            (select-window (car (window-list)))
-            (let ((agent-repl-autoselect-input-on-workspace-switch t)
-                  (orig-select-window (symbol-function 'select-window)))
-              (cl-letf (((symbol-function 'select-window)
-                         (lambda (win &optional norecord)
-                           (push win selections)
-                           (funcall orig-select-window win norecord))))
-                (agent-repl--maybe-autoselect-input "test-ws"))
-              (setq selections (nreverse selections))
-              ;; Only the input selection should happen.
-              (should (equal selections (list input-win)))))
-        (when (and input-win (window-live-p input-win))
-          (ignore-errors (delete-window input-win)))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
 ;;;; ---- Tests: non-agent-panel-window-p with agent buffers ----
 
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-vterm-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing an agent vterm buffer."
-  (let ((buf (get-buffer-create "*agent-panel-abcd1234*")))
+(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-frontend-buffer ()
+  "non-agent-panel-window-p returns nil for a window showing the agent frontend (webview) buffer."
+  (let ((buf (get-buffer-create "*agent-frontend-abcd1234*")))
     (unwind-protect
         (progn
           (switch-to-buffer buf)
@@ -2509,17 +1512,17 @@ only the input window."
   "hide-panels calls close-buffer-windows with both buffers."
   (agent-repl-test--with-clean-state
     (let ((closed-bufs nil))
-      (agent-repl-test--with-temp-buffer "*hide-vterm*"
-        (let ((vterm-buf (current-buffer)))
+      (agent-repl-test--with-temp-buffer "*hide-frontend*"
+        (let ((frontend-buf (current-buffer)))
           (agent-repl-test--with-temp-buffer "*hide-input*"
             (let ((input-buf (current-buffer)))
-              (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
+              (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
               (agent-repl--ws-put "test-ws" :input-buffer input-buf)
               (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                         ((symbol-function 'agent-repl--close-buffer-windows)
                          (lambda (&rest bufs) (setq closed-bufs bufs))))
                 (agent-repl--hide-panels)
-                (should (equal closed-bufs (list input-buf vterm-buf)))))))))))
+                (should (equal closed-bufs (list input-buf frontend-buf)))))))))))
 
 (ert-deftest agent-repl-test-panels-hide-panels-neither-exists ()
   "hide-panels does not error when neither buffer exists."
@@ -2553,155 +1556,6 @@ only the input window."
               ((symbol-function 'agent-repl--update-hide-overlay) #'ignore))
       (should-error (agent-repl--on-window-change) :type 'error))))
 
-;;;; ---- Tests: cursor reset is workspace-switch-only ----
-
-(ert-deftest agent-repl-test-panels-on-window-change-does-not-reset-cursors ()
-  "`--on-window-change' must NOT call `--reset-vterm-cursors'.
-Resetting on every window-config change snaps vterm back to the bottom
-and undoes user scrolls (e.g. via `C-S-k')."
-  (agent-repl-test--with-clean-state
-    (let ((reset-called nil))
-      (cl-letf (((symbol-function 'agent-repl--sync-panels) #'ignore)
-                ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                ((symbol-function 'agent-repl--reset-vterm-cursors)
-                 (lambda () (setq reset-called t))))
-        (agent-repl--on-window-change)
-        (should-not reset-called)))))
-
-(ert-deftest agent-repl-test-panels-no-cursor-reset-on-selection-change ()
-  "No agent-repl cursor-reset handler is installed on
-`window-selection-change-functions'.  If one is, every focus change
-schedules `--reset-vterm-cursors', which snaps vterm to the bottom and
-undoes user scrolls."
-  (should-not
-   (cl-find-if
-    (lambda (fn)
-      (and (symbolp fn)
-           (string-prefix-p "agent-repl--" (symbol-name fn))
-           (string-match-p "cursor-reset\\|reset-vterm" (symbol-name fn))))
-    window-selection-change-functions)))
-
-(ert-deftest agent-repl-test-panels-no-cursor-reset-on-buffer-list-update ()
-  "No agent-repl cursor-reset handler is installed on
-`buffer-list-update-hook'.  If one is, normal buffer activity
-schedules `--reset-vterm-cursors', which snaps vterm to the bottom and
-undoes user scrolls."
-  (should-not
-   (cl-find-if
-    (lambda (fn)
-      (and (symbolp fn)
-           (string-prefix-p "agent-repl--" (symbol-name fn))
-           (string-match-p "cursor-reset\\|reset-vterm" (symbol-name fn))))
-    buffer-list-update-hook)))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-still-resets-cursors ()
-  "Workspace switch is the one place that DOES reset vterm cursors.
-This preserves the recenter-after-switch behavior while the broader
-hooks are gone."
-  (agent-repl-test--with-clean-state
-    (let ((reset-called nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                ((symbol-function 'agent-repl--reset-vterm-cursors)
-                 (lambda () (setq reset-called t)))
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-        (agent-repl--on-workspace-switch "ws1")
-        (should reset-called)))))
-
-;;;; ---- Tests: bounce-from-vterm ----
-
-(ert-deftest agent-repl-test-panels-bounce-from-vterm-non-vterm-buffer ()
-  "bounce-from-vterm is a no-op when the selected window shows a non-agent buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*bounce-noop-regular*"
-      (let ((orig-win (selected-window)))
-        (set-window-buffer orig-win (current-buffer))
-        (agent-repl--bounce-from-vterm nil)
-        (should (eq (selected-window) orig-win))))))
-
-(ert-deftest agent-repl-test-panels-bounce-from-vterm-input-buffer-no-recursion ()
-  "bounce-from-vterm does NOT fire when the selected window shows an input buffer.
-Load-bearing: after the bounce redirects vterm→input, the input selection
-must not itself trigger another bounce."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*agent-panel-input-test-ws*"
-      (let ((orig-win (selected-window)))
-        (set-window-buffer orig-win (current-buffer))
-        (let ((last-input-event ?a))
-          (agent-repl--bounce-from-vterm nil))
-        (should (eq (selected-window) orig-win))))))
-
-(ert-deftest agent-repl-test-panels-bounce-from-vterm-keyboard-redirects ()
-  "bounce-from-vterm redirects to the input window when selection is keyboard-driven."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
-          (input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
-          (new-win nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (set-window-buffer (selected-window) vterm-buf)
-            (setq new-win (split-window))
-            (set-window-buffer new-win input-buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-              (let ((last-input-event ?a))
-                (agent-repl--bounce-from-vterm nil)
-                (should (eq (window-buffer (selected-window)) input-buf)))))
-        (when (and new-win (window-live-p new-win))
-          (ignore-errors (delete-window new-win)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-bounce-from-vterm-mouse-does-not-redirect ()
-  "Mouse-driven selection of a vterm window stays put — user wants to scroll/copy."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
-          (input-buf (get-buffer-create "*agent-panel-input-test-ws*"))
-          (new-win nil))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-            (let ((vterm-win (selected-window)))
-              (set-window-buffer vterm-win vterm-buf)
-              (setq new-win (split-window))
-              (set-window-buffer new-win input-buf)
-              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-                ;; Simulate a mouse event as last-input-event
-                (let ((last-input-event '(mouse-1 (nil 0 . 0))))
-                  (agent-repl--bounce-from-vterm nil)
-                  (should (eq (selected-window) vterm-win))))))
-        (when (and new-win (window-live-p new-win))
-          (ignore-errors (delete-window new-win)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-bounce-from-vterm-warns-when-no-input-win ()
-  "When panels are hidden (no visible input window), bounce emits a user-facing warning.
-Previously this path logged verbosely and stranded point in vterm; now
-we at least surface the stuck state so the user knows to click out."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*agent-panel-test-ws*"))
-          (messages nil))
-      (unwind-protect
-          (progn
-            ;; Input buffer is stored but NOT displayed in any window.
-            (agent-repl--ws-put "test-ws" :input-buffer
-                                 (get-buffer-create "*agent-panel-input-test-ws*"))
-            (set-window-buffer (selected-window) vterm-buf)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                      ((symbol-function 'message)
-                       (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
-              (let ((last-input-event ?a))
-                (agent-repl--bounce-from-vterm nil)))
-            (should (cl-some (lambda (m) (string-match-p "input panel isn't visible" m))
-                             messages)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))
-        (when-let ((b (get-buffer "*agent-panel-input-test-ws*"))) (kill-buffer b))))))
 
 ;;;; ---- Tests: initialize-input-buffer ----
 
@@ -2782,115 +1636,6 @@ hide sessions that keep running."
                                 :supported-backends '(claude)))))
         (agent-repl--on-close "ws1")
         (should-not killed)))))
-
-;;;; ---- Tests: kill-stale-vterm ----
-
-(ert-deftest agent-repl-test-panels-kill-stale-vterm-no-buffer ()
-  "kill-stale-vterm is a no-op when no buffer with the expected name exists."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--buffer-name)
-               (lambda (&rest _) "*nonexistent-stale*")))
-      ;; Should not error
-      (agent-repl--kill-stale-vterm))))
-
-(ert-deftest agent-repl-test-panels-kill-stale-vterm-stale ()
-  "kill-stale-vterm kills a buffer that exists without a live process."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*stale-vterm-test*")))
-      (cl-letf (((symbol-function 'agent-repl--buffer-name)
-                 (lambda (&rest _) "*stale-vterm-test*")))
-        (should (get-buffer "*stale-vterm-test*"))
-        (agent-repl--kill-stale-vterm)
-        (should-not (get-buffer "*stale-vterm-test*"))))))
-
-(ert-deftest agent-repl-test-panels-kill-stale-vterm-zombie-process ()
-  "kill-stale-vterm kills a live-process leftover through the queryless path.
-Callers reach it only after the already-running guard passed, so a
-live process here is a zombie from a failed teardown — preserving it
-(the old behavior) made the next launch die on \"already initialized\"
-behind an interactive kill prompt."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*process-vterm-test*"))
-          (killed nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--buffer-name)
-                     (lambda (&rest _) "*process-vterm-test*"))
-                    ((symbol-function 'get-buffer-process) (lambda (_buf) 'fake-process))
-                    ((symbol-function 'agent-repl--kill-vterm-process)
-                     (lambda (b) (setq killed b))))
-            (agent-repl--kill-stale-vterm)
-            ;; Routed through the queryless process-kill wrapper.
-            (should (eq killed buf)))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-;;;; ---- Tests: kill-vterm-process live buffer without process ----
-
-(ert-deftest agent-repl-test-panels-kill-vterm-process-live-no-process ()
-  "kill-vterm-process kills a live buffer that has no process."
-  (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create "*kill-no-proc*")))
-      (agent-repl--kill-vterm-process buf)
-      ;; Buffer should have been killed
-      (should-not (buffer-live-p buf)))))
-
-(ert-deftest agent-repl-test-panels-kill-vterm-process-skips-kill-buffer-query-functions ()
-  "kill-vterm-process does not consult `kill-buffer-query-functions'.
-Regression: the nuke path must not prompt about closing the agent
-process, even when other hooks (e.g., vterm's own kill query) are
-registered."
-  (agent-repl-test--with-clean-state
-    (let* ((buf (get-buffer-create "*kill-no-prompt*"))
-           (consulted nil)
-           (kill-buffer-query-functions
-            (list (lambda () (setq consulted t) nil))))
-      (agent-repl--kill-vterm-process buf)
-      (should-not consulted)
-      (should-not (buffer-live-p buf)))))
-
-;;;; ---- Tests: teardown-session-state ----
-
-(ert-deftest agent-repl-test-panels-teardown-session-state ()
-  "teardown-session-state clears overlay, timers, and workspace buffer refs."
-  (agent-repl-test--with-clean-state
-    (let ((overlay-disabled nil)
-          (state-saved nil))
-      (agent-repl-test--with-temp-buffer "*teardown-vterm*"
-        (let ((vterm-buf (current-buffer)))
-          (agent-repl-test--with-temp-buffer "*teardown-input*"
-            (let ((input-buf (current-buffer)))
-              (agent-repl--ws-put "test-ws" :vterm-buffer vterm-buf)
-              (agent-repl--ws-put "test-ws" :input-buffer input-buf)
-              (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-              (agent-repl--ws-put "test-ws" :bare-metal
-                                   (make-agent-repl-instantiation :start-cmd "claude" :session-id "sess-1"))
-              (cl-letf (((symbol-function 'agent-repl--disable-hide-overlay)
-                         (lambda () (setq overlay-disabled t)))
-                        ((symbol-function 'agent-repl--state-save)
-                         (lambda (_ws) (setq state-saved t)))
-                        ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil)))
-                (agent-repl--teardown-session-state "test-ws")
-                (should overlay-disabled)
-                (should state-saved)
-                ;; Buffer refs should be cleared
-                (should-not (agent-repl--ws-get "test-ws" :vterm-buffer))
-                (should-not (agent-repl--ws-get "test-ws" :input-buffer))
-                ;; Instantiation should have start-cmd cleared
-                (let ((inst (agent-repl--ws-get "test-ws" :bare-metal)))
-                  (should-not (agent-repl-instantiation-start-cmd inst)))))))))))
-
-;;;; ---- Tests: destroy-session-buffers input dead ----
-
-(ert-deftest agent-repl-test-panels-destroy-session-buffers-input-dead ()
-  "destroy-session-buffers handles a dead input buffer gracefully."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*destroy-vterm*"))
-          (input-buf (get-buffer-create "*destroy-input-dead*")))
-      (kill-buffer input-buf)
-      (cl-letf (((symbol-function 'agent-repl--close-buffer-windows) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--kill-placeholder) (lambda () nil))
-                ((symbol-function 'agent-repl--kill-vterm-process) (lambda (_) nil)))
-        ;; Should not error with dead input buffer
-        (agent-repl--destroy-session-buffers vterm-buf input-buf)))))
 
 ;;;; ---- Tests: kill-workspace-buffers ----
 
@@ -3054,332 +1799,6 @@ into this persp, and nuking it would wipe that workspace's running session."
       (dolist (b (list b1 b2 b3))
         (when (buffer-live-p b) (kill-buffer b))))))
 
-;;;; ---- Tests: show-existing-panels no workspace ----
-
-(ert-deftest agent-repl-test-panels-show-existing-panels-no-workspace ()
-  "show-existing-panels errors when no workspace is active."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--refresh-vterm) (lambda () nil)))
-      (should-error (agent-repl--show-existing-panels)))))
-
-;;;; ---- Tests: initialize-agent ----
-
-(ert-deftest agent-repl-test-panels-initialize-agent-no-workspace ()
-  "initialize-agent errors when no workspace is active."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-      (should-error (agent-repl--initialize-agent)))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-already-running-errors ()
-  "initialize-agent errors when the agent is already running."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t)))
-      (should-error (agent-repl--initialize-agent)))))
-
-(defmacro agent-repl-test--initialize-agent-stubs (vterm-buf-var &rest body)
-  "Run BODY with the stubs needed to exercise `agent-repl--initialize-agent'.
-VTERM-BUF-VAR is the name of a `let'-bound buffer that will be returned
-from `create-buffer'.  Stubs can be overridden by wrapping BODY in another
-`cl-letf' that rebinds the same symbols."
-  (declare (indent 1))
-  `(cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-             ((symbol-function 'agent-repl--agent-running-p) (lambda (&optional _ws) nil))
-             ((symbol-function 'agent-repl--initialize-ws-env) #'ignore)
-             ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp"))
-             ((symbol-function 'agent-repl--record-project-dir) #'ignore)
-             ((symbol-function 'agent-repl--kill-stale-vterm) (lambda (&optional _ws) nil))
-             ((symbol-function 'agent-repl--create-buffer)
-              (lambda (_ws &optional _s) ,vterm-buf-var))
-             ((symbol-function 'agent-repl--build-start-cmd)
-              (lambda (_ws) (list :cmd "claude"
-                                  :session-id nil
-                                  :fork-session-id nil
-                                  :worktree-p nil
-                                  :active-env :bare-metal
-                                  :inst (make-agent-repl-instantiation))))
-             ((symbol-function 'agent-repl--log-session-start) #'ignore)
-             ((symbol-function 'vterm-mode) #'ignore)
-             ((symbol-function 'agent-repl--set-buffer-background) #'ignore)
-             ((symbol-function 'agent-repl--workspace-mode-line) (lambda (_ws) '("test")))
-             ((symbol-function 'vterm-send-string) #'ignore)
-             ((symbol-function 'vterm-send-return) #'ignore)
-             ((symbol-function 'agent-repl--schedule-ready-timer) #'ignore)
-             ((symbol-function 'agent-repl--initialize-input-buffer) #'ignore)
-             ((symbol-function 'agent-repl--enable-hide-overlay) #'ignore)
-             ;; Launch-time panel open (the 2026-07 gate change) is
-             ;; neutralized here; the dedicated launch-opens-panels tests
-             ;; rebind it to observe the call.
-             ((symbol-function 'agent-repl--show-hidden-panels) #'ignore)
-             ((symbol-function 'agent-repl--workspace-id) (lambda () "id")))
-     ,@body))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-stamps-vterm-frontend ()
-  "initialize-agent stamps :frontend 'vterm — the function IS the vterm boot.
-A workspace created while `agent-repl-default-frontend' is gui (the
-workspace-generation dispatch path) would otherwise resolve to the gui
-branch of `agent-repl--on-session-start-event', which never marks the
-vterm ready nor drains the dispatched initial prompt."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((agent-repl-default-frontend 'gui)
-          (vterm-buf (generate-new-buffer " *init-agent-stamp*")))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (agent-repl--initialize-agent "test-ws")
-            (should (eq (agent-repl--ws-get "test-ws" :frontend) 'vterm))
-            (should-not (agent-repl--ws-gui-frontend-p "test-ws")))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-opens-panels-at-launch ()
-  "initialize-agent opens panels immediately for the current workspace.
-Pins the 2026-07 gate change: blocking first-run screens (trust
-dialogs, codex onboarding) fire no readiness hook, so panels must not
-wait for ready."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-open*"))
-          (shown nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
-                       (lambda () (setq shown t))))
-              (agent-repl--initialize-agent "test-ws")
-              (should shown)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-background-boot-no-panels ()
-  "initialize-agent does NOT open panels for a non-current workspace boot."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "bg-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-bg*"))
-          (shown nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
-                       (lambda () (setq shown t))))
-              (agent-repl--initialize-agent "bg-ws")
-              (should-not shown)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-hidden-pref-no-panels ()
-  "initialize-agent honors a persisted :hidden repl-state (panels stay closed)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (agent-repl--ws-put "test-ws" :repl-state :hidden)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-hidden*"))
-          (shown nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--show-hidden-panels)
-                       (lambda () (setq shown t))))
-              (agent-repl--initialize-agent "test-ws")
-              (should-not shown)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-starts-new-session ()
-  "initialize-agent sets prefix counter, enables overlay, writes :agent-state :init."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-fixture*"))
-          (overlay-called nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--enable-hide-overlay)
-                       (lambda () (setq overlay-called t))))
-              (agent-repl--initialize-agent)
-              (should (equal (agent-repl--ws-get "test-ws" :prefix-counter) 0))
-              (should (eq (agent-repl--ws-get "test-ws" :agent-state) :init))
-              (should overlay-called)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-build-error-creates-no-buffer ()
-  "A build-start-cmd abort (e.g. the project dir is not inside a git
-repository, which `--compute-perm-flag' signals through `--git-root')
-happens before any buffer is created, so no orphan panel buffer is left
-behind."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((created nil))
-      (agent-repl-test--initialize-agent-stubs nil
-        (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
-                   (lambda (_ws) (user-error "agent-repl: /tmp is not inside a git repository")))
-                  ((symbol-function 'agent-repl--create-buffer)
-                   (lambda (_ws &optional _s) (setq created t) nil)))
-          (should-error (agent-repl--initialize-agent) :type 'user-error)
-          (should-not created)
-          (should-not (agent-repl--ws-get "test-ws" :vterm-buffer)))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-launch-error-kills-orphan-buffer ()
-  "A failure after the buffer is created kills the orphan buffer and clears
-:vterm-buffer, so a failed start cannot leave a zombie workspace behind."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-orphan*")))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'vterm-mode)
-                       (lambda () (error "boom during launch"))))
-              (should-error (agent-repl--initialize-agent))
-              (should-not (buffer-live-p vterm-buf))
-              (should-not (agent-repl--ws-get "test-ws" :vterm-buffer))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-sends-cmd-and-return ()
-  "initialize-agent sends the startup cmd string and a return to the vterm buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-send*"))
-          (sent-string nil)
-          (return-sent nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'vterm-send-string)
-                       (lambda (s) (setq sent-string s)))
-                      ((symbol-function 'vterm-send-return)
-                       (lambda () (setq return-sent t))))
-              (agent-repl--initialize-agent)
-              (should (string-match-p "claude" sent-string))
-              (should return-sent)))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-schedules-ready-timer ()
-  "initialize-agent schedules the readiness timer for the workspace."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-timer*"))
-          (timer-ws nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--schedule-ready-timer)
-                       (lambda (ws) (setq timer-ws ws))))
-              (agent-repl--initialize-agent)
-              (should (equal timer-ws "test-ws"))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-sets-ready-nil ()
-  "initialize-agent sets buffer-local agent-repl--ready to nil in the vterm buffer."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-ready*"))
-          (ready-at-send 'unset))
-      (unwind-protect
-          (progn
-            (with-current-buffer vterm-buf
-              (setq-local agent-repl--ready t))
-            (agent-repl-test--initialize-agent-stubs vterm-buf
-              (cl-letf (((symbol-function 'vterm-send-string)
-                         (lambda (_s) (setq ready-at-send agent-repl--ready))))
-                (agent-repl--initialize-agent)
-                (should-not ready-at-send))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-sets-workspace-mode-line ()
-  "initialize-agent sets mode-line-format via workspace-mode-line, passing ws."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-ml*"))
-          (mode-line-ws :unset))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
-                       (lambda (_ws) (list :cmd "claude"
-                                           :session-id nil
-                                           :fork-session-id nil
-                                           :worktree-p t
-                                           :active-env :bare-metal
-                                           :inst (make-agent-repl-instantiation))))
-                      ((symbol-function 'agent-repl--workspace-mode-line)
-                       (lambda (ws) (setq mode-line-ws ws) '("WS-ML"))))
-              (agent-repl--initialize-agent)
-              (should (equal mode-line-ws "test-ws"))
-              (with-current-buffer vterm-buf
-                (should (equal mode-line-format '("WS-ML"))))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-clears-fork-session-id ()
-  "initialize-agent clears :fork-session-id after building the cmd."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (agent-repl--ws-put "test-ws" :fork-session-id "fork-abc")
-    (let ((vterm-buf (generate-new-buffer " *init-agent-fork*")))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--build-start-cmd)
-                       (lambda (_ws) (list :cmd "claude"
-                                           :session-id nil
-                                           :fork-session-id "fork-abc"
-                                           :worktree-p nil
-                                           :active-env :bare-metal
-                                           :inst (make-agent-repl-instantiation)))))
-              (agent-repl--initialize-agent)
-              (should-not (agent-repl--ws-get "test-ws" :fork-session-id))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-always-calls-ws-env-init ()
-  "initialize-agent always calls initialize-ws-env, regardless of prior
-`:active-env'.  initialize-ws-env is idempotent, so unconditional call is
-safe and ensures the state file is re-read on every session start."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (generate-new-buffer " *init-agent-ws-env*"))
-          (init-call-count 0))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-                       (lambda (_ws &rest _) (cl-incf init-call-count))))
-              (agent-repl--initialize-agent)
-              (should (= init-call-count 1))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-passes-hints-to-ws-env-init ()
-  "initialize-agent forwards project-dir-hint and active-env-hint to
-initialize-ws-env.  Models the worktree-creation / new-workspace paths."
-  (agent-repl-test--with-clean-state
-    (let ((vterm-buf (generate-new-buffer " *init-agent-hints*"))
-          (got-hint nil)
-          (got-env nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-                       (lambda (_ws &optional dir env)
-                         (setq got-hint dir)
-                         (setq got-env env))))
-              (agent-repl--initialize-agent "test-ws" "/tmp/worktree" :bare-metal)
-              (should (equal got-hint "/tmp/worktree"))
-              (should (eq got-env :bare-metal))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-persists-state-on-success ()
-  "initialize-agent calls state-save at the end of a successful start."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-state-save*"))
-          (saved-ws nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function 'agent-repl--state-save)
-                       (lambda (ws) (setq saved-ws ws))))
-              (agent-repl--initialize-agent)
-              (should (equal saved-ws "test-ws"))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
-(ert-deftest agent-repl-test-panels-initialize-agent-uses-explicit-ws-arg ()
-  "initialize-agent uses the explicit WS argument rather than +workspace-current-name."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "explicit-arg-ws" :active-env :bare-metal)
-    (let ((vterm-buf (generate-new-buffer " *init-agent-explicit*"))
-          (running-ws nil))
-      (unwind-protect
-          (agent-repl-test--initialize-agent-stubs vterm-buf
-            (cl-letf (((symbol-function '+workspace-current-name)
-                       (lambda () "persp-current-ws"))
-                      ((symbol-function 'agent-repl--agent-running-p)
-                       (lambda (ws) (setq running-ws ws) nil)))
-              (agent-repl--initialize-agent "explicit-arg-ws")
-              (should (equal running-ws "explicit-arg-ws"))))
-        (when (buffer-live-p vterm-buf) (kill-buffer vterm-buf))))))
-
 ;;;; ---- Tests: schedule-sigkill ----
 
 (ert-deftest agent-repl-test-panels-schedule-sigkill-schedules-timer ()
@@ -3406,240 +1825,24 @@ initialize-ws-env.  Models the worktree-creation / new-workspace paths."
       (agent-repl--sigkill-if-alive 'fake-proc)
       (should (equal signaled '(fake-proc SIGKILL))))))
 
-;;;; ---- Tests: do-refresh ----
-
-(ert-deftest agent-repl-test-panels-do-refresh-calls-redraw ()
-  "do-refresh calls vterm-redraw and redisplay."
-  (let ((redraw-called nil)
-        (redisplay-called nil)
-        (vterm--term 'fake-term))
-    (cl-letf (((symbol-function 'agent-repl--vterm-redraw)
-               (lambda () (setq redraw-called t)))
-              ((symbol-function 'redisplay)
-               (lambda (&rest _) (setq redisplay-called t))))
-      (agent-repl--do-refresh)
-      (should redraw-called)
-      (should redisplay-called))))
-
-;;;; ---- Tests: vterm-redraw with set term ----
-
-(ert-deftest agent-repl-test-panels-vterm-redraw-with-term ()
-  "vterm-redraw calls vterm--redraw when vterm--term is set."
-  (let ((vterm--term 'fake-term)
-        (redraw-arg nil))
-    (cl-letf (((symbol-function 'vterm--redraw)
-               (lambda (term) (setq redraw-arg term))))
-      (agent-repl--vterm-redraw)
-      (should (eq redraw-arg 'fake-term)))))
-
-;;;; ---- Tests: fix-vterm-scroll with different window ----
-
-(ert-deftest agent-repl-test-panels-fix-vterm-scroll-different-window-preserves-selection ()
-  "fix-vterm-scroll never changes the selected window when the vterm window
-is a different (non-selected) window — the previous brief-select hack
-was the source of the visible scroll-down animation, so the new
-implementation must NOT select the vterm window at any point."
-  (let ((buf (get-buffer-create "*scroll-diff-win-preserve*"))
-        (new-win nil)
-        (selections nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (let ((orig-win (selected-window))
-                (orig-select-window (symbol-function 'select-window)))
-            ;; Ensure we are NOT in the vterm window
-            (should-not (eq new-win orig-win))
-            (cl-letf (((symbol-function 'select-window)
-                       (lambda (win &optional norecord)
-                         (push win selections)
-                         (funcall orig-select-window win norecord))))
-              (agent-repl--fix-vterm-scroll buf))
-            ;; New impl: no `select-window' calls at all — the snap is
-            ;; driven via `set-window-start' / `set-window-point' alone.
-            (should-not selections)
-            (should (eq (selected-window) orig-win))))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-fix-vterm-scroll-different-window-calls-snap ()
-  "fix-vterm-scroll calls `--snap-vterm-window-to-cursor' on the vterm
-window when the vterm window is a different (non-selected) window."
-  (let ((buf (get-buffer-create "*scroll-diff-win-snap*"))
-        (new-win nil)
-        (snap-arg nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (with-current-buffer buf (setq major-mode 'vterm-mode))
-          (cl-letf (((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
-                     (lambda (win) (setq snap-arg win))))
-            (agent-repl--fix-vterm-scroll buf))
-          (should (eq snap-arg new-win)))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-;;;; ---- Tests: snap-vterm-window-to-cursor ----
-
-(ert-deftest agent-repl-test-panels-snap-vterm-window-to-cursor-positions-cursor-at-bottom ()
-  "snap-vterm-window-to-cursor sets `window-start' so the cursor lands on
-the last visible line — that is, `window-start' is exactly
-`(body-height - 1)' lines above the cursor."
-  (let ((buf (get-buffer-create "*snap-bottom*"))
-        (new-win nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (with-current-buffer buf
-            (erase-buffer)
-            ;; Insert enough lines that the body-height fits inside the buffer.
-            (dotimes (i 200) (insert (format "line-%d\n" i)))
-            (goto-char (point-max))
-            (let* ((body-height (window-body-height new-win))
-                   (expected-start
-                    (save-excursion
-                      (goto-char (point-max))
-                      (forward-line (- 1 body-height))
-                      (line-beginning-position))))
-              (agent-repl--snap-vterm-window-to-cursor new-win)
-              (should (= (window-start new-win) expected-start))
-              (should (= (window-point new-win) (point-max))))))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-snap-vterm-window-to-cursor-short-buffer-uses-point-min ()
-  "When the buffer is shorter than `window-body-height',
-snap-vterm-window-to-cursor falls back to `point-min' as `window-start'
-\(via the natural `forward-line' cap when walking past the buffer head)."
-  (let ((buf (get-buffer-create "*snap-short*"))
-        (new-win nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (with-current-buffer buf
-            (erase-buffer)
-            (insert "only line\n")
-            (goto-char (point-max))
-            (agent-repl--snap-vterm-window-to-cursor new-win)
-            (should (= (window-start new-win) (point-min)))
-            (should (= (window-point new-win) (point-max)))))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-snap-vterm-window-to-cursor-does-not-select-window ()
-  "snap-vterm-window-to-cursor never selects the target window — it
-operates purely through `set-window-start' + `set-window-point' to
-avoid `window-selection-change-functions' / `bounce-from-vterm'
-re-entry."
-  (let ((buf (get-buffer-create "*snap-no-select*"))
-        (new-win nil)
-        (selections nil)
-        (orig-win nil))
-    (unwind-protect
-        (progn
-          (setq orig-win (selected-window))
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (with-current-buffer buf
-            (insert "some content\n")
-            (goto-char (point-max))
-            (let ((orig-select-window (symbol-function 'select-window)))
-              (cl-letf (((symbol-function 'select-window)
-                         (lambda (win &optional norecord)
-                           (push win selections)
-                           (funcall orig-select-window win norecord))))
-                (agent-repl--snap-vterm-window-to-cursor new-win))
-              (should-not selections)
-              (should (eq (selected-window) orig-win)))))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-;;;; ---- Tests: refresh-vterm-window ----
-
-(ert-deftest agent-repl-test-panels-refresh-vterm-window-snaps-on-vterm-mode-buffer ()
-  "refresh-vterm-window calls `--snap-vterm-window-to-cursor' on the
-vterm window after the cursor reset + redraw, replacing the old bare
-`set-window-point' tail."
-  (let ((buf (get-buffer-create "*agent-panel-snap-test*"))
-        (new-win nil)
-        (snap-arg nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (with-current-buffer buf (setq major-mode 'vterm-mode))
-          (cl-letf (((symbol-function 'agent-repl--agent-buffer-p) (lambda (_b) t))
-                    ((symbol-function 'agent-repl--vterm-redraw) #'ignore)
-                    ((symbol-function 'vterm-reset-cursor-point) #'ignore)
-                    ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
-                     (lambda (win) (setq snap-arg win))))
-            (agent-repl--refresh-vterm-window new-win))
-          (should (eq snap-arg new-win)))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-refresh-vterm-window-skips-non-agent-buffer ()
-  "refresh-vterm-window is a no-op when the window's buffer is not an
-agent vterm buffer — the snap helper must not run."
-  (let ((buf (get-buffer-create "*not-agent-refresh*"))
-        (new-win nil)
-        (snap-called nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (cl-letf (((symbol-function 'agent-repl--agent-buffer-p) (lambda (_b) nil))
-                    ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
-                     (lambda (_win) (setq snap-called t))))
-            (agent-repl--refresh-vterm-window new-win))
-          (should-not snap-called))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-fix-vterm-scroll-non-vterm-mode-skips-reset ()
-  "fix-vterm-scroll does not call `vterm-reset-cursor-point' when the
-buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
-  (let ((buf (get-buffer-create "*scroll-non-vterm*"))
-        (new-win nil)
-        (reset-called nil))
-    (unwind-protect
-        (progn
-          (setq new-win (split-window))
-          (set-window-buffer new-win buf)
-          (cl-letf (((symbol-function 'vterm-reset-cursor-point)
-                     (lambda () (setq reset-called t)))
-                    ((symbol-function 'agent-repl--snap-vterm-window-to-cursor)
-                     #'ignore))
-            (agent-repl--fix-vterm-scroll buf))
-          (should-not reset-called))
-      (when (and new-win (window-live-p new-win))
-        (ignore-errors (delete-window new-win)))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
 ;;;; ---- Tests: agent-repl-restart ----
 
-(ert-deftest agent-repl-test-panels-restart-kills-then-initializes ()
-  "agent-repl-restart dispatches the vterm frontend's kill-then-initialize."
+(ert-deftest agent-repl-test-panels-restart-dispatches-through-frontend ()
+  "agent-repl-restart is frontend-blind: it dispatches through whatever
+restart-fn the workspace's frontend registers."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (let ((order nil))
+    (let ((restarted nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--vterm-kill)
-                 (lambda (_ws) (push 'kill order)))
-                ((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (&optional _ws &rest _) (push 'init order))))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws)
+                   (agent-repl-frontend-create
+                    :name 'probe :open-fn #'ignore :kill-fn #'ignore
+                    :send-fn #'ignore :interrupt-fn #'ignore
+                    :running-p-fn #'ignore
+                    :restart-fn (lambda (ws) (setq restarted ws))
+                    :supported-backends '(claude)))))
         (agent-repl-restart)
-        (should (equal (nreverse order) '(kill init)))))))
+        (should (equal restarted "test-ws"))))))
 
 ;;;; ---- Tests: agent-repl-kill no workspace ----
 
@@ -3649,25 +1852,37 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (agent-repl-kill)))))
 
-(ert-deftest agent-repl-test-panels-kill-clears-state-axes ()
-  "agent-repl-kill resets :agent-state and :repl-state."
+(ert-deftest agent-repl-test-panels-kill-dispatches-through-frontend ()
+  "agent-repl-kill is frontend-blind: it dispatches through whatever kill-fn
+the workspace's frontend registers, which is what actually resets the
+state axes."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--use-vterm-frontend)
-    (agent-repl--ws-set "ws1" :thinking)
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
     (agent-repl--ws-set-repl-state "ws1" :inactive)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--kill-session) #'ignore)
-              ((symbol-function 'force-mode-line-update) #'ignore))
-      (agent-repl-kill)
-      (should-not (agent-repl--ws-get "ws1" :agent-state))
-      (should-not (agent-repl--ws-get "ws1" :repl-state)))))
+    (let ((killed-ws nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws)
+                   (agent-repl-frontend-create
+                    :name 'probe :open-fn #'ignore
+                    :kill-fn (lambda (ws)
+                               (setq killed-ws ws)
+                               (agent-repl--ws-put ws :agent-state nil)
+                               (agent-repl--ws-put ws :repl-state nil))
+                    :send-fn #'ignore :interrupt-fn #'ignore
+                    :running-p-fn #'ignore
+                    :supported-backends '(claude)))))
+        (agent-repl-kill)
+        (should (equal killed-ws "ws1"))
+        (should-not (agent-repl--ws-get "ws1" :agent-state))
+        (should-not (agent-repl--ws-get "ws1" :repl-state))))))
 
 ;;;; ---- Tests: redirect-from-agent-before-save with agent window ----
 
 (ert-deftest agent-repl-test-panels-redirect-claude-to-other-window ()
   "redirect-from-agent-before-save selects a non-agent window when current is the agent."
   (agent-repl-test--with-clean-state
-    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
+    (let ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
           (regular-buf (get-buffer-create "*regular-buf*"))
           (new-win nil))
       (unwind-protect
@@ -3689,7 +1904,7 @@ buffer is not in `vterm-mode' — the cursor-reset is vterm-specific."
 (ert-deftest agent-repl-test-panels-redirect-claude-only-window ()
   "redirect-from-agent-before-save skips redirect when the agent is the only window."
   (agent-repl-test--with-clean-state
-    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*")))
       (unwind-protect
           (progn
             (delete-other-windows)
@@ -3769,7 +1984,7 @@ pick the drawer as the redirect destination — defeating the purpose
 of the redirect."
   (agent-repl-test--with-clean-state
     (delete-other-windows)
-    (let* ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
+    (let* ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
            (regular-buf (get-buffer-create "*regular-buf*"))
            (side-buf    (get-buffer-create "*side-buf*"))
            (agent-win (selected-window))
@@ -3800,7 +2015,7 @@ of the redirect."
   "Redirect target must skip dedicated windows."
   (agent-repl-test--with-clean-state
     (delete-other-windows)
-    (let* ((agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
+    (let* ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
            (regular-buf (get-buffer-create "*regular-buf*"))
            (ded-buf (get-buffer-create "*ded-buf*"))
            (agent-win (selected-window))
@@ -3838,7 +2053,7 @@ of the redirect."
 (ert-deftest agent-repl-test-panels-save-target-window-p-agent-panel ()
   "save-target-window-p returns nil for a window showing an agent panel."
   (agent-repl-test--with-clean-state
-    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*")))
       (unwind-protect
           (progn
             (set-window-buffer (selected-window) agent-buf)
@@ -3882,7 +2097,7 @@ windows."
   (agent-repl-test--with-clean-state
     (let ((sweep-called nil)
           (agent-repl--window-fullscreen-config nil)
-          (agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
+          (agent-buf (get-buffer-create "*agent-frontend-abcd1234*")))
       (unwind-protect
           (progn
             (switch-to-buffer agent-buf)
@@ -3899,7 +2114,7 @@ windows."
   "fullscreen-and-focus selects the input window after toggling when in an agent buffer."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*agent-panel-input-abcd1234*"))
-          (agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
+          (agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
           (new-win nil))
       (unwind-protect
           (progn
@@ -3921,7 +2136,7 @@ windows."
   "fullscreen-and-focus does NOT enter evil insert state after focusing input."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*agent-panel-input-abcd1234*"))
-          (agent-buf (get-buffer-create "*agent-panel-abcd1234*"))
+          (agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
           (new-win nil)
           (insert-called nil))
       (unwind-protect
@@ -3946,7 +2161,7 @@ windows."
   "fullscreen-and-focus does not error when in an agent buffer but input has no window."
   (agent-repl-test--with-clean-state
     (let ((input-buf (get-buffer-create "*test-fs-no-win*"))
-          (agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
+          (agent-buf (get-buffer-create "*agent-frontend-abcd1234*")))
       (unwind-protect
           (progn
             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
@@ -3963,7 +2178,7 @@ windows."
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-no-input-buffer ()
   "fullscreen-and-focus does not error when in an agent buffer but no input buffer is set."
   (agent-repl-test--with-clean-state
-    (let ((agent-buf (get-buffer-create "*agent-panel-abcd1234*")))
+    (let ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*")))
       (unwind-protect
           (progn
             (switch-to-buffer agent-buf)
@@ -4171,7 +2386,7 @@ sacrificed because the drawer was the `keep' anchor."
 panel buffer, the side-window redirect lands on the agent buffer and
 the function takes the agent branch (focus input, no non-agent maximize)."
   (agent-repl-test--with-clean-state
-    (let ((vterm-buf (get-buffer-create "*agent-panel-fs-redir*"))
+    (let ((vterm-buf (get-buffer-create "*agent-frontend-fs-redir*"))
           (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
           (agent-repl--window-fullscreen-config nil))
       (unwind-protect
@@ -4245,79 +2460,12 @@ opening the agent used to destroy the drawer)."
         (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
               (list drawer-buf work-buf other-buf))))))
 
-(ert-deftest agent-repl-test-panels-show-existing-panels-preserves-drawer ()
-  "Opening the agent (full show-existing-panels flow) must NOT destroy the drawer.
-End-to-end regression: any drawer-as-side-window setup survives the
-panel-open path regardless of whether the drawer's window parameters
-match the canonical display-action."
-  (agent-repl-test--with-clean-state
-    (let ((drawer-buf (get-buffer-create "*spe-drawer*"))
-          (vterm-buf  (get-buffer-create "*spe-vterm*"))
-          (input-buf  (get-buffer-create "*spe-input*"))
-          (work-buf   (get-buffer-create "*spe-work*"))
-          (ws         "spe-ws"))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put ws :vterm-buffer vterm-buf)
-            (agent-repl--ws-put ws :input-buffer input-buf)
-            (delete-other-windows)
-            (set-window-buffer (selected-window) work-buf)
-            (let ((drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
-              (select-window (get-buffer-window work-buf))
-              (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
-                        ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                        ((symbol-function 'agent-repl--update-hide-overlay) #'ignore)
-                        ((symbol-function 'agent-repl--restore-tab-index) #'ignore)
-                        ((symbol-function 'agent-repl--flash-current-tab) #'ignore)
-                        ((symbol-function 'agent-repl--focus-input-panel) #'ignore))
-                (agent-repl--show-existing-panels))
-              (should (window-live-p drawer-win))
-              (should (get-buffer-window drawer-buf))))
-        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
-              (list drawer-buf vterm-buf input-buf work-buf))))))
-
-(ert-deftest agent-repl-test-panels-show-panels-redirects-from-side-window ()
-  "`--show-panels' must not try to split a side window.
-When the selected window is a side window (drawer), redirect to the
-frame's main window before splitting; splitting a side window would
-otherwise signal `Cannot split side window' and leave panels half-shown."
-  (agent-repl-test--with-clean-state
-    (let ((drawer-buf (get-buffer-create "*sp-redir-drawer*"))
-          (work-buf   (get-buffer-create "*sp-redir-work*"))
-          (vterm-buf  (get-buffer-create "*sp-redir-vterm*"))
-          (input-buf  (get-buffer-create "*sp-redir-input*"))
-          (ws         "sp-redir-ws"))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put ws :vterm-buffer vterm-buf)
-            (agent-repl--ws-put ws :input-buffer input-buf)
-            (delete-other-windows)
-            (set-window-buffer (selected-window) work-buf)
-            (let ((drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
-              ;; Simulate selected window being the drawer (e.g. mouse-click
-              ;; landed here just before the agent opened).
-              (select-window drawer-win)
-              (cl-letf (((symbol-function '+workspace-current-name) (lambda () ws))
-                        ((symbol-function 'agent-repl--refresh-vterm) #'ignore)
-                        ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore))
-                ;; Should NOT error.
-                (agent-repl--show-panels))
-              ;; Drawer still alive.
-              (should (window-live-p drawer-win))
-              ;; Panels were created.
-              (should (get-buffer-window vterm-buf))
-              (should (get-buffer-window input-buf))))
-        (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
-              (list drawer-buf work-buf vterm-buf input-buf))))))
-
 ;;;; ---- Tests: stale-panel-windows ----
 
 (ert-deftest agent-repl-test-panels-stale-panel-windows-returns-foreign-panels ()
   "stale-panel-windows returns windows showing panels from a different workspace."
   (agent-repl-test--with-clean-state
-    (let ((foreign-buf (get-buffer-create "*agent-panel-other-ws*")))
+    (let ((foreign-buf (get-buffer-create "*agent-frontend-other-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4330,7 +2478,7 @@ otherwise signal `Cannot split side window' and leave panels half-shown."
 (ert-deftest agent-repl-test-panels-stale-panel-windows-nil-for-own-panels ()
   "stale-panel-windows returns nil when panels belong to the current workspace."
   (agent-repl-test--with-clean-state
-    (let ((own-buf (get-buffer-create "*agent-panel-my-ws*")))
+    (let ((own-buf (get-buffer-create "*agent-frontend-my-ws*")))
       (unwind-protect
           (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                     ((symbol-function 'window-list) (lambda (&rest _) (list (selected-window))))
@@ -4417,113 +2565,69 @@ the fallback buffer instead of erroring, then still reclaims the frame."
         (kill-buffer fallback)))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-restores-when-panels-were-visible ()
-  "ensure-own-panels-on-persp-switch re-shows panels when :panels-were-visible is set."
+  "ensure-own-panels-on-persp-switch re-shows panels when :panels-were-visible
+is set, dispatching through WS's own frontend (the webview + input layout)."
   (agent-repl-test--with-clean-state
-    (let ((show-called nil))
+    (let ((shown-ws nil))
       (agent-repl--ws-put "my-ws" :panels-were-visible t)
-      (let ((vterm-buf (get-buffer-create "*agent-panel-my-ws*"))
+      (let ((frontend-buf (get-buffer-create "*agent-frontend-my-ws*"))
             (input-buf (get-buffer-create "*agent-panel-input-my-ws*")))
         (unwind-protect
             (progn
-              (agent-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
+              (agent-repl--ws-put "my-ws" :frontend-buffer frontend-buf)
               (agent-repl--ws-put "my-ws" :input-buffer input-buf)
               (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                         ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                         ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                        ((symbol-function 'agent-repl--show-panels)
-                         (lambda () (setq show-called t))))
+                        ((symbol-function 'agent-repl--frontend-dispatch-show)
+                         (lambda (ws) (setq shown-ws ws))))
                 (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-                (should show-called)))
-          (kill-buffer vterm-buf)
+                (should (equal shown-ws "my-ws"))))
+          (kill-buffer frontend-buf)
           (kill-buffer input-buf))))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-noop-when-panels-already-visible ()
   "ensure-own-panels-on-persp-switch does not re-show if panels are already visible."
   (agent-repl-test--with-clean-state
-    (let ((show-called nil))
+    (let ((shown-ws nil))
       (agent-repl--ws-put "my-ws" :panels-were-visible t)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-                ((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (ws) (setq shown-ws ws))))
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should-not show-called)))))
+        (should-not shown-ws)))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-noop-when-no-stale-no-flag ()
   "ensure-own-panels-on-persp-switch is a no-op with no stale panels and no flag."
   (agent-repl-test--with-clean-state
-    (let ((show-called nil)
+    (let ((shown-ws nil)
           (delete-called nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t)))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (ws) (setq shown-ws ws)))
                 ((symbol-function 'delete-window)
                  (lambda (_w) (setq delete-called t))))
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should-not show-called)
+        (should-not shown-ws)
         (should-not delete-called)))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-skips-restore-when-buffers-dead ()
   "ensure-own-panels-on-persp-switch does not re-show if panel buffers are dead."
   (agent-repl-test--with-clean-state
-    (let ((show-called nil))
+    (let ((shown-ws nil))
       (agent-repl--ws-put "my-ws" :panels-were-visible t)
       ;; Buffers are nil (dead) — should not try to show.
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t))))
+                ((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (ws) (setq shown-ws ws))))
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should-not show-called)))))
-
-(ert-deftest agent-repl-test-panels-ensure-own-adds-input-when-output-visible ()
-  "ensure-own-panels-on-persp-switch adds only the input window (not a full
-rebuild) when the output window survived but the input window was dropped."
-  (agent-repl-test--with-clean-state
-    (let ((show-panels-called nil)
-          (add-input-called nil))
-      (agent-repl--ws-put "my-ws" :panels-were-visible t)
-      (let ((vterm-buf (get-buffer-create "*agent-panel-my-ws*"))
-            (input-buf (get-buffer-create "*agent-panel-input-my-ws*")))
-        (unwind-protect
-            (progn
-              (agent-repl--ws-put "my-ws" :vterm-buffer vterm-buf)
-              (agent-repl--ws-put "my-ws" :input-buffer input-buf)
-              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                        ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                        ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                        ((symbol-function 'agent-repl--vterm-visible-p) (lambda () t))
-                        ((symbol-function 'agent-repl--output-visible-input-hidden-p)
-                         (lambda () nil))
-                        ((symbol-function 'agent-repl--show-panels)
-                         (lambda () (setq show-panels-called t)))
-                        ((symbol-function 'agent-repl--show-input-beside-output)
-                         (lambda () (setq add-input-called t))))
-                (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-                (should add-input-called)
-                (should-not show-panels-called)))
-          (kill-buffer vterm-buf)
-          (kill-buffer input-buf))))))
-
-(ert-deftest agent-repl-test-panels-ensure-own-repairs-fullscreen-output-only ()
-  "ensure-own-panels-on-persp-switch repairs a fullscreen output-only frame via
-the trailing ensure-input-beside-output call, even when :panels-were-visible
-was never recorded."
-  (agent-repl-test--with-clean-state
-    (let ((repair-called nil))
-      ;; :panels-were-visible intentionally unset — the restore branch must
-      ;; not fire; only the trailing repair should.
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-input-beside-output)
-                 (lambda () (setq repair-called t))))
-        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should repair-called)))))
+        (should-not shown-ws)))))
 
 ;;;; ---- Tests: stale-window-buffers ----
 
@@ -4661,17 +2765,15 @@ was never recorded."
 (ert-deftest agent-repl-test-panels-reclaim-fullscreen-noop-no-buffers ()
   "reclaim-frame-fullscreen is a no-op when ws has no live panel buffers."
   (agent-repl-test--with-clean-state
-    (let ((show-called nil))
-      (cl-letf (((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t))))
+    (let ((shown nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
+                 (lambda (_ws) (setq shown t))))
         (agent-repl--reclaim-frame-fullscreen "my-ws")
-        (should-not show-called)))))
+        (should-not shown)))))
 
 (ert-deftest agent-repl-test-panels-reclaim-fullscreen-gui-shows-webview ()
-  "reclaim-frame-fullscreen reclaims a gui workspace through its frontend.
-The vterm buffer-liveness path must not run — a gui workspace has no
-vterm buffer, and the old vterm-only check silently skipped the
-reclaim, stranding foreign leftovers in the frame."
+  "reclaim-frame-fullscreen reclaims a gui workspace through its frontend
+when the webview buffer is live."
   (agent-repl-test--with-clean-state
     (let ((dispatched nil)
           (webview (get-buffer-create "*agent-frontend-my-ws*")))
@@ -4680,9 +2782,7 @@ reclaim, stranding foreign leftovers in the frame."
             (agent-repl--ws-put "my-ws" :frontend 'gui)
             (agent-repl--ws-put "my-ws" :frontend-buffer webview)
             (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
-                       (lambda (ws) (setq dispatched ws)))
-                      ((symbol-function 'agent-repl--show-panels)
-                       (lambda () (error "vterm path must not run for a gui ws"))))
+                       (lambda (ws) (setq dispatched ws))))
               (agent-repl--reclaim-frame-fullscreen "my-ws")
               (should (equal dispatched "my-ws"))))
         (kill-buffer webview)))))
@@ -4692,97 +2792,12 @@ reclaim, stranding foreign leftovers in the frame."
 No view exists to reclaim the frame with, so the layout is left as-is
 rather than booting a session as a side effect."
   (agent-repl-test--with-clean-state
-    (let ((dispatched nil)
-          (show-called nil))
+    (let ((dispatched nil))
       (agent-repl--ws-put "my-ws" :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-show)
-                 (lambda (_ws) (setq dispatched t)))
-                ((symbol-function 'agent-repl--show-panels)
-                 (lambda () (setq show-called t))))
+                 (lambda (_ws) (setq dispatched t))))
         (agent-repl--reclaim-frame-fullscreen "my-ws")
-        (should-not dispatched)
-        (should-not show-called)))))
-
-(ert-deftest agent-repl-test-panels-reclaim-fullscreen-shows-panels ()
-  "reclaim-frame-fullscreen shows own panels via show-panels when buffers live.
-show-panels itself clears the main area and lays the panels out filling
-the frame (fullscreen is the sole display format), so reclaim no longer
-needs a separate enter-fullscreen step."
-  (agent-repl-test--with-clean-state
-    (let ((show-called nil)
-          (vterm (get-buffer-create "*agent-panel-my-ws*"))
-          (input (get-buffer-create "*agent-panel-input-my-ws*")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "my-ws" :vterm-buffer vterm)
-            (agent-repl--ws-put "my-ws" :input-buffer input)
-            (cl-letf (((symbol-function 'agent-repl--show-panels)
-                       (lambda () (setq show-called t))))
-              (agent-repl--reclaim-frame-fullscreen "my-ws")
-              (should show-called)))
-        (kill-buffer vterm)
-        (kill-buffer input)))))
-
-;;;; ---- Tests: lone-output-window ----
-
-(ert-deftest agent-repl-test-panels-lone-output-window-returns-sole-output ()
-  "lone-output-window returns the sole non-side window showing an agent output buffer."
-  (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*agent-panel-my-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
-                    ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
-                    ((symbol-function 'window-buffer) (lambda (_w) out)))
-            (should (eq (agent-repl--lone-output-window) 'w1)))
-        (kill-buffer out)))))
-
-(ert-deftest agent-repl-test-panels-lone-output-window-nil-when-multiple ()
-  "lone-output-window returns nil when more than one non-side window is present."
-  (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*agent-panel-my-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1 w2)))
-                    ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
-                    ((symbol-function 'window-buffer) (lambda (_w) out)))
-            (should-not (agent-repl--lone-output-window)))
-        (kill-buffer out)))))
-
-(ert-deftest agent-repl-test-panels-lone-output-window-nil-non-agent ()
-  "lone-output-window returns nil when the sole non-side window shows a non-agent buffer."
-  (agent-repl-test--with-clean-state
-    (let ((reg (get-buffer-create "*regular-buffer*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
-                    ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
-                    ((symbol-function 'window-buffer) (lambda (_w) reg)))
-            (should-not (agent-repl--lone-output-window)))
-        (kill-buffer reg)))))
-
-(ert-deftest agent-repl-test-panels-lone-output-window-nil-input-buffer ()
-  "lone-output-window returns nil when the sole non-side window shows an agent input buffer."
-  (agent-repl-test--with-clean-state
-    (let ((inp (get-buffer-create "*agent-panel-input-my-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(w1)))
-                    ((symbol-function 'agent-repl-window--side-window-p) (lambda (_w) nil))
-                    ((symbol-function 'window-buffer) (lambda (_w) inp)))
-            (should-not (agent-repl--lone-output-window)))
-        (kill-buffer inp)))))
-
-(ert-deftest agent-repl-test-panels-lone-output-window-ignores-side-windows ()
-  "lone-output-window ignores side windows when finding the sole non-side output window."
-  (agent-repl-test--with-clean-state
-    (let ((out (get-buffer-create "*agent-panel-my-ws*"))
-          (drawer (get-buffer-create "*drawer*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'window-list) (lambda (&rest _) '(side main)))
-                    ((symbol-function 'agent-repl-window--side-window-p)
-                     (lambda (w) (eq w 'side)))
-                    ((symbol-function 'window-buffer)
-                     (lambda (w) (if (eq w 'main) out drawer))))
-            (should (eq (agent-repl--lone-output-window) 'main)))
-        (kill-buffer out)
-        (kill-buffer drawer)))))
+        (should-not dispatched)))))
 
 ;;;; ---- Tests: ensure-own reclaim/detach on foreign panels ----
 
@@ -4802,7 +2817,6 @@ needs a separate enter-fullscreen step."
                     ((symbol-function 'agent-repl--detach-foreign-panel-buffers)
                      (lambda (_ws bufs) (setq detached bufs)))
                     ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                    ((symbol-function 'agent-repl--ensure-input-beside-output) #'ignore)
                     ((symbol-function 'agent-repl--reclaim-frame-fullscreen) #'ignore))
             (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
             (should (equal detached (list foreign))))
@@ -4820,22 +2834,19 @@ needs a separate enter-fullscreen step."
                 ((symbol-function 'delete-window) (lambda (_w) nil))
                 ((symbol-function 'agent-repl--detach-foreign-panel-buffers) #'ignore)
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-input-beside-output) #'ignore)
                 ((symbol-function 'agent-repl--reclaim-frame-fullscreen)
                  (lambda (ws) (setq reclaimed ws))))
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should (equal reclaimed "my-ws"))))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-no-reclaim-when-no-stale ()
-  "ensure-own-panels-on-persp-switch does not reclaim or detach when no stale panels and no lone output."
+  "ensure-own-panels-on-persp-switch does not reclaim or detach when no stale panels are present."
   (agent-repl-test--with-clean-state
     (let ((reclaimed nil)
           (detached nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                 ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                ((symbol-function 'agent-repl--lone-output-window) (lambda () nil))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-input-beside-output) #'ignore)
                 ((symbol-function 'agent-repl--detach-foreign-panel-buffers)
                  (lambda (_ws _bufs) (setq detached t)))
                 ((symbol-function 'agent-repl--reclaim-frame-fullscreen)
@@ -4843,39 +2854,6 @@ needs a separate enter-fullscreen step."
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should-not reclaimed)
         (should-not detached)))))
-
-(ert-deftest agent-repl-test-panels-ensure-own-reclaims-fullscreen-when-lone-output ()
-  "ensure-own-panels-on-persp-switch reclaims fullscreen for a lone output window with no stale panels."
-  (agent-repl-test--with-clean-state
-    (let ((reclaimed nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                ((symbol-function 'agent-repl--lone-output-window) (lambda () 'some-win))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-input-beside-output) #'ignore)
-                ((symbol-function 'agent-repl--reclaim-frame-fullscreen)
-                 (lambda (ws) (setq reclaimed ws))))
-        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should (equal reclaimed "my-ws"))))))
-
-(ert-deftest agent-repl-test-panels-ensure-own-reclaims-once-when-stale-and-lone-output ()
-  "ensure-own-panels-on-persp-switch reclaims exactly once when both stale and lone output are present."
-  (agent-repl-test--with-clean-state
-    (let ((reclaim-count 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                ((symbol-function 'agent-repl--stale-panel-windows)
-                 (lambda () (list (selected-window))))
-                ((symbol-function 'agent-repl--stale-window-buffers) (lambda (_w) nil))
-                ((symbol-function 'agent-repl--lone-output-window) (lambda () 'some-win))
-                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
-                ((symbol-function 'delete-window) (lambda (_w) nil))
-                ((symbol-function 'agent-repl--detach-foreign-panel-buffers) #'ignore)
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-input-beside-output) #'ignore)
-                ((symbol-function 'agent-repl--reclaim-frame-fullscreen)
-                 (lambda (_ws) (setq reclaim-count (1+ reclaim-count)))))
-        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        (should (= reclaim-count 1))))))
 
 ;;;; ---- Tests: before-persp-deactivate records panels-were-visible ----
 
@@ -4898,29 +2876,5 @@ needs a separate enter-fullscreen step."
               ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))
-
-;;;; ---- Tests: vterm frontend registration ----
-
-(ert-deftest agent-repl-test-panels-vterm-declares-bare-metal-only ()
-  "The vterm frontend declares `:bare-metal' alone.
-The `:sandbox' environment was retired (it never sandboxed anything —
-`agent-repl--build-start-cmd' always returned `:sandboxed-p nil'), so the
-environment axis collapsed to a single value and no frontend declares more."
-  ;; Act / Assert
-  (should (equal (agent-repl-frontend-supported-envs (agent-repl-frontend-get 'vterm))
-                 '(:bare-metal))))
-
-(ert-deftest agent-repl-test-panels-vterm-boot-threads-the-creation-hints ()
-  "The vterm boot capability passes the project-dir and env hints to initialize-agent."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((got nil))
-      (cl-letf (((symbol-function 'agent-repl--initialize-agent)
-                 (lambda (ws &optional dir env) (setq got (list ws dir env)))))
-        ;; Act
-        (funcall (agent-repl-frontend-boot-fn (agent-repl-frontend-get 'vterm))
-                 "ws1" "/tmp/wt" :bare-metal)
-        ;; Assert
-        (should (equal got '("ws1" "/tmp/wt" :bare-metal)))))))
 
 ;;; test-panels.el ends here

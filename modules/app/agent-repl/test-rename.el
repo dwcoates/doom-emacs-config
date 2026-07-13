@@ -232,52 +232,58 @@ is stale and must be re-resolved on next read."
 
 ;;;; ---- Tests: update-buffers ----
 
-(ert-deftest agent-repl-test-rename-update-buffers-renames-vterm-and-input ()
-  "Vterm and input buffers are renamed to the new ws's panel names."
+(ert-deftest agent-repl-test-rename-update-buffers-renames-webview-and-input ()
+  "Webview and input buffers are renamed to the new ws's panel names.
+The webview buffer lives in its own `*agent-frontend-WS*' namespace
+\(named via `agent-repl--frontend-webview-buffer-name', not
+`agent-repl--buffer-name') — distinct from the input composer's
+`*agent-panel-input-WS*' scheme.  Renaming the webview is new behavior
+per rename.el's commentary: it used to rename only the vterm/input
+pair, so a renamed workspace's webview kept its old name."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*agent-panel-old*"))
+    (let ((wbuf (get-buffer-create "*agent-frontend-old*"))
           (ibuf (get-buffer-create "*agent-panel-input-old*")))
       (unwind-protect
           (progn
-            (puthash "new" (list :vterm-buffer vbuf
+            (puthash "new" (list :frontend-buffer wbuf
                                  :input-buffer ibuf
                                  :project-dir "/tmp/new")
                      agent-repl--workspaces)
             (agent-repl--rename-update-buffers "old" "new" "/tmp/new")
-            (should (string= (buffer-name vbuf) "*agent-panel-new*"))
+            (should (string= (buffer-name wbuf) "*agent-frontend-new*"))
             (should (string= (buffer-name ibuf) "*agent-panel-input-new*")))
-        (when (buffer-live-p vbuf) (kill-buffer vbuf))
+        (when (buffer-live-p wbuf) (kill-buffer wbuf))
         (when (buffer-live-p ibuf) (kill-buffer ibuf))))))
 
 (ert-deftest agent-repl-test-rename-update-buffers-rewrites-owning-workspace ()
   "Buffer-local `agent-repl--owning-workspace' is repointed to the new ws."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*agent-panel-old*")))
+    (let ((wbuf (get-buffer-create "*agent-frontend-old*")))
       (unwind-protect
           (progn
-            (with-current-buffer vbuf
+            (with-current-buffer wbuf
               (setq-local agent-repl--owning-workspace "old"))
-            (puthash "new" (list :vterm-buffer vbuf
+            (puthash "new" (list :frontend-buffer wbuf
                                  :project-dir "/tmp/new")
                      agent-repl--workspaces)
             (agent-repl--rename-update-buffers "old" "new" "/tmp/new")
-            (should (equal (buffer-local-value 'agent-repl--owning-workspace vbuf)
+            (should (equal (buffer-local-value 'agent-repl--owning-workspace wbuf)
                            "new")))
-        (when (buffer-live-p vbuf) (kill-buffer vbuf))))))
+        (when (buffer-live-p wbuf) (kill-buffer wbuf))))))
 
 (ert-deftest agent-repl-test-rename-update-buffers-updates-default-directory ()
-  "Vterm buffer's `default-directory' is repointed to the new path."
+  "Webview buffer's `default-directory' is repointed to the new path."
   (agent-repl-test--with-clean-state
-    (let ((vbuf (get-buffer-create "*agent-panel-old*")))
+    (let ((wbuf (get-buffer-create "*agent-frontend-old*")))
       (unwind-protect
           (progn
-            (puthash "new" (list :vterm-buffer vbuf
+            (puthash "new" (list :frontend-buffer wbuf
                                  :project-dir "/tmp/newdir")
                      agent-repl--workspaces)
             (agent-repl--rename-update-buffers "old" "new" "/tmp/newdir")
-            (should (equal (buffer-local-value 'default-directory vbuf)
+            (should (equal (buffer-local-value 'default-directory wbuf)
                            (file-name-as-directory "/tmp/newdir"))))
-        (when (buffer-live-p vbuf) (kill-buffer vbuf))))))
+        (when (buffer-live-p wbuf) (kill-buffer wbuf))))))
 
 ;;;; ---- Tests: update-history ----
 

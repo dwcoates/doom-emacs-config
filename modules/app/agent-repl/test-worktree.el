@@ -484,19 +484,39 @@ the rev-parse comparison and the checkout invocation."
 ;;;; ---- Tests: dispatch-prompt-command ----
 
 (ert-deftest agent-repl-test-dispatch-prompt-enqueues-when-no-buffer ()
-  "When no vterm buffer exists, prompt is enqueued on :pending-prompts."
+  "When the workspace has no state at all (never registered), prompt is
+enqueued on :pending-prompts."
   (agent-repl-test--with-clean-state
     (agent-repl--dispatch-prompt-command "ws1" "hello")
     (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("hello")))))
 
 (ert-deftest agent-repl-test-dispatch-prompt-enqueues-when-not-ready ()
-  "When vterm buffer exists but is not ready, prompt is enqueued."
+  "When the workspace has no live running agent session, the prompt is enqueued."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-buffer "*agent-panel-test-vterm*"
-      (setq-local agent-repl--ready nil)
-      (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-      (agent-repl--dispatch-prompt-command "ws1" "hello")
-      (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("hello"))))))
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--dispatch-prompt-command "ws1" "hello")
+    (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("hello")))))
+
+(ert-deftest agent-repl-test-dispatch-prompt-sends-immediately-when-running ()
+  "When the workspace has a live running agent session, the prompt is sent
+immediately via `agent-repl--send' rather than enqueued.
+
+Regression: the old body gated on the vterm-only buffer-local
+`agent-repl--ready', which is always nil for a gui workspace (no
+`:vterm-buffer' is ever set), so it ALWAYS enqueued -- a gui workspace's
+prompt could never be delivered immediately no matter how long its
+session had been running.  This test's workspace has a genuinely live
+session (`:frontend-session-id' bound) and fails against that old body."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend 'gui)
+    (agent-repl--ws-put "ws1" :frontend-session-id "sid-1")
+    (let (sent-prompt sent-ws)
+      (cl-letf (((symbol-function 'agent-repl--send)
+                 (lambda (prompt ws) (setq sent-prompt prompt sent-ws ws))))
+        (agent-repl--dispatch-prompt-command "ws1" "hello")
+        (should (equal sent-prompt "hello"))
+        (should (equal sent-ws "ws1"))
+        (should-not (agent-repl--ws-get "ws1" :pending-prompts))))))
 
 (ert-deftest agent-repl-test-dispatch-prompt-appends-to-existing ()
   "Multiple prompts are appended to :pending-prompts in order."
@@ -1199,7 +1219,7 @@ merge-completion-only behavior owned by `--workspace-merge-do'."
 (ert-deftest agent-repl-test-handle-close-command-routes-through-gns-gating ()
   "`--handle-close-command' must dispatch via `--gns-sockets-close-then'
 so the in-workspace agent is sent `/gns-sockets close' and given a
-chance to release sockets before its vterm dies."
+chance to release sockets before its session dies."
   (let ((gating-ws :unset)
         (gating-teardown :unset))
     (cl-letf (((symbol-function 'agent-repl--gns-sockets-close-then)
@@ -1333,9 +1353,16 @@ Models a workspace whose worktree was removed by `finish'."
 
 ;;;; ---- Tests: gns-sockets-close-then ----
 
-(ert-deftest agent-repl-test-gns-sockets-close-then-no-vterm-runs-teardown-directly ()
-  "Without a live vterm buffer, `--gns-sockets-close-then' must run the
-teardown thunk immediately — there is no agent to drain."
+(ert-deftest agent-repl-test-gns-sockets-close-then-unregistered-ws-runs-teardown-directly ()
+  "For a bare, unregistered workspace, `--gns-sockets-close-then' must run
+the teardown thunk immediately — there is no agent to drain.
+
+Runs through the REAL (unstubbed) `agent-repl--agent-running-p', which is
+exactly the regression this function pins: the old body gated on the
+vterm-only buffer-local `agent-repl--ready' and so happened to reach the
+same answer here, but for the wrong reason -- see the `-gui-running'
+tests below for the fixture where the old and new bodies actually
+disagree."
   (agent-repl-test--with-clean-state
     (puthash "ws" '() agent-repl--workspaces)
     (let ((called nil)
@@ -1347,82 +1374,74 @@ teardown thunk immediately — there is no agent to drain."
         (should called)
         (should-not sent)))))
 
-(ert-deftest agent-repl-test-gns-sockets-close-then-not-ready-runs-teardown-directly ()
-  "A live vterm buffer that has not yet set `agent-repl--ready' must
-still fall through to immediate teardown — the prompt would otherwise
-queue on `:pending-prompts' and never drain before close."
+(ert-deftest agent-repl-test-gns-sockets-close-then-gui-not-running-runs-teardown-directly ()
+  "A gui workspace with no live daemon session binding must still fall
+through to immediate teardown — the prompt would otherwise queue on
+`:pending-prompts' and never drain before close."
   (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-vterm*"))
-          (called nil)
+    (agent-repl--ws-put "ws" :frontend 'gui)
+    (let ((called nil)
           (sent nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (setq-local agent-repl--ready nil))
-            (puthash "ws" (list :vterm-buffer buf) agent-repl--workspaces)
-            (cl-letf (((symbol-function 'agent-repl--send)
-                       (lambda (&rest _) (setq sent t))))
-              (agent-repl--gns-sockets-close-then
-               "ws" (lambda () (setq called t)))
-              (should called)
-              (should-not sent)))
-        (kill-buffer buf)))))
+      (cl-letf (((symbol-function 'agent-repl--send)
+                 (lambda (&rest _) (setq sent t))))
+        (agent-repl--gns-sockets-close-then
+         "ws" (lambda () (setq called t)))
+        (should called)
+        (should-not sent)))))
 
-(ert-deftest agent-repl-test-gns-sockets-close-then-ready-sends-prompt ()
-  "With a live, ready vterm, `--gns-sockets-close-then' must dispatch
-`agent-repl-gns-sockets-close-prompt' via `--send' and defer teardown."
+(ert-deftest agent-repl-test-gns-sockets-close-then-gui-running-sends-prompt ()
+  "With a live, running gui session, `--gns-sockets-close-then' must
+dispatch `agent-repl-gns-sockets-close-prompt' via `--send' and defer
+teardown.
+
+Regression: the old body gated on the vterm-only buffer-local
+`agent-repl--ready', which is always nil for a gui workspace (no
+`:vterm-buffer' is ever set), so it ALWAYS took the immediate-teardown
+branch and silently skipped the GNS socket drain for every gui
+workspace close.  This test's workspace has a genuinely live session
+\(`:frontend-session-id' bound) and fails against that old body."
   (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-vterm*"))
-          (sent-prompt :unset)
+    (agent-repl--ws-put "ws" :frontend 'gui)
+    (agent-repl--ws-put "ws" :frontend-session-id "sid-1")
+    (let ((sent-prompt :unset)
           (sent-ws :unset)
           (teardown-called nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (setq-local agent-repl--ready t))
-            (puthash "ws" (list :vterm-buffer buf) agent-repl--workspaces)
-            (cl-letf (((symbol-function 'agent-repl--send)
-                       (lambda (prompt ws &optional _force _on-settle)
-                         (setq sent-prompt prompt
-                               sent-ws ws)))
-                      ((symbol-function 'run-at-time)
-                       (lambda (&rest _) nil)))
-              (agent-repl--gns-sockets-close-then
-               "ws" (lambda () (setq teardown-called t)))
-              (should (equal sent-prompt agent-repl-gns-sockets-close-prompt))
-              (should (equal sent-ws "ws"))
-              (should-not teardown-called)))
-        (kill-buffer buf)))))
+      (cl-letf (((symbol-function 'agent-repl--send)
+                 (lambda (prompt ws &optional _force _on-settle)
+                   (setq sent-prompt prompt
+                         sent-ws ws)))
+                ((symbol-function 'run-at-time)
+                 (lambda (&rest _) nil)))
+        (agent-repl--gns-sockets-close-then
+         "ws" (lambda () (setq teardown-called t)))
+        (should (equal sent-prompt agent-repl-gns-sockets-close-prompt))
+        (should (equal sent-ws "ws"))
+        (should-not teardown-called)))))
 
 (ert-deftest agent-repl-test-gns-sockets-close-then-on-settle-schedules-poll ()
   "The `on-settle' callback handed to `--send' must schedule the first
 `--gns-sockets-close-poll' via `run-at-time' so the prompt_submit hook
 has time to fire before state is polled."
   (agent-repl-test--with-clean-state
-    (let ((buf (generate-new-buffer " *test-vterm*"))
-          (scheduled-fn :unset)
+    (agent-repl--ws-put "ws" :frontend 'gui)
+    (agent-repl--ws-put "ws" :frontend-session-id "sid-1")
+    (let ((scheduled-fn :unset)
           (scheduled-delay :unset)
           (captured-on-settle nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer buf
-              (setq-local agent-repl--ready t))
-            (puthash "ws" (list :vterm-buffer buf) agent-repl--workspaces)
-            (cl-letf (((symbol-function 'agent-repl--send)
-                       (lambda (_prompt _ws &optional _force on-settle)
-                         (setq captured-on-settle on-settle)))
-                      ((symbol-function 'run-at-time)
-                       (lambda (delay _repeat fn &rest _args)
-                         (setq scheduled-delay delay
-                               scheduled-fn fn))))
-              (agent-repl--gns-sockets-close-then
-               "ws" (lambda () nil))
-              (should (functionp captured-on-settle))
-              (funcall captured-on-settle)
-              (should (equal scheduled-delay
-                             agent-repl-gns-sockets-close-settle-delay))
-              (should (eq scheduled-fn #'agent-repl--gns-sockets-close-poll))))
-        (kill-buffer buf)))))
+      (cl-letf (((symbol-function 'agent-repl--send)
+                 (lambda (_prompt _ws &optional _force on-settle)
+                   (setq captured-on-settle on-settle)))
+                ((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest _args)
+                   (setq scheduled-delay delay
+                         scheduled-fn fn))))
+        (agent-repl--gns-sockets-close-then
+         "ws" (lambda () nil))
+        (should (functionp captured-on-settle))
+        (funcall captured-on-settle)
+        (should (equal scheduled-delay
+                       agent-repl-gns-sockets-close-settle-delay))
+        (should (eq scheduled-fn #'agent-repl--gns-sockets-close-poll))))))
 
 ;;;; ---- Tests: gns-sockets-close-poll ----
 
@@ -4714,7 +4733,7 @@ persp-kill and the resulting tombstone marker."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
-      (cl-letf (((symbol-function 'agent-repl--kill-vterm-process) (lambda (_b) nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
                 ((symbol-function 'persp-kill) (lambda (ws) (setq persp-killed ws))))
         (agent-repl--finish-workspace "ws1")
@@ -4732,7 +4751,7 @@ persp-kill and the resulting tombstone marker."
           (progn
             (agent-repl--ws-put "ws1" :worktree-p t)
             (agent-repl--ws-put "ws1" :project-dir (file-name-as-directory tmpdir))
-            (cl-letf (((symbol-function 'agent-repl--kill-vterm-process) (lambda (_b) nil))
+            (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                       ((symbol-function '+workspace-list-names) (lambda () '("ws1")))
                       ((symbol-function 'persp-kill) (lambda (_ws) nil))
                       ((symbol-function 'agent-repl--remove-git-worktree)
@@ -4749,32 +4768,41 @@ removed); we pin both the name normalization and the resulting
 liveness flip."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "foo" :project-dir "/tmp/fake")
-    (cl-letf (((symbol-function 'agent-repl--kill-vterm-process) (lambda (_b) nil))
+    (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
               ((symbol-function '+workspace-list-names) (lambda () '("foo")))
               ((symbol-function 'persp-kill) (lambda (_ws) nil)))
       (agent-repl--finish-workspace "DWC/foo")
       (should-not (agent-repl--ws-live-p "foo"))
       (should (agent-repl--ws-get "foo" :nuked-at)))))
 
-(ert-deftest agent-repl-test-finish-workspace-kills-vterm ()
-  "Vterm buffer process is killed when present."
+(ert-deftest agent-repl-test-finish-workspace-kills-through-frontend-registry ()
+  "finish-workspace kills WS's agent session through the frontend
+registry's `:kill-fn' dispatch, NOT a hardcoded vterm-process kill.
+
+Regression: the old body only ever called `agent-repl--kill-vterm-process',
+and only `when' a `:vterm-buffer' was present -- for a gui workspace that
+key is never set, so a gui workspace's daemon session (and its webview)
+was NEVER killed on finish, orphaning it forever.  This test fails
+against that old body: a gui workspace here has no `:vterm-buffer' at
+all, yet the kill must still fire, through `agent-repl--gui-kill' (the
+registered gui frontend's `:kill-fn')."
   (agent-repl-test--with-clean-state
-    (let ((killed-buf nil))
-      (agent-repl-test--with-temp-buffer "*agent-panel-test-vterm*"
-        (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
-        (cl-letf (((symbol-function 'agent-repl--kill-vterm-process)
-                   (lambda (b) (setq killed-buf b)))
-                  ((symbol-function '+workspace-list-names) (lambda () nil))
-                  ((symbol-function 'persp-kill) (lambda (_ws) nil)))
-          (agent-repl--finish-workspace "ws1")
-          (should (equal killed-buf (get-buffer "*agent-panel-test-vterm*"))))))))
+    (let ((killed-ws nil))
+      (agent-repl--ws-put "ws1" :frontend 'gui)
+      (agent-repl--ws-put "ws1" :frontend-session-id "sid-1")
+      (cl-letf (((symbol-function 'agent-repl--gui-kill)
+                 (lambda (ws) (setq killed-ws ws)))
+                ((symbol-function '+workspace-list-names) (lambda () nil))
+                ((symbol-function 'persp-kill) (lambda (_ws) nil)))
+        (agent-repl--finish-workspace "ws1")
+        (should (equal killed-ws "ws1"))))))
 
 (ert-deftest agent-repl-test-finish-workspace-no-persp-kill-if-not-listed ()
   "If workspace is not in +workspace-list-names, persp-kill is not called."
   (agent-repl-test--with-clean-state
     (let ((persp-killed nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
-      (cl-letf (((symbol-function 'agent-repl--kill-vterm-process) (lambda (_b) nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-kill) #'ignore)
                 ((symbol-function '+workspace-list-names) (lambda () '("other")))
                 ((symbol-function 'persp-kill) (lambda (ws) (setq persp-killed ws))))
         (agent-repl--finish-workspace "ws1")
@@ -5240,35 +5268,14 @@ override must precede the default it replaces."
 (ert-deftest agent-repl-test-setup-worktree-session-boots-through-the-default-frontend ()
   "Without NO-AGENT, a new worktree boots under `agent-repl-default-frontend' (gui)."
   ;; Arrange
-  (let ((gui-booted nil)
-        (vterm-booted nil))
+  (let ((gui-booted nil))
     (agent-repl-test--with-worktree-boot-stubs
         (((symbol-function 'agent-repl--gui-boot)
-          (lambda (ws &rest _) (setq gui-booted ws)))
-         ((symbol-function 'agent-repl--initialize-agent)
-          (lambda (&rest _) (setq vterm-booted t))))
-      ;; Act
-      (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws")
-      ;; Assert — the generated workspace is born in the gui, not the vterm.
-      (should (equal gui-booted "ws"))
-      (should-not vterm-booted))))
-
-(ert-deftest agent-repl-test-setup-worktree-session-boots-vterm-for-a-vterm-workspace ()
-  "A workspace that chose vterm boots the vterm, not the default gui."
-  ;; Arrange
-  (let ((vterm-booted nil)
-        (gui-booted nil))
-    (agent-repl-test--with-worktree-boot-stubs
-        (((symbol-function 'agent-repl--initialize-agent)
-          (lambda (ws &rest _) (setq vterm-booted ws)))
-         ((symbol-function 'agent-repl--gui-boot)
-          (lambda (&rest _) (setq gui-booted t))))
-      (agent-repl--ws-choose-frontend "ws" 'vterm)
+          (lambda (ws &rest _) (setq gui-booted ws))))
       ;; Act
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws")
       ;; Assert
-      (should (equal vterm-booted "ws"))
-      (should-not gui-booted))))
+      (should (equal gui-booted "ws")))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-does-not-escape ()
   "A boot failure (e.g. the agent binary is missing) is caught,
@@ -5305,16 +5312,16 @@ the tab/drawer surface the failure instead of it vanishing silently."
 
 (ert-deftest agent-repl-test-setup-worktree-session-no-agent-skips-boot ()
   "With NO-AGENT, setup hydrates env via `initialize-ws-env' and never boots the agent."
-  (let ((init-agent-called nil)
+  (let ((boot-called nil)
         (init-env-called nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--initialize-agent)
-               (lambda (&rest _) (setq init-agent-called t)))
+              ((symbol-function 'agent-repl--frontend-boot-session)
+               (lambda (&rest _) (setq boot-called t)))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) (setq init-env-called t))))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
-      (should-not init-agent-called)
+      (should-not boot-called)
       (should init-env-called))))
 
 (ert-deftest agent-repl-test-setup-worktree-session-no-agent-still-registers-worktree ()
@@ -5322,8 +5329,8 @@ the tab/drawer surface the failure instead of it vanishing silently."
   (let ((registered nil))
     (cl-letf (((symbol-function 'agent-repl--register-worktree-ws)
                (lambda (_ws-id &optional _ws) (setq registered t)))
-              ((symbol-function 'agent-repl--initialize-agent)
-               (lambda (&rest _) (error "should not boot Claude")))
+              ((symbol-function 'agent-repl--frontend-boot-session)
+               (lambda (&rest _) (error "should not boot the agent")))
               ((symbol-function 'agent-repl--initialize-ws-env)
                (lambda (&rest _) nil)))
       (agent-repl--setup-worktree-session "id" "/tmp/wt/" "ws" t)
@@ -6298,16 +6305,6 @@ triggers the master-worktree lookup."
   (should (equal (agent-repl--build-preemptive-prompt "do the thing")
                  (concat (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
                          "do the thing"))))
-
-(ert-deftest agent-repl-test-build-preemptive-prompt-unmarks-to-the-agent-message ()
-  "Unmarking the composed prompt yields exactly the message the agent must read.
-The markers are annotation, never content: dropping them must leave the
-preamble + task + gate concatenation the agent always received."
-  (should (equal (agent-repl--meta-unmark
-                  (agent-repl--build-preemptive-prompt "do the thing" "\n\nWRAP-UP GATE"))
-                 (concat agent-repl--autonomous-prompt-prefix
-                         "do the thing"
-                         "\n\nWRAP-UP GATE"))))
 
 ;;;; ---- Tests: autonomous-prompt-prefix content ----
 
@@ -7738,7 +7735,7 @@ showing ❌ despite the latest run landing cleanly."
 (ert-deftest agent-repl-test-workspace-merge-do-sets-repl-state-merged-on-success ()
   "After a successful cherry-pick, `:repl-state' is set to `:merged'
 so the 🔀 badge survives the post-nuke poll cycle that would
-otherwise mark the (now-vterm-less) workspace `:dead'."
+otherwise mark the (now-session-less) workspace `:dead'."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -7876,7 +7873,7 @@ just aborted."
 (ert-deftest agent-repl-test-workspace-merge-do-routes-close-through-gns-gating ()
   "Successful merge must dispatch the editor-side close via
 `--gns-sockets-close-then' so the in-workspace agent is sent
-`/gns-sockets close' before its vterm dies.  The teardown thunk
+`/gns-sockets close' before its session dies.  The teardown thunk
 forwarded to the gate must call `--close-workspace' with
 `preserve-entry'."
   (agent-repl-test--with-clean-state
@@ -7938,7 +7935,7 @@ explicit drawer `x' (`--finish-workspace') removes it."
 (ert-deftest agent-repl-test-workspace-merge-do-defers-success-teardown ()
   "Success-path teardown (gns-sockets-close-then -> close-workspace) is
 routed through `agent-repl--defer-to-main-thread' so the perspective
-kill, vterm kill, and buffer cleanup all run on the main thread.  This
+kill, agent session kill, and buffer cleanup all run on the main thread.  This
 is what makes `--workspace-merge-do' safe to execute from the worker
 thread spawned by `agent-repl--workspace-merge-async'.
 
@@ -8028,8 +8025,8 @@ Conflict-specific errors go through a different path — see
   "When the cherry-pick raises `agent-repl-merge-conflict-error', the
 target workspace flips to `:repl-state :merge-conflict' (not `:dead')
 so the drawer renders the 💥 badge.  `:agent-state' is preserved
-because the vterm is still alive — the user can keep typing after
-resolving the conflict externally."
+because the agent session is still alive — the user can keep typing
+after resolving the conflict externally."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '(:agent-state :thinking) agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -8045,7 +8042,8 @@ resolving the conflict externally."
       (should-error (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
                     :type 'agent-repl-merge-conflict-error)
       (should (eq (agent-repl--ws-get "other-ws" :repl-state) :merge-conflict))
-      ;; vterm-alive workspace should keep its agent-state through a conflict
+      ;; A workspace with a live agent session should keep its agent-state
+      ;; through a conflict.
       (should (eq (agent-repl--ws-get "other-ws" :agent-state) :thinking)))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-clears-prior-merge-conflict-on-retry ()
@@ -8089,7 +8087,7 @@ other repl-states are preserved."
     (should (eq (agent-repl--ws-get "ws" :repl-state) :merge-conflict))
     (should (null (agent-repl--ws-get "ws" :merging)))
     (should (null (agent-repl--ws-get "ws" :merge-completed)))
-    ;; :agent-state must remain — vterm is still alive on a conflict
+    ;; :agent-state must remain — the agent session is still alive on a conflict
     (should (eq (agent-repl--ws-get "ws" :agent-state) :thinking))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-does-not-set-merge-completed-on-error ()
@@ -11359,9 +11357,10 @@ prompt onto `agent-repl--oneshot-amended-prompts' (FIFO)."
           (should (null (plist-get agent-repl--oneshot-amended-prompts :doom))))))))
 
 (ert-deftest agent-repl-test-oneshot-amend-errors-when-ws-gone ()
-  "When the recorded workspace dirname no longer exists (no vterm
-buffer AND not in the perspective list), amend surfaces a user-error
-rather than persisting a ghost `:pending-prompts' entry."
+  "When the recorded workspace dirname is not in the perspective list,
+amend surfaces a user-error rather than persisting a ghost
+`:pending-prompts' entry.  Unconditional check -- there is no
+`:vterm-buffer'-present escape hatch that could skip it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-oneshot-tracking-state
       (setq agent-repl--oneshot-last-ws

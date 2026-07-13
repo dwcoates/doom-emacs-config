@@ -2,13 +2,13 @@
 
 ;;; Commentary:
 
-;; Make Claude panel buffers (vterm + input) unselectable through the
-;; interactive buffer-cycling commands.  Emacs's `next-buffer',
-;; `previous-buffer', and the replacement-picker that runs after
-;; `kill-buffer' (and bury-buffer) all consult
-;; `switch-to-prev-buffer-skip'.  We install a predicate there so those
-;; paths skip Claude panels and fall through to the next eligible
-;; buffer in the window's history.
+;; Make Claude panel buffers (the input composer and the webview)
+;; unselectable through the interactive buffer-cycling commands.
+;; Emacs's `next-buffer', `previous-buffer', and the
+;; replacement-picker that runs after `kill-buffer' (and bury-buffer)
+;; all consult `switch-to-prev-buffer-skip'.  We install a predicate
+;; there so those paths skip Claude panels and fall through to the
+;; next eligible buffer in the window's history.
 ;;
 ;; Programmatic selection (`switch-to-buffer', `display-buffer',
 ;; `pop-to-buffer-same-window' invoked by code) is unaffected — those
@@ -22,9 +22,10 @@
 
 (defun agent-repl--prev-buffer-skip-agent-panel (_window buffer _bury-or-kill)
   "Predicate for `switch-to-prev-buffer-skip'.
-Return non-nil when BUFFER is a Claude panel buffer (vterm or input)
-so it is skipped by `next-buffer', `previous-buffer', and the
-replacement chooser invoked after `kill-buffer'."
+Return non-nil when BUFFER is a Claude panel buffer (the input
+composer or the webview) so it is skipped by `next-buffer',
+`previous-buffer', and the replacement chooser invoked after
+`kill-buffer'."
   (and (buffer-live-p buffer)
        (agent-repl--agent-panel-buffer-p buffer)))
 
