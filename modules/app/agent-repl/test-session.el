@@ -579,16 +579,26 @@ wrapper to an error-on-call lambda."
 (ert-deftest agent-repl-test-assemble-cmd-bare-metal ()
   "assemble-cmd should produce a plain `claude' command."
   (should (equal (agent-repl--assemble-cmd "--resume abc")
-                 "claude --resume abc")))
+                 "AGENT_REPL_OWNED=1 claude --resume abc")))
 
 (ert-deftest agent-repl-test-assemble-cmd-no-flags ()
   "assemble-cmd with empty flags should produce clean command."
-  (should (equal (agent-repl--assemble-cmd "") "claude")))
+  (should (equal (agent-repl--assemble-cmd "") "AGENT_REPL_OWNED=1 claude")))
 
 (ert-deftest agent-repl-test-assemble-cmd-config-dir ()
   "assemble-cmd prepends CLAUDE_CONFIG_DIR when config-dir is given."
   (should (equal (agent-repl--assemble-cmd "--resume abc" "/home/u/.claude-cc")
-                 "CLAUDE_CONFIG_DIR=/home/u/.claude-cc claude --resume abc")))
+                 "AGENT_REPL_OWNED=1 CLAUDE_CONFIG_DIR=/home/u/.claude-cc claude --resume abc")))
+
+(ert-deftest agent-repl-test-assemble-cmd-always-marks-ownership ()
+  "Every module-launched CLI carries AGENT_REPL_OWNED=1.
+The hook scripts stamp the sentinel ownership marker from it, which is
+what stops a foreign claude in the same cwd from hijacking the
+workspace's durable session id."
+  ;; Act / Assert — with and without a config dir.
+  (should (string-prefix-p "AGENT_REPL_OWNED=1 " (agent-repl--assemble-cmd "")))
+  (should (string-prefix-p "AGENT_REPL_OWNED=1 "
+                           (agent-repl--assemble-cmd "--resume abc" "/cc"))))
 
 (ert-deftest agent-repl-test-assemble-cmd-never-sandbox ()
   "assemble-cmd never emits a claude-sandbox invocation, even with a config-dir."
@@ -2301,7 +2311,8 @@ restart (the lazy-start path applies its defaults instead)."
       (cl-letf (((symbol-function 'agent-repl--get-sandbox-image)
                  (lambda (_ws) nil)))
         (let ((result (agent-repl--build-start-cmd "ws1")))
-          (should (equal (plist-get result :cmd) "claude --permission-mode auto"))
+          (should (equal (plist-get result :cmd)
+                         "AGENT_REPL_OWNED=1 claude --permission-mode auto"))
           (should-not (plist-get result :sandboxed-p)))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-uses-ws-model ()
@@ -2393,7 +2404,7 @@ restart (the lazy-start path applies its defaults instead)."
                  (lambda (_ws) nil)))
         (let ((result (agent-repl--build-start-cmd "ws1")))
           (should (equal (plist-get result :cmd)
-                         "claude --permission-mode auto --system-prompt \".\"")))))))
+                         "AGENT_REPL_OWNED=1 claude --permission-mode auto --system-prompt \".\"")))))))
 
 (ert-deftest agent-repl-test-build-start-cmd-sandbox-env-uses-plain-claude ()
   "Even a :sandbox-env worktree with a session launches plain `claude' + --continue, never claude-sandbox."
@@ -2405,7 +2416,8 @@ restart (the lazy-start path applies its defaults instead)."
     (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
     (let ((result (agent-repl--build-start-cmd "ws1")))
       (should-not (string-match-p "claude-sandbox" (plist-get result :cmd)))
-      (should (string-match-p "\\`claude " (plist-get result :cmd)))
+      ;; The ownership env prefix leads; the invocation itself is plain claude.
+      (should (string-match-p "\\`AGENT_REPL_OWNED=1 claude " (plist-get result :cmd)))
       (should (string-match-p "--continue" (plist-get result :cmd)))
       (should-not (plist-get result :sandboxed-p))
       (should-not (plist-get result :docker-image)))))
