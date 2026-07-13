@@ -157,6 +157,23 @@ describe("decodeCommandLine", () => {
     // Act + Assert
     expect(() => decodeCommandLine(line)).toThrow(/non-empty model/);
   });
+
+  it("decodes a refresh-commands command", () => {
+    // Arrange — it carries nothing but its request_id.
+    const line = JSON.stringify({ type: "refresh-commands", request_id: "r1" });
+    // Act
+    const cmd = decodeCommandLine(line);
+    // Assert
+    expect(cmd).toEqual({ type: "refresh-commands", request_id: "r1" });
+  });
+
+  it("throws ProtocolError on refresh-commands with no request_id", () => {
+    // Arrange — the ack is correlated by request_id, so a refresh without
+    // one could never be acknowledged.
+    const line = JSON.stringify({ type: "refresh-commands" });
+    // Act + Assert
+    expect(() => decodeCommandLine(line)).toThrow(/missing request_id/);
+  });
 });
 
 describe("encodeEvent", () => {
@@ -171,6 +188,19 @@ describe("encodeEvent", () => {
     const line = encodeEvent(evt);
     // Assert
     expect(line.endsWith("\n")).toBe(true);
+    expect(JSON.parse(line)).toEqual(evt);
+  });
+
+  it("encodes a commands event with its slash-command list intact", () => {
+    // Arrange
+    const evt: ShimEvent = {
+      type: "commands",
+      session_id: "s1",
+      commands: [{ name: "compact", description: "summarize", argumentHint: "<how>" }],
+    };
+    // Act
+    const line = encodeEvent(evt);
+    // Assert
     expect(JSON.parse(line)).toEqual(evt);
   });
 });

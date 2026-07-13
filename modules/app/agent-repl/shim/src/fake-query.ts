@@ -11,7 +11,7 @@
  * Every turn ends with a `result` message.
  */
 import { AsyncQueue } from "./input-queue.js";
-import { ModelInfo, PermissionMode } from "./protocol.js";
+import { ModelInfo, PermissionMode, SlashCommand } from "./protocol.js";
 import {
   CanUseToolLike,
   QueryLike,
@@ -27,6 +27,20 @@ import {
 export const FAKE_MODELS: ModelInfo[] = [
   { value: "fake-model", displayName: "Fake Sonnet", description: "the offline default" },
   { value: "fake-model-fast", displayName: "Fake Haiku", description: "the offline fast one" },
+];
+
+/**
+ * The offline stand-in for `query.supportedCommands()`. One entry takes an
+ * argument and one does not, because the completion UI renders those two
+ * cases differently and an all-or-nothing fake could not exercise both.
+ */
+export const FAKE_COMMANDS: SlashCommand[] = [
+  {
+    name: "fake-skill",
+    description: "the offline skill",
+    argumentHint: "<target>",
+  },
+  { name: "fake-bare", description: "the offline skill that takes no arguments", argumentHint: "" },
 ];
 
 export interface FakeQueryOpts {
@@ -270,5 +284,6 @@ export function createFakeQuery(
       model = next;
     },
     supportedModels: async (): Promise<ModelInfo[]> => FAKE_MODELS,
+    supportedCommands: async (): Promise<SlashCommand[]> => FAKE_COMMANDS,
   };
 }
