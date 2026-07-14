@@ -693,6 +693,57 @@ func TestTranslatorCompactBoundaryMapsToDedicatedFrame(t *testing.T) {
 	}
 }
 
+func TestTranslatorCompactBoundaryReportsPostTokens(t *testing.T) {
+	// Arrange — the current SDK reports the post-compaction size in
+	// compact_metadata; the boundary frame must carry it so the topbar can
+	// re-anchor its token count instead of showing "unknown".
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"compact_boundary","data":{"compact_metadata":{"trigger":"manual","pre_tokens":200000,"post_tokens":18000}}}`))
+	// Assert
+	wantTypes(t, frames, "compact-boundary")
+	cb := frames[0].(*protocol.CompactBoundaryFrame)
+	if cb.PostTokens != 18000 {
+		t.Errorf("post tokens = %d, want 18000", cb.PostTokens)
+	}
+}
+
+func TestTranslatorCompactBoundaryPostTokensZeroWhenOmitted(t *testing.T) {
+	// Arrange — post_tokens is optional; an SDK that omits it leaves the size
+	// unknown (0), never fabricated.
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"compact_boundary","data":{"compact_metadata":{"trigger":"auto","pre_tokens":9000}}}`))
+	// Assert
+	cb := frames[0].(*protocol.CompactBoundaryFrame)
+	if cb.PostTokens != 0 {
+		t.Errorf("post tokens = %d, want 0", cb.PostTokens)
+	}
+}
+
+func TestTranslatorCompactingStatusMapsToCompactStatusFrame(t *testing.T) {
+	// Arrange — the SDK announces compaction start with status:"compacting".
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"status","data":{"type":"system","subtype":"status","status":"compacting"}}`))
+	// Assert
+	wantTypes(t, frames, "compact-status")
+	cs := frames[0].(*protocol.CompactStatusFrame)
+	if !cs.Active {
+		t.Errorf("compact-status Active = %v, want true", cs.Active)
+	}
+}
+
+func TestTranslatorNonCompactingStatusDropped(t *testing.T) {
+	// Arrange — every other status value (requesting, ...) has no Layer-2
+	// meaning and must not emit a frame.
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"status","data":{"type":"system","subtype":"status","status":"requesting"}}`))
+	// Assert
+	wantTypes(t, frames)
+}
+
 func TestTranslatorToolUseProgressMapsToDedicatedFrame(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()
