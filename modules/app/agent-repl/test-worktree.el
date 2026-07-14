@@ -2023,40 +2023,51 @@ silently return a colliding name."
 
 ;;;; ---- Tests: handle-create-command disambiguation integration ----
 
+(defmacro agent-repl-test--with-create-command-stubs (bindings &rest body)
+  "Run BODY with `agent-repl--handle-create-command's collaborators stubbed.
+
+Binds fresh copies of the two dispatch tables (`agent-repl--workspaces',
+`agent-repl--workspace-names-in-flight') and a nil
+`agent-repl-worktree-start-tag-prefix', stubs the collision probe to
+\"no collision\", and stubs `run-with-timer' to capture the scheduled
+create args into the anaphoric variable `scheduled-args' — a list of
+\(git-root name prompt priority fork-session-id base-commit model).
+
+BINDINGS are extra `cl-letf' bindings and are spliced in FIRST, ahead
+of the defaults: when one `cl-letf' binds the same place twice, the
+EARLIER binding is the one in force for the body, so a caller's
+override must precede the default it replaces."
+  (declare (indent 1))
+  `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
+         (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+         (agent-repl-worktree-start-tag-prefix nil)
+         (scheduled-args nil))
+     (ignore scheduled-args)
+     (cl-letf (,@bindings
+               ((symbol-function 'agent-repl--workspace-name-collides-p)
+                (lambda (&rest _args) nil))
+               ((symbol-function 'run-with-timer)
+                (lambda (_delay _repeat _fn &rest args)
+                  (setq scheduled-args args))))
+       ,@body)))
+
 (ert-deftest agent-repl-test-handle-create-command-passes-clean-name-through ()
   "When the desired name does not collide, the timer is scheduled with the original name."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/clean") (git_root . "/tmp/repo"))
-       0)
-      ;; Args are (git-root name prompt priority fork-session-id base-commit)
-      (should (equal "DWC/clean" (nth 1 scheduled-args))))))
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/clean") (git_root . "/tmp/repo"))
+     0)
+    (should (equal "DWC/clean" (nth 1 scheduled-args)))))
 
 (ert-deftest agent-repl-test-handle-create-command-warns-when-prompt-missing ()
   "A create entry without a `prompt' field still creates but warns loudly.
 The /workspace-generation flow always supplies a prompt, so a missing
 field there means the generation output was malformed and the workspace
 would otherwise boot silently idle."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil)
-        (warned nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
+  (let ((warned nil))
+    (agent-repl-test--with-create-command-stubs
+        (((symbol-function 'agent-repl--warn)
+          (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/noprompt") (git_root . "/tmp/repo"))
        0)
@@ -2066,16 +2077,10 @@ would otherwise boot silently idle."
 
 (ert-deftest agent-repl-test-handle-create-command-warns-when-prompt-empty ()
   "An empty-string `prompt' field warns exactly like a missing one."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (warned nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
-              ((symbol-function 'run-with-timer)
-               (lambda (&rest _args) nil)))
+  (let ((warned nil))
+    (agent-repl-test--with-create-command-stubs
+        (((symbol-function 'agent-repl--warn)
+          (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/emptyprompt") (git_root . "/tmp/repo") (prompt . ""))
        0)
@@ -2083,16 +2088,10 @@ would otherwise boot silently idle."
 
 (ert-deftest agent-repl-test-handle-create-command-no-warn-when-prompt-present ()
   "A create entry carrying a non-empty `prompt' does not warn."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (warned nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (&rest _args) (setq warned t)))
-              ((symbol-function 'run-with-timer)
-               (lambda (&rest _args) nil)))
+  (let ((warned nil))
+    (agent-repl-test--with-create-command-stubs
+        (((symbol-function 'agent-repl--warn)
+          (lambda (&rest _args) (setq warned t))))
       (agent-repl--handle-create-command
        `((type . "create") (name . "DWC/hasprompt") (git_root . "/tmp/repo") (prompt . "do the thing"))
        0)
@@ -2100,84 +2099,47 @@ would otherwise boot silently idle."
 
 (ert-deftest agent-repl-test-handle-create-command-forwards-model-from-json ()
   "A `model' field in the create JSON is scheduled as the 7th timer arg."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/mdl") (git_root . "/tmp/repo") (model . "sonnet"))
-       0)
-      ;; Args are (git-root name prompt priority fork-session-id base-commit model)
-      (should (equal "sonnet" (nth 6 scheduled-args))))))
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/mdl") (git_root . "/tmp/repo") (model . "sonnet"))
+     0)
+    (should (equal "sonnet" (nth 6 scheduled-args)))))
 
 (ert-deftest agent-repl-test-handle-create-command-model-nil-when-absent ()
   "When the create JSON omits `model', the scheduled model arg is nil."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/nomdl") (git_root . "/tmp/repo"))
-       0)
-      (should (null (nth 6 scheduled-args))))))
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/nomdl") (git_root . "/tmp/repo"))
+     0)
+    (should (null (nth 6 scheduled-args)))))
 
 (ert-deftest agent-repl-test-handle-create-command-model-nil-when-empty-string ()
   "An empty-string `model' field is normalized to nil (falls back to default)."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/emptymdl") (git_root . "/tmp/repo") (model . ""))
-       0)
-      (should (null (nth 6 scheduled-args))))))
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/emptymdl") (git_root . "/tmp/repo") (model . ""))
+     0)
+    (should (null (nth 6 scheduled-args)))))
 
 (ert-deftest agent-repl-test-handle-create-command-disambiguates-collision ()
   "When the desired name collides (existing branch), the timer is scheduled with a suffixed name."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
-        (scheduled-args nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (name &rest _args)
-                 ;; Only the bare name collides; suffixed variants do not.
-                 (equal name "DWC/taken")))
-              ((symbol-function 'run-with-timer)
-               (lambda (_delay _repeat _fn &rest args)
-                 (setq scheduled-args args))))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/taken") (git_root . "/tmp/repo"))
-       0)
-      (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'"
-                              (nth 1 scheduled-args))))))
+  (agent-repl-test--with-create-command-stubs
+      (((symbol-function 'agent-repl--workspace-name-collides-p)
+        (lambda (name &rest _args)
+          ;; Only the bare name collides; suffixed variants do not.
+          (equal name "DWC/taken"))))
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/taken") (git_root . "/tmp/repo"))
+     0)
+    (should (string-match-p "\\`DWC/taken-[a-z]\\{3\\}\\'"
+                            (nth 1 scheduled-args)))))
 
 (ert-deftest agent-repl-test-handle-create-command-reserves-name-in-flight ()
   "After scheduling, the effective name is recorded in the in-flight hash so siblings see it."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'run-with-timer)
-               (lambda (&rest _args) nil)))
-      (agent-repl--handle-create-command
-       `((type . "create") (name . "DWC/sibling") (git_root . "/tmp/repo"))
-       0))
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/sibling") (git_root . "/tmp/repo"))
+     0)
     (should (gethash "DWC/sibling" agent-repl--workspace-names-in-flight))))
 
 (ert-deftest agent-repl-test-handle-create-command-second-sibling-gets-suffix ()
