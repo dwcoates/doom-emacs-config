@@ -1058,6 +1058,7 @@ rather than re-derive them."
    "\n"
    "Deterministic fields you MUST emit on the create entry, EXACTLY as given:\n"
    (format "  \"type\": \"create\"\n")
+   "  \"prompt\": the VERBATIM user-prompt string above (everything between the second <<< and >>>)\n"
    (format "  \"git_root\": %S\n" git-root)
    (format "  \"base_commit\": %S\n" base-commit)
    (when fork-from
@@ -2454,6 +2455,14 @@ it is used verbatim after `expand-file-name'.  If \"git_root\" is missing or
 empty, the workspace is NOT created — callers must emit git_root explicitly
 rather than relying on the ambient Emacs context.
 
+CMD SHOULD contain a non-empty \"prompt\" field carrying the new
+workspace's first message.  A missing/empty prompt still creates the
+workspace (skill-driven creates may legitimately omit it) but is
+surfaced as a loud warning: the `/workspace-generation' flow always
+supplies a prompt, so a promptless create from that flow means the
+generation output dropped the field and the workspace would otherwise
+boot silently idle with no first message.
+
 CMD MUST also contain a non-empty string \"name\" field whose bare form
 \(after `agent-repl--bare-workspace-name') is not `persp-nil-name'
 \(default \"none\").  A missing/`null'/empty name — or one that resolves
@@ -2535,6 +2544,14 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
                                    name (error-message-string err))
                  nil))))
         (when effective-name
+          ;; A missing/empty prompt is tolerated (see docstring) but never
+          ;; silent — a generation-flow payload that dropped its `prompt'
+          ;; field would otherwise materialize as a workspace that boots
+          ;; idle with no first message and no explanation.
+          (when (or (not (stringp prompt)) (string-empty-p prompt))
+            (agent-repl--warn effective-name
+                              "workspace '%s' is being created WITHOUT an initial prompt — if this came from /workspace-generation, its output JSON dropped the `prompt' field"
+                              effective-name))
           (agent-repl--reserve-workspace-name effective-name)
           (agent-repl--log effective-name
                             "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s model=%s"
