@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
 import { formatDuration, formatDurationCeil } from "./duration.js";
-import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
+import { applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
@@ -1204,7 +1204,7 @@ export class FeedRenderer {
         // item that carries it: a running tool card rewrites its whole
         // body when its result lands, which would otherwise re-cap a
         // command the user had just expanded.
-        const open = expandedIndexes(sectionsIn(entry.el));
+        const open = expandedKeys(sectionsIn(entry.el));
         entry.el.innerHTML = html;
         applyExpanded(sectionsIn(entry.el), open);
         entry.html = html;

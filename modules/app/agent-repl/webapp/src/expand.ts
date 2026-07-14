@@ -10,7 +10,7 @@
  *
  * Expansion is one class on the section (EXPANDED_CLASS), which the
  * stylesheet turns into `max-height: none`. FeedRenderer re-applies it
- * across an item's re-render (expandedIndexes + applyExpanded), so a
+ * across an item's re-render (expandedKeys + applyExpanded), so a
  * section the user opened stays open when its tool card later changes.
  *
  * installClickExpand is the only DOM-facing piece; every decision it
@@ -103,24 +103,39 @@ export function toggleExpanded(section: Section): boolean {
   return true;
 }
 
+/** The class a section is keyed by: its first CAPPED_CLASSES entry. */
+function primaryClass(section: Section): string {
+  return CAPPED_CLASSES.find((c) => section.classList.contains(c)) ?? "";
+}
+
 /**
- * Positions of the expanded sections among an item's capped sections —
- * the whole of what a re-render must carry over, since a re-rendered item
- * lays its sections out in the same order.
+ * Stable identities of the expanded sections among an item's capped
+ * sections: `class:occurrence` rather than raw position, so a section the
+ * user opened keeps its expansion when a re-render inserts or drops a
+ * DIFFERENT kind of section around it (a result box landing beneath an
+ * open command, a child panel growing above an open output).
  */
-export function expandedIndexes(sections: ArrayLike<Section>): number[] {
-  const open: number[] = [];
+export function expandedKeys(sections: ArrayLike<Section>): string[] {
+  const open: string[] = [];
+  const seen = new Map<string, number>();
   for (let i = 0; i < sections.length; i++) {
-    if (isExpanded(sections[i])) open.push(i);
+    const cls = primaryClass(sections[i]);
+    const n = seen.get(cls) ?? 0;
+    seen.set(cls, n + 1);
+    if (isExpanded(sections[i])) open.push(`${cls}:${n}`);
   }
   return open;
 }
 
-/** Re-expand the sections at INDEXES (positions from expandedIndexes). */
-export function applyExpanded(sections: ArrayLike<Section>, indexes: readonly number[]): void {
-  const open = new Set(indexes);
+/** Re-expand the sections whose keys are in KEYS (from expandedKeys). */
+export function applyExpanded(sections: ArrayLike<Section>, keys: readonly string[]): void {
+  const open = new Set(keys);
+  const seen = new Map<string, number>();
   for (let i = 0; i < sections.length; i++) {
-    if (open.has(i)) sections[i].classList.add(EXPANDED_CLASS);
+    const cls = primaryClass(sections[i]);
+    const n = seen.get(cls) ?? 0;
+    seen.set(cls, n + 1);
+    if (open.has(`${cls}:${n}`)) sections[i].classList.add(EXPANDED_CLASS);
   }
 }
 

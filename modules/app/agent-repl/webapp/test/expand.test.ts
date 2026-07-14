@@ -7,7 +7,7 @@ import {
   applyExpanded,
   cappedSectionAt,
   expandAction,
-  expandedIndexes,
+  expandedKeys,
   isCappedSection,
   isExpanded,
   toggleExpanded,
@@ -189,24 +189,39 @@ describe("isExpanded", () => {
   });
 });
 
-describe("expandedIndexes", () => {
-  it("records the positions of the expanded sections", () => {
+describe("expandedKeys", () => {
+  it("keys the expanded section by class and occurrence", () => {
     // Arrange — a Bash card whose output is open and whose command is not.
     const sections = [section("bash-input"), section("bash-output", EXPANDED_CLASS)];
     // Act + Assert
-    expect(expandedIndexes(sections)).toEqual([1]);
+    expect(expandedKeys(sections)).toEqual(["bash-output:0"]);
+  });
+
+  it("counts occurrences among sections sharing a class", () => {
+    // Arrange — two outputs in one item, only the second open.
+    const sections = [section("tool-output"), section("tool-output", EXPANDED_CLASS)];
+    // Act + Assert
+    expect(expandedKeys(sections)).toEqual(["tool-output:1"]);
+  });
+
+  it("keys a multi-class section by its first capped class", () => {
+    // Arrange — the Bash output carries both tool-output and bash-output;
+    // tool-output comes first in CAPPED_CLASSES, so it names the key.
+    const sections = [section("tool-output", "bash-output", EXPANDED_CLASS)];
+    // Act + Assert
+    expect(expandedKeys(sections)).toEqual(["tool-output:0"]);
   });
 
   it("records nothing for an item with no expanded section", () => {
     // Arrange
     const sections = [section("bash-input"), section("bash-output")];
     // Act + Assert
-    expect(expandedIndexes(sections)).toEqual([]);
+    expect(expandedKeys(sections)).toEqual([]);
   });
 
   it("records nothing for an item with no capped section at all", () => {
     // Arrange + Act + Assert
-    expect(expandedIndexes([])).toEqual([]);
+    expect(expandedKeys([])).toEqual([]);
   });
 });
 
@@ -215,7 +230,7 @@ describe("applyExpanded", () => {
     // Arrange — the rebuilt item's fresh, capped sections.
     const sections = [section("bash-input"), section("bash-output")];
     // Act
-    applyExpanded(sections, [1]);
+    applyExpanded(sections, ["bash-output:0"]);
     // Assert
     expect(sections.map((s) => s.classes.has(EXPANDED_CLASS))).toEqual([false, true]);
   });
@@ -229,11 +244,22 @@ describe("applyExpanded", () => {
     expect(sections[0].classes.has(EXPANDED_CLASS)).toBe(false);
   });
 
-  it("drops an index whose section the re-render no longer renders", () => {
+  it("drops a key whose section the re-render no longer renders", () => {
     // Arrange — the rebuilt item carries one section where two were open.
     const sections = [section("bash-input")];
-    // Act + Assert — the surviving section reopens and the missing one is not reached.
-    expect(() => applyExpanded(sections, [0, 1])).not.toThrow();
+    // Act + Assert — the surviving section reopens and the missing one is ignored.
+    expect(() => applyExpanded(sections, ["bash-input:0", "bash-output:0"])).not.toThrow();
     expect(sections[0].classes.has(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("keeps an open section open when a different-class section lands above it", () => {
+    // Arrange — an open output whose re-render grew a command line above it,
+    // the layout shift that breaks a positional index.
+    const before = [section("bash-output", EXPANDED_CLASS)];
+    const after = [section("bash-input"), section("bash-output")];
+    // Act
+    applyExpanded(after, expandedKeys(before));
+    // Assert
+    expect(after.map((s) => s.classes.has(EXPANDED_CLASS))).toEqual([false, true]);
   });
 });
