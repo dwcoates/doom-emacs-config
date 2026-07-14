@@ -451,6 +451,40 @@ describe.each([
   });
 });
 
+/**
+ * The bubble breath is deliberately deeper than the tool-card breath: it is the
+ * one motion under a freshly sent prompt or a caught-up frontier, so it must
+ * register at a glance. It lives in a band whose ceiling ("shallow enough to
+ * read under prose") the palette suite above pins and whose floor is here — a
+ * breath shallower than this floor reads as no breath at all. Bubble-scoped on
+ * purpose: the tool-card washes take a quieter breath and sit this floor out.
+ */
+describe.each([
+  { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
+  { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
+])("$role breath is perceptible", ({ wash, far }) => {
+  /** Luminance units below which the breath stops registering as motion. */
+  const FLOOR = 20;
+
+  it("deepens the light-theme breath past the perceptibility floor", () => {
+    // Arrange
+    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
+    // Act
+    const depth = Math.abs(luminance(deep) - luminance(near));
+    // Assert
+    expect(depth).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  it("lifts the dark-theme breath past the perceptibility floor", () => {
+    // Arrange
+    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
+    // Act
+    const depth = Math.abs(luminance(deep) - luminance(near));
+    // Assert
+    expect(depth).toBeGreaterThanOrEqual(FLOOR);
+  });
+});
+
 describe("turn stamp", () => {
   const bubble = blockAfter(css, ".bubble ");
   const body = blockAfter(css, ".bubble-body");
