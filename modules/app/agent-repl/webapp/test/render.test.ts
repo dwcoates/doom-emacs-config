@@ -79,8 +79,9 @@ function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
     // Distinct from sincePrevFinalMs so a chip that reads the wrong field
     // is caught: the whole-task figure the standalone chip shows.
     durationMs: 12,
-    // The since-previous-final figure the final-response chip shows.
-    sincePrevFinalMs: 7,
+    // The since-previous-final figure the final-response chip shows, above
+    // the one-second floor below which that chip is dropped entirely.
+    sincePrevFinalMs: 7_000,
     numTurns: 1,
     totalCostUsd: 0.5,
     usage: { input_tokens: 3, output_tokens: 4 },
@@ -1431,6 +1432,25 @@ describe("ResultChip", () => {
     };
   }
 
+  /** The HTML of a completed answer nesting its chip, whose turn closed
+   *  ELAPSED ms after the previous final response. */
+  function finalResponseHtml(elapsed: number): string {
+    const answer: TextItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "done",
+      done: true,
+      ts: TEXT_TS,
+    };
+    const closing: ResultItem = { ...result("success"), sincePrevFinalMs: elapsed };
+    return renderItem(
+      answer,
+      undefined,
+      finalResponses([userTurnAt(9, 0), answer, closing]),
+    );
+  }
+
   it("marks a successful turn's chip with the muted-yellow done class", () => {
     // Arrange + Act
     const html = renderItem(resultItem("success"));
@@ -1562,6 +1582,35 @@ describe("ResultChip", () => {
     // Assert — 30s is sincePrevFinalMs; the 5m 30s whole-task figure never shows.
     expect(html).toContain("30s · 300,000 in");
     expect(html).not.toContain("5m 30s");
+  });
+
+  it("drops the final-response chip when the turn closed in under a second", () => {
+    // Arrange + Act — 999ms of elapsed time sits below the one-second floor.
+    const html = finalResponseHtml(999);
+    // Assert — no timing pill at all below a whole second.
+    expect(html).not.toContain(`class="result`);
+  });
+
+  it("keeps the final-response wash when the sub-second chip is dropped", () => {
+    // Arrange + Act — a sub-second close still produced the turn's answer.
+    const html = finalResponseHtml(999);
+    // Assert — the green border survives even with no chip beneath it.
+    expect(html).toContain("final-response");
+  });
+
+  it("renders the final-response chip at the one-second boundary", () => {
+    // Arrange + Act — exactly one second cleared, the floor being inclusive.
+    const html = finalResponseHtml(1_000);
+    // Assert
+    expect(html).toContain("1s · 300,000 in");
+  });
+
+  it("rounds the final-response chip's duration up to whole seconds", () => {
+    // Arrange + Act — 5984ms, a part-second past the fifth second.
+    const html = finalResponseHtml(5_984);
+    // Assert — 6s, never the 5s 984ms the millisecond scale would give.
+    expect(html).toContain("6s · 300,000 in");
+    expect(html).not.toContain("984ms");
   });
 });
 

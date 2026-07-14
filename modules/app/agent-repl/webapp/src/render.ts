@@ -5,7 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
-import { formatDuration } from "./duration.js";
+import { formatDuration, formatDurationCeil } from "./duration.js";
 import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
@@ -296,7 +296,15 @@ function TextStream(item: TextItem, chip: ResultItem | null, isPulsing = false):
   const cls = `bubble assistant md${chip ? " final-response" : ""}${
     isPulsing ? " pulsing" : ""
   }`;
-  const closer = chip ? ResultChip(chip, chip.sincePrevFinalMs) : "";
+  // A turn that closed in under a second reports no time worth a chip, so the
+  // final-response badge is dropped entirely below that floor rather than
+  // rounding a negligible span up to a `1s` the reader never asked for. The
+  // bubble keeps its `final-response` wash regardless, since it is the answer
+  // either way — only the timing pill is conditional.
+  const closer =
+    chip && chip.sincePrevFinalMs >= 1000
+      ? ResultChip(chip, chip.sincePrevFinalMs, true)
+      : "";
   // A bare metaprompt TLDR tree (no code fence — fenced trees are the
   // markdown fence handler's job) renders as hanging-indent tree lines;
   // the markdown pipeline would shear its wrapped branches to column 0.
@@ -805,11 +813,22 @@ function formatTokenDelta(n: number): string {
  * (see `TextStream`), so the feed prints the chip standalone only when no
  * bubble swallowed it: an aborted or errored turn, or a completed turn
  * that wrote no answer at all.
+ *
+ * SECOND-RESOLUTION rounds the duration up to whole seconds (`6s`, not
+ * `5s 984ms`): the nested final-response badge reports a settled turn to a
+ * reader who never needs the millisecond digit, whereas the standalone chip
+ * keeps the SDK's exact figure so a sub-second abort still reads its span.
  */
-function ResultChip(item: ResultItem, durationMs: number): string {
+function ResultChip(
+  item: ResultItem,
+  durationMs: number,
+  secondResolution = false,
+): string {
   const done = isTurnComplete(item);
   const parts = done ? [] : [escapeHtml(item.subtype)];
-  parts.push(formatDuration(durationMs));
+  parts.push(
+    secondResolution ? formatDurationCeil(durationMs) : formatDuration(durationMs),
+  );
   if (item.context) {
     parts.push(`${formatTokens(item.context.total)} in`);
     parts.push(formatTokenDelta(item.context.delta));

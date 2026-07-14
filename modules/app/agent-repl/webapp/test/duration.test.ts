@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration, formatElapsed } from "../src/duration.js";
+import {
+  formatDuration,
+  formatDurationCeil,
+  formatElapsed,
+} from "../src/duration.js";
 
 describe("formatDuration", () => {
   it("keeps a sub-second duration in whole milliseconds", () => {
@@ -99,5 +103,43 @@ describe("formatElapsed", () => {
   it("floors a start stamped ahead of the reader's clock to zero", () => {
     // Arrange + Act + Assert — a skewed clock counts from zero, never backwards.
     expect(formatElapsed(-2_000)).toBe("0s");
+  });
+});
+
+describe("formatDurationCeil", () => {
+  it("rounds a part-second up to the next whole second", () => {
+    // Arrange + Act + Assert — 5984ms is closer to six seconds than five.
+    expect(formatDurationCeil(5_984)).toBe("6s");
+  });
+
+  it("leaves a whole-second count unchanged", () => {
+    // Arrange + Act + Assert — nothing to round when the span is exact.
+    expect(formatDurationCeil(6_000)).toBe("6s");
+  });
+
+  it("never emits a millisecond remainder", () => {
+    // Arrange + Act + Assert — 1033ms rounds up rather than reading 1s 33ms.
+    expect(formatDurationCeil(1_033)).toBe("2s");
+  });
+
+  it("rounds a part-second above a minute up into whole seconds", () => {
+    // Arrange + Act + Assert — 90500ms is 1m plus 30.5s, rounded to 31s.
+    expect(formatDurationCeil(90_500)).toBe("1m 31s");
+  });
+
+  it("counts any positive sub-second span as a whole second", () => {
+    // Arrange + Act + Assert — a single millisecond still rounds up to 1s.
+    expect(formatDurationCeil(1)).toBe("1s");
+  });
+
+  it("floors a zero span to zero seconds", () => {
+    // Arrange + Act + Assert — `0ms` is the millisecond scale's answer, not
+    // the second scale's.
+    expect(formatDurationCeil(0)).toBe("0s");
+  });
+
+  it("floors a negative span to zero seconds", () => {
+    // Arrange + Act + Assert — a skewed clock counts from zero, never backwards.
+    expect(formatDurationCeil(-2_000)).toBe("0s");
   });
 });
