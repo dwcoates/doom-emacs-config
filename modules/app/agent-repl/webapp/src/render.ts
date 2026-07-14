@@ -370,7 +370,7 @@ export interface PanelContext {
 
 /** True when the child renders something the panel and ticker count. */
 function visibleChild(item: ConversationItem): boolean {
-  return !(item.kind === "tool" && SUPPRESSED_TOOLS.has(item.toolName));
+  return !isInvisibleItem(item);
 }
 
 /** One child item's ticker line, or "" when it offers nothing live. */
