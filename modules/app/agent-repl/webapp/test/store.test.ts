@@ -289,6 +289,41 @@ describe("ConversationStore tool cards", () => {
     // Assert
     expect((store.state.items[0] as ToolItem).progressElapsedS).toBe(3.5);
   });
+
+  it("lands a task notification on the spawning tool card", () => {
+    // Arrange
+    const store = newStore();
+    runToolStart(store);
+    // Act
+    store.applyRaw(
+      frame("task-notification", {
+        tool_use_id: "t1",
+        task_id: "bg1",
+        status: "completed",
+        summary: "done (exit code 0)",
+        output_file: "/tmp/bg1.output",
+        text: "<task-notification>…</task-notification>",
+      }),
+    );
+    // Assert
+    expect((store.state.items[0] as ToolItem).notification).toMatchObject({
+      taskId: "bg1",
+      status: "completed",
+      summary: "done (exit code 0)",
+      outputFile: "/tmp/bg1.output",
+    });
+  });
+
+  it("surfaces an unattributable task notification as a system note", () => {
+    // Arrange — no tool item carries the named id.
+    const store = newStore();
+    // Act
+    store.applyRaw(
+      frame("task-notification", { tool_use_id: "t-unknown", text: "<task-notification/>" }),
+    );
+    // Assert — the completion is never swallowed.
+    expect(store.state.items[0]).toMatchObject({ kind: "system", subtype: "task-notification" });
+  });
 });
 
 describe("ConversationStore permissions", () => {
