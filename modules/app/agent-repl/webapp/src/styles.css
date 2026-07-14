@@ -301,13 +301,19 @@ pre {
 }
 /* Smaller and quieter than the text it dates, and lifted clear of the
    body's first line: a corner label rather than a word in the sentence.
-   It never shrinks the way the wrapping body does. */
+   It never shrinks the way the wrapping body does. Negative top/right
+   margins pull it in toward the bubble's top-right corner — closer than the
+   body padding alone would sit it, but each margin's magnitude stays under
+   the padding it eats into (0.6rem top, 0.9rem right), so a sliver of space
+   survives and the stamp never abuts the corner. A touch darker than plain
+   --muted (pushed toward --fg) so it reads a shade more present. */
 .turn-ts {
   flex: none;
-  color: var(--muted);
-  font-size: 0.7rem;
+  color: color-mix(in srgb, var(--muted), var(--fg) 25%);
+  font-size: 0.65rem;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+  margin: -0.3rem -0.5rem 0 0;
 }
 .bubble.assistant {
   background: var(--assistant);
