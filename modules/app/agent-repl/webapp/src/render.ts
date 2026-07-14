@@ -8,7 +8,7 @@ import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
 import { formatDuration, formatDurationCeil } from "./duration.js";
 import { CLICK_THROUGH_SELECTOR, applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
-import { partitionFeed } from "./partition.js";
+import { partitionFeed, spawnedTaskIds } from "./partition.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
@@ -43,6 +43,13 @@ export interface Actions {
   cancelQueued(queueId: string): void;
   /** Escalate a parked queued message to preempt the running turn (§2.13). */
   runQueuedNow(queueId: string): void;
+  /**
+   * Send TEXT as a user prompt — the channel behind the card controls
+   * (stop task). Prompt-mediated on purpose: no daemon-native kill
+   * exists, so the control ASKS THE AGENT, spends a real turn, and
+   * queues behind an in-flight one; the button's label says as much.
+   */
+  sendPrompt?(text: string): void;
 }
 
 /** One AskUserQuestion entry as carried in the tool input. */
@@ -505,7 +512,28 @@ function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): str
       ${progress}
       ${activity}
       ${toolResult(item)}
+      ${taskControls(item)}
     </div>`;
+}
+
+/**
+ * Stop controls for the detached work a card spawned, gone once the
+ * task's completion notification lands. Prompt-mediated on purpose (see
+ * Actions.sendPrompt): the button asks the agent to run TaskStop, and
+ * its label owns that instead of posing as an instant kill switch.
+ */
+function taskControls(item: ToolItem): string {
+  const live = item.notification ? [] : spawnedTaskIds(item);
+  if (live.length === 0) return "";
+  const buttons = live
+    .map((id) => {
+      const prompt = `Stop the background task ${id} (TaskStop), then confirm it stopped.`;
+      return `<button type="button" class="task-stop" data-send-prompt="${escapeHtml(
+        prompt,
+      )}" title="sends a prompt to the agent">stop ${escapeHtml(id)} · asks the agent</button>`;
+    })
+    .join("");
+  return `<div class="task-controls">${buttons}</div>`;
 }
 
 function toolInput(item: ToolItem): string {
@@ -1330,6 +1358,8 @@ export class FeedRenderer {
       if (cancelQ !== null) this.actions.cancelQueued(cancelQ);
       const runNowQ = target.getAttribute("data-queue-run-now");
       if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
+      const prompt = target.closest("[data-send-prompt]")?.getAttribute("data-send-prompt");
+      if (prompt) this.actions.sendPrompt?.(prompt);
       this.handleTabClick(target);
       this.handlePanelToggle(target);
     });

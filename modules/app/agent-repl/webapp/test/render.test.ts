@@ -3001,3 +3001,45 @@ describe("scheduled-wakeup anchor", () => {
     expect(html).toContain("stderr");
   });
 });
+
+describe("task stop control", () => {
+  /** A Bash spawn whose result announced a background task. */
+  function bgSpawn(notified = false): ToolItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "Bash",
+      inputJson: "{}",
+      input: { command: "make", run_in_background: true },
+      inputDone: true,
+      result: { isError: false, content: "Command running in background with ID: bg7." },
+      ...(notified
+        ? { notification: { taskId: "bg7", status: "completed", text: "<task-notification/>" } }
+        : {}),
+    };
+  }
+
+  it("offers a stop button while the spawned task still runs", () => {
+    // Arrange + Act
+    const html = renderItem(bgSpawn());
+    // Assert — the label owns being prompt-mediated.
+    expect(html).toContain("task-stop");
+    expect(html).toContain("stop bg7 · asks the agent");
+    expect(html).toContain(`data-send-prompt="Stop the background task bg7`);
+  });
+
+  it("withdraws the button once the completion notification lands", () => {
+    // Arrange + Act
+    const html = renderItem(bgSpawn(true));
+    // Assert
+    expect(html).not.toContain("task-stop");
+  });
+
+  it("offers no control on a card that spawned nothing", () => {
+    // Arrange + Act
+    const html = renderItem(tool());
+    // Assert
+    expect(html).not.toContain("task-controls");
+  });
+});

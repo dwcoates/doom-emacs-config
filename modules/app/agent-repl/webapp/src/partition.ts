@@ -41,7 +41,7 @@ function resultText(item: ToolItem): string {
 }
 
 /** Every task id ITEM's spawn result or notification announced. */
-function spawnedTaskIds(item: ToolItem): string[] {
+export function spawnedTaskIds(item: ToolItem): string[] {
   const ids = [...resultText(item).matchAll(SPAWNED_ID_RE)].map((m) => m[1]);
   if (item.notification?.taskId) ids.push(item.notification.taskId);
   return ids;
