@@ -546,7 +546,18 @@ export class ShimSession {
 
   private mapSystemMessage(msg: SdkMessageLike): void {
     const subtype = String(msg.subtype);
-    if (subtype === "init" || subtype === "compact_boundary" || subtype === "slash_command") {
+    // `status: "compacting"` announces the START of a context compaction
+    // (the compact_boundary that ends it is the only other signal — there
+    // is no progress percentage), forwarded so the GUI can show a
+    // compaction-in-progress indicator. Every other SDK system subtype (a
+    // non-`compacting` status, hook_response, ...) has no Layer-1
+    // representation and is dropped.
+    const forward =
+      subtype === "init" ||
+      subtype === "compact_boundary" ||
+      subtype === "slash_command" ||
+      (subtype === "status" && msg.status === "compacting");
+    if (forward) {
       this.deps.emit({
         type: "system",
         session_id: this.deps.sessionId,
@@ -555,8 +566,6 @@ export class ShimSession {
         data: msg,
       });
     }
-    // Other SDK system subtypes (status, hook_response, ...) have no
-    // Layer-1 representation and are dropped.
   }
 
   private emitError(

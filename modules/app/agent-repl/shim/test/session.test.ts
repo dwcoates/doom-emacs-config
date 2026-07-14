@@ -1008,6 +1008,41 @@ describe("ShimSession SDK message mapping", () => {
     });
   });
 
+  it("forwards status:compacting system messages so the GUI can show progress", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await drive(h, {
+      type: "system",
+      subtype: "status",
+      uuid: "u9c",
+      status: "compacting",
+    });
+    // Assert
+    expect(h.eventsOfType("system")[0]).toMatchObject({
+      subtype: "status",
+      data: expect.objectContaining({ status: "compacting" }),
+    });
+  });
+
+  it("drops status system messages that are not compacting", async () => {
+    // Arrange — land the startup `models` event first, so the sampled window
+    // holds only what the driven message produced.
+    const h = makeHarness();
+    await until(() => h.eventsOfType("models").length === 1);
+    const before = h.emitted.length;
+    // Act
+    await drive(h, {
+      type: "system",
+      subtype: "status",
+      uuid: "u9d",
+      status: "requesting",
+    });
+    // Assert — no system event added, only the closed event
+    const added = h.emitted.slice(before).map((e) => e.type);
+    expect(added).toEqual(["closed"]);
+  });
+
   it("maps tool_progress messages to system events with subtype tool_use_progress", async () => {
     // Arrange
     const h = makeHarness();
