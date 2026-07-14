@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1001,6 +1002,10 @@ func (r *recordingRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID s
 	r.record("claude-id " + sessionID + " " + claudeSessionID)
 }
 
+func (r *recordingRegistrar) ModelChanged(sessionID, model string) {
+	r.record("model " + sessionID + " " + model)
+}
+
 func (r *recordingRegistrar) SessionTerminal(sessionID, deathReason string) {
 	r.record("terminal " + sessionID + " " + deathReason)
 }
@@ -1093,6 +1098,68 @@ func TestRegistrarNotifiedOnHardShimDeath(t *testing.T) {
 	}
 }
 
+func TestRegistrarNotifiedWhenAssistantMessageMovesTheModel(t *testing.T) {
+	// Arrange — the agent answers on a model the mirror has not seen.
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, assistantMsg("m1", "haiku", ""))
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — the switch is written through so a restart resumes on it.
+	if !slices.Contains(reg.snapshot(), "model sess-1 haiku") {
+		t.Fatalf("calls = %v, want a model write-through", reg.snapshot())
+	}
+}
+
+func TestRegistrarNotifiedWhenInitSuppliesModel(t *testing.T) {
+	// Arrange
+	h, reg := newRegistrarHarness(t)
+	// Act — system:init names the startup model.
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"model":"opus"}}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	if !slices.Contains(reg.snapshot(), "model sess-1 opus") {
+		t.Fatalf("calls = %v, want a model write-through", reg.snapshot())
+	}
+}
+
+func TestRegistrarModelReportedOncePerValue(t *testing.T) {
+	// Arrange — two turns answered on the SAME model.
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, assistantMsg("m1", "haiku", ""))
+	h.shim.pushEvent(t, assistantMsg("m2", "haiku", ""))
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — the steady state writes through exactly once.
+	count := 0
+	for _, c := range reg.snapshot() {
+		if c == "model sess-1 haiku" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("model reported %d times, want 1 (calls = %v)", count, reg.snapshot())
+	}
+}
+
+func TestRegistrarNotSentAModelWhenNoneIsEverKnown(t *testing.T) {
+	// Arrange — a session that only ever sees non-model events must never
+	// write an empty model through (it would clobber a good record).
+	h, reg := newRegistrarHarness(t)
+	// Act
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"session_id":"cli-uuid-7"}}`)
+	h.endShim()
+	<-h.sess.Done()
+	// Assert
+	for _, c := range reg.snapshot() {
+		if strings.HasPrefix(c, "model ") {
+			t.Fatalf("an empty model was written through: %v", reg.snapshot())
+		}
+	}
+}
+
 func TestRegistrarNotifiedByTranscriptSeedStamp(t *testing.T) {
 	// Arrange — no Run needed: SeedFromTranscript stamps synchronously.
 	shim := newFakeShim()
@@ -1107,5 +1174,26 @@ func TestRegistrarNotifiedByTranscriptSeedStamp(t *testing.T) {
 	calls := reg.snapshot()
 	if len(calls) != 1 || calls[0] != "claude-id sess-1 cli-uuid-9" {
 		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestRegistrarNotifiedOfModelByTranscriptSeed(t *testing.T) {
+	// Arrange — a resumed session whose transcript's last main-chain model
+	// is haiku: the seed adopts it, and that must be written through so a
+	// record predating the write-through (or drifted before restart) is
+	// corrected to the model it is actually resuming on.
+	shim := newFakeShim()
+	reg := &recordingRegistrar{}
+	sess := New(Config{ID: "sess-1", Shim: shim, Logf: func(string, ...any) {}, Registrar: reg})
+	configDir := writeTranscript(t, "/w", "uuid", assistantLine("haiku"))
+	sess.translator.CWD = "/w"
+	path := TranscriptPath(configDir, "/w", "uuid")
+	// Act
+	if err := sess.SeedFromTranscript(path, "uuid"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Assert
+	if !slices.Contains(reg.snapshot(), "model sess-1 haiku") {
+		t.Fatalf("calls = %v, want a model write-through", reg.snapshot())
 	}
 }

@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +161,33 @@ func TestReconcileModelBroadcastsWhenTheMirrorHasDrifted(t *testing.T) {
 	frame := recvFrame(t, client)
 	if frame["type"] != "model-changed" || frame["model"] != "haiku" || frame["origin"] != "reconcile" {
 		t.Errorf("frame = %v, want model-changed haiku origin reconcile", frame)
+	}
+}
+
+func TestReconcileModelWritesTheDriftedModelThrough(t *testing.T) {
+	// Arrange — a drift the push path missed, on a session with a
+	// registrar: healing the live topbar must ALSO update the durable
+	// record so a restart resumes on the reconciled model.
+	configDir := writeTranscript(t, "/w", "uuid", assistantLine("haiku"))
+	shim := newFakeShim()
+	defer shim.end()
+	reg := &recordingRegistrar{}
+	sess := New(Config{
+		ID:                  "s_test",
+		Shim:                shim,
+		CWD:                 "/w",
+		ConfigDir:           configDir,
+		Logf:                func(string, ...any) {},
+		ModelReconcileTicks: make(chan time.Time),
+		Registrar:           reg,
+	})
+	sess.translator.ClaudeSessionID = "uuid"
+	sess.translator.Model = "opus"
+	// Act
+	sess.ReconcileModel()
+	// Assert
+	if !slices.Contains(reg.snapshot(), "model s_test haiku") {
+		t.Fatalf("calls = %v, want a model write-through", reg.snapshot())
 	}
 }
 
