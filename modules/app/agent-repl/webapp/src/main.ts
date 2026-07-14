@@ -8,6 +8,7 @@
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
 import { sessionSubagents } from "./agents.js";
+import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
@@ -184,6 +185,21 @@ async function boot(): Promise<void> {
     renderChrome();
   };
 
+  // Renders are coalesced onto animation frames: a message burst — the
+  // backlog draining when this webview's hidden workspace is switched back
+  // to, a reconnect's replay, a fast delta stream — otherwise runs a full
+  // feed render per message, and that churn is the switch-in jitter. The
+  // paint decides chrome-only vs full feed when it FIRES, not when it was
+  // asked for: a replay that completes between the two must paint the feed,
+  // not just the chrome.
+  const frames = new RenderCoalescer(windowFrameHost(window), () => {
+    if (store.replaying) {
+      renderChrome();
+    } else {
+      rerender();
+    }
+  });
+
   // swapTo rebinds the live view onto a successor session id (the
   // client-side twin of the Emacs sync-webview rebind): fresh store,
   // fresh socket, URL param updated so a reload lands on the successor.
@@ -192,6 +208,9 @@ async function boot(): Promise<void> {
     ws.close();
     activeSessionId = next;
     rememberedClaudeId = "";
+    // A paint scheduled against the dead session would render the
+    // just-reset (empty) store; the successor's hello drives the next one.
+    frames.cancel();
     store.reset();
     // The successor's turn is not this one's: stop the clock now rather than
     // letting it run on the dead session until the successor's hello lands.
@@ -240,13 +259,16 @@ async function boot(): Promise<void> {
         if (result.restored) {
           // Fresh-join replay complete: tail-first backfill render, so
           // the newest message is on screen immediately with no scroll.
+          // Supersedes any coalesced paint — left pending, its rAF would
+          // fire next and flush the staged backfill in one gulp.
+          frames.cancel();
           feed.renderRestored(store.state);
           renderChrome();
-        } else if (result.changed && store.replaying) {
-          // Replay still streaming: defer the feed, keep the chrome live.
-          renderChrome();
         } else if (result.changed) {
-          rerender();
+          // One paint per animation frame, however many messages land
+          // before it. During a replay the paint keeps the chrome live
+          // and leaves the feed to the completion render.
+          frames.schedule();
         }
         return result.send;
       },
