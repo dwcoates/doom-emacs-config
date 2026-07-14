@@ -1226,6 +1226,25 @@ func TestFirstStreamAccessRehydratesWithResume(t *testing.T) {
 	}
 }
 
+func TestRehydratedSessionHelloCarriesTheRecordModel(t *testing.T) {
+	// Arrange — a restart finds a record whose model is the one the
+	// write-through kept current; the rehydrated hello must carry it, so a
+	// client connecting after the restart sees the right model at once.
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	writeTranscript(t, cfg, "uuid-1")
+	h, _, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_before", CWD: "/w", Model: "haiku", ClaudeSessionID: "uuid-1"})
+	// Act
+	conn := h.dial(t, "s_before")
+	h.awaitShim(t)
+	hello := readFrame(t, conn)
+	// Assert
+	if hello["type"] != "hello" || hello["model"] != "haiku" {
+		t.Fatalf("hello = %v, want model haiku", hello)
+	}
+}
+
 func TestRehydratedSessionReplaysPreRestartHistory(t *testing.T) {
 	// Arrange
 	cfg := t.TempDir()
