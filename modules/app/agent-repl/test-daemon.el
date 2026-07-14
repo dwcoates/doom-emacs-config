@@ -477,6 +477,42 @@ whenever a real session happened to be mid-turn."
      ;; Assert
      (should (null agent-repl--frontend-daemon-process)))))
 
+;;;; ---- restart command: rebinds open workspaces ----------------------------
+
+(ert-deftest agent-repl-test-daemon-restart-rebinds-after-force-restart ()
+  "Restart force-bounces the daemon FIRST, then rebinds the open workspaces.
+Order is contractual: the workspaces can only rebind onto a daemon that has
+already been restarted."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--ensure-frontend-daemon)
+               (lambda (&optional force) (push (cons 'ensure force) calls) t))
+              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+               (lambda () (push 'rebind calls) 0)))
+      ;; Act
+      (agent-repl-frontend-daemon-restart)
+      ;; Assert
+      (should (equal (reverse calls) '((ensure . t) rebind))))))
+
+(ert-deftest agent-repl-test-daemon-restart-reports-rebound-count ()
+  "Restart's confirmation message reports how many workspaces were rebound."
+  ;; Arrange
+  (let ((reported nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--ensure-frontend-daemon)
+               (lambda (&optional _force) t))
+              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+               (lambda () 3))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq reported (apply #'format fmt args)))))
+      ;; Act
+      (agent-repl-frontend-daemon-restart)
+      ;; Assert
+      (should (string-match-p "rebound 3 open workspaces" reported)))))
+
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here

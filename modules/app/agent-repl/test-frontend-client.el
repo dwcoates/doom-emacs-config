@@ -915,6 +915,58 @@ the workspace's model.  Fails against that hardcoded nil, since
       (should (= armed 1))
       (should (eq agent-repl--frontend-reattach-timer 'fake-timer)))))
 
+;;;; ---- rebind after restart -------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-rebind-waits-ready-before-reattach ()
+  "The rebind waits for the daemon to answer BEFORE driving the reattach.
+Order matters: `agent-repl--frontend-reattach-check' treats an unreachable
+daemon as \"nothing to reattach\", so probing before readiness would skip
+every workspace."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready)
+               (lambda () (push 'wait calls) t))
+              ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-reattach-check)
+               (lambda () (push 'reattach calls))))
+      ;; Act
+      (agent-repl--frontend-rebind-workspaces-after-restart)
+      ;; Assert
+      (should (equal (reverse calls) '(wait reattach))))))
+
+(ert-deftest agent-repl-test-frontend-rebind-delegates-to-reattach-check ()
+  "The rebind drives the same sweep machinery that bounces and remounts."
+  ;; Arrange
+  (let ((reattached nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-reattach-check)
+               (lambda () (setq reattached t))))
+      ;; Act
+      (agent-repl--frontend-rebind-workspaces-after-restart)
+      ;; Assert
+      (should reattached))))
+
+(ert-deftest agent-repl-test-frontend-rebind-returns-bound-workspace-count ()
+  "The rebind returns how many open workspaces carried a session binding."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (agent-repl-test--with-ws "ws2" '(:frontend-session-id "s_2" :project-dir "/w2")
+      (agent-repl-test--with-ws "ws3" '(:project-dir "/w3")
+        (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-reattach-check) #'ignore))
+          ;; Act / Assert — ws1 and ws2 are bound, ws3 is not.
+          (should (= 2 (agent-repl--frontend-rebind-workspaces-after-restart))))))))
+
+(ert-deftest agent-repl-test-frontend-rebind-returns-zero-without-bindings ()
+  "The rebind returns 0 when no open workspace carries a session binding."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--frontend-reattach-check) #'ignore))
+      ;; Act / Assert
+      (should (= 0 (agent-repl--frontend-rebind-workspaces-after-restart))))))
+
 ;;;; ---- release on nuke ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-release-deletes-and-clears ()

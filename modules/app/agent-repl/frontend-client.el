@@ -442,6 +442,27 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
                   ws n (error-message-string err))
           :error))))))
 
+(defun agent-repl--frontend-rebind-workspaces-after-restart ()
+  "Bounce every open gui workspace's shim onto the freshly restarted daemon.
+Meant to run right after `agent-repl-frontend-daemon-restart' force-bounces
+the daemon: rather than leaving each open panel dark until the next reattach
+sweep timer fires (up to `agent-repl-frontend-reattach-interval' away), this
+drives the reattach IMMEDIATELY so every workspace is good to go the moment
+the restart returns.
+
+Waits for the new daemon to answer, then delegates to
+`agent-repl--frontend-reattach-check' — the SAME machinery the sweep timer
+runs.  Against a fresh instance that lists none of the old bindings, the
+sweep notes the new boot id (resetting the give-ups the previous instance
+left behind), re-ensures each bound workspace's session (a fresh shim that
+resumes the durable conversation), and remounts each live webview.  Returns
+the count of open workspaces that carried a session binding to rebind."
+  (agent-repl--frontend-wait-ready)
+  (let ((n (cl-count-if (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
+                        (agent-repl--live-ws-names))))
+    (agent-repl--frontend-reattach-check)
+    n))
+
 ;;;; ---- Message / interrupt injection ------------------------------------------
 
 (defun agent-repl--frontend-send-message (session-id text)
