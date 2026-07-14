@@ -2962,6 +2962,34 @@ describe("groupHtml", () => {
     expect(html).toContain(`class="tab-chip active" data-tab-group="t1" data-tab-member="t1"`);
     expect(html).toContain(`data-tab-member="t2"`);
   });
+
+  it("renders the tab bar INSIDE the card, after the card opens", () => {
+    // Arrange
+    const members = [bash("t1", "a"), bash("t2", "b")];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert — the card opens first, then the tab bar sits within it.
+    expect(html.indexOf(`class="tool-card`)).toBeLessThan(html.indexOf(`class="tab-bar"`));
+  });
+
+  it("does not render the tab bar as a sibling above the card", () => {
+    // Arrange
+    const members = [bash("t1", "a"), bash("t2", "b")];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert — the feed-group's first child is the card, not the tab bar.
+    expect(html).not.toMatch(/<div class="feed-group">\s*<div class="tab-bar">/);
+    expect(html).toMatch(/<div class="feed-group">\s*<div class="tool-card/);
+  });
+
+  it("places the tab bar above the tool head within the card", () => {
+    // Arrange
+    const members = [bash("t1", "a"), bash("t2", "b")];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert — inside the card the chip row precedes the tool head row.
+    expect(html.indexOf(`class="tab-bar"`)).toBeLessThan(html.indexOf(`class="tool-head"`));
+  });
 });
 
 describe("generic folded input", () => {
