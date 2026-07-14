@@ -62,3 +62,23 @@ export function formatElapsed(ms: number): string {
   // as `0ms` — the one value the second-resolution scale has to say itself.
   return seconds === 0 ? "0s" : formatDuration(seconds * 1000);
 }
+
+/**
+ * A finished span at second resolution, rounded UP: `1s`, `6s`, `1m 30s`.
+ * The end-of-turn result chip reports how long a turn took, where the reader
+ * never needs the millisecond digit, so 5984ms reads as `6s`.
+ *
+ * Rounded UP rather than truncated (the mirror of `formatElapsed`, which
+ * floors a still-running timer), since a turn that ran 5984ms took closer to
+ * six seconds than five, and truncating would undercount the time it spent.
+ *
+ * A whole-second count runs back through `formatDuration`, whose finest unit
+ * it can no longer reach, so no `Xs Yms` remainder survives to the chip. A
+ * non-positive span (a start stamped ahead of the reader's clock) floors to
+ * `0s`, which the chip's own sub-second suppression drops before this is
+ * ever asked to render it.
+ */
+export function formatDurationCeil(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return seconds === 0 ? "0s" : formatDuration(seconds * 1000);
+}
