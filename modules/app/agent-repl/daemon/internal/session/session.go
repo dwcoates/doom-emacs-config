@@ -351,6 +351,17 @@ func (s *Session) Run() {
 	go s.runModelReconciler(runDone, s.reconcileTicks, s.reconcileInterval)
 	for evt := range shim.Events() {
 		s.mu.Lock()
+		// A cooperative hibernation makes the shim emit its own `closed`
+		// (reason "shutdown") on the way out. That is the EXPECTED drain,
+		// not a death: swallow it whole so the session stays non-terminal,
+		// the registry record keeps rehydrating, and no `closed` frame
+		// reaches an attached client to report a session that is merely
+		// suspended as gone. Run then exits the loop on the stream close
+		// below and takes the hibernation branch.
+		if evt.Type == "closed" && s.hibernating {
+			s.mu.Unlock()
+			continue
+		}
 		s.lastActive = s.now()
 		frames := s.translator.OnEvent(evt)
 		s.broadcastLocked(frames)
