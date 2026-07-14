@@ -778,6 +778,78 @@ true — it must not block a future bounce."
     ;; Act / Assert
     (should (null (agent-repl--frontend-turn-active-sessions)))))
 
+;;;; ---- orphan-session reaper --------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-orphan-ids-selects-superseded-duplicate ()
+  "A live-shim session bound nowhere, duplicating a bound conversation, is a target."
+  ;; Arrange — s_new is bound; s_old is the same claude id, live, unbound.
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_new"))))
+    (let ((sessions
+           `(,(list '(session_id . "s_new") '(claude_session_id . "c1"))
+             ,(list '(session_id . "s_old") '(claude_session_id . "c1")))))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-orphan-session-ids sessions) '("s_old"))))))
+
+(ert-deftest agent-repl-test-frontend-orphan-ids-spares-rehydratable ()
+  "A rehydratable (cold) duplicate is spared: it has no shim to leak."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_new"))))
+    (let ((sessions
+           `(,(list '(session_id . "s_new") '(claude_session_id . "c1"))
+             ,(list '(session_id . "s_cold") '(claude_session_id . "c1") '(rehydratable . t)))))
+      ;; Act / Assert
+      (should (null (agent-repl--frontend-orphan-session-ids sessions))))))
+
+(ert-deftest agent-repl-test-frontend-orphan-ids-spares-hibernated ()
+  "A hibernated duplicate is spared: its shim is already freed."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_new"))))
+    (let ((sessions
+           `(,(list '(session_id . "s_new") '(claude_session_id . "c1"))
+             ,(list '(session_id . "s_hib") '(claude_session_id . "c1") '(hibernated . t)))))
+      ;; Act / Assert
+      (should (null (agent-repl--frontend-orphan-session-ids sessions))))))
+
+(ert-deftest agent-repl-test-frontend-orphan-ids-spares-unique-unbound ()
+  "An unbound live session duplicating NO bound conversation is left alone."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_new"))))
+    (let ((sessions
+           `(,(list '(session_id . "s_new") '(claude_session_id . "c1"))
+             ,(list '(session_id . "s_solo") '(claude_session_id . "c2")))))
+      ;; Act / Assert
+      (should (null (agent-repl--frontend-orphan-session-ids sessions))))))
+
+(ert-deftest agent-repl-test-frontend-reap-deletes-orphans ()
+  "The reaper issues a DELETE for each orphan id and returns them."
+  ;; Arrange
+  (let ((deleted nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-orphan-session-ids)
+               (lambda (_sessions) '("s_old")))
+              ((symbol-function 'agent-repl--frontend-delete-session)
+               (lambda (id) (push id deleted) t)))
+      ;; Act
+      (let ((reaped (agent-repl--frontend-reap-orphan-sessions '())))
+        ;; Assert
+        (should (equal reaped '("s_old")))
+        (should (equal deleted '("s_old")))))))
+
+(ert-deftest agent-repl-test-frontend-reap-skips-failed-delete ()
+  "A failed DELETE is skipped rather than fatal, and excluded from the reaped list."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-orphan-session-ids)
+             (lambda (_sessions) '("s_bad" "s_ok")))
+            ((symbol-function 'agent-repl--frontend-delete-session)
+             (lambda (id) (if (equal id "s_bad") (error "boom") t))))
+    ;; Act
+    (let ((reaped (agent-repl--frontend-reap-orphan-sessions '())))
+      ;; Assert
+      (should (equal reaped '("s_ok"))))))
+
 ;;;; ---- reattach loop -----------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-reattach-check-no-op-when-listed ()

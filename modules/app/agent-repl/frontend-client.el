@@ -279,6 +279,58 @@ watching:
                        (error-message-string err))
      nil)))
 
+(defun agent-repl--frontend-orphan-session-ids (sessions)
+  "Return ids of SESSIONS that leak a live shim for an already-bound conversation.
+Pure (no deletion).  A daemon bounce or reattach can supersede a session
+\(rebinding its workspace onto a fresh resume of the same conversation)
+while the old one's shim keeps running — a leaked `claude' process that
+no client is watching.  A target is a session that:
+- still holds a LIVE SHIM: non-terminal, not hibernated, not rehydratable
+  (a hibernated or cold record has already shed or never spawned its
+  shim, so it leaks nothing and is spared);
+- is bound to NO live workspace
+  (`agent-repl--frontend-bound-session-ids'); and
+- shares its `claude_session_id' with a session a workspace IS bound to,
+  which is what makes it a superseded DUPLICATE rather than some
+  unrelated session, so a uniquely-unbound live session is left alone.
+
+SESSIONS is the `GET /sessions' listing (alist entries)."
+  (let* ((bound (agent-repl--frontend-bound-session-ids))
+         (bound-claude-ids
+          (delq nil (mapcar (lambda (s)
+                              (when (member (alist-get 'session_id s) bound)
+                                (alist-get 'claude_session_id s)))
+                            sessions))))
+    (delq nil
+          (mapcar
+           (lambda (s)
+             (let ((id (alist-get 'session_id s))
+                   (claude-id (alist-get 'claude_session_id s)))
+               (when (and (not (eq (alist-get 'terminal s) t))
+                          (not (eq (alist-get 'hibernated s) t))
+                          (not (eq (alist-get 'rehydratable s) t))
+                          (not (member id bound))
+                          claude-id
+                          (member claude-id bound-claude-ids))
+                 id)))
+           sessions))))
+
+(defun agent-repl--frontend-reap-orphan-sessions (sessions)
+  "Delete the leaked-orphan sessions in SESSIONS, freeing their shim processes.
+Targets come from `agent-repl--frontend-orphan-session-ids'.  A failed
+DELETE is logged and skipped rather than aborting the sweep — the next
+sweep retries it.  Returns the ids actually reaped."
+  (let (reaped)
+    (dolist (id (agent-repl--frontend-orphan-session-ids sessions) (nreverse reaped))
+      (condition-case err
+          (progn
+            (agent-repl--frontend-delete-session id)
+            (push id reaped)
+            (agent-repl--log nil "reap: deleted orphan session %s (leaked duplicate shim)" id))
+        (error
+         (agent-repl--log nil "reap: failed to delete orphan %s: %s"
+                           id (error-message-string err)))))))
+
 ;;;; ---- Workspace binding ---------------------------------------------------
 
 (defun agent-repl--frontend-session-url (session-id)
@@ -420,7 +472,11 @@ exist, ensure it (spawn or adopt) so the next sweep can reattach."
             (agent-repl--ws-put ws :reattach-failed nil)
             (agent-repl--ws-put ws :reattach-failures nil))
            ((agent-repl--ws-get ws :reattach-failed) nil)
-           (t (agent-repl--frontend-reattach-ws ws bound)))))))))
+           (t (agent-repl--frontend-reattach-ws ws bound))))))
+      ;; With bindings reconciled, reap any superseded session still
+      ;; running a leaked duplicate shim for a conversation now bound
+      ;; elsewhere (see `agent-repl--frontend-reap-orphan-sessions').
+      (agent-repl--frontend-reap-orphan-sessions (alist-get 'sessions resp)))))
 
 (defun agent-repl--frontend-note-boot-id (boot-id)
   "Record BOOT-ID; on an instance change, reset every reattach give-up.
