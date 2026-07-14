@@ -229,6 +229,11 @@ async function boot(): Promise<void> {
       rerender();
     }
   });
+  // The wake anchors' countdowns tick on wall-clock time, not on frames,
+  // so nothing would re-render them between deltas. A slow heartbeat
+  // ask keeps them honest through the same coalescer every other render
+  // rides; reconciliation no-ops every node whose HTML did not change.
+  window.setInterval(() => frames.schedule(), 30_000);
 
   // swapTo rebinds the live view onto a successor session id (the
   // client-side twin of the Emacs sync-webview rebind): fresh store,

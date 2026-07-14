@@ -658,9 +658,22 @@ function toolResult(item: ToolItem): string {
 }
 
 /**
+ * The live countdown suffix of a wake anchor: whole minutes down to the
+ * last minute and a half, then seconds, then "firing…" once the moment
+ * passes — the periodic re-render in main.ts is what makes it tick.
+ */
+export function wakeRemainingLabel(fireMs: number, nowMs: number): string {
+  const remaining = (fireMs - nowMs) / 1000;
+  if (remaining <= 0) return "firing…";
+  if (remaining < 90) return `in ${Math.round(remaining)}s`;
+  return `in ${Math.round(remaining / 60)}m`;
+}
+
+/**
  * The wall-clock moment a scheduled wakeup fires (result time plus
- * delaySeconds) with its reason, a stop acknowledgment for `stop: true`,
- * and the raw ack echo when the input carries neither anchor.
+ * delaySeconds) with a ticking countdown and its reason, a stop
+ * acknowledgment for `stop: true`, and the raw ack echo when the input
+ * carries neither anchor.
  */
 function wakeLine(item: ToolItem): string {
   if (item.input?.stop === true) {
@@ -672,11 +685,12 @@ function wakeLine(item: ToolItem): string {
       contentToText(item.result?.content ?? ""),
     )}</pre>`;
   }
-  const at = new Date(new Date(item.resultTs).getTime() + delay * 1000);
+  const fireMs = new Date(item.resultTs).getTime() + delay * 1000;
+  const at = new Date(fireMs);
   const reason = typeof item.input?.reason === "string" ? ` · ${item.input.reason}` : "";
-  return `<div class="wake-at">wakes ~${escapeHtml(formatTurnTime(at.toISOString()))}${escapeHtml(
-    reason,
-  )}</div>`;
+  return `<div class="wake-at">wakes ~${escapeHtml(formatTurnTime(at.toISOString()))} (${escapeHtml(
+    wakeRemainingLabel(fireMs, Date.now()),
+  )})${escapeHtml(reason)}</div>`;
 }
 
 /**
