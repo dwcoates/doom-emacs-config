@@ -327,7 +327,12 @@ function Thinking(item: ThinkingItem): string {
     </details>`;
 }
 
-function ToolCard(item: ToolItem): string {
+// IS-PULSING breathes the card while it is the running frontier (see
+// `pulseTarget`): a slow wash under the head's fast arc, so a call in flight
+// is never a wholly still card during the second the arc stays hidden. The
+// two motions live on different channels — the arc in the badge, the breath
+// on the card background — so they read as one signal, not two competing ones.
+function ToolCard(item: ToolItem, isPulsing = false): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
   // In-flight is ONE look, whichever phase the call is in: the orange run
   // badge carrying the same arc the thinking indicator spins, held
@@ -347,7 +352,7 @@ function ToolCard(item: ToolItem): string {
     ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>`
     : "";
   return `
-    <div class="tool-card tool-${variant.toLowerCase()}">
+    <div class="tool-card tool-${variant.toLowerCase()}${isPulsing ? " pulsing" : ""}">
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}</div>
       ${toolInput(item)}
       ${progress}
@@ -698,30 +703,33 @@ export function rendersEmpty(
   }
 }
 
-/** The bubble that BREATHES, or null when none does. */
+/** The section that BREATHES, or null when none does. */
 export type PulseTarget =
   | { kind: "user-turn"; requestId: string }
   | { kind: "text"; blockId: string }
+  | { kind: "tool"; toolUseId: string }
   | null;
 
 /**
- * The one bubble that breathes: whichever of the prompt and the agent's last
- * word the UI has drawn nothing newer than.
+ * The one section that breathes: the newest thing the UI is waiting on, so a
+ * running session always shows a single slow beat somewhere at its tail.
  *
- * - The PROMPT breathes from the moment it is sent until the turn draws its
+ * Exactly one of these takes the breath, in tail-first precedence:
+ * - a RUNNING TOOL CARD at the tail breathes until its badge flips to
+ *   done/error, covering the second its arc spends deliberately hidden (see
+ *   `.tool-spinner`) so a call in flight is never a wholly still card.
+ * - the WORKING FRONTIER (the last response a still-running turn has
+ *   finished) breathes once the agent has written something, so a reader who
+ *   has caught up sees it is still writing rather than that it went quiet.
+ * - the PROMPT breathes from the moment it is sent until the turn draws its
  *   first visible thing, so a send is never answered by a still feed.
- * - The WORKING FRONTIER (the last response a still-running turn has
- *   finished) breathes after that, so a reader who has caught up sees the
- *   agent is still writing rather than that it went quiet.
  *
- * They are mutually exclusive by construction: the prompt only breathes while
- * nothing visible follows it, and the frontier only exists once something
- * does. The states that forfeit the pulse entirely, each because something
- * else already carries the beat (or because there is no beat to carry):
+ * The states that forfeit the pulse entirely, each because something else
+ * already carries the beat (or because there is no beat to carry):
  * - the turn is not in flight, so nothing more is coming at all;
  * - a response is streaming, and its own cursor is the live signal;
  * - a thinking indicator is running, and its spinner is the live signal;
- * - a visible section (a tool card, a retry, an error) followed the prompt
+ * - a settled section (a done tool, a retry, an error) followed the prompt
  *   before the agent wrote a word, and IT is now the progress on show.
  *
  * The scan stops at the newest user turn: the previous turn's answer belongs
@@ -748,16 +756,26 @@ export function pulseTarget(
     if (item.kind === "text") {
       return item.done ? { kind: "text", blockId: item.blockId } : null;
     }
+    // A running tool card (no result badge yet) at the tail IS the frontier:
+    // it breathes until its badge flips to done/error, filling the second its
+    // arc stays hidden. A card the agent has moved past (something visible
+    // follows it) is history, so the frontier falls back to the text above.
+    if (item.kind === "tool" && atTail && !item.result) {
+      return { kind: "tool", toolUseId: item.toolUseId };
+    }
     atTail = false;
   }
   return null;
 }
 
-/** Whether PULSE names this item as the bubble that breathes. */
+/** Whether PULSE names this item as the section that breathes. */
 export function isPulsed(item: ConversationItem, pulse: PulseTarget): boolean {
   if (!pulse) return false;
   if (pulse.kind === "text") {
     return item.kind === "text" && item.blockId === pulse.blockId;
+  }
+  if (pulse.kind === "tool") {
+    return item.kind === "tool" && item.toolUseId === pulse.toolUseId;
   }
   return item.kind === "user-turn" && item.requestId === pulse.requestId;
 }
@@ -827,8 +845,8 @@ function SystemNote(item: SystemItem): string {
  * carrying its chip, and the paired result renders as nothing, since the
  * bubble above it has already drawn it.
  *
- * IS-PULSING marks the one bubble that breathes (`pulseTarget`), which is
- * either the prompt or a finished response.
+ * IS-PULSING marks the one section that breathes (`pulseTarget`), which is
+ * the prompt, a finished response, or a running tool card.
  */
 export function renderItem(
   item: ConversationItem,
@@ -845,7 +863,7 @@ export function renderItem(
     case "thinking":
       return Thinking(item);
     case "tool":
-      return ToolCard(item);
+      return ToolCard(item, isPulsing);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
