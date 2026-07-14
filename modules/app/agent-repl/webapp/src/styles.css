@@ -497,6 +497,23 @@ pre {
 .agent-panel { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.35rem; }
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
+/* Consecutive like-cards collapse into one tabbed group: the chips pick
+   the member, the active member's card renders beneath, and the red
+   count keeps failures loud even from unselected tabs. */
+.tab-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem; }
+.tab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab-chip.active { color: var(--fg); border-color: var(--accent); }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
    5 each, independently scrollable) and --cap-extra absorbs the
