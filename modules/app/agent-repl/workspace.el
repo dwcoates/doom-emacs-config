@@ -180,8 +180,8 @@ debug logging on."
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
-`:priority', `:worktree-p', `:source-ws-dir', `:ws-id', and the
-`:merge-completed*' family.  Preserving `:project-dir' across tombstone
+`:last-viewed-at', `:priority', `:worktree-p', `:source-ws-dir', `:ws-id',
+and the `:merge-completed*' family.  Preserving `:project-dir' across tombstone
 is what lets `agent-repl--ws-dir' callers (magit-status, async git,
 ws-id hashing) keep working on a persp that outlives its agent-repl
 session — the failure mode that previously surfaced as
@@ -1451,9 +1451,20 @@ Callers must use this function instead of calling `advice-add' on
   "Record the current workspace at the front of `agent-repl--workspace-history'.
 Removes any prior occurrence of the name so the list stays
 most-recently-visited-first with no duplicates.  No-op when there is no
-current workspace.  Registered on the persp activation hook below."
+current workspace.  Registered on the persp activation hook below.
+
+Also stamps `:last-viewed-at' with `current-time' on the activated
+workspace's plist.  This is the single view chokepoint every
+perspective activation funnels through, so the project picker
+\(`agent-repl-switch-to-project') can sort by most-recently-viewed and
+`agent-repl--state-save' can persist the stamp for dead workspaces."
   (let ((name (agent-repl--ws-current-name)))
     (when name
+      ;; Stamp only known agent-repl workspaces; a foreign persp (the main
+      ;; persp, a non-agent-repl one) has no hash entry, and `--ws-put'
+      ;; would otherwise STUB-CREATE a spurious :project-dir-less entry.
+      (when (agent-repl--ws-known-p name)
+        (agent-repl--ws-put name :last-viewed-at (current-time)))
       (setq agent-repl--workspace-history
             (cons name (cl-remove name agent-repl--workspace-history
                                   :test #'string=))))))

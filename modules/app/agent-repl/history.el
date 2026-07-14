@@ -273,6 +273,11 @@ project stamps a creation date that subsequent saves preserve.
 the previously-persisted value to avoid clobbering on stray saves that
 do not represent a kill.
 
+`:last-viewed-at' records when the workspace was last switched to; it is
+stamped on the persp-activated chokepoint and, like `:last-killed-at',
+prefers the live plist value then the previously-persisted one so a
+stray save never clobbers it.  The project picker sorts on this key.
+
 `:model' records the session's current model, resolved from the
 workspace's Claude config dir via `agent-repl--model-persist-value' so
 a mid-session `/model' switch (e.g. `opus' to `fable') survives restart;
@@ -294,6 +299,14 @@ launches under the same model."
                              (current-time)))
              (last-killed-at (or (agent-repl--ws-get ws :last-killed-at)
                                  (plist-get existing :last-killed-at)))
+             ;; When this workspace was last switched to / navigated to.
+             ;; Stamped on the persp-activated chokepoint
+             ;; (`agent-repl--record-workspace-history'); prefer the live
+             ;; plist value, fall back to the previously-persisted one so a
+             ;; stray save that predates any view does not clobber it.  The
+             ;; project picker sorts most-recently-viewed first on this key.
+             (last-viewed-at (or (agent-repl--ws-get ws :last-viewed-at)
+                                 (plist-get existing :last-viewed-at)))
              ;; The session's *current* model, resolved from the workspace's
              ;; Claude config dir (its session jsonl) so a mid-session
              ;; `/model' switch survives restart; falls back to the
@@ -307,9 +320,12 @@ launches under the same model."
         (agent-repl--ws-put ws :created-at created-at)
         (when last-killed-at
           (agent-repl--ws-put ws :last-killed-at last-killed-at))
+        (when last-viewed-at
+          (agent-repl--ws-put ws :last-viewed-at last-viewed-at))
         (let ((state (append `(:project-dir ,root
                                 :created-at ,created-at
                                 :last-killed-at ,last-killed-at
+                                :last-viewed-at ,last-viewed-at
                                 :model ,model
                                 :active-env ,(agent-repl--ws-get ws :active-env)
                                 :priority ,(agent-repl--ws-get ws :priority)
