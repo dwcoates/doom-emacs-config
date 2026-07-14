@@ -565,18 +565,23 @@ pre {
 .tool-progress { color: var(--muted); font-style: italic; }
 /* The scheduled-wakeup anchor: pending-work orange, like the run badge. */
 .wake-at { color: var(--thinking); font-style: italic; }
-/* Prompt-mediated card controls: the button asks the AGENT to stop the
-   task (a real turn, queued like any prompt) and its label owns that. */
+/* Prompt-mediated card controls: each button asks the AGENT (a real
+   turn, queued like any prompt) and its label owns that. One shared
+   shape; only the color separates stop from send. */
 .task-controls { margin-top: 0.35rem; }
-.task-stop {
+.task-stop, .task-msg {
   font-size: 0.75rem;
   cursor: pointer;
-  color: var(--err);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 99px;
   padding: 0.1rem 0.6rem;
 }
+.task-stop { color: var(--err); }
+.task-msg { color: var(--accent); }
+/* The freeform composer for a live background agent. */
+.agent-msg { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
+.agent-msg-input { flex: 1; min-width: 0; font-size: 0.8rem; }
 .stderr { color: var(--err); }
 
 .diff .add { color: var(--ok); }

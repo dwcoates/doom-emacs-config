@@ -3090,3 +3090,61 @@ describe("wakeRemainingLabel", () => {
     expect(wakeRemainingLabel(1000, 5000)).toBe("firing…");
   });
 });
+
+describe("agent message composer", () => {
+  /** An Agent spawn whose result announced a background agent id. */
+  function bgAgent(notified = false): ToolItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "Agent",
+      inputJson: "{}",
+      input: { description: "scout" },
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "Async agent launched successfully. agentId: abc9 (internal ID)",
+      },
+      ...(notified
+        ? { notification: { taskId: "abc9", status: "completed", text: "<task-notification/>" } }
+        : {}),
+    };
+  }
+
+  it("offers a freeform composer while the background agent runs", () => {
+    // Arrange + Act
+    const html = renderItem(bgAgent());
+    // Assert — the send owns being prompt-mediated.
+    expect(html).toContain(`data-msg-for="abc9"`);
+    expect(html).toContain(`data-msg-send="abc9"`);
+    expect(html).toContain("send · asks the agent");
+  });
+
+  it("withdraws the composer once the completion notification lands", () => {
+    // Arrange + Act
+    const html = renderItem(bgAgent(true));
+    // Assert
+    expect(html).not.toContain("agent-msg");
+  });
+
+  it("offers no composer on a card that spawned no agent", () => {
+    // Arrange + Act
+    const html = renderItem(tool());
+    // Assert
+    expect(html).not.toContain("agent-msg");
+  });
+
+  it("re-renders a half-typed draft back into the input", () => {
+    // Arrange — the draft lives in renderer state (PanelContext.drafts).
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => false,
+      drafts: new Map([["abc9", "status pls"]]),
+    };
+    // Act
+    const html = renderItem(bgAgent(), undefined, undefined, false, panels);
+    // Assert
+    expect(html).toContain(`value="status pls"`);
+  });
+});
