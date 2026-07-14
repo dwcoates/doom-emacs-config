@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -110,41 +111,96 @@ type transcriptAssistantMeta struct {
 	Usage *protocol.Usage `json:"usage"`
 }
 
-// BuildReplayFrames translates the transcript JSONL on r into the L2
-// frames the live stream would have produced, mutating t exactly as
-// live translation would (block ids, tool metadata for render hints,
-// model). Sidechain (subagent) and meta entries are skipped; malformed
-// lines are skipped without aborting the remainder. Each completed turn
-// is closed with a synthetic result frame (closeReplayTurns), which the
-// transcript does not record but the live stream always emits. The
-// trailing usage frame mirrors the last assistant message's usage so the
-// webapp's token counter shows the resumed context size.
-func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
-	var frames []protocol.L2Frame
-	var lastMeta transcriptAssistantMeta
+// replayState carries the accumulators one replay pass threads through
+// its entries: the synthetic user-turn counter, the last assistant
+// metadata (for the trailing usage frame), and the background-agent ids
+// each Task/Agent result announced (agentId → spawning tool_use_id),
+// which is what links a subagents/agent-<id>.jsonl file back to the
+// card that spawned it.
+type replayState struct {
+	seq      int
+	lastMeta transcriptAssistantMeta
+	agentIDs map[string]string
+}
+
+func newReplayState() *replayState {
+	return &replayState{agentIDs: map[string]string{}}
+}
+
+// replayBatch is one transcript entry's frames plus the entry's own
+// timestamp, the unit the sidechain merge interleaves by.
+type replayBatch struct {
+	ts     string
+	frames []protocol.L2Frame
+}
+
+// buildReplayBatches walks the main-transcript JSONL on r, one batch per
+// usable entry, mutating t exactly as live translation would.
+func buildReplayBatches(t *Translator, r io.Reader, st *replayState) []replayBatch {
+	var batches []replayBatch
 	reader := bufio.NewReader(r)
-	replaySeq := 0
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			frames = append(frames, replayEntryFrames(t, line, &replaySeq, &lastMeta)...)
+			if frames, ts := replayEntryFrames(t, line, st); len(frames) > 0 {
+				batches = append(batches, replayBatch{ts: ts, frames: frames})
+			}
 		}
 		if err != nil {
 			break
 		}
 	}
+	return batches
+}
+
+// flattenWithUsage joins the batches and closes with the §2.8 usage
+// frame mirroring the last MAIN assistant message, so the webapp's token
+// counter shows the resumed context size.
+func flattenWithUsage(batches []replayBatch, st *replayState) []protocol.L2Frame {
+	var frames []protocol.L2Frame
+	for _, b := range batches {
+		frames = append(frames, b.frames...)
+	}
+	// Synthetic turn-end results land on the FLATTENED, time-merged list,
+	// so a turn's boundary is computed over the same order clients see.
 	frames = closeReplayTurns(frames)
 	// No model assignment here: each assistant entry is translated through
 	// t.OnEvent, which adopts the model it reports, so the mirror has
 	// already landed on the LAST main-chain entry's model by this point.
-	if lastMeta.Usage != nil {
+	if st.lastMeta.Usage != nil {
 		frames = append(frames, &protocol.UsageFrame{
 			Envelope:  protocol.Envelope{Type: "usage"},
-			MessageID: lastMeta.ID,
-			Usage:     *lastMeta.Usage,
+			MessageID: st.lastMeta.ID,
+			Usage:     *st.lastMeta.Usage,
 		})
 	}
 	return frames
+}
+
+// BuildReplayFrames translates the transcript JSONL on r into the L2
+// frames the live stream would have produced, mutating t exactly as
+// live translation would (block ids, tool metadata for render hints,
+// model). Inline sidechain entries (legacy CLI transcripts, no reliable
+// parent linkage) and meta entries are skipped; malformed lines are
+// skipped without aborting the remainder. Current-CLI sidechains live
+// in per-agent files, which BuildReplayFramesWithAgents merges in.
+func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
+	st := newReplayState()
+	return flattenWithUsage(buildReplayBatches(t, r, st), st)
+}
+
+// BuildReplayFramesWithAgents is BuildReplayFrames plus the session's
+// sidechain files: every subagents/agent-<id>.jsonl under subagentsDir
+// that can be linked to the Task/Agent call that spawned it replays as
+// parented frames, interleaved with the main chain by entry timestamp.
+// Files with no discoverable spawner are skipped like malformed lines —
+// unparented frames would pollute the main feed instead of nesting.
+func BuildReplayFramesWithAgents(t *Translator, r io.Reader, subagentsDir string) []protocol.L2Frame {
+	st := newReplayState()
+	batches := buildReplayBatches(t, r, st)
+	batches = append(batches, sidechainBatches(t, subagentsDir, st)...)
+	sort.SliceStable(batches, func(i, j int) bool { return batches[i].ts < batches[j].ts })
+	return flattenWithUsage(batches, st)
 }
 
 // closeReplayTurns inserts a synthetic §2.4 result frame at each turn
@@ -225,27 +281,27 @@ func replayResult(ts string) protocol.L2Frame {
 }
 
 // replayEntryFrames translates one transcript line; unusable lines
-// yield no frames.
-func replayEntryFrames(t *Translator, line []byte, replaySeq *int, lastMeta *transcriptAssistantMeta) []protocol.L2Frame {
+// yield no frames. The returned ts is the entry's own timestamp.
+func replayEntryFrames(t *Translator, line []byte, st *replayState) ([]protocol.L2Frame, string) {
 	var entry transcriptEntry
 	if err := json.Unmarshal(line, &entry); err != nil {
-		return nil
+		return nil, ""
 	}
 	if entry.IsSidechain || entry.IsMeta {
-		return nil
+		return nil, ""
 	}
 	switch entry.Type {
 	case "assistant":
 		var meta transcriptAssistantMeta
 		if err := json.Unmarshal(entry.Message, &meta); err == nil {
-			*lastMeta = meta
+			st.lastMeta = meta
 		}
 		frames := t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
-		return stampReplay(frames, entry.Timestamp)
+		return stampReplay(frames, entry.Timestamp), entry.Timestamp
 	case "user":
-		return replayUserFrames(t, entry.Message, entry.Timestamp, replaySeq)
+		return replayUserFrames(t, entry.Message, entry.Timestamp, st), entry.Timestamp
 	default:
-		return nil
+		return nil, ""
 	}
 }
 
@@ -300,11 +356,16 @@ func slashCommandText(s string) string {
 	return typed
 }
 
+// A backgrounded Task/Agent result announces the sidechain file its
+// output lands in: "Async agent launched successfully. agentId: <hex>".
+var agentIDRe = regexp.MustCompile(`agentId:\s*([0-9a-fA-F]+)`)
+
 // replayUserFrames maps one user transcript entry to frames: tool_result
 // blocks become tool-use-result frames (through the Translator, so
 // render hints fire for tools it has seen), and the remaining content
-// becomes one §2.3 user-turn frame.
-func replayUserFrames(t *Translator, message json.RawMessage, ts string, replaySeq *int) []protocol.L2Frame {
+// becomes one §2.3 user-turn frame. Subagent-spawning results also bank
+// their announced agentId so the sidechain merge can find its parent.
+func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *replayState) []protocol.L2Frame {
 	var msg transcriptUserMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
 		return nil
@@ -316,7 +377,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 			return nil
 		}
 		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": text}})
-		return []protocol.L2Frame{replayUserTurn(norm, ts, replaySeq)}
+		return []protocol.L2Frame{replayUserTurn(norm, ts, st)}
 	}
 	var rawBlocks []json.RawMessage
 	if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
@@ -330,6 +391,9 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 			continue
 		}
 		if block.Type == "tool_result" {
+			if m := agentIDRe.FindStringSubmatch(contentText(block.Content)); m != nil {
+				st.agentIDs[m[1]] = block.ToolUseID
+			}
 			frames = append(frames, stampReplay(t.OnEvent(&protocol.L1Event{
 				Type:      "tool-result",
 				ToolUseID: block.ToolUseID,
@@ -342,9 +406,185 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 	}
 	if len(turnBlocks) > 0 {
 		content, _ := json.Marshal(turnBlocks)
-		frames = append(frames, replayUserTurn(content, ts, replaySeq))
+		frames = append(frames, replayUserTurn(content, ts, st))
 	}
 	return frames
+}
+
+// sidechainBatches replays every linkable subagents/agent-<id>.jsonl
+// under dir. A file links to its spawner via the announced agentId
+// (background agents) or by its first user prompt matching a replayed
+// Task/Agent input's prompt (foreground agents, claimed at most once);
+// files with neither are skipped.
+func sidechainBatches(t *Translator, dir string, st *replayState) []replayBatch {
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var batches []replayBatch
+	claimed := map[string]bool{}
+	for _, id := range st.agentIDs {
+		claimed[id] = true
+	}
+	for _, de := range des {
+		id, ok := sidechainFileID(de.Name())
+		if !ok {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		entryLines := transcriptLines(data)
+		parent := st.agentIDs[id]
+		if parent == "" {
+			parent = promptMatchParent(t, entryLines, claimed)
+		}
+		if parent == "" {
+			continue
+		}
+		claimed[parent] = true
+		for _, line := range entryLines {
+			if frames, ts := sidechainEntryFrames(t, line, parent); len(frames) > 0 {
+				batches = append(batches, replayBatch{ts: ts, frames: frames})
+			}
+		}
+	}
+	return batches
+}
+
+// sidechainFileID extracts <id> from an agent-<id>.jsonl filename.
+func sidechainFileID(name string) (string, bool) {
+	id, ok := strings.CutPrefix(name, "agent-")
+	if !ok {
+		return "", false
+	}
+	id, ok = strings.CutSuffix(id, ".jsonl")
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+// transcriptLines splits a whole JSONL file into its non-blank lines.
+func transcriptLines(data []byte) [][]byte {
+	var lines [][]byte
+	for _, l := range splitLines(string(data)) {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, []byte(l))
+		}
+	}
+	return lines
+}
+
+// promptMatchParent links a sidechain file to the replayed Task/Agent
+// call whose input prompt equals the file's first user text — the only
+// linkage a FOREGROUND agent leaves behind (background agents announce
+// an agentId instead). Each spawning call is claimed at most once, so
+// parallel agents with identical prompts each land on their own card
+// (which one is arbitrary, and interchangeable by construction).
+func promptMatchParent(t *Translator, entryLines [][]byte, claimed map[string]bool) string {
+	prompt := firstUserText(entryLines)
+	if prompt == "" {
+		return ""
+	}
+	for id, meta := range t.tools {
+		if claimed[id] || (meta.name != "Task" && meta.name != "Agent") {
+			continue
+		}
+		var in struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.Unmarshal(meta.input, &in); err != nil {
+			continue
+		}
+		if in.Prompt != "" && in.Prompt == prompt {
+			return id
+		}
+	}
+	return ""
+}
+
+// firstUserText returns the first user entry's text content: the prompt
+// the spawning call injected into the sidechain.
+func firstUserText(entryLines [][]byte) string {
+	for _, line := range entryLines {
+		var entry transcriptEntry
+		if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "user" {
+			continue
+		}
+		var msg transcriptUserMessage
+		if err := json.Unmarshal(entry.Message, &msg); err != nil {
+			return ""
+		}
+		var text string
+		if err := json.Unmarshal(msg.Content, &text); err == nil {
+			return text
+		}
+		var blocks []transcriptUserBlock
+		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+			for _, b := range blocks {
+				if b.Type == "text" {
+					var s string
+					if err := json.Unmarshal(b.Content, &s); err == nil {
+						return s
+					}
+				}
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// sidechainEntryFrames translates one sidechain transcript line under
+// its spawning call. Assistant entries replay in full (their blocks all
+// carry the parent); user entries contribute ONLY tool_result blocks —
+// the injected prompt is the spawning call's own input, never a user
+// bubble in the feed.
+func sidechainEntryFrames(t *Translator, line []byte, parent string) ([]protocol.L2Frame, string) {
+	var entry transcriptEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return nil, ""
+	}
+	if entry.IsMeta {
+		return nil, ""
+	}
+	switch entry.Type {
+	case "assistant":
+		frames := t.OnEvent(&protocol.L1Event{
+			Type:            "assistant-message",
+			Message:         entry.Message,
+			ParentToolUseID: parent,
+		})
+		return stampReplay(frames, entry.Timestamp), entry.Timestamp
+	case "user":
+		var msg transcriptUserMessage
+		if err := json.Unmarshal(entry.Message, &msg); err != nil {
+			return nil, ""
+		}
+		var rawBlocks []json.RawMessage
+		if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
+			return nil, ""
+		}
+		var frames []protocol.L2Frame
+		for _, raw := range rawBlocks {
+			var block transcriptUserBlock
+			if err := json.Unmarshal(raw, &block); err != nil || block.Type != "tool_result" {
+				continue
+			}
+			frames = append(frames, stampReplay(t.OnEvent(&protocol.L1Event{
+				Type:            "tool-result",
+				ToolUseID:       block.ToolUseID,
+				IsError:         block.IsError,
+				Content:         block.Content,
+				ParentToolUseID: parent,
+			}), entry.Timestamp)...)
+		}
+		return frames, entry.Timestamp
+	default:
+		return nil, ""
+	}
 }
 
 // replayUserTurn builds the §2.3 user-turn frame for replayed content.
@@ -352,11 +592,11 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, replayS
 // user-message command. The envelope is pre-stamped with the transcript
 // entry's own timestamp so the hub keeps it (§2.1) instead of stamping
 // resume time; an entry without one falls through to the hub's stamp.
-func replayUserTurn(content json.RawMessage, ts string, replaySeq *int) protocol.L2Frame {
-	*replaySeq++
+func replayUserTurn(content json.RawMessage, ts string, st *replayState) protocol.L2Frame {
+	st.seq++
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn", TS: ts},
-		RequestID: replayRequestID(*replaySeq),
+		RequestID: replayRequestID(st.seq),
 		Content:   content,
 	}
 }
@@ -392,13 +632,20 @@ func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
 			s.logf("session %s: close transcript %s: %v", s.ID, path, cerr)
 		}
 	}()
-	s.broadcastLocked(BuildReplayFrames(s.translator, f))
+	s.broadcastLocked(BuildReplayFramesWithAgents(s.translator, f, subagentsDirFor(path)))
 	// The replay adopts the transcript's last main-chain model into the
 	// mirror, so write it through here: a resumed session whose record
 	// predates the write-through (or drifted before the restart) is
 	// corrected to the model it is actually resuming on.
 	s.notifyRegistrarLocked()
 	return nil
+}
+
+// subagentsDirFor returns the per-session sidechain directory the CLI
+// writes beside a transcript: <uuid>/subagents under the project dir,
+// one agent-<id>.jsonl per spawned subagent.
+func subagentsDirFor(path string) string {
+	return filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 }
 
 // NoteResumeUnavailable retains a recoverable in-band error frame
