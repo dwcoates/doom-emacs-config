@@ -590,6 +590,43 @@ pre {
   font-size: 0.75rem;
 }
 
+/* The compaction-in-progress banner (#compact-progress-slot): an INDETERMINATE
+   bar shown while a /compact runs. The SDK reports no progress percentage, so
+   the fill loops a sweep rather than tracking a fraction. The slot is empty
+   (and so collapsed) whenever no compaction is running. */
+.compact-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--info-tokens);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.compact-progress-label { white-space: nowrap; }
+.compact-progress-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.compact-progress-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: compact-progress-sweep 1.2s ease-in-out infinite;
+}
+@keyframes compact-progress-sweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
 /* The context boundary a /clear draws, between its own prompt bubble and the
    `system: init` that re-opens the session beneath it. It carries no width of
    its own, so it spans exactly the feed column the bubbles do rather than the
@@ -844,6 +881,15 @@ pre {
   .bubble.pulsing,
   .tool-card.pulsing {
     animation: none;
+  }
+  /* The compaction bar's sweep is a hint, not the sole signal (the
+     "Compacting conversation…" label says it plainly), so under reduced
+     motion it rests as a steady half-lit fill rather than a moving sweep. */
+  .compact-progress-bar {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
   }
 }
 
