@@ -726,7 +726,7 @@ at top-level AND into its evil intercept aux maps for every state in
 
 (map! :leader
       (:prefix "p"
-       :desc "Switch to project" "p" #'agent-repl-switch-to-project
+       :desc "Switch to workspace" "p" #'agent-repl-switch-to-project
        :desc "Create worktree workspace" "w" #'agent-repl-create-worktree-workspace))
 
 (map! :leader
