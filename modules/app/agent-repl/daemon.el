@@ -193,13 +193,19 @@ When the system `claude' binary resolves, it is handed to the daemon
 via -claude-bin so SDK sessions drive the SAME CLI version as vterm
 sessions (and accept its permission modes, e.g. `auto', which the
 SDK-bundled cli.js predates).  The same binary drives the headless
-\"session gone\" analyst the daemon dispatches from -remediation-dir."
+\"session gone\" analyst the daemon dispatches from -remediation-dir.
+
+The canonical account roster rides in via -accounts (see
+`agent-repl--frontend-accounts-flag'): the daemon serves it at
+GET /accounts for the webapp's account menu, and gates the switch
+endpoint to exactly these roots."
   (append
    (list agent-repl--frontend-daemon-bin
          "-addr"   agent-repl-frontend-daemon-addr
          "-node"   agent-repl-frontend-node-bin
          "-shim"   agent-repl--frontend-shim-entry
-         "-webapp" agent-repl--frontend-webapp-dir)
+         "-webapp" agent-repl--frontend-webapp-dir
+         "-accounts" (agent-repl--frontend-accounts-flag))
    (when agent-repl-frontend-remediate-lost-sessions
      (append
       (list "-remediation-dir" agent-repl--frontend-repo-root)
@@ -208,6 +214,19 @@ SDK-bundled cli.js predates).  The same binary drives the headless
               agent-repl-frontend-remediation-permission-mode))))
    (when-let ((claude (executable-find "claude")))
      (list "-claude-bin" claude))))
+
+(defun agent-repl--frontend-accounts-flag ()
+  "Return the -accounts flag value naming the canonical account roster.
+Two roots, mirroring `agent-repl--compute-config-dir''s two answers:
+`personal' is the CLI's own default ~/.claude (the empty dir, exactly
+how sessions created without a config_dir record it), and `work' is
+`agent-repl-multi-repo-config-dir' expanded (the dodge@chess.com
+account).  Keeping the flag derived from the SAME variable the resolver
+uses is what makes the roster's dirs equal (string-equal) to the dirs
+sessions actually run under, which the daemon's switch endpoint
+compares against."
+  (format "personal=,work=%s"
+          (expand-file-name agent-repl-multi-repo-config-dir)))
 
 (defun agent-repl--frontend-spawn-daemon ()
   "External-boundary wrapper: spawn `claude-repld' via `make-process'.
