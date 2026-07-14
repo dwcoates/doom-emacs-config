@@ -401,7 +401,7 @@ pre {
    the only motion the app puts under a block of prose the user is reading, so
    it must never pull the eye the way the spinners are meant to. A turn that
    has ENDED never pulses. */
-.bubble.pulsing { animation: bubble-breathe 4s ease-in-out infinite; }
+.bubble.pulsing { animation: bubble-breathe 2s ease-in-out infinite; }
 @keyframes bubble-breathe {
   50% { background: var(--pulse-to); }
 }
@@ -467,7 +467,7 @@ pre {
    rocking toward --pulse-to) so the whole app has one beat, not two. It is a
    wash under the head's fast arc, filling the second the arc stays hidden;
    both drop together under reduced motion below. */
-.tool-card.pulsing { animation: bubble-breathe 4s ease-in-out infinite; }
+.tool-card.pulsing { animation: bubble-breathe 2s ease-in-out infinite; }
 /* The async wash: a skill handoff and a spawned subagent are each a whole
    conversation of their own, not one more file read, and the one shared teal
    makes them findable in a long feed of grey tool cards. Depth no longer

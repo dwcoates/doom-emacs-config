@@ -288,9 +288,10 @@ describe("the bubble pulse", () => {
   });
 
   it("holds the breath slower than every ticking indicator in the app", () => {
-    // Arrange / Act — the spinners and the cursor all tick in around a second.
+    // Arrange / Act — the spinners and the cursor all tick in around a second,
+    // so a two-second breath still reads as the slowest motion in the app.
     // Assert
-    expect(period).toBeGreaterThanOrEqual(3);
+    expect(period).toBeGreaterThanOrEqual(2);
   });
 
   it("carries no hue of its own, breathing toward whatever the role names", () => {
