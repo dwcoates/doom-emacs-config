@@ -145,6 +145,27 @@ export function sessionInfoHtml(
 }
 
 /**
+ * The compaction-in-progress banner: shown while the SDK is compacting the
+ * conversation (a `compact-status` frame opened the window and the
+ * `compact-boundary` closes it). The SDK reports no progress percentage, so
+ * the bar is INDETERMINATE — a looping sweep, mirroring the CLI's own
+ * "Compacting conversation…" spinner rather than pretending to a fraction it
+ * cannot know.
+ *
+ * Returns "" when no compaction is running, so the caller can blindly write
+ * the result into the banner slot and let an empty string collapse it.
+ */
+export function compactionBannerHtml(compacting: boolean): string {
+  if (!compacting) return "";
+  return (
+    `<div class="compact-progress" role="status" aria-live="polite">` +
+    `<span class="compact-progress-label">Compacting conversation…</span>` +
+    `<span class="compact-progress-track"><span class="compact-progress-bar"></span></span>` +
+    `</div>`
+  );
+}
+
+/**
  * The #model-select options: the live model SELECTED, every alternative
  * the daemon offers, and nothing invented.
  *
