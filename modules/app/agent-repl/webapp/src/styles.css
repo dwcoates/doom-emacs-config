@@ -528,9 +528,10 @@ pre {
 .agent-panel { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.35rem; }
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
-/* Consecutive like-cards collapse into one tabbed group: the chips pick
-   the member, the active member's card renders beneath, and the red
-   count keeps failures loud even from unselected tabs. */
+/* Consecutive like-cards collapse into one tabbed group: the chip row
+   rides INSIDE the active member's card at its top (above the tool head),
+   the chips pick the member, and the red count keeps failures loud even
+   from unselected tabs. The margin-bottom is the gap to the tool head. */
 .tab-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem; }
 .tab-chip {
   display: inline-flex;

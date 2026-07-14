@@ -505,7 +505,12 @@ function ActivitySection(
 // is never a wholly still card during the second the arc stays hidden. The
 // two motions live on different channels — the arc in the badge, the breath
 // on the card background — so they read as one signal, not two competing ones.
-function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): string {
+function ToolCard(
+  item: ToolItem,
+  isPulsing = false,
+  panels?: PanelContext,
+  tabBar = "",
+): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
   // In-flight is ONE look, whichever phase the call is in: the orange run
   // badge carrying the same arc the thinking indicator spins, held
@@ -535,8 +540,12 @@ function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): str
     pendingPerms > 0 ? `<span class="badge perm">needs permission</span>` : "";
   const activity =
     panels && children.length > 0 ? ActivitySection(item.toolUseId, children, panels) : "";
+  // TABBAR, when a consecutive-run group hands one in, is the row of member
+  // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
+  // bubble at its top, rather than floating above it (see groupHtml).
   return `
     <div class="tool-card tool-${variant.toLowerCase()}${isPulsing ? " pulsing" : ""}">
+      ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}</div>
       ${toolInput(item)}
       ${progress}
@@ -1332,13 +1341,13 @@ function tabLabel(item: ToolItem, index: number): string {
 /**
  * A tab group's card: one status-dotted chip per member, a failure count
  * that stays loud whichever tab is selected, and the active member's own
- * card beneath — the inactive members' cards exist only as their tabs
- * until picked.
+ * card carrying that chip row INSIDE it at the top — the inactive members'
+ * cards exist only as their tabs until picked. The tab bar rides inside the
+ * bubble (handed to ToolCard) rather than floating above it.
  */
 export function groupHtml(
   members: readonly ToolItem[],
   activeId: string,
-  selections?: QuestionSelections,
   panels?: PanelContext,
 ): string {
   const groupKey = members[0].toolUseId;
@@ -1357,13 +1366,8 @@ export function groupHtml(
     .join("");
   const errBadge = failed > 0 ? `<span class="badge err">${failed} failed</span>` : "";
   const active = members.find((m) => m.toolUseId === activeId) ?? members[members.length - 1];
-  return `<div class="feed-group"><div class="tab-bar">${tabs}${errBadge}</div>${renderItem(
-    active,
-    selections,
-    undefined,
-    false,
-    panels,
-  )}</div>`;
+  const tabBar = `<div class="tab-bar">${tabs}${errBadge}</div>`;
+  return `<div class="feed-group">${ToolCard(active, false, panels, tabBar)}</div>`;
 }
 
 /**
@@ -1539,7 +1543,7 @@ export class FeedRenderer {
   ): string {
     if (entry.kind === "group") {
       const active = activeGroupMember(entry.members, this.activeTabs.get(this.entryKey(entry)));
-      return groupHtml(entry.members, active, this.questionSelections, panels);
+      return groupHtml(entry.members, active, panels);
     }
     return this.itemHtml(entry.item, finals, pulse, panels);
   }
