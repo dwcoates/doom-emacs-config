@@ -424,9 +424,36 @@ describe("turn stamp", () => {
   });
 
   it("mutes the stamp below the text it dates", () => {
-    // Arrange / Act
+    // Arrange / Act — the color is still derived from --muted, so the stamp
+    // stays quieter than the --fg body text it labels.
     // Assert
-    expect(stamp).toMatch(/color:\s*var\(--muted\)/);
+    expect(stamp).toMatch(/color:[^;]*var\(--muted\)/);
+  });
+
+  it("darkens the stamp a shade toward the body text", () => {
+    // Arrange / Act — mixing --muted with --fg pushes the grey a touch more
+    // present than plain --muted, in both the light and dark themes.
+    // Assert
+    expect(stamp).toMatch(/color:\s*color-mix\([^;]*var\(--muted\)[^;]*var\(--fg\)/);
+  });
+
+  it("pulls the stamp in toward the bubble's top-right corner", () => {
+    // Arrange
+    const [top, right] = margins(stamp);
+    // Act / Assert — negative top/right margins seat it nearer the corner
+    // than the body padding alone would.
+    expect(parseFloat(top)).toBeLessThan(0);
+    expect(parseFloat(right)).toBeLessThan(0);
+  });
+
+  it("keeps a sliver of space so the stamp never abuts the corner", () => {
+    // Arrange — the bubble's own padding on the sides the stamp eats into.
+    const [padTop, padRight] = padding(bubble);
+    const [top, right] = margins(stamp);
+    // Act / Assert — each pull-in stays shy of the padding it consumes, so
+    // some corner gap always survives.
+    expect(Math.abs(parseFloat(top))).toBeLessThan(padTop);
+    expect(Math.abs(parseFloat(right))).toBeLessThan(padRight);
   });
 
   it("reaches the markdown through the body column for its flush-edge margins", () => {
@@ -517,6 +544,15 @@ function margins(rule: string): string[] {
   const sides = shorthand[1].trim().split(/\s+/);
   const [top, right = top, bottom = top, left = right] = sides;
   return [top, right, bottom, left];
+}
+
+/** The padding shorthand's four sides in rem, `[top, right, bottom, left]`. */
+function padding(rule: string): number[] {
+  const shorthand = rule.match(/padding:\s*([^;]+);/);
+  if (!shorthand) throw new Error("rule sets no padding shorthand");
+  const sides = shorthand[1].trim().split(/\s+/);
+  const [top, right = top, bottom = top, left = right] = sides;
+  return [top, right, bottom, left].map(parseFloat);
 }
 
 describe("nested turn-complete chip", () => {
