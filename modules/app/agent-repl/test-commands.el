@@ -5224,19 +5224,23 @@ columns are visually distinct in the candidate list."
     (should (eq (get-text-property 0 'face str)
                 'agent-repl-picker-killed-face))))
 
-(ert-deftest agent-repl-cmd-test-picker-name-width/uses-longest-basename ()
-  "When the longest basename exceeds the minimum, picker pads to that
+(ert-deftest agent-repl-cmd-test-picker-name-width/uses-longest-name ()
+  "When the longest workspace name exceeds the minimum, picker pads to that
 length so date columns line up across all rows."
-  (let* ((roots '("/p/a-short" "/p/this-is-a-much-longer-project-name")))
-    (should (= (agent-repl--picker-name-width roots)
-               (length "this-is-a-much-longer-project-name")))))
+  (should (= (agent-repl--picker-name-width
+              '("short" "this-is-a-much-longer-workspace-name"))
+             (length "this-is-a-much-longer-workspace-name"))))
 
 (ert-deftest agent-repl-cmd-test-picker-name-width/honors-minimum ()
-  "When every basename is short, picker pads to the configured minimum so
+  "When every name is short, picker pads to the configured minimum so
 short-name-only lists still get a readable column gutter."
-  (let ((roots '("/p/a" "/p/b")))
-    (should (= (agent-repl--picker-name-width roots)
-               agent-repl--picker-name-min-width))))
+  (should (= (agent-repl--picker-name-width '("a" "b"))
+             agent-repl--picker-name-min-width)))
+
+(ert-deftest agent-repl-cmd-test-picker-name-width/empty ()
+  "An empty name list falls back to the configured minimum without error."
+  (should (= (agent-repl--picker-name-width nil)
+             agent-repl--picker-name-min-width)))
 
 (ert-deftest agent-repl-cmd-test-picker-time-greater-p/non-nil-vs-non-nil ()
   "Picker time comparison: newer non-nil value sorts before older."
@@ -5250,292 +5254,352 @@ short-name-only lists still get a readable column gutter."
   (should (agent-repl--picker-time-greater-p '(25000 0 0 0) nil))
   (should-not (agent-repl--picker-time-greater-p nil '(25000 0 0 0))))
 
-(ert-deftest agent-repl-cmd-test-picker-sort-key/prefers-killed-over-created ()
-  "Sort key prefers `:last-killed-at' so projects sort by their most-recent
-kill, falling back to creation date only when never killed."
-  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at (20000 0 0 0))))
+(ert-deftest agent-repl-cmd-test-picker-sort-key/returns-last-viewed ()
+  "Sort key is `:last-viewed-at' regardless of create / kill times, so the
+picker orders workspaces by most-recently-viewed."
+  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at (20000 0 0 0)
+                   :last-viewed-at (30000 0 0 0))))
     (should (equal (agent-repl--picker-sort-key summary)
-                   '(20000 0 0 0)))))
+                   '(30000 0 0 0)))))
 
-(ert-deftest agent-repl-cmd-test-picker-sort-key/falls-back-to-created ()
-  "When `:last-killed-at' is nil, sort key uses `:created-at' so projects
-that have never been killed still sort newest-first by creation."
-  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at nil)))
-    (should (equal (agent-repl--picker-sort-key summary)
-                   '(10000 0 0 0)))))
+(ert-deftest agent-repl-cmd-test-picker-sort-key/nil-when-never-viewed ()
+  "Sort key is nil when the workspace was never viewed, even with create /
+kill times present — those are irrelevant to ordering."
+  (let ((summary '(:created-at (10000 0 0 0) :last-killed-at (20000 0 0 0)
+                   :last-viewed-at nil)))
+    (should-not (agent-repl--picker-sort-key summary))))
 
-(ert-deftest agent-repl-cmd-test-project-has-live-workspace-p/matches ()
-  "Returns t when any registered workspace points at the given root."
+(ert-deftest agent-repl-cmd-test-known-workspace-entries/includes-live-and-tombstoned ()
+  "Includes both live and tombstoned in-memory entries carrying a :project-dir."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :project-dir "/tmp/proj/")
-    (should (agent-repl--project-has-live-workspace-p "/tmp/proj"))))
+    (agent-repl--ws-put "live" :project-dir "/tmp/live")
+    (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
+    (agent-repl--ws-put "dead" :nuked-at '(1 2 3))
+    (let ((entries (agent-repl--known-workspace-entries)))
+      (should (equal (cdr (assoc "live" entries)) "/tmp/live"))
+      (should (equal (cdr (assoc "dead" entries)) "/tmp/dead")))))
 
-(ert-deftest agent-repl-cmd-test-project-has-live-workspace-p/no-match ()
-  "Returns nil when no registered workspace matches the given root."
+(ert-deftest agent-repl-cmd-test-known-workspace-entries/skips-no-project-dir ()
+  "A hash entry with no :project-dir (a bare stub) is excluded."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :project-dir "/tmp/other/")
-    (should-not (agent-repl--project-has-live-workspace-p "/tmp/proj"))))
+    (agent-repl--ws-put "stub" :agent-state :idle)
+    (should-not (assoc "stub" (agent-repl--known-workspace-entries)))))
 
-(ert-deftest agent-repl-cmd-test-project-has-live-workspace-p/trailing-slash ()
-  "Trailing-slash differences don't cause false negatives — both the
-registered `:project-dir' and the queried root are normalized."
+(ert-deftest agent-repl-cmd-test-known-workspace-entries/unions-snapshot ()
+  "A workspace present only in the on-disk roster snapshot still appears."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :project-dir "/tmp/proj")
-    (should (agent-repl--project-has-live-workspace-p "/tmp/proj/"))))
+    (agent-repl-test--seed-file
+     agent-repl-workspace-snapshot-file
+     (prin1-to-string '(:workspaces (("snap-only" :project-dir "/tmp/snap")))))
+    (should (equal (cdr (assoc "snap-only" (agent-repl--known-workspace-entries)))
+                   "/tmp/snap"))))
 
-(ert-deftest agent-repl-cmd-test-project-state-summary/reads-ws-plist-fields ()
-  "Summary sources `:created-at', `:last-killed-at', `:priority' from
-the live workspace plist — picker reads only in-memory cached state,
-never the on-disk state file."
+(ert-deftest agent-repl-cmd-test-known-workspace-entries/memory-wins-collision ()
+  "On a name collision the in-memory :project-dir wins over the snapshot's,
+and the name appears exactly once."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-summary-" t)))
-          (created '(10000 0 0 0))
-          (killed  '(20000 0 0 0)))
+    (agent-repl--ws-put "dup" :project-dir "/tmp/mem")
+    (agent-repl-test--seed-file
+     agent-repl-workspace-snapshot-file
+     (prin1-to-string '(:workspaces (("dup" :project-dir "/tmp/snap")))))
+    (let ((entries (agent-repl--known-workspace-entries)))
+      (should (equal (cdr (assoc "dup" entries)) "/tmp/mem"))
+      (should (= 1 (cl-count "dup" entries :key #'car :test #'equal))))))
+
+(ert-deftest agent-repl-cmd-test-picker-workspace-summary/reads-live-plist ()
+  "Summary sources fresher live in-memory dates for a known workspace."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-sum-" t))))
       (unwind-protect
           (progn
             (agent-repl--ws-put "ws-a" :project-dir tmpdir)
-            (agent-repl--ws-put "ws-a" :created-at created)
-            (agent-repl--ws-put "ws-a" :last-killed-at killed)
-            (agent-repl--ws-put "ws-a" :priority "p1")
-            (let ((summary (agent-repl--project-state-summary tmpdir)))
-              (should (equal (plist-get summary :created-at) created))
-              (should (equal (plist-get summary :last-killed-at) killed))
-              (should (equal (plist-get summary :priority) "p1"))
-              (should (plist-get summary :live-p))))
+            (agent-repl--ws-put "ws-a" :created-at '(10000 0 0 0))
+            (agent-repl--ws-put "ws-a" :last-viewed-at '(30000 0 0 0))
+            (let ((s (agent-repl--picker-workspace-summary "ws-a" tmpdir)))
+              (should (equal (plist-get s :created-at) '(10000 0 0 0)))
+              (should (equal (plist-get s :last-viewed-at) '(30000 0 0 0)))
+              (should (equal (plist-get s :workspace-name) "ws-a"))
+              (should (plist-get s :live-p))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-project-state-summary/no-workspace ()
-  "Without a live workspace pointing at the project, summary's date and
-priority fields are all nil — the picker deliberately does not consult
-the state file on disk, so projects without an in-memory entry surface
-with placeholder columns."
+(ert-deftest agent-repl-cmd-test-picker-workspace-summary/reads-persisted-disk ()
+  "For a workspace absent from memory, the summary reads dates from the
+on-disk state file so dead workspaces still show real dates."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-state-" t))))
-      (unwind-protect
-          (let ((summary (agent-repl--project-state-summary tmpdir)))
-            (should-not (plist-get summary :created-at))
-            (should-not (plist-get summary :last-killed-at))
-            (should-not (plist-get summary :priority))
-            (should-not (plist-get summary :live-p)))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-cmd-test-project-state-summary/ignores-on-disk-state ()
-  "Pins the no-disk-IO contract: even when an on-disk state file exists
-with full `:created-at' / `:last-killed-at' values, the summary
-returns nil for those keys unless a live workspace also points at the
-project.  Regression guard against re-introducing a state-file read
-in the picker hot path."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-ignore-disk-" t))))
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-sum-disk-" t))))
       (unwind-protect
           (progn
             (agent-repl-test--seed-file
              (agent-repl--state-file tmpdir)
              (prin1-to-string '(:created-at (10000 0 0 0)
                                 :last-killed-at (20000 0 0 0)
-                                :priority "p-disk")))
-            (let ((summary (agent-repl--project-state-summary tmpdir)))
-              (should-not (plist-get summary :created-at))
-              (should-not (plist-get summary :last-killed-at))
-              (should-not (plist-get summary :priority))))
+                                :last-viewed-at (30000 0 0 0))))
+            (let ((s (agent-repl--picker-workspace-summary "ws-dead" tmpdir)))
+              (should (equal (plist-get s :created-at) '(10000 0 0 0)))
+              (should (equal (plist-get s :last-killed-at) '(20000 0 0 0)))
+              (should (equal (plist-get s :last-viewed-at) '(30000 0 0 0)))
+              (should-not (plist-get s :live-p))
+              (should-not (plist-get s :workspace-name))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-project-state-summary/no-disk-read-when-no-workspace ()
-  "Picker's summary path makes ZERO `agent-repl--read-sexp-file' calls
-when no live workspace matches the project — anchors the cached-only
-contract by counting actual function invocations rather than just
-inspecting the returned plist."
+(ert-deftest agent-repl-cmd-test-picker-workspace-summary/live-overlays-disk ()
+  "A live in-memory :last-viewed-at wins over a staler on-disk value."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-read-" t)))
-          (read-count 0))
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-sum-overlay-" t))))
       (unwind-protect
-          (cl-letf* ((orig (symbol-function 'agent-repl--read-sexp-file))
-                     ((symbol-function 'agent-repl--read-sexp-file)
-                      (lambda (&rest args)
-                        (cl-incf read-count)
-                        (apply orig args))))
-            (agent-repl--project-state-summary tmpdir)
-            (should (= read-count 0)))
+          (progn
+            (agent-repl-test--seed-file
+             (agent-repl--state-file tmpdir)
+             (prin1-to-string '(:last-viewed-at (10000 0 0 0))))
+            (agent-repl--ws-put "ws-a" :project-dir tmpdir)
+            (agent-repl--ws-put "ws-a" :last-viewed-at '(99999 0 0 0))
+            (let ((s (agent-repl--picker-workspace-summary "ws-a" tmpdir)))
+              (should (equal (plist-get s :last-viewed-at) '(99999 0 0 0)))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-project-state-summary/workspace-name-resolves ()
-  "Summary's `:workspace-name' is the registered ws whose `:project-dir'
-matches the queried root — picker uses this to mirror the drawer's
-per-workspace glyph."
+(ert-deftest agent-repl-cmd-test-picker-workspace-summary/tombstoned-known ()
+  "A tombstoned workspace is still a known entry, so :workspace-name is set
+\(drives the drawer glyph) while :live-p is nil."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-wsname-" t))))
+    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-sum-tomb-" t))))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "ws-x" :project-dir tmpdir)
-            (let ((summary (agent-repl--project-state-summary tmpdir)))
-              (should (equal (plist-get summary :workspace-name) "ws-x"))))
+            (agent-repl--ws-put "ws-t" :project-dir tmpdir)
+            (agent-repl--ws-put "ws-t" :nuked-at '(20000 0 0 0))
+            (let ((s (agent-repl--picker-workspace-summary "ws-t" tmpdir)))
+              (should (equal (plist-get s :workspace-name) "ws-t"))
+              (should-not (plist-get s :live-p))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-project-state-summary/workspace-name-nil-when-no-ws ()
-  "Summary's `:workspace-name' is nil when no workspace points at the
-queried root — picker falls back to the project-level emoji ladder."
+(ert-deftest agent-repl-cmd-test-build-candidates/sorted-by-last-viewed ()
+  "Candidates sort most-recently-viewed first, ignoring create / kill times."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (file-name-as-directory (make-temp-file "picker-no-ws-" t))))
+    (agent-repl--ws-put "old" :project-dir "/tmp/old")
+    (agent-repl--ws-put "old" :last-viewed-at '(10000 0 0 0))
+    (agent-repl--ws-put "old" :last-killed-at '(99999 0 0 0))
+    (agent-repl--ws-put "new" :project-dir "/tmp/new")
+    (agent-repl--ws-put "new" :last-viewed-at '(20000 0 0 0))
+    (let* ((cands (agent-repl--build-workspace-picker-candidates
+                   '(("old" . "/tmp/old") ("new" . "/tmp/new"))))
+           (names (mapcar (lambda (c) (plist-get (cdr c) :name)) cands)))
+      (should (equal names '("new" "old"))))))
+
+(ert-deftest agent-repl-cmd-test-build-candidates/never-viewed-sinks ()
+  "A never-viewed workspace sorts below a viewed one regardless of create date."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "viewed" :project-dir "/tmp/v")
+    (agent-repl--ws-put "viewed" :last-viewed-at '(10000 0 0 0))
+    (agent-repl--ws-put "never" :project-dir "/tmp/n")
+    (agent-repl--ws-put "never" :created-at '(99999 0 0 0))
+    (let* ((cands (agent-repl--build-workspace-picker-candidates
+                   '(("never" . "/tmp/n") ("viewed" . "/tmp/v"))))
+           (names (mapcar (lambda (c) (plist-get (cdr c) :name)) cands)))
+      (should (equal names '("viewed" "never"))))))
+
+(ert-deftest agent-repl-cmd-test-build-candidates/payload-carries-name-dir-live ()
+  "Each candidate's payload carries :name, :project-dir, and :live-p."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/tmp/w")
+    (let ((payload (cdr (car (agent-repl--build-workspace-picker-candidates
+                              '(("w" . "/tmp/w")))))))
+      (should (equal (plist-get payload :name) "w"))
+      (should (equal (plist-get payload :project-dir) "/tmp/w"))
+      (should (plist-get payload :live-p)))))
+
+(ert-deftest agent-repl-cmd-test-build-candidates/live-display-mirrors-drawer-glyph ()
+  "A live workspace's display opens with the drawer's per-workspace glyph
+and includes the workspace name."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "wsx" :project-dir "/tmp/wsx")
+    (agent-repl--ws-put "wsx" :agent-state :idle)
+    (let ((display (substring-no-properties
+                    (car (car (agent-repl--build-workspace-picker-candidates
+                               '(("wsx" . "/tmp/wsx"))))))))
+      (should (string-prefix-p (alist-get :idle agent-repl-drawer-state-icons) display))
+      (should (string-match-p "wsx" display)))))
+
+(ert-deftest agent-repl-cmd-test-build-candidates/disk-only-gets-folder-emoji ()
+  "A disk-only record (no hash entry) opens with the neutral 📁 emoji."
+  (agent-repl-test--with-clean-state
+    (let ((display (substring-no-properties
+                    (car (car (agent-repl--build-workspace-picker-candidates
+                               '(("dead" . "/tmp/dead"))))))))
+      (should (string-prefix-p "📁" display)))))
+
+(ert-deftest agent-repl-cmd-test-build-candidates/three-aligned-date-columns ()
+  "A dateless row renders three dash placeholders in adjacent columns, so
+the created / viewed / removed columns all align."
+  (agent-repl-test--with-clean-state
+    (let ((display (substring-no-properties
+                    (car (car (agent-repl--build-workspace-picker-candidates
+                               '(("dead" . "/tmp/dead"))))))))
+      (should (string-match-p
+               (regexp-quote (concat "----------" agent-repl--picker-column-gap
+                                     "----------" agent-repl--picker-column-gap
+                                     "----------"))
+               display)))))
+
+(ert-deftest agent-repl-cmd-test-picker-header-line/labels-each-column ()
+  "The header row names each of the four columns."
+  (let ((h (substring-no-properties (agent-repl--picker-header-line 24))))
+    (should (string-match-p "Workspace" h))
+    (should (string-match-p "Created" h))
+    (should (string-match-p "Viewed" h))
+    (should (string-match-p "Removed" h))))
+
+(ert-deftest agent-repl-cmd-test-read-workspace/helm-returns-payload ()
+  "With helm available, returns the payload the helm action receives."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/tmp/w")
+    (cl-letf (((symbol-function 'helm)
+               (lambda (&rest args)
+                 (let* ((src (car (plist-get args :sources)))
+                        (cands (cdr (assq 'candidates src)))
+                        (action (cdr (assq 'action src))))
+                   (funcall action (cdr (car cands)))))))
+      (should (equal (plist-get (agent-repl--read-workspace-via-picker) :name)
+                     "w")))))
+
+(ert-deftest agent-repl-cmd-test-read-workspace/ivy-returns-payload ()
+  "Without helm, falls back to ivy-read; returns the payload cdr."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/tmp/w")
+    (cl-letf (((symbol-function 'ivy-read)
+               (lambda (_prompt candidates &rest args)
+                 (funcall (plist-get args :action) (car candidates)))))
+      (should (equal (plist-get (agent-repl--read-workspace-via-picker) :name)
+                     "w")))))
+
+(ert-deftest agent-repl-cmd-test-read-workspace/completing-read-fallback ()
+  "With neither helm nor ivy, falls back to `completing-read' on the
+display strings and resolves the chosen display back to its payload."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/tmp/w")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _) (car collection))))
+      (should (equal (plist-get (agent-repl--read-workspace-via-picker) :name)
+                     "w")))))
+
+(ert-deftest agent-repl-cmd-test-read-workspace/no-candidates-returns-nil ()
+  "Returns nil when there are no known workspaces."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--read-workspace-via-picker))))
+
+(ert-deftest agent-repl-cmd-test-open-selection/live-switches ()
+  "A live payload switches in place via --ws-switch, never reviving."
+  (agent-repl-test--with-clean-state
+    (let (switched revived)
+      (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                 (lambda (name &rest _) (setq switched name)))
+                ((symbol-function 'agent-repl--picker-revive)
+                 (lambda (&rest _) (setq revived t)))
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+        (agent-repl--picker-open-selection
+         '(:name "w" :project-dir "/tmp/w" :live-p t))
+        (should (equal switched "w"))
+        (should-not revived)))))
+
+(ert-deftest agent-repl-cmd-test-open-selection/dead-ensures-then-revives ()
+  "A dead payload ensures the directory then revives, never a plain switch."
+  (agent-repl-test--with-clean-state
+    (let (ensured revived switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (setq switched t)))
+                ((symbol-function 'agent-repl--picker-ensure-directory)
+                 (lambda (name dir) (setq ensured (cons name dir))))
+                ((symbol-function 'agent-repl--picker-revive)
+                 (lambda (name dir) (setq revived (cons name dir))))
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+        (agent-repl--picker-open-selection
+         '(:name "w" :project-dir "/tmp/w" :live-p nil))
+        (should (equal ensured '("w" . "/tmp/w")))
+        (should (equal revived '("w" . "/tmp/w")))
+        (should-not switched)))))
+
+(ert-deftest agent-repl-cmd-test-ensure-directory/noop-when-exists ()
+  "No recreate is attempted when the directory already exists."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "picker-exists-" t)) (recreated nil))
       (unwind-protect
-          (let ((summary (agent-repl--project-state-summary tmpdir)))
-            (should-not (plist-get summary :workspace-name)))
+          (cl-letf (((symbol-function 'agent-repl--picker-recreate-directory)
+                     (lambda (&rest _) (setq recreated t))))
+            (agent-repl--picker-ensure-directory "w" tmpdir)
+            (should-not recreated))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/sorted-by-killed-at ()
-  "Picker sorts entries most-recently-killed first.  Sort key is sourced
-from each project's live workspace plist (cached in-memory) — no
-state-file reads — so older kill ranks below newer kill regardless of
-created-at."
+(ert-deftest agent-repl-cmd-test-ensure-directory/recreates-when-missing ()
+  "Delegates to recreate only when the directory is missing."
   (agent-repl-test--with-clean-state
-    (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-kill-" t)))
-           (tmp-new (file-name-as-directory (make-temp-file "picker-new-kill-" t))))
+    (let ((recreated nil))
+      (cl-letf (((symbol-function 'agent-repl--picker-recreate-directory)
+                 (lambda (name dir) (setq recreated (cons name dir)))))
+        (agent-repl--picker-ensure-directory "w" "/tmp/agent-repl-nope-xyz")
+        (should (equal recreated '("w" . "/tmp/agent-repl-nope-xyz")))))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/plain-dir-mkdir ()
+  "A non-worktree project dir is recreated with make-directory."
+  (agent-repl-test--with-clean-state
+    (let* ((parent (make-temp-file "picker-plain-" t))
+           (dir (expand-file-name "gone" parent)))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "ws-old" :project-dir tmp-old)
-            (agent-repl--ws-put "ws-old" :created-at '(30000 0 0 0))
-            (agent-repl--ws-put "ws-old" :last-killed-at '(10000 0 0 0))
-            (agent-repl--ws-put "ws-new" :project-dir tmp-new)
-            (agent-repl--ws-put "ws-new" :created-at '(10000 0 0 0))
-            (agent-repl--ws-put "ws-new" :last-killed-at '(20000 0 0 0))
-            (let* ((candidates (agent-repl--build-project-picker-candidates
-                                (list tmp-old tmp-new)))
-                   (roots (mapcar #'cdr candidates)))
-              (should (equal (car roots) tmp-new))
-              (should (equal (cadr roots) tmp-old))))
-        (delete-directory tmp-old t)
-        (delete-directory tmp-new t)))))
+            (agent-repl--ws-put "w" :project-dir dir)
+            (agent-repl--picker-recreate-directory "w" dir)
+            (should (file-directory-p dir)))
+        (delete-directory parent t)))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/sorted-by-created-when-no-kill ()
-  "Projects with no `:last-killed-at' sort among themselves by the
-workspace plist's `:created-at' (newest-first).  Source-of-truth is
-the in-memory hash, not the on-disk state file."
+(ert-deftest agent-repl-cmd-test-recreate-directory/worktree-runs-git-add ()
+  "A worktree project prunes then runs `git worktree add' from the source repo."
   (agent-repl-test--with-clean-state
-    (let* ((tmp-old (file-name-as-directory (make-temp-file "picker-old-create-" t)))
-           (tmp-new (file-name-as-directory (make-temp-file "picker-new-create-" t))))
+    (let ((source (make-temp-file "picker-src-" t)) git-calls)
       (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws-old" :project-dir tmp-old)
-            (agent-repl--ws-put "ws-old" :created-at '(10000 0 0 0))
-            (agent-repl--ws-put "ws-new" :project-dir tmp-new)
-            (agent-repl--ws-put "ws-new" :created-at '(20000 0 0 0))
-            (let* ((candidates (agent-repl--build-project-picker-candidates
-                                (list tmp-old tmp-new)))
-                   (roots (mapcar #'cdr candidates)))
-              (should (equal (car roots) tmp-new))
-              (should (equal (cadr roots) tmp-old))))
-        (delete-directory tmp-old t)
-        (delete-directory tmp-new t)))))
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (root &rest args) (push (cons root args) git-calls) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) "DWC/foo")))
+            (agent-repl--ws-put "w" :project-dir "/tmp/wt-gone")
+            (agent-repl--ws-put "w" :worktree-p t)
+            (agent-repl--ws-put "w" :source-ws-dir source)
+            (agent-repl--picker-recreate-directory "w" "/tmp/wt-gone")
+            (should (member (list source "worktree" "add" "/tmp/wt-gone" "DWC/foo")
+                            git-calls)))
+        (delete-directory source t)))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/non-live-sorts-last ()
-  "A project without a live workspace has nil sort-key (no cached
-dates).  It sinks below every project with a cached created-at — the
-picker surfaces live/recently-touched workspaces and pushes
-never-opened or fully-killed ones to the bottom."
+(ert-deftest agent-repl-cmd-test-recreate-directory/worktree-add-failure-errors ()
+  "A failed `git worktree add' signals a loud error rather than reviving
+onto a phantom directory."
   (agent-repl-test--with-clean-state
-    (let* ((tmp-live (file-name-as-directory (make-temp-file "picker-live-" t)))
-           (tmp-none (file-name-as-directory (make-temp-file "picker-none-" t))))
+    (let ((source (make-temp-file "picker-src-fail-" t)))
       (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws-live" :project-dir tmp-live)
-            (agent-repl--ws-put "ws-live" :created-at '(10000 0 0 0))
-            (let* ((candidates (agent-repl--build-project-picker-candidates
-                                (list tmp-none tmp-live)))
-                   (roots (mapcar #'cdr candidates)))
-              (should (equal (car roots) tmp-live))
-              (should (equal (cadr roots) tmp-none))))
-        (delete-directory tmp-live t)
-        (delete-directory tmp-none t)))))
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (_root &rest args) (if (member "add" args) 1 0)))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) "b")))
+            (agent-repl--ws-put "w" :project-dir "/tmp/wt-fail")
+            (agent-repl--ws-put "w" :worktree-p t)
+            (agent-repl--ws-put "w" :source-ws-dir source)
+            (should-error (agent-repl--picker-recreate-directory "w" "/tmp/wt-fail")))
+        (delete-directory source t)))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/display-includes-emoji ()
-  "Each candidate display string starts with the status emoji prefix so
-users can scan the list at a glance.  A project with no live workspace
-gets the neutral 📁 (the picker no longer distinguishes
-killed/dormant/never-opened — that distinction required disk I/O)."
+(ert-deftest agent-repl-cmd-test-recreate-directory/no-source-errors ()
+  "A worktree with no recorded source repo errors rather than guessing."
   (agent-repl-test--with-clean-state
-    (let ((tmp (file-name-as-directory (make-temp-file "picker-display-" t))))
-      (unwind-protect
-          (let* ((candidates (agent-repl--build-project-picker-candidates
-                              (list tmp)))
-                 (display (substring-no-properties (car (car candidates)))))
-            (should (string-prefix-p "📁" display)))
-        (delete-directory tmp t)))))
+    (agent-repl--ws-put "w" :project-dir "/tmp/wt-nosrc")
+    (agent-repl--ws-put "w" :worktree-p t)
+    (should-error (agent-repl--picker-recreate-directory "w" "/tmp/wt-nosrc"))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/display-mirrors-drawer-glyph ()
-  "When a workspace points at the project, the picker's candidate display
-opens with the drawer's per-workspace glyph rather than the legacy 🟢
-\"any live ws\" emoji — pins the consistency the picker promises with
-the drawer."
-  (agent-repl-test--with-clean-state
-    (let ((tmp (file-name-as-directory (make-temp-file "picker-glyph-mirror-" t))))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "live-ws" :project-dir tmp)
-            (agent-repl--ws-put "live-ws" :agent-state :idle)
-            (let* ((candidates (agent-repl--build-project-picker-candidates
-                                (list tmp)))
-                   (display (substring-no-properties (car (car candidates)))))
-              (should (string-prefix-p
-                       (alist-get :idle agent-repl-drawer-state-icons)
-                       display))))
-        (delete-directory tmp t)))))
+(ert-deftest agent-repl-cmd-test-worktree-branch/parses-porcelain ()
+  "Reads the branch for the matching worktree path from git porcelain output."
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest _)
+               "worktree /tmp/other\nbranch refs/heads/main\n\nworktree /tmp/wt\nbranch refs/heads/DWC/foo\n")))
+    (should (equal (agent-repl--picker-worktree-branch "/src" "/tmp/wt") "DWC/foo"))))
 
-(ert-deftest agent-repl-cmd-test-build-project-picker-candidates/display-aligns-columns ()
-  "Picker pads the project-name column to a uniform width so the date
-columns line up across rows even when basenames differ in length.
-
-Both rows in this test are never-opened (no state file), so each
-display contains two `----------' placeholders — one for created, one
-for last-killed.  We anchor on the first placeholder occurrence in
-each row; aligned columns mean that position is identical."
-  (agent-repl-test--with-clean-state
-    (let* ((short (file-name-as-directory (make-temp-file "ab-" t)))
-           (long  (file-name-as-directory (make-temp-file "xyz-much-longer-basename-" t))))
-      (unwind-protect
-          (let* ((candidates (agent-repl--build-project-picker-candidates
-                              (list short long)))
-                 (displays (mapcar (lambda (c) (substring-no-properties (car c)))
-                                   candidates))
-                 (positions (mapcar (lambda (d)
-                                      (string-match "----------" d))
-                                    displays)))
-            (should (apply #'= positions)))
-        (delete-directory short t)
-        (delete-directory long t)))))
-
-(ert-deftest agent-repl-cmd-test-read-project-via-picker/captures-cdr ()
-  "Picker returns the project root (cdr of the selected candidate), never
-the propertized display string, regardless of the shape ivy passes to
-the action closure."
-  (agent-repl-test--with-clean-state
-    (let ((tmp (file-name-as-directory (make-temp-file "picker-capture-" t))))
-      (unwind-protect
-          (cl-letf (((symbol-function 'projectile-relevant-known-projects)
-                     (lambda () (list tmp)))
-                    ((symbol-function 'ivy-read)
-                     (lambda (_prompt candidates &rest args)
-                       ;; Simulate ivy passing the cons cell into the
-                       ;; action; the closure should setq the cdr.
-                       (let ((action (plist-get args :action)))
-                         (funcall action (car candidates))))))
-            (should (equal (agent-repl--read-project-via-picker) tmp)))
-        (delete-directory tmp t)))))
-
-(ert-deftest agent-repl-cmd-test-read-project-via-picker/string-shape ()
-  "Picker also handles the ivy-shape where the action receives the
-display string rather than the cons cell — it falls back to assoc on
-the candidate list."
-  (agent-repl-test--with-clean-state
-    (let ((tmp (file-name-as-directory (make-temp-file "picker-string-" t))))
-      (unwind-protect
-          (cl-letf (((symbol-function 'projectile-relevant-known-projects)
-                     (lambda () (list tmp)))
-                    ((symbol-function 'ivy-read)
-                     (lambda (_prompt candidates &rest args)
-                       (let ((action (plist-get args :action)))
-                         ;; Pass just the display string.
-                         (funcall action (car (car candidates)))))))
-            (should (equal (agent-repl--read-project-via-picker) tmp)))
-        (delete-directory tmp t)))))
+(ert-deftest agent-repl-cmd-test-worktree-branch/nil-when-no-match ()
+  "Returns nil when no registered worktree matches the queried path."
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest _) "worktree /tmp/other\nbranch refs/heads/main\n")))
+    (should-not (agent-repl--picker-worktree-branch "/src" "/tmp/wt"))))
 
 ;;;; ---- Indexed workspace switchers (M-1..M-9, M-0) ----
 ;;
