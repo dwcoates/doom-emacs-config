@@ -346,18 +346,12 @@ describe("the tool-card pulse", () => {
     expect(blockAfter(css, ".tool-card {")).toMatch(/--pulse-to:\s*var\(--card-pulse\)/);
   });
 
-  it("points the skill card's breath at the skill-pulse token", () => {
-    // Arrange / Act — the .tool-card.tool-skill rule.
+  it("points the async card's breath at the async-pulse token", () => {
+    // Arrange / Act — the shared skill/agent wash rule (one wash, one breath).
     // Assert
-    expect(blockAfter(css, ".tool-card.tool-skill {")).toMatch(
-      /--pulse-to:\s*var\(--skill-pulse\)/,
+    expect(blockAfter(css, ".tool-card.tool-skill")).toMatch(
+      /--pulse-to:\s*var\(--async-pulse\)/,
     );
-  });
-
-  it("points the subagent card's breath at the agent-pulse token", () => {
-    // Arrange / Act — the .tool-card.tool-agent rule.
-    // Assert
-    expect(blockAfter(css, ".tool-card.tool-agent")).toMatch(/--pulse-to:\s*var\(--agent-pulse\)/);
   });
 
   it("deepens the light-theme grey card at the top of the breath", () => {
@@ -400,8 +394,7 @@ describe("the tool-card pulse", () => {
 describe.each([
   { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
   { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
-  { role: "skill-card", wash: "--skill-bg", far: "--skill-pulse" },
-  { role: "subagent-card", wash: "--agent-card", far: "--agent-pulse" },
+  { role: "async-card", wash: "--async-card", far: "--async-pulse" },
 ])("$role pulse palette", ({ wash, far }) => {
   it("keeps the light-theme breath inside the bubble's own hue", () => {
     // Arrange
@@ -965,6 +958,15 @@ describe("compaction progress bar", () => {
     // Arrange / Act — the reduced-motion .compact-progress-bar override.
     // Assert
     expect(reducedCompactBar).toMatch(/animation:\s*none/);
+  });
+});
+
+describe("tool-card status chip", () => {
+  it("backs every tool card's chip with the card grey so the async teal cannot tint it", () => {
+    // Arrange / Act — the .tool-card .badge rule (brace-anchored: the
+    // palette comment also names the selector).
+    // Assert
+    expect(blockAfter(css, ".tool-card .badge {")).toMatch(/background:\s*var\(--card\)/);
   });
 });
 
