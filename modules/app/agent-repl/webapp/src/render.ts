@@ -1068,6 +1068,130 @@ export function lastUserTurnId(items: readonly ConversationItem[]): string | nul
   return null;
 }
 
+// --- consecutive-run tab groups -------------------------------------------------
+
+/** One slot of the grouped feed: a lone item or a consecutive-run group. */
+export type FeedEntry =
+  | { kind: "item"; item: ConversationItem; index: number }
+  | { kind: "group"; members: ToolItem[]; indexes: number[] };
+
+/**
+ * True when ITEM renders nothing — a suppressed tool or a user turn
+ * that was nothing but injected spans — so it can never break a run.
+ */
+function isInvisibleItem(item: ConversationItem): boolean {
+  if (item.kind === "tool") return SUPPRESSED_TOOLS.has(item.toolName);
+  if (item.kind === "user-turn") return userTurnText(item) === "";
+  return false;
+}
+
+/**
+ * Collapse consecutive same-tool cards into tab groups: three Bash calls
+ * in a row become one group of three, selectable by tabs, while a
+ * singleton stays a plain card. Any VISIBLE item of another shape breaks
+ * a run; invisible items are held aside and re-emitted after the group
+ * (they render nothing, so their position among empty nodes is moot).
+ */
+export function groupFeed(top: readonly ConversationItem[]): FeedEntry[] {
+  const entries: FeedEntry[] = [];
+  let run: { name: string; members: ToolItem[]; indexes: number[] } | null = null;
+  let held: Array<{ item: ConversationItem; index: number }> = [];
+
+  const closeRun = (): void => {
+    if (run) {
+      if (run.members.length >= 2) {
+        entries.push({ kind: "group", members: run.members, indexes: run.indexes });
+      } else {
+        entries.push({ kind: "item", item: run.members[0], index: run.indexes[0] });
+      }
+      run = null;
+    }
+    for (const h of held) entries.push({ kind: "item", item: h.item, index: h.index });
+    held = [];
+  };
+
+  top.forEach((item, index) => {
+    if (isInvisibleItem(item)) {
+      if (run) {
+        held.push({ item, index });
+      } else {
+        entries.push({ kind: "item", item, index });
+      }
+      return;
+    }
+    if (item.kind === "tool") {
+      if (run && run.name === item.toolName) {
+        run.members.push(item);
+        run.indexes.push(index);
+        return;
+      }
+      closeRun();
+      run = { name: item.toolName, members: [item], indexes: [index] };
+      return;
+    }
+    closeRun();
+    entries.push({ kind: "item", item, index });
+  });
+  closeRun();
+  return entries;
+}
+
+/**
+ * The member a group shows: the user's pin when it still names a member,
+ * else the newest still-running member (auto-follow), else the last.
+ */
+export function activeGroupMember(members: readonly ToolItem[], pinned?: string): string {
+  if (pinned !== undefined && members.some((m) => m.toolUseId === pinned)) return pinned;
+  for (let i = members.length - 1; i >= 0; i--) {
+    if (!members[i].result) return members[i].toolUseId;
+  }
+  return members[members.length - 1].toolUseId;
+}
+
+/** A tab's short label: the member's headline, else its name and ordinal. */
+function tabLabel(item: ToolItem, index: number): string {
+  const head = toolHeadline(item);
+  const label = head === "" ? `${item.toolName} #${index + 1}` : head;
+  return label.length > 24 ? `${label.slice(0, 23)}…` : label;
+}
+
+/**
+ * A tab group's card: one status-dotted chip per member, a failure count
+ * that stays loud whichever tab is selected, and the active member's own
+ * card beneath — the inactive members' cards exist only as their tabs
+ * until picked.
+ */
+export function groupHtml(
+  members: readonly ToolItem[],
+  activeId: string,
+  selections?: QuestionSelections,
+  panels?: PanelContext,
+): string {
+  const groupKey = members[0].toolUseId;
+  const failed = members.filter((m) => m.result?.isError).length;
+  const tabs = members
+    .map((m, i) => {
+      const status = m.result ? (m.result.isError ? "error" : "done") : "running";
+      return `<button type="button" class="tab-chip${
+        m.toolUseId === activeId ? " active" : ""
+      }" data-tab-group="${escapeHtml(groupKey)}" data-tab-member="${escapeHtml(
+        m.toolUseId,
+      )}"><span class="agent-dot agent-${status}" aria-hidden="true">●</span> ${escapeHtml(
+        tabLabel(m, i),
+      )}</button>`;
+    })
+    .join("");
+  const errBadge = failed > 0 ? `<span class="badge err">${failed} failed</span>` : "";
+  const active = members.find((m) => m.toolUseId === activeId) ?? members[members.length - 1];
+  return `<div class="feed-group"><div class="tab-bar">${tabs}${errBadge}</div>${renderItem(
+    active,
+    selections,
+    undefined,
+    false,
+    panels,
+  )}</div>`;
+}
+
 /**
  * Whether a render must land the feed on its tail.
  *
@@ -1117,6 +1241,8 @@ export class FeedRenderer {
   private questionSelections = new Map<string, Set<string>>();
   /** Cards whose activity panel the user has open (renderer-owned too). */
   private openPanels = new Set<string>();
+  /** Tab pins per group key; an unpinned group auto-follows the newest runner. */
+  private activeTabs = new Map<string, string>();
   private lastState: StoreState | null = null;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
@@ -1148,8 +1274,19 @@ export class FeedRenderer {
       if (cancelQ !== null) this.actions.cancelQueued(cancelQ);
       const runNowQ = target.getAttribute("data-queue-run-now");
       if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
+      this.handleTabClick(target);
       this.handlePanelToggle(target);
     });
+  }
+
+  /** A click on a tab chip pins that member as its group's active card. */
+  private handleTabClick(target: HTMLElement): void {
+    const chip = target.closest("[data-tab-member]");
+    if (!chip) return;
+    const group = chip.getAttribute("data-tab-group") ?? "";
+    const member = chip.getAttribute("data-tab-member") ?? "";
+    this.activeTabs.set(`group:${group}`, member);
+    if (this.lastState) this.render(this.lastState);
   }
 
   /**
@@ -1185,6 +1322,27 @@ export class FeedRenderer {
       isOpen: (id) => this.openPanels.has(id),
       selections: this.questionSelections,
     };
+  }
+
+  /** The DOM key one grouped-feed entry reconciles under. */
+  private entryKey(entry: FeedEntry): string {
+    return entry.kind === "group"
+      ? `group:${entry.members[0].toolUseId}`
+      : itemKey(entry.item, entry.index);
+  }
+
+  /** One grouped-feed entry's HTML: the item's own, or its group's card. */
+  private entryHtml(
+    entry: FeedEntry,
+    finals: FinalResponses,
+    pulse: PulseTarget,
+    panels: PanelContext,
+  ): string {
+    if (entry.kind === "group") {
+      const active = activeGroupMember(entry.members, this.activeTabs.get(this.entryKey(entry)));
+      return groupHtml(entry.members, active, this.questionSelections, panels);
+    }
+    return this.itemHtml(entry.item, finals, pulse, panels);
   }
 
   private pendingQuestionItem(requestId: string): { item: PermissionItem; questions: AskQuestion[] } | null {
@@ -1269,16 +1427,16 @@ export class FeedRenderer {
     const panels = this.panelContext(part.children);
     const finals = finalResponses(state.items);
     const pulse = pulseTarget(state.items, state.turnInFlight, finals);
-    const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
-    part.top.forEach((item, i) => {
-      const key = itemKey(item, i);
+    const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
+    for (const entry of groupFeed(part.top)) {
+      const key = this.entryKey(entry);
       const el = document.createElement("div");
       el.className = "feed-item";
       el.dataset.key = key;
       this.container.appendChild(el);
       this.nodes.set(key, { el, html: "" });
-      shells.push({ el, item });
-    });
+      shells.push({ el, entry });
+    }
     // The parked queue (§2.13) renders in full at the tail — a fresh join
     // with a pending queue must show it, and the cards are cheap enough to
     // skip the tail-first backfill the history items get.
@@ -1295,11 +1453,11 @@ export class FeedRenderer {
     const fillChunk = (indexes: number[]): void => {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
-        const { el, item } = shells[i];
-        const html = this.itemHtml(item, finals, pulse, panels);
+        const { el, entry } = shells[i];
+        const html = this.entryHtml(entry, finals, pulse, panels);
         el.innerHTML = html;
-        const entry = this.nodes.get(el.dataset.key ?? "");
-        if (entry) entry.html = html;
+        const node = this.nodes.get(el.dataset.key ?? "");
+        if (node) node.html = html;
       }
       // Content added above the viewport grows scrollHeight; shift
       // scrollTop by the growth so the tail stays in view.
@@ -1349,10 +1507,10 @@ export class FeedRenderer {
     const finals = finalResponses(state.items);
     const pulse = pulseTarget(state.items, state.turnInFlight, finals);
     const seen = new Set<string>();
-    part.top.forEach((item, i) => {
-      const key = itemKey(item, i);
+    for (const feedEntry of groupFeed(part.top)) {
+      const key = this.entryKey(feedEntry);
       seen.add(key);
-      const html = this.itemHtml(item, finals, pulse, panels);
+      const html = this.entryHtml(feedEntry, finals, pulse, panels);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");
@@ -1372,7 +1530,7 @@ export class FeedRenderer {
         applyExpanded(sectionsIn(entry.el), open);
         entry.html = html;
       }
-    });
+    }
     // The in-flight queue (§2.13) is a subdued section at the tail, after
     // every conversation item. Each card is re-appended so a live item node
     // appended above (the agent's streaming response during the running

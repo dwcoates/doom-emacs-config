@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   PanelContext,
+  activeGroupMember,
   activityTicker,
   backfillChunks,
   compactionBannerHtml,
   diffHtml,
   finalResponses,
   formatTurnTime,
+  groupFeed,
+  groupHtml,
   isPulsed,
   itemKey,
   lastUserTurnId,
@@ -2736,5 +2739,164 @@ describe("activityTicker", () => {
   it("voices a waiting child permission", () => {
     // Arrange + Act + Assert
     expect(activityTicker([childPermission("t2")])).toBe("1 step · awaiting permission: Bash");
+  });
+});
+
+// --- consecutive-run tab groups ---------------------------------------------------
+
+/** A Bash card with its own id and command, for building runs. */
+function bash(id: string, command = "ls", result?: { isError: boolean }): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: id,
+    messageId: "m1",
+    toolName: "Bash",
+    inputJson: "{}",
+    input: { command },
+    inputDone: true,
+    ...(result ? { result: { isError: result.isError, content: "out" } } : {}),
+  };
+}
+
+describe("groupFeed", () => {
+  it("groups two consecutive same-tool cards", () => {
+    // Arrange + Act
+    const entries = groupFeed([bash("t1"), bash("t2")]);
+    // Assert
+    expect(entries).toHaveLength(1);
+    expect(entries[0].kind).toBe("group");
+  });
+
+  it("leaves a singleton as a plain item", () => {
+    // Arrange + Act
+    const entries = groupFeed([bash("t1"), text("b1")]);
+    // Assert
+    expect(entries.map((e) => e.kind)).toEqual(["item", "item"]);
+  });
+
+  it("breaks a run on a different tool name", () => {
+    // Arrange
+    const read: ToolItem = { ...bash("t2"), toolName: "Read" };
+    // Act
+    const entries = groupFeed([bash("t1"), read, bash("t3")]);
+    // Assert
+    expect(entries.map((e) => e.kind)).toEqual(["item", "item", "item"]);
+  });
+
+  it("breaks a run on a visible non-tool item", () => {
+    // Arrange + Act
+    const entries = groupFeed([bash("t1"), text("b1"), bash("t2")]);
+    // Assert
+    expect(entries.map((e) => e.kind)).toEqual(["item", "item", "item"]);
+  });
+
+  it("lets a suppressed tool ride through a run without breaking it", () => {
+    // Arrange — ToolSearch renders nothing, so it cannot split the tabs.
+    const invisible: ToolItem = { ...bash("x1"), toolName: "ToolSearch" };
+    // Act
+    const entries = groupFeed([bash("t1"), invisible, bash("t2")]);
+    // Assert — one group, with the invisible item re-emitted after it.
+    expect(entries[0].kind).toBe("group");
+    expect(entries).toHaveLength(2);
+  });
+
+  it("lets a meta-only user turn ride through a run without breaking it", () => {
+    // Arrange — a turn that was nothing but injected spans renders "".
+    const meta = userTurnAt(9, 0, `${META_OPEN}read the metaprompt${META_CLOSE}`);
+    // Act
+    const entries = groupFeed([bash("t1"), meta, bash("t2")]);
+    // Assert
+    expect(entries[0].kind).toBe("group");
+  });
+
+  it("groups consecutive Agent cards like any other run", () => {
+    // Arrange
+    const a1: ToolItem = { ...agentTool("a1") };
+    const a2: ToolItem = { ...agentTool("a2") };
+    // Act
+    const entries = groupFeed([a1, a2]);
+    // Assert
+    expect(entries[0].kind).toBe("group");
+  });
+
+  it("keeps each member's original index for reconciliation", () => {
+    // Arrange + Act
+    const entries = groupFeed([text("b1"), bash("t1"), bash("t2")]);
+    // Assert
+    const group = entries[1];
+    if (group.kind !== "group") throw new Error("expected a group");
+    expect(group.indexes).toEqual([1, 2]);
+  });
+});
+
+describe("activeGroupMember", () => {
+  it("auto-follows the newest still-running member", () => {
+    // Arrange
+    const members = [bash("t1", "a", { isError: false }), bash("t2", "b"), bash("t3", "c", { isError: false })];
+    // Act + Assert
+    expect(activeGroupMember(members)).toBe("t2");
+  });
+
+  it("settles on the last member when every member finished", () => {
+    // Arrange
+    const members = [bash("t1", "a", { isError: false }), bash("t2", "b", { isError: false })];
+    // Act + Assert
+    expect(activeGroupMember(members)).toBe("t2");
+  });
+
+  it("honors the user's pin over the auto-follow", () => {
+    // Arrange
+    const members = [bash("t1", "a", { isError: false }), bash("t2", "b")];
+    // Act + Assert
+    expect(activeGroupMember(members, "t1")).toBe("t1");
+  });
+
+  it("ignores a stale pin naming a member the group no longer holds", () => {
+    // Arrange
+    const members = [bash("t1", "a", { isError: false }), bash("t2", "b")];
+    // Act + Assert
+    expect(activeGroupMember(members, "t-gone")).toBe("t2");
+  });
+});
+
+describe("groupHtml", () => {
+  it("renders one status-dotted chip per member", () => {
+    // Arrange
+    const members = [bash("t1", "a", { isError: false }), bash("t2", "b")];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert
+    expect(html.match(/tab-chip/g)?.length).toBe(2);
+    expect(html).toContain("agent-done");
+    expect(html).toContain("agent-running");
+  });
+
+  it("renders only the active member's card beneath the tabs", () => {
+    // Arrange
+    const members = [bash("t1", "first-cmd", { isError: false }), bash("t2", "second-cmd")];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert
+    expect(html).toContain("$ second-cmd");
+    expect(html).not.toContain("$ first-cmd");
+  });
+
+  it("keeps failures loud whichever tab is selected", () => {
+    // Arrange — the failed member is NOT the active one.
+    const members = [bash("t1", "a", { isError: true }), bash("t2", "b", { isError: false })];
+    // Act
+    const html = groupHtml(members, "t2");
+    // Assert
+    expect(html).toContain("1 failed");
+  });
+
+  it("marks the selected chip active and wires both data attributes", () => {
+    // Arrange
+    const members = [bash("t1", "a"), bash("t2", "b")];
+    // Act
+    const html = groupHtml(members, "t1");
+    // Assert
+    expect(html).toContain(`class="tab-chip active" data-tab-group="t1" data-tab-member="t1"`);
+    expect(html).toContain(`data-tab-member="t2"`);
   });
 });
