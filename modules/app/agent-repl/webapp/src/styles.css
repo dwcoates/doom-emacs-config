@@ -464,6 +464,10 @@ pre {
    running reads as the same "model is busy" signal wherever it appears (and it
    matches the arc spinning inside the badge, which is already --thinking). */
 .badge.run { color: var(--thinking); display: inline-flex; align-items: center; gap: 0.3rem; }
+/* Every tool card's chip sits on the card grey, so the async teal cannot
+   tint it: done/running reads identically on a Bash card and an Agent
+   card. The two-class selector outranks .badge's transparent default. */
+.tool-card .badge { background: var(--card); }
 .cmd { color: var(--accent); }
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 .tool-input { color: var(--muted); max-height: 8rem; overflow-y: auto; }
