@@ -1139,6 +1139,14 @@ describe("queued-card (§2.13 in-flight queue)", () => {
     expect(card).toMatch(/border:\s*1px\s+dashed/);
   });
 
+  it("draws the dashed border in the very --user blue the live bubble fills with", () => {
+    // Arrange / Act — the border color ties the parked card to the user's own
+    // prompt, at the code level the same token .bubble.user backgrounds with.
+    // Assert
+    expect(card).toMatch(/border:\s*1px\s+dashed\s+var\(--user\)/);
+    expect(userBubble).toMatch(/background:\s*var\(--user\)/);
+  });
+
   it("dims the parked card below full opacity", () => {
     // Arrange / Act — reduced opacity reads as held-back.
     // Assert
