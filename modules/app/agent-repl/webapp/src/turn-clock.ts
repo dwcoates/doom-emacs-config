@@ -15,7 +15,7 @@
  * replace the denylist.
  */
 import { stripMetaSpans } from "./meta.js";
-import { ConversationItem, UserTurnItem } from "./store.js";
+import type { ConversationItem, UserTurnItem } from "./store.js";
 
 /**
  * Built-in slash commands that are NOT skills. A user turn that is exactly
