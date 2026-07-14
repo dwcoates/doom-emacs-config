@@ -394,12 +394,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 			if m := agentIDRe.FindStringSubmatch(contentText(block.Content)); m != nil {
 				st.agentIDs[m[1]] = block.ToolUseID
 			}
-			frames = append(frames, stampReplay(t.OnEvent(&protocol.L1Event{
-				Type:      "tool-result",
-				ToolUseID: block.ToolUseID,
-				IsError:   block.IsError,
-				Content:   block.Content,
-			}), ts)...)
+			frames = append(frames, replayToolResult(t, block, ts, "")...)
 			continue
 		}
 		turnBlocks = append(turnBlocks, raw)
@@ -409,6 +404,21 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 		frames = append(frames, replayUserTurn(content, ts, st))
 	}
 	return frames
+}
+
+// replayToolResult translates one transcript tool_result block through
+// the Translator (so render hints fire for tools it has seen), stamped
+// with the entry's own time. PARENT is the owning subagent call, empty
+// on the main chain — the one decoding both the main and sidechain
+// walks share.
+func replayToolResult(t *Translator, block transcriptUserBlock, ts, parent string) []protocol.L2Frame {
+	return stampReplay(t.OnEvent(&protocol.L1Event{
+		Type:            "tool-result",
+		ToolUseID:       block.ToolUseID,
+		IsError:         block.IsError,
+		Content:         block.Content,
+		ParentToolUseID: parent,
+	}), ts)
 }
 
 // sidechainBatches replays every linkable subagents/agent-<id>.jsonl
@@ -573,13 +583,7 @@ func sidechainEntryFrames(t *Translator, line []byte, parent string) ([]protocol
 			if err := json.Unmarshal(raw, &block); err != nil || block.Type != "tool_result" {
 				continue
 			}
-			frames = append(frames, stampReplay(t.OnEvent(&protocol.L1Event{
-				Type:            "tool-result",
-				ToolUseID:       block.ToolUseID,
-				IsError:         block.IsError,
-				Content:         block.Content,
-				ParentToolUseID: parent,
-			}), entry.Timestamp)...)
+			frames = append(frames, replayToolResult(t, block, entry.Timestamp, parent)...)
 		}
 		return frames, entry.Timestamp
 	default:
