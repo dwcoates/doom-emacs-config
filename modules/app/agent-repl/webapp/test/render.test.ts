@@ -2949,3 +2949,55 @@ describe("generic folded input", () => {
     expect(html).not.toContain("folded-headline");
   });
 });
+
+describe("scheduled-wakeup anchor", () => {
+  /** A settled ScheduleWakeup call with INPUT and a result at RESULTTS. */
+  function wake(input: Record<string, unknown>, resultTs?: string): ToolItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "ScheduleWakeup",
+      inputJson: JSON.stringify(input),
+      input,
+      inputDone: true,
+      resultTs,
+      result: { isError: false, content: "scheduled" },
+    };
+  }
+
+  it("names the wall-clock moment the wakeup fires", () => {
+    // Arrange — scheduled at 10:00 local with a 10-minute delay.
+    const at = new Date(2026, 4, 24, 10, 0, 0);
+    const item = wake({ delaySeconds: 600, reason: "watching CI" }, at.toISOString());
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("wakes ~10:10");
+    expect(html).toContain("watching CI");
+  });
+
+  it("acknowledges a stop instead of computing a moment", () => {
+    // Arrange + Act
+    const html = renderItem(wake({ stop: true }));
+    // Assert
+    expect(html).toContain("loop stopped");
+  });
+
+  it("echoes the raw ack when the input offers no anchor", () => {
+    // Arrange + Act — no delaySeconds to compute from.
+    const html = renderItem(wake({ prompt: "loop" }));
+    // Assert
+    expect(html).toContain("scheduled");
+    expect(html).not.toContain("wakes ~");
+  });
+
+  it("keeps a failed schedule loud", () => {
+    // Arrange
+    const item = { ...wake({ delaySeconds: 60 }), result: { isError: true, content: "bad" } };
+    // Act
+    const html = renderItem(item as ToolItem);
+    // Assert
+    expect(html).toContain("stderr");
+  });
+});

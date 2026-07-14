@@ -76,6 +76,8 @@ export interface ToolItem {
     outputFile?: string;
     text: string;
   };
+  /** Envelope ts of the result frame: when the call settled. */
+  resultTs?: string;
   result?: {
     isError: boolean;
     content: string | Array<{ type: "text"; text: string }>;
@@ -567,6 +569,7 @@ export class ConversationStore {
             content: frame.content,
             render: frame.render,
           };
+          item.resultTs = frame.ts;
         }
         break;
       }

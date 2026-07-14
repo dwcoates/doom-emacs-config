@@ -606,9 +606,37 @@ function toolResult(item: ToolItem): string {
   if (item.toolName === "Skill" && !item.result.isError) {
     return "";
   }
+  // A ScheduleWakeup's result is a countdown anchor: the card names the
+  // wall-clock moment the wakeup fires (result time plus the delay)
+  // rather than echoing the scheduler's ack. Errors fall through loud.
+  if (item.toolName === "ScheduleWakeup" && !item.result.isError) {
+    return wakeLine(item);
+  }
   return `<pre class="tool-output${item.result.isError ? " stderr" : ""}">${escapeHtml(
     contentToText(item.result.content),
   )}</pre>`;
+}
+
+/**
+ * The wall-clock moment a scheduled wakeup fires (result time plus
+ * delaySeconds) with its reason, a stop acknowledgment for `stop: true`,
+ * and the raw ack echo when the input carries neither anchor.
+ */
+function wakeLine(item: ToolItem): string {
+  if (item.input?.stop === true) {
+    return `<div class="wake-at">loop stopped</div>`;
+  }
+  const delay = typeof item.input?.delaySeconds === "number" ? item.input.delaySeconds : null;
+  if (delay === null || item.resultTs === undefined) {
+    return `<pre class="tool-output">${escapeHtml(
+      contentToText(item.result?.content ?? ""),
+    )}</pre>`;
+  }
+  const at = new Date(new Date(item.resultTs).getTime() + delay * 1000);
+  const reason = typeof item.input?.reason === "string" ? ` · ${item.input.reason}` : "";
+  return `<div class="wake-at">wakes ~${escapeHtml(formatTurnTime(at.toISOString()))}${escapeHtml(
+    reason,
+  )}</div>`;
 }
 
 /**

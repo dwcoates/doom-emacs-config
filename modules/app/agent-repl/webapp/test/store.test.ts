@@ -1330,3 +1330,19 @@ describe("ConversationStore in-flight queue", () => {
     expect(store.state.turnInFlight).toBe(true);
   });
 });
+
+describe("ConversationStore result timestamps", () => {
+  it("stamps the tool item with its result frame's envelope time", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(
+      frame("tool-use-start", { tool_use_id: "t1", tool_name: "Bash", message_id: "m1" }),
+    );
+    // Act
+    store.applyRaw(
+      frame("tool-use-result", { tool_use_id: "t1", is_error: false, content: "ok" }),
+    );
+    // Assert — frame() stamps every envelope with ts "T".
+    expect((store.state.items[0] as ToolItem).resultTs).toBe("T");
+  });
+});
