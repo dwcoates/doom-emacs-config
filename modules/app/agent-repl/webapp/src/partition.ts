@@ -22,13 +22,47 @@ export interface FeedPartition {
   children: ReadonlyMap<string, ConversationItem[]>;
 }
 
+/** Tool names that poll or stop a detached task rather than doing work. */
+const TASK_POLL_TOOLS = new Set(["TaskOutput", "TaskStop", "TaskGet"]);
+
+/**
+ * The ids a spawning call announces its detached work under: "running in
+ * background with ID: bg1" for shells, "agentId: abc1" for background
+ * agents. Task notifications carry the id verbatim, so the notification
+ * field is the authoritative source when it has landed.
+ */
+const SPAWNED_ID_RE = /\b(?:ID|agentId):\s*([A-Za-z0-9_-]+)/g;
+
+function resultText(item: ToolItem): string {
+  const content = item.result?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((b) => b.text ?? "").join("\n");
+}
+
+/** Every task id ITEM's spawn result or notification announced. */
+function spawnedTaskIds(item: ToolItem): string[] {
+  const ids = [...resultText(item).matchAll(SPAWNED_ID_RE)].map((m) => m[1]);
+  if (item.notification?.taskId) ids.push(item.notification.taskId);
+  return ids;
+}
+
 /** The parent id an item claims, or undefined for main-chain items. */
 function claimedParent(
   item: ConversationItem,
   toolParents: ReadonlyMap<string, string | undefined>,
+  spawnByTaskId: ReadonlyMap<string, string>,
 ): string | undefined {
   switch (item.kind) {
-    case "tool":
+    case "tool": {
+      if (item.parentToolUseId !== undefined) return item.parentToolUseId;
+      // A poll of a detached task belongs to the card that spawned the
+      // task, so the polling call folds into the spawner's panel.
+      if (TASK_POLL_TOOLS.has(item.toolName) && typeof item.input?.task_id === "string") {
+        return spawnByTaskId.get(item.input.task_id);
+      }
+      return undefined;
+    }
     case "text":
     case "thinking":
       return item.parentToolUseId;
@@ -50,17 +84,20 @@ function claimedParent(
 export function partitionFeed(items: readonly ConversationItem[]): FeedPartition {
   const known = new Set<string>();
   const toolParents = new Map<string, string | undefined>();
+  const spawnByTaskId = new Map<string, string>();
   for (const item of items) {
-    if (item.kind === "tool") {
-      known.add(item.toolUseId);
-      toolParents.set(item.toolUseId, (item as ToolItem).parentToolUseId);
+    if (item.kind !== "tool") continue;
+    known.add(item.toolUseId);
+    toolParents.set(item.toolUseId, item.parentToolUseId);
+    for (const id of spawnedTaskIds(item)) {
+      spawnByTaskId.set(id, item.toolUseId);
     }
   }
   const top: ConversationItem[] = [];
   const children = new Map<string, ConversationItem[]>();
   for (const item of items) {
-    const parent = claimedParent(item, toolParents);
-    if (parent !== undefined && known.has(parent)) {
+    const parent = claimedParent(item, toolParents, spawnByTaskId);
+    if (parent !== undefined && known.has(parent) && !(item.kind === "tool" && parent === item.toolUseId)) {
       const list = children.get(parent) ?? [];
       list.push(item);
       children.set(parent, list);
