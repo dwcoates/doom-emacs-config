@@ -343,6 +343,177 @@ func TestBuildReplayFramesEmitsTrailingUsage(t *testing.T) {
 	}
 }
 
+// --- sidechain (subagents/agent-*.jsonl) replay -------------------------------
+
+// buildFramesWithAgents replays MAIN plus a subagents dir holding one
+// agent-<id>.jsonl per AGENTS entry.
+func buildFramesWithAgents(t *testing.T, mainLines []string, agents map[string][]string) ([]protocol.L2Frame, *Translator) {
+	t.Helper()
+	sub := filepath.Join(t.TempDir(), "subagents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for id, lines := range agents {
+		path := filepath.Join(sub, "agent-"+id+".jsonl")
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr := NewTranslator()
+	return BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(mainLines, "\n")), sub), tr
+}
+
+// The main-transcript shape every sidechain test starts from: an Agent
+// call whose result announces the sidechain's agentId.
+var sidechainMain = []string{
+	`{"type":"assistant","timestamp":"2026-05-24T10:00:00.000Z","message":{"id":"m1","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"tk1","name":"Agent","input":{"description":"d","prompt":"do the thing"}}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+	`{"type":"user","timestamp":"2026-05-24T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tk1","content":"Async agent launched successfully. agentId: abc1"}]}}`,
+}
+
+var sidechainAgentLines = []string{
+	`{"type":"user","timestamp":"2026-05-24T10:00:02.000Z","message":{"role":"user","content":"do the thing"}}`,
+	`{"type":"assistant","timestamp":"2026-05-24T10:00:03.000Z","message":{"id":"am1","role":"assistant","model":"claude-haiku-4-5","content":[{"type":"text","text":"working"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+}
+
+func firstParentedTextStart(frames []protocol.L2Frame) *protocol.TextStartFrame {
+	for _, f := range frames {
+		if ts, ok := f.(*protocol.TextStartFrame); ok && ts.ParentToolUseID != "" {
+			return ts
+		}
+	}
+	return nil
+}
+
+func TestSidechainReplayLinksBackgroundAgentByAnnouncedID(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFramesWithAgents(t, sidechainMain, map[string][]string{"abc1": sidechainAgentLines})
+	// Assert — the agent's prose replays under the call that spawned it.
+	ts := firstParentedTextStart(frames)
+	if ts == nil || ts.ParentToolUseID != "tk1" {
+		t.Fatalf("parented text-start = %+v", ts)
+	}
+}
+
+func TestSidechainReplayPromptMatchesForegroundAgent(t *testing.T) {
+	// Arrange — the result carries the agent's ANSWER, no agentId.
+	main := []string{
+		sidechainMain[0],
+		`{"type":"user","timestamp":"2026-05-24T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tk1","content":"the answer"}]}}`,
+	}
+	// Act — the file's first user prompt equals the Agent input's prompt.
+	frames, _ := buildFramesWithAgents(t, main, map[string][]string{"zzz9": sidechainAgentLines})
+	// Assert
+	ts := firstParentedTextStart(frames)
+	if ts == nil || ts.ParentToolUseID != "tk1" {
+		t.Fatalf("parented text-start = %+v", ts)
+	}
+}
+
+func TestSidechainReplaySkipsUnlinkableFile(t *testing.T) {
+	// Arrange — no agentId announcement and a prompt matching nothing.
+	agent := []string{
+		`{"type":"user","timestamp":"2026-05-24T10:00:02.000Z","message":{"role":"user","content":"some other prompt"}}`,
+		sidechainAgentLines[1],
+	}
+	main := []string{
+		sidechainMain[0],
+		`{"type":"user","timestamp":"2026-05-24T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tk1","content":"the answer"}]}}`,
+	}
+	// Act
+	frames, _ := buildFramesWithAgents(t, main, map[string][]string{"zzz9": agent})
+	// Assert — unparented frames would pollute the feed, so none replay.
+	if ts := firstParentedTextStart(frames); ts != nil {
+		t.Fatalf("unexpected parented frames: %+v", ts)
+	}
+}
+
+func TestSidechainReplayEmitsNoUserTurnForTheInjectedPrompt(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFramesWithAgents(t, sidechainMain, map[string][]string{"abc1": sidechainAgentLines})
+	// Assert — the prompt is the spawning call's input, not a user bubble.
+	for _, f := range frames {
+		if _, ok := f.(*protocol.UserTurnFrame); ok {
+			t.Fatalf("sidechain replay produced a user-turn: %+v", f)
+		}
+	}
+}
+
+func TestSidechainReplayDoesNotFlipTheModelMirror(t *testing.T) {
+	// Arrange / Act — the agent file reports a haiku model.
+	_, tr := buildFramesWithAgents(t, sidechainMain, map[string][]string{"abc1": sidechainAgentLines})
+	// Assert — a subagent's model must not masquerade as the session's.
+	if tr.Model != "claude-fable-5" {
+		t.Fatalf("mirror = %q, want claude-fable-5", tr.Model)
+	}
+}
+
+func TestSidechainReplayInterleavesByTimestamp(t *testing.T) {
+	// Arrange — a main text block written AFTER the agent's (10:00:05).
+	main := append(append([]string{}, sidechainMain...),
+		`{"type":"assistant","timestamp":"2026-05-24T10:00:05.000Z","message":{"id":"m2","role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"after"}],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+	// Act
+	frames, _ := buildFramesWithAgents(t, main, map[string][]string{"abc1": sidechainAgentLines})
+	// Assert — the agent's 10:00:03 prose lands before the 10:00:05 main text.
+	agentAt, mainAt := -1, -1
+	for i, f := range frames {
+		if ts, ok := f.(*protocol.TextStartFrame); ok {
+			if ts.ParentToolUseID != "" {
+				agentAt = i
+			} else {
+				mainAt = i
+			}
+		}
+	}
+	if agentAt == -1 || mainAt == -1 || agentAt > mainAt {
+		t.Fatalf("agentAt = %d, mainAt = %d, want agent first", agentAt, mainAt)
+	}
+}
+
+func TestSidechainReplayToolResultsCarryTheParent(t *testing.T) {
+	// Arrange — the agent runs its own tool and gets a result back.
+	agent := append(append([]string{}, sidechainAgentLines...),
+		`{"type":"assistant","timestamp":"2026-05-24T10:00:04.000Z","message":{"id":"am2","role":"assistant","model":"claude-haiku-4-5","content":[{"type":"tool_use","id":"gt1","name":"Grep","input":{"pattern":"x"}}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		`{"type":"user","timestamp":"2026-05-24T10:00:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"gt1","content":"no matches"}]}}`)
+	// Act
+	frames, _ := buildFramesWithAgents(t, sidechainMain, map[string][]string{"abc1": agent})
+	// Assert — the nested call and its result both replay.
+	var start, result bool
+	for _, f := range frames {
+		if s, ok := f.(*protocol.ToolUseStartFrame); ok && s.ToolUseID == "gt1" && s.ParentToolUseID == "tk1" {
+			start = true
+		}
+		if r, ok := f.(*protocol.ToolUseResultFrame); ok && r.ToolUseID == "gt1" {
+			result = true
+		}
+	}
+	if !start || !result {
+		t.Fatalf("start = %v, result = %v, want both", start, result)
+	}
+}
+
+func TestSidechainReplayMissingDirMatchesPlainReplay(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a session that never spawned agents has no subagents dir.
+	frames := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(sidechainMain, "\n")),
+		filepath.Join(t.TempDir(), "subagents"))
+	// Assert — exactly the main chain's frames, nothing dropped or added.
+	plain := BuildReplayFrames(NewTranslator(), strings.NewReader(strings.Join(sidechainMain, "\n")))
+	if len(frames) != len(plain) {
+		t.Fatalf("len = %d, want %d", len(frames), len(plain))
+	}
+}
+
+func TestSubagentsDirForDerivesTheSessionDir(t *testing.T) {
+	// Arrange / Act
+	got := subagentsDirFor(filepath.Join("p", "projects", "slug", "uuid-1.jsonl"))
+	// Assert
+	want := filepath.Join("p", "projects", "slug", "uuid-1", "subagents")
+	if got != want {
+		t.Fatalf("subagentsDirFor = %q, want %q", got, want)
+	}
+}
+
 func TestBuildReplayFramesSkipsSidechainEntries(t *testing.T) {
 	// Arrange / Act
 	frames, _ := buildFrames(t,
