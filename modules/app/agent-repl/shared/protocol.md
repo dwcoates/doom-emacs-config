@@ -1067,6 +1067,135 @@ This is a self-healing loop, NOT a fallback that papers over a broken
 event path: a `reconcile`-origin frame is evidence the push path missed
 something, and it is visible on the wire precisely so it can be noticed.
 
+### 2.13 In-flight message queue
+
+A `user-message` submitted while a turn is already in flight is not
+forwarded to the shim immediately. The daemon owns a per-session FIFO
+**queue** and enforces one invariant: **at most one turn is ever in
+flight at the shim.** This makes the daemon — not the SDK's opaque
+streaming-input buffer — the authority on ordering, so a queued message
+is inspectable, cancellable, and re-orderable, and the shim's
+turn/result accounting stays 1:1 (no Layer-1 / shim change is needed).
+
+**Submission decision** (`user-message` in `HandleClientFrame`):
+
+- **Idle** (`!turnActive`): forwarded immediately exactly as before —
+  broadcast `user-turn`, set `turnActive`, `SendRaw` to the shim. No
+  queue involvement.
+- **Busy** (`turnActive`): NOT forwarded. The daemon assigns a stable
+  `queue_id`, stores the raw command, broadcasts `queue-added`
+  (`status: "classifying"`), and launches an async classifier
+  (see below). The command reaches the shim only later, at drain.
+
+**Classifier.** A cheap headless model call decides whether the queued
+message should preempt the running turn. It runs in a goroutine (never
+under `s.mu`) and re-acquires the lock to apply its verdict.
+
+- Spawns `claude -p --model <classifier-model> --output-format json
+  --json-schema <schema>` with the message text on stdin, `cwd` a
+  neutral temp dir (so its `SessionStart`/`Stop` hooks never resolve to
+  a registered workspace — mirrors `prompt-summary.el`), and
+  `CLAUDE_CONFIG_DIR` set to the session's account dir.
+- Schema: `{verdict: "interrupt"|"wait", reason: string}` both required.
+- Prompt is injection-hardened: the running-task text and the new
+  message are DATA, not instructions; no tools; one-line reason.
+- **Fails closed to `wait`** on any error, timeout (~20s), non-zero
+  exit, or unparseable output — a classifier failure must NEVER
+  interrupt live work. A failure still emits a `queue-classified`
+  frame (`source: "fallback"`) rather than being swallowed.
+- Model default `haiku`; the whole feature is behind a daemon flag
+  defaulting on (`--classify-queue` / `AGENT_REPL_CLASSIFY_QUEUE`).
+
+**Verdict application:**
+
+- `wait`: broadcast `queue-classified` (`verdict: "wait"`). The item
+  stays queued and drains in FIFO order when a turn completes.
+- `interrupt`: broadcast `queue-classified` (`verdict: "interrupt"`),
+  move the item to the queue front, and — if a turn is in flight —
+  send an `interrupt` to the shim. The aborted turn's `result` then
+  triggers the normal drain, which now finds this item at the front.
+  This is the ONLY path that preempts a running turn.
+
+**Drain** (on every `result` frame, i.e. any turn end including
+aborted): if `!turnActive` and the queue is non-empty, pop the front
+item, run it through `OnUserMessageCmd` (which broadcasts its
+`user-turn` and sets `turnActive`), broadcast `queue-removed`
+(`reason: "drained"`, carrying the `request_id` of the `user-turn` it
+became), and `SendRaw` it to the shim. A verdict that arrives after
+its item has already drained is discarded (the item is gone).
+
+**User overrides** (daemon-handled Layer-2 commands, NOT forwarded to
+the shim, reusing the command-shape convention like `replay-request`):
+
+```ts
+interface QueueRunNowCmd { type: "queue-run-now"; request_id: RequestId; queue_id: string; }
+interface QueueCancelCmd { type: "queue-cancel"; request_id: RequestId; queue_id: string; }
+```
+
+- `queue-run-now` is a manual `interrupt` verdict: same escalation as a
+  classifier `interrupt`, with `queue-classified` `source: "user"`.
+- `queue-cancel` removes the item without ever sending it and
+  broadcasts `queue-removed` (`reason: "cancelled"`). A stale
+  `queue_id` (already drained/cancelled) is a no-op ack, not an error.
+
+HTTP equivalents for the Emacs host (which holds no WebSocket):
+
+- `POST /sessions/{id}/queue/{queueId}/run-now`
+- `POST /sessions/{id}/queue/{queueId}/cancel`
+
+**Frames (daemon → client):**
+
+```ts
+interface QueueAddedFrame extends WsEnvelope {
+  type: "queue-added";
+  queue_id: string;                   // daemon-assigned, stable for the item's life
+  request_id: RequestId;              // the user-message id it will submit under
+  content: ContentBlock[];            // normalized, same shape as user-turn
+  status: "classifying";              // always the initial status
+}
+interface QueueClassifiedFrame extends WsEnvelope {
+  type: "queue-classified";
+  queue_id: string;
+  verdict: "wait" | "interrupt";
+  reason: string;                     // one-line human explanation
+  source: "classifier" | "user" | "fallback";
+}
+interface QueueRemovedFrame extends WsEnvelope {
+  type: "queue-removed";
+  queue_id: string;
+  reason: "drained" | "cancelled" | "session_end";
+  request_id?: RequestId;             // present when reason === "drained"
+}
+```
+
+**Snapshot on (re)connect.** `hello` (§2.2) and the `GET /sessions`
+listing gain a `queue` array in front-to-back order so a fresh join or
+a replay-evicted client rebuilds the pending queue without a gap:
+
+```ts
+interface QueuedItem {
+  queue_id: string;
+  request_id: RequestId;
+  content: ContentBlock[];
+  status: "classifying" | "waiting" | "interrupt";
+  verdict?: "wait" | "interrupt";
+  reason?: string;
+}
+```
+
+Live frames still ride the seq stream and the retention ring like every
+other broadcast, so a seq-gap replay reconstructs the queue too. On
+session end (terminal / shutdown / shim death) every queued item is
+dropped with `queue-removed` (`reason: "session_end"`) and any
+in-flight classifier goroutine no-ops when it finds the item gone.
+
+**UI intent.** A queued item renders as a distinct, visually subdued
+"queued — waiting" affordance (NOT a live turn bubble), carrying its
+classifier verdict/reason once known, plus a Cancel control and a
+Run-now control. The whole point of the feature is that the user SEES
+a message is parked for later handling and is explicitly NOT
+interrupting the current task unless escalated.
+
 ---
 
 ## Account selection (`CLAUDE_CONFIG_DIR`)
