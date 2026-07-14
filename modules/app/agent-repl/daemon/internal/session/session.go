@@ -119,6 +119,11 @@ type SentinelSink interface {
 	PermissionRequested(cwd, sid, reqID string)
 	PermissionResolved(cwd, sid, reqID string)
 	SessionDead(cwd, sid string)
+	// AccountChanged records that the session moved onto another
+	// canonical account root. Written by the SERVER's switch endpoint
+	// rather than the session broadcast tap — the switch is a daemon
+	// action on the session, not a frame the shim ever emits.
+	AccountChanged(cwd, sid string)
 }
 
 // Registrar receives the durable-state transitions the persistent

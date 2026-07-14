@@ -78,6 +78,42 @@ type harness struct {
 	ts    *httptest.Server
 	srv   *Server
 	shims chan *fakeShim
+	// sink records sentinel side-channel writes; only switchHarness sets it.
+	sink *recordingSentinel
+}
+
+// recordingSentinel is a thread-safe session.SentinelSink recording calls.
+type recordingSentinel struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *recordingSentinel) record(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, s)
+}
+
+func (r *recordingSentinel) PermissionRequested(cwd, sid, reqID string) {
+	r.record("requested " + cwd + " " + sid + " " + reqID)
+}
+
+func (r *recordingSentinel) PermissionResolved(cwd, sid, reqID string) {
+	r.record("resolved " + cwd + " " + sid + " " + reqID)
+}
+
+func (r *recordingSentinel) SessionDead(cwd, sid string) {
+	r.record("dead " + cwd + " " + sid)
+}
+
+func (r *recordingSentinel) AccountChanged(cwd, sid string) {
+	r.record("account-changed " + cwd + " " + sid)
+}
+
+func (r *recordingSentinel) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -2223,6 +2259,7 @@ func TestAccountsReportsALoggedOutRootWithAnEmptyEmail(t *testing.T) {
 func switchHarness(t *testing.T, accounts []Account) *harness {
 	t.Helper()
 	shims := make(chan *fakeShim, 8)
+	sink := &recordingSentinel{}
 	srv := New(Config{
 		DaemonVersion: "0.1.0-test",
 		Retention:     64,
@@ -2232,6 +2269,7 @@ func switchHarness(t *testing.T, accounts []Account) *harness {
 			shims <- shim
 			return shim, nil
 		},
+		Sentinel: sink,
 		Registry: registry.Open(filepath.Join(t.TempDir(), "sessions.json"), func(string, ...any) {}),
 		Accounts: accounts,
 	})
@@ -2257,7 +2295,7 @@ func switchHarness(t *testing.T, accounts []Account) *harness {
 			}
 		}
 	})
-	return &harness{ts: ts, srv: srv, shims: shims}
+	return &harness{ts: ts, srv: srv, shims: shims, sink: sink}
 }
 
 // postSwitch asks the daemon to move sessionID onto configDir.
@@ -2531,6 +2569,36 @@ func TestSwitchOfAFreshSessionRelaunchesWithoutATranscript(t *testing.T) {
 	}
 	if rec, _ := h.srv.registry.Get(id); rec.ConfigDir != cfgB {
 		t.Errorf("record.ConfigDir = %q, want %q", rec.ConfigDir, cfgB)
+	}
+}
+
+func TestSwitchPokesEmacsOverTheSentinelChannel(t *testing.T) {
+	// Arrange: Emacs's per-workspace config-dir override must follow the
+	// switch, and the sentinel side channel is how it learns.
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	plantTranscript(t, cfgA, "/w", "u_1")
+	h := switchHarness(t, []Account{
+		{Label: "personal", ConfigDir: cfgA},
+		{Label: "work", ConfigDir: cfgB},
+	})
+	id, shim := createForSwitch(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"u_1"}`, cfgA))
+	drainOnShutdown(shim)
+
+	// Act
+	resp, _ := postSwitch(t, h, id, cfgB)
+
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if got := h.sink.snapshot(); !slices.Contains(got, "account-changed /w u_1") {
+		t.Errorf("sentinel calls = %v, want account-changed /w u_1", got)
+	}
+	select {
+	case relaunched := <-h.shims:
+		t.Cleanup(relaunched.end)
+	case <-time.After(recvTimeout):
+		t.Fatal("no relaunch shim spawned")
 	}
 }
 

@@ -787,6 +787,12 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	go fresh.Run()
 	s.logf("session %s: switched to account %q (%s), resume %s", id, target.Label, target.ConfigDir, csid)
+	// Poke Emacs over the sentinel side channel: its per-workspace
+	// config-dir override must follow the switch, or its own next
+	// create/reattach would put the session back on the computed default.
+	if s.sentinel != nil {
+		s.sentinel.AccountChanged(rec.CWD, csid)
+	}
 	s.respondSwitched(w, http.StatusAccepted, true, target)
 }
 

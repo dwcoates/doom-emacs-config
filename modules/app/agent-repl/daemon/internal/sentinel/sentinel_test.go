@@ -72,7 +72,7 @@ func TestDirDefaultsToHomeClaudeEmacs(t *testing.T) {
 }
 
 func TestWriteFilenamesAndContent(t *testing.T) {
-	// Arrange — table over the three sentinel kinds.
+	// Arrange — table over the sentinel kinds.
 	tests := []struct {
 		name     string
 		write    func(w *Writer)
@@ -92,6 +92,11 @@ func TestWriteFilenamesAndContent(t *testing.T) {
 			name:     "session dead",
 			write:    func(w *Writer) { w.SessionDead("/repo", "sid1") },
 			wantName: "session_dead_sid1",
+		},
+		{
+			name:     "account changed",
+			write:    func(w *Writer) { w.AccountChanged("/repo", "sid1") },
+			wantName: "account_changed_sid1",
 		},
 	}
 	for _, tt := range tests {
