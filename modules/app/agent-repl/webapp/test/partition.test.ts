@@ -143,4 +143,40 @@ describe("partitionFeed", () => {
     // Assert
     expect(part.children.get("w1")).toEqual([child]);
   });
+
+  it("folds a TaskOutput poll onto the card whose result announced the task id", () => {
+    // Arrange — a backgrounded Bash announcing bg1, then its poll.
+    const spawn = {
+      ...tool("t1"),
+      result: { isError: false, content: "Command running in background with ID: bg1." },
+    } as ConversationItem;
+    const poll = { ...tool("t2", "TaskOutput"), input: { task_id: "bg1" } } as ConversationItem;
+    // Act
+    const part = partitionFeed([spawn, poll]);
+    // Assert
+    expect(part.top).toEqual([spawn]);
+    expect(part.children.get("t1")).toEqual([poll]);
+  });
+
+  it("folds a TaskStop onto the spawner named by its landed notification", () => {
+    // Arrange — the notification is the authoritative id source.
+    const spawn = {
+      ...tool("t1", "Agent"),
+      notification: { taskId: "abc1", text: "<task-notification/>" },
+    } as ConversationItem;
+    const stop = { ...tool("t2", "TaskStop"), input: { task_id: "abc1" } } as ConversationItem;
+    // Act
+    const part = partitionFeed([spawn, stop]);
+    // Assert
+    expect(part.children.get("t1")).toEqual([stop]);
+  });
+
+  it("keeps a poll of an unknown task id top-level", () => {
+    // Arrange
+    const poll = { ...tool("t2", "TaskOutput"), input: { task_id: "bg-gone" } } as ConversationItem;
+    // Act
+    const part = partitionFeed([poll]);
+    // Assert
+    expect(part.top).toEqual([poll]);
+  });
 });
