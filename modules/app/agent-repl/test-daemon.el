@@ -322,6 +322,27 @@ own `cl-letf', which shadows this one for the extent of that form."
       (should (member agent-repl--frontend-webapp-dir
                       (cdr (member "-webapp" cmd)))))))
 
+(ert-deftest agent-repl-test-daemon-command-carries-accounts-roster ()
+  "The daemon argv carries the canonical account roster via -accounts."
+  ;; Arrange
+  (let ((agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member (format "personal=,work=%s"
+                              (expand-file-name "~/.claude-chesscom"))
+                      (cdr (member "-accounts" cmd)))))))
+
+(ert-deftest agent-repl-test-daemon-accounts-flag-expands-the-work-root ()
+  "The -accounts value names the CLI default as personal and the expanded
+multi-repo config dir as work, matching how sessions record the dirs."
+  ;; Arrange
+  (let ((agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-accounts-flag)
+                   (format "personal=,work=%s"
+                           (expand-file-name "~/.claude-chesscom"))))))
+
 (ert-deftest agent-repl-test-daemon-command-carries-remediation-dir ()
   "The daemon argv nominates the checkout the lost-session analyst works in."
   ;; Arrange
