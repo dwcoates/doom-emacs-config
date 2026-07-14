@@ -1041,6 +1041,8 @@ describe("ShimSession SDK message mapping", () => {
     // Assert — no system event added, only the closed event
     const added = h.emitted.slice(before).map((e) => e.type);
     expect(added).toEqual(["closed"]);
+  });
+
   it("forwards a task-notification text block as a system/task_notification event", async () => {
     // Arrange
     const h = makeHarness();
