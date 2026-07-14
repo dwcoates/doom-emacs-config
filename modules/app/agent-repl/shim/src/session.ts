@@ -486,12 +486,37 @@ export class ShimSession {
     }
   }
 
-  /** Tool results ride on SDK user-role messages as tool_result blocks. */
+  /**
+   * Tool results ride on SDK user-role messages as tool_result blocks.
+   * So do harness task-notifications (the completion signal of detached
+   * background work), as text blocks wrapping a <task-notification>
+   * payload — those forward as system/task_notification events. Every
+   * OTHER text block stays host-side noise (system reminders, local
+   * command echoes) and is dropped as before.
+   */
   private mapUserMessage(msg: SdkMessageLike): void {
     const message = msg.message as { content?: unknown } | undefined;
     const content = message?.content;
-    if (!Array.isArray(content)) return;
-    for (const block of content as ContentBlock[]) {
+    const blocks: ContentBlock[] =
+      typeof content === "string"
+        ? [{ type: "text", text: content } as ContentBlock]
+        : Array.isArray(content)
+          ? (content as ContentBlock[])
+          : [];
+    for (const block of blocks) {
+      if (block.type === "text") {
+        const text = String((block as { text?: unknown }).text ?? "");
+        if (text.includes("<task-notification>")) {
+          this.deps.emit({
+            type: "system",
+            session_id: this.deps.sessionId,
+            uuid: msg.uuid ?? "",
+            subtype: "task_notification",
+            data: { text },
+          });
+        }
+        continue;
+      }
       if (block.type !== "tool_result") continue;
       const tr = block as ContentBlockToolResult;
       this.deps.emit({

@@ -794,6 +794,35 @@ func TestTranslatorNonCompactingStatusDropped(t *testing.T) {
 	wantTypes(t, frames)
 }
 
+func TestTranslatorTaskNotificationMapsToDedicatedFrame(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	text := "[SYSTEM NOTIFICATION]\\n<task-notification>\\n<task-id>bg1</task-id>\\n<tool-use-id>t7</tool-use-id>\\n<output-file>/tmp/t/bg1.output</output-file>\\n<status>completed</status>\\n<summary>Background command finished (exit code 0)</summary>\\n</task-notification>"
+	// Act — §2.9: never forwarded as a system frame.
+	frames := tr.OnEvent(evt(t, fmt.Sprintf(`{"type":"system","session_id":"s1","uuid":"u","subtype":"task_notification","data":{"text":%q}}`, text)))
+	// Assert
+	wantTypes(t, frames, "task-notification")
+	note := frames[0].(*protocol.TaskNotificationFrame)
+	if note.TaskID != "bg1" || note.ToolUseID != "t7" || note.Status != "completed" {
+		t.Errorf("note = %+v", note)
+	}
+	if note.OutputFile != "/tmp/t/bg1.output" || note.Summary != "Background command finished (exit code 0)" {
+		t.Errorf("note = %+v", note)
+	}
+}
+
+func TestTranslatorTaskNotificationWithoutTagsKeepsRawText(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a payload the tag scan cannot parse still surfaces, loudly.
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"task_notification","data":{"text":"<task-notification>malformed"}}`))
+	// Assert
+	note := frames[0].(*protocol.TaskNotificationFrame)
+	if note.Text != "<task-notification>malformed" || note.TaskID != "" {
+		t.Errorf("note = %+v", note)
+	}
+}
+
 func TestTranslatorToolUseProgressMapsToDedicatedFrame(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()

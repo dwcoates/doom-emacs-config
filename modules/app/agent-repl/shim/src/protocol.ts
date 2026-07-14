@@ -334,7 +334,10 @@ export type SystemSubtype =
   | "compact_boundary"
   | "tool_use_progress"
   | "slash_command"
-  | "status";
+  | "status"
+  // A harness task-notification (background work completing) that rode
+  // in on a user message's text block; data is { text }.
+  | "task_notification";
 
 export interface SystemEvt {
   type: "system";

@@ -805,6 +805,24 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 			Envelope: protocol.Envelope{Type: "compact-status"},
 			Active:   true,
 		}}
+	case "task_notification":
+		// §2.9: task_notification system events map to the dedicated
+		// task-notification frame, never to a system frame. The payload
+		// is the raw text block the notification rode in on; the tags
+		// inside carry the correlation fields.
+		var data struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(evt.Data, &data)
+		return []protocol.L2Frame{&protocol.TaskNotificationFrame{
+			Envelope:   protocol.Envelope{Type: "task-notification"},
+			ToolUseID:  tagValue(data.Text, "tool-use-id"),
+			TaskID:     tagValue(data.Text, "task-id"),
+			Status:     tagValue(data.Text, "status"),
+			Summary:    tagValue(data.Text, "summary"),
+			OutputFile: tagValue(data.Text, "output-file"),
+			Text:       data.Text,
+		}}
 	case "tool_use_progress":
 		// §2.9: tool_use_progress system events map to the dedicated
 		// tool-use-progress frame, never to a system frame. The shim's
@@ -863,4 +881,22 @@ func (t *Translator) onClosed(evt *protocol.L1Event) []protocol.L2Frame {
 		})
 	}
 	return frames
+}
+
+// tagValue extracts the trimmed inner text of the first <tag>…</tag>
+// pair in text, or "" when the pair is absent or unterminated. The
+// harness notification payload is line-oriented XML-ish, not XML — no
+// attributes, no escaping — so plain string scanning is the whole job.
+func tagValue(text, tag string) string {
+	open, close := "<"+tag+">", "</"+tag+">"
+	i := strings.Index(text, open)
+	if i == -1 {
+		return ""
+	}
+	rest := text[i+len(open):]
+	j := strings.Index(rest, close)
+	if j == -1 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:j])
 }

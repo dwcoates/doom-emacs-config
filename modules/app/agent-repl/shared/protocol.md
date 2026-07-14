@@ -432,7 +432,8 @@ interface SystemEvt {
     | "init"
     | "compact_boundary"              // pre-compaction marker
     | "tool_use_progress"             // tool emitted progress text
-    | "slash_command";
+    | "slash_command"
+    | "task_notification";            // background-task completion; data is { text }
   data: unknown;                      // SDK-shaped payload, see streaming-output docs
 }
 ```
@@ -859,6 +860,27 @@ interface ToolUseProgressFrame extends WsEnvelope {
 }
 ```
 
+#### `task-notification`
+
+The completion signal of detached background work (a backgrounded Bash,
+a background agent, a workflow), parsed from the harness notification
+that rode in on a user message. `tool_use_id` names the SPAWNING tool
+call verbatim from the payload, so a client lands the completion on the
+exact card that started the work; `text` keeps the whole raw
+notification for anything the tags miss.
+
+```ts
+interface TaskNotificationFrame extends WsEnvelope {
+  type: "task-notification";
+  tool_use_id?: ToolUseId;            // the spawning call
+  task_id?: string;
+  status?: string;                    // e.g. "completed"
+  summary?: string;
+  output_file?: string;
+  text: string;                       // raw notification payload
+}
+```
+
 ### 2.7 Permission prompts
 
 Emitted whenever the shim raises a `permission-request`. The SPA mounts
@@ -971,9 +993,10 @@ interface ModelChangedFrame extends WsEnvelope {
 
 ### 2.9 System / slash-command frames
 
-Layer-1 `system` events with subtype `tool_use_progress` are NOT
-forwarded here; the daemon maps them to the dedicated
-`tool-use-progress` frame (§2.6) instead.
+Layer-1 `system` events with subtype `tool_use_progress` or
+`task_notification` are NOT forwarded here; the daemon maps them to the
+dedicated `tool-use-progress` and `task-notification` frames (§2.6)
+instead.
 
 ```ts
 interface SystemFrame extends WsEnvelope {

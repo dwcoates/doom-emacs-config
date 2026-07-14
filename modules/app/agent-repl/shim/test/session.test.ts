@@ -1041,6 +1041,58 @@ describe("ShimSession SDK message mapping", () => {
     // Assert — no system event added, only the closed event
     const added = h.emitted.slice(before).map((e) => e.type);
     expect(added).toEqual(["closed"]);
+  it("forwards a task-notification text block as a system/task_notification event", async () => {
+    // Arrange
+    const h = makeHarness();
+    const note =
+      "[SYSTEM NOTIFICATION]\n<task-notification>\n<task-id>bg1</task-id>\n<tool-use-id>t7</tool-use-id>\n<status>completed</status>\n</task-notification>";
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u12",
+      parent_tool_use_id: null,
+      message: { role: "user", content: [{ type: "text", text: note }] },
+    });
+    // Assert
+    expect(h.eventsOfType("system")[0]).toMatchObject({
+      subtype: "task_notification",
+      data: { text: note },
+    });
+  });
+
+  it("forwards a task-notification arriving as bare string content", async () => {
+    // Arrange
+    const h = makeHarness();
+    const note = "<task-notification><task-id>bg2</task-id></task-notification>";
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u13",
+      parent_tool_use_id: null,
+      message: { role: "user", content: note },
+    });
+    // Assert
+    expect(h.eventsOfType("system")[0]).toMatchObject({
+      subtype: "task_notification",
+      data: { text: note },
+    });
+  });
+
+  it("keeps dropping user text blocks that carry no task-notification", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act — a system-reminder is host-side noise, not a notification.
+    await drive(h, {
+      type: "user",
+      uuid: "u14",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "<system-reminder>tick</system-reminder>" }],
+      },
+    });
+    // Assert
+    expect(h.eventsOfType("system")).toHaveLength(0);
   });
 
   it("maps tool_progress messages to system events with subtype tool_use_progress", async () => {
