@@ -235,6 +235,15 @@ export interface StoreState {
    * context size and must never be mistaken for one.
    */
   contextTokens: number | null;
+  /**
+   * Whether a context compaction is IN PROGRESS: opened by a `compact-status`
+   * frame (the SDK's `status: "compacting"`) and closed by the `compact-boundary`
+   * that ends it. A compaction always runs inside a turn, so this is also
+   * cleared wherever `turnInFlight` clears (a terminating result or a
+   * non-recoverable error), guaranteeing the indicator never sticks. The SDK
+   * reports no progress percentage, so this is a plain boolean, not a fraction.
+   */
+  compacting: boolean;
   costUsd: number | null;
   lastSeq: number;
 }
@@ -254,6 +263,7 @@ function initialState(): StoreState {
     turnStartedAt: null,
     lastFinalResponseAt: null,
     contextTokens: null,
+    compacting: false,
     costUsd: null,
     lastSeq: 0,
   };
@@ -593,12 +603,21 @@ export class ConversationStore {
         if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
         s.turnInFlight = false;
         s.turnStartedAt = null;
+        // A compaction always finishes within its turn; clear the indicator
+        // here too so a compaction that ended without a boundary (a failure)
+        // never leaves it stuck on.
+        s.compacting = false;
         // `contextTokens` is deliberately NOT moved here: this frame's usage
         // is the turn's cumulative spend, not the context it left behind.
         // The standing figure is the one the turn's last request declared.
         s.costUsd = frame.total_cost_usd;
         break;
       }
+      case "compact-status":
+        // The compaction window: opened here, closed by the compact-boundary
+        // (or, defensively, by the turn's terminating result/error below).
+        s.compacting = frame.active;
+        break;
       case "compact-boundary":
         s.items.push({
           kind: "compact-boundary",
@@ -606,10 +625,14 @@ export class ConversationStore {
           preTokens: frame.pre_tokens,
           postTokens: frame.post_tokens,
         });
-        // A compaction rewrites the conversation and the SDK reports no
-        // post-compaction size, so the standing figure is stale the moment
-        // the boundary lands.
-        s.contextTokens = null;
+        // The compaction is done: close the in-progress window.
+        s.compacting = false;
+        // A compaction rewrites the conversation, so the standing figure is
+        // stale the moment the boundary lands. The SDK now reports the
+        // post-compaction size in `post_tokens`, so re-anchor on it when
+        // present (> 0), and only revert to unknown (a dash) when the SDK
+        // omits it — never a fabricated estimate.
+        s.contextTokens = frame.post_tokens > 0 ? frame.post_tokens : null;
         break;
       case "usage":
         s.contextTokens = contextTokens(frame.usage);
@@ -636,6 +659,9 @@ export class ConversationStore {
         if (!frame.recoverable) {
           s.turnInFlight = false;
           s.turnStartedAt = null;
+          // A fatal error ends the turn, and with it any compaction the turn
+          // was running: drop the in-progress indicator.
+          s.compacting = false;
         }
         break;
       case "retry":
