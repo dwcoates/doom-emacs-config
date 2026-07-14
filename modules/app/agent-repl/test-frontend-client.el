@@ -559,6 +559,123 @@ the workspace's model.  Fails against that hardcoded nil, since
       (should (equal method "POST"))
       (should (string-suffix-p "/sessions/s_1/interrupt" url)))))
 
+;;;; ---- in-flight message queue (§2.13) ----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-queue-run-now-posts-route ()
+  "Run-now POSTs the session/queue run-now override route."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 200 ""))
+    ;; Act
+    (agent-repl--frontend-queue-run-now "s_1" "q_9")
+    ;; Assert
+    (pcase-let ((`(,method ,url ,_) (car requests)))
+      (should (equal method "POST"))
+      (should (string-suffix-p "/sessions/s_1/queue/q_9/run-now" url)))))
+
+(ert-deftest agent-repl-test-frontend-queue-cancel-posts-route ()
+  "Cancel POSTs the session/queue cancel override route."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 200 ""))
+    ;; Act
+    (agent-repl--frontend-queue-cancel "s_1" "q_9")
+    ;; Assert
+    (pcase-let ((`(,method ,url ,_) (car requests)))
+      (should (equal method "POST"))
+      (should (string-suffix-p "/sessions/s_1/queue/q_9/cancel" url)))))
+
+(ert-deftest agent-repl-test-frontend-queue-preview-joins-text-blocks ()
+  "The content preview concatenates the text of text blocks."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--frontend-queue-content-preview
+                  '(((type . "text") (text . "hello"))
+                    ((type . "text") (text . "world"))))
+                 "hello world")))
+
+(ert-deftest agent-repl-test-frontend-queue-preview-truncates ()
+  "A preview beyond the length cap is truncated with an ellipsis."
+  ;; Arrange
+  (let ((agent-repl-queue-preview-length 5))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-queue-content-preview
+                    '(((type . "text") (text . "abcdefgh"))))
+                   "abcde…"))))
+
+(ert-deftest agent-repl-test-frontend-queue-preview-ignores-non-text ()
+  "Non-text content blocks contribute nothing to the preview."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--frontend-queue-content-preview
+                  '(((type . "tool_use") (name . "Bash") (input . "ls"))))
+                 "")))
+
+(ert-deftest agent-repl-test-frontend-session-queue-extracts-items ()
+  "The parser lifts each queue item into a plist with the §2.13 fields."
+  ;; Arrange
+  (let* ((entry '((session_id . "s_1")
+                  (queue . (((queue_id . "q_1") (request_id . "r_1")
+                             (status . "waiting") (verdict . "wait")
+                             (content . (((type . "text") (text . "first"))))))))))
+    ;; Act
+    (let ((items (agent-repl--frontend-session-queue entry)))
+      ;; Assert
+      (should (= 1 (length items)))
+      (let ((it (car items)))
+        (should (equal (plist-get it :queue-id) "q_1"))
+        (should (equal (plist-get it :status) "waiting"))
+        (should (equal (plist-get it :verdict) "wait"))
+        (should (equal (plist-get it :content-preview) "first"))))))
+
+(ert-deftest agent-repl-test-frontend-session-queue-nil-without-queue ()
+  "An entry carrying no `queue' array parses to an empty queue."
+  ;; Arrange / Act / Assert
+  (should (null (agent-repl--frontend-session-queue '((session_id . "s_1"))))))
+
+(ert-deftest agent-repl-test-frontend-capture-queues-stores-for-bound-ws ()
+  "Capture stores the parsed queue under a bound workspace's :queued-messages."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+    (let ((sessions '(((session_id . "s_1")
+                       (queue . (((queue_id . "q_1") (status . "waiting")
+                                  (content . (((type . "text") (text . "hi")))))))))))
+      ;; Act
+      (agent-repl--frontend-capture-queues sessions)
+      ;; Assert
+      (let ((q (agent-repl--ws-get "ws1" :queued-messages)))
+        (should (= 1 (length q)))
+        (should (equal (plist-get (car q) :queue-id) "q_1"))))))
+
+(ert-deftest agent-repl-test-frontend-capture-queues-clears-when-absent ()
+  "Capture clears :queued-messages when the bound session is not listed."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
+                                    :queued-messages ((:queue-id "q_old")))
+    ;; Act
+    (agent-repl--frontend-capture-queues '(((session_id . "s_other"))))
+    ;; Assert
+    (should (null (agent-repl--ws-get "ws1" :queued-messages)))))
+
+(ert-deftest agent-repl-test-ws-queued-messages-reads-plist ()
+  "The messages accessor returns the stored queue list verbatim."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:queued-messages ((:queue-id "q_1")))
+    ;; Act / Assert
+    (should (equal (agent-repl--ws-queued-messages "ws1") '((:queue-id "q_1"))))))
+
+(ert-deftest agent-repl-test-ws-queued-count-counts-items ()
+  "The count accessor returns the number of queued items."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:queued-messages ((:queue-id "q_1") (:queue-id "q_2")))
+    ;; Act / Assert
+    (should (= 2 (agent-repl--ws-queued-count "ws1")))))
+
+(ert-deftest agent-repl-test-ws-queued-count-zero-when-unset ()
+  "The count accessor returns 0 when no queue has been captured."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    ;; Act / Assert
+    (should (= 0 (agent-repl--ws-queued-count "ws1")))))
+
 (ert-deftest agent-repl-test-gui-running-p-tracks-session-binding ()
   "The gui liveness capability is exactly the presence of :frontend-session-id."
   ;; Arrange

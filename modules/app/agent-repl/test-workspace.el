@@ -139,6 +139,15 @@ post-nuke render passes don't paint a stale flash on a tombstoned tab."
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-get "ws1" :flashing))))
 
+(ert-deftest agent-repl-test-ws-del-clears-queued-messages ()
+  "ws-del clears `:queued-messages' — a daemon-snapshot runtime key tied
+to the session binding, so it must not outlive the tombstone."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :queued-messages '((:queue-id "q_1")))
+    (agent-repl--ws-del "ws1")
+    (should-not (agent-repl--ws-get "ws1" :queued-messages))))
+
 (ert-deftest agent-repl-test-ws-del-nonexistent ()
   "ws-del on a non-existent workspace should be a no-op."
   (agent-repl-test--with-clean-state

@@ -857,6 +857,13 @@ StopFailure hook (magenta + ⚠).")
   "Transient face applied while a workspace is in a `agent-repl-flash-tab'
 pulse — solid blue background regardless of the underlying state.")
 
+(defface agent-repl-queued-messages
+  '((t :inherit font-lock-comment-face))
+  "Face for the queued-message count segment.
+Subdued on purpose (per §2.13's UI intent): a queued message is parked
+for later, explicitly NOT interrupting the in-flight turn, so its
+indicator must not read as an active-state badge.")
+
 (defun agent-repl--ws-flashing-p (ws)
   "Return non-nil if workspace WS is currently in a flash pulse."
   (agent-repl--ws-get ws :flashing))
@@ -1390,6 +1397,20 @@ so its only purpose is the cache-busting role."
                     (concat name " ")
                   name)
                 'invisible t)))
+
+(defun agent-repl--ws-queued-segment (ws)
+  "Return a status/mode-line segment naming WS's queued-message count.
+Empty string when WS has no in-flight-queued messages; otherwise a
+subdued \"⋯N queued\" indicator (faced with `agent-repl-queued-messages',
+per §2.13's parked-message affordance).  The count comes from
+`agent-repl--ws-queued-count', refreshed off the reattach sweep's
+GET /sessions poll — this only renders it."
+  (let ((n (agent-repl--ws-queued-count ws)))
+    (if (> n 0)
+        (propertize (format "⋯%d queued" n)
+                    'face 'agent-repl-queued-messages
+                    'help-echo "agent-repl: messages queued behind the in-flight turn")
+      "")))
 
 ;; Install the tab-bar after persp-mode loads so `agent-repl--ws-current-name'
 ;; resolves cleanly at render time; persp-mode is the
