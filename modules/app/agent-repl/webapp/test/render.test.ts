@@ -89,16 +89,21 @@ function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
   };
 }
 
-/** A tool card item, standing in for work between two text blocks. */
-function tool(): ConversationItem {
+/**
+ * A tool card item, standing in for work between two text blocks. Running by
+ * default (no result badge yet); pass DONE to settle it, and TOOL-USE-ID to
+ * tell parallel calls apart.
+ */
+function tool(done = false, toolUseId = "t1"): ConversationItem {
   return {
     kind: "tool",
-    toolUseId: "t1",
+    toolUseId,
     messageId: "m1",
     toolName: "Bash",
     inputJson: "{}",
     input: {},
     inputDone: true,
+    ...(done ? { result: { isError: false, content: "" } } : {}),
   };
 }
 
@@ -622,6 +627,24 @@ describe("renderItem", () => {
       text: "on it",
       done: true,
     };
+    // Act
+    const html = renderItem(item, undefined, undefined, false);
+    // Assert
+    expect(html).not.toContain("pulsing");
+  });
+
+  it("breathes a running tool card the pulse flags as the frontier", () => {
+    // Arrange — the Bash fixture wears the tool-bash variant class.
+    const item = tool();
+    // Act
+    const html = renderItem(item, undefined, undefined, true);
+    // Assert
+    expect(html).toContain(`class="tool-card tool-bash pulsing"`);
+  });
+
+  it("withholds the breath from a tool card the pulse does not flag", () => {
+    // Arrange
+    const item = tool();
     // Act
     const html = renderItem(item, undefined, undefined, false);
     // Assert
@@ -1705,9 +1728,9 @@ describe("swallowed chips", () => {
 });
 
 describe("pulseTarget: the working frontier", () => {
-  it("pulses the finished response of a turn still running a tool", () => {
-    // Arrange — the agent said its piece and went off to work.
-    const items = [userTurnAt(9, 0), text("b1"), tool()];
+  it("pulses the finished response once the turn's tail tool has settled", () => {
+    // Arrange — the tool is done but the turn runs on, so the last word breathes.
+    const items = [userTurnAt(9, 0), text("b1"), tool(true)];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
@@ -1769,6 +1792,62 @@ describe("pulseTarget: the working frontier", () => {
   });
 });
 
+describe("pulseTarget: the running tool card", () => {
+  it("breathes a running tool card at the tail", () => {
+    // Arrange — a tools-only turn with no preamble text to fall back on.
+    const items = [userTurnAt(9, 0), tool()];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "tool", toolUseId: "t1" });
+  });
+
+  it("breathes the running tool over the finished text above it", () => {
+    // Arrange — the running card is newer than the last word, so it takes the beat.
+    const items = [userTurnAt(9, 0), text("b1"), tool()];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "tool", toolUseId: "t1" });
+  });
+
+  it("breathes only the LAST card when calls run in parallel", () => {
+    // Arrange — two calls in flight at once, only the tail one takes the beat.
+    const items = [userTurnAt(9, 0), tool(false, "t1"), tool(false, "t2")];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "tool", toolUseId: "t2" });
+  });
+
+  it("stills the tool pulse once its badge settles", () => {
+    // Arrange — a settled card is history, not the live frontier.
+    const items = [userTurnAt(9, 0), tool(true)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("stills the tool pulse when the turn is no longer in flight", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), tool()];
+    // Act
+    const pulse = pulseTarget(items, false);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+
+  it("withholds the tool pulse while a thinking indicator runs after it", () => {
+    // Arrange — the thinking spinner is the live signal there, not the card.
+    const items = [userTurnAt(9, 0), tool(), thinking("k1", false)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toBeNull();
+  });
+});
+
 describe("pulseTarget: the prompt just sent", () => {
   it("pulses a prompt whose turn has yet to draw anything", () => {
     // Arrange — the send itself, with the agent not yet on the page.
@@ -1820,13 +1899,13 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt when a tool card takes the feed's tail", () => {
-    // Arrange
+  it("hands the beat off the prompt when a running tool card takes the tail", () => {
+    // Arrange — the running card now carries the beat, so the prompt no longer does.
     const items = [userTurnAt(9, 0), tool()];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBeNull();
+    expect(pulse).not.toEqual({ kind: "user-turn", requestId: "r1" });
   });
 
   it("stills the prompt when a permission card takes the feed's tail", () => {
@@ -1965,6 +2044,16 @@ describe("isPulsed", () => {
   it("spares a text block the pulse does not name", () => {
     // Arrange + Act + Assert
     expect(isPulsed(text("b2"), { kind: "text", blockId: "b1" })).toBe(false);
+  });
+
+  it("marks the tool card the pulse names", () => {
+    // Arrange + Act + Assert
+    expect(isPulsed(tool(false, "t1"), { kind: "tool", toolUseId: "t1" })).toBe(true);
+  });
+
+  it("spares a tool card the pulse does not name", () => {
+    // Arrange + Act + Assert
+    expect(isPulsed(tool(false, "t1"), { kind: "tool", toolUseId: "t9" })).toBe(false);
   });
 
   it("marks the prompt the pulse names", () => {

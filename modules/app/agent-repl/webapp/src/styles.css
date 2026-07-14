@@ -72,6 +72,14 @@
      spawned agent from a skill handoff. styles.test.ts pins them apart. */
   --agent-card: #a7e8dd;
   --agent-border: #4fb8a8;
+  /* The far end of the breath a RUNNING tool card takes (see
+     .tool-card.pulsing): each card wash one shade deeper, the same way the
+     bubble washes deepen for --user-pulse / --assistant-pulse. Three tokens
+     because a card wears one of three washes (generic grey, skill turquoise,
+     subagent teal) and the breath must stay inside whichever it wears. */
+  --card-pulse: #e8eaed;
+  --skill-pulse: #c2ebe3;
+  --agent-pulse: #8fddce;
   /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
      floats on, so a `token` inside a sentence of prose reads as typeable at a
      glance. A transparent BLACK wash, never a --fg one: --fg flips light in the
@@ -109,6 +117,12 @@
     --skill-border: #1f6b62;
     --agent-card: #0f6b60;
     --agent-border: #4fc4b0;
+    /* Dark-theme card breath LIFTS the wash instead of deepening it, the same
+       inversion --user-pulse / --assistant-pulse make, since deepening a dark
+       wash would move the eye too little to read as motion. */
+    --card-pulse: #262a34;
+    --skill-pulse: #1a544e;
+    --agent-pulse: #148074;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 }
@@ -389,14 +403,22 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card);
+  --pulse-to: var(--card-pulse);
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
 }
+/* A running tool card breathes as the working frontier (see `pulseTarget`),
+   taking the SAME slow breath the bubbles take (@keyframes bubble-breathe,
+   rocking toward --pulse-to) so the whole app has one beat, not two. It is a
+   wash under the head's fast arc, filling the second the arc stays hidden;
+   both drop together under reduced motion below. */
+.tool-card.pulsing { animation: bubble-breathe 4s ease-in-out infinite; }
 /* A skill launch is a handoff, not a tool result: the card carries the one
    "Launching skill: <name>" line and wears the pale turquoise wash so the
    handoff is findable among the grey tool cards around it. */
 .tool-card.tool-skill {
   background: var(--skill-bg);
+  --pulse-to: var(--skill-pulse);
   border-color: var(--skill-border);
 }
 .skill-launch { font-weight: 600; }
@@ -406,6 +428,7 @@ pre {
    hue family but stays pale. */
 .tool-card.tool-agent, .tool-card.tool-task {
   background: var(--agent-card);
+  --pulse-to: var(--agent-pulse);
   border-color: var(--agent-border);
 }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
@@ -765,10 +788,12 @@ pre {
   .agent-dot.agent-running {
     animation: none;
   }
-  /* A bubble's breath is a hint, never the sole liveness signal (the topbar
-     spinner and the running tool arcs both still say a turn is in flight), so
-     it drops entirely rather than degrading to something slower. */
-  .bubble.pulsing {
+  /* A breath is a hint, never the sole liveness signal (the topbar spinner and
+     the running tool arcs both still say a turn is in flight), so it drops
+     entirely rather than degrading to something slower — for the card that
+     breathes as the running frontier just as for the bubbles. */
+  .bubble.pulsing,
+  .tool-card.pulsing {
     animation: none;
   }
 }
