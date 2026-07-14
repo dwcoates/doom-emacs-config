@@ -103,50 +103,62 @@ TS shim → Agent SDK → Claude
 ## 7. Open questions for discussion
 
 1. Logic dependency: `chessops`/`chessground` (GPL-3, most proven), hand-rolled (dependency-free), `chess.js` (BSD-2 but no variation trees), or vendored JCE (proprietary)?
-   - **DECIDED: hand-rolled** (dependency-free, no licensing/registry coupling).
+   - ~~DECIDED: hand-rolled~~ **SUPERSEDED — DECIDED: CEE via the WASM TypeScript SDK, as a STRICT requirement** (see §8). No hand-rolled or third-party chess logic anywhere; without the CEE capability configured, the widget does not exist.
 2. Trigger surface: ```` ```pgn ```` fence only, or also auto-detect bare PGN/FEN in assistant prose?
 3. Interaction model: click-click, drag-and-drop, or both (chessground gives both for free)?
 4. Is this config repo public or ever intended to be (hard constraint on any `@chesscom/*` dependency)?
 
-## 8. Implementation plan (hand-rolled logic, webapp component)
+## 8. Implementation plan (CEE-WASM logic, webapp component)
 
-All new code is plain TS in `webapp/src/` (flat, matching the existing layout), each module with a `webapp/test/<module>.test.ts` vitest file, one commit per completed step. No daemon/shim/protocol changes anywhere.
+**CEE is a STRICT requirement for this feature.** All chess semantics — PGN parsing, game tree, legality, move application — flow exclusively through the explanation engine compiled to WASM, driven by the TypeScript SDK (`@chesscom/cee-wrapper`, `explanation-engine/sdks/lang/typescript`, ISC). There is no hand-rolled or third-party chess-logic fallback of any kind: when the CEE capability is not configured, the widget does not activate and ```` ```pgn ````/```` ```fen ```` fences render as ordinary code blocks.
 
-### Phase 1 — logic core (pure, DOM-free)
+Widget code is plain TS in `webapp/src/` (flat, matching the existing layout), each module with a `webapp/test/<module>.test.ts` vitest file, one commit per completed step. No daemon/shim/protocol changes.
 
-1. `src/chess.ts` — position + rules:
-   - Board representation (0x88 mailbox), FEN parse/serialize.
-   - Move generation and legality: checks, pins via make/unmake validation, castling, en passant, promotion, halfmove/fullmove counters.
-   - SAN: generation (with disambiguation, `+`/`#`) and parsing.
-   - Tests: perft node counts at depth 3–4 for the standard perft positions (startpos, Kiwipete, en-passant/promotion suites), FEN round-trips, SAN round-trips, one edge-case per test.
-2. `src/pgn.ts` — PGN + game tree:
-   - Tokenizer (headers, SAN tokens, NAGs, `{}` comments, `()` RAVs, results) and parser producing a node tree: `{ san, fen, comment?, nags?, children[] }` with mainline as `children[0]`.
-   - Serializer back to PGN (needed later for copy-out of user-added lines).
-   - Tests: nested variations, comments-before-and-after moves, promotions in SAN, multi-game strings, malformed-PGN error surfacing (errors are reported, never swallowed).
+### Capability gate
+
+- One env var (working name `AGENT_REPL_CEE_DIR`) points at the explanation-engine checkout/build.
+- `bin/build-frontend.sh` reads it to (a) resolve `@chesscom/cee-wrapper` and the `@chesscom/proto_*` peer-deps from the local checkout (vite aliases / `file:` deps — never the internal registry, keeping registry auth out of the build), and (b) copy `explanation-engine.wasm` + the worker JS into the webapp's served assets.
+- The widget module loads via dynamic import behind a build-time flag, so ungated builds contain no CEE code and behave exactly as today.
+- Elisp surfaces the gate as a defcustom mirroring the env var (precedent: `$CEEPYGNPATH` in `modules/app/chess/config.el`), used only for diagnostics (`doctor.el` check) — the webapp build is the real consumer.
+
+### Phase 0 — SDK readiness (in the explanation-engine repo)
+
+1. Verify the wrapper's generated client exposes the widget-essential features; regenerate (`npm run generate:types`) or fall back to the generic transport for any missing ones:
+   - `get_ergonomic_game` (PGN → `chess.Game` tree, comments/NAGs preserved), `get_ergonomic_position`/`get_fen`, `legal_moves`, `make_moves`/`unmake_moves`, `validate_pgn`.
+2. Confirm the wasm artifact + worker JS build outputs and their load config (`createWasmClient(config)` asset URLs) work when served by `claude-repld`'s static file server.
+
+### Phase 1 — CEE client integration
+
+3. `src/cee.ts` — worker/client lifecycle:
+   - Bootstrap `createWasmClient` lazily on first chess fence; one CEE game instance per board widget (mirroring the one-game-per-session model), LRU-capped with disposal for old bubbles.
+   - Parse results cached by PGN-text hash so `innerHTML` re-renders never re-hit the worker.
+   - Every `CeeError` surfaces visibly in the widget frame (never swallowed, per error-handling policy).
+   - Tests: fake transport implementing the used features; lifecycle, caching, error surfacing.
 
 ### Phase 2 — rendering
 
-3. `src/chessboard.ts` — widget HTML:
-   - `chessboardHtml(state): string` — inline SVG board (squares, coordinates, last-move highlight, selected-square + legal-target markers) with Unicode piece glyphs for v1 (a bundled SVG piece set is a later cosmetic upgrade).
+4. `src/chessboard.ts` — widget HTML:
+   - `chessboardHtml(state): string` — inline SVG board (squares, coordinates, last-move highlight, selected-square + legal-target markers) with Unicode piece glyphs for v1; per-node positions come from CEE (`get_ergonomic_position`/`get_fen`).
    - Nav strip (`|<` `<` `>` `>|`, flip) and a variation indicator when the current node has siblings, all as `data-board-*` buttons.
-   - Tests: SVG snapshot-ish assertions on piece placement, highlight classes, nav-button presence per tree position.
-4. `src/markdown.ts` — trigger:
-   - Intercept ```` ```pgn ```` and ```` ```fen ```` fences in `flushFence()` (`markdown.ts:83-100`), mirroring the `isMetapromptTree` branch: emit the widget container instead of a `<pre>`; on parse failure fall back to the plain `<pre>` and render the parse error visibly in the widget frame.
-   - Tests: fence dispatch, fallback on invalid PGN.
+   - Async hydration: the fence renders a placeholder frame synchronously, then hydrates when the worker returns the parsed game.
+   - Tests: SVG assertions on piece placement, highlight classes, nav-button presence per tree position.
+5. `src/markdown.ts` — trigger:
+   - Intercept ```` ```pgn ```` and ```` ```fen ```` fences in `flushFence()` (`markdown.ts:83-100`), mirroring the `isMetapromptTree` branch; on CEE parse rejection (`validate_pgn`) render the plain `<pre>` plus the visible error.
+   - Tests: fence dispatch, ungated passthrough, invalid-PGN error path.
 
 ### Phase 3 — interactivity
 
-5. `src/render.ts` — state + events:
-   - Per-item board state in `FeedRenderer` beside `questionSelections` (`render.ts:998`), keyed by `itemKey` + fence index: current tree node, selected square, orientation. Re-hydrate the widget after each `innerHTML` rewrite (`render.ts:1202-1211`).
-   - Delegated `data-board-*` click handling in the constructor's existing listener block (`render.ts:1008-1030`): square click = select / legal-move / deselect, nav clicks walk the tree, promotion via a 4-choice mini-picker.
-   - User moves: if the move matches an existing child node, step into it; otherwise insert a new variation node (analysis-board semantics) — the PGN tree is the single source of truth.
-   - Tests: state survival across re-render, click→move legality filtering, variation insertion vs step-into.
+6. `src/render.ts` — state + events:
+   - Per-item board state in `FeedRenderer` beside `questionSelections` (`render.ts:998`), keyed by `itemKey` + fence index: current game point, selected square, orientation. Re-hydrate after each `innerHTML` rewrite (`render.ts:1202-1211`).
+   - Delegated `data-board-*` click handling in the constructor's existing listener block (`render.ts:1008-1030`): square click = select / play / deselect with `legal_moves` supplying the target dots, nav clicks walk game points, promotion via a 4-choice mini-picker.
+   - User moves via `make_moves` at the current game point: stepping into an existing child when the move matches, otherwise creating the new variation node — CEE's game tree is the single source of truth.
+   - Tests: state survival across re-render, legality filtering, variation insertion vs step-into.
 
 ### Phase 4 — integration & polish
 
-6. `styles.css` — board sizing inside `.bubble-body` (fixed max width, responsive), theme-consistent colors.
-7. End-to-end verify: `npm test` + `npm run typecheck` in `webapp/`, `bin/build-frontend.sh`, hot-reload the live Emacs xwidget session, and exercise a real ```` ```pgn ```` response bubble (variations + user moves) before final commit.
+7. `styles.css` — board sizing inside `.bubble-body` (fixed max width, responsive), theme-consistent colors.
+8. End-to-end verify: `npm test` + `npm run typecheck` in `webapp/` (both gated and ungated builds), `bin/build-frontend.sh` with `AGENT_REPL_CEE_DIR` set, hot-reload the live Emacs xwidget session, and exercise a real ```` ```pgn ```` bubble (variations + user moves) before final commit.
 
 ### Explicitly out of scope for v1
 
-- Drag-and-drop (click-click only), SVG piece art, move-list pane, engine/eval integration, bare-PGN auto-detection in prose, Emacs-side keybindings via `xwidget-webkit-execute-script`.
+- Drag-and-drop (click-click only), SVG piece art, move-list pane, search/eval/threats/coach features (natural CEE-powered follow-ups), bare-PGN auto-detection in prose, Emacs-side keybindings via `xwidget-webkit-execute-script`.
