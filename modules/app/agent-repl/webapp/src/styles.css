@@ -8,7 +8,7 @@
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
-  --user-pulse: #cfdefb;
+  --user-pulse: #bfd3f6;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
@@ -17,7 +17,7 @@
      second hue — the pulse is a sign of life on a bubble the reader is
      mid-sentence in, so it must be readable as motion out of the corner of the
      eye and invisible to the eye reading the words. */
-  --assistant-pulse: #ddd2f6;
+  --assistant-pulse: #d2c6f2;
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
@@ -108,9 +108,9 @@
     --border: #2a2e37;
     --card: #1a1d24;
     --user: #1e2a44;
-    --user-pulse: #2a3a5c;
+    --user-pulse: #31456e;
     --assistant: #292040;
-    --assistant-pulse: #372c57;
+    --assistant-pulse: #443669;
     --thinking: #fb923c;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
