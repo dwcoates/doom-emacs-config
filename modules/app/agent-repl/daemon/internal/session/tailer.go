@@ -39,9 +39,13 @@ const (
 )
 
 var (
-	taskSpawnIDRe   = regexp.MustCompile(`with ID:\s*([A-Za-z0-9_-]+)`)
+	// Backgrounded Bash: "with ID: bg1"; Workflow: "Task ID: wj7025gze".
+	taskSpawnIDRe   = regexp.MustCompile(`(?:with|Task) ID:\s*([A-Za-z0-9_-]+)`)
 	taskSpawnPathRe = regexp.MustCompile(`Output is being written to:\s*(\S+\.output)`)
-	taskSpoolRe     = regexp.MustCompile(`^(/private)?/tmp/claude-\d+/`)
+	// Workflow spawn results announce the run's transcript directory;
+	// its journal.jsonl is the run's progress stream.
+	workflowDirRe = regexp.MustCompile(`Transcript dir:\s*(\S+)`)
+	taskSpoolRe   = regexp.MustCompile(`^(/private)?/tmp/claude-\d+/`)
 )
 
 // spawnAnnouncement is the (task id, output file) pair a backgrounded
@@ -54,23 +58,50 @@ type spawnAnnouncement struct {
 
 // parseSpawnAnnouncement extracts the announcement from a tool result
 // frame; nil when the result is an error, announces nothing, or names a
-// path outside the harness task spool.
-func parseSpawnAnnouncement(f protocol.L2Frame) *spawnAnnouncement {
+// path outside the trees the tailer may read. configRoot is the
+// session's Claude config dir, which is where a workflow journal must
+// live (a backgrounded shell's output lives in the tmp spool instead).
+func parseSpawnAnnouncement(f protocol.L2Frame, configRoot string) *spawnAnnouncement {
 	r, ok := f.(*protocol.ToolUseResultFrame)
 	if !ok || r.IsError {
 		return nil
 	}
 	text := contentText(r.Content)
 	id := taskSpawnIDRe.FindStringSubmatch(text)
-	path := taskSpawnPathRe.FindStringSubmatch(text)
-	if id == nil || path == nil || !allowedTaskOutputPath(path[1]) {
+	if id == nil {
 		return nil
 	}
-	return &spawnAnnouncement{
-		TaskID:    id[1],
-		Path:      filepath.Clean(path[1]),
-		ToolUseID: r.ToolUseID,
+	if path := taskSpawnPathRe.FindStringSubmatch(text); path != nil && allowedTaskOutputPath(path[1]) {
+		return &spawnAnnouncement{
+			TaskID:    id[1],
+			Path:      filepath.Clean(path[1]),
+			ToolUseID: r.ToolUseID,
+		}
 	}
+	if dir := workflowDirRe.FindStringSubmatch(text); dir != nil {
+		journal := filepath.Join(filepath.Clean(dir[1]), "journal.jsonl")
+		if allowedJournalPath(journal, configRoot) {
+			return &spawnAnnouncement{
+				TaskID:    id[1],
+				Path:      journal,
+				ToolUseID: r.ToolUseID,
+			}
+		}
+	}
+	return nil
+}
+
+// allowedJournalPath confines workflow-journal tailing to the session's
+// own config root: <root>/projects/**/subagents/workflows/<run>/journal.jsonl
+// and nothing else.
+func allowedJournalPath(path, configRoot string) bool {
+	if configRoot == "" {
+		return false
+	}
+	clean := filepath.Clean(path)
+	return strings.HasPrefix(clean, filepath.Clean(configRoot)+"/projects/") &&
+		strings.Contains(clean, "/subagents/workflows/") &&
+		strings.HasSuffix(clean, "/journal.jsonl")
 }
 
 // allowedTaskOutputPath confines the tailer to the harness task spool:
@@ -89,7 +120,7 @@ func allowedTaskOutputPath(path string) bool {
 // catch-up read before exiting. Callers hold s.mu.
 func (s *Session) superviseTailersLocked(frames []protocol.L2Frame) {
 	for _, f := range frames {
-		if ann := parseSpawnAnnouncement(f); ann != nil {
+		if ann := parseSpawnAnnouncement(f, ClaudeConfigDir(s.configDir)); ann != nil {
 			s.startTailerLocked(*ann)
 		}
 		if n, ok := f.(*protocol.TaskNotificationFrame); ok && n.TaskID != "" {
