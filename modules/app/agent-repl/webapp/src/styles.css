@@ -565,6 +565,18 @@ pre {
 .tool-progress { color: var(--muted); font-style: italic; }
 /* The scheduled-wakeup anchor: pending-work orange, like the run badge. */
 .wake-at { color: var(--thinking); font-style: italic; }
+/* Prompt-mediated card controls: the button asks the AGENT to stop the
+   task (a real turn, queued like any prompt) and its label owns that. */
+.task-controls { margin-top: 0.35rem; }
+.task-stop {
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--err);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 0.1rem 0.6rem;
+}
 .stderr { color: var(--err); }
 
 .diff .add { color: var(--ok); }

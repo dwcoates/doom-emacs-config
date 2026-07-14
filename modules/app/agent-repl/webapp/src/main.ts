@@ -117,6 +117,16 @@ async function boot(): Promise<void> {
     runQueuedNow: (queueId) => {
       ws.send({ type: "queue-run-now", request_id: crypto.randomUUID(), queue_id: queueId });
     },
+    sendPrompt: (text) => {
+      // Card controls (stop task) are prompt-mediated: the button sends
+      // an ordinary user message through the same channel the composer
+      // uses, so it spends a turn and queues like any other prompt.
+      ws.send({
+        type: "user-message",
+        request_id: crypto.randomUUID(),
+        content: text,
+      });
+    },
   });
 
   const statusEl = must("conn-status");
