@@ -114,9 +114,11 @@ type transcriptAssistantMeta struct {
 // frames the live stream would have produced, mutating t exactly as
 // live translation would (block ids, tool metadata for render hints,
 // model). Sidechain (subagent) and meta entries are skipped; malformed
-// lines are skipped without aborting the remainder. The trailing usage
-// frame mirrors the last assistant message's usage so the webapp's
-// token counter shows the resumed context size.
+// lines are skipped without aborting the remainder. Each completed turn
+// is closed with a synthetic result frame (closeReplayTurns), which the
+// transcript does not record but the live stream always emits. The
+// trailing usage frame mirrors the last assistant message's usage so the
+// webapp's token counter shows the resumed context size.
 func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
 	var frames []protocol.L2Frame
 	var lastMeta transcriptAssistantMeta
@@ -131,6 +133,7 @@ func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
 			break
 		}
 	}
+	frames = closeReplayTurns(frames)
 	// No model assignment here: each assistant entry is translated through
 	// t.OnEvent, which adopts the model it reports, so the mirror has
 	// already landed on the LAST main-chain entry's model by this point.
@@ -142,6 +145,83 @@ func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
 		})
 	}
 	return frames
+}
+
+// closeReplayTurns inserts a synthetic §2.4 result frame at each turn
+// boundary of the replayed frame list, so a resumed session's history
+// carries the same turn-end markers the live stream would have. The
+// transcript records no result event (the CLI's result is stream-only;
+// see this file's header), so without this a replayed turn's final text
+// block is followed by no result — and the webapp keys the green
+// final-response border off exactly that text→result adjacency
+// (finalResponses in webapp/src/render.ts). The border therefore
+// vanished on every binding recreation (§2.10) until the first live turn.
+//
+// A result closes the PRIOR turn, so one is inserted immediately before
+// each user-turn that opens a NEW turn, and once more at end-of-input to
+// close the last turn. Only a turn that actually produced an assistant
+// response is closed: a bare prompt the agent never answered (a lone
+// trailing prompt, or two prompts back to back) is an incomplete turn,
+// not a completed one, and gets no result — mirroring the live stream,
+// which emits a result only when a turn ends.
+func closeReplayTurns(frames []protocol.L2Frame) []protocol.L2Frame {
+	out := make([]protocol.L2Frame, 0, len(frames)+2)
+	turnOpen := false     // a real user-turn has opened a turn not yet closed
+	turnAnswered := false // that open turn has produced assistant content
+	lastTS := ""          // TS of the last frame emitted, to date the result
+	closeTurn := func() {
+		if turnOpen && turnAnswered {
+			out = append(out, replayResult(lastTS))
+		}
+		turnOpen = false
+		turnAnswered = false
+	}
+	for _, f := range frames {
+		if _, ok := f.(*protocol.UserTurnFrame); ok {
+			closeTurn() // close the prior turn before the new one opens
+			turnOpen = true
+		} else if isReplayResponseFrame(f) {
+			turnAnswered = true
+		}
+		out = append(out, f)
+		if ts := f.Env().TS; ts != "" {
+			lastTS = ts
+		}
+	}
+	closeTurn() // close the final turn at end-of-input
+	return out
+}
+
+// isReplayResponseFrame reports whether a replayed frame is the agent
+// doing something within its turn — text, thinking, a tool call, or a
+// tool result — as against pure metadata (model-changed) or the user's
+// own turn. A turn carrying at least one of these is an answered turn,
+// which the live stream would have closed with a result.
+func isReplayResponseFrame(f protocol.L2Frame) bool {
+	switch f.(type) {
+	case *protocol.TextStartFrame,
+		*protocol.ThinkingStartFrame,
+		*protocol.ToolUseStartFrame,
+		*protocol.ToolUseResultFrame:
+		return true
+	default:
+		return false
+	}
+}
+
+// replayResult builds the synthetic turn-closing result frame (§2.4).
+// It reports subtype "success" — a turn preserved in the transcript with
+// a response is one the CLI ran to completion — which is what marks the
+// turn's answer a final response the webapp draws its green border
+// around. The frame is pre-stamped with ts (the closing turn's last
+// frame time) so the hub keeps it (§2.1) and the webapp dates the turn's
+// end correctly; it carries no duration/usage/cost, none of which the
+// transcript records.
+func replayResult(ts string) protocol.L2Frame {
+	return &protocol.ResultFrame{
+		Envelope: protocol.Envelope{Type: "result", TS: ts},
+		Subtype:  "success",
+	}
 }
 
 // replayEntryFrames translates one transcript line; unusable lines
