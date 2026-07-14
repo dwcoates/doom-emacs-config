@@ -166,6 +166,18 @@ func TestRenderHint(t *testing.T) {
 			},
 		},
 		{
+			name:     "agent render takes the same task summary as legacy Task",
+			tool:     "Agent",
+			input:    `{"description":"d","prompt":"p"}`,
+			content:  `[{"type":"text","text":"agent says hi"}]`,
+			wantKind: "task",
+			check: func(t *testing.T, h map[string]any) {
+				if h["summary"] != "agent says hi" {
+					t.Errorf("summary = %v", h["summary"])
+				}
+			},
+		},
+		{
 			name:    "read render is nil",
 			tool:    "Read",
 			input:   `{"file_path":"/f"}`,
