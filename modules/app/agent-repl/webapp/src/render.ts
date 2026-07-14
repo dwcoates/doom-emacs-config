@@ -4,7 +4,9 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
-import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
+import { SUBAGENT_TOOLS, agentsMenuHtml } from "./agents.js";
+import { CounterEntry } from "./counter-menu.js";
+import { tasksMenuHtml } from "./tasks.js";
 import { formatDuration, formatDurationCeil } from "./duration.js";
 import { CLICK_THROUGH_SELECTOR, applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
@@ -109,17 +111,19 @@ function formatTokens(n: number): string {
 
 /**
  * Topbar session datapoints: `parent workspace: <ws> · time: <elapsed> ·
- * tokens: <n> · <k> agents ▾` (the vterm modeline's context mirror). The
- * parent workspace entry is omitted entirely when PARENT-WS is absent or
- * empty, as is the agents chip before the session spawns one; each value
- * gets its own color via the info-* classes.
+ * tokens: <n> · <k> agents ▾ · <k> tasks ▾` (the vterm modeline's context
+ * mirror). The parent workspace entry is omitted entirely when PARENT-WS is
+ * absent or empty, as is each counter chip before the session gives it
+ * something to count; each value gets its own color via the info-* classes.
  *
  * The model is NOT here. It moved into the #model-select picker, which
  * both names the live model and switches it — printing it again as text
  * immediately left of a dropdown showing the same thing is noise.
  *
- * AGENTS-OPEN is the caller's disclosure state for the agents chip, which
- * drops the subagent roster as an overlay.
+ * The two counter chips are the shared `counter-menu` facade: the subagent
+ * roster and the task roster. AGENTS-OPEN / TASKS-OPEN are the caller's
+ * disclosure state for each (only one is ever open at a time), and
+ * CURRENT-TURN is the counted-turn clock their recency windows age against.
  *
  * TIMER-LABEL is how long the running task has taken so far (`IDLE_LABEL`
  * when none is). Its span is marked so the caller's once-a-second tick can
@@ -134,8 +138,11 @@ function formatTokens(n: number): string {
 export function sessionInfoHtml(
   parentWs: string | null,
   contextTokens: number | null,
-  agents: readonly SubagentEntry[] = [],
+  agents: readonly CounterEntry[] = [],
+  tasks: readonly CounterEntry[] = [],
+  currentTurn = 0,
   agentsOpen = false,
+  tasksOpen = false,
   timerLabel: string = IDLE_LABEL,
 ): string {
   const parts: string[] = [];
@@ -147,8 +154,10 @@ export function sessionInfoHtml(
   );
   const tokens = contextTokens === null ? "—" : formatTokens(contextTokens);
   parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
-  const menu = agentsMenuHtml(agents, agentsOpen);
-  if (menu !== "") parts.push(menu);
+  const agentsMenu = agentsMenuHtml(agents, agentsOpen, currentTurn);
+  if (agentsMenu !== "") parts.push(agentsMenu);
+  const tasksMenu = tasksMenuHtml(tasks, tasksOpen, currentTurn);
+  if (tasksMenu !== "") parts.push(tasksMenu);
   return parts.join(" · ");
 }
 

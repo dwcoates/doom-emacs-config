@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  SUBAGENT_TOOLS,
-  SubagentEntry,
-  agentsLabel,
-  agentsMenuHtml,
-  agentsOverlayHtml,
-  runningCount,
-  sessionSubagents,
-} from "../src/agents.js";
+import { SUBAGENT_TOOLS, agentsMenuHtml, sessionSubagents } from "../src/agents.js";
+import { CounterEntry } from "../src/counter-menu.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 
 /** A subagent tool call in the feed, defaulted to a settled successful one. */
@@ -22,6 +15,7 @@ function agentTool(over: Partial<ToolItem> = {}): ToolItem {
     input: { description: "hunt the flake", subagent_type: "Explore" },
     inputDone: true,
     result: { isError: false, content: "found it" },
+    deactivatedAtTurn: 4,
     ...over,
   };
 }
@@ -36,14 +30,15 @@ function clearTurn(): ConversationItem {
   };
 }
 
-/** A roster entry, defaulted to a settled successful one. */
-function entry(over: Partial<SubagentEntry> = {}): SubagentEntry {
+/** A counter entry, for the render-delegation tests. */
+function entry(over: Partial<CounterEntry> = {}): CounterEntry {
   return {
-    toolUseId: "t1",
-    description: "hunt the flake",
-    agentType: "Explore",
-    status: "done",
+    id: "t1",
+    summary: "hunt the flake",
+    detail: "Explore",
+    status: "running",
     nested: false,
+    deactivatedAtTurn: null,
     ...over,
   };
 }
@@ -67,7 +62,7 @@ describe("sessionSubagents", () => {
     // Act
     const agents = sessionSubagents(items);
     // Assert
-    expect(agents.map((a) => a.toolUseId)).toEqual(["t1", "t2"]);
+    expect(agents.map((a) => a.id)).toEqual(["t1", "t2"]);
   });
 
   it("includes a legacy Task call", () => {
@@ -93,48 +88,48 @@ describe("sessionSubagents", () => {
     expect(sessionSubagents(items)).toHaveLength(0);
   });
 
-  it("carries the call's description", () => {
+  it("carries the call's description as the summary", () => {
     // Arrange + Act
     const [agent] = sessionSubagents([agentTool()]);
     // Assert
-    expect(agent.description).toBe("hunt the flake");
+    expect(agent.summary).toBe("hunt the flake");
   });
 
-  it("carries the call's subagent type", () => {
+  it("carries the call's subagent type as the detail", () => {
     // Arrange + Act
     const [agent] = sessionSubagents([agentTool()]);
     // Assert
-    expect(agent.agentType).toBe("Explore");
+    expect(agent.detail).toBe("Explore");
   });
 
-  it("leaves the subagent type empty when the call named none", () => {
+  it("leaves the detail empty when the call named no type", () => {
     // Arrange + Act
     const [agent] = sessionSubagents([agentTool({ input: { description: "d" } })]);
     // Assert
-    expect(agent.agentType).toBe("");
+    expect(agent.detail).toBe("");
   });
 
   it("reads a call whose input is still streaming as starting", () => {
     // Arrange
-    const item = agentTool({ inputDone: false, input: undefined, result: undefined });
+    const item = agentTool({ inputDone: false, input: undefined, result: undefined, deactivatedAtTurn: undefined });
     // Act
     const [agent] = sessionSubagents([item]);
     // Assert
     expect(agent.status).toBe("starting");
   });
 
-  it("leaves the description empty while the input still streams", () => {
+  it("leaves the summary empty while the input still streams", () => {
     // Arrange
-    const item = agentTool({ inputDone: false, input: undefined, result: undefined });
+    const item = agentTool({ inputDone: false, input: undefined, result: undefined, deactivatedAtTurn: undefined });
     // Act
     const [agent] = sessionSubagents([item]);
     // Assert
-    expect(agent.description).toBe("");
+    expect(agent.summary).toBe("");
   });
 
   it("reads a call awaiting its result as running", () => {
     // Arrange + Act
-    const [agent] = sessionSubagents([agentTool({ result: undefined })]);
+    const [agent] = sessionSubagents([agentTool({ result: undefined, deactivatedAtTurn: undefined })]);
     // Assert
     expect(agent.status).toBe("running");
   });
@@ -182,189 +177,50 @@ describe("sessionSubagents", () => {
     // Act
     const agents = sessionSubagents(items);
     // Assert
-    expect(agents.map((a) => a.toolUseId)).toEqual(["t2"]);
-  });
-});
-
-describe("runningCount", () => {
-  it("counts a subagent awaiting its result", () => {
-    // Arrange + Act + Assert
-    expect(runningCount([entry({ status: "running" })])).toBe(1);
+    expect(agents.map((a) => a.id)).toEqual(["t2"]);
   });
 
-  it("counts a subagent whose input is still streaming", () => {
-    // Arrange + Act + Assert
-    expect(runningCount([entry({ status: "starting" })])).toBe(1);
+  it("carries the deactivation turn stamped on a settled call", () => {
+    // Arrange + Act
+    const [agent] = sessionSubagents([agentTool()]);
+    // Assert
+    expect(agent.deactivatedAtTurn).toBe(4);
   });
 
-  it("ignores a settled subagent", () => {
-    // Arrange + Act + Assert
-    expect(runningCount([entry({ status: "done" })])).toBe(0);
-  });
-
-  it("ignores a failed subagent", () => {
-    // Arrange + Act + Assert
-    expect(runningCount([entry({ status: "error" })])).toBe(0);
-  });
-});
-
-describe("agentsLabel", () => {
-  it("singularizes a lone subagent", () => {
-    // Arrange + Act + Assert
-    expect(agentsLabel(1)).toBe("1 agent");
-  });
-
-  it("pluralizes several subagents", () => {
-    // Arrange + Act + Assert
-    expect(agentsLabel(3)).toBe("3 agents");
+  it("reads an unstamped active call as never deactivated", () => {
+    // Arrange
+    const item = agentTool({ result: undefined, deactivatedAtTurn: undefined });
+    // Act
+    const [agent] = sessionSubagents([item]);
+    // Assert
+    expect(agent.deactivatedAtTurn).toBeNull();
   });
 });
 
 describe("agentsMenuHtml", () => {
   it("renders nothing when the session spawned no subagents", () => {
     // Arrange + Act + Assert
-    expect(agentsMenuHtml([], false)).toBe("");
+    expect(agentsMenuHtml([], false, 0)).toBe("");
   });
 
   it("labels the chip with the subagent count", () => {
     // Arrange + Act
-    const html = agentsMenuHtml([entry(), entry({ toolUseId: "t2" })], false);
+    const html = agentsMenuHtml([entry(), entry({ id: "t2" })], false, 0);
     // Assert
     expect(html).toContain("2 agents");
   });
 
-  it("carries a caret so the chip reads as a dropdown", () => {
+  it("renders the subagent menu under the agents class", () => {
     // Arrange + Act
-    const html = agentsMenuHtml([entry()], false);
+    const html = agentsMenuHtml([entry()], false, 0);
     // Assert
-    expect(html).toContain(`<span class="agents-caret" aria-hidden="true">▾</span>`);
+    expect(html).toContain("agents-menu");
   });
 
-  it("flips the caret when the roster is open", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], true);
-    // Assert
-    expect(html).toContain(`<span class="agents-caret" aria-hidden="true">▴</span>`);
-  });
-
-  it("marks the toggle for the topbar's delegated click handler", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], false);
-    // Assert
-    expect(html).toContain("data-agents-toggle");
-  });
-
-  it("reports the closed roster to assistive tech", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], false);
-    // Assert
-    expect(html).toContain(`aria-expanded="false"`);
-  });
-
-  it("reports the open roster to assistive tech", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], true);
-    // Assert
-    expect(html).toContain(`aria-expanded="true"`);
-  });
-
-  it("withholds the roster while the chip is closed", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], false);
-    // Assert
-    expect(html).not.toContain("agents-overlay");
-  });
-
-  it("drops the roster as an overlay while the chip is open", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], true);
-    // Assert
-    expect(html).toContain("agents-overlay");
-  });
-
-  it("annotates the chip with how many subagents are still working", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry({ status: "running" }), entry({ toolUseId: "t2" })], false);
-    // Assert
-    expect(html).toContain(`<span class="agents-running">1 running</span>`);
-  });
-
-  it("omits the running annotation once every subagent has settled", () => {
-    // Arrange + Act
-    const html = agentsMenuHtml([entry()], false);
-    // Assert
-    expect(html).not.toContain("agents-running");
-  });
-});
-
-describe("agentsOverlayHtml", () => {
-  it("renders one row per subagent", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry(), entry({ toolUseId: "t2" })]);
-    // Assert
-    expect(html.match(/class="agent-row/g)).toHaveLength(2);
-  });
-
-  it("names each subagent by its description", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ description: "hunt the flake" })]);
-    // Assert
-    expect(html).toContain("hunt the flake");
-  });
-
-  it("stands a placeholder in for a description that has not streamed yet", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ description: "", status: "starting" })]);
-    // Assert
-    expect(html).toContain("starting…");
-  });
-
-  it("chips the subagent type beside the description", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ agentType: "Explore" })]);
-    // Assert
-    expect(html).toContain(`<span class="agent-type">Explore</span>`);
-  });
-
-  it("omits the type chip for a subagent that named no type", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ agentType: "" })]);
-    // Assert
-    expect(html).not.toContain("agent-type");
-  });
-
-  it("colors the status dot by the subagent's status", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ status: "error" })]);
-    // Assert
-    expect(html).toContain("agent-dot agent-error");
-  });
-
-  it("spells the status out beside the dot", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ status: "running" })]);
-    // Assert
-    expect(html).toContain(`<span class="agent-status">running</span>`);
-  });
-
-  it("indents a nested subagent's row", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ nested: true })]);
-    // Assert
-    expect(html).toContain(`class="agent-row nested"`);
-  });
-
-  it("escapes markup in a subagent's description", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ description: "<img src=x>" })]);
-    // Assert
-    expect(html).not.toContain("<img");
-  });
-
-  it("escapes markup in a subagent's type", () => {
-    // Arrange + Act
-    const html = agentsOverlayHtml([entry({ agentType: "<img src=x>" })]);
-    // Assert
-    expect(html).not.toContain("<img");
+  it("ages a settled subagent out of the roster past the retention window", () => {
+    // Arrange — one done subagent, deactivated long ago.
+    const agents = [entry({ status: "done", deactivatedAtTurn: 0 })];
+    // Act + Assert — the whole chip disappears once nothing survives.
+    expect(agentsMenuHtml(agents, false, 99)).toBe("");
   });
 });

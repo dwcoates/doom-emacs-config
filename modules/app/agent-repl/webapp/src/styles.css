@@ -39,6 +39,9 @@
   /* The subagent roster chip: the --tool-title purple the tool cards title
      themselves with, since a subagent IS a tool call the session made. */
   --info-agents: #7c3aed;
+  /* The task roster chip: rose, kept clear of the subagent chip's violet so
+     the two topbar counters never read as one datapoint at a glance. */
+  --info-tasks: #be185d;
   /* Completed-turn chip wash: the --info-tokens amber dialed down to a muted
      background tint, so a turn that ran to completion reads at a glance —
      the wash IS the "turn complete" label, which is why the chip prints no
@@ -114,6 +117,7 @@
     --info-tokens: #fbbf24;
     --info-time: #93c5fd;
     --info-agents: #c4b5fd;
+    --info-tasks: #fda4af;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
@@ -235,10 +239,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Subagent roster: a chip in the session-datapoint run that drops the full
-   list. The menu anchors the overlay, which hangs below the topbar without
-   displacing the row it hangs from. */
-.agents-menu { position: relative; display: inline-block; }
+/* Topbar counters (subagent roster + task roster): a chip in the
+   session-datapoint run that drops the full list. Both counters share this
+   styling — the shared counter-menu facade emits parallel class stems — and
+   only the chip color differs per counter. The menu anchors the overlay,
+   which hangs below the topbar without displacing the row it hangs from. */
+.agents-menu, .tasks-menu { position: relative; display: inline-block; }
 
 .info-agents {
   font: inherit;
@@ -248,13 +254,21 @@ body {
   padding: 0;
   cursor: pointer;
 }
-.info-agents:hover { text-decoration: underline; }
-.agents-caret { font-size: 0.7rem; }
-/* The one datapoint that is not a settled number: subagents still working
+.info-tasks {
+  font: inherit;
+  color: var(--info-tasks);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.info-agents:hover, .info-tasks:hover { text-decoration: underline; }
+.agents-caret, .tasks-caret { font-size: 0.7rem; }
+/* The one datapoint that is not a settled number: entries still working
    read in the palette's in-flight orange, as the thinking indicator does. */
-.agents-running { color: var(--thinking); }
+.agents-running, .tasks-running { color: var(--thinking); }
 
-.agents-overlay {
+.agents-overlay, .tasks-overlay {
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
@@ -272,7 +286,7 @@ body {
   box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
 }
 
-.agent-row {
+.agent-row, .task-row {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
@@ -280,28 +294,39 @@ body {
   border-radius: 4px;
   white-space: nowrap;
 }
-.agent-row:hover { background: var(--bg); }
-/* A subagent another subagent spawned is indented under the roster, so the
+.agent-row:hover, .task-row:hover { background: var(--bg); }
+/* An entry another entry spawned is indented under the roster, so the
    nesting the feed shows through parent_tool_use_id survives into the list. */
-.agent-row.nested { padding-left: 1.25rem; }
+.agent-row.nested, .task-row.nested { padding-left: 1.25rem; }
+/* A settled (inactive) entry greys its headline, so a done row reads as past
+   while its dot still carries the done/error color and its age its label. */
+.agent-row.inactive .agent-desc,
+.task-row.inactive .task-desc { color: var(--muted); }
 
 .agent-desc {
   color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-type {
+.task-desc {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-type, .task-type {
   color: var(--tool-title);
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
 }
-.agent-status { color: var(--muted); font-size: 0.75rem; margin-left: auto; padding-left: 0.75rem; }
+.agent-status, .task-status { color: var(--muted); font-size: 0.75rem; margin-left: auto; padding-left: 0.75rem; }
 
-.agent-dot { font-size: 0.6rem; }
+.agent-dot, .task-dot { font-size: 0.6rem; }
 .agent-dot.agent-starting,
-.agent-dot.agent-running { color: var(--thinking); animation: pulse 1s infinite; }
-.agent-dot.agent-done { color: var(--ok); }
-.agent-dot.agent-error { color: var(--err); }
+.agent-dot.agent-running,
+.task-dot.task-starting,
+.task-dot.task-running { color: var(--thinking); animation: pulse 1s infinite; }
+.agent-dot.agent-done, .task-dot.task-done { color: var(--ok); }
+.agent-dot.agent-error, .task-dot.task-error { color: var(--err); }
 
 #feed {
   flex: 1;
@@ -941,7 +966,9 @@ pre {
   /* The roster's in-flight dot has no rotation to slow, only a pulse — which
      is exactly the motion this query exists to drop. */
   .agent-dot.agent-starting,
-  .agent-dot.agent-running {
+  .agent-dot.agent-running,
+  .task-dot.task-starting,
+  .task-dot.task-running {
     animation: none;
   }
   /* A breath is a hint, never the sole liveness signal (the topbar spinner and

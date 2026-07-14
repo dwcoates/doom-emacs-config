@@ -22,7 +22,7 @@ import {
   sessionInfoHtml,
   wakeRemainingLabel,
 } from "../src/render.js";
-import { SubagentEntry } from "../src/agents.js";
+import { CounterEntry } from "../src/counter-menu.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { TIMER_SLOT } from "../src/timer.js";
 import {
@@ -33,14 +33,15 @@ import {
   ToolItem,
 } from "../src/store.js";
 
-/** A settled roster entry for one spawned subagent. */
-function subagentEntry(over: Partial<SubagentEntry> = {}): SubagentEntry {
+/** A counter entry, defaulted to an active one that never prunes. */
+function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
   return {
-    toolUseId: "t1",
-    description: "hunt the flake",
-    agentType: "Explore",
-    status: "done",
+    id: "t1",
+    summary: "hunt the flake",
+    detail: "Explore",
+    status: "running",
     nested: false,
+    deactivatedAtTurn: null,
     ...over,
   };
 }
@@ -240,42 +241,71 @@ describe("sessionInfoHtml", () => {
 
   it("appends the subagent chip after the token datapoint", () => {
     // Arrange
-    const agents = [subagentEntry()];
+    const agents = [counterEntry()];
     // Act
-    const html = sessionInfoHtml("ws", null, agents, false);
+    const html = sessionInfoHtml("ws", null, agents, [], 0, false, false);
     // Assert
     expect(html).toContain("</span> · <span class=\"agents-menu\">");
   });
 
   it("counts the session's subagents on the chip", () => {
     // Arrange
-    const agents = [subagentEntry(), subagentEntry({ toolUseId: "t2" })];
+    const agents = [counterEntry(), counterEntry({ id: "t2" })];
     // Act + Assert
-    expect(sessionInfoHtml("ws", null, agents, false)).toContain("2 agents");
+    expect(sessionInfoHtml("ws", null, agents, [], 0)).toContain("2 agents");
   });
 
-  it("drops the subagent roster when the chip is open", () => {
+  it("drops the subagent roster when the agents chip is open", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [subagentEntry()], true);
+    const html = sessionInfoHtml("ws", null, [counterEntry()], [], 0, true, false);
     // Assert
     expect(html).toContain("agents-overlay");
   });
 
   it("omits the subagent chip when the session spawned none", () => {
     // Arrange + Act + Assert
-    expect(sessionInfoHtml("ws", null, [], false)).not.toContain("agents-menu");
+    expect(sessionInfoHtml("ws", null, [], [], 0)).not.toContain("agents-menu");
   });
 
-  it("leaves no dangling separator when the session spawned no subagents", () => {
+  it("appends the task chip to the right of the agents chip", () => {
+    // Arrange
+    const agents = [counterEntry()];
+    const tasks = [counterEntry({ id: "k1" })];
+    // Act
+    const html = sessionInfoHtml("ws", null, agents, tasks, 0);
+    // Assert — source order is left-to-right in the datapoint run.
+    expect(html.indexOf("tasks-menu")).toBeGreaterThan(html.indexOf("agents-menu"));
+  });
+
+  it("counts the session's tasks on the task chip", () => {
+    // Arrange
+    const tasks = [counterEntry({ id: "k1" }), counterEntry({ id: "k2" })];
+    // Act + Assert
+    expect(sessionInfoHtml("ws", null, [], tasks, 0)).toContain("2 tasks");
+  });
+
+  it("drops the task roster when the task chip is open", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], false);
+    const html = sessionInfoHtml("ws", null, [], [counterEntry({ id: "k1" })], 0, false, true);
+    // Assert
+    expect(html).toContain("tasks-overlay");
+  });
+
+  it("omits the task chip when the session created none", () => {
+    // Arrange + Act + Assert
+    expect(sessionInfoHtml("ws", null, [], [], 0)).not.toContain("tasks-menu");
+  });
+
+  it("leaves no dangling separator when the session has neither counter", () => {
+    // Arrange + Act
+    const html = sessionInfoHtml("ws", null, [], [], 0);
     // Assert
     expect(html.endsWith("</span>")).toBe(true);
   });
 
   it("renders the running task's elapsed time", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], false, "5m 30s");
+    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "5m 30s");
     // Assert
     expect(html).toContain(
       `time: <span class="info-time" data-task-timer>5m 30s</span>`,
@@ -291,14 +321,14 @@ describe("sessionInfoHtml", () => {
 
   it("marks the timer span so the tick can repaint it alone", () => {
     // Arrange + Act — a whole-strip rewrite once a second would be churn.
-    const html = sessionInfoHtml("ws", null, [], false, "12s");
+    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "12s");
     // Assert
     expect(html).toContain(TIMER_SLOT);
   });
 
   it("places the timer between the parent workspace and the token count", () => {
     // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], false, "12s");
+    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "12s");
     // Assert
     expect(html.indexOf("time:")).toBeGreaterThan(html.indexOf("parent workspace:"));
     expect(html.indexOf("time:")).toBeLessThan(html.indexOf("tokens:"));
