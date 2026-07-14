@@ -6,8 +6,9 @@
  */
 import { SUBAGENT_TOOLS, SubagentEntry, agentsMenuHtml } from "./agents.js";
 import { formatDuration, formatDurationCeil } from "./duration.js";
-import { applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
+import { CLICK_THROUGH_SELECTOR, applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
+import { partitionFeed } from "./partition.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
@@ -356,12 +357,99 @@ function Thinking(item: ThinkingItem): string {
     </details>`;
 }
 
+/**
+ * The renderer-owned context the activity panels draw from: the feed
+ * partition's child lists, which cards the user has open, and the
+ * question selections child permission prompts need.
+ */
+export interface PanelContext {
+  children: ReadonlyMap<string, readonly ConversationItem[]>;
+  isOpen(id: string): boolean;
+  selections?: QuestionSelections;
+}
+
+/** True when the child renders something the panel and ticker count. */
+function visibleChild(item: ConversationItem): boolean {
+  return !(item.kind === "tool" && SUPPRESSED_TOOLS.has(item.toolName));
+}
+
+/** One child item's ticker line, or "" when it offers nothing live. */
+function childLine(item: ConversationItem): string {
+  switch (item.kind) {
+    case "tool": {
+      const head = toolHeadline(item);
+      return head === "" ? item.toolName : `${item.toolName}: ${head}`;
+    }
+    case "text":
+      return item.text.replace(/\s+/g, " ").trim();
+    case "thinking":
+      return item.done ? "" : "thinking…";
+    case "permission":
+      return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
+    default:
+      return "";
+  }
+}
+
+/** The input field that best headlines a tool call, "" when none. */
+function toolHeadline(item: ToolItem): string {
+  if (!item.input) return "";
+  for (const key of ["command", "file_path", "description", "pattern", "skill"]) {
+    const v = item.input[key];
+    if (typeof v === "string" && v !== "") return v.replace(/\s+/g, " ");
+  }
+  return "";
+}
+
+/**
+ * The collapsed face of an activity panel: how many steps the child feed
+ * holds and the most recent one with something to say, capped so the
+ * line stays a line.
+ */
+export function activityTicker(children: readonly ConversationItem[]): string {
+  const steps = `${children.length} step${children.length === 1 ? "" : "s"}`;
+  for (let i = children.length - 1; i >= 0; i--) {
+    const line = childLine(children[i]);
+    if (line !== "") {
+      const capped = line.length > 80 ? `${line.slice(0, 79)}…` : line;
+      return `${steps} · ${capped}`;
+    }
+  }
+  return steps;
+}
+
+/**
+ * The activity fold on a spawning card: the ticker line is the collapsed
+ * face, and the panel — the child feed rendered through the same
+ * renderItem the top level uses — exists in the HTML only while the
+ * card is open, so a hundred buffered children cost nothing while
+ * closed. Open state lives in the RENDERER (like question selections),
+ * because the fold must survive the card's own re-renders.
+ */
+function ActivitySection(
+  id: string,
+  children: readonly ConversationItem[],
+  panels: PanelContext,
+): string {
+  const open = panels.isOpen(id);
+  const body = open
+    ? `<div class="agent-panel">${children
+        .map((c) => `<div class="feed-child">${renderItem(c, panels.selections, undefined, false, panels)}</div>`)
+        .join("")}</div>`
+    : "";
+  return `<div class="agent-activity${open ? " open" : ""}" data-panel-toggle="${escapeHtml(id)}">
+      <div class="agent-ticker">${escapeHtml(activityTicker(children))} <span class="agent-caret" aria-hidden="true">${
+        open ? "▴" : "▾"
+      }</span></div>${body}
+    </div>`;
+}
+
 // IS-PULSING breathes the card while it is the running frontier (see
 // `pulseTarget`): a slow wash under the head's fast arc, so a call in flight
 // is never a wholly still card during the second the arc stays hidden. The
 // two motions live on different channels — the arc in the badge, the breath
 // on the card background — so they read as one signal, not two competing ones.
-function ToolCard(item: ToolItem, isPulsing = false): string {
+function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
   // In-flight is ONE look, whichever phase the call is in: the orange run
   // badge carrying the same arc the thinking indicator spins, held
@@ -380,11 +468,23 @@ function ToolCard(item: ToolItem, isPulsing = false): string {
   const progress = item.progress
     ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>`
     : "";
+  // The card's confined children: its panel body, its ticker, and — when
+  // one of them is a permission prompt still waiting — a badge loud
+  // enough that a CLOSED card can never silently block the turn.
+  const children = (panels?.children.get(item.toolUseId) ?? []).filter(visibleChild);
+  const pendingPerms = children.filter(
+    (c) => c.kind === "permission" && !c.resolution,
+  ).length;
+  const permBadge =
+    pendingPerms > 0 ? `<span class="badge perm">needs permission</span>` : "";
+  const activity =
+    panels && children.length > 0 ? ActivitySection(item.toolUseId, children, panels) : "";
   return `
     <div class="tool-card tool-${variant.toLowerCase()}${isPulsing ? " pulsing" : ""}">
-      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}</div>
+      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}</div>
       ${toolInput(item)}
       ${progress}
+      ${activity}
       ${toolResult(item)}
     </div>`;
 }
@@ -901,13 +1001,17 @@ function SystemNote(item: SystemItem): string {
  * bubble above it has already drawn it.
  *
  * IS-PULSING marks the one section that breathes (`pulseTarget`), which is
- * the prompt, a finished response, or a running tool card.
+ * the prompt, a finished response, or a running tool card. PANELS carries
+ * the feed partition's child lists, letting a spawning card fold its
+ * confined children into an activity panel (and letting those children
+ * recurse through this same function).
  */
 export function renderItem(
   item: ConversationItem,
   selections?: QuestionSelections,
   finals?: FinalResponses,
   isPulsing = false,
+  panels?: PanelContext,
 ): string {
   if (rendersEmpty(item, finals)) return "";
   switch (item.kind) {
@@ -918,7 +1022,7 @@ export function renderItem(
     case "thinking":
       return Thinking(item);
     case "tool":
-      return ToolCard(item, isPulsing);
+      return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item, isPulsing, panels);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
@@ -1011,6 +1115,8 @@ export class FeedRenderer {
   private nodes = new Map<string, { el: HTMLElement; html: string }>();
   /** AskUserQuestion picks (renderer-owned so re-renders keep them). */
   private questionSelections = new Map<string, Set<string>>();
+  /** Cards whose activity panel the user has open (renderer-owned too). */
+  private openPanels = new Set<string>();
   private lastState: StoreState | null = null;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
@@ -1042,7 +1148,43 @@ export class FeedRenderer {
       if (cancelQ !== null) this.actions.cancelQueued(cancelQ);
       const runNowQ = target.getAttribute("data-queue-run-now");
       if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
+      this.handlePanelToggle(target);
     });
+  }
+
+  /**
+   * A click on an activity fold flips its card's panel. Clicks INSIDE
+   * the panel belong to the children (their own expands, permission
+   * buttons), a click on any control belongs to that control, and a
+   * click ending a text highlight is a selection gesture — the same
+   * guards expandAction applies to the capped sections.
+   */
+  private handlePanelToggle(target: HTMLElement): void {
+    const toggle = target.closest("[data-panel-toggle]");
+    if (
+      !toggle ||
+      target.closest(".agent-panel") !== null ||
+      target.closest(CLICK_THROUGH_SELECTOR) !== null ||
+      (window.getSelection()?.toString() ?? "").trim() !== ""
+    ) {
+      return;
+    }
+    const id = toggle.getAttribute("data-panel-toggle") ?? "";
+    if (this.openPanels.has(id)) {
+      this.openPanels.delete(id);
+    } else {
+      this.openPanels.add(id);
+    }
+    if (this.lastState) this.render(this.lastState);
+  }
+
+  /** The PanelContext this renderer's state backs. */
+  private panelContext(children: ReadonlyMap<string, readonly ConversationItem[]>): PanelContext {
+    return {
+      children,
+      isOpen: (id) => this.openPanels.has(id),
+      selections: this.questionSelections,
+    };
   }
 
   private pendingQuestionItem(requestId: string): { item: PermissionItem; questions: AskQuestion[] } | null {
@@ -1076,14 +1218,16 @@ export class FeedRenderer {
 
   /**
    * One item's HTML: green-bordered and chip-bearing when FINALS marks it a
-   * turn's answer, and breathing when PULSE names it.
+   * turn's answer, breathing when PULSE names it, and carrying its
+   * activity panel when PANELS holds children for it.
    */
   private itemHtml(
     item: ConversationItem,
     finals: FinalResponses,
     pulse: PulseTarget,
+    panels: PanelContext,
   ): string {
-    return renderItem(item, this.questionSelections, finals, isPulsed(item, pulse));
+    return renderItem(item, this.questionSelections, finals, isPulsed(item, pulse), panels);
   }
 
   private submitQuestionAnswers(requestId: string): void {
@@ -1121,10 +1265,12 @@ export class FeedRenderer {
     this.backfillQueue = [];
     this.container.innerHTML = "";
     this.nodes.clear();
+    const part = partitionFeed(state.items);
+    const panels = this.panelContext(part.children);
     const finals = finalResponses(state.items);
     const pulse = pulseTarget(state.items, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; item: ConversationItem }> = [];
-    state.items.forEach((item, i) => {
+    part.top.forEach((item, i) => {
       const key = itemKey(item, i);
       const el = document.createElement("div");
       el.className = "feed-item";
@@ -1150,7 +1296,7 @@ export class FeedRenderer {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
         const { el, item } = shells[i];
-        const html = this.itemHtml(item, finals, pulse);
+        const html = this.itemHtml(item, finals, pulse, panels);
         el.innerHTML = html;
         const entry = this.nodes.get(el.dataset.key ?? "");
         if (entry) entry.html = html;
@@ -1198,13 +1344,15 @@ export class FeedRenderer {
       pinned: isPinnedToBottom(this.container),
     });
     this.lastUserTurn = turnId;
+    const part = partitionFeed(state.items);
+    const panels = this.panelContext(part.children);
     const finals = finalResponses(state.items);
     const pulse = pulseTarget(state.items, state.turnInFlight, finals);
     const seen = new Set<string>();
-    state.items.forEach((item, i) => {
+    part.top.forEach((item, i) => {
       const key = itemKey(item, i);
       seen.add(key);
-      const html = this.itemHtml(item, finals, pulse);
+      const html = this.itemHtml(item, finals, pulse, panels);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");

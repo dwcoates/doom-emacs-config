@@ -970,6 +970,33 @@ describe("tool-card status chip", () => {
   });
 });
 
+describe("activity fold", () => {
+  it("invites the click with a zoom cursor on the closed fold", () => {
+    // Arrange / Act — the .agent-activity rule.
+    // Assert
+    expect(blockAfter(css, ".agent-activity {")).toMatch(/cursor:\s*zoom-in/);
+  });
+
+  it("offers the fold-back cursor on the open fold's ticker only", () => {
+    // Arrange / Act — clicks inside the panel belong to the children.
+    // Assert
+    expect(blockAfter(css, ".agent-activity.open > .agent-ticker")).toMatch(/cursor:\s*zoom-out/);
+  });
+
+  it("mutes the ticker so the live line reads as status, not content", () => {
+    // Arrange / Act — line-anchored: the open-fold cursor rule also
+    // names the class mid-selector.
+    // Assert
+    expect(blockAfter(css, "\n.agent-ticker")).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("tints the needs-permission badge in the accent", () => {
+    // Arrange / Act
+    // Assert
+    expect(blockAfter(css, ".badge.perm")).toMatch(/color:\s*var\(--accent\)/);
+  });
+});
+
 /* The subagent roster drops out of the topbar, which is a fixed-height flex row:
    the overlay has to leave that row's layout entirely, and its anchor has to be
    the positioned ancestor it hangs from. Both are pure CSS, so both are asserted
