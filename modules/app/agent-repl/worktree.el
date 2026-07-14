@@ -4261,6 +4261,81 @@ cherry-pick already succeeded; a tag-write failure shouldn't undo that."
       (agent-repl--warn source-ws "failed to create tag %s (exit %d)"
                         tag exit-code))))
 
+(declare-function agent-repl--establish-workspace "commands")
+(declare-function agent-repl--deliver-pending-prompts "session")
+(declare-function agent-repl--agent-running-p "session")
+
+(defun agent-repl--merge-remediation-prompt (target-ws err)
+  "Compose the remediation directive for TARGET-WS's failed merge.
+Names the merge target branch (resolved from TARGET-WS's
+`:source-ws-dir', the same source `--workspace-merge-do' cherry-picks
+into) and the failure ERR, then directs the workspace's agent through
+the standard recovery: rebase onto the target, get the suites green,
+re-dispatch the merge."
+  (let* ((src (agent-repl--ws-get target-ws :source-ws-dir))
+         (branch (and src (agent-repl--git-string-quiet
+                           "-C" (expand-file-name src)
+                           "branch" "--show-current")))
+         (target (if (and branch (not (string-empty-p branch)))
+                     (format "`%s`" branch)
+                   "the merge target branch")))
+    (format (concat
+             "Your workspace's merge into %s FAILED: %S. Remediate this now: "
+             "(1) rebase this workspace onto %s, resolving any conflicts — "
+             "incorporate both sides when the commits are orthogonal, but STOP "
+             "and surface the conflict when they represent competing design "
+             "decisions; (2) run the test suites affected by this branch's "
+             "changes and drive any failure to green; (3) once green, "
+             "re-dispatch the merge by invoking the create-or-update-workspace "
+             "skill with `merge %s`.")
+            target err target target-ws)))
+
+(defun agent-repl--dispatch-merge-remediation (target-ws err)
+  "Schedule TARGET-WS's recreation with an immediate remediation directive.
+Runs `agent-repl--run-merge-remediation' via a 0-second timer rather
+than inline: every caller sits inside a merge error handler that
+re-signals (and may run on a worker thread), while the recreation does
+persp and session work that belongs on the main loop after the merge
+flow has unwound."
+  (let ((prompt (agent-repl--merge-remediation-prompt target-ws err)))
+    (agent-repl--log target-ws "dispatch-merge-remediation: ws=%s scheduling" target-ws)
+    (run-at-time 0 nil #'agent-repl--run-merge-remediation target-ws prompt)))
+
+(defun agent-repl--run-merge-remediation (target-ws prompt)
+  "Deliver PROMPT to TARGET-WS, recreating its session when needed.
+A live agent gets the directive immediately over the standard delivery
+path.  A dead one is recreated first: the directive is parked on
+`:pending-prompts' and `agent-repl--establish-workspace' re-establishes
+the persp and boots a fresh session, whose startup drain delivers it.
+A dead workspace with no `:project-dir' cannot be recreated, which is
+surfaced as a warning rather than silently dropping the remediation."
+  (let ((dir (agent-repl--ws-get target-ws :project-dir)))
+    (cond
+     ((agent-repl--agent-running-p target-ws)
+      (agent-repl--log target-ws "run-merge-remediation: ws=%s live — delivering directly" target-ws)
+      (agent-repl--deliver-pending-prompts (list prompt) target-ws))
+     ((null dir)
+      (agent-repl--warn target-ws
+                        "merge-remediation: ws=%s has no :project-dir — cannot recreate for remediation"
+                        target-ws))
+     (t
+      (agent-repl--log target-ws "run-merge-remediation: ws=%s dead — recreating" target-ws)
+      (agent-repl--enqueue-preemptive-prompt target-ws prompt)
+      (agent-repl--establish-workspace target-ws dir)))))
+
+(defun agent-repl--mark-merge-silent-failure (target-ws)
+  "Mark TARGET-WS merge-failed after a silent non-zero cherry-pick.
+The `'failed' sentinel means git exited non-zero WITHOUT leaving a
+CHERRY_PICK_HEAD — no commits landed and there is no conflict to
+resolve.  Flags the ❌ badge state and dispatches the remediation
+loop (`agent-repl--dispatch-merge-remediation') so the workspace is
+recreated with the recovery directive as its first prompt."
+  (agent-repl--ws-put target-ws :merge-failed t)
+  (agent-repl--ws-put target-ws :repl-state :merge-failed)
+  (agent-repl--ws-put target-ws :agent-state nil)
+  (agent-repl--dispatch-merge-remediation
+   target-ws "cherry-pick exited non-zero without leaving CHERRY_PICK_HEAD (silent failure)"))
+
 (defun agent-repl--mark-merge-failed (target-ws err)
   "Mark TARGET-WS as dead because its merge attempt failed with ERR.
 Sets `:repl-state :dead' and clears `:agent-state' — the same state
@@ -4284,7 +4359,8 @@ died / generic failure)."
   (agent-repl--ws-put target-ws :merging nil)
   (agent-repl--ws-put target-ws :merge-completed nil)
   (agent-repl--ws-put target-ws :agent-state nil)
-  (agent-repl--ws-put target-ws :repl-state :dead))
+  (agent-repl--ws-put target-ws :repl-state :dead)
+  (agent-repl--dispatch-merge-remediation target-ws err))
 
 (defun agent-repl--mark-merge-conflict (target-ws err)
   "Mark TARGET-WS as `:merge-conflict' because the cherry-pick conflicted.
@@ -4313,7 +4389,8 @@ handler of `agent-repl--workspace-merge-do'."
                     target-ws err)
   (agent-repl--ws-put target-ws :merging nil)
   (agent-repl--ws-put target-ws :merge-completed nil)
-  (agent-repl--ws-put target-ws :repl-state :merge-conflict))
+  (agent-repl--ws-put target-ws :repl-state :merge-conflict)
+  (agent-repl--dispatch-merge-remediation target-ws err))
 
 (defun agent-repl--workspace-merge-do (target-ws &optional project-root-override silent auto-resolve)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
@@ -4430,9 +4507,7 @@ off so the user resolves in magit directly."
                               target-ws already failed)
             (cond
              (failed
-              (agent-repl--ws-put target-ws :merge-failed t)
-              (agent-repl--ws-put target-ws :repl-state :merge-failed)
-              (agent-repl--ws-put target-ws :agent-state nil))
+              (agent-repl--mark-merge-silent-failure target-ws))
              (t
               (agent-repl--ws-put target-ws :merge-completed t)
               (agent-repl--ws-put target-ws :merge-completed-at
