@@ -76,9 +76,9 @@ function hue(hex: string): number {
 
 /**
  * Whether a `#rrggbb` literal reads as turquoise: cyan-green, between teal and
- * aqua. BOTH special card washes live in this band on purpose — the skill
- * handoff and the spawned subagent — so hue alone never tells them apart. What
- * separates them is depth, which the "subagent card" suite pins.
+ * aqua. The one async wash lives in this band — the skill handoff and the
+ * spawned subagent share it deliberately (one token, one depth), which the
+ * "subagent card" suite pins.
  */
 function isTurquoise(hex: string): boolean {
   const h = hue(hex);
@@ -549,47 +549,24 @@ describe("turn stamp", () => {
 describe("skill-launch card", () => {
   const skillCard = blockAfter(css, ".tool-card.tool-skill");
 
-  it("washes the skill-launch card in the skill token", () => {
+  it("washes the skill-launch card in the shared async token", () => {
     // Arrange / Act — the .tool-card.tool-skill rule.
     // Assert
-    expect(skillCard).toMatch(/background:\s*var\(--skill-bg\)/);
+    expect(skillCard).toMatch(/background:\s*var\(--async-card\)/);
   });
 
   it("recolors the card's existing border rather than adding a second one", () => {
     // Arrange / Act — .tool-card already lays out the 1px border.
     // Assert
-    expect(skillCard).toMatch(/border-color:\s*var\(--skill-border\)/);
+    expect(skillCard).toMatch(/border-color:\s*var\(--async-border\)/);
     expect(skillCard).not.toMatch(/border:\s/);
-  });
-
-  it("defines a turquoise wash token for the light theme", () => {
-    // Arrange / Act
-    const turquoise = isTurquoise(token(lightTheme, "--skill-bg"));
-    // Assert
-    expect(turquoise).toBe(true);
-  });
-
-  it("defines a turquoise wash token for the dark theme", () => {
-    // Arrange / Act
-    const turquoise = isTurquoise(token(darkTheme, "--skill-bg"));
-    // Assert
-    expect(turquoise).toBe(true);
-  });
-
-  it("darkens the dark-theme wash below the light-theme one, as every other wash does", () => {
-    // Arrange
-    const [dark, light] = [token(darkTheme, "--skill-bg"), token(lightTheme, "--skill-bg")];
-    // Act
-    const darker = luminance(dark) < luminance(light);
-    // Assert
-    expect(darker).toBe(true);
   });
 
   it("keeps the card's border turquoise in both themes", () => {
     // Arrange / Act
     const [light, dark] = [
-      isTurquoise(token(lightTheme, "--skill-border")),
-      isTurquoise(token(darkTheme, "--skill-border")),
+      isTurquoise(token(lightTheme, "--async-border")),
+      isTurquoise(token(darkTheme, "--async-border")),
     ];
     // Assert
     expect([light, dark]).toEqual([true, true]);
@@ -671,10 +648,10 @@ const agentJson = blockAfter(css, ".agent-json {");
 const agentJsonOpen = blockAfter(css, ".agent-input.expanded .agent-json");
 
 describe("subagent card", () => {
-  it("washes the subagent card in the teal token rather than the tool-card grey", () => {
+  it("washes the subagent card in the async token rather than the tool-card grey", () => {
     // Arrange / Act — the .tool-card.tool-agent rule.
     // Assert
-    expect(agentCard).toMatch(/background:\s*var\(--agent-card\)/);
+    expect(agentCard).toMatch(/background:\s*var\(--async-card\)/);
   });
 
   it("carries the legacy Task name into the same teal wash", () => {
@@ -692,44 +669,48 @@ describe("subagent card", () => {
 
   it("defines a teal card token for the light theme", () => {
     // Arrange / Act
-    const teal = isTurquoise(token(lightTheme, "--agent-card"));
+    const teal = isTurquoise(token(lightTheme, "--async-card"));
     // Assert
     expect(teal).toBe(true);
   });
 
   it("defines a teal card token for the dark theme", () => {
     // Arrange / Act
-    const teal = isTurquoise(token(darkTheme, "--agent-card"));
+    const teal = isTurquoise(token(darkTheme, "--async-card"));
     // Assert
     expect(teal).toBe(true);
   });
 
   it("sinks the dark-theme card token below the light-theme one", () => {
     // Arrange
-    const [dark, light] = [token(darkTheme, "--agent-card"), token(lightTheme, "--agent-card")];
+    const [dark, light] = [token(darkTheme, "--async-card"), token(lightTheme, "--async-card")];
     // Act
     const darker = luminance(dark) < luminance(light);
     // Assert
     expect(darker).toBe(true);
   });
 
-  it("sinks the light-theme subagent wash below the skill wash it shares a hue with", () => {
-    // Arrange — both washes are turquoise, so only depth can tell a spawned
-    // subagent apart from a skill handoff sitting next to it in the feed.
-    const [agent, skill] = [token(lightTheme, "--agent-card"), token(lightTheme, "--skill-bg")];
-    // Act
-    const separation = luminance(skill) - luminance(agent);
-    // Assert — a token or two apart would still read as the same card.
-    expect(separation).toBeGreaterThan(20);
+  it("washes the skill handoff and the spawned subagent in the same rule", () => {
+    // Arrange — one async teal for both: depth no longer tells a skill
+    // handoff apart from a spawned subagent, the card's own content does.
+    const skillCard = blockAfter(css, ".tool-card.tool-skill");
+    // Act / Assert — both markers resolve to the same shared block.
+    expect(skillCard).toBe(agentCard);
   });
 
-  it("lifts the dark-theme subagent wash clear of the skill wash it shares a hue with", () => {
-    // Arrange — the dark theme inverts which of the two is the deeper wash.
-    const [agent, skill] = [token(darkTheme, "--agent-card"), token(darkTheme, "--skill-bg")];
-    // Act
-    const separation = Math.abs(luminance(agent) - luminance(skill));
-    // Assert
-    expect(separation).toBeGreaterThan(10);
+  it("sinks the light-theme wash a tad below the old subagent teal", () => {
+    // Arrange — #a7e8dd is the pre-unification subagent card, pinned here so
+    // the requested darkening cannot silently regress.
+    const wash = token(lightTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#a7e8dd"));
+  });
+
+  it("sinks the dark-theme wash a tad below the old subagent teal", () => {
+    // Arrange — #0f6b60 is the pre-unification dark subagent card.
+    const wash = token(darkTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#0f6b60"));
   });
 });
 

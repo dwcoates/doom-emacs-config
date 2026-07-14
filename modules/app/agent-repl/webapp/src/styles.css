@@ -72,27 +72,21 @@
        unmistakable among the feed. */
   --q-opt-bg: color-mix(in srgb, var(--fg) 8%, var(--card));
   --q-border: #eab308;
-  /* Skill-launch card wash: turquoise, so "the agent handed itself off to a
-     skill" reads at a glance against the card grey every other tool call sits
-     in. Kept PALE, because the subagent wash below shares its hue family and
-     the two are told apart by depth. */
-  --skill-bg: #d5f4ef;
-  --skill-border: #8fded1;
-  /* Subagent (Agent/Task) card wash: teal, so a spawned agent stands out from
-     the grey run of ordinary tool cards — a subagent is a whole conversation of
-     its own, not one more file read. DEEPER than the skill turquoise on purpose:
-     the two sit a few degrees apart in hue, so saturation is what separates a
-     spawned agent from a skill handoff. styles.test.ts pins them apart. */
-  --agent-card: #a7e8dd;
-  --agent-border: #4fb8a8;
+  /* The async teal, shared by every card that is a whole conversation or
+     process of its own rather than one more file read: a skill handoff, a
+     spawned subagent, and any detached background work to come. ONE hue at
+     ONE depth — a tad darker than the old subagent teal (styles.test.ts
+     pins the darkening against the old hex), with the status chip backed by
+     the card grey (.tool-card .badge) so the wash never tints it. */
+  --async-card: #8fdfd0;
+  --async-border: #4fb8a8;
   /* The far end of the breath a RUNNING tool card takes (see
      .tool-card.pulsing): each card wash one shade deeper, the same way the
-     bubble washes deepen for --user-pulse / --assistant-pulse. Three tokens
-     because a card wears one of three washes (generic grey, skill turquoise,
-     subagent teal) and the breath must stay inside whichever it wears. */
+     bubble washes deepen for --user-pulse / --assistant-pulse. Two tokens
+     because a card wears one of two washes (generic grey, async teal) and
+     the breath must stay inside whichever it wears. */
   --card-pulse: #e8eaed;
-  --skill-pulse: #c2ebe3;
-  --agent-pulse: #8fddce;
+  --async-pulse: #79d6c4;
   /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
      floats on, so a `token` inside a sentence of prose reads as typeable at a
      glance. A transparent BLACK wash, never a --fg one: --fg flips light in the
@@ -127,16 +121,13 @@
     --clear-divider: #ef4444;
     --final-response: #4ade80;
     --q-border: #facc15;
-    --skill-bg: #12403c;
-    --skill-border: #1f6b62;
-    --agent-card: #0f6b60;
-    --agent-border: #4fc4b0;
+    --async-card: #0c5b52;
+    --async-border: #4fc4b0;
     /* Dark-theme card breath LIFTS the wash instead of deepening it, the same
        inversion --user-pulse / --assistant-pulse make, since deepening a dark
        wash would move the eye too little to read as motion. */
     --card-pulse: #262a34;
-    --skill-pulse: #1a544e;
-    --agent-pulse: #148074;
+    --async-pulse: #127c6f;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 }
@@ -452,24 +443,18 @@ pre {
    wash under the head's fast arc, filling the second the arc stays hidden;
    both drop together under reduced motion below. */
 .tool-card.pulsing { animation: bubble-breathe 4s ease-in-out infinite; }
-/* A skill launch is a handoff, not a tool result: the card carries the one
-   "Launching skill: <name>" line and wears the pale turquoise wash so the
-   handoff is findable among the grey tool cards around it. */
-.tool-card.tool-skill {
-  background: var(--skill-bg);
-  --pulse-to: var(--skill-pulse);
-  border-color: var(--skill-border);
+/* The async wash: a skill handoff and a spawned subagent are each a whole
+   conversation of their own, not one more file read, and the one shared teal
+   makes them findable in a long feed of grey tool cards. Depth no longer
+   tells the two apart — the card's own content does. */
+.tool-card.tool-skill,
+.tool-card.tool-agent,
+.tool-card.tool-task {
+  background: var(--async-card);
+  --pulse-to: var(--async-pulse);
+  border-color: var(--async-border);
 }
 .skill-launch { font-weight: 600; }
-/* A spawned subagent gets the deep teal card: it is a whole conversation of its
-   own, not one more file read, and the wash makes it findable in a long feed.
-   The depth is what separates it from the skill handoff above, which shares its
-   hue family but stays pale. */
-.tool-card.tool-agent, .tool-card.tool-task {
-  background: var(--agent-card);
-  --pulse-to: var(--agent-pulse);
-  border-color: var(--agent-border);
-}
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
