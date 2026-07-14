@@ -313,6 +313,11 @@ func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
 		}
 	}()
 	s.broadcastLocked(BuildReplayFrames(s.translator, f))
+	// The replay adopts the transcript's last main-chain model into the
+	// mirror, so write it through here: a resumed session whose record
+	// predates the write-through (or drifted before the restart) is
+	// corrected to the model it is actually resuming on.
+	s.notifyRegistrarLocked()
 	return nil
 }
 
