@@ -1682,6 +1682,26 @@ identity-distinct string injected by `agent-repl-set-priority' from
         (agent-repl--record-workspace-history)
         (should (equal agent-repl--workspace-history '("a")))))))
 
+(ert-deftest agent-repl-test-record-workspace-history-stamps-last-viewed-at ()
+  "record-workspace-history stamps :last-viewed-at on the activated known workspace."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil))
+      (agent-repl--ws-put "a" :project-dir "/tmp/a")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+                ((symbol-function 'current-time) (lambda () '(25000 0))))
+        (agent-repl--record-workspace-history)
+        (should (equal (agent-repl--ws-get "a" :last-viewed-at) '(25000 0)))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-skips-unknown-stamp ()
+  "record-workspace-history does not stub-create an entry for a foreign persp."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main")))
+        (agent-repl--record-workspace-history)
+        ;; History still records the name, but no hash entry was created.
+        (should (equal agent-repl--workspace-history '("main")))
+        (should-not (agent-repl--ws-known-p "main"))))))
+
 ;;;; ---- Tests: --ws-new ----
 
 (ert-deftest agent-repl-test-ws-new-with-name-delegates-to-workspace-new ()
