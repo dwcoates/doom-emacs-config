@@ -4,6 +4,7 @@ import {
   PermissionItem,
   ResultItem,
   TextItem,
+  ThinkingItem,
   ToolItem,
   UserTurnItem,
 } from "../src/store.js";
@@ -179,6 +180,28 @@ describe("ConversationStore text blocks", () => {
     // Assert
     const item = store.state.items[0] as TextItem;
     expect(item).toMatchObject({ kind: "text", text: "hello", done: true });
+  });
+
+  it("keeps a subagent text block's owning call from its start frame", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(
+      frame("text-start", { block_id: "b1", message_id: "m1", parent_tool_use_id: "task1" }),
+    );
+    // Assert
+    expect((store.state.items[0] as TextItem).parentToolUseId).toBe("task1");
+  });
+
+  it("keeps a subagent thinking block's owning call from its start frame", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(
+      frame("thinking-start", { block_id: "b1", message_id: "m1", parent_tool_use_id: "task1" }),
+    );
+    // Assert
+    expect((store.state.items[0] as ThinkingItem).parentToolUseId).toBe("task1");
   });
 
   it("stamps a text block with the time its start frame carried", () => {

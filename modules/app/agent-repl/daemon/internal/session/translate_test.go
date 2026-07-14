@@ -235,6 +235,56 @@ func TestTranslatorParentToolUseIDPropagatesToToolUseStart(t *testing.T) {
 	}
 }
 
+func TestTranslatorParentToolUseIDPropagatesToStreamedTextStart(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a subagent's streamed prose opens under its spawning call.
+	frames := tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`))
+	// Assert
+	if frames[0].(*protocol.TextStartFrame).ParentToolUseID != "task1" {
+		t.Errorf("parent = %+v", frames[0])
+	}
+}
+
+func TestTranslatorParentToolUseIDPropagatesToStreamedThinkingStart(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`))
+	// Assert
+	if frames[0].(*protocol.ThinkingStartFrame).ParentToolUseID != "task1" {
+		t.Errorf("parent = %+v", frames[0])
+	}
+}
+
+func TestTranslatorMainChainTextStartCarriesNoParent(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — no parent_tool_use_id on the event at all.
+	frames := tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`))
+	// Assert
+	if frames[0].(*protocol.TextStartFrame).ParentToolUseID != "" {
+		t.Errorf("parent = %+v", frames[0])
+	}
+}
+
+func TestTranslatorParentToolUseIDPropagatesToSynthesizedTextStart(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a non-streamed subagent message synthesizes its text frames.
+	frames := tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","message":{"id":"msgZ","role":"assistant","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}}`))
+	// Assert — first frame is the text-start (any model frame precedes only on main-chain).
+	for _, f := range frames {
+		if ts, ok := f.(*protocol.TextStartFrame); ok {
+			if ts.ParentToolUseID != "task1" {
+				t.Errorf("parent = %+v", ts)
+			}
+			return
+		}
+	}
+	t.Fatalf("no text-start frame in %v", frames)
+}
+
 // --- tool results --------------------------------------------------------------
 
 func TestTranslatorToolResultCarriesBashRenderHint(t *testing.T) {

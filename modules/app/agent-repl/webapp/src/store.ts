@@ -35,6 +35,8 @@ export interface TextItem {
   kind: "text";
   blockId: string;
   messageId: string;
+  /** Owning subagent call; undefined on main-chain blocks. */
+  parentToolUseId?: string;
   text: string;
   done: boolean;
   /**
@@ -48,6 +50,8 @@ export interface ThinkingItem {
   kind: "thinking";
   blockId: string;
   messageId: string;
+  /** Owning subagent call; undefined on main-chain blocks. */
+  parentToolUseId?: string;
   text: string;
   done: boolean;
   signature?: string;
@@ -479,6 +483,7 @@ export class ConversationStore {
           kind: "text",
           blockId: frame.block_id,
           messageId: frame.message_id,
+          parentToolUseId: frame.parent_tool_use_id,
           text: "",
           done: false,
           ts: frame.ts,
@@ -502,6 +507,7 @@ export class ConversationStore {
           kind: "thinking",
           blockId: frame.block_id,
           messageId: frame.message_id,
+          parentToolUseId: frame.parent_tool_use_id,
           text: "",
           done: false,
         });
