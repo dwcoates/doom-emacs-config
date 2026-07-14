@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  PanelContext,
+  activityTicker,
   backfillChunks,
   compactionBannerHtml,
   diffHtml,
@@ -2570,5 +2572,169 @@ describe("repinsToTail", () => {
   it("keeps a pinned feed following its tail", () => {
     // Arrange + Act + Assert
     expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true })).toBe(true);
+  });
+});
+
+// --- activity panels ------------------------------------------------------------
+
+/** An Agent card the panel tests spawn children under. */
+function agentTool(id = "a1"): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: id,
+    messageId: "m1",
+    toolName: "Agent",
+    inputJson: "{}",
+    input: { description: "scout the repo" },
+    inputDone: true,
+  };
+}
+
+/** A nested Bash call carrying its spawner. */
+function childBash(id = "t2", parent = "a1"): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: id,
+    messageId: "m1",
+    toolName: "Bash",
+    parentToolUseId: parent,
+    inputJson: "{}",
+    input: { command: "ls -la" },
+    inputDone: true,
+  };
+}
+
+/** A pending permission prompt gating TOOLUSEID. */
+function childPermission(toolUseId: string, resolved = false): ConversationItem {
+  return {
+    kind: "permission",
+    requestId: "p1",
+    toolUseId,
+    toolName: "Bash",
+    input: {},
+    ...(resolved ? { resolution: { decision: "allow" as const } } : {}),
+  };
+}
+
+/** A PanelContext holding CHILDREN under a1, open per OPEN. */
+function panelCtx(children: ConversationItem[], open = false): PanelContext {
+  return {
+    children: new Map([["a1", children]]),
+    isOpen: () => open,
+  };
+}
+
+describe("activity panel", () => {
+  it("renders no activity fold on a card without children", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([]));
+    // Assert
+    expect(html).not.toContain("agent-activity");
+  });
+
+  it("shows the ticker face while closed and none of the child feed", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([childBash()]));
+    // Assert
+    expect(html).toContain("agent-ticker");
+    expect(html).toContain("1 step · Bash: ls -la");
+    expect(html).not.toContain("agent-panel");
+  });
+
+  it("renders the child feed inside the open panel", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([childBash()], true));
+    // Assert
+    expect(html).toContain("agent-panel");
+    expect(html).toContain("tool-bash");
+    expect(html).toContain("$ ls -la");
+  });
+
+  it("badges the card while a child permission waits", () => {
+    // Arrange + Act
+    const html = renderItem(
+      agentTool(),
+      undefined,
+      undefined,
+      false,
+      panelCtx([childBash(), childPermission("t2")]),
+    );
+    // Assert — a closed card must never silently block the turn.
+    expect(html).toContain("needs permission");
+  });
+
+  it("drops the badge once the child permission resolves", () => {
+    // Arrange + Act
+    const html = renderItem(
+      agentTool(),
+      undefined,
+      undefined,
+      false,
+      panelCtx([childBash(), childPermission("t2", true)]),
+    );
+    // Assert
+    expect(html).not.toContain("needs permission");
+  });
+
+  it("ignores suppressed children entirely", () => {
+    // Arrange — ToolSearch renders as nothing everywhere.
+    const suppressed: ToolItem = { ...childBash(), toolName: "ToolSearch" };
+    // Act
+    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([suppressed]));
+    // Assert
+    expect(html).not.toContain("agent-activity");
+  });
+
+  it("attaches the fold to a non-agent spawner just the same", () => {
+    // Arrange — a Workflow's children confine like an Agent's.
+    const wf: ToolItem = { ...agentTool(), toolName: "Workflow" };
+    // Act
+    const html = renderItem(wf, undefined, undefined, false, panelCtx([childBash()]));
+    // Assert
+    expect(html).toContain("agent-activity");
+  });
+});
+
+describe("activityTicker", () => {
+  it("counts a single child in the singular", () => {
+    // Arrange + Act + Assert
+    expect(activityTicker([childBash()])).toBe("1 step · Bash: ls -la");
+  });
+
+  it("headlines the most recent child with something to say", () => {
+    // Arrange
+    const older = childBash("t2");
+    const newer: ToolItem = { ...childBash("t3"), input: { command: "make test" } };
+    // Act + Assert
+    expect(activityTicker([older, newer])).toBe("2 steps · Bash: make test");
+  });
+
+  it("falls back to the count alone when no child offers a line", () => {
+    // Arrange — a finished thinking block has nothing live to say.
+    const quiet: ConversationItem = {
+      kind: "thinking",
+      blockId: "k1",
+      messageId: "m1",
+      parentToolUseId: "a1",
+      text: "hmm",
+      done: true,
+    };
+    // Act + Assert
+    expect(activityTicker([quiet])).toBe("1 step");
+  });
+
+  it("caps a runaway line so the ticker stays a line", () => {
+    // Arrange
+    const long: ToolItem = { ...childBash(), input: { command: "x".repeat(200) } };
+    // Act
+    const ticker = activityTicker([long]);
+    // Assert
+    expect(ticker.length).toBeLessThan(100);
+    expect(ticker.endsWith("…")).toBe(true);
+  });
+
+  it("voices a waiting child permission", () => {
+    // Arrange + Act + Assert
+    expect(activityTicker([childPermission("t2")])).toBe("1 step · awaiting permission: Bash");
   });
 });
