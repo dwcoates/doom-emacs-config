@@ -18,7 +18,13 @@ import {
 import { SubagentEntry } from "../src/agents.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { TIMER_SLOT } from "../src/timer.js";
-import { ConversationItem, ResultItem, TextItem, ToolItem } from "../src/store.js";
+import {
+  ConversationItem,
+  ResultItem,
+  TextItem,
+  ThinkingItem,
+  ToolItem,
+} from "../src/store.js";
 
 /** A settled roster entry for one spawned subagent. */
 function subagentEntry(over: Partial<SubagentEntry> = {}): SubagentEntry {
@@ -70,6 +76,16 @@ function text(blockId: string, done = true): ConversationItem {
 /** A thinking block item, finished unless DONE says otherwise. */
 function thinking(blockId: string, done = true, text = "hmm"): ConversationItem {
   return { kind: "thinking", blockId, messageId: "m1", text, done };
+}
+
+/** A subagent's text block: TEXT plus the parent that confines it. */
+function subagentText(blockId: string, done = true): ConversationItem {
+  return { ...(text(blockId, done) as TextItem), parentToolUseId: "a1" };
+}
+
+/** A subagent's thinking block, as subagentText. */
+function subagentThinking(blockId: string, done = true): ConversationItem {
+  return { ...(thinking(blockId, done) as ThinkingItem), parentToolUseId: "a1" };
 }
 
 /** A result frame closing a turn with the given subtype. */
@@ -1656,6 +1672,26 @@ describe("finalResponses", () => {
     expect([...finals.chips.keys()]).toEqual(["b1"]);
   });
 
+  it("never crowns a subagent's parented text as the turn's answer", () => {
+    // Arrange — the subagent's aside lands after the real answer.
+    const items = [userTurnAt(9, 0), text("b1"), subagentText("b2"), result()];
+    // Act
+    const finals = finalResponses(items);
+    // Assert — the main-chain block keeps the pairing.
+    expect([...finals.chips.keys()]).toEqual(["b1"]);
+  });
+
+  it("leaves the chip standalone when only subagent text preceded it", () => {
+    // Arrange — a turn that answered through tools alone.
+    const closer = result();
+    const items = [userTurnAt(9, 0), subagentText("b1"), closer];
+    // Act
+    const finals = finalResponses(items);
+    // Assert
+    expect(finals.chips.size).toBe(0);
+    expect(finals.swallowed.has(closer)).toBe(false);
+  });
+
   it("pairs the completed turn's answer with the very chip that closes it", () => {
     // Arrange — the pairing is what lets the bubble draw the chip itself.
     const closer = result();
@@ -1825,6 +1861,24 @@ describe("pulseTarget: the working frontier", () => {
     const pulse = pulseTarget(items, true);
     // Assert
     expect(pulse).toEqual({ kind: "text", blockId: "b2" });
+  });
+
+  it("skips a subagent's parented text and pulses the main frontier behind it", () => {
+    // Arrange — the subagent chatters after the main agent's last word.
+    const items = [userTurnAt(9, 0), text("b1"), subagentText("b2")];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "text", blockId: "b1" });
+  });
+
+  it("keeps pulsing the main frontier while a subagent thinks", () => {
+    // Arrange — the panel's spinner covers the subagent's own beat.
+    const items = [userTurnAt(9, 0), text("b1"), subagentThinking("k1", false)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "text", blockId: "b1" });
   });
 
   it("stills the pulse once the turn ends", () => {

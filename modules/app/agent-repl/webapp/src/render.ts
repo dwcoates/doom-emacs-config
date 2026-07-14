@@ -674,6 +674,10 @@ export interface FinalResponses {
  * The pairing is what nests a completed turn's chip inside its answer.
  * A completed turn that wrote no answer to nest it in (one that only ran
  * tools) pairs with nothing, so its chip keeps printing standalone.
+ *
+ * Main-chain text only: a subagent's parented prose is commentary inside
+ * its card's panel, never the turn's answer, so it can neither win the
+ * pairing nor break an earlier main-chain candidate's claim.
  */
 export function finalResponses(items: readonly ConversationItem[]): FinalResponses {
   const chips = new Map<string, ResultItem>();
@@ -682,7 +686,7 @@ export function finalResponses(items: readonly ConversationItem[]): FinalRespons
   for (const item of items) {
     if (item.kind === "user-turn") {
       lastText = null;
-    } else if (item.kind === "text") {
+    } else if (item.kind === "text" && item.parentToolUseId === undefined) {
       lastText = item.blockId;
     } else if (item.kind === "result") {
       if (lastText !== null && isTurnComplete(item)) {
@@ -764,7 +768,10 @@ export type PulseTarget =
  * The scan stops at the newest user turn: the previous turn's answer belongs
  * to a question already answered, so a fresh prompt never breathes life back
  * into it. What the feed never drew (`rendersEmpty`) is skipped outright — a
- * pulse is stilled only by progress the user can actually see.
+ * pulse is stilled only by progress the user can actually see — and so are
+ * a subagent's parented blocks: their prose lives in its card's panel, so
+ * it neither carries the main feed's pulse nor silences the main-chain
+ * frontier behind it.
  */
 export function pulseTarget(
   items: readonly ConversationItem[],
@@ -778,6 +785,14 @@ export function pulseTarget(
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
     if (rendersEmpty(item, finals)) continue;
+    // A subagent's parented blocks live in its card's panel: they neither
+    // carry the main feed's pulse nor count as visible progress stilling it.
+    if (
+      (item.kind === "text" || item.kind === "thinking" || item.kind === "tool") &&
+      item.parentToolUseId !== undefined
+    ) {
+      continue;
+    }
     if (item.kind === "user-turn") {
       return atTail ? { kind: "user-turn", requestId: item.requestId } : null;
     }
