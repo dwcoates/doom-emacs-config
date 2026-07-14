@@ -416,17 +416,19 @@ func (t *Translator) onStreamEvent(evt *protocol.L1Event) []protocol.L2Frame {
 			blk.id = t.nextBlockID()
 			t.open[key(se.Index)] = blk
 			return []protocol.L2Frame{&protocol.TextStartFrame{
-				Envelope:  protocol.Envelope{Type: "text-start"},
-				BlockID:   blk.id,
-				MessageID: msgID,
+				Envelope:        protocol.Envelope{Type: "text-start"},
+				BlockID:         blk.id,
+				MessageID:       msgID,
+				ParentToolUseID: parent,
 			}}
 		case "thinking":
 			blk.id = t.nextBlockID()
 			t.open[key(se.Index)] = blk
 			return []protocol.L2Frame{&protocol.ThinkingStartFrame{
-				Envelope:  protocol.Envelope{Type: "thinking-start"},
-				BlockID:   blk.id,
-				MessageID: msgID,
+				Envelope:        protocol.Envelope{Type: "thinking-start"},
+				BlockID:         blk.id,
+				MessageID:       msgID,
+				ParentToolUseID: parent,
 			}}
 		case "tool_use":
 			blk.toolUseID = se.ContentBlock.ID
@@ -621,14 +623,14 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 		case "text":
 			id := t.nextBlockID()
 			frames = append(frames,
-				&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}, BlockID: id, MessageID: msg.ID},
+				&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}, BlockID: id, MessageID: msg.ID, ParentToolUseID: evt.ParentToolUseID},
 				&protocol.TextDeltaFrame{Envelope: protocol.Envelope{Type: "text-delta"}, BlockID: id, Text: block.Text},
 				&protocol.TextEndFrame{Envelope: protocol.Envelope{Type: "text-end"}, BlockID: id, FinalText: block.Text},
 			)
 		case "thinking":
 			id := t.nextBlockID()
 			frames = append(frames,
-				&protocol.ThinkingStartFrame{Envelope: protocol.Envelope{Type: "thinking-start"}, BlockID: id, MessageID: msg.ID},
+				&protocol.ThinkingStartFrame{Envelope: protocol.Envelope{Type: "thinking-start"}, BlockID: id, MessageID: msg.ID, ParentToolUseID: evt.ParentToolUseID},
 				&protocol.ThinkingDeltaFrame{Envelope: protocol.Envelope{Type: "thinking-delta"}, BlockID: id, Text: block.Thinking},
 				&protocol.ThinkingEndFrame{Envelope: protocol.Envelope{Type: "thinking-end"}, BlockID: id, FinalText: block.Thinking, Signature: block.Signature},
 			)

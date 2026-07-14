@@ -126,6 +126,10 @@ type TextStartFrame struct {
 	Envelope
 	BlockID   string `json:"block_id"`
 	MessageID string `json:"message_id"`
+	// The subagent tool call this block belongs to; empty (and omitted)
+	// on main-chain blocks. Only the start frame carries it — delta/end
+	// key by block_id into a block that already knows its parent.
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 }
 
 type TextDeltaFrame struct {
@@ -146,6 +150,8 @@ type ThinkingStartFrame struct {
 	Envelope
 	BlockID   string `json:"block_id"`
 	MessageID string `json:"message_id"`
+	// As TextStartFrame: the owning subagent call, omitted on main-chain.
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 }
 
 type ThinkingDeltaFrame struct {
