@@ -476,6 +476,96 @@ overlay.  Tests the workspace-anchored restoration path."
         (let ((text (buffer-substring-no-properties (point-min) (point-max))))
           (should-not (string-match-p "merged into:" text)))))))
 
+(ert-deftest agent-repl-drawer-test-merged-detail-shows-merge-time ()
+  "A MERGED-section entry's folded detail shows a relative merge time."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merged
+                                       :merge-completed-at (- (float-time) 1820))
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          ;; Compound, seconds-resolution format on a real merged entry;
+          ;; matched by shape rather than exact value to tolerate the
+          ;; sub-second float-time drift between stamp and render.
+          (should (string-match-p "merged: +[0-9]+m [0-9]+s ago" text)))))))
+
+(ert-deftest agent-repl-drawer-test-merged-detail-time-has-face ()
+  "The merge-time value carries `agent-repl-drawer-detail-merge-time'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merged
+                                       :merge-completed-at (- (float-time) 1820))
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let* ((all (buffer-substring-no-properties (point-min) (point-max)))
+               (pos (string-match "[0-9]+m [0-9]+s ago" all))
+               (f (and pos (get-text-property (1+ pos) 'face))))
+          (should (memq 'agent-repl-drawer-detail-merge-time
+                        (if (listp f) f (list f)))))))))
+
+(ert-deftest agent-repl-drawer-test-merged-detail-omits-merge-time-when-unset ()
+  "A MERGED-section entry with no `:merge-completed-at' omits the merge-time line."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :repl-state :merged
+                                       :merge-target-name "DWC/parent-branch")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "merged: +[0-9]" text)))))))
+
+(ert-deftest agent-repl-drawer-test-non-merged-detail-omits-merge-time ()
+  "A non-MERGED entry omits the merge-time line even when `:merge-completed-at' is set."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "ws"
+                                       :priority "p1"
+                                       :project-dir "/tmp/"
+                                       :detail-branch "feature/x"
+                                       :merge-completed-at (- (float-time) 1820))
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (pcase args
+                   (`("-C" ,dir "rev-parse" "--git-common-dir")
+                    (concat (file-name-as-directory dir) ".git"))
+                   (_ (error "unmocked git-string-quiet: %S" args))))))
+      (agent-repl-drawer-test--with-buffer
+        (agent-repl-drawer--ensure-expanded-set)
+        (puthash "ws" t agent-repl-drawer--expanded-set)
+        (agent-repl-drawer--render)
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should-not (string-match-p "merged: +[0-9]" text)))))))
+
 ;;;; ---- Ahead-counts (patch-id equivalence) ----
 
 (ert-deftest agent-repl-drawer-test-unmerged-ahead-count-uses-cherry-pick ()
@@ -808,6 +898,39 @@ overlay.  Tests the workspace-anchored restoration path."
   (should (equal (agent-repl-drawer--format-duration 600)  "10m ago"))
   (should (equal (agent-repl-drawer--format-duration 7200) "2.0h ago"))
   (should (equal (agent-repl-drawer--format-duration 172800) "2.0d ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-seconds-only ()
+  "`--format-merge-ago' shows just the seconds field under a minute."
+  (should (equal (agent-repl-drawer--format-merge-ago 20) "20s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-minutes-and-seconds ()
+  "`--format-merge-ago' compounds minutes and seconds (\"30m 20s ago\")."
+  (should (equal (agent-repl-drawer--format-merge-ago 1820) "30m 20s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-hours-minutes-seconds ()
+  "`--format-merge-ago' compounds hours, minutes, and seconds."
+  (should (equal (agent-repl-drawer--format-merge-ago 3725) "1h 2m 5s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-days ()
+  "`--format-merge-ago' includes days as the largest unit when present."
+  (should (equal (agent-repl-drawer--format-merge-ago 90061)
+                 "1d 1h 1m 1s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-keeps-intermediate-zeros ()
+  "`--format-merge-ago' keeps intermediate zero units contiguous down to seconds."
+  (should (equal (agent-repl-drawer--format-merge-ago 3601) "1h 0m 1s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-drops-leading-zero-units ()
+  "`--format-merge-ago' omits leading zero units above the largest non-zero one."
+  (should (equal (agent-repl-drawer--format-merge-ago 65) "1m 5s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-rounds-subsecond ()
+  "`--format-merge-ago' rounds sub-second precision to whole seconds."
+  (should (equal (agent-repl-drawer--format-merge-ago 20.6) "21s ago")))
+
+(ert-deftest agent-repl-drawer-test-format-merge-ago-clamps-negative ()
+  "`--format-merge-ago' clamps a negative elapsed value to \"0s ago\"."
+  (should (equal (agent-repl-drawer--format-merge-ago -5) "0s ago")))
 
 (ert-deftest agent-repl-drawer-test-detail-values-have-distinct-faces ()
   "Detail-line values carry their per-field faces (not the generic summary face)."
