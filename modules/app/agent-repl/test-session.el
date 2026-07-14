@@ -483,6 +483,31 @@ workspace's durable session id."
         (agent-repl-default-config-dir nil))
     (should-not (agent-repl--compute-config-dir "/home/user/multi/proj"))))
 
+(ert-deftest agent-repl-test-compute-config-dir-string-override-wins ()
+  "A workspace :config-dir-override string beats the path-computed account."
+  (agent-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+      (agent-repl--ws-put "ws1" :config-dir-override "~/.claude-personal")
+      (cl-letf (((symbol-function 'agent-repl--ws-for-dir) (lambda (_dir) "ws1")))
+        (should (equal (agent-repl--compute-config-dir "/home/user/multi/repoA/proj")
+                       (expand-file-name "~/.claude-personal")))))))
+
+(ert-deftest agent-repl-test-compute-config-dir-default-override-yields-nil ()
+  "A :default override selects the CLI's own root even under the multi-repo root."
+  (agent-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+      (agent-repl--ws-put "ws1" :config-dir-override :default)
+      (cl-letf (((symbol-function 'agent-repl--ws-for-dir) (lambda (_dir) "ws1")))
+        (should-not (agent-repl--compute-config-dir "/home/user/multi/repoA/proj"))))))
+
+(ert-deftest agent-repl-test-compute-config-dir-no-override-falls-through ()
+  "A workspace without an override still resolves the path-computed account."
+  (agent-repl-test--with-clean-state
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+      (cl-letf (((symbol-function 'agent-repl--ws-for-dir) (lambda (_dir) "ws1")))
+        (should (equal (agent-repl--compute-config-dir "/home/user/multi/repoA/proj")
+                       (expand-file-name agent-repl-multi-repo-config-dir)))))))
+
 (ert-deftest agent-repl-test-compute-config-dir-nil-dir ()
   "compute-config-dir with nil project-dir should signal an error."
   (should-error (agent-repl--compute-config-dir nil) :type 'error))
@@ -1795,6 +1820,21 @@ when the saved plist carries none."
     (agent-repl--ws-put "ws1" :model "opus")
     (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
     (should (equal (agent-repl--ws-get "ws1" :model) "opus"))))
+
+(ert-deftest agent-repl-test-apply-display-state-sets-config-dir-override-from-saved ()
+  "apply-display-state restores :config-dir-override so a switched workspace
+does not silently revert to its path-computed account after a restart."
+  (agent-repl-test--with-clean-state
+    (agent-repl--apply-display-state "ws1" '(:config-dir-override "~/.claude-chesscom"))
+    (should (equal (agent-repl--ws-get "ws1" :config-dir-override) "~/.claude-chesscom"))))
+
+(ert-deftest agent-repl-test-apply-display-state-config-dir-override-falls-back-to-plist ()
+  "apply-display-state keeps the in-memory :config-dir-override when saved
+carries none (an account_changed_ sentinel handled before any save)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :config-dir-override :default)
+    (agent-repl--apply-display-state "ws1" '(:project-dir "/x"))
+    (should (eq (agent-repl--ws-get "ws1" :config-dir-override) :default))))
 
 (ert-deftest agent-repl-test-apply-display-state-sets-backend-from-saved ()
   "apply-display-state copies :backend out of the saved plist onto the ws."

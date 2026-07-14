@@ -318,6 +318,7 @@ launches under the same model."
                                 :saved-tab-index ,(agent-repl--ws-get ws :saved-tab-index)
                                 :backend ,(agent-repl--ws-get ws :backend)
                                 :backend-session-stash ,(agent-repl--ws-get ws :backend-session-stash)
+                                :config-dir-override ,(agent-repl--ws-get ws :config-dir-override)
                                 :frontend ,(agent-repl--ws-get ws :frontend)
                                 :frontend-explicit ,(agent-repl--ws-get ws :frontend-explicit)
                                 :fork-session-id ,(agent-repl--ws-get ws :fork-session-id)

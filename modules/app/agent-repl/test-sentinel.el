@@ -165,6 +165,76 @@ Guards the reverse shadowing direction of the new session_dead_ entry."
         (should (eq (plist-get dispatched-handler :callback)
                     'agent-repl--on-session-start-event))))))
 
+(ert-deftest agent-repl-test-sentinel-dispatches-account-changed ()
+  "An account_changed_<sid> file dispatches to the account-changed handler."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched-handler nil))
+      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (_file handler) (setq dispatched-handler handler))))
+        (agent-repl--dispatch-sentinel-file "/dir/account_changed_abc123")
+        (should dispatched-handler)
+        (should (eq (plist-get dispatched-handler :callback)
+                    'agent-repl--on-account-changed-event))))))
+
+;;;; ---- Tests: agent-repl--on-account-changed-event ----
+
+(ert-deftest agent-repl-test-account-changed-stores-string-override ()
+  "The handler stores the daemon's config dir as the workspace override
+and persists it via state-save."
+  (agent-repl-test--with-clean-state
+    (let ((saved nil))
+      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (_method path)
+                   (should (equal path "/sessions/s_1/account"))
+                   '((config_dir . "/home/u/.claude-chesscom") (email . "dodge@chess.com"))))
+                ((symbol-function 'agent-repl--state-save)
+                 (lambda (ws) (setq saved ws))))
+        (agent-repl--on-account-changed-event "ws1" "/dir")
+        (should (equal (agent-repl--ws-get "ws1" :config-dir-override)
+                       "/home/u/.claude-chesscom"))
+        (should (equal saved "ws1"))))))
+
+(ert-deftest agent-repl-test-account-changed-maps-empty-dir-to-default ()
+  "The daemon's empty config dir (the CLI's own root) stores as :default,
+distinguishable from the nil of no-override-at-all."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-api)
+               (lambda (_method _path) '((config_dir . "") (email . "a@b.c"))))
+              ((symbol-function 'agent-repl--state-save) #'ignore))
+      (agent-repl--on-account-changed-event "ws1" "/dir")
+      (should (eq (agent-repl--ws-get "ws1" :config-dir-override) :default)))))
+
+(ert-deftest agent-repl-test-account-changed-fetch-failure-leaves-override ()
+  "A failed config-dir fetch warns and leaves the override untouched —
+acting on a guess could pin the workspace to the wrong account."
+  (agent-repl-test--with-clean-state
+    (let ((warned nil))
+      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+      (agent-repl--ws-put "ws1" :config-dir-override "/old/root")
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (_method _path) (error "daemon unreachable")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        (agent-repl--on-account-changed-event "ws1" "/dir")
+        (should warned)
+        (should (equal (agent-repl--ws-get "ws1" :config-dir-override) "/old/root"))))))
+
+(ert-deftest agent-repl-test-account-changed-without-session-id-warns ()
+  "A workspace with no :frontend-session-id warns instead of fetching."
+  (agent-repl-test--with-clean-state
+    (let ((warned nil)
+          (fetched nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-api)
+                 (lambda (&rest _) (setq fetched t)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        (agent-repl--on-account-changed-event "ws1" "/dir")
+        (should warned)
+        (should-not fetched)
+        (should-not (agent-repl--ws-get "ws1" :config-dir-override))))))
+
 (ert-deftest agent-repl-test-sentinel-dispatch-returns-nil-for-unknown ()
   "dispatch-sentinel-file should return nil for an unrecognized filename."
   (agent-repl-test--with-clean-state

@@ -532,6 +532,23 @@ longer exists on the next hydration."
     ;; No :project-dir set -- should not error
     (agent-repl--state-save "ws")))
 
+(ert-deftest agent-repl-test-state-save-includes-config-dir-override ()
+  "state-save serializes `:config-dir-override' so a switched workspace's
+account survives restarts."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :config-dir-override "/home/u/.claude-chesscom")
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--state-save "ws")
+            (let ((data (agent-repl--read-sexp-file (agent-repl--state-file tmpdir))))
+              (should (equal (plist-get data :config-dir-override)
+                             "/home/u/.claude-chesscom"))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest agent-repl-test-state-save-includes-priority ()
   "state-save serializes `:priority' so badges survive restarts."
   (agent-repl-test--with-clean-state
