@@ -757,6 +757,42 @@ func TestTranslatorToolUseProgressMapsToDedicatedFrame(t *testing.T) {
 	}
 }
 
+func TestTranslatorToolUseProgressCarriesStructuredFields(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"tool_use_progress","data":{"tool_use_id":"t1","tool_name":"Bash","elapsed_time_seconds":3.5}}`))
+	// Assert — the raw clock and name travel beside the synthesized text.
+	progress := frames[0].(*protocol.ToolUseProgressFrame)
+	if progress.ToolName != "Bash" || progress.ElapsedSeconds != 3.5 {
+		t.Errorf("progress = %+v", progress)
+	}
+}
+
+func TestTranslatorToolUseProgressAttributesSubagentParent(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a subagent's heartbeat names its spawning tool call.
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"tool_use_progress","data":{"tool_use_id":"t1","tool_name":"Grep","parent_tool_use_id":"agent1","elapsed_time_seconds":2}}`))
+	// Assert
+	progress := frames[0].(*protocol.ToolUseProgressFrame)
+	if progress.ParentToolUseID != "agent1" {
+		t.Errorf("parent = %q", progress.ParentToolUseID)
+	}
+}
+
+func TestTranslatorToolUseProgressNullParentStaysEmpty(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — the SDK sends parent_tool_use_id: null for main-chain tools.
+	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"tool_use_progress","data":{"tool_use_id":"t1","tool_name":"Bash","parent_tool_use_id":null,"elapsed_time_seconds":1}}`))
+	// Assert — omitempty keeps the field off the wire entirely.
+	progress := frames[0].(*protocol.ToolUseProgressFrame)
+	if progress.ParentToolUseID != "" {
+		t.Errorf("parent = %q", progress.ParentToolUseID)
+	}
+}
+
 // --- errors and closure --------------------------------------------------------------
 
 func TestTranslatorShimErrorMapsCode(t *testing.T) {
