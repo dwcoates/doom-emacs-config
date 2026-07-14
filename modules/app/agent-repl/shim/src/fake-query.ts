@@ -232,6 +232,87 @@ export function createFakeQuery(
     emitResult("success", closing);
   };
 
+  /**
+   * A backgrounded tool turn: the spawn's progress heartbeat, the
+   * announcing result (observed real shape), and the harness
+   * task-notification that completes it — the whole detached-work frame
+   * family, so e2e runs exercise tool_progress, task-notification, and
+   * tailer plumbing instead of never seeing those frames at all.
+   */
+  const runBackgroundTurn = (messageId: string, command: string): void => {
+    const toolUseId = `toolu_fake_${turn}`;
+    const taskId = `fakebg${turn}`;
+    emitStream({
+      type: "message_start",
+      message: { id: messageId, role: "assistant", model, usage },
+    });
+    emitStream({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: toolUseId, name: "Bash", input: {} },
+    });
+    emitStream({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "input_json_delta",
+        partial_json: JSON.stringify({ command, run_in_background: true }),
+      },
+    });
+    emitStream({ type: "content_block_stop", index: 0 });
+    emitStream({ type: "message_stop" });
+    emit({
+      type: "tool_progress",
+      tool_use_id: toolUseId,
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 1,
+    });
+    emit({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-0/fake/${taskId}/tasks/${taskId}.output.`,
+            is_error: false,
+          },
+        ],
+      },
+    });
+    emit({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `<task-notification>\n<task-id>${taskId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>completed</status>\n<summary>Background command completed</summary>\n</task-notification>`,
+          },
+        ],
+      },
+    });
+    const closing = "Backgrounded the command.";
+    emitTextBlock(messageId, 1, closing);
+    emit({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        id: messageId,
+        role: "assistant",
+        model,
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: closing }],
+        usage,
+      },
+    });
+    emitResult("success", closing);
+  };
+
   const main = async (): Promise<void> => {
     emit({
       type: "system",
@@ -258,6 +339,8 @@ export function createFakeQuery(
       const messageId = `msg_fake_${turn}`;
       if (text.startsWith("!tool ")) {
         await runToolTurn(messageId, text.slice("!tool ".length));
+      } else if (text.startsWith("!bg ")) {
+        runBackgroundTurn(messageId, text.slice("!bg ".length));
       } else {
         runTextTurn(messageId, text);
       }
