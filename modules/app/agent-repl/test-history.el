@@ -565,6 +565,39 @@ account survives restarts."
               (should (equal (plist-get data :priority) "p1"))))
         (delete-directory tmpdir t)))))
 
+(ert-deftest agent-repl-test-state-save-includes-last-viewed-at ()
+  "state-save serializes `:last-viewed-at' so the picker sorts dead workspaces by view time."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :last-viewed-at '(25000 0))
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            (agent-repl--state-save "ws")
+            (let ((data (agent-repl--read-sexp-file (agent-repl--state-file tmpdir))))
+              (should (equal (plist-get data :last-viewed-at) '(25000 0)))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-state-save-preserves-persisted-last-viewed-at ()
+  "state-save keeps the on-disk `:last-viewed-at' when the plist lacks one (stray save)."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
+            ;; Seed a prior view time on disk; the plist carries none.
+            (agent-repl--write-sexp-file
+             (agent-repl--state-file tmpdir)
+             '(:project-dir "x" :last-viewed-at (25000 0)))
+            (agent-repl--state-save "ws")
+            (let ((data (agent-repl--read-sexp-file (agent-repl--state-file tmpdir))))
+              (should (equal (plist-get data :last-viewed-at) '(25000 0)))))
+        (delete-directory tmpdir t)))))
+
 (ert-deftest agent-repl-test-state-save-includes-backend ()
   "state-save serializes `:backend' so a codex ws resumes via codex."
   (agent-repl-test--with-clean-state
