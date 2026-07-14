@@ -317,6 +317,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "sentinel")
 (agent-repl--load-module "input")
+;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
+;; `agent-repl-input-mode-map' (input.el) and writes captured images under
+;; the workspace dir via `agent-repl--ws-dir' (status.el) -- both already
+;; loaded above.  Named `clipboard-image', NOT `image', so its `provide'
+;; never shadows Emacs's built-in `image' feature.
+(agent-repl--load-module "clipboard-image")
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
