@@ -391,10 +391,29 @@ function childLine(item: ConversationItem): string {
   }
 }
 
-/** The input field that best headlines a tool call, "" when none. */
+/**
+ * The input field that best headlines a tool call, "" when none. The
+ * key list is ordered most-specific-first and serves every consumer of
+ * a one-line identity: tickers, tab labels, and the generic folded
+ * input.
+ */
 function toolHeadline(item: ToolItem): string {
   if (!item.input) return "";
-  for (const key of ["command", "file_path", "description", "pattern", "skill"]) {
+  const keys = [
+    "command",
+    "file_path",
+    "description",
+    "pattern",
+    "skill",
+    "url",
+    "query",
+    "subject",
+    "name",
+    "task_id",
+    "reason",
+    "prompt",
+  ];
+  for (const key of keys) {
     const v = item.input[key];
     if (typeof v === "string" && v !== "") return v.replace(/\s+/g, " ");
   }
@@ -536,6 +555,15 @@ function toolInput(item: ToolItem): string {
   // turn or the agent's own text.
   if (item.toolName === "Skill" && item.input && typeof item.input.skill === "string") {
     return `<div class="skill-launch">Launching skill: ${escapeHtml(item.input.skill)}</div>`;
+  }
+  // Any other tool folds to a headline when its input offers one: the
+  // interesting field on a line, the full JSON one click away (the same
+  // fold the subagent card wears). No headline keeps the raw capped JSON.
+  const headline = toolHeadline(item);
+  if (headline !== "") {
+    return `<div class="tool-input folded-input"><div class="file-path folded-headline">${escapeHtml(
+      headline,
+    )}</div><pre class="folded-json">${escapeHtml(item.inputJson)}</pre></div>`;
   }
   return `<pre class="tool-input">${escapeHtml(item.inputJson)}</pre>`;
 }

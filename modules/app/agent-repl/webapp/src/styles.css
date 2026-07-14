@@ -481,6 +481,12 @@ pre {
 .agent-input-desc { white-space: pre-wrap; }
 .agent-json { display: none; margin-top: 0.35rem; }
 .agent-input.expanded .agent-json { display: block; }
+/* Generic inputs wear the same fold as the subagent's: the headline
+   visible, the JSON one click away. The wrapper carries .tool-input,
+   which makes the whole box the click target (CAPPED_CLASSES). */
+.folded-headline { white-space: pre-wrap; }
+.folded-json { display: none; margin-top: 0.35rem; }
+.folded-input.expanded .folded-json { display: block; }
 /* The activity fold on a spawning card: the ticker line is the collapsed
    face, a click swaps in the confined child feed (the panel exists in the
    HTML only while open — see ActivitySection), and a second click on the

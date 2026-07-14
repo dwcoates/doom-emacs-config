@@ -2415,7 +2415,7 @@ describe("renderItem subagent input", () => {
     expect(html).toContain(`class="tool-input agent-input"`);
   });
 
-  it("falls back to the plain JSON dump for an Agent call carrying no description", () => {
+  it("falls back to the generic prompt-headlined fold for an Agent call carrying no description", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
@@ -2428,8 +2428,9 @@ describe("renderItem subagent input", () => {
     };
     // Act
     const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`<pre class="tool-input">`);
+    // Assert — the generic fold headlines the prompt; the agent-specific
+    // description form stays off.
+    expect(html).toContain("folded-headline");
     expect(html).not.toContain("agent-input-desc");
   });
 
@@ -2898,5 +2899,53 @@ describe("groupHtml", () => {
     // Assert
     expect(html).toContain(`class="tab-chip active" data-tab-group="t1" data-tab-member="t1"`);
     expect(html).toContain(`data-tab-member="t2"`);
+  });
+});
+
+describe("generic folded input", () => {
+  /** A generic tool card with the given input. */
+  function generic(name: string, input: Record<string, unknown>): ToolItem {
+    return {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: name,
+      inputJson: JSON.stringify(input),
+      input,
+      inputDone: true,
+    };
+  }
+
+  it("headlines a WebFetch on its url with the JSON folded away", () => {
+    // Arrange + Act
+    const html = renderItem(generic("WebFetch", { url: "https://x.test/a" }));
+    // Assert
+    expect(html).toContain("folded-headline");
+    expect(html).toContain("https://x.test/a");
+    expect(html).toContain("folded-json");
+  });
+
+  it("headlines a TaskCreate on its subject", () => {
+    // Arrange + Act
+    const html = renderItem(generic("TaskCreate", { subject: "Fix the build" }));
+    // Assert
+    expect(html).toContain("Fix the build");
+    expect(html).toContain("folded-headline");
+  });
+
+  it("headlines a TaskOutput on the task id it polls", () => {
+    // Arrange + Act
+    const html = renderItem(generic("TaskOutput", { task_id: "bg1" }));
+    // Assert
+    expect(html).toContain("bg1");
+    expect(html).toContain("folded-headline");
+  });
+
+  it("keeps the raw capped JSON for an input offering no headline", () => {
+    // Arrange — TodoWrite's input is a list, nothing to headline.
+    const html = renderItem(generic("TodoWrite", { todos: [] }));
+    // Assert
+    expect(html).toContain(`<pre class="tool-input">`);
+    expect(html).not.toContain("folded-headline");
   });
 });
