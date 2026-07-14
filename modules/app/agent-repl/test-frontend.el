@@ -206,6 +206,96 @@ agent panel it is, with no special-casing left to carve out."
         ;; Assert
         (should (null agent-repl-test--urls))))))
 
+;;;; ---- remount-webview (bundle reload) ----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-remount-webview-reloads-live-buffer ()
+  "Remount kills the live webview and mounts a fresh one on the SAME session.
+This is the whole point over `agent-repl--frontend-ensure-session' reuse:
+an unchanged session would otherwise keep the stale buffer, so the served
+bundle would never be refetched."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
+                ((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_1")))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Act
+          (let ((new (agent-repl--frontend-remount-webview "ws1")))
+            ;; Assert
+            (should-not (buffer-live-p old))
+            (should (buffer-live-p new))
+            (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1"))
+            (should (= (length agent-repl-test--urls) 2))))))))
+
+(ert-deftest agent-repl-test-frontend-remount-webview-noop-when-closed ()
+  "Remount returns nil and mounts nothing when no webview is open."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
+                ((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_1")))
+        ;; Act
+        (let ((result (agent-repl--frontend-remount-webview "ws1")))
+          ;; Assert
+          (should (null result))
+          (should (null agent-repl-test--urls)))))))
+
+(ert-deftest agent-repl-test-frontend-remount-all-counts-open-webviews ()
+  "Remount-all remounts only workspaces with an open webview, and counts them."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
+        (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                   (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
+                  ((symbol-function 'agent-repl--frontend-ensure-session)
+                   (lambda (_ws) "s_x"))
+                  ((symbol-function 'agent-repl--live-ws-names)
+                   (lambda () '("ws1" "ws2"))))
+          (agent-repl--frontend-ensure-webview-buffer "ws1" "s_x" "http://x/?session=s_x")
+          ;; Act
+          (let ((count (agent-repl--frontend-remount-all-webviews)))
+            ;; Assert — only ws1 had an open webview.
+            (should (= count 1))
+            (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
+            (should (null (agent-repl--ws-get "ws2" :frontend-buffer)))))))))
+
+(ert-deftest agent-repl-test-frontend-reload-webview-command-errors-without-webview ()
+  "The interactive reload signals when the current workspace has no webview."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-reload-webview) :type 'user-error))))
+
+(ert-deftest agent-repl-test-frontend-reload-webview-command-remounts-current ()
+  "The interactive reload remounts the current workspace's open webview."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
+                ((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) "s_1"))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Act
+          (agent-repl-frontend-reload-webview)
+          ;; Assert
+          (should-not (buffer-live-p old))
+          (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
+          (should (= (length agent-repl-test--urls) 2)))))))
+
 ;;;; ---- Copy chords ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
