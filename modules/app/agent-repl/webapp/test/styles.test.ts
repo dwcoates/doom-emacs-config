@@ -997,6 +997,28 @@ describe("activity fold", () => {
   });
 });
 
+describe("tab groups", () => {
+  it("lays the tab bar out as a wrapping flex row", () => {
+    // Arrange / Act — an eight-agent fan-out must not overflow the card.
+    const bar = blockAfter(css, ".tab-bar");
+    // Assert
+    expect(bar).toMatch(/display:\s*flex/);
+    expect(bar).toMatch(/flex-wrap:\s*wrap/);
+  });
+
+  it("invites the click with a pointer cursor on each chip", () => {
+    // Arrange / Act
+    // Assert
+    expect(blockAfter(css, ".tab-chip {")).toMatch(/cursor:\s*pointer/);
+  });
+
+  it("rings the selected chip in the accent", () => {
+    // Arrange / Act
+    // Assert
+    expect(blockAfter(css, ".tab-chip.active")).toMatch(/border-color:\s*var\(--accent\)/);
+  });
+});
+
 /* The subagent roster drops out of the topbar, which is a fixed-height flex row:
    the overlay has to leave that row's layout entirely, and its anchor has to be
    the positioned ancestor it hangs from. Both are pure CSS, so both are asserted
