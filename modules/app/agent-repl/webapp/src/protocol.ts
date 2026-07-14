@@ -72,6 +72,27 @@ export interface HelloFrame extends WsEnvelope {
   cwd: string;
   /** Durable CLI session uuid (resume target); absent until system:init. */
   claude_session_id?: string;
+  /**
+   * The in-flight message queue snapshot (§2.13), front-to-back order, so
+   * a fresh join or a replay-evicted client rebuilds the pending queue
+   * without a gap. Absent when no messages are queued.
+   */
+  queue?: QueuedItem[];
+}
+
+/**
+ * One parked message in the in-flight queue (§2.13), as carried in the
+ * `hello` snapshot and mirrored in the store's `queued` slice. A queued
+ * message is NOT a conversation item: it renders as a subdued "queued —
+ * waiting" affordance and only becomes a real `user-turn` once drained.
+ */
+export interface QueuedItem {
+  queue_id: string;
+  request_id: string;
+  content: ContentBlock[];
+  status: "classifying" | "waiting" | "interrupt";
+  verdict?: "wait" | "interrupt";
+  reason?: string;
 }
 
 export type ResultSubtype =
@@ -268,6 +289,47 @@ export interface SystemFrame extends WsEnvelope {
   data: unknown;
 }
 
+// --- §2.13 in-flight message queue -------------------------------------------
+
+/**
+ * A `user-message` submitted while a turn was in flight was parked rather
+ * than forwarded: the daemon assigned it a stable `queue_id`, and it will
+ * reach the shim only later, at drain. `status` is always the initial
+ * `"classifying"` — the verdict rides a later `queue-classified`.
+ */
+export interface QueueAddedFrame extends WsEnvelope {
+  type: "queue-added";
+  queue_id: string;
+  request_id: string;
+  content: ContentBlock[];
+  status: "classifying";
+}
+
+/**
+ * The classifier's (or a user override's) verdict on a queued item. `wait`
+ * keeps the item parked to drain in FIFO order; `interrupt` escalates it to
+ * preempt the running turn. `source` names who decided.
+ */
+export interface QueueClassifiedFrame extends WsEnvelope {
+  type: "queue-classified";
+  queue_id: string;
+  verdict: "wait" | "interrupt";
+  reason: string;
+  source: "classifier" | "user" | "fallback";
+}
+
+/**
+ * A queued item left the queue: `drained` (it became the `user-turn` named
+ * by `request_id` and went to the shim), `cancelled` (the user removed it),
+ * or `session_end` (the session ended before it ran).
+ */
+export interface QueueRemovedFrame extends WsEnvelope {
+  type: "queue-removed";
+  queue_id: string;
+  reason: "drained" | "cancelled" | "session_end";
+  request_id?: string;
+}
+
 export type L2Frame =
   | HelloFrame
   | ResultFrame
@@ -292,7 +354,10 @@ export type L2Frame =
   | PermissionModeChangedFrame
   | ModelsFrame
   | ModelChangedFrame
-  | SystemFrame;
+  | SystemFrame
+  | QueueAddedFrame
+  | QueueClassifiedFrame
+  | QueueRemovedFrame;
 
 /** The set of frame types this client version understands. */
 export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
@@ -320,6 +385,9 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "models",
   "model-changed",
   "system",
+  "queue-added",
+  "queue-classified",
+  "queue-removed",
 ]);
 
 /**
@@ -389,10 +457,33 @@ export interface ReplayRequestCmd {
   from_seq: number;
 }
 
+/**
+ * Escalate a queued item to preempt the running turn — the manual
+ * counterpart to a classifier `interrupt` verdict (§2.13). Daemon-handled,
+ * never forwarded to the shim; a stale `queue_id` is a no-op ack.
+ */
+export interface QueueRunNowCmd {
+  type: "queue-run-now";
+  request_id: string;
+  queue_id: string;
+}
+
+/**
+ * Remove a queued item without ever sending it (§2.13). Daemon-handled;
+ * a stale `queue_id` is a no-op ack, not an error.
+ */
+export interface QueueCancelCmd {
+  type: "queue-cancel";
+  request_id: string;
+  queue_id: string;
+}
+
 export type ClientCommand =
   | UserMessageCmd
   | PermissionDecisionCmd
   | InterruptCmd
   | SetPermissionModeCmd
   | SetModelCmd
-  | ReplayRequestCmd;
+  | ReplayRequestCmd
+  | QueueRunNowCmd
+  | QueueCancelCmd;

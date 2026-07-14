@@ -10,10 +10,10 @@ import { applyExpanded, expandedIndexes, sectionsIn } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
-import { ModelInfo } from "./protocol.js";
+import { ModelInfo, QueuedItem } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { isClearTurn, userTurnText } from "./turn.js";
+import { blocksToText, isClearTurn, userTurnText } from "./turn.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -38,6 +38,10 @@ export interface Actions {
    * contract the CLI's permission component expects.
    */
   answerQuestions(requestId: string, updatedInput: unknown): void;
+  /** Remove a parked queued message without ever running it (§2.13). */
+  cancelQueued(queueId: string): void;
+  /** Escalate a parked queued message to preempt the running turn (§2.13). */
+  runQueuedNow(queueId: string): void;
 }
 
 /** One AskUserQuestion entry as carried in the tool input. */
@@ -214,6 +218,57 @@ function UserTurn(item: UserTurnItem, isPulsing = false): string {
     ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
     : "";
   return `${Bubble(cls, `<pre>${escapeHtml(userTurnText(item))}</pre>`, item.ts)}${divider}`;
+}
+
+/**
+ * §2.13 status/verdict badge for a queued item. `classifying` is the
+ * pre-verdict state; `waiting` parks the message to drain in FIFO order;
+ * `interrupt` escalates it to preempt the running turn.
+ */
+function queuedBadge(item: QueuedItem): { label: string; cls: string } {
+  switch (item.status) {
+    case "waiting":
+      return { label: "queued — waiting", cls: "waiting" };
+    case "interrupt":
+      return { label: "interrupting…", cls: "interrupt" };
+    case "classifying":
+    default:
+      return { label: "queued — classifying…", cls: "classifying" };
+  }
+}
+
+/**
+ * A parked message in the in-flight queue (§2.13). It is deliberately NOT
+ * a `bubble user`: a subdued card, so the reader SEES the message is queued
+ * for later and is explicitly not interrupting the running turn unless
+ * escalated. It carries the prompt text (injected spans stripped, exactly
+ * as a user turn's are), a status/verdict badge, the classifier's one-line
+ * reason once known, and a Cancel / Run-now pair. Each button carries the
+ * `queue_id` in a data attribute for delegated click handling.
+ */
+export function QueuedCard(item: QueuedItem): string {
+  const badge = queuedBadge(item);
+  const qid = escapeHtml(item.queue_id);
+  const reason = item.reason
+    ? `<div class="queued-reason">${escapeHtml(item.reason)}</div>`
+    : "";
+  return `
+    <div class="queued-card">
+      <div class="queued-head">
+        <span class="queued-badge ${badge.cls}">${escapeHtml(badge.label)}</span>
+      </div>
+      <pre class="queued-content">${escapeHtml(blocksToText(item.content))}</pre>
+      ${reason}
+      <div class="queued-actions">
+        <button data-queue-cancel="${qid}">Cancel</button>
+        <button data-queue-run-now="${qid}">Run now</button>
+      </div>
+    </div>`;
+}
+
+/** Key identifying one queued card's DOM node across renders (§2.13). */
+export function queuedCardKey(item: QueuedItem): string {
+  return `queued:${item.queue_id}`;
 }
 
 /**
@@ -908,6 +963,12 @@ export class FeedRenderer {
       }
       const submit = target.getAttribute("data-q-submit");
       if (submit !== null) this.submitQuestionAnswers(submit);
+      // §2.13 queued-card controls: cancel drops the parked message,
+      // run-now escalates it to preempt the running turn.
+      const cancelQ = target.getAttribute("data-queue-cancel");
+      if (cancelQ !== null) this.actions.cancelQueued(cancelQ);
+      const runNowQ = target.getAttribute("data-queue-run-now");
+      if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
     });
   }
 
@@ -999,6 +1060,19 @@ export class FeedRenderer {
       this.nodes.set(key, { el, html: "" });
       shells.push({ el, item });
     });
+    // The parked queue (§2.13) renders in full at the tail — a fresh join
+    // with a pending queue must show it, and the cards are cheap enough to
+    // skip the tail-first backfill the history items get.
+    state.queued.forEach((q) => {
+      const key = queuedCardKey(q);
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = key;
+      const html = QueuedCard(q);
+      el.innerHTML = html;
+      this.container.appendChild(el);
+      this.nodes.set(key, { el, html });
+    });
     const fillChunk = (indexes: number[]): void => {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
@@ -1077,6 +1151,28 @@ export class FeedRenderer {
         applyExpanded(sectionsIn(entry.el), open);
         entry.html = html;
       }
+    });
+    // The in-flight queue (§2.13) is a subdued section at the tail, after
+    // every conversation item. Each card is re-appended so a live item node
+    // appended above (the agent's streaming response during the running
+    // turn) never lands beneath a parked message.
+    state.queued.forEach((q) => {
+      const key = queuedCardKey(q);
+      seen.add(key);
+      const html = QueuedCard(q);
+      let entry = this.nodes.get(key);
+      if (!entry) {
+        const el = document.createElement("div");
+        el.className = "feed-item";
+        el.dataset.key = key;
+        entry = { el, html: "" };
+        this.nodes.set(key, entry);
+      }
+      if (entry.html !== html) {
+        entry.el.innerHTML = html;
+        entry.html = html;
+      }
+      this.container.appendChild(entry.el);
     });
     for (const [key, entry] of this.nodes) {
       if (!seen.has(key)) {

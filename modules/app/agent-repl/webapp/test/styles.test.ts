@@ -1045,3 +1045,36 @@ describe("task timer styles", () => {
     expect(taskTimer).toMatch(/font-variant-numeric:\s*tabular-nums/);
   });
 });
+
+describe("queued-card (§2.13 in-flight queue)", () => {
+  const card = blockAfter(css, ".queued-card");
+  const interruptBadge = blockAfter(css, ".queued-badge.interrupt");
+  const userBubble = blockAfter(css, ".bubble.user");
+
+  it("subdues the parked card with a dashed border, unlike the solid user bubble", () => {
+    // Arrange / Act — the dashed border is the "parked, not active" cue.
+    // Assert
+    expect(card).toMatch(/border:\s*1px\s+dashed/);
+  });
+
+  it("dims the parked card below full opacity", () => {
+    // Arrange / Act — reduced opacity reads as held-back.
+    // Assert
+    const m = card.match(/opacity:\s*([0-9.]+)/);
+    expect(m).not.toBeNull();
+    expect(Number(m![1])).toBeLessThan(1);
+  });
+
+  it("washes the card in the muted card grey rather than the user fill", () => {
+    // Arrange / Act — a queued message must not read as the saturated live bubble.
+    // Assert
+    expect(card).toMatch(/background:\s*var\(--card\)/);
+    expect(userBubble).toMatch(/background:\s*var\(--user\)/);
+  });
+
+  it("lights the interrupt badge in the in-flight orange, since it preempts the turn", () => {
+    // Arrange / Act — the escalating verdict borrows the app's "about to act" colour.
+    // Assert
+    expect(interruptBadge).toMatch(/color:\s*var\(--thinking\)/);
+  });
+});

@@ -547,6 +547,46 @@ pre {
   font-size: 0.85rem;
 }
 
+/* --- §2.13 in-flight message queue ----------------------------------------
+   A queued message is PARKED, not active. It must read as subdued and
+   plainly distinct from a live .bubble.user, so the user sees the message
+   is waiting for later and is explicitly NOT interrupting the running turn
+   unless escalated. Three cues carry that: the DASHED border (a solid one
+   is the live bubble's), the reduced OPACITY, and the muted card grey — the
+   opposite of the user bubble's saturated fill. It self-aligns to the same
+   right edge as the user's own bubbles, since a queued message IS the
+   user's own prompt, only held back. */
+.queued-card {
+  align-self: flex-end;
+  max-width: 85%;
+  border: 1px dashed var(--muted);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+.queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
+/* The status pill: "queued — classifying…" → "queued — waiting" or
+   "interrupting…". An interrupt lights up in the in-flight orange the rest
+   of the app uses for "the model is about to act", since that verdict is
+   the one that preempts the running turn. */
+.queued-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+}
+.queued-badge.interrupt { color: var(--thinking); border-color: var(--thinking); }
+/* The user's own words stay upright and legible at full color — the subdued
+   chrome is around them, not on them. */
+.queued-content { color: var(--fg); }
+/* The classifier's one-line reason reads as an aside: muted and italic. */
+.queued-reason { margin-top: 0.3rem; font-size: 0.8rem; font-style: italic; }
+.queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.queued-actions button { cursor: pointer; font: inherit; }
+
 #composer {
   display: flex;
   gap: 0.5rem;
