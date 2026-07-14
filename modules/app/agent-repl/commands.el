@@ -2197,40 +2197,58 @@ both the plist cache and `recentf-list' lag filesystem deletions."
                       (file-in-directory-p file project-root)))
                (bound-and-true-p recentf-list)))))
 
-;;;; Project picker (SPC p p)
+;;;; Workspace picker (SPC p p)
 ;;
-;; `agent-repl-switch-to-project' replaces the plain
-;; `projectile-completing-read' candidate list with a richer column view:
+;; `agent-repl-switch-to-project' (interactive `SPC p p') is a picker over
+;; KNOWN AGENT-REPL WORKSPACES — not over every projectile project — rendered
+;; as a column view under a header row:
 ;;
-;;   <emoji> <project-name padded>   <created-date>   <last-killed-date>
+;;   <emoji> <workspace-name padded>   <created>   <viewed>   <removed>
 ;;
-;; - The emoji prefix reflects the project's workspace state at picker time:
-;;   for projects with a live workspace it mirrors the drawer's per-workspace
-;;   glyph; for projects without a live workspace it falls back to a neutral
-;;   📁.
-;; - Date columns are populated from the live workspace's `:created-at' /
-;;   `:last-killed-at' plist entries when one exists.  Projects without a
-;;   live workspace show dash placeholders — we deliberately do NOT read the
-;;   per-project state.el from disk on every `SPC p p' invocation, so the
-;;   picker uses only the cached in-memory hash the drawer already maintains.
-;; - The two date columns get distinct faces so they read at a glance.
-;; - Entries are sorted most-recently-killed first, then by creation date
-;;   when no kill is recorded — projects that need attention surface to the
-;;   top.  Non-live projects (no cached dates) sort to the bottom.
+;; - Candidates are the union of the in-memory workspace hash (live and
+;;   tombstoned) and the on-disk roster snapshot, so workspaces killed /
+;;   merged in a prior session still appear (`agent-repl--known-workspace-entries').
+;; - The emoji mirrors the drawer's per-workspace glyph for a known
+;;   workspace, else a neutral 📁 for a disk-only record.
+;; - The three date columns are read from PERSISTED state — each candidate's
+;;   `<root>/.claude/emacs/state.el' — with fresher live in-memory values
+;;   overlaid, so dead workspaces still show real dates.  The candidate set
+;;   is bounded to known workspaces, so this disk read is not the
+;;   all-projectile-projects fan-out the old picker avoided.
+;; - Entries are sorted most-recently-VIEWED first (`:last-viewed-at'); a
+;;   workspace's create/kill time is irrelevant to ordering.  Never-viewed
+;;   workspaces sink to the bottom.
+;; - Selecting a live workspace switches to it; selecting a removed
+;;   (killed / nuked / merged) workspace revives it from persisted state,
+;;   recreating its worktree/directory first when missing — the only
+;;   filesystem-existence check happens then, at selection time, never on
+;;   every picker invocation.
+;; - helm renders the header natively via its per-source header; ivy /
+;;   `completing-read' fall back to putting the header in the prompt.
 
 (defface agent-repl-picker-created-face
   '((t :inherit font-lock-comment-face))
   "Face for the creation-date column in `agent-repl-switch-to-project'."
   :group 'agent-repl)
 
+(defface agent-repl-picker-viewed-face
+  '((t :inherit success))
+  "Face for the last-viewed-date column in `agent-repl-switch-to-project'."
+  :group 'agent-repl)
+
 (defface agent-repl-picker-killed-face
   '((t :inherit error))
-  "Face for the last-kill-date column in `agent-repl-switch-to-project'."
+  "Face for the removed-date (last kill/merge) column in the picker."
   :group 'agent-repl)
 
 (defface agent-repl-picker-name-face
   '((t :inherit default))
-  "Face for the project-name column in `agent-repl-switch-to-project'."
+  "Face for the workspace-name column in `agent-repl-switch-to-project'."
+  :group 'agent-repl)
+
+(defface agent-repl-picker-header-face
+  '((t :inherit font-lock-keyword-face :weight bold))
+  "Face for the picker's column-title header row."
   :group 'agent-repl)
 
 (defconst agent-repl--picker-date-format "%Y-%m-%d"
@@ -2242,75 +2260,95 @@ both the plist cache and `recentf-list' lag filesystem deletions."
 \"--\" aligned with real dates.")
 
 (defconst agent-repl--picker-name-min-width 24
-  "Minimum padding width for the project-name column in the picker.
-Actual width is the max of this and the longest candidate basename.")
+  "Minimum padding width for the workspace-name column in the picker.
+Actual width is the max of this and the longest candidate name.")
 
 (defconst agent-repl--picker-column-gap "   "
   "Whitespace inserted between the picker's name and date columns.")
 
-(defun agent-repl--project-has-live-workspace-p (project-root)
-  "Return non-nil when any registered workspace points at PROJECT-ROOT.
-Compares `expand-file-name' results so trailing-slash and `~/' vs.
-absolute differences don't cause false negatives.  Returns nil for nil
-PROJECT-ROOT."
-  (when project-root
-    (let ((canonical (file-name-as-directory (expand-file-name project-root)))
-          (found nil))
-      (maphash (lambda (_ws plist)
-                 (when-let ((dir (plist-get plist :project-dir)))
-                   (when (equal (file-name-as-directory (expand-file-name dir))
-                                canonical)
-                     (setq found t))))
-               agent-repl--workspaces)
-      found)))
+(defun agent-repl--known-workspace-entries ()
+  "Return an alist of (WS-NAME . PROJECT-DIR) for every known agent-repl workspace.
 
-(defun agent-repl--project-state-summary (project-root)
-  "Return a plist summarizing PROJECT-ROOT's in-memory workspace state.
+Unions two sources so a workspace killed / merged in a prior session
+still appears:
+  1. the in-memory `agent-repl--workspaces' hash — every entry, live or
+     tombstoned, that carries a `:project-dir';
+  2. the on-disk roster snapshot (`agent-repl-workspace-snapshot-file')
+     for names not present in memory (a prior session's record that was
+     never re-established this run).
 
-Sources values exclusively from `agent-repl--workspaces' (the live
-hash) — performs NO disk I/O — so the picker reflects exactly the
-cached values the drawer renders and a `SPC p p' invocation does not
-fan out to a state-file read for every projectile-known project.
+In-memory entries win on name collision.  Order: in-memory entries first
+\(hash-traversal order), then snapshot-only entries.  This is the
+candidate universe of the project picker — deliberately NOT
+`projectile-relevant-known-projects', which listed every project
+regardless of whether an agent-repl workspace ever existed there."
+  (let ((seen (make-hash-table :test #'equal))
+        (result nil))
+    (maphash (lambda (ws plist)
+               (when-let ((dir (plist-get plist :project-dir)))
+                 (unless (gethash ws seen)
+                   (puthash ws t seen)
+                   (push (cons ws dir) result))))
+             agent-repl--workspaces)
+    (let* ((file (agent-repl--workspace-snapshot-file-for-read))
+           (raw (and file (ignore-errors
+                            (agent-repl--read-sexp-file-if-exists file))))
+           (entries (agent-repl--snapshot-entries-from-raw raw)))
+      (dolist (entry entries)
+        (let* ((norm (ignore-errors (agent-repl--snapshot-entry-normalize entry)))
+               (name (car norm))
+               (dir (plist-get (cdr norm) :project-dir)))
+          (when (and name dir (not (gethash name seen)))
+            (puthash name t seen)
+            (push (cons name dir) result)))))
+    (nreverse result)))
 
-When a live workspace points at PROJECT-ROOT, `:created-at',
-`:last-killed-at', and `:priority' are returned from that workspace's
-plist.  When no live workspace matches, all those values are nil and
-the picker falls back to a neutral non-live emoji + dash placeholders.
+(defun agent-repl--picker-workspace-summary (ws-name project-dir)
+  "Return a plist summarizing workspace WS-NAME at PROJECT-DIR for the picker.
+
+Reads the persisted state file at PROJECT-DIR for `:created-at',
+`:last-killed-at', and `:last-viewed-at', then overlays fresher live
+in-memory values from `agent-repl--workspaces' when WS-NAME is a known
+entry.  Reading the state file is bounded to the known-workspace
+candidate set (see `agent-repl--known-workspace-entries'), so this is
+not the all-projectile-projects disk fan-out the old picker avoided.
 
 Keys:
-  `:created-at'      from ws plist when live, else nil
-  `:last-killed-at'  from ws plist when live, else nil
-  `:priority'        from ws plist when live, else nil
-  `:live-p'          non-nil iff a live workspace matches PROJECT-ROOT
-  `:workspace-name'  the matching live ws name, or nil"
-  (let ((workspace-name (and project-root
-                             (agent-repl--ws-name-for-dir project-root))))
-    (list :created-at (and workspace-name
-                           (agent-repl--ws-get workspace-name :created-at))
-          :last-killed-at (and workspace-name
-                               (agent-repl--ws-get workspace-name :last-killed-at))
-          :priority (and workspace-name
-                         (agent-repl--ws-get workspace-name :priority))
-          :live-p (not (null workspace-name))
-          :workspace-name workspace-name)))
+  `:created-at' `:last-killed-at' `:last-viewed-at' — persisted (live overlay)
+  `:live-p'          non-nil iff WS-NAME is a live (non-tombstoned) entry
+  `:workspace-name'  WS-NAME when it is a known hash entry, else nil
+  `:project-dir'     PROJECT-DIR"
+  (let* ((known (and ws-name (agent-repl--ws-known-p ws-name)))
+         (state-file (and project-dir
+                          (agent-repl--state-file-for-read project-dir)))
+         (saved (and state-file
+                     (ignore-errors
+                       (agent-repl--read-sexp-file-if-exists state-file)))))
+    (cl-flet ((val (key) (or (and known (agent-repl--ws-get ws-name key))
+                             (plist-get saved key))))
+      (list :created-at (val :created-at)
+            :last-killed-at (val :last-killed-at)
+            :last-viewed-at (val :last-viewed-at)
+            :live-p (and ws-name (agent-repl--ws-live-p ws-name))
+            :workspace-name (and known ws-name)
+            :project-dir project-dir))))
 
 (defun agent-repl--picker-status-emoji (summary)
   "Return the status-emoji prefix for a candidate with SUMMARY.
-SUMMARY is a plist from `agent-repl--project-state-summary'.
+SUMMARY is a plist from `agent-repl--picker-workspace-summary'.
 
 When `:workspace-name' is non-nil, delegates to
 `agent-repl--ws-render-status' for the render-state keyword and
 looks up the glyph in `agent-repl-drawer-state-icons'.  This is the
-same path the drawer's `--state-glyph' takes, so the project picker
+same path the drawer's `--state-glyph' takes, so the workspace picker
 (`SPC p p') and the drawer always agree on the emoji for a given
 workspace.  Calling render-status directly (instead of going through
 `agent-repl-drawer--state-glyph') keeps the picker free of drawer
 internals.
 
-For projects without a live workspace returns a neutral 📁.  No
-historical kill/dormant distinction is drawn because the picker
-deliberately avoids disk I/O — the on-disk state file is NOT read on
-every invocation."
+For a disk-only record with no in-memory hash entry returns a neutral
+📁 — a tombstoned or merged workspace still has a hash entry and so
+still renders its (killed / merged / dormant) drawer glyph."
   (let ((ws (plist-get summary :workspace-name)))
     (if (and ws (agent-repl--ws-known-p ws))
         (or (alist-get (agent-repl--ws-render-status ws)
@@ -2329,27 +2367,20 @@ result."
                (truncate-string-to-width placeholder width 0 ?\s))))
     (propertize str 'face face)))
 
-(defun agent-repl--picker-name-width (project-roots)
-  "Return the padding width to use for the project-name column.
-Max of `agent-repl--picker-name-min-width' and the longest basename
-across PROJECT-ROOTS so every row's date columns start at the same
-character position."
-  (let ((max-basename
-         (apply #'max 0
-                (mapcar (lambda (p)
-                          (length (file-name-nondirectory
-                                   (directory-file-name p))))
-                        project-roots))))
-    (max agent-repl--picker-name-min-width max-basename)))
+(defun agent-repl--picker-name-width (names)
+  "Return the padding width to use for the workspace-name column.
+Max of `agent-repl--picker-name-min-width' and the longest name across
+NAMES so every row's date columns start at the same character position."
+  (let ((max-name (apply #'max 0 (mapcar #'length names))))
+    (max agent-repl--picker-name-min-width max-name)))
 
 (defun agent-repl--picker-sort-key (summary)
-  "Return the `:last-killed-at' time for SUMMARY, or its `:created-at'.
-Used as the sort key so most-recently-killed projects surface first, with
-never-killed projects falling back to creation-date order (also most-recent
-first).  Returns nil when neither timestamp is available; callers treat
-nil keys as oldest."
-  (or (plist-get summary :last-killed-at)
-      (plist-get summary :created-at)))
+  "Return the `:last-viewed-at' time for SUMMARY.
+Used as the sole sort key so the picker orders workspaces
+most-recently-viewed first — create / kill / merge times are
+irrelevant to ordering.  Returns nil when the workspace has never been
+viewed; callers treat nil keys as oldest (sorted to the bottom)."
+  (plist-get summary :last-viewed-at))
 
 (defun agent-repl--picker-time-greater-p (a b)
   "Compare two `current-time'-shaped values: non-nil A newer than nil B."
@@ -2357,48 +2388,52 @@ nil keys as oldest."
         (a t)
         (t nil)))
 
-(defun agent-repl--build-project-picker-candidates (project-roots)
-  "Return a sorted alist of (display-string . project-root) for PROJECT-ROOTS.
+(defun agent-repl--build-workspace-picker-candidates (entries)
+  "Return a sorted alist of (DISPLAY-STRING . PAYLOAD) for ENTRIES.
 
-Each entry's display string prefixes a status emoji, then a name column
-padded to a width derived from the longest basename, then two date
-columns (creation date, last kill/nuke date) separated by
-`agent-repl--picker-column-gap'.  Empty date placeholders keep the
-columns aligned across all rows.
+ENTRIES is an alist of (WS-NAME . PROJECT-DIR) — typically from
+`agent-repl--known-workspace-entries'.  Each display string prefixes a
+status emoji, then the workspace name padded to a shared width, then
+three date columns (created, last-viewed, removed) separated by
+`agent-repl--picker-column-gap'; dash placeholders keep columns aligned.
+PAYLOAD is a plist (:name WS-NAME :project-dir DIR :live-p BOOL) that
+`agent-repl--picker-open-selection' consumes.
 
-Sort order: most-recently-killed first; never-killed projects sort by
-creation date (most-recent first).  This is the input
-`projectile-completing-read' / `ivy-read' receives."
-  (let* ((name-width (agent-repl--picker-name-width project-roots))
-         (entries (mapcar
-                   (lambda (root)
-                     (let* ((basename (file-name-nondirectory
-                                       (directory-file-name root)))
-                            (summary (agent-repl--project-state-summary root)))
-                       (list :root root
-                             :basename basename
-                             :summary summary)))
-                   project-roots))
-         (sorted (sort entries
+Sort order: most-recently-VIEWED first; never-viewed workspaces sink to
+the bottom (see `agent-repl--picker-sort-key')."
+  (let* ((name-width (agent-repl--picker-name-width (mapcar #'car entries)))
+         (rows (mapcar
+                (lambda (entry)
+                  (let* ((name (car entry))
+                         (dir (cdr entry))
+                         (summary (agent-repl--picker-workspace-summary name dir)))
+                    (list :name name :dir dir :summary summary)))
+                entries))
+         (sorted (sort rows
                        (lambda (a b)
                          (agent-repl--picker-time-greater-p
                           (agent-repl--picker-sort-key (plist-get a :summary))
                           (agent-repl--picker-sort-key (plist-get b :summary)))))))
     (mapcar
-     (lambda (entry)
-       (let* ((root (plist-get entry :root))
-              (basename (plist-get entry :basename))
-              (summary (plist-get entry :summary))
+     (lambda (row)
+       (let* ((name (plist-get row :name))
+              (dir (plist-get row :dir))
+              (summary (plist-get row :summary))
               (emoji (agent-repl--picker-status-emoji summary))
               (name-padded
                (propertize
-                (truncate-string-to-width basename name-width 0 ?\s)
+                (truncate-string-to-width name name-width 0 ?\s)
                 'face 'agent-repl-picker-name-face))
               (created (agent-repl--picker-format-date
                         (plist-get summary :created-at)
                         agent-repl--picker-date-width
                         'agent-repl-picker-created-face
                         "----------"))
+              (viewed (agent-repl--picker-format-date
+                       (plist-get summary :last-viewed-at)
+                       agent-repl--picker-date-width
+                       'agent-repl-picker-viewed-face
+                       "----------"))
               (killed (agent-repl--picker-format-date
                        (plist-get summary :last-killed-at)
                        agent-repl--picker-date-width
@@ -2406,88 +2441,220 @@ creation date (most-recent first).  This is the input
                        "----------"))
               (display (concat emoji " "
                                name-padded
-                               agent-repl--picker-column-gap
-                               created
-                               agent-repl--picker-column-gap
-                               killed)))
-         (cons display root)))
+                               agent-repl--picker-column-gap created
+                               agent-repl--picker-column-gap viewed
+                               agent-repl--picker-column-gap killed)))
+         (cons display (list :name name
+                             :project-dir dir
+                             :live-p (plist-get summary :live-p)))))
      sorted)))
 
-(defun agent-repl--read-project-via-picker ()
-  "Prompt for a project root with the rich column picker.
-Returns the selected project root path (the cdr of the matched
-candidate) — never the propertized display string.  Uses `ivy-read' when
-available (it preserves text-property faces in the candidate list) and
-falls back to `completing-read'.
+(defun agent-repl--picker-header-line (name-width)
+  "Return the propertized column-title header row for the picker.
+Approximately aligns the titles over the emoji / name / date columns;
+NAME-WIDTH matches the width
+`agent-repl--build-workspace-picker-candidates' pads the name column to.
+Rendered natively as helm's per-source header, and folded into the
+prompt string on the ivy / `completing-read' fallbacks."
+  (propertize
+   (concat "   "                       ; emoji (≈2 display cols) + gap
+           (truncate-string-to-width "Workspace" name-width 0 ?\s)
+           agent-repl--picker-column-gap
+           (truncate-string-to-width "Created" agent-repl--picker-date-width 0 ?\s)
+           agent-repl--picker-column-gap
+           (truncate-string-to-width "Viewed" agent-repl--picker-date-width 0 ?\s)
+           agent-repl--picker-column-gap
+           (truncate-string-to-width "Removed" agent-repl--picker-date-width 0 ?\s))
+   'face 'agent-repl-picker-header-face))
 
-Captures the choice via the action closure rather than `ivy-read''s
-return value because ivy's return shape for cons-cell candidates varies
-across versions (sometimes the cons, sometimes the car); the action
-sees `c' in a consistent shape so we can normalize once."
-  (let* ((roots (agent-repl--ws-known-projects))
-         (candidates (agent-repl--build-project-picker-candidates roots))
+(declare-function helm "ext:helm")
+
+(defun agent-repl--read-workspace-via-picker ()
+  "Prompt for a known workspace with the rich column picker.
+Returns the selected PAYLOAD plist (:name :project-dir :live-p), or nil
+when there are no candidates or the user aborts.
+
+Backend preference: `helm' when available (its per-source header renders
+the column titles natively), else `ivy-read', else `completing-read';
+the latter two fold the header into the prompt.  The choice is captured
+via the action closure (helm/ivy pass a consistent shape there) rather
+than the backend's return value."
+  (let* ((entries (agent-repl--known-workspace-entries))
+         (candidates (agent-repl--build-workspace-picker-candidates entries))
+         (header (agent-repl--picker-header-line
+                  (agent-repl--picker-name-width (mapcar #'car entries))))
          (selected nil))
-    (if (fboundp 'ivy-read)
-        (ivy-read "Switch to project: " candidates
-                  :action (lambda (c)
-                            (setq selected (cond ((consp c) (cdr c))
-                                                 ((stringp c)
-                                                  (cdr (assoc c candidates)))
-                                                 (t c))))
-                  :require-match t
-                  :caller 'agent-repl-switch-to-project)
-      (let* ((choice (completing-read "Switch to project: "
+    (cond
+     ((null candidates)
+      (message "No known agent-repl workspaces")
+      nil)
+     ((fboundp 'helm)
+      ;; Raw-alist helm source: no helm macros, so byte-compilation does
+      ;; not require helm at build time (the `fboundp' guard defers the
+      ;; call to runtime, where helm is loaded).  A cons candidate
+      ;; (DISPLAY . PAYLOAD) hands PAYLOAD to the action.
+      (helm :sources
+            (list `((name . "Switch to workspace")
+                    (candidates . ,candidates)
+                    (header-name . ,(lambda (_n) header))
+                    (action . ,(lambda (payload) (setq selected payload)))))
+            :buffer "*helm agent-repl workspaces*")
+      selected)
+     ((fboundp 'ivy-read)
+      (ivy-read (concat header "\nSwitch to workspace: ") candidates
+                :action (lambda (c)
+                          (setq selected (cond ((consp c) (cdr c))
+                                               ((stringp c)
+                                                (cdr (assoc c candidates)))
+                                               (t c))))
+                :require-match t
+                :caller 'agent-repl-switch-to-project)
+      selected)
+     (t
+      (let* ((choice (completing-read (concat header "  |  Switch to workspace: ")
                                       (mapcar #'car candidates)
                                       nil t))
              (hit (assoc choice candidates)))
-        (setq selected (and hit (cdr hit)))))
-    selected))
+        (and hit (cdr hit)))))))
 
-(defun agent-repl-switch-to-project (&optional project)
-  "Switch to PROJECT and hydrate the workspace's priority badge.
-PROJECT is a project root path; when nil, prompt via
-`agent-repl--read-project-via-picker' (rich column view sorted by
-last-kill / creation date).
+(defun agent-repl--picker-worktree-branch (source-repo dir)
+  "Return the branch git has registered for worktree DIR in SOURCE-REPO, or nil.
+Parses `git worktree list --porcelain' — which lists registered
+worktrees even when their directory is missing — for the entry whose
+worktree path canonicalizes to DIR, returning its short branch name.
+Used only when recreating a missing worktree at selection time."
+  (when (and source-repo dir)
+    (let ((out (ignore-errors
+                 (agent-repl--git-string "-C" source-repo
+                                         "worktree" "list" "--porcelain")))
+          (want (directory-file-name (expand-file-name dir)))
+          (cur nil) (result nil))
+      (when (and out (not (string-empty-p out)))
+        (dolist (line (split-string out "\n"))
+          (cond
+           ((string-prefix-p "worktree " line)
+            (setq cur (directory-file-name (expand-file-name (substring line 9)))))
+           ((and (string-prefix-p "branch " line) (equal cur want))
+            (setq result (replace-regexp-in-string
+                          "\\`refs/heads/" "" (substring line 7)))))))
+      result)))
 
-Switches via `projectile-switch-project-by-name' (which fires Doom's
-`+workspaces-switch-to-project-h' to create/activate the persp keyed
-on the project basename), then opens the most-recently-accessed file
-under PROJECT via `agent-repl--most-recent-project-file', hydrates
-the saved display state (`:priority' and the drawer badges) from the
-per-project state file and reseats the workspace into its priority
-slot — both via the shared `agent-repl--hydrate-and-reorder-on-open'
-step, so the tabline badge appears immediately on `SPC p p' (instead
-of only once Claude starts) and the workspace lands in priority order
-just like the snapshot/worktree restore path — and flashes the
-activated tab.
+(defun agent-repl--picker-recreate-directory (name dir)
+  "Recreate the missing DIR for workspace NAME before revival.
+For a git-worktree workspace, resolves the source repo (`:source-ws-dir'
+on the live plist or in the persisted state file) and the branch git
+still has registered, prunes stale worktree admin entries (safe — prune
+only drops records for already-missing worktrees), then runs
+`git worktree add'.  For a plain (non-worktree) project dir, recreates
+the directory with `make-directory'.  Signals a loud error when a
+worktree cannot be recreated safely, so revival never proceeds onto a
+phantom directory (no destructive git operations are attempted)."
+  (let* ((known (agent-repl--ws-known-p name))
+         (saved (let ((f (agent-repl--state-file-for-read dir)))
+                  (and f (ignore-errors
+                           (agent-repl--read-sexp-file-if-exists f)))))
+         (worktree-p (or (and known (agent-repl--ws-get name :worktree-p))
+                         (plist-get saved :worktree-p)))
+         (source (or (and known (agent-repl--ws-get name :source-ws-dir))
+                     (plist-get saved :source-ws-dir))))
+    (cond
+     ((not worktree-p)
+      (make-directory dir t))
+     ((and source (file-directory-p source))
+      (let ((branch (or (agent-repl--picker-worktree-branch source dir) name)))
+        (agent-repl--git-exit-code source "worktree" "prune")
+        (let ((ec (agent-repl--git-exit-code source "worktree" "add" dir branch)))
+          (unless (zerop ec)
+            (error "agent-repl: could not recreate worktree for '%s' at %s (git worktree add exit %d); recreate it manually and retry"
+                   name dir ec)))))
+     (t
+      (error "agent-repl: cannot recreate missing worktree for '%s' at %s: no source repo recorded; recreate it manually and retry"
+             name dir)))))
 
-Distinct from `agent-repl--switch-to-workspace': that primitive is
-name-keyed and assumes the persp already exists; this one is
-project-keyed and creates the persp via the Doom hook.  Both differ
-from `agent-repl--establish-workspace', which is a snapshot-restore
-path that bypasses the Doom hook to preserve the snapshot's exact ws
-name."
-  (interactive)
-  (let ((project (or project (agent-repl--read-project-via-picker))))
-    (when project
-      (agent-repl--ws-switch-project project)
-      ;; Defer the file open and display-state disk read so the persp switch
-      ;; completes and Emacs redraws before any blocking I/O fires.  Both are
-      ;; deferred together in one timer so they run in order on the same idle
-      ;; cycle rather than racing across two separate timers.
+(defun agent-repl--picker-ensure-directory (name dir)
+  "Ensure DIR exists on disk before reviving workspace NAME.
+The ONLY filesystem-existence check in the picker, run at selection time
+so `SPC p p' never polls the disk for every candidate.  No-op when DIR
+already exists (the common case — kill / nuke / merge leave the worktree
+in place); delegates to `agent-repl--picker-recreate-directory' when DIR
+is missing."
+  (when (and dir (not (file-directory-p dir)))
+    (agent-repl--picker-recreate-directory name dir)))
+
+(defun agent-repl--picker-revive (name dir)
+  "Revive removed workspace NAME at DIR from persisted state.
+Re-asserts `:project-dir' (so a disk-only record with no live hash entry
+gains one) and calls `agent-repl--establish-workspace', the canonical
+resurrection path — it recreates the perspective, hydrates persisted
+display state, clears any tombstone, and resumes the durable session."
+  (agent-repl--ws-put name :project-dir dir)
+  (agent-repl--establish-workspace name dir))
+
+(defun agent-repl--picker-open-selection (payload)
+  "Open the workspace described by PAYLOAD (:name :project-dir :live-p).
+A live workspace switches in place via `agent-repl--ws-switch'.  A
+removed workspace is revived from persisted state via
+`agent-repl--picker-revive', after `agent-repl--picker-ensure-directory'
+recreates its worktree/directory when missing.  Then hydrates the
+priority badge and flashes the tab on a deferred timer, mirroring the
+PROJECT-arg path of `agent-repl-switch-to-project'.  Re-activating the
+workspace stamps its `:last-viewed-at' via the persp-activated hook, so
+the picker reorders it to the front next time."
+  (let ((name (plist-get payload :name))
+        (dir (plist-get payload :project-dir)))
+    (when name
+      (if (plist-get payload :live-p)
+          (agent-repl--ws-switch name)
+        (agent-repl--picker-ensure-directory name dir)
+        (agent-repl--picker-revive name dir))
       (run-at-time 0 nil
                    (lambda ()
-                     (when-let ((recent-file (agent-repl--most-recent-project-file project)))
-                       (when (file-exists-p recent-file)
-                         (find-file recent-file)))
-                     ;; Hydrate the priority badge then reseat the just-opened
-                     ;; ws into its priority slot via the shared opener step, so
-                     ;; `SPC p p' lands the workspace in priority order exactly
-                     ;; like the snapshot/worktree restore path does.
                      (agent-repl--hydrate-and-reorder-on-open
-                      (ignore-errors (agent-repl--ws-current-name))
-                      project)))
-      (agent-repl--flash-current-tab))))
+                      (ignore-errors (agent-repl--ws-current-name)) dir)
+                     (agent-repl--flash-current-tab))))))
+
+(defun agent-repl-switch-to-project (&optional project)
+  "Switch to a known workspace (interactive `SPC p p'), or to PROJECT.
+
+With no argument, prompts via `agent-repl--read-workspace-via-picker'
+\(the column picker over KNOWN agent-repl workspaces, sorted
+most-recently-viewed first) and opens the chosen workspace via
+`agent-repl--picker-open-selection' — switching to it when live, or
+reviving it from persisted state (recreating its worktree/directory
+first when missing) when it was removed.
+
+With PROJECT (a project root path — the programmatic contract
+worktree.el's callers rely on), switches via
+`projectile-switch-project-by-name' (Doom's
+`+workspaces-switch-to-project-h' creates/activates the persp keyed on
+the project basename), opens the most-recently-accessed file under
+PROJECT, hydrates the saved display state and reseats by priority via
+the shared `agent-repl--hydrate-and-reorder-on-open' step, and flashes
+the activated tab.
+
+Distinct from `agent-repl--switch-to-workspace': that primitive is
+name-keyed and assumes the persp already exists.  Both differ from
+`agent-repl--establish-workspace', which is the snapshot-restore /
+revival path that bypasses the Doom hook to preserve the exact ws name."
+  (interactive)
+  (if project
+      (progn
+        (agent-repl--ws-switch-project project)
+        ;; Defer the file open and display-state disk read so the persp switch
+        ;; completes and Emacs redraws before any blocking I/O fires.  Both are
+        ;; deferred together in one timer so they run in order on the same idle
+        ;; cycle rather than racing across two separate timers.
+        (run-at-time 0 nil
+                     (lambda ()
+                       (when-let ((recent-file (agent-repl--most-recent-project-file project)))
+                         (when (file-exists-p recent-file)
+                           (find-file recent-file)))
+                       (agent-repl--hydrate-and-reorder-on-open
+                        (ignore-errors (agent-repl--ws-current-name))
+                        project)))
+        (agent-repl--flash-current-tab))
+    (when-let ((sel (agent-repl--read-workspace-via-picker)))
+      (agent-repl--picker-open-selection sel))))
 
 ;;;; Workspace cycling (hide-mode aware)
 
