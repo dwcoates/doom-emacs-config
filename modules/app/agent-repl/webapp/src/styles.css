@@ -615,13 +615,15 @@ pre {
    is waiting for later and is explicitly NOT interrupting the running turn
    unless escalated. Three cues carry that: the DASHED border (a solid one
    is the live bubble's), the reduced OPACITY, and the muted card grey — the
-   opposite of the user bubble's saturated fill. It self-aligns to the same
-   right edge as the user's own bubbles, since a queued message IS the
-   user's own prompt, only held back. */
+   opposite of the user bubble's saturated fill. The dash is drawn in the
+   very --user blue the live bubble fills with, so even parked the card reads
+   as the user's own prompt held back rather than a foreign chrome. It
+   self-aligns to the same right edge as the user's own bubbles, since a
+   queued message IS the user's own prompt, only held back. */
 .queued-card {
   align-self: flex-end;
   max-width: 85%;
-  border: 1px dashed var(--muted);
+  border: 1px dashed var(--user);
   border-radius: 8px;
   background: var(--card);
   padding: 0.5rem 0.75rem;
