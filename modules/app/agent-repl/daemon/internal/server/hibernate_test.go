@@ -131,6 +131,26 @@ func recvShutdown(t *testing.T, shim *fakeShim) {
 	}
 }
 
+// hibernateBySweep drives an initialized session all the way into the
+// settled hibernated state via the idle sweeper, mirroring the REAL shim:
+// it honors the shutdown by emitting its own `closed` (reason "shutdown")
+// before its stream closes. Returns the (now hibernated) session.
+func (h *sweepHarness) hibernateBySweep(t *testing.T, id string, shim *fakeShim) *session.Session {
+	t.Helper()
+	h.advance(11 * time.Minute)
+	h.sweepOnce(t)
+	recvShutdown(t, shim)
+	sess := h.srv.lookup(id)
+	shim.pushEvent(t, `{"type":"closed","session_id":"s","uuid":"u","reason":"shutdown","exit_code":0}`)
+	shim.end()
+	select {
+	case <-sess.HibernateDone():
+	case <-time.After(recvTimeout):
+		t.Fatal("session never settled into hibernation")
+	}
+	return sess
+}
+
 // expectNoForward fails if any command reaches shim (used to prove a skip).
 func expectNoForward(t *testing.T, shim *fakeShim) {
 	t.Helper()
@@ -185,16 +205,7 @@ func TestActRevivesHibernatedSession(t *testing.T) {
 	id, shim := h.createSession(t)
 	conn := h.dial(t, id)
 	initOverStream(t, conn, shim, "cli-uuid-1")
-	h.advance(11 * time.Minute)
-	h.sweepOnce(t)
-	recvShutdown(t, shim)
-	shim.end() // CLI honors shutdown
-	sess := h.srv.lookup(id)
-	select {
-	case <-sess.HibernateDone():
-	case <-time.After(recvTimeout):
-		t.Fatal("session never settled into hibernation")
-	}
+	h.hibernateBySweep(t, id, shim)
 	// Act — an HTTP send is an act, so it must revive the CLI.
 	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
 		bytes.NewBufferString(`{"content":"back?"}`))
@@ -219,16 +230,7 @@ func TestStreamAttachDoesNotReviveHibernatedSession(t *testing.T) {
 	id, shim := h.createSession(t)
 	conn := h.dial(t, id)
 	initOverStream(t, conn, shim, "cli-uuid-1")
-	h.advance(11 * time.Minute)
-	h.sweepOnce(t)
-	recvShutdown(t, shim)
-	shim.end()
-	sess := h.srv.lookup(id)
-	select {
-	case <-sess.HibernateDone():
-	case <-time.After(recvTimeout):
-		t.Fatal("session never settled into hibernation")
-	}
+	h.hibernateBySweep(t, id, shim)
 	// Act — a NEW observer attaches (a workspace switch). resolveForAttach
 	// runs fully in the handler before the hello is written, so once the
 	// hello lands the spawn decision has already been made.
@@ -254,16 +256,7 @@ func TestHibernatedSessionListedAsNonTerminal(t *testing.T) {
 	id, shim := h.createSession(t)
 	conn := h.dial(t, id)
 	initOverStream(t, conn, shim, "cli-uuid-1")
-	h.advance(11 * time.Minute)
-	h.sweepOnce(t)
-	recvShutdown(t, shim)
-	shim.end()
-	sess := h.srv.lookup(id)
-	select {
-	case <-sess.HibernateDone():
-	case <-time.After(recvTimeout):
-		t.Fatal("session never settled into hibernation")
-	}
+	h.hibernateBySweep(t, id, shim)
 	// Act
 	resp, err := http.Get(h.ts.URL + "/sessions")
 	if err != nil {
@@ -293,16 +286,7 @@ func TestWebappActingFrameOverStreamRevives(t *testing.T) {
 	id, shim := h.createSession(t)
 	conn := h.dial(t, id)
 	initOverStream(t, conn, shim, "cli-uuid-1")
-	h.advance(11 * time.Minute)
-	h.sweepOnce(t)
-	recvShutdown(t, shim)
-	shim.end()
-	sess := h.srv.lookup(id)
-	select {
-	case <-sess.HibernateDone():
-	case <-time.After(recvTimeout):
-		t.Fatal("session never settled into hibernation")
-	}
+	h.hibernateBySweep(t, id, shim)
 	// Act — the webapp's own composer sends a user-message OVER the stream
 	// socket (not HTTP). That acting frame must revive the session.
 	conn2 := h.dial(t, id)
