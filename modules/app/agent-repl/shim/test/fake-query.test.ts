@@ -199,3 +199,52 @@ describe("createFakeQuery", () => {
     expect((assistant.message as { model: string }).model).toBe("fake-model");
   });
 });
+
+describe("!bg background turns", () => {
+  it("emits the tool_progress heartbeat for a backgrounded command", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!bg sleep 5"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const progress = msgs.find((m) => m.type === "tool_progress");
+    expect(progress).toMatchObject({ tool_name: "Bash", elapsed_time_seconds: 1 });
+  });
+
+  it("announces the spawn with a task id and spool output path", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!bg sleep 5"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const resultMsg = msgs.find((m) => {
+      if (m.type !== "user") return false;
+      const blocks = (m.message as { content: Array<Record<string, unknown>> }).content;
+      return blocks[0]?.type === "tool_result";
+    })!;
+    const blocks = (resultMsg.message as { content: Array<Record<string, unknown>> }).content;
+    expect(String(blocks[0].content)).toMatch(/with ID: fakebg\d+\. Output is being written to: \/tmp\/claude-0\//);
+  });
+
+  it("completes the task with a harness-shaped notification text block", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!bg sleep 5"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const noteMsg = msgs.find((m) => {
+      if (m.type !== "user") return false;
+      const blocks = (m.message as { content: Array<Record<string, unknown>> }).content;
+      return blocks[0]?.type === "text";
+    })!;
+    const blocks = (noteMsg.message as { content: Array<Record<string, unknown>> }).content;
+    expect(String(blocks[0].text)).toContain("<task-notification>");
+    expect(String(blocks[0].text)).toContain("<status>completed</status>");
+  });
+});
