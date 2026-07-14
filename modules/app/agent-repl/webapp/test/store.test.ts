@@ -1369,3 +1369,138 @@ describe("ConversationStore task output", () => {
     expect(store.state.items).toHaveLength(0);
   });
 });
+
+describe("ConversationStore interrupt gating", () => {
+  /** Start a turn and a running Bash, then interrupt: the common arrange. */
+  function interruptedWithBash(store: ConversationStore): void {
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("tool-use-start", { tool_use_id: "t1", tool_name: "Bash", message_id: "m1" }));
+    store.applyRaw(frame("interrupt"));
+  }
+
+  function toolItems(store: ConversationStore): ToolItem[] {
+    return store.state.items.filter((i): i is ToolItem => i.kind === "tool");
+  }
+
+  it("enters the interrupting state when a turn is in flight", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    // Act
+    store.applyRaw(frame("interrupt"));
+    // Assert
+    expect(store.state.interrupting).toBe(true);
+  });
+
+  it("ignores an interrupt frame when no turn is in flight", () => {
+    // Arrange — idle session: nothing to interrupt.
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("interrupt"));
+    // Assert
+    expect(store.state.interrupting).toBe(false);
+  });
+
+  it("clears the interrupting state at the terminating result", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("interrupt"));
+    // Act — the aborted result the interrupt was waiting on.
+    store.applyRaw(resultFrame({ subtype: "aborted", result_text: "" }));
+    // Assert
+    expect(store.state.interrupting).toBe(false);
+  });
+
+  it("clears the interrupting state when the next turn starts", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("interrupt"));
+    // Act — a queue-run-now preemption drains its promoted message here.
+    store.applyRaw(frame("user-turn", { request_id: "r2", content: [] }));
+    // Assert
+    expect(store.state.interrupting).toBe(false);
+  });
+
+  it("clears the interrupting state on a non-recoverable error", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("interrupt"));
+    // Act
+    store.applyRaw(frame("error", { code: "shim_death", message: "gone", recoverable: false }));
+    // Assert
+    expect(store.state.interrupting).toBe(false);
+  });
+
+  it("drops a new main-chain text bubble while interrupting", () => {
+    // Arrange
+    const store = newStore();
+    interruptedWithBash(store);
+    // Act — the aborting turn tries to open a fresh assistant text bubble.
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m2" }));
+    // Assert — no text item entered the feed.
+    expect(store.state.items.some((i) => i.kind === "text")).toBe(false);
+  });
+
+  it("drops a new main-chain thinking bubble while interrupting", () => {
+    // Arrange
+    const store = newStore();
+    interruptedWithBash(store);
+    // Act
+    store.applyRaw(frame("thinking-start", { block_id: "b1", message_id: "m2" }));
+    // Assert
+    expect(store.state.items.some((i) => i.kind === "thinking")).toBe(false);
+  });
+
+  it("drops a new-shape tool bubble while interrupting", () => {
+    // Arrange — current run is Bash; a Read would open a new bubble.
+    const store = newStore();
+    interruptedWithBash(store);
+    // Act
+    store.applyRaw(frame("tool-use-start", { tool_use_id: "t2", tool_name: "Read", message_id: "m2" }));
+    // Assert — only the pre-interrupt Bash card exists.
+    expect(toolItems(store)).toHaveLength(1);
+    expect(toolItems(store)[0].toolName).toBe("Bash");
+  });
+
+  it("keeps a tool that continues the current run while interrupting", () => {
+    // Arrange — a second consecutive Bash nests into the same tabbed bubble.
+    const store = newStore();
+    interruptedWithBash(store);
+    // Act
+    store.applyRaw(frame("tool-use-start", { tool_use_id: "t2", tool_name: "Bash", message_id: "m2" }));
+    // Assert — both Bash cards are present (same-name run continues).
+    expect(toolItems(store)).toHaveLength(2);
+  });
+
+  it("keeps a tool nested under an existing card while interrupting", () => {
+    // Arrange — a subagent card exists; its nested tool streams within it.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("tool-use-start", { tool_use_id: "a1", tool_name: "Agent", message_id: "m1" }));
+    store.applyRaw(frame("interrupt"));
+    // Act
+    store.applyRaw(
+      frame("tool-use-start", {
+        tool_use_id: "n1",
+        tool_name: "Read",
+        message_id: "m2",
+        parent_tool_use_id: "a1",
+      }),
+    );
+    // Assert — the nested tool is kept (within the existing bubble).
+    expect(toolItems(store).some((t) => t.toolUseId === "n1")).toBe(true);
+  });
+
+  it("still streams a result into a pre-interrupt tool while interrupting", () => {
+    // Arrange
+    const store = newStore();
+    interruptedWithBash(store);
+    // Act — the in-flight Bash settles after the interrupt registered.
+    store.applyRaw(frame("tool-use-result", { tool_use_id: "t1", is_error: false, content: "done" }));
+    // Assert — the update landed within the existing bubble.
+    expect(toolItems(store)[0].result).toMatchObject({ isError: false });
+  });
+});

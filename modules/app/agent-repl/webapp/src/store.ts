@@ -262,6 +262,18 @@ export interface StoreState {
    * reports no progress percentage, so this is a plain boolean, not a fraction.
    */
   compacting: boolean;
+  /**
+   * Whether the running turn is being INTERRUPTED: opened by an `interrupt`
+   * frame (only while a turn is in flight) and closed by the turn's
+   * terminating `result`, a non-recoverable `error`, or the next `user-turn`.
+   * While set, the feed shows the red "interrupting…" indicator and the store
+   * drops content-start frames that would open a NEW bubble — the interrupt is
+   * cooperative, so already-dispatched tools and subagents keep streaming, and
+   * their tail must land WITHIN existing bubbles rather than sprouting fresh
+   * ones. Updates to existing items and tools continuing the current run still
+   * apply, so an in-flight bubble finishes streaming.
+   */
+  interrupting: boolean;
   costUsd: number | null;
   lastSeq: number;
 }
@@ -282,6 +294,7 @@ function initialState(): StoreState {
     lastFinalResponseAt: null,
     contextTokens: null,
     compacting: false,
+    interrupting: false,
     costUsd: null,
     lastSeq: 0,
   };
@@ -457,6 +470,7 @@ export class ConversationStore {
     s.turnStartedAt = null;
     s.lastFinalResponseAt = null;
     s.contextTokens = null;
+    s.interrupting = false;
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
     if (hello.resume_from_seq > 0 && hello.seq >= hello.resume_from_seq) {
@@ -489,8 +503,12 @@ export class ConversationStore {
         });
         s.turnInFlight = true;
         s.turnStartedAt = frame.ts;
+        // A fresh turn is starting: any interrupt of the PREVIOUS turn is over
+        // (a queue-run-now preemption drains its promoted message here).
+        s.interrupting = false;
         break;
       case "text-start":
+        if (this.opensNewBubbleWhileInterrupting(frame.parent_tool_use_id, undefined)) break;
         s.items.push({
           kind: "text",
           blockId: frame.block_id,
@@ -515,6 +533,7 @@ export class ConversationStore {
         break;
       }
       case "thinking-start":
+        if (this.opensNewBubbleWhileInterrupting(frame.parent_tool_use_id, undefined)) break;
         s.items.push({
           kind: "thinking",
           blockId: frame.block_id,
@@ -539,6 +558,7 @@ export class ConversationStore {
         break;
       }
       case "tool-use-start":
+        if (this.opensNewBubbleWhileInterrupting(frame.parent_tool_use_id, frame.tool_name)) break;
         s.items.push({
           kind: "tool",
           toolUseId: frame.tool_use_id,
@@ -651,6 +671,10 @@ export class ConversationStore {
         if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
         s.turnInFlight = false;
         s.turnStartedAt = null;
+        // The turn has ended, so an interrupt of it is over: this `result` is
+        // the `aborted` one the interrupt was waiting on (or the turn finished
+        // before the interrupt landed). Either way the indicator drops here.
+        s.interrupting = false;
         // A compaction always finishes within its turn; clear the indicator
         // here too so a compaction that ended without a boundary (a failure)
         // never leaves it stuck on.
@@ -661,6 +685,14 @@ export class ConversationStore {
         s.costUsd = frame.total_cost_usd;
         break;
       }
+      case "interrupt":
+        // Enter the interrupting state only while a turn is actually running:
+        // an idle interrupt aborts nothing, and no terminating result would
+        // arrive to clear a stuck indicator. The daemon already gates the
+        // frame on turn-active, but the store double-checks against its own
+        // authoritative turnInFlight so a replayed interrupt never sticks.
+        if (s.turnInFlight) s.interrupting = true;
+        break;
       case "compact-status":
         // The compaction window: opened here, closed by the compact-boundary
         // (or, defensively, by the turn's terminating result/error below).
@@ -710,6 +742,9 @@ export class ConversationStore {
           // A fatal error ends the turn, and with it any compaction the turn
           // was running: drop the in-progress indicator.
           s.compacting = false;
+          // A fatal error also ends any interrupt in progress — no aborted
+          // result will follow to clear it.
+          s.interrupting = false;
         }
         break;
       case "retry":
@@ -774,6 +809,53 @@ export class ConversationStore {
     if (total === null) return null;
     const prior = this.findLast((i): i is ResultItem => i.kind === "result");
     return { total, delta: total - (prior?.context?.total ?? 0) };
+  }
+
+  // --- interrupt gate ----------------------------------------------------------
+
+  /**
+   * While interrupting, whether a content-start frame would open a NEW
+   * top-level bubble — the frames the store drops so the aborting turn's tail
+   * lands within existing bubbles instead of sprouting fresh ones. Two shapes
+   * still pass (return false):
+   * - a block nested inside a card the feed already holds (it streams within
+   *   that card's activity panel, i.e. within a bubble);
+   * - a tool that continues the current top-level tool run (it joins the same
+   *   tabbed group, i.e. the same bubble).
+   * Returns false whenever not interrupting, so the normal path is untouched.
+   * `toolName` is set only for a `tool-use-start`.
+   */
+  private opensNewBubbleWhileInterrupting(
+    parentToolUseId: string | undefined,
+    toolName: string | undefined,
+  ): boolean {
+    if (!this.state.interrupting) return false;
+    if (parentToolUseId !== undefined && this.findTool(parentToolUseId)) return false;
+    if (toolName !== undefined && this.extendsCurrentToolRun(toolName)) return false;
+    return true;
+  }
+
+  /**
+   * Whether a new MAIN-CHAIN tool of TOOLNAME would join the current top-level
+   * tool run (nesting into the existing tabbed bubble) rather than opening a
+   * new one — true when the last main-chain item is a tool of the same name.
+   * Nested items (those bound to a parent card) are skipped, since grouping is
+   * a top-level concern; this mirrors the render's consecutive-run grouping
+   * closely enough for the brief interrupt window.
+   */
+  private extendsCurrentToolRun(toolName: string): boolean {
+    const items = this.state.items;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (
+        (item.kind === "text" || item.kind === "thinking" || item.kind === "tool") &&
+        item.parentToolUseId !== undefined
+      ) {
+        continue;
+      }
+      return item.kind === "tool" && item.toolName === toolName;
+    }
+    return false;
   }
 
   // --- lookups (last matching item wins: block/tool ids are unique, but
