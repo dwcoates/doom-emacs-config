@@ -62,6 +62,8 @@ export interface ToolItem {
   input?: Record<string, unknown>;
   inputDone: boolean;
   progress?: string;
+  /** The SDK's raw elapsed clock from the latest heartbeat, in seconds. */
+  progressElapsedS?: number;
   result?: {
     isError: boolean;
     content: string | Array<{ type: "text"; text: string }>;
@@ -556,7 +558,10 @@ export class ConversationStore {
       }
       case "tool-use-progress": {
         const item = this.findTool(frame.tool_use_id);
-        if (item) item.progress = frame.text;
+        if (item) {
+          item.progress = frame.text;
+          item.progressElapsedS = frame.elapsed_seconds;
+        }
         break;
       }
       case "permission-request":

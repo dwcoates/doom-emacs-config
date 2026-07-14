@@ -838,12 +838,19 @@ interface ToolUseResultFrame extends WsEnvelope {
 #### `tool-use-progress`
 
 Optional intermediate progress (long-running tools, background bash).
+`text` is the display line the daemon synthesizes; the structured fields
+travel alongside it so clients can attribute the heartbeat to a subagent
+(`parent_tool_use_id`, absent on main-chain tools) and render their own
+elapsed clock (`elapsed_seconds`, raw from the SDK).
 
 ```ts
 interface ToolUseProgressFrame extends WsEnvelope {
   type: "tool-use-progress";
   tool_use_id: ToolUseId;
   text: string;
+  tool_name?: string;
+  parent_tool_use_id?: ToolUseId;
+  elapsed_seconds?: number;
 }
 ```
 
