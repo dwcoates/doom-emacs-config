@@ -64,3 +64,15 @@
 ;; hasn't declared, so straight installs llama but it never lands on load-path.
 ;; Declaring it here puts build-29.3/llama on load-path so (require 'llama) works.
 (package! llama)
+
+;; helm, as a STANDALONE package — NOT Doom's `:completion helm' module,
+;; which is mutually exclusive with the active `:completion ivy'.  Declared
+;; here (not in modules/app/agent-repl/packages.el) because that module is
+;; loaded manually from config.el rather than via the `doom!' block, so its
+;; own packages.el is never scanned by `doom sync'.  agent-repl never enables
+;; `helm-mode' (the global `completing-read' remap) — ivy stays the default
+;; everywhere — and calls `helm' directly for exactly one command, the
+;; workspace picker (`agent-repl-switch-to-project' / `SPC p p'), whose
+;; per-source header renders the picker's column titles natively.  Every call
+;; site is `fboundp'-guarded so the module loads and its tests run without helm.
+(package! helm)
