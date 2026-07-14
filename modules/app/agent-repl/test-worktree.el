@@ -2040,6 +2040,64 @@ silently return a colliding name."
       ;; Args are (git-root name prompt priority fork-session-id base-commit)
       (should (equal "DWC/clean" (nth 1 scheduled-args))))))
 
+(ert-deftest agent-repl-test-handle-create-command-warns-when-prompt-missing ()
+  "A create entry without a `prompt' field still creates but warns loudly.
+The /workspace-generation flow always supplies a prompt, so a missing
+field there means the generation output was malformed and the workspace
+would otherwise boot silently idle."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (agent-repl-worktree-start-tag-prefix nil)
+        (scheduled-args nil)
+        (warned nil))
+    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
+              ((symbol-function 'run-with-timer)
+               (lambda (_delay _repeat _fn &rest args)
+                 (setq scheduled-args args))))
+      (agent-repl--handle-create-command
+       `((type . "create") (name . "DWC/noprompt") (git_root . "/tmp/repo"))
+       0)
+      (should (string-match-p "WITHOUT an initial prompt" warned))
+      ;; The warn is non-blocking: the create is still scheduled.
+      (should (equal "DWC/noprompt" (nth 1 scheduled-args))))))
+
+(ert-deftest agent-repl-test-handle-create-command-warns-when-prompt-empty ()
+  "An empty-string `prompt' field warns exactly like a missing one."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (agent-repl-worktree-start-tag-prefix nil)
+        (warned nil))
+    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _args) nil)))
+      (agent-repl--handle-create-command
+       `((type . "create") (name . "DWC/emptyprompt") (git_root . "/tmp/repo") (prompt . ""))
+       0)
+      (should (string-match-p "WITHOUT an initial prompt" warned)))))
+
+(ert-deftest agent-repl-test-handle-create-command-no-warn-when-prompt-present ()
+  "A create entry carrying a non-empty `prompt' does not warn."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
+        (agent-repl-worktree-start-tag-prefix nil)
+        (warned nil))
+    (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (&rest _args) (setq warned t)))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _args) nil)))
+      (agent-repl--handle-create-command
+       `((type . "create") (name . "DWC/hasprompt") (git_root . "/tmp/repo") (prompt . "do the thing"))
+       0)
+      (should-not warned))))
+
 (ert-deftest agent-repl-test-handle-create-command-forwards-model-from-json ()
   "A `model' field in the create JSON is scheduled as the 7th timer arg."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
@@ -6352,6 +6410,18 @@ with the exact values supplied."
     (should (string-match-p "\"type\": \"create\"" out))
     (should (string-match-p "\"git_root\": \"/tmp/repo/\"" out))
     (should (string-match-p "\"base_commit\": \"origin/master\"" out))))
+
+(ert-deftest agent-repl-test-workspace-generation-prompt-lists-prompt-as-required-field ()
+  "The MUST-emit field block names `prompt' alongside the deterministic
+fields.  Prose-only instruction proved insufficient: a generation run
+omitted the `prompt' field entirely, materializing a workspace that
+booted idle with no first message."
+  (let* ((out (agent-repl--workspace-generation-prompt
+               "raw" "prefixed" "/tmp/repo/" "HEAD" nil))
+         (must-block (progn
+                       (should (string-match "Deterministic fields you MUST emit[^:]*:\n\\(\\(?:  .*\n\\)+\\)" out))
+                       (match-string 1 out))))
+    (should (string-match-p "\"prompt\"" must-block))))
 
 (ert-deftest agent-repl-test-workspace-generation-prompt-omits-fork-from-when-nil ()
   "When FORK-FROM is nil, no `fork_from' line is emitted in the prompt."
