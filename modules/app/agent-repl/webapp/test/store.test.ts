@@ -436,6 +436,17 @@ describe("ConversationStore turn lifecycle", () => {
     expect(resultItems(store)[0].context).toBeNull();
   });
 
+  it("re-anchors the standing input tokens on post_tokens when a compaction reports it", () => {
+    // Arrange — the SDK reports the post-compaction size, so the topbar shows
+    // it immediately instead of a dash.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act
+    store.applyRaw(frame("compact-boundary", { trigger: "manual", pre_tokens: 200_000, post_tokens: 18_000 }));
+    // Assert
+    expect(store.state.contextTokens).toBe(18_000);
+  });
+
   it("unknows the standing input tokens when a /clear re-inits the session", () => {
     // Arrange
     const store = newStore();
@@ -567,6 +578,66 @@ describe("ConversationStore turn lifecycle", () => {
     // Assert
     expect(store.state.turnInFlight).toBe(false);
     expect(store.state.items.at(-1)).toMatchObject({ kind: "error", code: "shim_died" });
+  });
+});
+
+describe("ConversationStore compaction progress", () => {
+  it("starts not compacting", () => {
+    // Arrange + Act
+    const store = newStore();
+    // Assert
+    expect(store.state.compacting).toBe(false);
+  });
+
+  it("enters the compacting state on a compact-status frame", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("compact-status", { active: true }));
+    // Assert
+    expect(store.state.compacting).toBe(true);
+  });
+
+  it("leaves the compacting state when the compact-boundary lands", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("compact-status", { active: true }));
+    // Act
+    store.applyRaw(frame("compact-boundary", { trigger: "manual", pre_tokens: 9000, post_tokens: 800 }));
+    // Assert
+    expect(store.state.compacting).toBe(false);
+  });
+
+  it("leaves the compacting state when the turn's result lands without a boundary", () => {
+    // Arrange — a compaction that failed emits no boundary; the result still
+    // ends the turn, so the indicator must not stick.
+    const store = newStore();
+    store.applyRaw(frame("compact-status", { active: true }));
+    // Act
+    store.applyRaw(resultFrame());
+    // Assert
+    expect(store.state.compacting).toBe(false);
+  });
+
+  it("leaves the compacting state on an unrecoverable error", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("compact-status", { active: true }));
+    // Act
+    store.applyRaw(frame("error", { code: "shim_died", message: "gone", recoverable: false }));
+    // Assert
+    expect(store.state.compacting).toBe(false);
+  });
+
+  it("keeps compacting through a recoverable error", () => {
+    // Arrange — a recoverable error is followed by a retry; the compaction the
+    // turn was running is still in flight.
+    const store = newStore();
+    store.applyRaw(frame("compact-status", { active: true }));
+    // Act
+    store.applyRaw(frame("error", { code: "sdk_error", message: "hiccup", recoverable: true }));
+    // Assert
+    expect(store.state.compacting).toBe(true);
   });
 });
 

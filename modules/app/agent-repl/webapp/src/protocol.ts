@@ -131,6 +131,17 @@ export interface CompactBoundaryFrame extends WsEnvelope {
   post_tokens: number;
 }
 
+/**
+ * A context compaction is IN PROGRESS. The daemon opens the window on the
+ * SDK's `status: "compacting"` and the compact-boundary closes it; the SDK
+ * reports no progress percentage, so `active` is always true and the GUI's
+ * indicator is indeterminate.
+ */
+export interface CompactStatusFrame extends WsEnvelope {
+  type: "compact-status";
+  active: boolean;
+}
+
 export interface RetryFrame extends WsEnvelope {
   type: "retry";
   attempt: number;
@@ -345,6 +356,7 @@ export type L2Frame =
   | HelloFrame
   | ResultFrame
   | CompactBoundaryFrame
+  | CompactStatusFrame
   | RetryFrame
   | ErrorFrame
   | UserTurnFrame
@@ -375,6 +387,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "hello",
   "result",
   "compact-boundary",
+  "compact-status",
   "retry",
   "error",
   "user-turn",
