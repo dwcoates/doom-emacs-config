@@ -1272,26 +1272,26 @@ fallback + filename-prefix dispatch) is unchanged machinery.
 - **Daemon-written events** — exactly the set no hook ever produces
   for SDK sessions (dedup with hooks is by disjoint event sets):
 
-  | filename | trigger (Layer-2 frame at the broadcast tap) |
+  | filename | trigger |
   |---|---|
-  | `permission_request_<sid>_<reqid>` | `permission-request` |
+  | `permission_request_<sid>_<reqid>` | `permission-request` (Layer-2 frame at the broadcast tap) |
   | `permission_resolved_<sid>_<reqid>` | `permission-resolved` (webapp decision or turn-end/interrupt/close/death auto-cancel) |
   | `session_dead_<sid>` | `error` with `code: "shim_died"` (both abnormal death paths; never on clean shutdown) |
-  | `login_request_<sid>` | `POST /sessions/{id}/login` (the webapp topbar's login button) |
+  | `account_changed_<sid>` | `POST /sessions/{id}/account` relaunched the session under another canonical root |
 
   Everything else (`prompt_submit_*`, `stop_*`, `subagent_*`,
   `stop_failure_*`, `session_start_*`) keeps coming from the real
   global hooks, which fire for SDK sessions.
 
-  `login_request_<sid>` is the one entry that is not a broadcast tap: it
-  is a REQUEST travelling daemon → Emacs rather than a state report. The
-  Claude OAuth flow is an interactive TUI needing a controlling terminal,
-  which neither the browser nor the daemon (pipes only) has — Emacs does,
-  so the daemon's job is to name the session's `cwd` and hand it over.
-  Emacs opens a vterm running `CLAUDE_CONFIG_DIR=<dir> claude /login`,
-  with `<dir>` resolved from that `cwd` (see below). The `sid` may be
-  empty when `system:init` has not landed; the `cwd`, not the id, is what
-  the Emacs dispatcher keys on.
+  `account_changed_<sid>` is the one entry that is not a broadcast tap:
+  it is written by the server's account-switch endpoint rather than the
+  session frame stream. It is a POKE, not a payload — Emacs fetches the
+  authoritative config dir back via `GET /sessions/{id}/account` and
+  stores it as the workspace's account override, so daemon and Emacs can
+  never disagree about the new account. (The retired `login_request_`
+  channel, which once relayed the login to an Emacs vterm, is drained by
+  Emacs without action; the daemon runs the login on its own pty — see
+  `daemon/internal/login`.)
 - **Consumer gates**: the Emacs handlers are state-gated and
   idempotent (`permission_request` acts only from `:thinking`,
   `permission_resolved` only from `:permission`), which makes
