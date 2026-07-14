@@ -41,6 +41,7 @@
 (require 'url-util)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
@@ -492,12 +493,25 @@ deleted once it is the sole survivor.  Buffers and the daemon session
 survive.  Falls back to closing the individual windows when no layout
 was saved, resolving the input buffer by NAME too as a defensive
 fallback since the plist key can go stale nil while the named buffer
-stays displayed."
-  (unless (agent-repl--restore-fullscreen-config ws)
-    (agent-repl--close-buffer-windows
-     (agent-repl--ws-get ws :frontend-buffer)
-     (or (agent-repl--ws-get ws :input-buffer)
-         (get-buffer (agent-repl--buffer-name "-input" ws))))))
+stays displayed.
+
+Window teardown is scoped to the workspace currently ON the frame.
+When WS is NOT the active workspace — e.g. a background merge tearing
+down a DIFFERENT workspace through `agent-repl--gui-kill' — its panels
+are not displayed on the visible frame, so restoring its saved layout
+via `set-window-configuration' (a frame-global operation that would
+clobber the visible workspace's layout) or closing its buffer windows
+must NOT run.  In that case the frame is left untouched and the
+now-moot saved layout is dropped so a later reopen cannot restore a
+stale configuration.  This is the window-isolation guarantee: merging
+one workspace never disturbs another workspace's windows."
+  (if (not (agent-repl--current-ws-p ws))
+      (agent-repl--ws-put ws :fullscreen-config nil)
+    (unless (agent-repl--restore-fullscreen-config ws)
+      (agent-repl--close-buffer-windows
+       (agent-repl--ws-get ws :frontend-buffer)
+       (or (agent-repl--ws-get ws :input-buffer)
+           (get-buffer (agent-repl--buffer-name "-input" ws)))))))
 
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').

@@ -811,12 +811,15 @@ deadlock the non-interactive nuke hook."
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.
 Restoring is what removes BOTH gui windows, since the input window
-cannot be deleted once it is the sole survivor."
+cannot be deleted once it is the sole survivor.  Only fires for the
+workspace currently on the frame, so the ws is stubbed active."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((restored nil)
           (closed nil))
-      (cl-letf (((symbol-function 'agent-repl--restore-fullscreen-config)
+      (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+                 (lambda (_ws) t))
+                ((symbol-function 'agent-repl--restore-fullscreen-config)
                  (lambda (_ws) (setq restored t) t))
                 ((symbol-function 'agent-repl--close-buffer-windows)
                  (lambda (&rest _) (setq closed t))))
@@ -828,13 +831,16 @@ cannot be deleted once it is the sole survivor."
 
 (ert-deftest agent-repl-test-frontend-gui-hide-falls-back-to-window-close ()
   "Without a saved layout, gui hide closes the windows individually,
-resolving the input buffer by name when the plist key is stale nil."
+resolving the input buffer by name when the plist key is stale nil.
+Only fires for the workspace on the frame, so the ws is stubbed active."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((named (get-buffer-create "*agent-panel-input-ws1*"))
           (closed nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--restore-fullscreen-config)
+          (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+                     (lambda (_ws) t))
+                    ((symbol-function 'agent-repl--restore-fullscreen-config)
                      (lambda (_ws) nil))
                     ((symbol-function 'agent-repl--close-buffer-windows)
                      (lambda (&rest bufs) (setq closed bufs))))
@@ -843,6 +849,43 @@ resolving the input buffer by name when the plist key is stale nil."
             ;; Assert
             (should (memq named closed)))
         (kill-buffer named)))))
+
+(ert-deftest agent-repl-test-frontend-gui-hide-leaves-frame-alone-when-ws-not-current ()
+  "gui hide never restores the layout of a NON-current workspace.
+A background merge tearing down a DIFFERENT workspace routes through
+`agent-repl--gui-kill' -> `agent-repl--gui-hide'.  Restoring that
+workspace's saved config (a frame-global `set-window-configuration')
+would clobber the visible workspace's windows, so the frame must be
+left untouched — neither restore nor per-window close fires."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((restored nil)
+          (closed nil))
+      (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--restore-fullscreen-config)
+                 (lambda (_ws) (setq restored t) t))
+                ((symbol-function 'agent-repl--close-buffer-windows)
+                 (lambda (&rest _) (setq closed t))))
+        ;; Act
+        (agent-repl--gui-hide "ws1")
+        ;; Assert — neither frame-global window op ran.
+        (should-not restored)
+        (should-not closed)))))
+
+(ert-deftest agent-repl-test-frontend-gui-hide-drops-stale-layout-when-ws-not-current ()
+  "Tearing down a non-current workspace drops its now-moot saved layout.
+Leaving `:fullscreen-config' set would let a later reopen of the
+workspace restore a stale configuration, so the plist key is cleared."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w"
+                                             :fullscreen-config (fake-config))
+    (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+               (lambda (_ws) nil)))
+      ;; Act
+      (agent-repl--gui-hide "ws1")
+      ;; Assert
+      (should (null (agent-repl--ws-get "ws1" :fullscreen-config))))))
 
 (ert-deftest agent-repl-test-frontend-display-saves-layout-once ()
   "The display path saves :fullscreen-config only on a genuine open."
