@@ -109,6 +109,24 @@ function primaryClass(section: Section): string {
 }
 
 /**
+ * Walk an item's sections in order, handing each to VISIT with its
+ * stable `class:occurrence` key — the one walk both sides of the
+ * capture/re-apply round trip share, so their keys cannot drift apart.
+ */
+function eachSectionKey(
+  sections: ArrayLike<Section>,
+  visit: (section: Section, key: string) => void,
+): void {
+  const seen = new Map<string, number>();
+  for (let i = 0; i < sections.length; i++) {
+    const cls = primaryClass(sections[i]);
+    const n = seen.get(cls) ?? 0;
+    seen.set(cls, n + 1);
+    visit(sections[i], `${cls}:${n}`);
+  }
+}
+
+/**
  * Stable identities of the expanded sections among an item's capped
  * sections: `class:occurrence` rather than raw position, so a section the
  * user opened keeps its expansion when a re-render inserts or drops a
@@ -117,26 +135,18 @@ function primaryClass(section: Section): string {
  */
 export function expandedKeys(sections: ArrayLike<Section>): string[] {
   const open: string[] = [];
-  const seen = new Map<string, number>();
-  for (let i = 0; i < sections.length; i++) {
-    const cls = primaryClass(sections[i]);
-    const n = seen.get(cls) ?? 0;
-    seen.set(cls, n + 1);
-    if (isExpanded(sections[i])) open.push(`${cls}:${n}`);
-  }
+  eachSectionKey(sections, (section, key) => {
+    if (isExpanded(section)) open.push(key);
+  });
   return open;
 }
 
 /** Re-expand the sections whose keys are in KEYS (from expandedKeys). */
 export function applyExpanded(sections: ArrayLike<Section>, keys: readonly string[]): void {
   const open = new Set(keys);
-  const seen = new Map<string, number>();
-  for (let i = 0; i < sections.length; i++) {
-    const cls = primaryClass(sections[i]);
-    const n = seen.get(cls) ?? 0;
-    seen.set(cls, n + 1);
-    if (open.has(`${cls}:${n}`)) sections[i].classList.add(EXPANDED_CLASS);
-  }
+  eachSectionKey(sections, (section, key) => {
+    if (open.has(key)) section.classList.add(EXPANDED_CLASS);
+  });
 }
 
 /** The capped sections inside one rendered feed item, in document order. */
