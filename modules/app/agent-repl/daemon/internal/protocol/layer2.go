@@ -237,6 +237,22 @@ type ToolUseProgressFrame struct {
 	ElapsedSeconds  float64 `json:"elapsed_seconds,omitempty"`
 }
 
+// TaskNotificationFrame is the completion signal of detached background
+// work (a backgrounded Bash, a background agent, a workflow), parsed
+// from the harness notification that rode in on a user message.
+// ToolUseID names the SPAWNING tool call verbatim from the payload, so
+// clients can land the completion on the exact card that started it.
+// Text keeps the whole raw notification for anything the tags miss.
+type TaskNotificationFrame struct {
+	Envelope
+	ToolUseID  string `json:"tool_use_id,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+	OutputFile string `json:"output_file,omitempty"`
+	Text       string `json:"text"`
+}
+
 // --- §2.7 permission prompts ------------------------------------------------
 
 // PermissionPreview is the optional preview payload on

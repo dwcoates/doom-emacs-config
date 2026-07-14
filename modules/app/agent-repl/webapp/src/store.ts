@@ -68,6 +68,14 @@ export interface ToolItem {
   progress?: string;
   /** The SDK's raw elapsed clock from the latest heartbeat, in seconds. */
   progressElapsedS?: number;
+  /** Background-work completion that named this call as its spawner. */
+  notification?: {
+    taskId?: string;
+    status?: string;
+    summary?: string;
+    outputFile?: string;
+    text: string;
+  };
   result?: {
     isError: boolean;
     content: string | Array<{ type: "text"; text: string }>;
@@ -567,6 +575,25 @@ export class ConversationStore {
         if (item) {
           item.progress = frame.text;
           item.progressElapsedS = frame.elapsed_seconds;
+        }
+        break;
+      }
+      case "task-notification": {
+        // The completion lands on the SPAWNING card when the payload
+        // names one the feed knows; anything else surfaces as a system
+        // note rather than vanishing — a background completion is never
+        // swallowed.
+        const item = frame.tool_use_id ? this.findTool(frame.tool_use_id) : undefined;
+        if (item) {
+          item.notification = {
+            taskId: frame.task_id,
+            status: frame.status,
+            summary: frame.summary,
+            outputFile: frame.output_file,
+            text: frame.text,
+          };
+        } else {
+          s.items.push({ kind: "system", subtype: "task-notification" });
         }
         break;
       }

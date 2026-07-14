@@ -250,6 +250,21 @@ export interface ToolUseProgressFrame extends WsEnvelope {
   elapsed_seconds?: number;
 }
 
+/**
+ * Completion signal of detached background work, parsed from the
+ * harness notification. `tool_use_id` names the SPAWNING call, which is
+ * what lands the completion on the card that started the work.
+ */
+export interface TaskNotificationFrame extends WsEnvelope {
+  type: "task-notification";
+  tool_use_id?: string;
+  task_id?: string;
+  status?: string;
+  summary?: string;
+  output_file?: string;
+  text: string;
+}
+
 // --- §2.7 permission prompts ---------------------------------------------------------
 
 export type PermissionPreview =
@@ -381,6 +396,7 @@ export type L2Frame =
   | ToolUseInputEndFrame
   | ToolUseResultFrame
   | ToolUseProgressFrame
+  | TaskNotificationFrame
   | PermissionRequestFrame
   | PermissionResolvedFrame
   | UsageFrame
@@ -412,6 +428,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "tool-use-input-end",
   "tool-use-result",
   "tool-use-progress",
+  "task-notification",
   "permission-request",
   "permission-resolved",
   "usage",
