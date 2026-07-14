@@ -621,17 +621,6 @@ describe("ConversationStore fresh-join replay phases", () => {
     expect(result).toMatchObject({ changed: true, restored: true });
   });
 
-  it("does not enter replaying mode on a reconnect within retention", () => {
-    // Arrange — store already has 1..2 applied.
-    const store = newStore();
-    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
-    store.applyRaw(frame("system", { subtype: "init", data: {} }, 2));
-    // Act — reconnect; daemon is at 6, retains from 1.
-    store.applyRaw(hello({ seq: 6, resume_from_seq: 1 }));
-    // Assert — tail fill is incremental, not a restore.
-    expect(store.replaying).toBe(false);
-  });
-
   it("does not enter replaying mode on an empty fresh session", () => {
     // Arrange
     autoSeq = 0;
@@ -639,6 +628,60 @@ describe("ConversationStore fresh-join replay phases", () => {
     // Act
     store.applyRaw(hello({ seq: 0, resume_from_seq: 0 }));
     // Assert
+    expect(store.replaying).toBe(false);
+  });
+});
+
+describe("ConversationStore gap-fill replay phases", () => {
+  /** A store with seqs 1..2 applied, reconnecting to a daemon at seq 4. */
+  function reconnected(): ConversationStore {
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    store.applyRaw(frame("system", { subtype: "init", data: {} }, 2));
+    store.applyRaw(hello({ seq: 4, resume_from_seq: 1 }));
+    return store;
+  }
+
+  it("enters replaying mode on a reconnect that missed frames", () => {
+    // Arrange + Act — the backlog otherwise renders once per frame,
+    // which is the switched-back-to feed's catch-up jitter.
+    const store = reconnected();
+    // Assert
+    expect(store.replaying).toBe(true);
+  });
+
+  it("stays quiet-changed while the gap backlog streams in", () => {
+    // Arrange
+    const store = reconnected();
+    // Act — first of the two missed frames.
+    const result = store.applyRaw(frame("system", { subtype: "s3", data: {} }, 3));
+    // Assert — applied, deferred, not yet caught up.
+    expect(result).toMatchObject({ changed: true });
+    expect(result.restored).toBeFalsy();
+    expect(store.replaying).toBe(true);
+  });
+
+  it("completes at the hello watermark without the restored flag", () => {
+    // Arrange
+    const store = reconnected();
+    store.applyRaw(frame("system", { subtype: "s3", data: {} }, 3));
+    // Act — the frame reaching the watermark.
+    const result = store.applyRaw(frame("system", { subtype: "s4", data: {} }, 4));
+    // Assert — one ordinary reconcile render, NOT the restored rebuild:
+    // the feed is already built, and a rebuild would drop expanded
+    // sections and yank a scrolled-up reader to the tail.
+    expect(result.changed).toBe(true);
+    expect(result.restored).toBeFalsy();
+    expect(store.replaying).toBe(false);
+  });
+
+  it("does not enter replaying mode on a reconnect that missed nothing", () => {
+    // Arrange — store already has 1 applied.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }, 1));
+    // Act — reconnect; the daemon is exactly where we left off.
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    // Assert — nothing to defer.
     expect(store.replaying).toBe(false);
   });
 });

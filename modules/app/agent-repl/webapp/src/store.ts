@@ -255,9 +255,11 @@ export interface ApplyResult {
   /** Whether visible state changed (render needed). */
   changed: boolean;
   /**
-   * Set on the frame that completes a fresh-join history replay: the
-   * feed should now render restored (tail-first backfill) instead of
-   * incrementally.
+   * Set (true) on the frame that completes a FRESH-JOIN history replay:
+   * the feed should now render restored (tail-first backfill) instead
+   * of incrementally. The frame completing a reconnect's gap-fill
+   * replay reports plain `changed` instead — the feed is already built,
+   * and one reconcile render shows the whole backlog at once.
    */
   restored?: boolean;
 }
@@ -278,14 +280,24 @@ export class ConversationStore {
   }
 
   /**
-   * Fresh-join replay watermark: the hello's seq when a full history
-   * replay was requested, null outside a replay. While set, frames are
-   * applied silently (no per-frame feed render) and the feed renders
-   * once, restored, when lastSeq catches up.
+   * Replay watermark: the hello's seq when a replay was requested, null
+   * outside a replay. While set, frames are applied silently (no
+   * per-frame feed render) and the feed renders once when lastSeq
+   * catches up — rendering per replayed frame is what a switched-back-to
+   * feed's catch-up jitter is made of.
    */
   private replayTarget: number | null = null;
 
-  /** Whether a fresh-join history replay is still streaming in. */
+  /**
+   * What kind of replay the watermark guards: a fresh join's completion
+   * renders restored (full tail-first rebuild), a reconnect gap-fill's
+   * completion renders as one ordinary reconcile — the feed is already
+   * built, and a rebuild would drop expanded sections and yank a
+   * scrolled-up reader to the tail.
+   */
+  private replayKind: "fresh" | "gap" = "fresh";
+
+  /** Whether a history replay (fresh-join or gap-fill) is still streaming in. */
   get replaying(): boolean {
     return this.replayTarget !== null;
   }
@@ -321,16 +333,19 @@ export class ConversationStore {
       };
     }
     this.state.lastSeq = envelope.seq;
-    const restored =
+    const caughtUp =
       this.replayTarget !== null && envelope.seq >= this.replayTarget;
-    if (restored) this.replayTarget = null;
+    if (caughtUp) this.replayTarget = null;
+    // Only a fresh join's completion renders restored; a gap-fill's is a
+    // plain `changed` (see `replayKind`).
+    const restored = caughtUp && this.replayKind === "fresh";
     if (frame === null) {
       // unknown type: cursor advanced, nothing to render — but a replay
       // that ends on an unknown frame still has a backlog to show.
-      return restored ? { changed: true, restored } : { changed: false };
+      return caughtUp ? { changed: true, restored } : { changed: false };
     }
     this.applyKnown(frame);
-    return restored ? { changed: true, restored } : { changed: true };
+    return caughtUp ? { changed: true, restored } : { changed: true };
   }
 
   private applyHello(hello: HelloFrame): ApplyResult {
@@ -349,8 +364,14 @@ export class ConversationStore {
       s.lastSeq > 0 && hello.resume_from_seq <= s.lastSeq + 1;
     if (canFillFromHistory) {
       // Reconnect with our history still inside the retention window:
-      // fetch only what we missed (if anything).
+      // fetch only what we missed (if anything). The backlog applies
+      // silently behind the gap-fill watermark and the feed renders once
+      // when it lands — a webview whose socket died while its workspace
+      // was hidden otherwise replays a long backlog as a burst of
+      // per-frame renders, which is the switch-in jitter.
       if (hello.seq > s.lastSeq) {
+        this.replayTarget = hello.seq;
+        this.replayKind = "gap";
         return {
           changed: true,
           send: { type: "replay-request", from_seq: s.lastSeq + 1 },
@@ -371,6 +392,7 @@ export class ConversationStore {
       // Full-history replay incoming: render nothing per-frame and
       // restore (tail-first) once lastSeq reaches the hello watermark.
       this.replayTarget = hello.seq;
+      this.replayKind = "fresh";
       return {
         changed: true,
         send: { type: "replay-request", from_seq: hello.resume_from_seq },
