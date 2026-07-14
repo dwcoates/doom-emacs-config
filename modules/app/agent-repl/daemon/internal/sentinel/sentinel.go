@@ -101,6 +101,15 @@ func (w *Writer) SessionDead(cwd, sid string) {
 	w.jobs <- job{name: "session_dead_" + sid, cwd: cwd, sid: sid}
 }
 
+// AccountChanged records that a session switched onto another canonical
+// account root. Filename: account_changed_<sid>. The file carries no
+// payload beyond the standard cwd/sid lines: Emacs reads the sentinel as
+// a poke and fetches the authoritative config dir back off the daemon,
+// so the two can never disagree about what the new account is.
+func (w *Writer) AccountChanged(cwd, sid string) {
+	w.jobs <- job{name: "account_changed_" + sid, cwd: cwd, sid: sid}
+}
+
 func (w *Writer) run() {
 	defer close(w.done)
 	for j := range w.jobs {
