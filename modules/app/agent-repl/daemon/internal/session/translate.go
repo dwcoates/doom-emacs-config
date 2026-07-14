@@ -771,8 +771,9 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 	case "compact_boundary":
 		var data struct {
 			CompactMetadata struct {
-				Trigger   string `json:"trigger"`
-				PreTokens int64  `json:"pre_tokens"`
+				Trigger    string `json:"trigger"`
+				PreTokens  int64  `json:"pre_tokens"`
+				PostTokens int64  `json:"post_tokens"`
 			} `json:"compact_metadata"`
 		}
 		_ = json.Unmarshal(evt.Data, &data)
@@ -780,8 +781,27 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 			Envelope:  protocol.Envelope{Type: "compact-boundary"},
 			Trigger:   data.CompactMetadata.Trigger,
 			PreTokens: data.CompactMetadata.PreTokens,
-			// The SDK does not report post-compaction size; 0 = unknown.
-			PostTokens: 0,
+			// post_tokens is optional in compact_metadata; 0 means the SDK
+			// omitted it (post-compaction size unknown). When present it is
+			// the post-compaction context size the topbar re-anchors on.
+			PostTokens: data.CompactMetadata.PostTokens,
+		}}
+	case "status":
+		// The SDK's `status` system message reports many transient states
+		// (`requesting`, ...); only `compacting` has a Layer-2 meaning. It
+		// announces the START of a compaction, with no progress percentage,
+		// so it maps to a pure start signal. Every other status value has no
+		// Layer-2 representation and is dropped.
+		var data struct {
+			Status string `json:"status"`
+		}
+		_ = json.Unmarshal(evt.Data, &data)
+		if data.Status != "compacting" {
+			return nil
+		}
+		return []protocol.L2Frame{&protocol.CompactStatusFrame{
+			Envelope: protocol.Envelope{Type: "compact-status"},
+			Active:   true,
 		}}
 	case "tool_use_progress":
 		// §2.9: tool_use_progress system events map to the dedicated

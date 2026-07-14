@@ -85,6 +85,18 @@ type CompactBoundaryFrame struct {
 	PostTokens int64  `json:"post_tokens"`
 }
 
+// CompactStatusFrame announces that a context compaction is IN PROGRESS. The
+// SDK opens the window with a `status: "compacting"` system message and closes
+// it with the compact-boundary that ends the compaction; the SDK reports no
+// progress percentage, so the frame is a pure start signal (Active is always
+// true) and the GUI's indicator is indeterminate. The window is torn down by
+// the compact-boundary, or — belt-and-suspenders, since a compaction always
+// runs inside a turn — by the turn's terminating result/error.
+type CompactStatusFrame struct {
+	Envelope
+	Active bool `json:"active"`
+}
+
 type RetryFrame struct {
 	Envelope
 	Attempt int    `json:"attempt"`
