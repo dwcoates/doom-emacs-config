@@ -841,6 +841,36 @@ describe("thinking spinner", () => {
   });
 });
 
+const interruptingPending = blockAfter(css, ".interrupting-pending");
+const interruptingSpinner = blockAfter(css, ".interrupting-spinner {");
+const reducedMotion = blockAfter(css, "@media (prefers-reduced-motion: reduce)");
+
+describe("interrupting indicator", () => {
+  it("reads in the alarm red rather than the thinking orange", () => {
+    // Arrange / Act — the .interrupting-pending label rule.
+    // Assert — --err (red), the opposite signal from --thinking (working orange).
+    expect(interruptingPending).toMatch(/color:\s*var\(--err\)/);
+  });
+
+  it("spins the same thinking-spin animation the thinking indicator uses", () => {
+    // Arrange / Act — the base .interrupting-spinner rule.
+    // Assert — reusing thinking-spin means only the hue differs from thinking.
+    expect(interruptingSpinner).toMatch(/animation:\s*thinking-spin\s+[\d.]+s\s+linear\s+infinite/);
+  });
+
+  it("draws the spinning arc in red", () => {
+    // Arrange / Act — the base .interrupting-spinner rule.
+    // Assert — the arc's leading edge is the alarm red.
+    expect(interruptingSpinner).toMatch(/border-top-color:\s*var\(--err\)/);
+  });
+
+  it("slows the interrupting arc under reduced motion alongside the thinking arc", () => {
+    // Arrange / Act — the reduced-motion block names the interrupting spinner too.
+    // Assert
+    expect(reducedMotion).toContain(".interrupting-spinner");
+  });
+});
+
 const toolSpinner = blockAfter(css, ".tool-spinner");
 const appearKeyframes = blockAfter(css, "@keyframes tool-run-appear");
 const reducedToolSpinner = blockAfter(

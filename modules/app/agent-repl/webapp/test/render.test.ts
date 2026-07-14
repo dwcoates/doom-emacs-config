@@ -10,6 +10,7 @@ import {
   formatTurnTime,
   groupFeed,
   groupHtml,
+  interruptingIndicatorHtml,
   isPulsed,
   itemKey,
   lastUserTurnId,
@@ -329,6 +330,36 @@ describe("compactionBannerHtml", () => {
   it("marks the banner as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = compactionBannerHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("interruptingIndicatorHtml", () => {
+  it("renders nothing when not interrupting", () => {
+    // Arrange / Act / Assert — an empty string drops the tail node.
+    expect(interruptingIndicatorHtml(false)).toBe("");
+  });
+
+  it("names the interrupt in progress", () => {
+    // Arrange / Act
+    const html = interruptingIndicatorHtml(true);
+    // Assert
+    expect(html).toContain("interrupting");
+  });
+
+  it("carries the same spinner class the thinking indicator animates", () => {
+    // Arrange / Act — the red twin reuses the thinking-spin animation via its
+    // own spinner class, so the markup exposes that spinner hook.
+    const html = interruptingIndicatorHtml(true);
+    // Assert
+    expect(html).toContain("interrupting-spinner");
+  });
+
+  it("marks the indicator as a live status region for assistive tech", () => {
+    // Arrange / Act
+    const html = interruptingIndicatorHtml(true);
     // Assert
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-live="polite"');
