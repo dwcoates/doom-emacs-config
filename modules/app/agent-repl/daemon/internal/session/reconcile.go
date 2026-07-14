@@ -156,6 +156,10 @@ func (s *Session) ReconcileModel() {
 	s.logf("session %s: model drift — mirror said %q, transcript says %q; adopting the transcript",
 		s.ID, was, model)
 	s.broadcastLocked([]protocol.L2Frame{frame})
+	// The reconciler broadcasts outside the Run loop, so it must drive the
+	// registry write-through itself; without this a drift the push path
+	// missed would heal the live topbar but leave the durable record stale.
+	s.notifyRegistrarLocked()
 }
 
 // runModelReconciler drives ReconcileModel until the session ends. TICKS

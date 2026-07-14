@@ -250,6 +250,12 @@ func (r registrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
 	})
 }
 
+func (r registrar) ModelChanged(sessionID, model string) {
+	r.s.updateRegistry(sessionID, "model", func(rec *registry.Record) {
+		rec.Model = model
+	})
+}
+
 func (r registrar) SessionTerminal(sessionID, deathReason string) {
 	// A daemon-wide drain is not a conversation death: the registry
 	// exists precisely so these sessions rehydrate on the next boot, so

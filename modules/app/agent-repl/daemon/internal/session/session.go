@@ -86,9 +86,11 @@ type Session struct {
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
 	deathReason string
-	// registrarClaudeID / registrarTerminal track what the registrar has
-	// already been told, so each transition is reported exactly once.
+	// registrarClaudeID / registrarModel / registrarTerminal track what
+	// the registrar has already been told, so each transition is reported
+	// exactly once per distinct value.
 	registrarClaudeID string
+	registrarModel    string
 	registrarTerminal bool
 
 	done chan struct{}
@@ -106,12 +108,17 @@ type SentinelSink interface {
 
 // Registrar receives the durable-state transitions the persistent
 // session registry records: the arrival (or change) of the CLI session
-// uuid, and the session's terminal transition. Optional: a nil
-// registrar disables the notifications (tests, embedded use).
-// Implementations are called under the session lock and must not call
-// back into the session.
+// uuid, the session's current model (every time it moves), and the
+// session's terminal transition. Optional: a nil registrar disables the
+// notifications (tests, embedded use). Implementations are called under
+// the session lock and must not call back into the session.
 type Registrar interface {
 	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+	// ModelChanged reports the session's current model whenever it moves,
+	// so a rehydrated session resumes on the live model rather than the
+	// frozen create-time one. Reported once per distinct value; a
+	// still-empty model (never seeded, never observed) is never reported.
+	ModelChanged(sessionID, model string)
 	SessionTerminal(sessionID, deathReason string)
 }
 
@@ -291,6 +298,10 @@ func (s *Session) notifyRegistrarLocked() {
 	if id := s.translator.ClaudeSessionID; id != "" && id != s.registrarClaudeID {
 		s.registrarClaudeID = id
 		s.registrar.ClaudeSessionIDChanged(s.ID, id)
+	}
+	if m := s.translator.Model; m != "" && m != s.registrarModel {
+		s.registrarModel = m
+		s.registrar.ModelChanged(s.ID, m)
 	}
 	if s.terminal && !s.registrarTerminal {
 		s.registrarTerminal = true

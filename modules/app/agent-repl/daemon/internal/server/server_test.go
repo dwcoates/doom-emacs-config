@@ -972,6 +972,37 @@ func TestSystemInitWritesClaudeSessionIDThroughToRegistry(t *testing.T) {
 	}
 }
 
+func TestAgentModelSwitchWritesThroughToRegistry(t *testing.T) {
+	// Arrange — a session created with no model, so its record starts
+	// empty and any observed model is a genuine move.
+	h, reg := registryHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act — the agent answers on opus; the filler event that follows is
+	// the sync point (Run handles events serially, so the filler's frame
+	// arriving proves the assistant iteration, registrar write included,
+	// is done).
+	shim.pushEvent(t, `{"type":"assistant-message","session_id":"`+id+`","uuid":"a1","message":{"id":"m1","role":"assistant","model":"opus","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+	shim.pushEvent(t, `{"type":"system","session_id":"`+id+`","uuid":"u2","subtype":"slash_command","data":{}}`)
+	// Drain the assistant message's frames (model-changed plus its block
+	// synthesis) until the filler's system frame arrives: Run processes
+	// events serially, so the filler frame proves the assistant iteration,
+	// registrar write included, is fully done.
+	for {
+		frame := readFrame(t, conn)
+		if frame["type"] == "system" && frame["subtype"] == "slash_command" {
+			break
+		}
+	}
+	// Assert — the durable record now holds the live model so a restart
+	// resumes on it.
+	rec, ok := reg.Get(id)
+	if !ok || rec.Model != "opus" {
+		t.Errorf("record = %+v, ok=%v, want model opus", rec, ok)
+	}
+}
+
 func TestSessionEndMarksRegistryRecordTerminal(t *testing.T) {
 	// Arrange
 	h, reg := registryHarness(t)
