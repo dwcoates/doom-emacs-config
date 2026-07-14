@@ -254,6 +254,13 @@ workspace names nested beneath it."
   "Face for the merge-target branch in the MERGED-section detail view."
   :group 'agent-repl)
 
+(defface agent-repl-drawer-detail-merge-time
+  '((t :foreground "spring green" :slant italic))
+  "Face for the relative merge-completion time in the MERGED-section detail view.
+Renders the \"merged: 30m 20s ago\" line produced from
+`:merge-completed-at' via `agent-repl-drawer--format-merge-ago'."
+  :group 'agent-repl)
+
 (defface agent-repl-drawer-detail-ahead-master
   '((t :foreground "spring green" :weight bold))
   "Face for the ahead-master commit count in expanded detail view."
@@ -2060,6 +2067,31 @@ count as ahead of it."
    ((< seconds 86400) (format "%.1fh ago" (/ seconds 3600.0)))
    (t                 (format "%.1fd ago" (/ seconds 86400.0)))))
 
+(defun agent-repl-drawer--format-merge-ago (seconds)
+  "Format SECONDS elapsed as a compound relative \"... ago\" string.
+Unlike `agent-repl-drawer--format-duration', which collapses to a
+single coarse unit, this renders every unit from the largest non-zero
+one down to whole seconds, so a merge 1820 seconds ago reads
+\"30m 20s ago\".  Seconds are the finest resolution: sub-second
+precision is rounded away and the seconds field is always the trailing
+unit even when zero.  Negative inputs are clamped to 0 (so a
+just-completed merge reads \"0s ago\")."
+  (let* ((total (max 0 (round seconds)))
+         (units (list (cons (/ total 86400)          "d")
+                      (cons (/ (% total 86400) 3600) "h")
+                      (cons (/ (% total 3600) 60)    "m")
+                      (cons (% total 60)             "s")))
+         (started nil)
+         (parts nil))
+    (dolist (u units)
+      ;; Skip leading zero units, but once a non-zero unit appears keep
+      ;; every finer unit (including intermediate zeros) so the readout
+      ;; stays contiguous down to the always-present seconds field.
+      (when (or started (> (car u) 0) (string= (cdr u) "s"))
+        (setq started t)
+        (push (format "%d%s" (car u) (cdr u)) parts)))
+    (concat (string-join (nreverse parts) " ") " ago")))
+
 (defun agent-repl-drawer--toggle-repo-fold (key)
   "Fold or unfold repo KEY, then re-render the drawer and the tab-bar.
 Folding is global state (`agent-repl--folded-repos'), so the tab-bar
@@ -2132,9 +2164,12 @@ Reads only cached `:detail-*' fields and existing plist values; never
 invokes git.  Caller is `--render-workspace-expanded'."
   (let* ((indent-str (make-string (* depth agent-repl-drawer-indent-per-level) ?\s))
          (detail-prefix (concat agent-repl-drawer-gutter indent-str "    "))
+         (section      (agent-repl-drawer--workspace-section ws))
          (branch       (agent-repl--ws-get ws :detail-branch))
-         (merge-target (and (eq (agent-repl-drawer--workspace-section ws) :merged)
+         (merge-target (and (eq section :merged)
                             (agent-repl--ws-get ws :merge-target-name)))
+         (merge-completed-at (and (eq section :merged)
+                                  (agent-repl--ws-get ws :merge-completed-at)))
          (master-ahead (agent-repl--ws-get ws :detail-master-ahead))
          (source-branch (agent-repl--ws-get ws :detail-source-branch))
          (source-ahead (agent-repl--ws-get ws :detail-source-ahead))
@@ -2162,6 +2197,15 @@ invokes git.  Caller is `--render-workspace-expanded'."
       (when merge-target
         (line "merged into:" merge-target
               'agent-repl-drawer-detail-merge-target))
+      ;; Relative wall-clock time since the merge completed, compounded
+      ;; down to whole seconds ("30m 20s ago").  Gated on the timestamp
+      ;; being present so MERGED-section entries without a recorded
+      ;; completion time (e.g. a merge-failed/conflict entry) omit it.
+      (when (numberp merge-completed-at)
+        (line "merged:"
+              (agent-repl-drawer--format-merge-ago
+               (- (float-time) merge-completed-at))
+              'agent-repl-drawer-detail-merge-time))
       (when master-ahead
         (line (format "ahead %s:" agent-repl-master-branch-name)
               (format "%d" master-ahead)
