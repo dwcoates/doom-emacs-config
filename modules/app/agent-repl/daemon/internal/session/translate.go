@@ -162,18 +162,57 @@ func (t *Translator) OnEvent(evt *protocol.L1Event) []protocol.L2Frame {
 // OnUserMessageCmd yields the user-turn broadcast frame for an accepted
 // user-message command, with string-shorthand content normalized.
 func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame {
-	content := cmd.Content
-	var s string
-	if err := json.Unmarshal(cmd.Content, &s); err == nil {
-		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": s}})
-		content = norm
-	}
 	t.turnActive = true
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
-		Content:   content,
+		Content:   normalizeContent(cmd.Content),
 	}
+}
+
+// normalizeContent expands string-shorthand content into the wire
+// ContentBlock[] shape; already-structured content passes through. Shared
+// by the user-turn frame and the queue's snapshot/frames so a queued item
+// and the turn it becomes carry byte-identical content.
+func normalizeContent(content json.RawMessage) json.RawMessage {
+	var s string
+	if err := json.Unmarshal(content, &s); err == nil {
+		// A []map[string]string cannot fail to marshal, matching the
+		// original OnUserMessageCmd behavior exactly.
+		norm, _ := json.Marshal([]map[string]string{{"type": "text", "text": s}})
+		return norm
+	}
+	return content
+}
+
+// commandText renders content (string shorthand or ContentBlock[]) as a
+// plain-text approximation for the classifier prompt and the running-task
+// tracker. Best-effort and total: it never fails, returning the raw JSON
+// when the shape is unrecognized.
+func commandText(content json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(content, &s); err == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		var b strings.Builder
+		for _, blk := range blocks {
+			if blk.Type == "text" && blk.Text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(blk.Text)
+			}
+		}
+		if b.Len() > 0 {
+			return b.String()
+		}
+	}
+	return string(content)
 }
 
 // OnPermissionDecisionCmd resolves a pending permission prompt. The
