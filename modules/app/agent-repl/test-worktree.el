@@ -5464,6 +5464,107 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
       (agent-repl--inherit-config-dir-override "child" "/tmp/parent/")
       (should-not (agent-repl--ws-get "child" :config-dir-override)))))
 
+;;;; ---- Tests: merge remediation ----
+
+(ert-deftest agent-repl-test-merge-remediation-prompt-names-branch-and-error ()
+  "The remediation prompt carries the merge target branch and the failure."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :source-ws-dir "/tmp/parent/")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "master")))
+      (let ((prompt (agent-repl--merge-remediation-prompt "ws1" "boom")))
+        (should (string-match-p "`master`" prompt))
+        (should (string-match-p "boom" prompt))
+        (should (string-match-p "merge ws1" prompt))))))
+
+(ert-deftest agent-repl-test-merge-remediation-prompt-without-source-dir ()
+  "A workspace with no :source-ws-dir still gets a directive, generically worded."
+  (agent-repl-test--with-clean-state
+    (let ((prompt (agent-repl--merge-remediation-prompt "ws1" "boom")))
+      (should (string-match-p "the merge target branch" prompt)))))
+
+(ert-deftest agent-repl-test-dispatch-merge-remediation-schedules ()
+  "Dispatch schedules the run via a 0-second timer carrying the prompt."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest args) (setq scheduled (cons fn args))))
+                ((symbol-function 'agent-repl--merge-remediation-prompt)
+                 (lambda (_ws _err) "the directive")))
+        (agent-repl--dispatch-merge-remediation "ws1" "boom")
+        (should (eq (car scheduled) #'agent-repl--run-merge-remediation))
+        (should (equal (cdr scheduled) '("ws1" "the directive")))))))
+
+(ert-deftest agent-repl-test-run-merge-remediation-live-delivers-directly ()
+  "A live agent gets the directive over the delivery path with no recreation."
+  (agent-repl-test--with-clean-state
+    (let ((delivered nil) (established nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1/")
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--deliver-pending-prompts)
+                 (lambda (pending ws &optional _r) (setq delivered (cons ws pending))))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest _) (setq established t))))
+        (agent-repl--run-merge-remediation "ws1" "the directive")
+        (should (equal delivered '("ws1" "the directive")))
+        (should-not established)))))
+
+(ert-deftest agent-repl-test-run-merge-remediation-dead-recreates ()
+  "A dead agent's workspace is recreated with the directive parked first."
+  (agent-repl-test--with-clean-state
+    (let ((established nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1/")
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (ws dir) (setq established (list ws dir)))))
+        (agent-repl--run-merge-remediation "ws1" "the directive")
+        (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("the directive")))
+        (should (equal established '("ws1" "/tmp/ws1/")))))))
+
+(ert-deftest agent-repl-test-run-merge-remediation-dead-without-dir-warns ()
+  "A dead workspace with no :project-dir warns instead of dropping silently."
+  (agent-repl-test--with-clean-state
+    (let ((warned nil) (established nil))
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest _) (setq established t)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        (agent-repl--run-merge-remediation "ws1" "the directive")
+        (should warned)
+        (should-not established)))))
+
+(ert-deftest agent-repl-test-mark-merge-silent-failure-flags-and-dispatches ()
+  "The silent-failure marker flags the ❌ state and dispatches remediation."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched nil))
+      (cl-letf (((symbol-function 'agent-repl--dispatch-merge-remediation)
+                 (lambda (ws err) (setq dispatched (list ws err)))))
+        (agent-repl--mark-merge-silent-failure "ws1")
+        (should (agent-repl--ws-get "ws1" :merge-failed))
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :merge-failed))
+        (should (equal (car dispatched) "ws1"))))))
+
+(ert-deftest agent-repl-test-mark-merge-failed-dispatches-remediation ()
+  "The generic-failure marker dispatches remediation alongside the ❌ state."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched nil))
+      (cl-letf (((symbol-function 'agent-repl--dispatch-merge-remediation)
+                 (lambda (ws err) (setq dispatched (list ws err)))))
+        (agent-repl--mark-merge-failed "ws1" '(error "boom"))
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))
+        (should (equal dispatched '("ws1" (error "boom"))))))))
+
+(ert-deftest agent-repl-test-mark-merge-conflict-dispatches-remediation ()
+  "The conflict marker dispatches remediation alongside the 💥 state."
+  (agent-repl-test--with-clean-state
+    (let ((dispatched nil))
+      (cl-letf (((symbol-function 'agent-repl--dispatch-merge-remediation)
+                 (lambda (ws err) (setq dispatched (list ws err)))))
+        (agent-repl--mark-merge-conflict "ws1" '(error "clash"))
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :merge-conflict))
+        (should (equal dispatched '("ws1" (error "clash"))))))))
+
 ;;;; ---- Tests: finalize-worktree-workspace child inherits parent priority ----
 
 (ert-deftest agent-repl-test-finalize-child-inherits-parent-priority ()
