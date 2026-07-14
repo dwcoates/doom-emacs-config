@@ -955,6 +955,38 @@ describe("running badge", () => {
   });
 });
 
+/* The compaction bar's motion is pure CSS, like the spinners above, so it is
+   asserted against the stylesheet source rather than a jsdom render. */
+const compactBar = blockAfter(css, ".compact-progress-bar");
+const compactSweep = blockAfter(css, "@keyframes compact-progress-sweep");
+const reducedCompactBar = blockAfter(
+  blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+  ".compact-progress-bar",
+);
+
+describe("compaction progress bar", () => {
+  it("loops an indeterminate sweep rather than tracking a fraction", () => {
+    // Arrange / Act — the .compact-progress-bar rule.
+    // Assert
+    expect(compactBar).toMatch(
+      /animation:\s*compact-progress-sweep\s+[\d.]+s\s+[a-z-]+\s+infinite/,
+    );
+  });
+
+  it("sweeps the fill from off the left edge to off the right", () => {
+    // Arrange / Act — the compact-progress-sweep keyframes.
+    // Assert
+    expect(compactSweep).toMatch(/0%\s*{\s*left:\s*-\d+%/);
+    expect(compactSweep).toMatch(/100%\s*{\s*left:\s*\d+%/);
+  });
+
+  it("rests the bar still under reduced motion, since the label carries the meaning", () => {
+    // Arrange / Act — the reduced-motion .compact-progress-bar override.
+    // Assert
+    expect(reducedCompactBar).toMatch(/animation:\s*none/);
+  });
+});
+
 /* The subagent roster drops out of the topbar, which is a fixed-height flex row:
    the overlay has to leave that row's layout entirely, and its anchor has to be
    the positioned ancestor it hangs from. Both are pure CSS, so both are asserted

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   backfillChunks,
+  compactionBannerHtml,
   diffHtml,
   finalResponses,
   formatTurnTime,
@@ -278,6 +279,37 @@ describe("sessionInfoHtml", () => {
     // Assert
     expect(html.indexOf("time:")).toBeGreaterThan(html.indexOf("parent workspace:"));
     expect(html.indexOf("time:")).toBeLessThan(html.indexOf("tokens:"));
+  });
+});
+
+describe("compactionBannerHtml", () => {
+  it("renders nothing when no compaction is running", () => {
+    // Arrange / Act / Assert — an empty string collapses the banner slot.
+    expect(compactionBannerHtml(false)).toBe("");
+  });
+
+  it("names the compaction in progress", () => {
+    // Arrange / Act
+    const html = compactionBannerHtml(true);
+    // Assert
+    expect(html).toContain("Compacting conversation");
+  });
+
+  it("draws an indeterminate bar rather than a percentage", () => {
+    // Arrange / Act — the SDK reports no fraction, so the bar is a looping
+    // track/fill with no numeric progress in it.
+    const html = compactionBannerHtml(true);
+    // Assert
+    expect(html).toContain("compact-progress-bar");
+    expect(html).not.toMatch(/%/);
+  });
+
+  it("marks the banner as a live status region for assistive tech", () => {
+    // Arrange / Act
+    const html = compactionBannerHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
   });
 });
 

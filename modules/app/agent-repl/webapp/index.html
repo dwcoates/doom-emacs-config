@@ -28,6 +28,10 @@
          account, one switch verb per other canonical root. Built on open
          from the daemon's roster, so the identities are live. -->
     <div id="account-menu" hidden></div>
+    <!-- The compaction-in-progress banner slot: filled with an indeterminate
+         "Compacting conversation…" bar while a /compact runs, empty (and so
+         collapsed) otherwise. -->
+    <div id="compact-progress-slot"></div>
     <main id="feed"></main>
     <footer id="composer">
       <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>

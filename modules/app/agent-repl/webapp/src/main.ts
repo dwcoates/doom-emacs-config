@@ -27,7 +27,7 @@ import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
-import { FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
+import { compactionBannerHtml, FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
@@ -124,6 +124,7 @@ async function boot(): Promise<void> {
   const modeEl = must<HTMLSelectElement>("mode-select");
   const modelEl = must<HTMLSelectElement>("model-select");
   const spinnerEl = must("spinner");
+  const compactBarEl = must("compact-progress-slot");
   const remediationEl = must("remediation");
   const accountEl = must<HTMLButtonElement>("account");
   const accountMenuEl = must("account-menu");
@@ -173,6 +174,8 @@ async function boot(): Promise<void> {
     if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
     if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
+    // Empty string when no compaction runs, which collapses the slot.
+    compactBarEl.innerHTML = compactionBannerHtml(s.compacting);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
 
