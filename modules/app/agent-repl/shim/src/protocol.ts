@@ -333,7 +333,8 @@ export type SystemSubtype =
   | "init"
   | "compact_boundary"
   | "tool_use_progress"
-  | "slash_command";
+  | "slash_command"
+  | "status";
 
 export interface SystemEvt {
   type: "system";
