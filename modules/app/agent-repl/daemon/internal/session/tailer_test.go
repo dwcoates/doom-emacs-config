@@ -70,7 +70,7 @@ func TestParseSpawnAnnouncementExtractsIDAndPath(t *testing.T) {
 	frame := announcementFrame(t,
 		"Command running in background with ID: bg7. Output is being written to: /tmp/claude-501/s/tasks/bg7.output. You will be notified.", false)
 	// Act
-	ann := parseSpawnAnnouncement(frame)
+	ann := parseSpawnAnnouncement(frame, "/cfg")
 	// Assert
 	if ann == nil || ann.TaskID != "bg7" || ann.Path != "/tmp/claude-501/s/tasks/bg7.output" || ann.ToolUseID != "t1" {
 		t.Fatalf("ann = %+v", ann)
@@ -82,7 +82,7 @@ func TestParseSpawnAnnouncementIgnoresErrorResults(t *testing.T) {
 	frame := announcementFrame(t,
 		"with ID: bg7. Output is being written to: /tmp/claude-501/s/tasks/bg7.output", true)
 	// Act + Assert
-	if parseSpawnAnnouncement(frame) != nil {
+	if parseSpawnAnnouncement(frame, "/cfg") != nil {
 		t.Fatal("parsed an announcement from an error result")
 	}
 }
@@ -92,8 +92,51 @@ func TestParseSpawnAnnouncementRefusesPathsOutsideTheSpool(t *testing.T) {
 	frame := announcementFrame(t,
 		"with ID: bg7. Output is being written to: /Users/x/secret.output", false)
 	// Act + Assert
-	if parseSpawnAnnouncement(frame) != nil {
+	if parseSpawnAnnouncement(frame, "/cfg") != nil {
 		t.Fatal("accepted a path outside the spool")
+	}
+}
+
+func TestParseSpawnAnnouncementExtractsWorkflowJournal(t *testing.T) {
+	// Arrange — the observed Workflow spawn shape: a Task ID line plus
+	// the run's transcript dir, whose journal.jsonl is the progress stream.
+	frame := announcementFrame(t,
+		"Workflow launched in background. Task ID: wj7025gze\nSummary: s\nTranscript dir: /cfg/projects/slug/uuid/subagents/workflows/wf_bd77b668-e04\nScript file: /cfg/projects/slug/uuid/workflows/scripts/x.js", false)
+	// Act
+	ann := parseSpawnAnnouncement(frame, "/cfg")
+	// Assert
+	if ann == nil || ann.TaskID != "wj7025gze" {
+		t.Fatalf("ann = %+v", ann)
+	}
+	if ann.Path != "/cfg/projects/slug/uuid/subagents/workflows/wf_bd77b668-e04/journal.jsonl" {
+		t.Fatalf("path = %q", ann.Path)
+	}
+}
+
+func TestParseSpawnAnnouncementRefusesJournalOutsideTheConfigRoot(t *testing.T) {
+	// Arrange — a transcript dir under someone ELSE's tree.
+	frame := announcementFrame(t,
+		"Task ID: wj1\nTranscript dir: /other/projects/slug/uuid/subagents/workflows/wf_1", false)
+	// Act + Assert
+	if parseSpawnAnnouncement(frame, "/cfg") != nil {
+		t.Fatal("accepted a journal outside the config root")
+	}
+}
+
+func TestParseSpawnAnnouncementRefusesNonWorkflowDirsInTheRoot(t *testing.T) {
+	// Arrange — right root, but not a workflow transcript dir.
+	frame := announcementFrame(t,
+		"Task ID: wj1\nTranscript dir: /cfg/projects/slug/uuid/other", false)
+	// Act + Assert
+	if parseSpawnAnnouncement(frame, "/cfg") != nil {
+		t.Fatal("accepted a non-workflow dir")
+	}
+}
+
+func TestAllowedJournalPathRejectsDotDotEscapes(t *testing.T) {
+	// Arrange + Act + Assert — Clean resolves the escape out of the root.
+	if allowedJournalPath("/cfg/projects/x/subagents/workflows/wf/../../../../../../etc/journal.jsonl", "/cfg") {
+		t.Fatal("accepted a dot-dot escape")
 	}
 }
 
