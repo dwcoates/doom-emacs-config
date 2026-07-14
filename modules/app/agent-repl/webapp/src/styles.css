@@ -563,6 +563,8 @@ pre {
    the phantom leading gap from the first block's own margin. */
 .tool-read-md > :first-child { margin-top: 0; }
 .tool-progress { color: var(--muted); font-style: italic; }
+/* The scheduled-wakeup anchor: pending-work orange, like the run badge. */
+.wake-at { color: var(--thinking); font-style: italic; }
 .stderr { color: var(--err); }
 
 .diff .add { color: var(--ok); }
