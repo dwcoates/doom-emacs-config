@@ -13,6 +13,7 @@ import {
   ModelInfo,
   PermissionMode,
   PermissionPreview,
+  QueuedItem,
   RenderHint,
   ReplayRequestCmd,
   ResultSubtype,
@@ -188,6 +189,15 @@ export interface StoreState {
   claudeSessionId: string;
   permissionMode: PermissionMode;
   items: ConversationItem[];
+  /**
+   * The in-flight message queue (§2.13): messages submitted while a turn
+   * was running, parked by the daemon rather than run immediately. Kept
+   * SEPARATE from `items` — a queued message is not a conversation item;
+   * it becomes a real `user-turn` only once the daemon drains it. Nothing
+   * here ever touches `turnInFlight`, which only real `user-turn`/`result`
+   * frames move.
+   */
+  queued: QueuedItem[];
   turnInFlight: boolean;
   /**
    * When the in-flight turn started, as the daemon stamped its `user-turn`
@@ -239,6 +249,7 @@ function initialState(): StoreState {
     claudeSessionId: "",
     permissionMode: "default",
     items: [],
+    queued: [],
     turnInFlight: false,
     turnStartedAt: null,
     lastFinalResponseAt: null,
@@ -380,8 +391,13 @@ export class ConversationStore {
       return { changed: true };
     }
     // Fresh join, or §2.10 eviction rebuild: discard local state and
-    // request everything the daemon still retains.
+    // request everything the daemon still retains. The queue is seeded
+    // from the hello snapshot (§2.13) so a replay-evicted client whose
+    // queue-added frame fell out of the retention window still shows its
+    // parked messages; the queue-added reducer dedupes by queue_id, so a
+    // still-retained queue-added re-sent by the replay does not double it.
     s.items = [];
+    s.queued = (hello.queue ?? []).slice();
     s.turnInFlight = false;
     s.turnStartedAt = null;
     s.lastFinalResponseAt = null;
@@ -609,6 +625,38 @@ export class ConversationStore {
         // accumulated. The init announces no size, so the figure is
         // unknown until the next request reports the fresh one.
         if (frame.subtype === "init") s.contextTokens = null;
+        break;
+      case "queue-added":
+        // §2.13: a message parked because a turn was in flight. This never
+        // touches turnInFlight — the item is NOT running. Deduped by
+        // queue_id so a replay re-sending the frame (or a hello snapshot
+        // seed racing the retained frame) never double-adds.
+        if (!s.queued.some((q) => q.queue_id === frame.queue_id)) {
+          s.queued.push({
+            queue_id: frame.queue_id,
+            request_id: frame.request_id,
+            content: frame.content,
+            status: frame.status,
+          });
+        }
+        break;
+      case "queue-classified": {
+        // The classifier's verdict lands on the matching item: `wait` keeps
+        // it parked ("waiting"), `interrupt` escalates it ("interrupt"). A
+        // verdict whose item already drained/cancelled is discarded.
+        const item = s.queued.find((q) => q.queue_id === frame.queue_id);
+        if (item) {
+          item.verdict = frame.verdict;
+          item.reason = frame.reason;
+          item.status = frame.verdict === "wait" ? "waiting" : "interrupt";
+        }
+        break;
+      }
+      case "queue-removed":
+        // The item left the queue (drained into a user-turn, cancelled, or
+        // dropped on session end). The user-turn it drained into arrives as
+        // its own frame; here we only drop the parked entry.
+        s.queued = s.queued.filter((q) => q.queue_id !== frame.queue_id);
         break;
     }
   }

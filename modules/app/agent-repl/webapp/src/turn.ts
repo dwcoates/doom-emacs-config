@@ -9,22 +9,31 @@
  * a `/clear` looks like.
  */
 import { stripMetaSpans } from "./meta.js";
+import { ContentBlock } from "./protocol.js";
 import { ConversationItem, UserTurnItem } from "./store.js";
 
 /**
- * A user turn's prompt text, non-text blocks standing in as `[kind]`.
- *
- * The host's injected spans (the metaprompt read-directive, the
+ * Prompt text of a content-block list, non-text blocks standing in as
+ * `[kind]`. The host's injected spans (the metaprompt read-directive, the
  * workspace-generation preamble and wrap-up gate) are marked at their
- * injection site and dropped here: a user turn reads as the user's own
- * words, both in the bubble and to `isClearTurn`.
+ * injection site and dropped here. Shared by user turns and queued
+ * messages (§2.13), so a parked message reads as the user's own words
+ * exactly as a live turn does.
  */
-export function userTurnText(item: UserTurnItem): string {
+export function blocksToText(content: ContentBlock[]): string {
   return stripMetaSpans(
-    item.content
+    content
       .map((b) => (b.type === "text" ? String((b as { text: string }).text) : `[${b.type}]`))
       .join("\n"),
   );
+}
+
+/**
+ * A user turn's prompt text, delegating to `blocksToText` on its content —
+ * both for the bubble and for `isClearTurn`.
+ */
+export function userTurnText(item: UserTurnItem): string {
+  return blocksToText(item.content);
 }
 
 /**
