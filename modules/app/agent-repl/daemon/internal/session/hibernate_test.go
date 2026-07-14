@@ -20,19 +20,29 @@ func initEvent(t *testing.T, h *harness) *Client {
 	return c
 }
 
-// hibernateNow suspends the session cooperatively and blocks until it has
-// settled into the hibernated state, synchronizing on the shim's shutdown
-// command and the session's hibernate signal (no polling).
+// hibernateNow suspends the harness's session cooperatively and blocks
+// until it has settled.
 func hibernateNow(t *testing.T, h *harness) {
 	t.Helper()
-	if err := h.sess.Hibernate("idle"); err != nil {
+	driveHibernate(t, h.shim, h.sess)
+}
+
+// driveHibernate suspends sess cooperatively and blocks until it settles,
+// synchronizing on the shim's shutdown command and the session's hibernate
+// signal (no polling). It mirrors the REAL shim's shutdown response: the
+// shim emits its own `closed` (reason "shutdown") and THEN closes stdout,
+// so a hibernation drain must never be mistaken for a death.
+func driveHibernate(t *testing.T, shim *fakeShim, sess *Session) {
+	t.Helper()
+	if err := sess.Hibernate("idle"); err != nil {
 		t.Fatalf("Hibernate: %v", err)
 	}
-	if line := recvSent(t, h.shim); !strings.Contains(string(line), "shutdown") {
+	if line := recvSent(t, shim); !strings.Contains(string(line), "shutdown") {
 		t.Fatalf("forwarded = %s, want a shutdown command", line)
 	}
-	sig := h.sess.HibernateDone()
-	h.shim.end() // CLI honors shutdown: its event stream closes.
+	sig := sess.HibernateDone()
+	shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","reason":"shutdown","exit_code":0}`)
+	shim.end()
 	select {
 	case <-sig:
 	case <-time.After(recvTimeout):
@@ -219,6 +229,52 @@ func TestActingCommandRefusedOnHibernatedSession(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("acting on a hibernated session should error")
+	}
+}
+
+func TestHibernateDoesNotMarkSessionTerminal(t *testing.T) {
+	// Arrange — the REAL shim emits a `closed` (reason "shutdown") as it
+	// drains, which must NOT be read as a death.
+	h := newHarness(t, 16)
+	initEvent(t, h)
+	// Act
+	hibernateNow(t, h)
+	// Assert — suspended, explicitly NOT terminal.
+	if h.sess.Terminal() {
+		t.Fatal("hibernation drain (closed reason=shutdown) marked the session terminal")
+	}
+	if !h.sess.Hibernated() {
+		t.Fatal("session not hibernated")
+	}
+}
+
+func TestHibernateDoesNotNotifyRegistrarTerminal(t *testing.T) {
+	// Arrange — a session with a recording registrar. A terminal
+	// notification here would mark the registry record terminal and stop
+	// it rehydrating on the next daemon boot.
+	shim := newFakeShim()
+	reg := &recordingRegistrar{}
+	sess := New(Config{
+		ID: "sess-1", DaemonVersion: "0.1.0-test", Shim: shim, Retention: 16,
+		Now:       func() time.Time { return time.Unix(0, 0).UTC() },
+		Logf:      func(string, ...any) {},
+		Registrar: reg,
+	})
+	go sess.Run()
+	cleanupSession(t, shim, sess)
+	c := NewClient()
+	sess.Attach(c)
+	recvFrame(t, c) // hello
+	shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{"session_id":"cli-uuid-1"}}`)
+	waitForFrameType(t, c, "system")
+	// Act
+	driveHibernate(t, shim, sess)
+	// Assert — the registrar learned the claude id but was NEVER told
+	// terminal.
+	for _, call := range reg.snapshot() {
+		if strings.HasPrefix(call, "terminal ") {
+			t.Fatalf("hibernation notified the registrar terminal: %v", reg.snapshot())
+		}
 	}
 }
 
