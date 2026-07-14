@@ -217,6 +217,21 @@ world; the Stop signal's intent is simply \"the agent finished\"."
         (agent-repl-interactive-model nil))
     (should (equal (agent-repl--compute-claude-flags nil nil nil nil) ""))))
 
+(ert-deftest agent-repl-test-effective-model-explicit-wins ()
+  "An explicit MODEL is returned over the interactive default."
+  (let ((agent-repl-interactive-model "opus"))
+    (should (equal (agent-repl--effective-model "sonnet") "sonnet"))))
+
+(ert-deftest agent-repl-test-effective-model-falls-back-to-interactive ()
+  "A nil MODEL falls back to `agent-repl-interactive-model'."
+  (let ((agent-repl-interactive-model "opus"))
+    (should (equal (agent-repl--effective-model nil) "opus"))))
+
+(ert-deftest agent-repl-test-effective-model-nil-both ()
+  "MODEL and `agent-repl-interactive-model' both nil yields nil."
+  (let ((agent-repl-interactive-model nil))
+    (should (null (agent-repl--effective-model nil)))))
+
 (ert-deftest agent-repl-test-compute-claude-flags-perm-flag ()
   "compute-claude-flags should include permission flag when provided."
   (let ((agent-repl-system-prompt nil)
