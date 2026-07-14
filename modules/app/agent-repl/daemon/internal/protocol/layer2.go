@@ -97,6 +97,18 @@ type CompactStatusFrame struct {
 	Active bool `json:"active"`
 }
 
+// InterruptFrame announces that the running turn is being interrupted: the
+// gesture has been delivered to the shim, but the turn only actually ends when
+// its `aborted` result lands. The window between the two is where already-
+// dispatched tools and subagents keep streaming, so the GUI uses this frame to
+// show an "interrupting…" indicator and to stop opening NEW bubbles for that
+// tail while still letting in-flight bubbles finish streaming. Broadcast only
+// when a turn is active (an idle interrupt has nothing to interrupt), and
+// cleared client-side by the turn's terminating result/error or the next turn.
+type InterruptFrame struct {
+	Envelope
+}
+
 type RetryFrame struct {
 	Envelope
 	Attempt int    `json:"attempt"`
