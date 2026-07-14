@@ -728,6 +728,17 @@ the workspace's model.  Fails against that hardcoded nil, since
     ;; Act / Assert
     (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy")))))
 
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-terminal ()
+  "A terminal session is never counted busy, even with turn_active true."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _)
+        (agent-repl-test--json-ok
+         `((sessions . [,(list '(session_id . "s_zombie") '(turn_active . t) '(terminal . t))
+                        ,(list '(session_id . "s_live") '(turn_active . t) '(terminal . :false))]))))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live")))))
+
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-nil-when-unreachable ()
   "An unreachable daemon reads as no turns (nothing to protect)."
   ;; Arrange

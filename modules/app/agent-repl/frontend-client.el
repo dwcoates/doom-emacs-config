@@ -241,11 +241,16 @@ never blocks on the probe.  Signals on HTTP failure."
 (defun agent-repl--frontend-turn-active-sessions ()
   "Return session ids the daemon reports mid-turn; nil when unreachable.
 The daemon-stop guard keys on this: an unreachable daemon has nothing
-to protect, so unreachability reads as \"no turns\" (loudly logged)."
+to protect, so unreachability reads as \"no turns\" (loudly logged).
+Terminal (ended) sessions are skipped: a dead record has no live shim
+or SDK query to protect, yet the daemon can leave a stale `turn_active'
+on one that shut down mid-turn — counting it would falsely refuse an
+otherwise-idle daemon bounce."
   (condition-case err
       (let (busy)
         (dolist (s (agent-repl--frontend-list-sessions) (nreverse busy))
-          (when (eq (alist-get 'turn_active s) t)
+          (when (and (eq (alist-get 'turn_active s) t)
+                     (not (eq (alist-get 'terminal s) t)))
             (push (alist-get 'session_id s) busy))))
     (error
      (agent-repl--log nil "turn-active-sessions: daemon unreachable (%s) — treating as none"
