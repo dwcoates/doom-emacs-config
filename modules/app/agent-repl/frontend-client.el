@@ -68,6 +68,14 @@ the SDK default."
   :type 'integer
   :group 'agent-repl)
 
+(defcustom agent-repl-queue-preview-length 60
+  "Max characters of a queued message's content shown in previews.
+Caps the one-line preview `agent-repl--frontend-session-queue' derives
+from a queued item's content blocks, so the status segment and the
+`agent-repl-queue-*' completion prompts stay a single readable line."
+  :type 'integer
+  :group 'agent-repl)
+
 ;;;; ---- External boundary ------------------------------------------------
 
 (defun agent-repl--frontend-http-request (method url &optional payload)
@@ -372,6 +380,10 @@ exist, ensure it (spawn or adopt) so the next sweep can reattach."
              (agent-repl--log nil "reattach: daemon ensure failed: %s"
                                (error-message-string err)))))
       (agent-repl--frontend-note-boot-id (alist-get 'boot_id resp))
+      ;; Same GET /sessions poll now carries the per-session queue
+      ;; snapshot (§2.13); cache it per-workspace off the one listing we
+      ;; already fetched rather than issuing a second request.
+      (agent-repl--frontend-capture-queues (alist-get 'sessions resp))
       (let ((listed (mapcar (lambda (s) (alist-get 'session_id s))
                             (alist-get 'sessions resp))))
         (dolist (ws (agent-repl--live-ws-names))
@@ -448,6 +460,98 @@ so every attached tab renders the user-turn echo."
   "Abort SESSION-ID's in-flight turn over HTTP."
   (agent-repl--frontend-api "POST" (format "/sessions/%s/interrupt" session-id))
   t)
+
+;;;; ---- In-flight message queue (protocol §2.13) ---------------------------
+;;
+;; A `user-message' submitted while a turn is in flight is parked in the
+;; daemon's per-session FIFO queue rather than forwarded.  The webapp owns
+;; the rich queued-message UI; the Emacs host holds no WebSocket, so it
+;; reaches the queue through two HTTP override routes and reads the queue
+;; SNAPSHOT off the `GET /sessions' listing (the `queue' array each entry
+;; now carries).  The snapshot is cached per-workspace under
+;; `:queued-messages' by `agent-repl--frontend-capture-queues', refreshed
+;; on the reattach sweep's existing GET /sessions poll.
+
+(defun agent-repl--frontend-queue-run-now (session-id queue-id)
+  "Escalate queued message QUEUE-ID in SESSION-ID to run now over HTTP.
+POSTs the daemon's run-now override route, a manual `interrupt' verdict
+\(§2.13): the item moves to the queue front and, if a turn is in flight,
+the running turn is interrupted so the drain picks this item up next.
+A stale QUEUE-ID is a daemon-side no-op ack, not an error."
+  (agent-repl--frontend-api
+   "POST" (format "/sessions/%s/queue/%s/run-now" session-id queue-id))
+  t)
+
+(defun agent-repl--frontend-queue-cancel (session-id queue-id)
+  "Cancel queued message QUEUE-ID in SESSION-ID over HTTP.
+POSTs the daemon's cancel override route, removing the item from the
+queue without ever sending it (§2.13).  A stale QUEUE-ID is a
+daemon-side no-op ack, not an error."
+  (agent-repl--frontend-api
+   "POST" (format "/sessions/%s/queue/%s/cancel" session-id queue-id))
+  t)
+
+(defun agent-repl--frontend-queue-content-preview (content)
+  "Return a one-line text preview of CONTENT, a list of content-block alists.
+Concatenates the `text' of every text block, collapses runs of
+whitespace to single spaces, and truncates to
+`agent-repl-queue-preview-length' characters (an ellipsis marks a
+truncation).  Non-text blocks contribute nothing, so a tool-only turn
+previews as the empty string."
+  (let* ((texts (delq nil
+                      (mapcar (lambda (block)
+                                (when (equal (alist-get 'type block) "text")
+                                  (alist-get 'text block)))
+                              content)))
+         (joined (string-trim
+                  (replace-regexp-in-string
+                   "[ \t\n\r]+" " " (string-join texts " ")))))
+    (if (> (length joined) agent-repl-queue-preview-length)
+        (concat (substring joined 0 agent-repl-queue-preview-length) "…")
+      joined)))
+
+(defun agent-repl--frontend-session-queue (entry)
+  "Return ENTRY's in-flight message queue as a list of plists, front-to-back.
+ENTRY is a `GET /sessions' listing entry (an alist).  Each returned
+plist carries `:queue-id', `:status', `:verdict', and a
+`:content-preview' (a truncated one-line rendering of the item's content
+per §2.13).  Returns nil when ENTRY carries no `queue' array."
+  (mapcar (lambda (item)
+            (list :queue-id (alist-get 'queue_id item)
+                  :status (alist-get 'status item)
+                  :verdict (alist-get 'verdict item)
+                  :content-preview
+                  (agent-repl--frontend-queue-content-preview
+                   (alist-get 'content item))))
+          (alist-get 'queue entry)))
+
+(defun agent-repl--frontend-capture-queues (sessions)
+  "Refresh every live workspace's `:queued-messages' from SESSIONS.
+SESSIONS is the parsed `sessions' array of a GET /sessions poll.  For
+each live workspace bound to a listed session, the parsed queue snapshot
+\(`agent-repl--frontend-session-queue') is stored under
+`:queued-messages'; a bound workspace whose session is absent from
+SESSIONS has its queue cleared.  Forces a mode-line repaint so the
+queued-count segment reflects the new snapshot."
+  (dolist (ws (agent-repl--live-ws-names))
+    (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
+      (let ((entry (seq-find (lambda (s) (equal (alist-get 'session_id s) bound))
+                             sessions)))
+        (agent-repl--ws-put ws :queued-messages
+                            (and entry (agent-repl--frontend-session-queue entry))))))
+  (force-mode-line-update t))
+
+(defun agent-repl--ws-queued-messages (ws)
+  "Return WS's last-known in-flight message queue (list of plists).
+Front-to-back, empty when nothing is queued; see
+`agent-repl--frontend-session-queue' for the plist shape.  Refreshed by
+`agent-repl--frontend-capture-queues' on the reattach sweep's
+GET /sessions poll."
+  (agent-repl--ws-get ws :queued-messages))
+
+(defun agent-repl--ws-queued-count (ws)
+  "Return the number of messages queued for WS (0 when none)."
+  (length (agent-repl--ws-queued-messages ws)))
 
 (defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
   "The gui frontend's send capability (registry `:send-fn').

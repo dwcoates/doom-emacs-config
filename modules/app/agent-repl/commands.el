@@ -14,6 +14,9 @@
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
+(declare-function agent-repl--frontend-queue-run-now "frontend-client")
+(declare-function agent-repl--frontend-queue-cancel "frontend-client")
+(declare-function agent-repl--ws-queued-messages "frontend-client")
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -462,6 +465,75 @@ is the sole observer here."
           (run-at-time agent-repl-interrupt-reinsert-delay nil
                        #'agent-repl--enter-insert-mode ws))
       (agent-repl--log ws "interrupt: frontend reported not delivered, skipping"))))
+
+;;;; In-flight message queue (protocol §2.13)
+
+(defun agent-repl--queue-item-label (item)
+  "Return a `completing-read' label for queued ITEM plist.
+Combines the item's content preview with its stable queue id so labels
+stay unique even when two queued messages share a preview."
+  (let ((preview (plist-get item :content-preview))
+        (qid (plist-get item :queue-id)))
+    (format "%s  (%s)"
+            (if (string-empty-p (or preview "")) "(no preview)" preview)
+            qid)))
+
+(defun agent-repl--queue-resolve-item (ws action-desc)
+  "Pick a queued message in WS for the queue action named ACTION-DESC.
+With exactly one queued message, returns it directly; with several,
+prompts via `completing-read' (showing each content preview); with none,
+signals `user-error' naming ACTION-DESC and WS.  Returns the selected
+item plist (see `agent-repl--frontend-session-queue')."
+  (let ((items (agent-repl--ws-queued-messages ws)))
+    (pcase items
+      ('nil (user-error "agent-repl: no queued messages to %s in workspace '%s'"
+                        action-desc ws))
+      (`(,only) only)
+      (_ (let* ((choices (mapcar (lambda (it)
+                                   (cons (agent-repl--queue-item-label it) it))
+                                 items))
+                (pick (completing-read
+                       (format "Queued message to %s: " action-desc)
+                       (mapcar #'car choices) nil t)))
+           (or (cdr (assoc pick choices))
+               (user-error "agent-repl: no queued message matched '%s'" pick)))))))
+
+(defun agent-repl--queue-act (ws action-desc route-fn)
+  "Resolve a queued message in WS and apply ROUTE-FN to its session/queue ids.
+ACTION-DESC names the action for the picker prompt and error messages.
+ROUTE-FN is a frontend-client HTTP function called with (SESSION-ID
+QUEUE-ID).  Signals `user-error' when WS has no queued messages
+\(via `agent-repl--queue-resolve-item') or no bound daemon session."
+  (let* ((item (agent-repl--queue-resolve-item ws action-desc))
+         (sid (agent-repl--ws-get ws :frontend-session-id))
+         (qid (plist-get item :queue-id)))
+    (unless sid
+      (user-error "agent-repl: workspace '%s' has no bound daemon session" ws))
+    (agent-repl--log ws "queue-%s: session=%s queue=%s" action-desc sid qid)
+    (funcall route-fn sid qid)))
+
+(defun agent-repl-queue-run-now (&optional ws)
+  "Escalate a queued message in workspace WS to run immediately.
+Operates on WS's in-flight message queue (§2.13): with exactly one
+queued message it escalates that one, with several it prompts (showing
+each content preview), and with none it signals `user-error'.  Defaults
+to the current workspace.  Resolves WS's `:frontend-session-id' and
+issues the daemon's run-now route, which interrupts the in-flight turn
+so the drain picks this message up next."
+  (interactive)
+  (agent-repl--queue-act (or ws (agent-repl--ws-current-name))
+                         "run now" #'agent-repl--frontend-queue-run-now))
+
+(defun agent-repl-queue-cancel (&optional ws)
+  "Cancel a queued message in workspace WS without ever sending it.
+Operates on WS's in-flight message queue (§2.13): with exactly one
+queued message it cancels that one, with several it prompts (showing
+each content preview), and with none it signals `user-error'.  Defaults
+to the current workspace.  Resolves WS's `:frontend-session-id' and
+issues the daemon's cancel route."
+  (interactive)
+  (agent-repl--queue-act (or ws (agent-repl--ws-current-name))
+                         "cancel" #'agent-repl--frontend-queue-cancel))
 
 (defun agent-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."

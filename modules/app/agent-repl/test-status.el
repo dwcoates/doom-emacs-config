@@ -1503,6 +1503,21 @@ purpose is the alternating-space cache-bust."
              (r-on (agent-repl-current-workspace-name-segment)))
         (should-not (equal r-off r-on))))))
 
+;;;; ---- Tests: ws-queued-segment (§2.13 queued-message indicator) ----
+
+(ert-deftest agent-repl-test-ws-queued-segment-empty-when-zero ()
+  "The queued segment is the empty string when nothing is queued."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (should (equal (agent-repl--ws-queued-segment "ws1") ""))))
+
+(ert-deftest agent-repl-test-ws-queued-segment-shows-count-when-nonzero ()
+  "The queued segment reads `⋯N queued' when N messages are queued."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :queued-messages
+                        '((:queue-id "q_1") (:queue-id "q_2") (:queue-id "q_3")))
+    (should (string-match-p "⋯3 queued" (agent-repl--ws-queued-segment "ws1")))))
+
 ;;;; ---- Tests: wconf-has-agent-p ----
 
 (ert-deftest agent-repl-test-wconf-has-agent-nil ()
