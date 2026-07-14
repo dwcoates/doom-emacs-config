@@ -31,6 +31,7 @@
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-api "agent-repl-frontend-client" (method path &optional payload-alist))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
+(declare-function agent-repl--frontend-rebind-workspaces-after-restart "agent-repl-frontend-client" ())
 
 ;;;; ---- Paths ------------------------------------------------------------
 
@@ -360,14 +361,20 @@ Refuses while a turn is in flight; with prefix arg FORCE, stops anyway."
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-restart ()
-  "Rebuild any stale artifact and restart the frontend daemon."
+  "Rebuild any stale artifact, restart the frontend daemon, and rebind panels.
+After the daemon is force-bounced, every OPEN workspace is immediately
+rebound to the new instance: its shim is bounced (a fresh daemon session
+resuming the durable conversation) and its webview is remounted, so each
+panel is good to go the moment this returns rather than after the next
+reattach sweep."
   (interactive)
   (let ((agent-repl-frontend-auto-start t))
     (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                (lambda () nil)))
       (agent-repl--ensure-frontend-daemon t)
-      (message "claude-repld restarted on %s"
-               agent-repl-frontend-daemon-addr))))
+      (let ((n (agent-repl--frontend-rebind-workspaces-after-restart)))
+        (message "claude-repld restarted on %s; rebound %d open workspace%s"
+                 agent-repl-frontend-daemon-addr n (if (= n 1) "" "s"))))))
 
 (provide 'daemon)
 
