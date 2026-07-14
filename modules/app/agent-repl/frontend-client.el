@@ -177,7 +177,7 @@ per-workspace account, and without this field every gui session would
 silently run as whichever account the daemon happened to inherit."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
-  (let* ((model (or model agent-repl-interactive-model))
+  (let* ((model (agent-repl--effective-model model))
          (config-dir (agent-repl--compute-config-dir cwd))
          (payload (append `(("cwd" . ,cwd))
                           (when model `(("model" . ,model)))

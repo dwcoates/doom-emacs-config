@@ -91,6 +91,15 @@ added and Claude uses its configured default.  Does NOT affect headless
                  (string :tag "Model alias"))
   :group 'agent-repl)
 
+(defun agent-repl--effective-model (model)
+  "Return MODEL, or `agent-repl-interactive-model' when MODEL is nil.
+The single resolver for which model a session launches under, shared by
+the CLI-launch path (`agent-repl--compute-claude-flags') and the
+gui-frontend create path (`agent-repl--frontend-create-session').  A nil
+result — MODEL and `agent-repl-interactive-model' both nil — means no
+`--model' is pinned and Claude picks its configured default."
+  (or model agent-repl-interactive-model))
+
 (defcustom agent-repl-notify-debounce-seconds 2.0
   "Minimum seconds between desktop notifications for the same workspace."
   :type 'number
@@ -404,7 +413,7 @@ default; when nil, `agent-repl-interactive-model' supplies the model
 \(which itself defaults to \"opus\").  A `--model' flag is appended whenever the resolved
 model is non-nil, and a `--system-prompt' flag when `agent-repl-system-prompt'
 is non-nil.  Returns a trimmed flags string."
-  (let* ((effective-model (or model agent-repl-interactive-model))
+  (let* ((effective-model (agent-repl--effective-model model))
          (flags (string-trim
                 (mapconcat #'identity
                            (delq nil (list
