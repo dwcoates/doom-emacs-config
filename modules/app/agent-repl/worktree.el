@@ -1206,6 +1206,19 @@ not resolve to a known workspace, or that workspace has no priority."
         (when-let ((src-ws (agent-repl--ws-name-for-dir source-dir)))
           (agent-repl--ws-get src-ws :priority)))))
 
+(defun agent-repl--inherit-config-dir-override (ws source-dir)
+  "Copy the account override from SOURCE-DIR's workspace onto WS.
+Used by `agent-repl--finalize-worktree-workspace': the account override
+travels parent -> child, so a workspace generated from a switched
+parent runs as the SAME account rather than the path-computed default
+the parent deliberately moved off.  No-op when SOURCE-DIR is nil, does
+not resolve to a known workspace, or that workspace carries no
+`:config-dir-override'."
+  (when source-dir
+    (when-let* ((parent-ws (agent-repl--ws-name-for-dir source-dir))
+                (override (agent-repl--ws-get parent-ws :config-dir-override)))
+      (agent-repl--ws-put ws :config-dir-override override))))
+
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id
                                                        callback &optional source-dir no-agent model)
@@ -1281,6 +1294,7 @@ session.  When nil, the session falls back to
         :fork-session-id fork-session-id
         :source-ws-dir source-dir
         :model model)
+      (agent-repl--inherit-config-dir-override ws source-dir)
       ;; Cache branch names at construction time so --merge-base-ancestor-args
       ;; can skip the per-tick synchronous rev-parse calls on the warm path.
       (let ((branch (agent-repl--git-string-quiet "-C" path "rev-parse" "--abbrev-ref" "HEAD")))
