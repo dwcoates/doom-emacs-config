@@ -19,6 +19,7 @@ import {
   rendersEmpty,
   repinsToTail,
   sessionInfoHtml,
+  wakeRemainingLabel,
 } from "../src/render.js";
 import { SubagentEntry } from "../src/agents.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
@@ -2974,6 +2975,7 @@ describe("scheduled-wakeup anchor", () => {
     const html = renderItem(item);
     // Assert
     expect(html).toContain("wakes ~10:10");
+    expect(html).toContain("(firing…)");
     expect(html).toContain("watching CI");
   });
 
@@ -3069,5 +3071,22 @@ describe("live task output", () => {
     const html = renderItem(tool());
     // Assert
     expect(html).not.toContain("task-live-output");
+  });
+});
+
+describe("wakeRemainingLabel", () => {
+  it("counts whole minutes while the moment is far off", () => {
+    // Arrange + Act + Assert
+    expect(wakeRemainingLabel(600_000, 0)).toBe("in 10m");
+  });
+
+  it("switches to seconds inside the last minute and a half", () => {
+    // Arrange + Act + Assert
+    expect(wakeRemainingLabel(45_000, 0)).toBe("in 45s");
+  });
+
+  it("reads firing once the moment passes", () => {
+    // Arrange + Act + Assert
+    expect(wakeRemainingLabel(1000, 5000)).toBe("firing…");
   });
 });
