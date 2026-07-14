@@ -709,12 +709,16 @@ garbage-collect dangling open blocks.
 
 Opens a new streaming text block. The SPA mounts a `TextStream` node
 keyed by `block_id` and appends subsequent `text-delta` frames into it.
+`parent_tool_use_id` names the subagent tool call the block belongs to
+and is absent on main-chain blocks — only the start frame carries it,
+since delta/end key by `block_id` into a block that already knows.
 
 ```ts
 interface TextStartFrame extends WsEnvelope {
   type: "text-start";
   block_id: string;                   // daemon-assigned, stable
   message_id: string;                 // SDK message.id
+  parent_tool_use_id?: string;        // subagent blocks only
 }
 ```
 
@@ -750,6 +754,7 @@ interface ThinkingStartFrame extends WsEnvelope {
   type: "thinking-start";
   block_id: string;
   message_id: string;
+  parent_tool_use_id?: string;        // subagent blocks only (as §2.4)
 }
 interface ThinkingDeltaFrame extends WsEnvelope {
   type: "thinking-delta";

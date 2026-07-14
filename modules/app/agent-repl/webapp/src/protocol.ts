@@ -171,6 +171,8 @@ export interface TextStartFrame extends WsEnvelope {
   type: "text-start";
   block_id: string;
   message_id: string;
+  /** Owning subagent call; absent on main-chain blocks. Start-frame only. */
+  parent_tool_use_id?: string;
 }
 export interface TextDeltaFrame extends WsEnvelope {
   type: "text-delta";
@@ -187,6 +189,8 @@ export interface ThinkingStartFrame extends WsEnvelope {
   type: "thinking-start";
   block_id: string;
   message_id: string;
+  /** As text-start: the owning subagent call, absent on main-chain. */
+  parent_tool_use_id?: string;
 }
 export interface ThinkingDeltaFrame extends WsEnvelope {
   type: "thinking-delta";
