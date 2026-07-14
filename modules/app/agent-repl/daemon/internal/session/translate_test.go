@@ -984,6 +984,42 @@ func TestTranslatorClosedClosesDanglingBlocksAndCancelsPermissions(t *testing.T)
 	wantTypes(t, frames, "text-end", "permission-resolved", "error")
 }
 
+func TestTranslatorCleanClosedClearsTurnActive(t *testing.T) {
+	// Arrange — a turn is in flight when the shim shuts down cleanly
+	// (hibernation), which leaves the session NON-terminal.
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.OnUserMessageCmd(cmd)
+	if !tr.TurnActive() {
+		t.Fatal("precondition: turn should be active")
+	}
+	// Act
+	tr.OnEvent(evt(t, `{"type":"closed","session_id":"s1","exit_code":0,"reason":"shutdown"}`))
+	// Assert — the closed shim has no in-flight turn.
+	if tr.TurnActive() {
+		t.Error("TurnActive() = true after clean close, want false")
+	}
+}
+
+func TestTranslatorFatalClosedClearsTurnActive(t *testing.T) {
+	// Arrange — a turn is in flight when the shim dies with a fatal exit.
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.OnUserMessageCmd(cmd)
+	// Act
+	tr.OnEvent(evt(t, `{"type":"closed","session_id":"s1","exit_code":1,"reason":"fatal_error"}`))
+	// Assert
+	if tr.TurnActive() {
+		t.Error("TurnActive() = true after fatal close, want false")
+	}
+}
+
 func TestTranslatorReadyRecordsPermissionMode(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()
