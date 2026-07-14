@@ -103,6 +103,50 @@ TS shim → Agent SDK → Claude
 ## 7. Open questions for discussion
 
 1. Logic dependency: `chessops`/`chessground` (GPL-3, most proven), hand-rolled (dependency-free), `chess.js` (BSD-2 but no variation trees), or vendored JCE (proprietary)?
+   - **DECIDED: hand-rolled** (dependency-free, no licensing/registry coupling).
 2. Trigger surface: ```` ```pgn ```` fence only, or also auto-detect bare PGN/FEN in assistant prose?
 3. Interaction model: click-click, drag-and-drop, or both (chessground gives both for free)?
 4. Is this config repo public or ever intended to be (hard constraint on any `@chesscom/*` dependency)?
+
+## 8. Implementation plan (hand-rolled logic, webapp component)
+
+All new code is plain TS in `webapp/src/` (flat, matching the existing layout), each module with a `webapp/test/<module>.test.ts` vitest file, one commit per completed step. No daemon/shim/protocol changes anywhere.
+
+### Phase 1 — logic core (pure, DOM-free)
+
+1. `src/chess.ts` — position + rules:
+   - Board representation (0x88 mailbox), FEN parse/serialize.
+   - Move generation and legality: checks, pins via make/unmake validation, castling, en passant, promotion, halfmove/fullmove counters.
+   - SAN: generation (with disambiguation, `+`/`#`) and parsing.
+   - Tests: perft node counts at depth 3–4 for the standard perft positions (startpos, Kiwipete, en-passant/promotion suites), FEN round-trips, SAN round-trips, one edge-case per test.
+2. `src/pgn.ts` — PGN + game tree:
+   - Tokenizer (headers, SAN tokens, NAGs, `{}` comments, `()` RAVs, results) and parser producing a node tree: `{ san, fen, comment?, nags?, children[] }` with mainline as `children[0]`.
+   - Serializer back to PGN (needed later for copy-out of user-added lines).
+   - Tests: nested variations, comments-before-and-after moves, promotions in SAN, multi-game strings, malformed-PGN error surfacing (errors are reported, never swallowed).
+
+### Phase 2 — rendering
+
+3. `src/chessboard.ts` — widget HTML:
+   - `chessboardHtml(state): string` — inline SVG board (squares, coordinates, last-move highlight, selected-square + legal-target markers) with Unicode piece glyphs for v1 (a bundled SVG piece set is a later cosmetic upgrade).
+   - Nav strip (`|<` `<` `>` `>|`, flip) and a variation indicator when the current node has siblings, all as `data-board-*` buttons.
+   - Tests: SVG snapshot-ish assertions on piece placement, highlight classes, nav-button presence per tree position.
+4. `src/markdown.ts` — trigger:
+   - Intercept ```` ```pgn ```` and ```` ```fen ```` fences in `flushFence()` (`markdown.ts:83-100`), mirroring the `isMetapromptTree` branch: emit the widget container instead of a `<pre>`; on parse failure fall back to the plain `<pre>` and render the parse error visibly in the widget frame.
+   - Tests: fence dispatch, fallback on invalid PGN.
+
+### Phase 3 — interactivity
+
+5. `src/render.ts` — state + events:
+   - Per-item board state in `FeedRenderer` beside `questionSelections` (`render.ts:998`), keyed by `itemKey` + fence index: current tree node, selected square, orientation. Re-hydrate the widget after each `innerHTML` rewrite (`render.ts:1202-1211`).
+   - Delegated `data-board-*` click handling in the constructor's existing listener block (`render.ts:1008-1030`): square click = select / legal-move / deselect, nav clicks walk the tree, promotion via a 4-choice mini-picker.
+   - User moves: if the move matches an existing child node, step into it; otherwise insert a new variation node (analysis-board semantics) — the PGN tree is the single source of truth.
+   - Tests: state survival across re-render, click→move legality filtering, variation insertion vs step-into.
+
+### Phase 4 — integration & polish
+
+6. `styles.css` — board sizing inside `.bubble-body` (fixed max width, responsive), theme-consistent colors.
+7. End-to-end verify: `npm test` + `npm run typecheck` in `webapp/`, `bin/build-frontend.sh`, hot-reload the live Emacs xwidget session, and exercise a real ```` ```pgn ```` response bubble (variations + user moves) before final commit.
+
+### Explicitly out of scope for v1
+
+- Drag-and-drop (click-click only), SVG piece art, move-list pane, engine/eval integration, bare-PGN auto-detection in prose, Emacs-side keybindings via `xwidget-webkit-execute-script`.
