@@ -93,7 +93,9 @@ func renderHint(toolName string, input, content json.RawMessage) *protocol.Rende
 		if matches := parseGrepMatches(contentText(content)); len(matches) > 0 {
 			return &protocol.RenderHint{Kind: "grep", Matches: matches}
 		}
-	case "Task":
+	// The CLI renamed the subagent tool Task -> Agent; replayed transcripts
+	// still carry the old name, so both take the task summary hint.
+	case "Task", "Agent":
 		return &protocol.RenderHint{Kind: "task", Summary: truncate(contentText(content), taskSummaryLimit)}
 	}
 	return nil
