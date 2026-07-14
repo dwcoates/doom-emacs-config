@@ -78,6 +78,17 @@ export interface HelloFrame extends WsEnvelope {
    * without a gap. Absent when no messages are queued.
    */
   queue?: QueuedItem[];
+  /**
+   * The daemon's authoritative "a turn is running right now" bit. A
+   * transcript-seeded fresh-join replay (§2.11) synthesizes a `result` for
+   * answered turns, but a trailing prompt the agent never answered gets
+   * none, so its dangling `user-turn` would otherwise leave the store
+   * believing a turn is in flight — the topbar timer would then count from a
+   * days-old prompt on a cold/rehydrated session. The store trusts this over
+   * what the replayed frames imply (see `store.ts`). Absent from a
+   * pre-`turn_active` daemon, which the store reads as no turn running.
+   */
+  turn_active?: boolean;
 }
 
 /**

@@ -55,6 +55,15 @@ type HelloFrame struct {
 	// so a fresh join or a replay-evicted client rebuilds the pending queue
 	// without a gap. Absent when the queue is empty.
 	Queue []QueuedItem `json:"queue,omitempty"`
+	// TurnActive is the daemon's authoritative "a turn is running right now"
+	// bit. The transcript-seeded replay a fresh join receives synthesizes a
+	// result for answered turns (closeReplayTurns), but a trailing prompt the
+	// agent never answered gets none, so its dangling user-turn would
+	// otherwise leave a client believing a turn is still in flight — a
+	// cold/rehydrated session, days after that prompt, would paint the topbar
+	// timer counting from its stale stamp. A client trusts this bit over what
+	// the replayed frames imply.
+	TurnActive bool `json:"turn_active"`
 }
 
 type ResultFrame struct {

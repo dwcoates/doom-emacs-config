@@ -920,6 +920,38 @@ func TestInfoTurnActiveLifecycle(t *testing.T) {
 	}
 }
 
+func TestSessionHelloTurnActiveFalseBeforeTurn(t *testing.T) {
+	// Arrange — no turn has run, so a fresh join must not paint a running one.
+	h := newHarness(t, 16)
+	c := NewClient()
+	// Act
+	h.sess.Attach(c)
+	// Assert
+	hello := recvFrame(t, c)
+	if hello["turn_active"] != false {
+		t.Errorf("hello turn_active = %v, want false", hello["turn_active"])
+	}
+}
+
+func TestSessionHelloTurnActiveTrueDuringTurn(t *testing.T) {
+	// Arrange — a turn is genuinely in flight (a live session's own state).
+	h := newHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"u1","content":"hi"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	// Act — a second tab joins mid-turn and must pick the running turn up.
+	late := NewClient()
+	h.sess.Attach(late)
+	// Assert
+	hello := recvFrame(t, late)
+	if hello["turn_active"] != true {
+		t.Errorf("hello turn_active = %v, want true", hello["turn_active"])
+	}
+}
+
 func TestInfoPendingPermissions(t *testing.T) {
 	// Arrange
 	h := newHarness(t, 16)

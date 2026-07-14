@@ -699,6 +699,7 @@ func (s *Session) helloLocked() []byte {
 		CWD:             s.translator.CWD,
 		ClaudeSessionID: s.translator.ClaudeSessionID,
 		Queue:           s.queue.snapshot(),
+		TurnActive:      s.translator.TurnActive(),
 	}
 	data, err := json.Marshal(hello)
 	if err != nil {
