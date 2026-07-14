@@ -391,6 +391,124 @@ func TestBuildReplayFramesLeavesTurnInactive(t *testing.T) {
 	}
 }
 
+// --- closeReplayTurns (turn-closing result frames) ---------------------------
+
+func TestBuildReplayFramesClosesCompletedTurnWithResult(t *testing.T) {
+	// Arrange / Act — a prompt the agent answered is a completed turn,
+	// which the live stream closes with a result the transcript omits.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}]}}`)
+	// Assert — the synthetic result trails the turn's final text, so the
+	// webapp draws its green final-response border on a resumed session.
+	wantTypes(t, frames, "user-turn", "text-start", "text-delta", "text-end", "result")
+}
+
+func TestBuildReplayFramesSyntheticResultIsSuccess(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}]}}`)
+	// Assert — only a "success" result marks a turn's answer a final
+	// response (the green border keys off exactly that subtype).
+	result, ok := frames[len(frames)-1].(*protocol.ResultFrame)
+	if !ok {
+		t.Fatalf("last frame = %T, want *protocol.ResultFrame", frames[len(frames)-1])
+	}
+	if result.Subtype != "success" {
+		t.Fatalf("result subtype = %q, want success", result.Subtype)
+	}
+}
+
+func TestBuildReplayFramesResultClosesPriorTurnBeforeNextPrompt(t *testing.T) {
+	// Arrange / Act — two answered turns.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a1"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"q2"}}`,
+		`{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"a2"}]}}`)
+	// Assert — each turn's answer is closed by its own result: one before
+	// the second prompt, one at end-of-input.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result",
+		"user-turn", "text-start", "text-delta", "text-end", "result")
+}
+
+func TestBuildReplayFramesIncompleteTrailingPromptGetsNoResult(t *testing.T) {
+	// Arrange / Act — a trailing prompt the agent never answered is an
+	// incomplete turn, so no result closes it (the live stream emits one
+	// only when a turn ends).
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a1"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"q2 unanswered"}}`)
+	// Assert — turn 1 is closed; the dangling q2 is not.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result",
+		"user-turn")
+}
+
+func TestBuildReplayFramesBackToBackPromptsGetNoResultBetween(t *testing.T) {
+	// Arrange / Act — a prompt with no assistant response before the next
+	// prompt never became an answered turn.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"user","message":{"role":"user","content":"q2"}}`)
+	// Assert — neither prompt gets a result.
+	wantTypes(t, frames, "user-turn", "user-turn")
+}
+
+func TestBuildReplayFramesToolOnlyTurnGetsResult(t *testing.T) {
+	// Arrange / Act — a turn that only ran a tool (no final text) is still
+	// a completed turn, exactly as the live stream reports it.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"q2 unanswered"}}`)
+	// Assert — the tool-only turn is closed with a result before q2.
+	wantTypes(t, frames,
+		"user-turn", "tool-use-start", "tool-use-input-end", "tool-use-result", "result",
+		"user-turn")
+}
+
+func TestBuildReplayFramesResultSplitsToolResultFromFollowingPrompt(t *testing.T) {
+	// Arrange / Act — one user entry carries both the prior turn's tool
+	// result and a fresh prompt; the closing result must land between them.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"},{"type":"text","text":"q2"}]}}`)
+	// Assert — tool result (closes the tool), then result (closes turn 1),
+	// then the new prompt opens turn 2.
+	wantTypes(t, frames,
+		"user-turn", "tool-use-start", "tool-use-input-end",
+		"tool-use-result", "result", "user-turn")
+}
+
+func TestBuildReplayFramesSyntheticResultCarriesClosingTurnTimestamp(t *testing.T) {
+	// Arrange / Act — the result must be dated at the turn's end so the
+	// webapp's "since previous final" timing is measured correctly.
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T12:00:00.000Z","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","timestamp":"2026-05-24T12:00:05.000Z","message":{"id":"m1","content":[{"type":"text","text":"a"}]}}`)
+	// Assert — the result takes the closing assistant entry's timestamp.
+	result := frames[len(frames)-1].(*protocol.ResultFrame)
+	if got := result.Env().TS; got != "2026-05-24T12:00:05.000Z" {
+		t.Fatalf("result TS = %q, want the closing turn's last frame time", got)
+	}
+}
+
+func TestBuildReplayFramesResultPrecedesTrailingUsage(t *testing.T) {
+	// Arrange / Act — a turn whose assistant message carries usage.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":100,"output_tokens":7}}}`)
+	// Assert — the turn-closing result comes before the trailing usage snapshot.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result", "usage")
+}
+
 // --- SeedFromTranscript -------------------------------------------------------
 
 func TestSeedFromTranscriptRetainsFramesForReplay(t *testing.T) {
