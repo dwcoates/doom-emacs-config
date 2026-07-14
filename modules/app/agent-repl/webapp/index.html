@@ -9,7 +9,7 @@
     <header id="topbar">
       <span id="conn-status">connecting…</span>
       <span id="spinner" class="spinner">●</span>
-      <span id="account" title="the Claude account this session runs as"></span>
+      <button id="account" title="the Claude account this session runs as — click for account actions"></button>
       <span id="remediation"></span>
       <span id="session-info"></span>
       <select id="model-select" title="model"></select>
@@ -23,8 +23,11 @@
         <option value="dontAsk">dontAsk</option>
         <option value="delegate">delegate</option>
       </select>
-      <button id="login-btn" title="log in to the Claude account this session runs under">login</button>
     </header>
+    <!-- The account chip's dropdown: one re-auth verb for the current
+         account, one switch verb per other canonical root. Built on open
+         from the daemon's roster, so the identities are live. -->
+    <div id="account-menu" hidden></div>
     <main id="feed"></main>
     <footer id="composer">
       <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
