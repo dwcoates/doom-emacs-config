@@ -876,6 +876,28 @@ pre {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+/* The interrupting indicator: the red twin of the textless-thinking spinner,
+   shown at the feed tail while a turn is being aborted. Same geometry and
+   the SAME thinking-spin animation; only the hue differs — the --err alarm red
+   rather than the --thinking working orange — so an interrupt reads as
+   "stopping", not "working". */
+.interrupting-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  color: var(--err);
+  font-size: 0.85rem;
+}
+.interrupting-spinner {
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid color-mix(in srgb, var(--err) 25%, transparent);
+  border-top-color: var(--err);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then
    awaiting the result), so every card in progress reads the same. Two
@@ -906,7 +928,8 @@ pre {
    degrades to a pulse (a pulse in place reads as a stalled spinner) — the
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
-  .thinking-spinner {
+  .thinking-spinner,
+  .interrupting-spinner {
     animation-duration: 1.4s;
   }
   /* Per-animation durations, in the order the base rule declares them: the

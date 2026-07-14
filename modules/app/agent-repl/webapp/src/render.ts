@@ -174,6 +174,25 @@ export function compactionBannerHtml(compacting: boolean): string {
 }
 
 /**
+ * The "interrupting…" indicator: the red twin of the textless-thinking
+ * spinner (`.thinking-pending`), shown at the feed tail while the store is
+ * interrupting a turn. It marks the window between the interrupt gesture and
+ * the turn's aborted result — during which in-flight bubbles keep streaming
+ * but no new ones open. Same spinner animation as the thinking indicator, in
+ * the alarm red rather than the working orange.
+ *
+ * Returns "" when not interrupting, so the caller can drop the tail node.
+ */
+export function interruptingIndicatorHtml(interrupting: boolean): string {
+  if (!interrupting) return "";
+  return (
+    `<div class="interrupting-pending" role="status" aria-live="polite">` +
+    `<span class="interrupting-spinner" aria-hidden="true"></span> interrupting…` +
+    `</div>`
+  );
+}
+
+/**
  * The #model-select options: the live model SELECTED, every alternative
  * the daemon offers, and nothing invented.
  *
@@ -1611,6 +1630,17 @@ export class FeedRenderer {
     // The parked queue (§2.13) renders in full at the tail — a fresh join
     // with a pending queue must show it, and the cards are cheap enough to
     // skip the tail-first backfill the history items get.
+    if (state.interrupting) {
+      // A fresh join landing mid-interrupt shows the indicator immediately,
+      // above the parked queue — the same tail slot render() keeps it in.
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = "interrupting";
+      const html = interruptingIndicatorHtml(true);
+      el.innerHTML = html;
+      this.container.appendChild(el);
+      this.nodes.set("interrupting", { el, html });
+    }
     state.queued.forEach((q) => {
       const key = queuedCardKey(q);
       const el = document.createElement("div");
@@ -1663,6 +1693,29 @@ export class FeedRenderer {
     }
   }
 
+  /**
+   * Ensure a single-purpose tail node (keyed KEY) exists, holds HTML, and
+   * sits at the current bottom of the feed, marking it seen so the reconcile
+   * sweep keeps it. Force-appends so a live item node appended above never
+   * lands beneath it — the same discipline the queue cards follow.
+   */
+  private reconcileTailNode(key: string, html: string, seen: Set<string>): void {
+    seen.add(key);
+    let entry = this.nodes.get(key);
+    if (!entry) {
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = key;
+      entry = { el, html: "" };
+      this.nodes.set(key, entry);
+    }
+    if (entry.html !== html) {
+      entry.el.innerHTML = html;
+      entry.html = html;
+    }
+    this.container.appendChild(entry.el);
+  }
+
   render(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
@@ -1701,6 +1754,13 @@ export class FeedRenderer {
         applyExpanded(sectionsIn(entry.el), open);
         entry.html = html;
       }
+    }
+    // The "interrupting…" indicator rides at the tail of the live turn's
+    // content, above the parked queue. Force-appended (like the queue cards
+    // below) so a live item node appended above never lands beneath it; when
+    // not interrupting, its key falls out of `seen` and the sweep removes it.
+    if (state.interrupting) {
+      this.reconcileTailNode("interrupting", interruptingIndicatorHtml(true), seen);
     }
     // The in-flight queue (§2.13) is a subdued section at the tail, after
     // every conversation item. Each card is re-appended so a live item node
