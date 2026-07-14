@@ -828,14 +828,65 @@ describe("ConversationStore task-timer start", () => {
   });
 
   it("resumes a mid-turn reconnect at the turn's original stamp", () => {
-    // Arrange — a fresh join whose replay carries a turn that never resulted.
+    // Arrange — a live session's second tab: a fresh join whose replay
+    // carries a turn that never resulted, and whose hello reports the turn
+    // genuinely still running.
     autoSeq = 0;
     const store = new ConversationStore();
-    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1, turn_active: true }));
     // Act — the retained user-turn keeps the stamp the daemon gave it.
     store.applyRaw(userTurn(START, 1));
     // Assert — the count picks up where the turn really is, not at zero.
     expect(store.state.turnStartedAt).toBe(START);
+  });
+
+  it("drops a phantom turn a transcript-seeded fresh join replays", () => {
+    // Arrange — a cold/rehydrated session (§2.11): the replay's trailing
+    // user-turn never resulted (transcripts carry no `result`), and the
+    // daemon's hello reports no turn actually running.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1, turn_active: false }));
+    // Act — the replay reaches its watermark on the dangling user-turn.
+    store.applyRaw(userTurn(START, 1));
+    // Assert — no phantom clock counting from a days-old prompt.
+    expect(store.state.turnStartedAt).toBeNull();
+    expect(store.state.turnInFlight).toBe(false);
+  });
+
+  it("keeps a phantom turn's clear across a longer transcript replay", () => {
+    // Arrange — the dangling user-turn is not the LAST replayed frame (a
+    // trailing usage frame follows it, as BuildReplayFrames appends), so the
+    // reconcile must survive frames applied after the turn.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(hello({ seq: 2, resume_from_seq: 1, turn_active: false }));
+    store.applyRaw(userTurn(START, 1));
+    // Act — the usage frame reaches the watermark.
+    store.applyRaw(
+      frame("usage", { message_id: "m1", usage: { input_tokens: 5, output_tokens: 2 } }, 2),
+    );
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+    expect(store.state.turnInFlight).toBe(false);
+  });
+
+  it("does not reconcile a gap-fill reconnect against turn_active", () => {
+    // Arrange — a mid-turn client whose socket dropped and whose history the
+    // daemon still retains: a gap-fill, NOT a fresh join. Its missed frames
+    // carry the real end of the turn, so the phantom-turn reconcile is scoped
+    // to fresh joins and must not fire here.
+    autoSeq = 0;
+    const store = new ConversationStore();
+    store.applyRaw(userTurn(START, 1));
+    // Act — reconnect to a daemon two frames ahead; the gap frames are the
+    // turn's ongoing stream, not a result.
+    store.applyRaw(hello({ seq: 3, resume_from_seq: 1, turn_active: false }));
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m1" }, 2));
+    store.applyRaw(frame("text-end", { block_id: "b1", message_id: "m1", final_text: "hi" }, 3));
+    // Assert — the clock kept running; only a fresh join reconciles.
+    expect(store.state.turnStartedAt).toBe(START);
+    expect(store.state.turnInFlight).toBe(true);
   });
 
   it("clears the turn start when the view is reset onto a successor session", () => {

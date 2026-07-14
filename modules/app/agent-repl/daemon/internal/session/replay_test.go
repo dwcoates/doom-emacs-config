@@ -511,6 +511,42 @@ func TestBuildReplayFramesResultPrecedesTrailingUsage(t *testing.T) {
 
 // --- SeedFromTranscript -------------------------------------------------------
 
+func TestSeedFromTranscriptHelloReportsNoActiveTurn(t *testing.T) {
+	// Arrange — a trailing prompt the agent never answered (Emacs killed
+	// right after the prompt was sent). closeReplayTurns closes only answered
+	// turns, so this incomplete turn gets no synthetic `result` and the seeded
+	// ring ends on a dangling user-turn. The hello must still tell attaching
+	// clients that nothing is running, else the topbar timer counts from this
+	// prompt's (potentially days-old) stamp after restoration.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uuid-1.jsonl")
+	transcript := `{"type":"user","message":{"role":"user","content":"first"}}` + "\n" +
+		`{"type":"assistant","message":{"id":"msg_1","model":"claude-fable-5","content":[{"type":"text","text":"answer"}]}}` + "\n" +
+		`{"type":"user","message":{"role":"user","content":"unanswered follow-up"}}` + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	sess := New(Config{ID: "s_test", Shim: shim, CWD: dir, Logf: func(string, ...any) {}})
+	if err := sess.SeedFromTranscript(path, "uuid-1"); err != nil {
+		t.Fatalf("SeedFromTranscript: %v", err)
+	}
+	// Act
+	client := NewClient()
+	sess.Attach(client)
+	var hello struct {
+		Type       string `json:"type"`
+		TurnActive bool   `json:"turn_active"`
+	}
+	if err := json.Unmarshal(<-client.Send, &hello); err != nil || hello.Type != "hello" {
+		t.Fatalf("first frame = %+v (err %v), want hello", hello, err)
+	}
+	// Assert
+	if hello.TurnActive {
+		t.Fatal("hello turn_active = true after transcript seed, want false")
+	}
+}
+
 func TestSeedFromTranscriptRetainsFramesForReplay(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()

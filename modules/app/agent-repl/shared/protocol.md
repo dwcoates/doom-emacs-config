@@ -554,6 +554,7 @@ interface HelloFrame extends WsEnvelope {
   models?: ModelInfo[];               // selectable models; absent until §1.2 `models` arrives
   cwd: string;
   claude_session_id?: string;         // durable CLI session uuid; absent until system:init
+  turn_active: boolean;               // daemon's authoritative "a turn is running right now"
 }
 ```
 
@@ -568,6 +569,18 @@ goes stale: it moves whenever the model moves, and §2.8's `model-changed`
 is what carries every move after the hello. `models` is the menu the
 `set-model` command draws from; it is republished in each hello so a
 reconnecting client never has to ask.
+
+`turn_active` is the daemon's authoritative statement of whether a turn is
+running RIGHT NOW, and a client must trust it over what the replayed frames
+imply. A transcript-seeded fresh-join replay (§2.11) synthesizes a `result`
+for every ANSWERED turn, but a trailing prompt the agent never answered is
+an incomplete turn that gets none, so the replay ends on a dangling
+`user-turn` with nothing to close it. That leaves the client believing a
+turn is still in flight, and a cold/rehydrated session revived days after
+that unanswered prompt would then paint the topbar task timer counting up
+from its stale stamp. `turn_active` false on replay completion is the signal
+to drop that phantom turn; a genuinely mid-turn fresh join (a live session's
+second tab) reports it true and keeps its running clock.
 
 #### `result`
 

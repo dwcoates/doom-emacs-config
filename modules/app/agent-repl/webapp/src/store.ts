@@ -288,6 +288,7 @@ export class ConversationStore {
   reset(): void {
     this.state = initialState();
     this.replayTarget = null;
+    this.helloTurnActive = false;
   }
 
   /**
@@ -307,6 +308,17 @@ export class ConversationStore {
    * scrolled-up reader to the tail.
    */
   private replayKind: "fresh" | "gap" = "fresh";
+
+  /**
+   * The daemon's authoritative turn-active bit from the last hello. A
+   * transcript-seeded fresh-join replay (§2.11) synthesizes a `result` for
+   * answered turns, but a trailing prompt the agent never answered gets
+   * none, so its dangling `user-turn` sets `turnInFlight`/`turnStartedAt`
+   * with nothing to clear them; this is what the completed replay reconciles
+   * against so a cold/rehydrated session does not paint a phantom running
+   * turn. `false` until a hello reports otherwise.
+   */
+  private helloTurnActive = false;
 
   /** Whether a history replay (fresh-join or gap-fill) is still streaming in. */
   get replaying(): boolean {
@@ -348,15 +360,25 @@ export class ConversationStore {
       this.replayTarget !== null && envelope.seq >= this.replayTarget;
     if (caughtUp) this.replayTarget = null;
     // Only a fresh join's completion renders restored; a gap-fill's is a
-    // plain `changed` (see `replayKind`).
+    // plain `changed` (see `replayKind`). An unknown last frame still leaves
+    // a backlog to show, so it advances the cursor without applying.
     const restored = caughtUp && this.replayKind === "fresh";
-    if (frame === null) {
-      // unknown type: cursor advanced, nothing to render — but a replay
-      // that ends on an unknown frame still has a backlog to show.
-      return caughtUp ? { changed: true, restored } : { changed: false };
+    if (frame !== null) this.applyKnown(frame);
+    // A fresh-join replay is seeded from the transcript (§2.11), which
+    // synthesizes a `result` for answered turns but leaves a trailing
+    // unanswered prompt's `user-turn` dangling. That dangling turn leaves
+    // `turnInFlight`/`turnStartedAt` set with nothing to clear them, so a
+    // cold/rehydrated session would paint the topbar timer counting from a
+    // days-old prompt. The daemon's hello turn_active is authoritative: when
+    // it says no turn runs, drop the phantom one. A genuinely mid-turn fresh
+    // join (a live session's second tab) reports turn_active true and keeps
+    // its real turn start.
+    if (restored && !this.helloTurnActive) {
+      this.state.turnInFlight = false;
+      this.state.turnStartedAt = null;
     }
-    this.applyKnown(frame);
-    return caughtUp ? { changed: true, restored } : { changed: true };
+    if (!caughtUp) return { changed: frame !== null };
+    return { changed: true, restored };
   }
 
   private applyHello(hello: HelloFrame): ApplyResult {
@@ -370,6 +392,11 @@ export class ConversationStore {
     s.cwd = hello.cwd;
     s.claudeSessionId = hello.claude_session_id ?? "";
     s.permissionMode = hello.permission_mode;
+    // Remembered for the fresh-join replay's completion to reconcile against:
+    // the replay's frames alone cannot say whether a trailing unanswered
+    // prompt's turn is still running (that turn gets no synthetic `result`),
+    // so the daemon's word is what settles it.
+    this.helloTurnActive = hello.turn_active ?? false;
 
     const canFillFromHistory =
       s.lastSeq > 0 && hello.resume_from_seq <= s.lastSeq + 1;
