@@ -85,6 +85,16 @@ function isTurquoise(hex: string): boolean {
   return h >= 160 && h <= 195;
 }
 
+/**
+ * Whether a `#rrggbb` literal reads as yellow: red and green both dominate a
+ * low blue and sit close to each other, so the hue lands between green and
+ * orange rather than drifting into either.
+ */
+function isYellow(hex: string): boolean {
+  const [r, g, b] = channels(hex);
+  return r > 2 * b && g > 2 * b && Math.abs(r - g) < 0.4 * r;
+}
+
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
 function luminance(hex: string): number {
   const [r, g, b] = channels(hex);
@@ -1148,5 +1158,151 @@ describe("queued-card (§2.13 in-flight queue)", () => {
     // Arrange / Act — the escalating verdict borrows the app's "about to act" colour.
     // Assert
     expect(interruptBadge).toMatch(/color:\s*var\(--thinking\)/);
+  });
+});
+
+const qOpt = blockAfter(css, ".q-opt {");
+const qChip = blockAfter(css, ".q-chip");
+const qText = blockAfter(css, ".q-text");
+const baseBadge = blockAfter(css, ".badge {");
+const pendingQuestion = blockAfter(css, ".permission.pending.question");
+const permissionBase = blockAfter(css, ".permission {");
+
+/** The `color-mix(in srgb, var(--A) N%, var(--B))` declaration bound to `name`. */
+function mixDecl(block: string, name: string): { mix: string; pct: number; base: string } {
+  const hit = block.match(
+    new RegExp(`${name}:\\s*color-mix\\(in srgb,\\s*var\\((--[a-z-]+)\\)\\s*(\\d+)%,\\s*var\\((--[a-z-]+)\\)\\)`, "i"),
+  );
+  if (!hit) throw new Error(`block has no color-mix bound to ${name}`);
+  return { mix: hit[1], pct: Number(hit[2]), base: hit[3] };
+}
+
+/** Luminance of an srgb color-mix, linear in its channels, so linear in its ends. */
+function mixLuminance(theme: string, decl: { mix: string; pct: number; base: string }): number {
+  const p = decl.pct / 100;
+  return p * luminance(token(theme, decl.mix)) + (1 - p) * luminance(token(theme, decl.base));
+}
+
+describe("AskUserQuestion option bubbles", () => {
+  it("fills an option bubble with the shared picker token, not the near-invisible card grey", () => {
+    // Arrange / Act — the .q-opt rule. --card sat one shade off the feed bg.
+    // Assert
+    expect(qOpt).toMatch(/background:\s*var\(--q-opt-bg\)/);
+    expect(qOpt).not.toMatch(/background:\s*var\(--card\)/);
+  });
+
+  it("mixes the bubble token from the fg into the card, so the lift stays neutral", () => {
+    // Arrange / Act — a --fg mix, never an --accent one, so it never competes
+    // with the blue wash a SELECTED option takes.
+    const decl = mixDecl(lightTheme, "--q-opt-bg");
+    // Assert
+    expect([decl.mix, decl.base]).toEqual(["--fg", "--card"]);
+  });
+
+  it("lifts the dark-theme bubble lighter than the card it started from", () => {
+    // Arrange — the "make the bubbles lighter" ask, read in the dark theme.
+    const decl = mixDecl(lightTheme, "--q-opt-bg");
+    // Act
+    const lifted = mixLuminance(darkTheme, decl) > luminance(token(darkTheme, "--card"));
+    // Assert
+    expect(lifted).toBe(true);
+  });
+
+  it("stands the dark-theme bubble further off the section bg than the old card did", () => {
+    // Arrange
+    const decl = mixDecl(lightTheme, "--q-opt-bg");
+    const bg = luminance(token(darkTheme, "--bg"));
+    // Act
+    const bubbleSep = Math.abs(mixLuminance(darkTheme, decl) - bg);
+    const cardSep = Math.abs(luminance(token(darkTheme, "--card")) - bg);
+    // Assert
+    expect(bubbleSep).toBeGreaterThan(cardSep);
+  });
+
+  it("stands the light-theme bubble further off the white section bg than the old card did", () => {
+    // Arrange — on white the same mix lands darker, which is what raises contrast.
+    const decl = mixDecl(lightTheme, "--q-opt-bg");
+    const bg = luminance(token(lightTheme, "--bg"));
+    // Act
+    const bubbleSep = Math.abs(mixLuminance(lightTheme, decl) - bg);
+    const cardSep = Math.abs(luminance(token(lightTheme, "--card")) - bg);
+    // Assert
+    expect(bubbleSep).toBeGreaterThan(cardSep);
+  });
+});
+
+describe("AskUserQuestion question badge", () => {
+  it("backs the badge with the very token the option bubbles use", () => {
+    // Arrange / Act — the .q-chip rule, so the header reads as one of the chips.
+    // Assert
+    expect(qChip).toMatch(/background:\s*var\(--q-opt-bg\)/);
+  });
+
+  it("keeps the badge's blue foreground rather than recoloring the abbreviation", () => {
+    // Arrange / Act — the blue text is the badge's identity, so only its fill moved.
+    // Assert
+    expect(qChip).toMatch(/color:\s*var\(--accent\)/);
+  });
+
+  it("sizes the badge 50% larger than a plain badge", () => {
+    // Arrange
+    const chipSize = Number(qChip.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    const badgeSize = Number(baseBadge.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    // Act
+    const ratio = chipSize / badgeSize;
+    // Assert
+    expect(ratio).toBeCloseTo(1.5, 2);
+  });
+});
+
+describe("AskUserQuestion question text", () => {
+  it("italicizes the question so it reads as the model's own words", () => {
+    // Arrange / Act — the .q-text rule.
+    // Assert
+    expect(qText).toMatch(/font-style:\s*italic/);
+  });
+});
+
+describe("AskUserQuestion picker border", () => {
+  it("rings the pending picker in the yellow token rather than the permission blue", () => {
+    // Arrange / Act — the .permission.pending.question rule.
+    // Assert
+    expect(pendingQuestion).toMatch(/border-color:\s*var\(--q-border\)/);
+  });
+
+  it("leaves an ordinary permission prompt bordered in the accent blue", () => {
+    // Arrange / Act — the base .permission rule is untouched, so allow/deny stays blue.
+    // Assert
+    expect(permissionBase).toMatch(/border:\s*1px\s+solid\s+var\(--accent\)/);
+  });
+
+  it("scopes the yellow to the pending picker, so a resolved one keeps its settled grey", () => {
+    // Arrange / Act — the selector must carry .pending, or a resolved picker would
+    // be re-yellowed over the muted grey it settles to.
+    // Assert
+    expect(css).toMatch(/\.permission\.pending\.question\s*{/);
+  });
+
+  it("defines a yellow border token for the light theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(lightTheme, "--q-border"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+
+  it("defines a yellow border token for the dark theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(darkTheme, "--q-border"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+
+  it("brightens the dark-theme border token above the light-theme one, as every wash does", () => {
+    // Arrange
+    const [dark, light] = [token(darkTheme, "--q-border"), token(lightTheme, "--q-border")];
+    // Act
+    const brighter = luminance(dark) > luminance(light);
+    // Assert
+    expect(brighter).toBe(true);
   });
 });

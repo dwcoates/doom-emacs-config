@@ -59,6 +59,19 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* AskUserQuestion picker. Two tokens shape the "answer me" panel:
+     --q-opt-bg lifts the option bubbles (and the question badge, which shares
+       their fill) clear of the plain feed background the picker sits on, so an
+       option reads as a pressable chip instead of melting into the panel.
+       Mixing --fg into the card keeps the lift NEUTRAL, so it never competes
+       with the blue wash a SELECTED option takes, and one definition stays
+       theme-correct: in the dark theme the lift reads lighter, in the light
+       theme a shade darker, since there the section is already white.
+     --q-border rings the pending picker in yellow rather than the blue every
+       other permission prompt wears, so the panel awaiting an answer is
+       unmistakable among the feed. */
+  --q-opt-bg: color-mix(in srgb, var(--fg) 8%, var(--card));
+  --q-border: #eab308;
   /* Skill-launch card wash: turquoise, so "the agent handed itself off to a
      skill" reads at a glance against the card grey every other tool call sits
      in. Kept PALE, because the subagent wash below shares its hue family and
@@ -113,6 +126,7 @@
     --remediation: #facc15;
     --clear-divider: #ef4444;
     --final-response: #4ade80;
+    --q-border: #facc15;
     --skill-bg: #12403c;
     --skill-border: #1f6b62;
     --agent-card: #0f6b60;
@@ -719,13 +733,16 @@ pre {
 
 /* --- AskUserQuestion picker ---------------------------------------------- */
 .q-block { margin: 0.4em 0 0.7em; }
-.q-chip { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-.q-text { margin: 0.3em 0 0.45em; font-weight: 600; }
+/* The header badge shares the option bubbles' fill and keeps its blue text, and
+   sits 50% larger than a plain .badge (0.7rem) so the abbreviated question reads
+   as the block's title rather than a footnote. */
+.q-chip { background: var(--q-opt-bg); color: var(--accent); font-size: 1.05rem; }
+.q-text { margin: 0.3em 0 0.45em; font-weight: 600; font-style: italic; }
 .q-multi { font-weight: 400; color: var(--muted); font-size: 0.85em; }
 .q-opts { display: flex; flex-wrap: wrap; gap: 0.4em; }
 .q-opt {
   border: 1px solid var(--border);
-  background: var(--card);
+  background: var(--q-opt-bg);
   color: var(--fg);
   border-radius: 999px;
   padding: 0.25em 0.85em;
@@ -739,6 +756,11 @@ pre {
   color: var(--accent);
   font-weight: 600;
 }
+/* The pending picker rings itself in yellow, overriding the blue .permission
+   border, so the panel awaiting an answer stands apart from an ordinary
+   allow/deny prompt. Scoped to .pending so a resolved picker keeps the muted
+   grey border of a settled prompt. */
+.permission.pending.question { border-color: var(--q-border); }
 .permission.question .perm-actions button[data-q-submit]:disabled {
   opacity: 0.45;
   cursor: not-allowed;
