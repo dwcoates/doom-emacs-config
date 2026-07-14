@@ -7,6 +7,8 @@
 (declare-function agent-repl--do-log "core")
 (declare-function agent-repl--mark-ws-thinking "input")
 (declare-function agent-repl--mark-dead "status")
+(declare-function agent-repl--frontend-api "frontend-client")
+(declare-function agent-repl--state-save "history")
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -392,6 +394,36 @@ and the `:init' grace)."
   (agent-repl--log ws "on-session-dead-event: ws=%s agent-state=%s" ws (agent-repl--ws-get ws :agent-state))
   (agent-repl--mark-dead ws))
 
+(defun agent-repl--on-account-changed-event (ws _dir)
+  "Adopt WS's new account root after a daemon-side switch.
+Callback for `account_changed_*' sentinels, written by the DAEMON after
+the gui's account menu moved the session onto another canonical config
+root.  The sentinel is a POKE, not a payload: the authoritative config
+dir is fetched back off the daemon (`GET /sessions/{id}/account'), so
+the two sides can never disagree about what the new account is.
+
+Stores the result as `:config-dir-override' — a config-dir string, or
+`:default' for the daemon's empty answer (the CLI's own ~/.claude root),
+which `agent-repl--compute-config-dir' reads ahead of its path-derived
+account — then persists it via `agent-repl--state-save' so the override
+survives an Emacs restart.  A fetch failure warns and leaves the
+override untouched: acting on a guess could pin the workspace to the
+wrong account, which is the exact failure the override exists to
+prevent."
+  (let ((sid (agent-repl--ws-get ws :frontend-session-id)))
+    (if (null sid)
+        (agent-repl--warn ws "account-changed sentinel for ws=%s with no :frontend-session-id" ws)
+      (condition-case err
+          (let* ((resp (agent-repl--frontend-api "GET" (format "/sessions/%s/account" sid)))
+                 (dir (alist-get 'config_dir resp))
+                 (override (if (or (null dir) (string-empty-p dir)) :default dir)))
+            (agent-repl--ws-put ws :config-dir-override override)
+            (agent-repl--log ws "on-account-changed-event: ws=%s override=%S email=%S"
+                              ws override (alist-get 'email resp))
+            (agent-repl--state-save ws))
+        (error
+         (agent-repl--warn ws "account-changed: config-dir fetch failed for ws=%s: %S" ws err))))))
+
 (defun agent-repl--maybe-finalize-stop (ws)
   "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
 Drives the `:thinking → :done' transition via
@@ -613,6 +645,12 @@ running but its load cycle has logically ended)."
     ("session_dead_"      . (:callback agent-repl--on-session-dead-event
                              :warning  "[agent-repl] WARNING: session-dead dir=%s matched no workspace"
                              :name     "handle-session-dead"))
+    ;; `account_changed_' shares no stem with any other entry.  Written
+    ;; ONLY by the daemon (account_changed_<sid>) after an account switch
+    ;; relaunches the session under another canonical config root.
+    ("account_changed_"   . (:callback agent-repl--on-account-changed-event
+                             :warning  "[agent-repl] WARNING: account-changed dir=%s matched no workspace"
+                             :name     "handle-account-changed"))
     ;; There is no `login_request_' handler here any more.  The gui login
     ;; used to be relayed to Emacs on this channel because the OAuth flow
     ;; needs a TTY and Emacs was the only TTY host in the system.  That

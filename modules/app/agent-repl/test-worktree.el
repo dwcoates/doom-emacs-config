@@ -5438,6 +5438,32 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
       (should (equal (agent-repl--inherit-priority-from-source nil "/tmp/parent/")
                      "p05")))))
 
+;;;; ---- Tests: inherit-config-dir-override ----
+
+(ert-deftest agent-repl-test-inherit-config-dir-override-copies-from-parent ()
+  "A child workspace adopts its parent's :config-dir-override."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (agent-repl--ws-put "parent" :config-dir-override "/home/u/.claude-chesscom")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))
+      (agent-repl--inherit-config-dir-override "child" "/tmp/parent/")
+      (should (equal (agent-repl--ws-get "child" :config-dir-override)
+                     "/home/u/.claude-chesscom")))))
+
+(ert-deftest agent-repl-test-inherit-config-dir-override-nil-source-dir ()
+  "A nil SOURCE-DIR leaves the child without an override."
+  (agent-repl-test--with-clean-state
+    (agent-repl--inherit-config-dir-override "child" nil)
+    (should-not (agent-repl--ws-get "child" :config-dir-override))))
+
+(ert-deftest agent-repl-test-inherit-config-dir-override-parent-without-one ()
+  "A parent carrying no override leaves the child on its computed default."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "parent" :project-dir "/tmp/parent/")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))
+      (agent-repl--inherit-config-dir-override "child" "/tmp/parent/")
+      (should-not (agent-repl--ws-get "child" :config-dir-override)))))
+
 ;;;; ---- Tests: finalize-worktree-workspace child inherits parent priority ----
 
 (ert-deftest agent-repl-test-finalize-child-inherits-parent-priority ()
