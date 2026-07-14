@@ -717,27 +717,58 @@ the workspace's model.  Fails against that hardcoded nil, since
 
 ;;;; ---- turn-active probe ------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
-  "Sessions with turn_active true are returned, idle ones skipped."
+(ert-deftest agent-repl-test-frontend-bound-session-ids-collects-live-workspaces ()
+  "The bound-id set gathers every live workspace's :frontend-session-id.
+A workspace without a binding contributes nothing."
   ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _)
-        (agent-repl-test--json-ok
-         `((sessions . [,(list '(session_id . "s_busy") '(turn_active . t))
-                        ,(list '(session_id . "s_idle") '(turn_active . :json-false))]))))
-    ;; Act / Assert
-    (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy")))))
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (agent-repl-test--with-ws "ws2" '(:frontend-session-id "s_2" :project-dir "/w2")
+      (agent-repl-test--with-ws "ws3" '(:project-dir "/w3")
+        ;; Act / Assert
+        (should (equal (sort (copy-sequence (agent-repl--frontend-bound-session-ids))
+                             #'string<)
+                       '("s_1" "s_2")))))))
+
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
+  "A bound session with turn_active true is returned, an idle one skipped."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_busy" "s_idle"))))
+    (agent-repl-test--with-http
+        (lambda (&rest _)
+          (agent-repl-test--json-ok
+           `((sessions . [,(list '(session_id . "s_busy") '(turn_active . t))
+                          ,(list '(session_id . "s_idle") '(turn_active . :json-false))]))))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy"))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-terminal ()
-  "A terminal session is never counted busy, even with turn_active true."
+  "A terminal session is never counted busy, even bound and turn_active true."
   ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _)
-        (agent-repl-test--json-ok
-         `((sessions . [,(list '(session_id . "s_zombie") '(turn_active . t) '(terminal . t))
-                        ,(list '(session_id . "s_live") '(turn_active . t) '(terminal . :false))]))))
-    ;; Act / Assert
-    (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live")))))
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_zombie" "s_live"))))
+    (agent-repl-test--with-http
+        (lambda (&rest _)
+          (agent-repl-test--json-ok
+           `((sessions . [,(list '(session_id . "s_zombie") '(turn_active . t) '(terminal . t))
+                          ,(list '(session_id . "s_live") '(turn_active . t) '(terminal . :false))]))))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live"))))))
+
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-unbound-orphan ()
+  "A turn_active session no live workspace is bound to is never counted.
+This is the orphan a prior bounce leaves behind with `turn_active' stuck
+true — it must not block a future bounce."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
+             (lambda () '("s_bound"))))
+    (agent-repl-test--with-http
+        (lambda (&rest _)
+          (agent-repl-test--json-ok
+           `((sessions . [,(list '(session_id . "s_bound") '(turn_active . t) '(terminal . :false))
+                          ,(list '(session_id . "s_orphan") '(turn_active . t) '(terminal . :false))]))))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_bound"))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-nil-when-unreachable ()
   "An unreachable daemon reads as no turns (nothing to protect)."
