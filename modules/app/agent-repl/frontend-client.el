@@ -39,6 +39,7 @@
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
+(declare-function agent-repl--frontend-remount-all-webviews "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
@@ -466,6 +467,15 @@ the count of open workspaces that carried a session binding to rebind."
   (let ((n (cl-count-if (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                         (agent-repl--live-ws-names))))
     (agent-repl--frontend-reattach-check)
+    ;; reattach-check rebinds each workspace's daemon session and, via
+    ;; `agent-repl--frontend-sync-webview', remounts only those whose
+    ;; session id CHANGED.  A session that rehydrated under its old id is
+    ;; left untouched, so its webview would keep rendering the pre-bounce
+    ;; bundle.  Force a remount of EVERY open webview so a bounce reliably
+    ;; reloads the served bundle across the board — a bounce is exactly
+    ;; when a fresh build lands, and each remount replays history off the
+    ;; live session, so nothing is lost.
+    (agent-repl--frontend-remount-all-webviews)
     n))
 
 ;;;; ---- Message / interrupt injection ------------------------------------------

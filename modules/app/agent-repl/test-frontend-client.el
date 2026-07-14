@@ -945,6 +945,23 @@ every workspace."
       ;; Assert
       (should (equal (reverse calls) '(wait reattach))))))
 
+(ert-deftest agent-repl-test-frontend-rebind-remounts-all-after-reattach ()
+  "The rebind force-remounts every open webview, and only after the reattach.
+The reattach must rebind sessions first; the unconditional remount then
+guarantees each webview reloads the freshly built bundle."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-reattach-check)
+               (lambda () (push 'reattach calls)))
+              ((symbol-function 'agent-repl--frontend-remount-all-webviews)
+               (lambda () (push 'remount-all calls) 0)))
+      ;; Act
+      (agent-repl--frontend-rebind-workspaces-after-restart)
+      ;; Assert
+      (should (equal (reverse calls) '(reattach remount-all))))))
+
 (ert-deftest agent-repl-test-frontend-rebind-delegates-to-reattach-check ()
   "The rebind drives the same sweep machinery that bounces and remounts."
   ;; Arrange

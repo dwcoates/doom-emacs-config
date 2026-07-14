@@ -43,6 +43,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
+(declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
@@ -468,6 +469,62 @@ binding already matches."
                   ws session-id (agent-repl--frontend-webview-url ws session-id))))
         (when (window-live-p win)
           (set-window-buffer win new))))))
+
+(defun agent-repl--frontend-remount-webview (ws)
+  "Force WS's open webview to reload the freshly served webapp bundle.
+The daemon serves the webapp off disk (`http.FileServer'), so a rebuilt
+bundle is live the moment `bin/build-frontend.sh' finishes — but an
+already-mounted webview keeps rendering the bundle it first loaded, and
+`agent-repl--frontend-ensure-session' would REUSE that live buffer
+because the session is unchanged.  Kill the buffer and drop its binding
+first, so the fresh mount navigates the URL clean and refetches (Vite's
+content-hashed asset names turn the refetch into a guaranteed cache
+miss).  The freshly mounted buffer is swapped back into the window that
+showed the old one, so a visible panel reloads in place without the
+`agent-repl--frontend-display-webview' window rebuild.
+
+A no-op returning nil when WS has no live webview buffer — a closed
+panel has nothing to reload, and its next open mounts fresh from the
+current bundle anyway.  Returns the new buffer when a remount happened."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (let* ((win (get-buffer-window buf t))
+             (session-id (agent-repl--frontend-ensure-session ws))
+             (url (agent-repl--frontend-webview-url ws session-id)))
+        (agent-repl--frontend-kill-webview buf)
+        (agent-repl--ws-put ws :frontend-buffer nil)
+        (agent-repl--ws-put ws :frontend-buffer-session-id nil)
+        (let ((new (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
+          (agent-repl--log ws "remount-webview: reloaded bundle ws=%s -> %s" ws session-id)
+          (when (window-live-p win)
+            (set-window-buffer win new))
+          new)))))
+
+(defun agent-repl--frontend-remount-all-webviews ()
+  "Remount every open workspace's webview so all pick up a rebuilt bundle.
+Iterates the live workspaces, remounting each that has an open webview
+\(`agent-repl--frontend-remount-webview' skips the rest).  Returns the
+count of workspaces whose webview was actually remounted."
+  (let ((n 0))
+    (dolist (ws (agent-repl--live-ws-names) n)
+      (when (agent-repl--frontend-remount-webview ws)
+        (setq n (1+ n))))))
+
+;;;###autoload
+(defun agent-repl-frontend-reload-webview ()
+  "Reload the current workspace's webview so it picks up a rebuilt bundle.
+Remounts the live webview against its session
+\(`agent-repl--frontend-remount-webview').  Use after rebuilding the
+webapp: the daemon serves the bundle off disk, so a rebuild needs only
+a fresh mount, not a daemon bounce.  Signals when no webview is open for
+the current workspace."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (unless (agent-repl--frontend-remount-webview ws)
+      (user-error "agent-repl: no webview open for workspace %s" ws))
+    (message "agent-repl: webview reloaded")))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
