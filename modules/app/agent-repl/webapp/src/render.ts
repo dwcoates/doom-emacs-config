@@ -373,6 +373,8 @@ export interface PanelContext {
   children: ReadonlyMap<string, readonly ConversationItem[]>;
   isOpen(id: string): boolean;
   selections?: QuestionSelections;
+  /** Message-composer drafts per agent id (renderer-owned, like selections). */
+  drafts?: ReadonlyMap<string, string>;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -514,7 +516,41 @@ function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): str
       ${toolResult(item)}
       ${liveTaskOutput(item)}
       ${taskControls(item)}
+      ${agentComposer(item, panels)}
     </div>`;
+}
+
+/** The agent ids a card's spawn result announced (background agents). */
+const AGENT_SPAWN_RE = /agentId:\s*([A-Za-z0-9_-]+)/g;
+
+function spawnedAgentIds(item: ToolItem): string[] {
+  if (!item.result) return [];
+  return [...contentToText(item.result.content).matchAll(AGENT_SPAWN_RE)].map((m) => m[1]);
+}
+
+/**
+ * A freeform composer for each live background agent this card spawned,
+ * gone once the completion notification lands. Prompt-mediated like the
+ * stop control: the send asks the MAIN agent to relay via SendMessage,
+ * and the label owns that. Drafts live in the renderer (PanelContext),
+ * so the card's per-frame re-renders cannot wipe half-typed text.
+ */
+function agentComposer(item: ToolItem, panels?: PanelContext): string {
+  if (item.notification) return "";
+  const ids = spawnedAgentIds(item);
+  if (ids.length === 0) return "";
+  return ids
+    .map((id) => {
+      const draft = panels?.drafts?.get(id) ?? "";
+      return `<div class="agent-msg"><input class="agent-msg-input" data-msg-for="${escapeHtml(
+        id,
+      )}" placeholder="message this agent…" value="${escapeHtml(
+        draft,
+      )}"><button type="button" class="task-msg" data-msg-send="${escapeHtml(
+        id,
+      )}" title="sends a prompt to the agent">send · asks the agent</button></div>`;
+    })
+    .join("");
 }
 
 /**
@@ -1353,6 +1389,8 @@ export class FeedRenderer {
   private openPanels = new Set<string>();
   /** Tab pins per group key; an unpinned group auto-follows the newest runner. */
   private activeTabs = new Map<string, string>();
+  /** Half-typed agent messages, keyed by agent id (see agentComposer). */
+  private msgDrafts = new Map<string, string>();
   private lastState: StoreState | null = null;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
@@ -1386,9 +1424,29 @@ export class FeedRenderer {
       if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
       const prompt = target.closest("[data-send-prompt]")?.getAttribute("data-send-prompt");
       if (prompt) this.actions.sendPrompt?.(prompt);
+      const msgTo = target.closest("[data-msg-send]")?.getAttribute("data-msg-send");
+      if (msgTo !== null && msgTo !== undefined) this.sendAgentMessage(msgTo);
       this.handleTabClick(target);
       this.handlePanelToggle(target);
     });
+    // Composer drafts are renderer state so re-renders cannot wipe them;
+    // every keystroke lands here before the next frame can rebuild the card.
+    container.addEventListener("input", (e) => {
+      const target = e.target as HTMLElement;
+      const forId = target.getAttribute("data-msg-for");
+      if (forId !== null) {
+        this.msgDrafts.set(forId, (target as HTMLInputElement).value);
+      }
+    });
+  }
+
+  /** Relay the drafted message to a background agent, via a prompt. */
+  private sendAgentMessage(id: string): void {
+    const text = (this.msgDrafts.get(id) ?? "").trim();
+    if (text === "") return;
+    this.msgDrafts.delete(id);
+    this.actions.sendPrompt?.(`Use SendMessage to relay this to agent ${id}: ${text}`);
+    if (this.lastState) this.render(this.lastState);
   }
 
   /** A click on a tab chip pins that member as its group's active card. */
@@ -1433,6 +1491,7 @@ export class FeedRenderer {
       children,
       isOpen: (id) => this.openPanels.has(id),
       selections: this.questionSelections,
+      drafts: this.msgDrafts,
     };
   }
 
