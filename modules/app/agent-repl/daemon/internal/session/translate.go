@@ -881,6 +881,13 @@ func (t *Translator) onError(evt *protocol.L1Event) []protocol.L2Frame {
 }
 
 func (t *Translator) onClosed(evt *protocol.L1Event) []protocol.L2Frame {
+	// A closed shim has no in-flight turn: the SDK query is over, whether by
+	// clean shutdown/hibernation or a fatal exit. Clearing turnActive here is
+	// what keeps a session whose shim went away mid-turn from lingering with
+	// turn_active stuck true — a clean `shutdown` (hibernation) leaves the
+	// session NON-terminal, so nothing else resets it, and the daemon-stop
+	// guard would read the dead flag as a live turn forever.
+	t.turnActive = false
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("session closed")...)
 	if evt.Reason == "fatal_error" {
