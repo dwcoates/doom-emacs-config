@@ -691,6 +691,10 @@ func (r *recordingSink) SessionDead(cwd, sid string) {
 	r.record("dead " + cwd + " " + sid)
 }
 
+func (r *recordingSink) AccountChanged(cwd, sid string) {
+	r.record("account-changed " + cwd + " " + sid)
+}
+
 func (r *recordingSink) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
