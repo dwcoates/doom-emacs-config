@@ -157,6 +157,15 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
 MODEL and RESUME (a durable claude session uuid) are optional
 passthroughs.  Signals on HTTP failure or a malformed response.
 
+MODEL defaults to `agent-repl-interactive-model' when nil, matching the
+CLI-launch path (`agent-repl--compute-claude-flags'): a gui session that
+omitted the flag would run on whatever default the CLI picks, and the
+real Claude CLI names that model only AFTER the first turn, leaving the
+topbar's model picker EMPTY until then.  Sending a concrete `--model'
+makes the daemon's hello carry the real model from the first frame.  A
+nil `agent-repl-interactive-model' is respected as a deliberate \"let the
+CLI choose\" and still sends no flag.
+
 The account the session's CLI runs as travels in the `config_dir' field,
 computed from CWD by `agent-repl--compute-config-dir' — the SAME resolver
 `ai-title.el' uses to locate a workspace's transcript, so a session
@@ -168,7 +177,8 @@ per-workspace account, and without this field every gui session would
 silently run as whichever account the daemon happened to inherit."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
-  (let* ((config-dir (agent-repl--compute-config-dir cwd))
+  (let* ((model (or model agent-repl-interactive-model))
+         (config-dir (agent-repl--compute-config-dir cwd))
          (payload (append `(("cwd" . ,cwd))
                           (when model `(("model" . ,model)))
                           (when resume `(("resume" . ,resume)))

@@ -103,6 +103,41 @@ Captured requests accumulate in the anaphoric variable `requests' as
       (should (string-match-p "\"model\":\"haiku\"" payload))
       (should (string-match-p "\"resume\":\"cli-uuid-9\"" payload)))))
 
+(ert-deftest agent-repl-test-frontend-create-defaults-model-to-interactive ()
+  "A create with no model sends `agent-repl-interactive-model' so the
+daemon's hello carries a concrete model from the first frame."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((agent-repl-interactive-model "opus"))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should (string-match-p "\"model\":\"opus\"" (nth 2 (car requests)))))))
+
+(ert-deftest agent-repl-test-frontend-create-omits-model-when-interactive-nil ()
+  "A nil `agent-repl-interactive-model' is respected as \"let the CLI
+choose\": no model flag is sent."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((agent-repl-interactive-model nil))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should-not (string-match-p "\"model\"" (nth 2 (car requests)))))))
+
+(ert-deftest agent-repl-test-frontend-create-explicit-model-overrides-interactive ()
+  "An explicit MODEL wins over `agent-repl-interactive-model'."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((session_id . "s_1"))))
+    (let ((agent-repl-interactive-model "opus"))
+      ;; Act
+      (agent-repl--frontend-create-session "/w" "haiku")
+      ;; Assert
+      (should (string-match-p "\"model\":\"haiku\"" (nth 2 (car requests)))))))
+
 (ert-deftest agent-repl-test-frontend-create-sends-permission-mode ()
   "Create carries the configured permission mode (vterm-parity default auto)."
   ;; Arrange
