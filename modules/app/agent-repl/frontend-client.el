@@ -239,19 +239,40 @@ never blocks on the probe.  Signals on HTTP failure."
   (let ((entry (agent-repl--frontend-session-entry id)))
     (and entry (eq (alist-get 'terminal entry) :false))))
 
+(defun agent-repl--frontend-bound-session-ids ()
+  "Return the daemon session ids a live workspace is currently bound to.
+Every conversation the user is actually driving surfaces through some
+workspace's `:frontend-session-id'.  A daemon session bound to NONE of
+them is an orphan — e.g. a session a prior daemon bounce or reattach
+superseded but left behind — that no client is watching."
+  (delq nil (mapcar (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
+                    (agent-repl--live-ws-names))))
+
 (defun agent-repl--frontend-turn-active-sessions ()
-  "Return session ids the daemon reports mid-turn; nil when unreachable.
+  "Return workspace-bound session ids the daemon reports mid-turn; nil if unreachable.
 The daemon-stop guard keys on this: an unreachable daemon has nothing
 to protect, so unreachability reads as \"no turns\" (loudly logged).
-Terminal (ended) sessions are skipped: a dead record has no live shim
-or SDK query to protect, yet the daemon can leave a stale `turn_active'
-on one that shut down mid-turn — counting it would falsely refuse an
-otherwise-idle daemon bounce."
+
+Only a session that is turn-active, NON-TERMINAL, AND bound to a live
+workspace counts — exactly the conversations a bounce would interrupt
+mid-generation.  The two exclusions each guard against a stuck flag the
+daemon can leave behind, neither of which is a live turn anyone is
+watching:
+- TERMINAL (ended) sessions — a dead record has no shim or SDK query,
+  yet the daemon can leave a stale `turn_active' on one that shut down
+  mid-turn.
+- ORPHAN sessions no live workspace is bound to
+  (`agent-repl--frontend-bound-session-ids') — a bounce/reattach can
+  supersede a session yet leave it lingering non-terminal with
+  `turn_active' stuck true forever, and counting it would refuse every
+  future bounce even while every workspace is idle."
   (condition-case err
-      (let (busy)
+      (let ((bound (agent-repl--frontend-bound-session-ids))
+            busy)
         (dolist (s (agent-repl--frontend-list-sessions) (nreverse busy))
           (when (and (eq (alist-get 'turn_active s) t)
-                     (not (eq (alist-get 'terminal s) t)))
+                     (not (eq (alist-get 'terminal s) t))
+                     (member (alist-get 'session_id s) bound))
             (push (alist-get 'session_id s) busy))))
     (error
      (agent-repl--log nil "turn-active-sessions: daemon unreachable (%s) — treating as none"
