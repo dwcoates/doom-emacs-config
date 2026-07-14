@@ -108,6 +108,10 @@ type Server struct {
 	logf          func(format string, args ...any)
 	now           func() time.Time
 	upgrader      websocket.Upgrader
+	// classifyQueue / classifierModel configure the §2.13 in-flight-queue
+	// classifier every real session inherits.
+	classifyQueue   bool
+	classifierModel string
 
 	sentinel   session.SentinelSink
 	remediator Remediator
@@ -157,6 +161,13 @@ type Config struct {
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
+	// ClassifyQueue enables the §2.13 in-flight-queue classifier on every
+	// real session. False leaves the queue active but every busy-submitted
+	// message defaults to an immediate wait with no subprocess spawned.
+	ClassifyQueue bool
+	// ClassifierModel is the model the queue classifier pins; empty takes
+	// the session package's haiku default.
+	ClassifierModel string
 }
 
 // New builds a Server.
@@ -170,17 +181,19 @@ func New(cfg Config) *Server {
 		now = time.Now
 	}
 	s := &Server{
-		daemonVersion: cfg.DaemonVersion,
-		bootID:        newBootID(),
-		retention:     cfg.Retention,
-		forceFake:     cfg.ForceFake,
-		spawn:         cfg.Spawn,
-		logf:          logf,
-		now:           now,
-		sentinel:      cfg.Sentinel,
-		logins:        cfg.Logins,
-		remediator:    cfg.Remediator,
-		registry:      cfg.Registry,
+		daemonVersion:   cfg.DaemonVersion,
+		bootID:          newBootID(),
+		retention:       cfg.Retention,
+		forceFake:       cfg.ForceFake,
+		spawn:           cfg.Spawn,
+		logf:            logf,
+		now:             now,
+		classifyQueue:   cfg.ClassifyQueue,
+		classifierModel: cfg.ClassifierModel,
+		sentinel:        cfg.Sentinel,
+		logins:          cfg.Logins,
+		remediator:      cfg.Remediator,
+		registry:        cfg.Registry,
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -294,6 +307,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
 	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands)
+	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
+	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
@@ -649,6 +664,49 @@ func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// handleQueueRunNow escalates a queued message over HTTP (§2.13): the
+// Emacs-host equivalent of the webapp's Run-now control. Same pipeline as
+// a WS queue-run-now: the item is promoted and the running turn preempted.
+func (s *Server) handleQueueRunNow(w http.ResponseWriter, r *http.Request) {
+	s.queueOverride(w, r, "queue-run-now")
+}
+
+// handleQueueCancel drops a queued message over HTTP (§2.13): the
+// Emacs-host equivalent of the webapp's Cancel control.
+func (s *Server) handleQueueCancel(w http.ResponseWriter, r *http.Request) {
+	s.queueOverride(w, r, "queue-cancel")
+}
+
+// queueOverride injects a §2.13 queue override (queue-run-now /
+// queue-cancel) for the named item through the shared client-command
+// pipeline. A stale queue_id is a no-op ack inside the session, so a
+// success here means "dispatched", not "the item still existed".
+func (s *Server) queueOverride(w http.ResponseWriter, r *http.Request, cmdType string) {
+	sess, err := s.resolve(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	queueID := r.PathValue("queueId")
+	if queueID == "" {
+		httpError(w, http.StatusBadRequest, "queue id must be non-empty")
+		return
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       cmdType,
+		"request_id": newRequestID(),
+		"queue_id":   queueID,
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var opts CreateOpts
 	if r.Body != nil {
@@ -731,16 +789,18 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 		return nil, err
 	}
 	cfg := session.Config{
-		ID:            id,
-		DaemonVersion: s.daemonVersion,
-		BootID:        s.bootID,
-		Shim:          shim,
-		CWD:           opts.CWD,
-		Model:         opts.Model,
-		ConfigDir:     opts.ConfigDir,
-		Retention:     s.retention,
-		Logf:          s.logf,
-		Sentinel:      s.sentinel,
+		ID:              id,
+		DaemonVersion:   s.daemonVersion,
+		BootID:          s.bootID,
+		Shim:            shim,
+		CWD:             opts.CWD,
+		Model:           opts.Model,
+		ConfigDir:       opts.ConfigDir,
+		Retention:       s.retention,
+		Logf:            s.logf,
+		Sentinel:        s.sentinel,
+		ClassifyQueue:   s.classifyQueue,
+		ClassifierModel: s.classifierModel,
 	}
 	// A fake session's CLI is a scripted stand-in that writes no
 	// transcript, so there is nothing to reconcile its model against; a
@@ -748,6 +808,10 @@ func (s *Server) launchSession(id string, opts CreateOpts, registrable bool) (*s
 	// wants does not exist.
 	if opts.Fake || s.forceFake {
 		cfg.ModelReconcileInterval = -1
+		// The queue classifier spawns a REAL claude; a fake/offline session
+		// must never reach the network, so it enqueues busy messages as
+		// immediate waits instead of classifying them.
+		cfg.ClassifyQueue = false
 	}
 	if registrable {
 		cfg.Registrar = registrar{s}
@@ -785,6 +849,9 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		TurnActive bool `json:"turn_active"`
 		// PendingPermissions lists unresolved permission request ids.
 		PendingPermissions []string `json:"pending_permissions,omitempty"`
+		// Queue is the in-flight message queue snapshot (§2.13),
+		// front-to-back; absent when empty.
+		Queue []protocol.QueuedItem `json:"queue,omitempty"`
 		// Rehydratable marks a cold session carried over from a previous
 		// daemon process: its id resolves, but the shim spawns (with
 		// --resume) only on first real access.
@@ -802,6 +869,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			DeathReason:        info.DeathReason,
 			TurnActive:         info.TurnActive,
 			PendingPermissions: info.PendingPermissions,
+			Queue:              info.Queue,
 		})
 	}
 	for id, rec := range s.dormant {
