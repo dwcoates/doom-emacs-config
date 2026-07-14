@@ -10,7 +10,11 @@ import {
   ACCOUNT_LOGGED_OUT,
   accountIsLoggedOut,
   accountLabel,
+  accountMenuEntries,
   fetchAccount,
+  fetchAccounts,
+  switchAccount,
+  type RosterEntry,
 } from "../src/account.js";
 
 /** A fetch that answers GET /sessions/{id}/account. */
@@ -109,5 +113,156 @@ describe("accountIsLoggedOut", () => {
     // Arrange — before the fetch lands there is nothing to warn about.
     // Act / Assert
     expect(accountIsLoggedOut(null)).toBe(false);
+  });
+});
+
+/** A fetch that also records each call's RequestInit (method, body). */
+function fakeFetchWithInit(resp: { ok: boolean; status?: number; body?: unknown }): {
+  fetchFn: typeof fetch;
+  calls: { url: string; init?: RequestInit }[];
+} {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return {
+      ok: resp.ok,
+      status: resp.status ?? 200,
+      json: async () => resp.body ?? {},
+      text: async () => "boom",
+    };
+  }) as unknown as typeof fetch;
+  return { fetchFn, calls };
+}
+
+describe("fetchAccounts", () => {
+  it("gets the roster route", async () => {
+    // Arrange
+    const { fetchFn, calls } = fakeFetch({ ok: true, body: { accounts: [] } });
+    // Act
+    await fetchAccounts("http://d", fetchFn);
+    // Assert
+    expect(calls[0]).toBe("http://d/accounts");
+  });
+
+  it("hands back the roster entries", async () => {
+    // Arrange
+    const roster = [
+      { label: "personal", config_dir: "", email: "a@b.c" },
+      { label: "work", config_dir: "/w", email: "d@e.f" },
+    ];
+    const { fetchFn } = fakeFetch({ ok: true, body: { accounts: roster } });
+    // Act
+    const got = await fetchAccounts("http://d", fetchFn);
+    // Assert
+    expect(got).toEqual(roster);
+  });
+
+  it("rejects when the daemon has no roster configured", async () => {
+    // Arrange — the 503 of a daemon started without -accounts.
+    const { fetchFn } = fakeFetch({ ok: false, status: 503 });
+    // Act / Assert
+    await expect(fetchAccounts("http://d", fetchFn)).rejects.toThrow(/503/);
+  });
+});
+
+describe("switchAccount", () => {
+  it("posts the target root to the session's account route", async () => {
+    // Arrange
+    const { fetchFn, calls } = fakeFetchWithInit({
+      ok: true,
+      body: { switched: true, account: { label: "work", config_dir: "/w", email: "d@e.f" } },
+    });
+    // Act
+    await switchAccount("http://d", "s_1", "/w", fetchFn);
+    // Assert
+    expect(calls[0].url).toBe("http://d/sessions/s_1/account");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ config_dir: "/w" });
+  });
+
+  it("hands back the switch outcome", async () => {
+    // Arrange
+    const outcome = {
+      switched: true,
+      account: { label: "work", config_dir: "/w", email: "d@e.f" },
+    };
+    const { fetchFn } = fakeFetchWithInit({ ok: true, body: outcome });
+    // Act
+    const got = await switchAccount("http://d", "s_1", "/w", fetchFn);
+    // Assert
+    expect(got).toEqual(outcome);
+  });
+
+  it("rejects a mid-turn refusal rather than reporting it as switched", async () => {
+    // Arrange — the daemon 409s while a turn is in flight.
+    const { fetchFn } = fakeFetchWithInit({ ok: false, status: 409 });
+    // Act / Assert
+    await expect(switchAccount("http://d", "s_1", "/w", fetchFn)).rejects.toThrow(/409/);
+  });
+});
+
+describe("accountMenuEntries", () => {
+  const personal: RosterEntry = { label: "personal", config_dir: "", email: "a@b.c" };
+  const work: RosterEntry = { label: "work", config_dir: "/w", email: "d@e.f" };
+
+  it("leads with a re-auth entry naming the current email", () => {
+    // Arrange / Act
+    const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [personal, work]);
+    // Assert
+    expect(entries[0]).toEqual({ kind: "reauth", text: "re-auth a@b.c" });
+  });
+
+  it("says log in when the current root is logged out", () => {
+    // Arrange — "re-auth" of nothing is not a verb the user can follow.
+    // Act
+    const entries = accountMenuEntries({ config_dir: "", email: "" }, []);
+    // Assert
+    expect(entries[0]).toEqual({ kind: "reauth", text: "log in" });
+  });
+
+  it("says log in before the account is known", () => {
+    // Arrange / Act
+    const entries = accountMenuEntries(null, []);
+    // Assert
+    expect(entries[0]).toEqual({ kind: "reauth", text: "log in" });
+  });
+
+  it("offers a switch entry naming each other root", () => {
+    // Arrange / Act
+    const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [personal, work]);
+    // Assert
+    expect(entries[1]).toEqual({
+      kind: "switch",
+      text: "switch to work (d@e.f)",
+      configDir: "/w",
+    });
+  });
+
+  it("excludes the root the session already runs as", () => {
+    // Arrange / Act
+    const entries = accountMenuEntries({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Assert
+    expect(entries.filter((e) => e.kind === "switch")).toHaveLength(1);
+    expect(entries[1]).toMatchObject({ configDir: "" });
+  });
+
+  it("annotates a logged-out switch target", () => {
+    // Arrange — switching to a dead root flows into re-auth, so the menu
+    // names the state up front rather than springing it after the bounce.
+    const out: RosterEntry = { label: "work", config_dir: "/w", email: "" };
+    // Act
+    const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [out]);
+    // Assert
+    expect(entries[1]).toMatchObject({ text: `switch to work (${ACCOUNT_LOGGED_OUT})` });
+  });
+
+  it("annotates an unreadable root instead of hiding it", () => {
+    // Arrange — a corrupt .claude.json is surfaced, never blanked into a
+    // fake logged-out.
+    const broken: RosterEntry = { label: "work", config_dir: "/w", email: "", error: "corrupt" };
+    // Act
+    const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [broken]);
+    // Assert
+    expect(entries[1]).toMatchObject({ text: "switch to work (unreadable)" });
   });
 });

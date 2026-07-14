@@ -12,7 +12,16 @@ import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
-import { accountIsLoggedOut, accountLabel, fetchAccount } from "./account.js";
+import {
+  type Account,
+  type RosterEntry,
+  accountIsLoggedOut,
+  accountLabel,
+  accountMenuEntries,
+  fetchAccount,
+  fetchAccounts,
+  switchAccount,
+} from "./account.js";
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
@@ -114,10 +123,10 @@ async function boot(): Promise<void> {
   const infoEl = must("session-info");
   const modeEl = must<HTMLSelectElement>("mode-select");
   const modelEl = must<HTMLSelectElement>("model-select");
-  const loginEl = must<HTMLButtonElement>("login-btn");
   const spinnerEl = must("spinner");
   const remediationEl = must("remediation");
-  const accountEl = must("account");
+  const accountEl = must<HTMLButtonElement>("account");
+  const accountMenuEl = must("account-menu");
   const loginOverlayEl = must("login-overlay");
   const loginAccountEl = must("login-account");
   const loginTermEl = must("login-term");
@@ -354,17 +363,21 @@ async function boot(): Promise<void> {
     });
   });
 
-  // Which account this session runs as. Refreshed after every login, since
-  // logging in is the one thing that changes the answer.
+  // Which account this session runs as. Refreshed after every login and
+  // switch, since those are the two things that change the answer. The
+  // last-fetched value seeds the menu's re-auth entry.
+  let account: Account | null = null;
   const refreshAccount = (): void => {
     void fetchAccount(httpBase, activeSessionId)
-      .then((account) => {
+      .then((fetched) => {
+        account = fetched;
         accountEl.textContent = accountLabel(account);
         accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
       })
       .catch((err: unknown) => {
         // Not fatal: the session may still be perfectly usable. Leave the slot
         // blank rather than assert an account we failed to read.
+        account = null;
         accountEl.textContent = "";
         accountEl.classList.remove("logged-out");
         console.error("account lookup failed", err);
@@ -372,11 +385,11 @@ async function boot(): Promise<void> {
   };
   refreshAccount();
 
-  // Login is the one topbar control that does not talk to the SDK session.
+  // Re-auth is the one account verb that does not talk to the SDK session.
   // The daemon runs the login on a pty it owns and streams it here, where it
   // renders as a real terminal: the flow is a full-screen TUI gated behind
   // stateful prompts before it ever reaches OAuth, so a human reads it and
-  // nothing parses it. The button is disabled for the round trip so a
+  // nothing parses it. The chip is disabled for the round trip so a
   // double-click cannot ask for two terminals.
   //
   // The notice reuses #remediation, the topbar's one status-line slot.
@@ -387,13 +400,13 @@ async function boot(): Promise<void> {
     terminal = null;
     loginOverlayEl.hidden = true;
     remediationEl.textContent = "";
-    // The login is the only thing that changes the account, so this is where
-    // the topbar learns the user's answer to it.
+    // A finished login may have changed the account, so this is where the
+    // topbar learns the user's answer to it.
     refreshAccount();
   };
 
-  loginEl.addEventListener("click", () => {
-    loginEl.disabled = true;
+  const openLoginTerminal = (): void => {
+    accountEl.disabled = true;
     void requestLogin(httpBase, activeSessionId)
       .then((opened) => {
         remediationEl.textContent = loginNotice("open");
@@ -415,8 +428,80 @@ async function boot(): Promise<void> {
         console.error("login request failed", err);
       })
       .finally(() => {
-        loginEl.disabled = false;
+        accountEl.disabled = false;
       });
+  };
+
+  // Switch never touches OAuth: the daemon migrates the transcript and
+  // bounces the shim under the target root, keeping the session id, so the
+  // stream reconnect below finds the same conversation. The chip is
+  // disabled for the round trip — a second switch racing the first would
+  // bounce a shim already mid-bounce.
+  const doSwitch = (configDir: string): void => {
+    accountEl.disabled = true;
+    remediationEl.textContent = "switching account…";
+    void switchAccount(httpBase, activeSessionId, configDir)
+      .then((outcome) => {
+        remediationEl.textContent = outcome.switched
+          ? `switched to ${outcome.account.email === "" ? outcome.account.label : outcome.account.email}`
+          : "";
+        refreshAccount();
+      })
+      .catch((err: unknown) => {
+        // A switch that did not happen must say so: the user is about to
+        // spend tokens as whichever account they BELIEVE is active.
+        remediationEl.textContent = "account switch failed";
+        console.error("account switch failed", err);
+      })
+      .finally(() => {
+        accountEl.disabled = false;
+      });
+  };
+
+  // The chip's dropdown. Rebuilt on every open from the daemon's live
+  // roster, so the identities shown are current rather than boot-time
+  // stale; a daemon without -accounts degrades to the re-auth entry alone.
+  const hideMenu = (): void => {
+    accountMenuEl.hidden = true;
+  };
+  const openMenu = async (): Promise<void> => {
+    let roster: RosterEntry[] = [];
+    try {
+      roster = await fetchAccounts(httpBase);
+    } catch (err: unknown) {
+      console.error("account roster lookup failed", err);
+    }
+    accountMenuEl.replaceChildren(
+      ...accountMenuEntries(account, roster).map((entry) => {
+        const item = document.createElement("button");
+        item.textContent = entry.text;
+        item.addEventListener("click", () => {
+          hideMenu();
+          if (entry.kind === "reauth") {
+            openLoginTerminal();
+          } else {
+            doSwitch(entry.configDir);
+          }
+        });
+        return item;
+      }),
+    );
+    accountMenuEl.style.left = `${accountEl.offsetLeft}px`;
+    accountMenuEl.hidden = false;
+  };
+  accountEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (accountMenuEl.hidden) {
+      void openMenu();
+    } else {
+      hideMenu();
+    }
+  });
+  // Click-away dismissal, so an abandoned menu does not sit over the feed.
+  document.addEventListener("click", (e) => {
+    if (!accountMenuEl.hidden && !accountMenuEl.contains(e.target as Node)) {
+      hideMenu();
+    }
   });
 
   loginCloseEl.addEventListener("click", () => {

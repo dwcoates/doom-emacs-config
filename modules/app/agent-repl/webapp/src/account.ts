@@ -62,3 +62,113 @@ export function accountLabel(account: Account | null): string {
 export function accountIsLoggedOut(account: Account | null): boolean {
   return account !== null && account.email === "";
 }
+
+/** One canonical root of the daemon's -accounts roster, with its identity. */
+export interface RosterEntry {
+  /** The operator's name for the root ("personal", "work"). */
+  label: string;
+  /** CLAUDE_CONFIG_DIR selecting the root, empty for the CLI default. */
+  config_dir: string;
+  /** The root's logged-in email, empty when logged out. */
+  email: string;
+  /** A per-root identity read failure (corrupt .claude.json), if any. */
+  error?: string;
+}
+
+/**
+ * Fetch the canonical account roster.
+ *
+ * Rejects on any non-2xx, including the 503 of a daemon started without
+ * -accounts — the menu then degrades to its re-auth entry alone.
+ */
+export async function fetchAccounts(
+  httpBase: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<RosterEntry[]> {
+  const resp = await fetchFn(`${httpBase}/accounts`);
+  if (!resp.ok) {
+    throw new Error(`GET /accounts: ${resp.status} ${await resp.text()}`);
+  }
+  const body = (await resp.json()) as { accounts: RosterEntry[] };
+  return body.accounts;
+}
+
+/** What a switch request came back with. */
+export interface SwitchOutcome {
+  /** False when the session already ran as the target root. */
+  switched: boolean;
+  /** The target root, with the identity the session now runs as. */
+  account: RosterEntry;
+}
+
+/**
+ * Move the session onto another canonical root.
+ *
+ * The daemon migrates the transcript and bounces the shim under the new
+ * CLAUDE_CONFIG_DIR; the session id survives, so the caller's stream
+ * reconnect finds the same conversation. Rejects on any non-2xx — a
+ * mid-turn 409 and an off-roster 400 both surface to the topbar.
+ */
+export async function switchAccount(
+  httpBase: string,
+  sessionId: string,
+  configDir: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<SwitchOutcome> {
+  const resp = await fetchFn(`${httpBase}/sessions/${sessionId}/account`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config_dir: configDir }),
+  });
+  if (!resp.ok) {
+    throw new Error(
+      `POST /sessions/${sessionId}/account: ${resp.status} ${await resp.text()}`,
+    );
+  }
+  return (await resp.json()) as SwitchOutcome;
+}
+
+/** One entry of the account chip's dropdown. */
+export type AccountMenuEntry =
+  | { kind: "reauth"; text: string }
+  | { kind: "switch"; text: string; configDir: string };
+
+/**
+ * Derive the account menu: one re-auth verb for the root the session runs
+ * as, then one switch verb per OTHER canonical root.
+ *
+ * The two verbs stay independent underneath — re-auth opens the login
+ * terminal (OAuth, for expired creds), switch never touches OAuth (it
+ * selects a root that is already authed). A root the daemon could not read
+ * is offered with its problem named rather than hidden: switching to it and
+ * hitting the error beats not knowing it exists.
+ */
+export function accountMenuEntries(
+  current: Account | null,
+  roster: RosterEntry[],
+): AccountMenuEntry[] {
+  const entries: AccountMenuEntry[] = [
+    {
+      kind: "reauth",
+      text:
+        current === null || accountIsLoggedOut(current)
+          ? "log in"
+          : `re-auth ${current.email}`,
+    },
+  ];
+  for (const root of roster) {
+    if (current !== null && root.config_dir === current.config_dir) continue;
+    const who =
+      root.error !== undefined && root.error !== ""
+        ? "unreadable"
+        : root.email === ""
+          ? ACCOUNT_LOGGED_OUT
+          : root.email;
+    entries.push({
+      kind: "switch",
+      text: `switch to ${root.label} (${who})`,
+      configDir: root.config_dir,
+    });
+  }
+  return entries;
+}

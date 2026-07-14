@@ -37,17 +37,26 @@ describe("topbar", () => {
     expect(topbar).toMatch(/<span id="remediation"><\/span>/);
   });
 
-  it("carries a login button", () => {
-    // Arrange / Act — the topbar markup.
+  it("renders the account chip as a button, the account menu's trigger", () => {
+    // Arrange / Act — the chip replaced the old standalone login button:
+    // both account verbs (re-auth, switch) now live in its dropdown.
     // Assert
-    expect(topbar).toContain(`id="login-btn"`);
+    expect(topbar).toMatch(/<button id="account"/);
   });
 
-  it("places the login button to the right of the permission-mode dropdown", () => {
-    // Arrange / Act — source order is layout order in the flex row, and the
-    // button is the last control, so it lands at the far right of the topbar.
+  it("carries no standalone login button", () => {
+    // Arrange / Act — the login verb moved into the account menu; a second
+    // trigger would reintroduce the two-buttons-one-concern split.
     // Assert
-    expect(topbar.indexOf(`id="login-btn"`)).toBeGreaterThan(topbar.indexOf(`id="mode-select"`));
+    expect(topbar).not.toContain(`id="login-btn"`);
+  });
+
+  it("keeps the account menu container outside the topbar, starting hidden", () => {
+    // Arrange / Act — the menu overlays the feed below the topbar, and a
+    // healthy page shows it only after a chip click.
+    // Assert
+    expect(topbar).not.toContain(`id="account-menu"`);
+    expect(html).toMatch(/<div id="account-menu" hidden><\/div>/);
   });
 
   it("carries a model picker", () => {
