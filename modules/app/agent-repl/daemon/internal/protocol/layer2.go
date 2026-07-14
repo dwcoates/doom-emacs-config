@@ -222,6 +222,13 @@ type ToolUseProgressFrame struct {
 	Envelope
 	ToolUseID string `json:"tool_use_id"`
 	Text      string `json:"text"`
+	// Structured companions to the synthesized Text: the tool's name, the
+	// spawning subagent's tool_use_id (empty on main-chain tools), and the
+	// SDK's raw elapsed clock, so clients can attribute and render the
+	// heartbeat themselves.
+	ToolName        string  `json:"tool_name,omitempty"`
+	ParentToolUseID string  `json:"parent_tool_use_id,omitempty"`
+	ElapsedSeconds  float64 `json:"elapsed_seconds,omitempty"`
 }
 
 // --- §2.7 permission prompts ------------------------------------------------

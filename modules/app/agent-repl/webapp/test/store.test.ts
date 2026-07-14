@@ -254,6 +254,18 @@ describe("ConversationStore tool cards", () => {
     // Assert
     expect((store.state.items[0] as ToolItem).progress).toBe("Bash running (3s)");
   });
+
+  it("keeps the heartbeat's raw elapsed clock beside the progress text", () => {
+    // Arrange
+    const store = newStore();
+    runToolStart(store);
+    // Act
+    store.applyRaw(
+      frame("tool-use-progress", { tool_use_id: "t1", text: "Bash running (3s)", elapsed_seconds: 3.5 }),
+    );
+    // Assert
+    expect((store.state.items[0] as ToolItem).progressElapsedS).toBe(3.5);
+  });
 });
 
 describe("ConversationStore permissions", () => {

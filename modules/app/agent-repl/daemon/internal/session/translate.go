@@ -805,17 +805,27 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 		}}
 	case "tool_use_progress":
 		// §2.9: tool_use_progress system events map to the dedicated
-		// tool-use-progress frame, never to a system frame.
+		// tool-use-progress frame, never to a system frame. The shim's
+		// data payload is the whole SDK message, so the subagent parent
+		// (null on main-chain tools) rides along with the elapsed clock.
 		var data struct {
 			ToolUseID          string  `json:"tool_use_id"`
 			ToolName           string  `json:"tool_name"`
+			ParentToolUseID    *string `json:"parent_tool_use_id"`
 			ElapsedTimeSeconds float64 `json:"elapsed_time_seconds"`
 		}
 		_ = json.Unmarshal(evt.Data, &data)
+		parent := ""
+		if data.ParentToolUseID != nil {
+			parent = *data.ParentToolUseID
+		}
 		return []protocol.L2Frame{&protocol.ToolUseProgressFrame{
-			Envelope:  protocol.Envelope{Type: "tool-use-progress"},
-			ToolUseID: data.ToolUseID,
-			Text:      fmt.Sprintf("%s running (%.0fs)", data.ToolName, data.ElapsedTimeSeconds),
+			Envelope:        protocol.Envelope{Type: "tool-use-progress"},
+			ToolUseID:       data.ToolUseID,
+			Text:            fmt.Sprintf("%s running (%.0fs)", data.ToolName, data.ElapsedTimeSeconds),
+			ToolName:        data.ToolName,
+			ParentToolUseID: parent,
+			ElapsedSeconds:  data.ElapsedTimeSeconds,
 		}}
 	}
 	return nil

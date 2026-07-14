@@ -238,6 +238,12 @@ export interface ToolUseProgressFrame extends WsEnvelope {
   type: "tool-use-progress";
   tool_use_id: string;
   text: string;
+  /** The tool's name, raw from the SDK heartbeat. */
+  tool_name?: string;
+  /** Spawning subagent's tool_use_id; absent on main-chain tools. */
+  parent_tool_use_id?: string;
+  /** The SDK's raw elapsed clock, for client-rendered tickers. */
+  elapsed_seconds?: number;
 }
 
 // --- §2.7 permission prompts ---------------------------------------------------------
