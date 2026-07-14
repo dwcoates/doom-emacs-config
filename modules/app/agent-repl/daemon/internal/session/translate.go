@@ -239,7 +239,18 @@ func (t *Translator) OnPermissionDecisionCmd(cmd *protocol.L1Command) (protocol.
 
 // OnInterruptCmd invalidates pending permission prompts (§2.7 "cancel").
 func (t *Translator) OnInterruptCmd() []protocol.L2Frame {
-	return t.cancelPendingPermissions("interrupted")
+	frames := t.cancelPendingPermissions("interrupted")
+	// Signal the interrupt to clients only when a turn is actually running:
+	// an idle interrupt aborts nothing, so it must not light the GUI's
+	// "interrupting…" indicator (which the terminating result would never
+	// arrive to clear). The frame leads the permission-cancels so the client
+	// enters the interrupting state before it sees anything else.
+	if t.turnActive {
+		frames = append([]protocol.L2Frame{
+			&protocol.InterruptFrame{Envelope: protocol.Envelope{Type: "interrupt"}},
+		}, frames...)
+	}
+	return frames
 }
 
 // TurnActive reports whether a user turn is currently in flight.

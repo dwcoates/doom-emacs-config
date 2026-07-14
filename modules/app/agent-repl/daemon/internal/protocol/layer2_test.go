@@ -53,6 +53,13 @@ func TestL2FrameMarshalling(t *testing.T) {
 			want: map[string]any{"type": "permission-resolved", "decision": "cancel"},
 		},
 		{
+			name: "interrupt frame carries only its envelope",
+			frame: &InterruptFrame{
+				Envelope: Envelope{Type: "interrupt", Seq: 8, TS: "T", SessionID: "s1"},
+			},
+			want: map[string]any{"type": "interrupt", "seq": float64(8)},
+		},
+		{
 			name: "queue-added carries the classifying status",
 			frame: &QueueAddedFrame{
 				Envelope:  Envelope{Type: "queue-added", Seq: 4, TS: "T", SessionID: "s1"},

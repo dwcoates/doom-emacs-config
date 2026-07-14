@@ -142,6 +142,18 @@ export interface CompactStatusFrame extends WsEnvelope {
   active: boolean;
 }
 
+/**
+ * The running turn is being interrupted (the gesture reached the shim; the
+ * turn ends only when its `aborted` result lands). The store enters an
+ * "interrupting" state on this frame: it shows the red "interrupting…"
+ * indicator and stops opening NEW bubbles for the tail, while still letting
+ * in-flight bubbles finish streaming. Broadcast by the daemon only while a
+ * turn is active, and cleared by the terminating result/error or the next turn.
+ */
+export interface InterruptFrame extends WsEnvelope {
+  type: "interrupt";
+}
+
 export interface RetryFrame extends WsEnvelope {
   type: "retry";
   attempt: number;
@@ -393,6 +405,7 @@ export type L2Frame =
   | ResultFrame
   | CompactBoundaryFrame
   | CompactStatusFrame
+  | InterruptFrame
   | RetryFrame
   | ErrorFrame
   | UserTurnFrame
@@ -426,6 +439,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "result",
   "compact-boundary",
   "compact-status",
+  "interrupt",
   "retry",
   "error",
   "user-turn",

@@ -19,6 +19,15 @@ describe("parseFrame", () => {
     expect(frame).toMatchObject({ type: "text-delta", block_id: "b1" });
   });
 
+  it("recognizes the interrupt frame as a known type", () => {
+    // Arrange
+    const data = JSON.stringify({ type: "interrupt", seq: 4, ts: "T", session_id: "s1" });
+    // Act
+    const { frame } = parseFrame(data);
+    // Assert — a known frame parses non-null (unknown types return null).
+    expect(frame).toMatchObject({ type: "interrupt" });
+  });
+
   it("returns a null frame but a valid envelope for unknown types", () => {
     // Arrange
     const data = JSON.stringify({ type: "hologram", seq: 9, ts: "T", session_id: "s1" });

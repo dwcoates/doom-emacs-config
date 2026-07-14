@@ -627,10 +627,52 @@ func TestTranslatorInterruptCancelsPendingPermissions(t *testing.T) {
 	tr.OnEvent(evt(t, `{"type":"permission-request","session_id":"s1","request_id":"p1","tool_use_id":"t1","tool_name":"Bash","input":{}}`))
 	// Act
 	frames := tr.OnInterruptCmd()
-	// Assert
+	// Assert — no turn is active here, so the interrupt carries no interrupt
+	// frame: only the pending permission is cancelled.
 	wantTypes(t, frames, "permission-resolved")
 	if frames[0].(*protocol.PermissionResolvedFrame).Decision != "cancel" {
 		t.Errorf("decision = %+v", frames[0])
+	}
+}
+
+func TestTranslatorInterruptEmitsInterruptFrameWhenTurnActive(t *testing.T) {
+	// Arrange — a turn is in flight.
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.OnUserMessageCmd(cmd)
+	// Act
+	frames := tr.OnInterruptCmd()
+	// Assert — with no pending permissions, the interrupt frame stands alone.
+	wantTypes(t, frames, "interrupt")
+}
+
+func TestTranslatorInterruptFrameLeadsThePermissionCancels(t *testing.T) {
+	// Arrange — a turn in flight with a pending permission prompt.
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.OnUserMessageCmd(cmd)
+	tr.OnEvent(evt(t, `{"type":"permission-request","session_id":"s1","request_id":"p1","tool_use_id":"t1","tool_name":"Bash","input":{}}`))
+	// Act
+	frames := tr.OnInterruptCmd()
+	// Assert — the client enters the interrupting state before it sees the
+	// cancel, so the interrupt frame leads.
+	wantTypes(t, frames, "interrupt", "permission-resolved")
+}
+
+func TestTranslatorIdleInterruptEmitsNoFrames(t *testing.T) {
+	// Arrange — no turn in flight and nothing pending.
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnInterruptCmd()
+	// Assert — an idle interrupt aborts nothing, so it signals nothing.
+	if len(frames) != 0 {
+		t.Errorf("frames = %v, want none", frameTypes(frames))
 	}
 }
 
