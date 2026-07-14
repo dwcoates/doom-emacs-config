@@ -8,6 +8,8 @@
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
 import { sessionSubagents } from "./agents.js";
+import { sessionTasks } from "./tasks.js";
+import { countedTurns } from "./turn-clock.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
@@ -144,10 +146,11 @@ async function boot(): Promise<void> {
   const loginCloseEl = must<HTMLButtonElement>("login-close");
   const parentWs = params.get("parent_ws");
 
-  // The subagent roster's disclosure state. It lives HERE rather than in the
-  // DOM because renderChrome rewrites the whole topbar on every frame, which
-  // would otherwise collapse an overlay the user is reading mid-turn.
-  let agentsOpen = false;
+  // Which topbar counter dropdown is open (only one at a time). It lives
+  // HERE rather than in the DOM because renderChrome rewrites the whole
+  // topbar on every frame, which would otherwise collapse an overlay the
+  // user is reading mid-turn.
+  let counterMenu: "agents" | "tasks" | null = null;
 
   // The running task's timer. Its tick writes the one span it owns rather
   // than re-rendering the topbar: a whole-strip rewrite once a second, on
@@ -171,7 +174,10 @@ async function boot(): Promise<void> {
       parentWs,
       s.contextTokens,
       sessionSubagents(s.items),
-      agentsOpen,
+      sessionTasks(s.items),
+      countedTurns(s.items),
+      counterMenu === "agents",
+      counterMenu === "tasks",
       timerLabel,
     );
     // After the strip exists, so the paint on a starting turn has a span to
@@ -189,25 +195,32 @@ async function boot(): Promise<void> {
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
 
-  const setAgentsOpen = (open: boolean): void => {
-    if (agentsOpen === open) return;
-    agentsOpen = open;
+  const setCounterMenu = (menu: "agents" | "tasks" | null): void => {
+    if (counterMenu === menu) return;
+    counterMenu = menu;
     renderChrome();
   };
 
-  // The chip is re-created by every renderChrome, so the toggle is delegated
-  // off the topbar rather than bound to a node that will not survive the turn.
+  // The chips are re-created by every renderChrome, so the toggles are
+  // delegated off the topbar rather than bound to nodes that will not
+  // survive the turn. Opening one counter closes the other.
   infoEl.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest("[data-agents-toggle]")) {
-      setAgentsOpen(!agentsOpen);
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-agents-toggle]")) {
+      setCounterMenu(counterMenu === "agents" ? null : "agents");
+    } else if (target.closest("[data-tasks-toggle]")) {
+      setCounterMenu(counterMenu === "tasks" ? null : "tasks");
     }
   });
   // An open overlay closes the way every dropdown does: click off it, or Escape.
   document.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".agents-menu")) setAgentsOpen(false);
+    const target = e.target as HTMLElement;
+    if (!target.closest(".agents-menu") && !target.closest(".tasks-menu")) {
+      setCounterMenu(null);
+    }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") setAgentsOpen(false);
+    if (e.key === "Escape") setCounterMenu(null);
   });
 
   const rerender = (): void => {
