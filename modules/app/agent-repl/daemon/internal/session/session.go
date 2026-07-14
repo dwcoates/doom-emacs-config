@@ -115,11 +115,16 @@ type Session struct {
 	// hibernateGrace bounds the wait for a cooperative shutdown before the
 	// shim is killed; immutable for the session's life.
 	hibernateGrace time.Duration
+	// Detached-task tailer poll cadence; immutable for the session's life.
+	tailInterval time.Duration
 
 	mu       sync.Mutex
 	seq      int64
 	ring     []retained
 	clients  map[*Client]struct{}
+	// tailers holds one release channel per detached task being tailed,
+	// keyed by task id; closing a channel ends that tail (see tailer.go).
+	tailers  map[string]chan struct{}
 	terminal bool
 	// queue is the in-flight message FIFO (§2.13): user messages submitted
 	// while a turn is in flight, held here so the daemon — not the SDK's
@@ -269,6 +274,9 @@ type Config struct {
 	// cooperative shutdown before it is killed. Zero takes the default
 	// (hibernateGrace); tests shrink it to exercise the escalation path.
 	HibernateGrace time.Duration
+	// TaskTailInterval is the detached-task tailer's poll cadence (see
+	// tailer.go). Zero takes the 500ms default; tests shrink it.
+	TaskTailInterval time.Duration
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -294,6 +302,9 @@ func New(cfg Config) *Session {
 	if cfg.PermissionMode != "" && protocol.ValidPermissionMode(cfg.PermissionMode) {
 		translator.PermissionMode = protocol.PermissionMode(cfg.PermissionMode)
 	}
+	if cfg.TaskTailInterval == 0 {
+		cfg.TaskTailInterval = DefaultTaskTailInterval
+	}
 	s := &Session{
 		ID:            cfg.ID,
 		DaemonVersion: cfg.DaemonVersion,
@@ -314,7 +325,9 @@ func New(cfg Config) *Session {
 		reconcileInterval: cfg.ModelReconcileInterval,
 		reconcileTicks:    cfg.ModelReconcileTicks,
 		hibernateGrace:    cfg.HibernateGrace,
+		tailInterval:      cfg.TaskTailInterval,
 		clients:           map[*Client]struct{}{},
+		tailers:           map[string]chan struct{}{},
 		lastActive:        cfg.Now(),
 		done:              make(chan struct{}),
 	}
@@ -422,6 +435,9 @@ func (s *Session) Run() {
 		s.lastActive = s.now()
 		frames := s.translator.OnEvent(evt)
 		s.broadcastLocked(frames)
+		// Spawn announcements start tailers; completion notifications
+		// release them (see tailer.go).
+		s.superviseTailersLocked(frames)
 		if evt.Type == "closed" {
 			s.terminal = true
 			s.deathReason = evt.Reason

@@ -860,6 +860,24 @@ interface ToolUseProgressFrame extends WsEnvelope {
 }
 ```
 
+#### `task-output-delta`
+
+Live growth of a detached task's output file. The daemon tails the
+file the spawn result announced — confined to the harness task spool
+(`/tmp/claude-<uid>/**/tasks/*.output`), coalesced to at most one frame
+per poll tick, and budgeted (a 64KB cap ends the stream with a
+truncation notice). `tool_use_id` names the spawning call so clients
+append the text onto that card.
+
+```ts
+interface TaskOutputDeltaFrame extends WsEnvelope {
+  type: "task-output-delta";
+  task_id: string;
+  tool_use_id?: ToolUseId;            // the spawning call
+  text: string;                       // appended bytes, UTF-8 safe
+}
+```
+
 #### `task-notification`
 
 The completion signal of detached background work (a backgrounded Bash,

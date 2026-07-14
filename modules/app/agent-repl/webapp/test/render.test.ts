@@ -3043,3 +3043,31 @@ describe("task stop control", () => {
     expect(html).not.toContain("task-controls");
   });
 });
+
+describe("live task output", () => {
+  it("streams the daemon's file tail into a capped output box", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "Bash",
+      inputJson: "{}",
+      input: { command: "make" },
+      inputDone: true,
+      taskOutput: "compiling…\nlinking…\n",
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("task-live-output");
+    expect(html).toContain("linking…");
+  });
+
+  it("renders no tail box before any output streams", () => {
+    // Arrange + Act
+    const html = renderItem(tool());
+    // Assert
+    expect(html).not.toContain("task-live-output");
+  });
+});
