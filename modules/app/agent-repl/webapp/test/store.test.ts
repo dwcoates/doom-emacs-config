@@ -324,6 +324,25 @@ describe("ConversationStore tool cards", () => {
     // Assert — the completion is never swallowed.
     expect(store.state.items[0]).toMatchObject({ kind: "system", subtype: "task-notification" });
   });
+
+  it("stamps the deactivation turn when the result arrives", () => {
+    // Arrange — one counted user turn precedes the tool.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [{ type: "text", text: "go" }] }));
+    runToolStart(store);
+    // Act
+    store.applyRaw(frame("tool-use-result", { tool_use_id: "t1", is_error: false, content: "done" }));
+    // Assert — the tool item is items[1] (after the user turn).
+    expect((store.state.items[1] as ToolItem).deactivatedAtTurn).toBe(1);
+  });
+
+  it("leaves the deactivation turn unstamped until the result arrives", () => {
+    // Arrange + Act — tool started but not yet settled.
+    const store = newStore();
+    runToolStart(store);
+    // Assert
+    expect((store.state.items[0] as ToolItem).deactivatedAtTurn).toBeUndefined();
+  });
 });
 
 describe("ConversationStore permissions", () => {
