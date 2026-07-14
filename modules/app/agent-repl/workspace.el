@@ -61,6 +61,7 @@
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
 (declare-function magit-status "ext:magit" (&optional directory cache))
+(declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (defvar persp-nil-name)
@@ -1435,7 +1436,7 @@ Callers must use this function instead of calling `advice-add' on
   (setq +workspaces-switch-project-function
         (lambda (dir)
           (unless (doom-real-buffer-list)
-            (magit-status dir))))
+            (agent-repl--magit-status-same-window dir))))
   ;; persp-mode's own session persistence is disabled — agent-repl is the
   ;; single source of truth for workspace save/restore via its snapshot
   ;; mechanism.  -1 disables auto-resume; 0 disables auto-save on kill.

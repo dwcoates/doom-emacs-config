@@ -425,6 +425,35 @@ so the buffer replaces the selected window's content."
       (should (eq captured-buffer 'fake-buf))
       (should (equal captured-action '(display-buffer-same-window))))))
 
+;;;; ---- Tests: agent-repl--magit-status-same-window ----
+
+(ert-deftest agent-repl-test-magit-status-same-window-calls-magit-status-with-dir ()
+  "Passes DIR straight through to `magit-status'."
+  (let ((magit-status-args nil))
+    (cl-letf (((symbol-function 'magit-status)
+               (lambda (&rest args) (setq magit-status-args args))))
+      (agent-repl--magit-status-same-window "/tmp/proj")
+      (should (equal magit-status-args '("/tmp/proj"))))))
+
+(ert-deftest agent-repl-test-magit-status-same-window-binds-same-window-display-fn ()
+  "Binds `magit-display-buffer-function' to the same-window helper for the
+`magit-status' call, so the status buffer replaces the current window
+instead of splitting via Doom's traditional display behavior."
+  (let ((observed-fn nil))
+    (cl-letf (((symbol-function 'magit-status)
+               (lambda (&rest _)
+                 (setq observed-fn magit-display-buffer-function))))
+      (agent-repl--magit-status-same-window "/tmp/proj")
+      (should (eq observed-fn #'agent-repl--magit-display-buffer-same-window)))))
+
+(ert-deftest agent-repl-test-magit-status-same-window-does-not-mutate-global-display-fn ()
+  "Restores the global `magit-display-buffer-function' after returning, so
+other magit buffers (diffs, logs) keep their normal display behavior."
+  (let ((magit-display-buffer-function 'global-default))
+    (cl-letf (((symbol-function 'magit-status) #'ignore))
+      (agent-repl--magit-status-same-window "/tmp/proj")
+      (should (eq magit-display-buffer-function 'global-default)))))
+
 ;;;; ---- Tests: agent-repl-magit-show-tags-in-log (defcustom default) ----
 
 (ert-deftest agent-repl-test-magit-show-tags-in-log-defaults-to-nil ()

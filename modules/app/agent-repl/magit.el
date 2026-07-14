@@ -189,6 +189,26 @@ replaces the current buffer rather than splitting or popping up a
 new window.  Returns the window magit should select."
   (display-buffer buffer '(display-buffer-same-window)))
 
+(defun agent-repl--magit-status-same-window (dir)
+  "Open `magit-status' for DIR, forcing same-window display.
+Binds `magit-display-buffer-function' to
+`agent-repl--magit-display-buffer-same-window' so the status buffer
+replaces the selected window's buffer rather than splitting.
+
+This is the canonical door every workspace-bring-up path opens magit
+through (restore via `+workspaces-switch-project-function', worktree
+create via `agent-repl--drain-pending-magit', plain new workspace via
+`agent-repl--new-workspace').  Without the same-window binding, Doom's
+`+magit-display-buffer-fn' routes a `magit-status-mode' buffer through
+`+magit--display-buffer-in-direction' (a SPLIT) whenever the selected
+window already shows a DIFFERENT repo's `magit-status' buffer — so a
+workspace opening its magit while the prior workspace's magit is still
+current lands TWO status windows side by side, the double-magit-windows
+bug."
+  (let ((magit-display-buffer-function
+         #'agent-repl--magit-display-buffer-same-window))
+    (magit-status dir)))
+
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the workspace in the SELECTED window.
 Always replaces the current buffer with the workspace's magit-status
@@ -220,9 +240,7 @@ instead of splitting it."
     (select-window (window-main-window)))
   (let* ((ws (agent-repl--ws-current-name))
          (tracked-dir (ignore-errors (agent-repl--ws-dir ws)))
-         (dir (or tracked-dir default-directory))
-         (magit-display-buffer-function
-          #'agent-repl--magit-display-buffer-same-window))
+         (dir (or tracked-dir default-directory)))
     (when (fboundp 'agent-repl--log)
       (agent-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s"
                         dir (if tracked-dir "yes" "no")))
@@ -241,7 +259,7 @@ instead of splitting it."
               (set-window-dedicated-p webview-win nil)
               (select-window webview-win)))))
       (agent-repl--ws-put ws :fullscreen-config nil))
-    (magit-status dir)))
+    (agent-repl--magit-status-same-window dir)))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 
