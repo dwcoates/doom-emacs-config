@@ -1860,7 +1860,7 @@ overridden by any saved priority for the same project)."
       (agent-repl--initialize-ws-env ws root)
       (when default-priority
         (agent-repl--reorder-workspace-by-priority ws)))
-    (magit-status root)
+    (agent-repl--magit-status-same-window root)
     (agent-repl--remove-doom-dashboard)))
 
 ;;; Prompt dispatch
