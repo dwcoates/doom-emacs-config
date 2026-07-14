@@ -966,3 +966,175 @@ describe("ConversationStore final-response chip elapsed", () => {
     expect(resultItems(store)[0].sincePrevFinalMs).toBe(999);
   });
 });
+
+describe("ConversationStore in-flight queue", () => {
+  /** A queue-added frame parking a message under the given ids. */
+  function queueAdded(fields: Record<string, unknown> = {}): string {
+    return frame("queue-added", {
+      queue_id: "q1",
+      request_id: "r2",
+      content: [{ type: "text", text: "do this later" }],
+      status: "classifying",
+      ...fields,
+    });
+  }
+
+  it("appends a classifying item on queue-added", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(queueAdded());
+    // Assert — a queued message is NOT a conversation item.
+    expect(store.state.items).toHaveLength(0);
+    expect(store.state.queued).toEqual([
+      {
+        queue_id: "q1",
+        request_id: "r2",
+        content: [{ type: "text", text: "do this later" }],
+        status: "classifying",
+      },
+    ]);
+  });
+
+  it("dedupes queue-added by queue_id so a replay re-send never doubles it", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act — the same item re-broadcast under a fresh seq (the seeded-then-
+    // replayed path), which the seq gate would let through.
+    store.applyRaw(frame("queue-added", {
+      queue_id: "q1",
+      request_id: "r2",
+      content: [{ type: "text", text: "do this later" }],
+      status: "classifying",
+    }));
+    // Assert
+    expect(store.state.queued).toHaveLength(1);
+  });
+
+  it("marks a wait classification as waiting and records the verdict", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act
+    store.applyRaw(frame("queue-classified", {
+      queue_id: "q1",
+      verdict: "wait",
+      reason: "unrelated to the running task",
+      source: "classifier",
+    }));
+    // Assert
+    expect(store.state.queued[0]).toMatchObject({
+      status: "waiting",
+      verdict: "wait",
+      reason: "unrelated to the running task",
+    });
+  });
+
+  it("marks an interrupt classification as interrupt", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act
+    store.applyRaw(frame("queue-classified", {
+      queue_id: "q1",
+      verdict: "interrupt",
+      reason: "edits the same file",
+      source: "classifier",
+    }));
+    // Assert
+    expect(store.state.queued[0]).toMatchObject({ status: "interrupt", verdict: "interrupt" });
+  });
+
+  it("discards a verdict whose item already left the queue", () => {
+    // Arrange — no queued item under this id (drained/cancelled).
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("queue-classified", {
+      queue_id: "gone",
+      verdict: "wait",
+      reason: "x",
+      source: "classifier",
+    }));
+    // Assert
+    expect(store.state.queued).toHaveLength(0);
+  });
+
+  it("removes a queued item by queue_id on queue-removed", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act
+    store.applyRaw(frame("queue-removed", { queue_id: "q1", reason: "cancelled" }));
+    // Assert
+    expect(store.state.queued).toHaveLength(0);
+  });
+
+  it("seeds the queue from the hello snapshot on a fresh join", () => {
+    // Arrange
+    autoSeq = 0;
+    const store = new ConversationStore();
+    const item = {
+      queue_id: "q1",
+      request_id: "r2",
+      content: [{ type: "text", text: "later" }],
+      status: "waiting",
+      verdict: "wait",
+      reason: "busy",
+    };
+    // Act
+    store.applyRaw(hello({ queue: [item] }));
+    // Assert
+    expect(store.state.queued).toEqual([item]);
+  });
+
+  it("clears a seeded queue on an eviction rebuild that carries none", () => {
+    // Arrange — a queue built up, then a §2.10 eviction rebuild hello.
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act — resume target past our history and no queue in the hello.
+    store.applyRaw(hello({ seq: 60, resume_from_seq: 50 }));
+    // Assert
+    expect(store.state.queued).toHaveLength(0);
+  });
+
+  it("never sets turnInFlight from a queued frame", () => {
+    // Arrange — a store with no turn running.
+    const store = newStore();
+    // Act — the whole queued lifecycle.
+    store.applyRaw(queueAdded());
+    store.applyRaw(frame("queue-classified", {
+      queue_id: "q1",
+      verdict: "interrupt",
+      reason: "x",
+      source: "user",
+    }));
+    store.applyRaw(frame("queue-removed", { queue_id: "q1", reason: "cancelled" }));
+    // Assert — only real user-turn/result frames move it.
+    expect(store.state.turnInFlight).toBe(false);
+  });
+
+  it("converts a drained queued item into a normal user turn", () => {
+    // Arrange — a turn in flight, a message queued behind it.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [{ type: "text", text: "first" }] }));
+    store.applyRaw(queueAdded({ content: [{ type: "text", text: "second" }] }));
+    store.applyRaw(frame("queue-classified", {
+      queue_id: "q1",
+      verdict: "wait",
+      reason: "unrelated",
+      source: "classifier",
+    }));
+    // Act — the turn ends; the daemon drains: it removes the parked item
+    // (reason "drained", carrying the request_id) and broadcasts the
+    // user-turn it became.
+    store.applyRaw(resultFrame());
+    store.applyRaw(frame("queue-removed", { queue_id: "q1", reason: "drained", request_id: "r2" }));
+    store.applyRaw(frame("user-turn", { request_id: "r2", content: [{ type: "text", text: "second" }] }));
+    // Assert — the queue is empty and the message is now a real user turn.
+    expect(store.state.queued).toHaveLength(0);
+    const turns = store.state.items.filter((i): i is UserTurnItem => i.kind === "user-turn");
+    expect(turns.map((t) => t.requestId)).toEqual(["r1", "r2"]);
+    expect(store.state.turnInFlight).toBe(true);
+  });
+});

@@ -100,6 +100,14 @@ async function boot(): Promise<void> {
         decision: { behavior: "allow", updated_input: updatedInput },
       });
     },
+    // §2.13 queued-card controls: both are daemon-handled Layer-2 commands,
+    // never forwarded to the shim, reusing the request_id convention.
+    cancelQueued: (queueId) => {
+      ws.send({ type: "queue-cancel", request_id: crypto.randomUUID(), queue_id: queueId });
+    },
+    runQueuedNow: (queueId) => {
+      ws.send({ type: "queue-run-now", request_id: crypto.randomUUID(), queue_id: queueId });
+    },
   });
 
   const statusEl = must("conn-status");
