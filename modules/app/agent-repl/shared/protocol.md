@@ -986,8 +986,16 @@ interface ReplayRequestFrame {
 daemon reads the resumed session's transcript JSONL
 (`$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<uuid>.jsonl`, default config
 dir `~/.claude`) and translates its user/assistant entries into the
-ordinary §2.3–§2.6 frames, closing with one §2.8 `usage` frame carrying
-the last assistant message's usage. Rationale: the CLI restores context
+ordinary §2.3–§2.6 frames, closing each completed turn with a synthetic
+§2.4 `result` (`subtype: "success"`) and the whole seed with one §2.8
+`usage` frame carrying the last assistant message's usage. The
+per-turn result is synthesized because the transcript records no result
+event (the CLI's `result` is stream-only), yet the SPA keys the green
+final-response border off a text block immediately followed by a
+`result`; without it the border is lost on every resumed session until
+the first live turn. A result closes the PRIOR turn, so one is emitted
+before each new user prompt and once at end-of-input; a bare prompt the
+agent never answered is an incomplete turn and gets none. Rationale: the CLI restores context
 on `--resume` but re-emits no history through the stream, so without
 seeding every binding recreation (daemon restart, Emacs restart,
 vterm→gui frontend switch) attaches to a blank conversation. The seed
