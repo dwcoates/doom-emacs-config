@@ -1,0 +1,264 @@
+package session
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"claude-repld/internal/protocol"
+)
+
+// --- confinement ---------------------------------------------------------------
+
+func TestAllowedTaskOutputPathAcceptsTheSpool(t *testing.T) {
+	// Arrange + Act + Assert
+	if !allowedTaskOutputPath("/private/tmp/claude-501/slug/sess/tasks/bg1.output") {
+		t.Fatal("spool path rejected")
+	}
+}
+
+func TestAllowedTaskOutputPathAcceptsTheUnprefixedTmpTwin(t *testing.T) {
+	// Arrange + Act + Assert
+	if !allowedTaskOutputPath("/tmp/claude-501/slug/tasks/bg1.output") {
+		t.Fatal("tmp twin rejected")
+	}
+}
+
+func TestAllowedTaskOutputPathRejectsPathsOutsideTheSpool(t *testing.T) {
+	// Arrange + Act + Assert
+	if allowedTaskOutputPath("/etc/passwd") {
+		t.Fatal("accepted a path outside the spool")
+	}
+}
+
+func TestAllowedTaskOutputPathRejectsSpoolFilesOutsideTasks(t *testing.T) {
+	// Arrange + Act + Assert — right tree, wrong directory.
+	if allowedTaskOutputPath("/tmp/claude-501/slug/other/bg1.output") {
+		t.Fatal("accepted a non-tasks file")
+	}
+}
+
+func TestAllowedTaskOutputPathRejectsDotDotEscapes(t *testing.T) {
+	// Arrange + Act + Assert — Clean resolves the escape out of the spool.
+	if allowedTaskOutputPath("/tmp/claude-501/tasks/../../../etc/x.output") {
+		t.Fatal("accepted a dot-dot escape")
+	}
+}
+
+// --- announcement parsing --------------------------------------------------------
+
+func announcementFrame(t *testing.T, text string, isErr bool) protocol.L2Frame {
+	t.Helper()
+	content, err := json.Marshal(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &protocol.ToolUseResultFrame{
+		Envelope:  protocol.Envelope{Type: "tool-use-result"},
+		ToolUseID: "t1",
+		IsError:   isErr,
+		Content:   content,
+	}
+}
+
+func TestParseSpawnAnnouncementExtractsIDAndPath(t *testing.T) {
+	// Arrange
+	frame := announcementFrame(t,
+		"Command running in background with ID: bg7. Output is being written to: /tmp/claude-501/s/tasks/bg7.output. You will be notified.", false)
+	// Act
+	ann := parseSpawnAnnouncement(frame)
+	// Assert
+	if ann == nil || ann.TaskID != "bg7" || ann.Path != "/tmp/claude-501/s/tasks/bg7.output" || ann.ToolUseID != "t1" {
+		t.Fatalf("ann = %+v", ann)
+	}
+}
+
+func TestParseSpawnAnnouncementIgnoresErrorResults(t *testing.T) {
+	// Arrange
+	frame := announcementFrame(t,
+		"with ID: bg7. Output is being written to: /tmp/claude-501/s/tasks/bg7.output", true)
+	// Act + Assert
+	if parseSpawnAnnouncement(frame) != nil {
+		t.Fatal("parsed an announcement from an error result")
+	}
+}
+
+func TestParseSpawnAnnouncementRefusesPathsOutsideTheSpool(t *testing.T) {
+	// Arrange — a result that names a file the tailer must not read.
+	frame := announcementFrame(t,
+		"with ID: bg7. Output is being written to: /Users/x/secret.output", false)
+	// Act + Assert
+	if parseSpawnAnnouncement(frame) != nil {
+		t.Fatal("accepted a path outside the spool")
+	}
+}
+
+// --- chunk reads -----------------------------------------------------------------
+
+func TestReadTailChunkReadsAppendedBytesIncrementally(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "t.output")
+	if err := os.WriteFile(path, []byte("hello "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	first, off := readTailChunk(path, 0)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("world"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := readTailChunk(path, off)
+	// Assert
+	if first != "hello " || second != "world" {
+		t.Fatalf("first = %q, second = %q", first, second)
+	}
+}
+
+func TestReadTailChunkLeavesOffsetOnMissingFile(t *testing.T) {
+	// Arrange + Act
+	text, off := readTailChunk(filepath.Join(t.TempDir(), "absent.output"), 3)
+	// Assert — the file may simply not exist yet on early ticks.
+	if text != "" || off != 3 {
+		t.Fatalf("text = %q, off = %d", text, off)
+	}
+}
+
+func TestReadTailChunkNeverSplitsARune(t *testing.T) {
+	// Arrange — fill to the chunk cap so a multi-byte rune straddles it.
+	path := filepath.Join(t.TempDir(), "t.output")
+	body := strings.Repeat("a", taskTailChunkMax-1) + "é" // 2-byte rune at the boundary
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	first, off := readTailChunk(path, 0)
+	rest, _ := readTailChunk(path, off)
+	// Assert — the rune arrives whole in the second chunk.
+	if strings.Contains(first, "�") || rest != "é" {
+		t.Fatalf("first ends %q, rest = %q", first[len(first)-4:], rest)
+	}
+}
+
+// --- session integration ------------------------------------------------------------
+
+// spoolFile creates a writable file inside the ALLOWED spool tree and
+// registers its cleanup. The confinement regex pins the /tmp/claude-<uid>
+// prefix, so t.TempDir cannot be used here.
+func spoolFile(t *testing.T, name string) string {
+	t.Helper()
+	dir := fmt.Sprintf("/tmp/claude-0/test-%s/tasks", strings.ReplaceAll(t.Name(), "/", "-"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Skipf("cannot create spool dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(dir)) })
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// nextFrameOfType reads frames from C until one of TYPE arrives,
+// failing after a bounded wait.
+func nextFrameOfType(t *testing.T, c *Client, frameType string) map[string]any {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case raw, ok := <-c.Send:
+			if !ok {
+				t.Fatal("client channel closed")
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded["type"] == frameType {
+				return decoded
+			}
+		case <-deadline:
+			t.Fatalf("no %s frame arrived", frameType)
+		}
+	}
+}
+
+func TestSessionTailsAnnouncedTaskOutput(t *testing.T) {
+	// Arrange — a session whose tool result announces a spool file.
+	path := spoolFile(t, "bg9.output")
+	if err := os.WriteFile(path, []byte("line one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	s := New(Config{
+		ID: "s1", Shim: shim,
+		ModelReconcileInterval: -1,
+		TaskTailInterval:       5 * time.Millisecond,
+	})
+	client := s.NewReplayClient()
+	s.Attach(client)
+	go s.Run()
+	defer func() {
+		shim.end()
+		<-s.Done()
+	}()
+	// Act — announce the spawn through the normal event path.
+	text := "Command running in background with ID: bg9. Output is being written to: " + path + "."
+	content, _ := json.Marshal(text)
+	shim.events <- &protocol.L1Event{Type: "tool-result", ToolUseID: "tu9", Content: content}
+	// Assert — the file's contents stream back as a delta frame.
+	frame := nextFrameOfType(t, client, "task-output-delta")
+	if frame["task_id"] != "bg9" || frame["tool_use_id"] != "tu9" {
+		t.Fatalf("frame = %v", frame)
+	}
+	if !strings.Contains(frame["text"].(string), "line one") {
+		t.Fatalf("text = %q", frame["text"])
+	}
+}
+
+func TestSessionTailerStopsAfterTheCompletionNotification(t *testing.T) {
+	// Arrange — a tailed task whose notification lands.
+	path := spoolFile(t, "bg10.output")
+	if err := os.WriteFile(path, []byte("early\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	s := New(Config{
+		ID: "s1", Shim: shim,
+		ModelReconcileInterval: -1,
+		TaskTailInterval:       5 * time.Millisecond,
+	})
+	client := s.NewReplayClient()
+	s.Attach(client)
+	go s.Run()
+	defer func() {
+		shim.end()
+		<-s.Done()
+	}()
+	text := "with ID: bg10. Output is being written to: " + path + "."
+	content, _ := json.Marshal(text)
+	shim.events <- &protocol.L1Event{Type: "tool-result", ToolUseID: "tu10", Content: content}
+	nextFrameOfType(t, client, "task-output-delta")
+	// Act — the notification releases the tailer (with one final read).
+	note, _ := json.Marshal(map[string]string{
+		"text": "<task-notification><task-id>bg10</task-id></task-notification>",
+	})
+	shim.events <- &protocol.L1Event{Type: "system", Subtype: "task_notification", Data: note}
+	nextFrameOfType(t, client, "task-notification")
+	// Assert — the release channel left the supervision map.
+	s.mu.Lock()
+	_, live := s.tailers["bg10"]
+	s.mu.Unlock()
+	if live {
+		t.Fatal("tailer still supervised after its notification")
+	}
+}

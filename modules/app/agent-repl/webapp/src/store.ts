@@ -78,6 +78,8 @@ export interface ToolItem {
   };
   /** Envelope ts of the result frame: when the call settled. */
   resultTs?: string;
+  /** Streamed output of the detached task this call spawned. */
+  taskOutput?: string;
   result?: {
     isError: boolean;
     content: string | Array<{ type: "text"; text: string }>;
@@ -579,6 +581,11 @@ export class ConversationStore {
           item.progress = frame.text;
           item.progressElapsedS = frame.elapsed_seconds;
         }
+        break;
+      }
+      case "task-output-delta": {
+        const item = frame.tool_use_id ? this.findTool(frame.tool_use_id) : undefined;
+        if (item) item.taskOutput = (item.taskOutput ?? "") + frame.text;
         break;
       }
       case "task-notification": {

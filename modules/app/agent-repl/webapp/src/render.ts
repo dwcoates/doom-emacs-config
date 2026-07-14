@@ -512,8 +512,20 @@ function ToolCard(item: ToolItem, isPulsing = false, panels?: PanelContext): str
       ${progress}
       ${activity}
       ${toolResult(item)}
+      ${liveTaskOutput(item)}
       ${taskControls(item)}
     </div>`;
+}
+
+/**
+ * The streamed output of the detached task this card spawned (the
+ * daemon's file tail), in the same capped scrollable box every tool
+ * output uses. Kept after the notification lands too — the tail's last
+ * catch-up read IS the task's final output.
+ */
+function liveTaskOutput(item: ToolItem): string {
+  if (item.taskOutput === undefined || item.taskOutput === "") return "";
+  return `<pre class="tool-output task-live-output">${escapeHtml(item.taskOutput)}</pre>`;
 }
 
 /**

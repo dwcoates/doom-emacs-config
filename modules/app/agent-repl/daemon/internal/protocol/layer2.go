@@ -237,6 +237,17 @@ type ToolUseProgressFrame struct {
 	ElapsedSeconds  float64 `json:"elapsed_seconds,omitempty"`
 }
 
+// TaskOutputDeltaFrame streams a detached task's output file as it
+// grows: the daemon tails the file the spawn result announced (§2.6)
+// and coalesces appended bytes into these frames. ToolUseID names the
+// spawning call so clients append the text onto that card.
+type TaskOutputDeltaFrame struct {
+	Envelope
+	TaskID    string `json:"task_id"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Text      string `json:"text"`
+}
+
 // TaskNotificationFrame is the completion signal of detached background
 // work (a backgrounded Bash, a background agent, a workflow), parsed
 // from the harness notification that rode in on a user message.

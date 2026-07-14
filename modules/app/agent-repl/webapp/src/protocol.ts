@@ -251,6 +251,17 @@ export interface ToolUseProgressFrame extends WsEnvelope {
 }
 
 /**
+ * Live growth of a detached task's output file: the daemon tails the
+ * announced spool file and streams appended text, spawning-call-keyed.
+ */
+export interface TaskOutputDeltaFrame extends WsEnvelope {
+  type: "task-output-delta";
+  task_id: string;
+  tool_use_id?: string;
+  text: string;
+}
+
+/**
  * Completion signal of detached background work, parsed from the
  * harness notification. `tool_use_id` names the SPAWNING call, which is
  * what lands the completion on the card that started the work.
@@ -396,6 +407,7 @@ export type L2Frame =
   | ToolUseInputEndFrame
   | ToolUseResultFrame
   | ToolUseProgressFrame
+  | TaskOutputDeltaFrame
   | TaskNotificationFrame
   | PermissionRequestFrame
   | PermissionResolvedFrame
@@ -428,6 +440,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "tool-use-input-end",
   "tool-use-result",
   "tool-use-progress",
+  "task-output-delta",
   "task-notification",
   "permission-request",
   "permission-resolved",

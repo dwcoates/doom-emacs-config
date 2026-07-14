@@ -1346,3 +1346,26 @@ describe("ConversationStore result timestamps", () => {
     expect((store.state.items[0] as ToolItem).resultTs).toBe("T");
   });
 });
+
+describe("ConversationStore task output", () => {
+  it("appends streamed task output onto the spawning card", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(
+      frame("tool-use-start", { tool_use_id: "t1", tool_name: "Bash", message_id: "m1" }),
+    );
+    // Act
+    store.applyRaw(frame("task-output-delta", { task_id: "bg1", tool_use_id: "t1", text: "a" }));
+    store.applyRaw(frame("task-output-delta", { task_id: "bg1", tool_use_id: "t1", text: "b" }));
+    // Assert
+    expect((store.state.items[0] as ToolItem).taskOutput).toBe("ab");
+  });
+
+  it("drops a delta naming no card the feed holds", () => {
+    // Arrange
+    const store = newStore();
+    // Act + Assert — no crash, no item invented.
+    store.applyRaw(frame("task-output-delta", { task_id: "bg1", tool_use_id: "t9", text: "x" }));
+    expect(store.state.items).toHaveLength(0);
+  });
+});
