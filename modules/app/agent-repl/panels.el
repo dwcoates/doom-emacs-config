@@ -140,8 +140,8 @@ still displays magit as before."
         (agent-repl--ws-put ws :pending-magit nil)
         (when path
           (if windowless
-              (save-window-excursion (magit-status path))
-            (magit-status path))
+              (save-window-excursion (agent-repl--magit-status-same-window path))
+            (agent-repl--magit-status-same-window path))
           (agent-repl--remove-doom-dashboard)))
     (agent-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
 
