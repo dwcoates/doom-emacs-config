@@ -1128,6 +1128,47 @@ describe("subagent roster styles", () => {
   });
 });
 
+const tasksToggle = blockAfter(css, ".info-tasks {");
+const inactiveDesc = blockAfter(css, ".agent-row.inactive .agent-desc,");
+const taskRunningDot = blockAfter(css, ".task-dot.task-starting,");
+
+describe("task roster styles", () => {
+  it("colors the task chip with its own datapoint token", () => {
+    // Arrange / Act — the task chip joins the same datapoint run as the agents chip.
+    // Assert
+    expect(tasksToggle).toMatch(/color:\s*var\(--info-tasks\)/);
+  });
+
+  it("binds the task chip's token in the light palette", () => {
+    // Arrange / Act + Assert
+    expect(token(lightTheme, "--info-tasks")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("binds the task chip's token in the dark palette", () => {
+    // Arrange / Act + Assert
+    expect(token(darkTheme, "--info-tasks")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("keeps the task chip hue clear of the agents chip violet", () => {
+    // Arrange — two counters side by side must not read as one datapoint.
+    const separation = Math.abs(hue(token(lightTheme, "--info-tasks")) - hue(token(lightTheme, "--info-agents")));
+    // Act + Assert — a comfortable hue gap in the light palette.
+    expect(Math.min(separation, 360 - separation)).toBeGreaterThan(40);
+  });
+
+  it("greys the headline of a settled (inactive) row", () => {
+    // Arrange / Act — the inactive greying rule covers both rosters.
+    // Assert
+    expect(inactiveDesc).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("pulses the dot of a task still working", () => {
+    // Arrange / Act — the task dot shares the roster's in-flight pulse.
+    // Assert
+    expect(taskRunningDot).toMatch(/animation:\s*pulse/);
+  });
+});
+
 const inlineCode = blockAfter(css, ".md code {");
 const fencedBlock = blockAfter(css, ".md pre.md-code {");
 const fencedInner = blockAfter(css, ".md pre.md-code code");
