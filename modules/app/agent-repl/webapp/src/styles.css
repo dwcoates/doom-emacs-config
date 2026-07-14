@@ -169,28 +169,53 @@ body {
    easy to reach and expensive to notice, so the topbar names it rather than
    leaving the user to infer it from a workspace path. Quiet by default; the
    error colour when the root has no login at all, because a logged-out
-   session cannot run a turn and that is a problem, not a decoration. */
-#account { color: var(--muted); }
-#account.logged-out { color: var(--err); }
+   session cannot run a turn and that is a problem, not a decoration.
 
-/* The remediation notice sits immediately right of the alarm dot. */
-#remediation { color: var(--remediation); }
-
-/* The login button is the far-right topbar control, sitting immediately
-   right of the permission-mode dropdown. It is deliberately quiet chrome:
-   an escape hatch reached when the account's credentials lapse, not a
-   thing to draw the eye during a normal turn. */
-#login-btn {
+   The chip is a button: clicking it opens the account menu carrying the
+   re-auth and switch verbs (the dropdown that replaced the old standalone
+   login button). Styled as the text it replaced — the border only surfaces
+   on hover, so the topbar stays quiet during a normal turn. */
+#account {
   background: transparent;
   color: var(--muted);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 3px;
   padding: 0.15rem 0.5rem;
   font: inherit;
   cursor: pointer;
 }
-#login-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
-#login-btn:disabled { opacity: 0.5; cursor: default; }
+#account:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
+#account:disabled { opacity: 0.5; cursor: default; }
+#account.logged-out { color: var(--err); }
+
+/* The account menu: the chip's dropdown, anchored under the topbar at the
+   chip's left edge (main.ts sets the offset — the chip's position depends
+   on its rendered label width). Above the feed, below the login overlay. */
+#account-menu {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+#account-menu[hidden] { display: none; }
+#account-menu button {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+#account-menu button:hover { background: var(--border); }
+
+/* The remediation notice sits immediately right of the alarm dot. */
+#remediation { color: var(--remediation); }
 
 #session-info { color: var(--muted); margin-left: auto; }
 #session-info .info-ws { color: var(--info-ws); }
