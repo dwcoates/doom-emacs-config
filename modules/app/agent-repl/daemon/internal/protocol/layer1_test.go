@@ -186,6 +186,39 @@ func TestDecodeCommand(t *testing.T) {
 			line:    `{"type":"set-model","request_id":"r1"}`,
 			wantErr: "non-empty model",
 		},
+		{
+			name: "queue-run-now decodes request_id and queue_id",
+			line: `{"type":"queue-run-now","request_id":"r1","queue_id":"q1"}`,
+			check: func(t *testing.T, cmd *L1Command) {
+				if cmd.QueueID != "q1" {
+					t.Errorf("QueueID = %q", cmd.QueueID)
+				}
+			},
+		},
+		{
+			name: "queue-cancel decodes queue_id",
+			line: `{"type":"queue-cancel","request_id":"r1","queue_id":"q9"}`,
+			check: func(t *testing.T, cmd *L1Command) {
+				if cmd.QueueID != "q9" {
+					t.Errorf("QueueID = %q", cmd.QueueID)
+				}
+			},
+		},
+		{
+			name:    "queue-run-now without queue_id errors",
+			line:    `{"type":"queue-run-now","request_id":"r1"}`,
+			wantErr: "missing queue_id",
+		},
+		{
+			name:    "queue-cancel without queue_id errors",
+			line:    `{"type":"queue-cancel","request_id":"r1"}`,
+			wantErr: "missing queue_id",
+		},
+		{
+			name:    "queue-cancel without request_id errors",
+			line:    `{"type":"queue-cancel","queue_id":"q1"}`,
+			wantErr: "missing request_id",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -230,6 +230,10 @@ type L1Command struct {
 
 	// replay-request (Layer 2 only; carries no request_id)
 	FromSeq int64 `json:"from_seq,omitempty"`
+
+	// queue-run-now / queue-cancel (Layer 2 only, daemon-handled: never
+	// forwarded to the shim). Names the queued item the override targets.
+	QueueID string `json:"queue_id,omitempty"`
 }
 
 // PermissionDecision mirrors PermissionDecisionCmd.decision.
@@ -250,6 +254,9 @@ var l1CommandKnownTypes = map[string]bool{
 	"refresh-commands":    true,
 	"shutdown":            true,
 	"replay-request":      true,
+	// §2.13 in-flight queue overrides: Layer-2 only, daemon-handled.
+	"queue-run-now": true,
+	"queue-cancel":  true,
 }
 
 // DecodeCommand decodes one command frame (webapp→daemon or Go→shim
@@ -301,6 +308,12 @@ func DecodeCommand(line []byte) (*L1Command, error) {
 		// CLI's to validate, so it passes through unchecked beyond this.
 		if cmd.Model == "" {
 			return nil, fmt.Errorf("layer1: set-model requires a non-empty model")
+		}
+	case "queue-run-now", "queue-cancel":
+		// A queue override that names no item cannot be dispatched: the
+		// queue_id is the sole target selector.
+		if cmd.QueueID == "" {
+			return nil, fmt.Errorf("layer1: %s command missing queue_id", cmd.Type)
 		}
 	}
 	return &cmd, nil

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -41,6 +42,8 @@ func main() {
 		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
+		classifyQueue  = flag.Bool("classify-queue", envBool("AGENT_REPL_CLASSIFY_QUEUE", true), "classify a message submitted mid-turn (interrupt vs wait) via a headless model (§2.13)")
+		classifierMdl  = flag.String("classifier-model", envStr("AGENT_REPL_CLASSIFIER_MODEL", "haiku"), "model for the in-flight-queue classifier")
 	)
 	flag.Parse()
 
@@ -131,14 +134,16 @@ func main() {
 	defer logins.CloseAll()
 
 	srv := server.New(server.Config{
-		DaemonVersion: daemonVersion,
-		Retention:     *retention,
-		ForceFake:     *fake,
-		Spawn:         spawn,
-		Sentinel:      sentinelWriter,
-		Remediator:    remediator,
-		Registry:      sessionRegistry,
-		Logins:        logins,
+		DaemonVersion:   daemonVersion,
+		Retention:       *retention,
+		ForceFake:       *fake,
+		Spawn:           spawn,
+		Sentinel:        sentinelWriter,
+		Remediator:      remediator,
+		Registry:        sessionRegistry,
+		Logins:          logins,
+		ClassifyQueue:   *classifyQueue,
+		ClassifierModel: *classifierMdl,
 	})
 
 	mux := http.NewServeMux()
@@ -219,6 +224,31 @@ func closeOrLog(c io.Closer, what string) {
 	if err := c.Close(); err != nil {
 		log.Printf("claude-repld: close %s: %v", what, err)
 	}
+}
+
+// envStr returns the environment variable name, or def when it is unset
+// or empty. Used to source a flag's default from the environment.
+func envStr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
+// envBool parses name as a bool default (via strconv), falling back to def
+// when the variable is unset or unparseable. An unparseable value is
+// surfaced loudly rather than silently treated as false.
+func envBool(name string, def bool) bool {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("claude-repld: %s=%q is not a bool (%v); using default %t", name, v, err, def)
+		return def
+	}
+	return b
 }
 
 // pumpAnalystOutput mirrors the analyst's output into the daemon log.

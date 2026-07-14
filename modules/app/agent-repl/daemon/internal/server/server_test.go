@@ -598,6 +598,168 @@ func TestSendMessageRoute404sOnUnknownSession(t *testing.T) {
 	}
 }
 
+// --- in-flight message queue (§2.13) HTTP routes ---------------------------
+
+// postMessage submits a user message over HTTP, asserting the 202.
+func postMessage(t *testing.T, h *harness, id, content string) {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(fmt.Sprintf(`{"content":%q}`, content)))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("message status = %d, want 202", resp.StatusCode)
+	}
+}
+
+// readFrameOfType reads frames until one of typ arrives.
+func readFrameOfType(t *testing.T, conn *websocket.Conn, typ string) map[string]any {
+	t.Helper()
+	for {
+		f := readFrame(t, conn)
+		if f["type"] == typ {
+			return f
+		}
+	}
+}
+
+// enqueueOverHTTP drives a session BUSY with a first turn, then parks a
+// second message on the queue (classification is off in the test harness,
+// so it resolves to an immediate wait) and returns the parked item's id.
+func enqueueOverHTTP(t *testing.T, h *harness, id string, shim *fakeShim, conn *websocket.Conn) string {
+	t.Helper()
+	postMessage(t, h, id, "first task")
+	readFrameOfType(t, conn, "user-turn")
+	<-shim.sent // forwarded first turn
+	postMessage(t, h, id, "second task")
+	added := readFrameOfType(t, conn, "queue-added")
+	readFrameOfType(t, conn, "queue-classified") // the immediate wait
+	return added["queue_id"].(string)
+}
+
+func TestQueueCancelRouteRemovesItem(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	qid := enqueueOverHTTP(t, h, id, shim, conn)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/queue/"+qid+"/cancel", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	removed := readFrameOfType(t, conn, "queue-removed")
+	if removed["reason"] != "cancelled" || removed["queue_id"] != qid {
+		t.Errorf("removed = %v", removed)
+	}
+}
+
+func TestQueueRunNowRouteEscalates(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	qid := enqueueOverHTTP(t, h, id, shim, conn)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/queue/"+qid+"/run-now", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST run-now: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — 202, a user-sourced interrupt verdict, and an interrupt sent.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	reclassified := readFrameOfType(t, conn, "queue-classified")
+	if reclassified["verdict"] != "interrupt" || reclassified["source"] != "user" || reclassified["queue_id"] != qid {
+		t.Errorf("reclassified = %v", reclassified)
+	}
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"interrupt"`) {
+			t.Errorf("escalation sent = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("run-now did not interrupt the shim")
+	}
+}
+
+func TestQueueOverrideRoutes404OnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act + Assert
+	for _, path := range []string{"run-now", "cancel"} {
+		resp, err := http.Post(h.ts.URL+"/sessions/nope/queue/q1/"+path, "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404", path, resp.StatusCode)
+		}
+	}
+}
+
+func TestQueueCancelRouteStaleIdIsAccepted(t *testing.T) {
+	// Arrange — a live session, but a queue_id that was never issued.
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act — a stale id is a no-op ack, not an error.
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/queue/ghost/cancel", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status = %d, want 202", resp.StatusCode)
+	}
+}
+
+func TestListSessionsCarriesQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	qid := enqueueOverHTTP(t, h, id, shim, conn)
+	// Act
+	listResp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer listResp.Body.Close()
+	var body struct {
+		Sessions []struct {
+			SessionID string `json:"session_id"`
+			Queue     []struct {
+				QueueID string `json:"queue_id"`
+				Status  string `json:"status"`
+			} `json:"queue"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Assert
+	if len(body.Sessions) != 1 || len(body.Sessions[0].Queue) != 1 {
+		t.Fatalf("sessions = %+v", body.Sessions)
+	}
+	item := body.Sessions[0].Queue[0]
+	if item.QueueID != qid || item.Status != "waiting" {
+		t.Errorf("queued item = %+v", item)
+	}
+}
+
 func TestInterruptRouteForwardsToShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

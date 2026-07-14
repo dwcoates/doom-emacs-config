@@ -76,12 +76,27 @@ type Session struct {
 	// Model-drift reconciler clock (§2.12); immutable for the session's life.
 	reconcileInterval time.Duration
 	reconcileTicks    <-chan time.Time
+	// classifyFn decides whether a message queued while a turn is in
+	// flight should interrupt the turn or wait (§2.13). Immutable for the
+	// session's life. Nil disables classification: a busy-submitted
+	// message still enqueues but is treated as an immediate fail-closed
+	// wait, with no subprocess spawned.
+	classifyFn classifyFn
 
 	mu       sync.Mutex
 	seq      int64
 	ring     []retained
 	clients  map[*Client]struct{}
 	terminal bool
+	// queue is the in-flight message FIFO (§2.13): user messages submitted
+	// while a turn is in flight, held here so the daemon — not the SDK's
+	// opaque buffer — owns ordering. Guarded by mu.
+	queue msgQueue
+	// activeTurnText mirrors the plain text of the turn currently in
+	// flight at the shim, captured when a message is forwarded (idle
+	// submit or drain). It is the running-task datum handed to the
+	// classifier for a message queued behind it. Guarded by mu.
+	activeTurnText string
 	// deathReason classifies HOW a terminal session ended: the shim's
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
@@ -164,6 +179,19 @@ type Config struct {
 	// real ticker; tests inject a channel so the check runs on demand
 	// rather than on a wall clock.
 	ModelReconcileTicks <-chan time.Time
+	// ClassifyQueue enables the §2.13 in-flight-queue classifier: a
+	// message submitted while a turn is in flight is classified
+	// (interrupt vs wait) by a headless model call. False leaves the queue
+	// active but every busy-submitted message defaults to an immediate
+	// wait with no subprocess spawned.
+	ClassifyQueue bool
+	// ClassifierModel is the model the classifier pins; empty takes the
+	// haiku default.
+	ClassifierModel string
+	// ClassifyFn overrides the classifier with an injected implementation.
+	// Tests set it to a deterministic fake so no subprocess is spawned;
+	// when set it takes precedence over ClassifyQueue.
+	ClassifyFn classifyFn
 }
 
 // New assembles a session; call Run to start consuming shim events.
@@ -183,7 +211,7 @@ func New(cfg Config) *Session {
 	translator := NewTranslator()
 	translator.CWD = cfg.CWD
 	translator.Model = cfg.Model
-	return &Session{
+	s := &Session{
 		ID:                cfg.ID,
 		DaemonVersion:     cfg.DaemonVersion,
 		BootID:            cfg.BootID,
@@ -200,6 +228,20 @@ func New(cfg Config) *Session {
 		clients:           map[*Client]struct{}{},
 		done:              make(chan struct{}),
 	}
+	// An injected classifier (tests) wins over the flag; otherwise the
+	// flag builds the real subprocess classifier. A nil classifyFn leaves
+	// classification disabled (immediate fail-closed wait).
+	switch {
+	case cfg.ClassifyFn != nil:
+		s.classifyFn = cfg.ClassifyFn
+	case cfg.ClassifyQueue:
+		model := cfg.ClassifierModel
+		if model == "" {
+			model = defaultClassifierModel
+		}
+		s.classifyFn = newClassifier(model, cfg.ConfigDir, s.logf)
+	}
+	return s
 }
 
 // Info is a point-in-time introspection snapshot of a session.
@@ -218,6 +260,8 @@ type Info struct {
 	TurnActive bool
 	// PendingPermissions lists unresolved permission request ids, sorted.
 	PendingPermissions []string
+	// Queue is the in-flight message queue snapshot (§2.13), front-to-back.
+	Queue []protocol.QueuedItem
 }
 
 // Info returns the session's current introspection snapshot: the
@@ -237,6 +281,7 @@ func (s *Session) Info() Info {
 		DeathReason:        s.deathReason,
 		TurnActive:         s.translator.TurnActive(),
 		PendingPermissions: s.translator.PendingPermissionIDs(),
+		Queue:              s.queue.snapshot(),
 	}
 }
 
@@ -255,6 +300,15 @@ func (s *Session) Run() {
 		if evt.Type == "closed" {
 			s.terminal = true
 			s.deathReason = evt.Reason
+		}
+		// Drain hook (§2.13): every turn end (any result, including an
+		// aborted one) is where the front queued item, if any, becomes the
+		// next turn. The translator has already cleared turnActive on the
+		// result frame just broadcast above.
+		if evt.Type == "result" && !s.terminal {
+			if err := s.drainQueueLocked(); err != nil {
+				s.logf("session %s: draining queue after result: %v", s.ID, err)
+			}
 		}
 		s.notifyRegistrarLocked()
 		s.mu.Unlock()
@@ -275,6 +329,12 @@ func (s *Session) Run() {
 			Recoverable: false,
 		}})
 	}
+	// Session end (§2.13): every still-queued item is dropped with a
+	// queue-removed(session_end) BEFORE the client channels close, so a
+	// connected tab sees the queue emptied. Any in-flight classifier
+	// goroutine no-ops when it re-acquires the lock and finds the item
+	// gone (and the session terminal).
+	s.clearQueueLocked("session_end")
 	s.notifyRegistrarLocked()
 	for c := range s.clients {
 		close(c.Send)
@@ -361,6 +421,7 @@ func (s *Session) helloLocked() []byte {
 		Models:          s.translator.Models,
 		CWD:             s.translator.CWD,
 		ClaudeSessionID: s.translator.ClaudeSessionID,
+		Queue:           s.queue.snapshot(),
 	}
 	data, err := json.Marshal(hello)
 	if err != nil {
@@ -406,8 +467,24 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 
 	switch cmd.Type {
 	case "user-message":
+		// §2.13: while a turn is in flight, the daemon owns ordering — the
+		// message is parked and classified, never forwarded now. Idle, it
+		// is forwarded immediately exactly as before.
+		if s.translator.TurnActive() {
+			return s.enqueueLocked(cmd, raw)
+		}
+		s.activeTurnText = commandText(cmd.Content)
 		s.broadcastLocked([]protocol.L2Frame{s.translator.OnUserMessageCmd(cmd)})
 		return s.shim.SendRaw(ndjson(raw))
+	case "queue-run-now":
+		// Manual interrupt verdict (§2.13): promote and preempt. A stale
+		// queue_id is a no-op ack, not an error.
+		return s.runNowLocked(cmd.QueueID)
+	case "queue-cancel":
+		// Remove without ever forwarding (§2.13). A stale queue_id is a
+		// no-op ack, not an error.
+		s.cancelQueuedLocked(cmd.QueueID)
+		return nil
 	case "permission-decision":
 		frame, pending := s.translator.OnPermissionDecisionCmd(cmd)
 		if !pending {
@@ -437,6 +514,172 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	// command) and decodes it, so it reaches this switch and falls
 	// through — it is deliberately dropped here, not filtered upstream.
 	return nil
+}
+
+// enqueueLocked parks a busy-submitted user-message on the FIFO queue
+// (§2.13): it assigns a queue_id, stores the raw command, broadcasts
+// queue-added(status "classifying"), and either launches the async
+// classifier or — when classification is disabled — resolves an immediate
+// fail-closed wait. The command is NOT forwarded to the shim here.
+func (s *Session) enqueueLocked(cmd *protocol.L1Command, raw []byte) error {
+	item := &queueItem{
+		queueID: newQueueID(),
+		cmd:     cmd,
+		raw:     append([]byte(nil), raw...),
+		content: normalizeContent(cmd.Content),
+		status:  "classifying",
+	}
+	s.queue.add(item)
+	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueAddedFrame{
+		Envelope:  protocol.Envelope{Type: "queue-added"},
+		QueueID:   item.queueID,
+		RequestID: cmd.RequestID,
+		Content:   item.content,
+		Status:    "classifying",
+	}})
+	if s.classifyFn == nil {
+		// Classification disabled: an immediate defaulted wait, no spawn.
+		// Source "fallback" marks it as a default rather than a model
+		// verdict, the same way a classifier failure is marked.
+		return s.applyVerdictLocked(item.queueID, classifierVerdict{
+			verdict: "wait",
+			reason:  "classification disabled; message parked to run after the current turn",
+			source:  "fallback",
+		})
+	}
+	// The classifier runs OFF the lock (it may spawn a subprocess); it
+	// captures the running-task text as it stands now.
+	go s.classify(item.queueID, s.activeTurnText, commandText(item.content))
+	return nil
+}
+
+// classify runs the injected classifier off the lock, then re-acquires it
+// to apply the verdict. A no-op when the session has ended or the item is
+// already gone (drained or cancelled while the classifier ran).
+func (s *Session) classify(queueID, runningTask, newMessage string) {
+	verdict := s.classifyFn(runningTask, newMessage)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.terminal {
+		return
+	}
+	if err := s.applyVerdictLocked(queueID, verdict); err != nil {
+		s.logf("session %s: applying queue verdict: %v", s.ID, err)
+	}
+}
+
+// applyVerdictLocked records a verdict on its queued item and broadcasts
+// queue-classified. On "interrupt" it escalates (promote + preempt). A
+// no-op when the item is gone: a verdict that arrives after its item
+// drained or was cancelled is discarded.
+func (s *Session) applyVerdictLocked(queueID string, v classifierVerdict) error {
+	item := s.queue.get(queueID)
+	if item == nil {
+		return nil
+	}
+	item.verdict = v.verdict
+	item.reason = v.reason
+	if v.verdict == "interrupt" {
+		item.status = "interrupt"
+	} else {
+		item.status = "waiting"
+	}
+	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueClassifiedFrame{
+		Envelope: protocol.Envelope{Type: "queue-classified"},
+		QueueID:  queueID,
+		Verdict:  v.verdict,
+		Reason:   v.reason,
+		Source:   v.source,
+	}})
+	if v.verdict == "interrupt" {
+		return s.escalateLocked(queueID)
+	}
+	return nil
+}
+
+// escalateLocked promotes queueID to the front and preempts the running
+// turn: an interrupt to the shim when a turn is in flight (whose aborted
+// result then drains this now-front item), or an immediate drain when the
+// session is idle. This is the only path that preempts a live turn.
+func (s *Session) escalateLocked(queueID string) error {
+	s.queue.moveFront(queueID)
+	if s.translator.TurnActive() {
+		s.broadcastLocked(s.translator.OnInterruptCmd())
+		return s.shim.SendRaw(interruptCmdLine())
+	}
+	return s.drainQueueLocked()
+}
+
+// runNowLocked is the manual override behind queue-run-now: a user-sourced
+// interrupt verdict for queueID. A stale id is a no-op ack, not an error.
+func (s *Session) runNowLocked(queueID string) error {
+	if s.queue.get(queueID) == nil {
+		return nil
+	}
+	return s.applyVerdictLocked(queueID, classifierVerdict{
+		verdict: "interrupt",
+		reason:  "user ran this message now",
+		source:  "user",
+	})
+}
+
+// cancelQueuedLocked removes queueID without ever forwarding it and
+// broadcasts queue-removed(cancelled). A stale id is a no-op ack.
+func (s *Session) cancelQueuedLocked(queueID string) {
+	if s.queue.remove(queueID) == nil {
+		return
+	}
+	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
+		Envelope: protocol.Envelope{Type: "queue-removed"},
+		QueueID:  queueID,
+		Reason:   "cancelled",
+	}})
+}
+
+// drainQueueLocked forwards the front queued item to the shim as the next
+// turn when the session is idle. Called on every turn end. A no-op when a
+// turn is still active or the queue is empty.
+func (s *Session) drainQueueLocked() error {
+	if s.translator.TurnActive() || s.queue.empty() {
+		return nil
+	}
+	item := s.queue.popFront()
+	s.activeTurnText = commandText(item.content)
+	// OnUserMessageCmd broadcasts the item's user-turn and sets turnActive.
+	s.broadcastLocked([]protocol.L2Frame{s.translator.OnUserMessageCmd(item.cmd)})
+	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
+		Envelope:  protocol.Envelope{Type: "queue-removed"},
+		QueueID:   item.queueID,
+		Reason:    "drained",
+		RequestID: item.cmd.RequestID,
+	}})
+	return s.shim.SendRaw(ndjson(item.raw))
+}
+
+// clearQueueLocked drops every queued item with queue-removed(reason),
+// front-to-back (session-end teardown).
+func (s *Session) clearQueueLocked(reason string) {
+	for _, item := range s.queue.drainAll() {
+		s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
+			Envelope: protocol.Envelope{Type: "queue-removed"},
+			QueueID:  item.queueID,
+			Reason:   reason,
+		}})
+	}
+}
+
+// interruptCmdLine builds a daemon-originated interrupt command line for
+// preempting the shim's running turn on a queue escalation, mirroring the
+// HTTP interrupt path's minted request id.
+func interruptCmdLine() []byte {
+	line, err := protocol.EncodeNDJSON(map[string]string{
+		"type":       "interrupt",
+		"request_id": newRequestID(),
+	})
+	if err != nil {
+		panic(fmt.Sprintf("session: marshal interrupt command: %v", err)) // static shape, cannot fail
+	}
+	return line
 }
 
 // InjectCommand runs a daemon-originated client command (HTTP send /

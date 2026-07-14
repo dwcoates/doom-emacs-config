@@ -51,6 +51,10 @@ type HelloFrame struct {
 	// ClaudeSessionID is the durable CLI-assigned session uuid (usable
 	// as a resume target); empty until the SDK's system:init arrives.
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
+	// Queue is the in-flight message queue snapshot (§2.13), front-to-back,
+	// so a fresh join or a replay-evicted client rebuilds the pending queue
+	// without a gap. Absent when the queue is empty.
+	Queue []QueuedItem `json:"queue,omitempty"`
 }
 
 type ResultFrame struct {
@@ -285,4 +289,50 @@ type SystemFrame struct {
 	Envelope
 	Subtype string          `json:"subtype"` // init | slash_command
 	Data    json.RawMessage `json:"data"`
+}
+
+// --- §2.13 in-flight message queue ------------------------------------------
+
+// QueueAddedFrame announces that a user-message submitted while a turn was
+// in flight was parked on the daemon's per-session FIFO queue rather than
+// forwarded to the shim. Status is always the initial "classifying".
+type QueueAddedFrame struct {
+	Envelope
+	QueueID   string          `json:"queue_id"`
+	RequestID string          `json:"request_id"`
+	Content   json.RawMessage `json:"content"` // normalized ContentBlock[]
+	Status    string          `json:"status"`  // always "classifying"
+}
+
+// QueueClassifiedFrame carries the verdict for a queued item: whether it
+// should preempt the running turn ("interrupt") or wait its turn ("wait").
+// Source names who decided: the async classifier, a manual user override,
+// or the fail-closed fallback.
+type QueueClassifiedFrame struct {
+	Envelope
+	QueueID string `json:"queue_id"`
+	Verdict string `json:"verdict"` // wait | interrupt
+	Reason  string `json:"reason"`  // one-line human explanation
+	Source  string `json:"source"`  // classifier | user | fallback
+}
+
+// QueueRemovedFrame announces a queued item leaving the queue: drained to
+// the shim as its own turn, cancelled by the user, or dropped on session
+// end. RequestID is present only when the item drained.
+type QueueRemovedFrame struct {
+	Envelope
+	QueueID   string `json:"queue_id"`
+	Reason    string `json:"reason"`               // drained | cancelled | session_end
+	RequestID string `json:"request_id,omitempty"` // present when reason == "drained"
+}
+
+// QueuedItem is one entry of the queue snapshot carried on hello (§2.2)
+// and the GET /sessions listing, front-to-back.
+type QueuedItem struct {
+	QueueID   string          `json:"queue_id"`
+	RequestID string          `json:"request_id"`
+	Content   json.RawMessage `json:"content"`
+	Status    string          `json:"status"` // classifying | waiting | interrupt
+	Verdict   string          `json:"verdict,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
 }

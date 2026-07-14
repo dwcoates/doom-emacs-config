@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -1195,5 +1196,431 @@ func TestRegistrarNotifiedOfModelByTranscriptSeed(t *testing.T) {
 	// Assert
 	if !slices.Contains(reg.snapshot(), "model sess-1 haiku") {
 		t.Fatalf("calls = %v, want a model write-through", reg.snapshot())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// In-flight message queue (§2.13)
+// ---------------------------------------------------------------------------
+
+// gatedClassifier is a deterministic fake classifyFn: each call records
+// its arguments and blocks until the test releases a verdict, so a test
+// controls exactly when an async classification resolves — no time.Sleep.
+type gatedClassifier struct {
+	calls   chan classifyCall
+	verdict chan classifierVerdict
+}
+
+type classifyCall struct{ task, msg string }
+
+func newGatedClassifier() *gatedClassifier {
+	return &gatedClassifier{
+		calls:   make(chan classifyCall, 8),
+		verdict: make(chan classifierVerdict, 8),
+	}
+}
+
+func (g *gatedClassifier) fn(task, msg string) classifierVerdict {
+	g.calls <- classifyCall{task, msg}
+	return <-g.verdict
+}
+
+// awaitCall blocks until the classifier goroutine has started for the next
+// queued item and returns the arguments it was invoked with.
+func (g *gatedClassifier) awaitCall(t *testing.T) classifyCall {
+	t.Helper()
+	select {
+	case c := <-g.calls:
+		return c
+	case <-time.After(recvTimeout):
+		t.Fatal("classifier was not invoked")
+		return classifyCall{}
+	}
+}
+
+func (g *gatedClassifier) release(v classifierVerdict) { g.verdict <- v }
+
+// newClassifyHarness builds a running session whose queue classifier is fn.
+func newClassifyHarness(t *testing.T, fn classifyFn) *harness {
+	t.Helper()
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     64,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+		ClassifyFn:    fn,
+	})
+	go sess.Run()
+	t.Cleanup(func() {
+		shim.end()
+		<-sess.Done()
+	})
+	return &harness{shim: shim, sess: sess}
+}
+
+// startTurn attaches a client, submits an idle first turn, and drains that
+// turn's user-turn broadcast and shim forward — leaving the session BUSY.
+func startTurn(t *testing.T, h *harness) *Client {
+	t.Helper()
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"turnA","content":"first task"}`)); err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	turn := recvFrame(t, c)
+	if turn["type"] != "user-turn" || turn["request_id"] != "turnA" {
+		t.Fatalf("turn A = %v", turn)
+	}
+	recvSent(t, h.shim) // forwarded user-message A
+	return c
+}
+
+// enqueueBusy submits a message while a turn is in flight and returns the
+// queue_id after the classifier goroutine has started (but not resolved).
+func enqueueBusy(t *testing.T, h *harness, c *Client, g *gatedClassifier, reqID, text string) string {
+	t.Helper()
+	raw := fmt.Sprintf(`{"type":"user-message","request_id":%q,"content":%q}`, reqID, text)
+	if err := h.sess.HandleClientFrame(c, []byte(raw)); err != nil {
+		t.Fatalf("enqueue %s: %v", reqID, err)
+	}
+	added := waitForFrameType(t, c, "queue-added")
+	if added["status"] != "classifying" || added["request_id"] != reqID {
+		t.Fatalf("queue-added = %v", added)
+	}
+	g.awaitCall(t)
+	return added["queue_id"].(string)
+}
+
+// enqueueWait fully drives a busy message to a wait verdict and returns
+// its queue_id.
+func enqueueWait(t *testing.T, h *harness, c *Client, g *gatedClassifier, reqID, text string) string {
+	t.Helper()
+	qid := enqueueBusy(t, h, c, g, reqID, text)
+	g.release(classifierVerdict{verdict: "wait", reason: "handle after the current turn", source: "classifier"})
+	classified := waitForFrameType(t, c, "queue-classified")
+	if classified["queue_id"] != qid || classified["verdict"] != "wait" || classified["source"] != "classifier" {
+		t.Fatalf("queue-classified = %v", classified)
+	}
+	return qid
+}
+
+func pushResult(t *testing.T, h *harness) {
+	t.Helper()
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+}
+
+func drainFrames(t *testing.T, c *Client) []map[string]any {
+	t.Helper()
+	var frames []map[string]any
+	for {
+		select {
+		case data, ok := <-c.Send:
+			if !ok {
+				return frames
+			}
+			var m map[string]any
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			frames = append(frames, m)
+		case <-time.After(recvTimeout):
+			t.Fatal("timed out draining frames")
+			return frames
+		}
+	}
+}
+
+func TestQueueForwardsImmediatelyWhenIdle(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act — an idle submit.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"r1","content":"hi"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	// Assert — a user-turn (not queue-added), forwarded, classifier untouched.
+	turn := recvFrame(t, c)
+	if turn["type"] != "user-turn" {
+		t.Fatalf("frame = %v, want user-turn", turn)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), `"user-message"`) {
+		t.Error("idle message not forwarded")
+	}
+	select {
+	case call := <-g.calls:
+		t.Fatalf("idle submit must not classify: %+v", call)
+	default:
+	}
+}
+
+func TestQueueEnqueuesWhenBusyAndDoesNotForward(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	// Act — a second message while the first turn is in flight.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"r2","content":"second"}`)); err != nil {
+		t.Fatalf("busy submit: %v", err)
+	}
+	// Assert — queue-added(classifying), classifier fired with the running
+	// task, and NOTHING forwarded to the shim.
+	added := recvFrame(t, c)
+	if added["type"] != "queue-added" || added["status"] != "classifying" || added["request_id"] != "r2" {
+		t.Fatalf("added = %v", added)
+	}
+	call := g.awaitCall(t)
+	if call.task != "first task" || call.msg != "second" {
+		t.Errorf("classifier call = %+v", call)
+	}
+	select {
+	case line := <-h.shim.sent:
+		t.Fatalf("busy message must not be forwarded: %s", line)
+	default:
+	}
+}
+
+func TestQueueDrainsInFIFOOrderOnResult(t *testing.T) {
+	// Arrange — two messages queued behind the running turn, both "wait".
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	enqueueWait(t, h, c, g, "rB", "second")
+	enqueueWait(t, h, c, g, "rC", "third")
+	// Act — the running turn ends; the front item drains.
+	pushResult(t, h)
+	// Assert — B drains first (FIFO), broadcasting its user-turn +
+	// queue-removed(drained), and forwarding B to the shim.
+	waitForFrameType(t, c, "result")
+	turnB := waitForFrameType(t, c, "user-turn")
+	if turnB["request_id"] != "rB" {
+		t.Fatalf("first drain = %v, want rB", turnB)
+	}
+	removedB := waitForFrameType(t, c, "queue-removed")
+	if removedB["reason"] != "drained" || removedB["request_id"] != "rB" {
+		t.Fatalf("removed B = %v", removedB)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), "second") {
+		t.Error("B not forwarded to shim")
+	}
+	// Act — B's turn ends; C drains next.
+	pushResult(t, h)
+	waitForFrameType(t, c, "result")
+	turnC := waitForFrameType(t, c, "user-turn")
+	if turnC["request_id"] != "rC" {
+		t.Fatalf("second drain = %v, want rC", turnC)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), "third") {
+		t.Error("C not forwarded to shim")
+	}
+}
+
+func TestQueueClassifierInterruptPreemptsRunningTurn(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueBusy(t, h, c, g, "rB", "stop, wrong file")
+	// Act — the classifier says interrupt.
+	g.release(classifierVerdict{verdict: "interrupt", reason: "countermands the running task", source: "classifier"})
+	// Assert — queue-classified(interrupt), and an interrupt to the shim.
+	classified := waitForFrameType(t, c, "queue-classified")
+	if classified["verdict"] != "interrupt" || classified["source"] != "classifier" || classified["queue_id"] != qid {
+		t.Fatalf("classified = %v", classified)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), `"interrupt"`) {
+		t.Error("escalation did not interrupt the shim")
+	}
+	// The aborted turn's result then drains the now-front item.
+	pushResult(t, h)
+	turnB := waitForFrameType(t, c, "user-turn")
+	if turnB["request_id"] != "rB" {
+		t.Fatalf("drained turn = %v, want rB", turnB)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), "stop, wrong file") {
+		t.Error("promoted item not forwarded after abort")
+	}
+}
+
+func TestQueueClassifierWaitLeavesItemQueued(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueWait(t, h, c, g, "rB", "second")
+	// Assert — still queued in "waiting"; the shim was not touched.
+	info := h.sess.Info()
+	if len(info.Queue) != 1 || info.Queue[0].QueueID != qid ||
+		info.Queue[0].Status != "waiting" || info.Queue[0].Verdict != "wait" {
+		t.Fatalf("queue = %+v", info.Queue)
+	}
+	select {
+	case line := <-h.shim.sent:
+		t.Fatalf("a wait verdict must not touch the shim: %s", line)
+	default:
+	}
+}
+
+func TestQueueFailClosedVerdictLeavesItemQueued(t *testing.T) {
+	// Arrange — a classifier that fails closed yields wait/fallback; the
+	// session must treat it like any other wait (item stays queued).
+	fallback := func(task, msg string) classifierVerdict {
+		return classifierVerdict{verdict: "wait", reason: "classifier unavailable", source: "fallback"}
+	}
+	h := newClassifyHarness(t, fallback)
+	c := startTurn(t, h)
+	// Act
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"rB","content":"second"}`)); err != nil {
+		t.Fatalf("busy submit: %v", err)
+	}
+	// Assert
+	waitForFrameType(t, c, "queue-added")
+	classified := waitForFrameType(t, c, "queue-classified")
+	if classified["verdict"] != "wait" || classified["source"] != "fallback" {
+		t.Fatalf("classified = %v, want wait/fallback", classified)
+	}
+	if len(h.sess.Info().Queue) != 1 {
+		t.Fatalf("queue = %+v, want the item still parked", h.sess.Info().Queue)
+	}
+}
+
+func TestQueueDisabledClassificationDefaultsToWait(t *testing.T) {
+	// Arrange — classifyFn nil (classification disabled).
+	h := newHarness(t, 64)
+	c := startTurn(t, h)
+	// Act
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"rB","content":"second"}`)); err != nil {
+		t.Fatalf("busy submit: %v", err)
+	}
+	// Assert — an immediate defaulted wait, no subprocess, item stays queued.
+	waitForFrameType(t, c, "queue-added")
+	classified := waitForFrameType(t, c, "queue-classified")
+	if classified["verdict"] != "wait" || classified["source"] != "fallback" {
+		t.Fatalf("classified = %v, want wait/fallback", classified)
+	}
+	if len(h.sess.Info().Queue) != 1 {
+		t.Fatalf("queue = %+v", h.sess.Info().Queue)
+	}
+}
+
+func TestQueueCancelRemovesWithoutForwarding(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueWait(t, h, c, g, "rB", "second")
+	// Act
+	raw := fmt.Sprintf(`{"type":"queue-cancel","request_id":"x","queue_id":%q}`, qid)
+	if err := h.sess.HandleClientFrame(c, []byte(raw)); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	// Assert
+	removed := waitForFrameType(t, c, "queue-removed")
+	if removed["reason"] != "cancelled" || removed["queue_id"] != qid {
+		t.Fatalf("removed = %v", removed)
+	}
+	if len(h.sess.Info().Queue) != 0 {
+		t.Fatalf("queue = %+v, want empty", h.sess.Info().Queue)
+	}
+}
+
+func TestQueueRunNowEscalatesLikeInterrupt(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueWait(t, h, c, g, "rB", "second")
+	// Act — the user runs it now.
+	raw := fmt.Sprintf(`{"type":"queue-run-now","request_id":"x","queue_id":%q}`, qid)
+	if err := h.sess.HandleClientFrame(c, []byte(raw)); err != nil {
+		t.Fatalf("run-now: %v", err)
+	}
+	// Assert — queue-classified(interrupt, source user) + interrupt to shim.
+	classified := waitForFrameType(t, c, "queue-classified")
+	if classified["verdict"] != "interrupt" || classified["source"] != "user" || classified["queue_id"] != qid {
+		t.Fatalf("classified = %v", classified)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), `"interrupt"`) {
+		t.Error("run-now did not interrupt the shim")
+	}
+	// The aborted result drains the promoted item.
+	pushResult(t, h)
+	turnB := waitForFrameType(t, c, "user-turn")
+	if turnB["request_id"] != "rB" {
+		t.Fatalf("drained = %v, want rB", turnB)
+	}
+}
+
+func TestQueueStaleOverrideIsNoOpNotError(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	// Act + Assert — a queue_id that was never issued: no-op ack, no frame.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"queue-cancel","request_id":"x","queue_id":"ghost"}`)); err != nil {
+		t.Fatalf("stale cancel should be a no-op ack: %v", err)
+	}
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"queue-run-now","request_id":"y","queue_id":"ghost"}`)); err != nil {
+		t.Fatalf("stale run-now should be a no-op ack: %v", err)
+	}
+	select {
+	case data := <-c.Send:
+		var m map[string]any
+		_ = json.Unmarshal(data, &m)
+		t.Fatalf("stale override emitted a frame: %v", m)
+	default:
+	}
+}
+
+func TestQueueSessionEndClearsQueue(t *testing.T) {
+	// Arrange — two items parked behind a running turn.
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qidB := enqueueWait(t, h, c, g, "rB", "second")
+	qidC := enqueueWait(t, h, c, g, "rC", "third")
+	// Act — hard shim death ends the session.
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — a queue-removed(session_end) for each parked item.
+	dropped := map[string]bool{}
+	for _, f := range drainFrames(t, c) {
+		if f["type"] == "queue-removed" && f["reason"] == "session_end" {
+			dropped[f["queue_id"].(string)] = true
+		}
+	}
+	if !dropped[qidB] || !dropped[qidC] {
+		t.Fatalf("session_end drops = %v, want both %s and %s", dropped, qidB, qidC)
+	}
+}
+
+func TestQueueSnapshotOnHelloAndInfo(t *testing.T) {
+	// Arrange
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueWait(t, h, c, g, "rB", "second task")
+	// Assert — Info carries the snapshot.
+	info := h.sess.Info()
+	if len(info.Queue) != 1 || info.Queue[0].QueueID != qid || info.Queue[0].Status != "waiting" {
+		t.Fatalf("Info queue = %+v", info.Queue)
+	}
+	// A late joiner's hello carries the same queue snapshot.
+	late := NewClient()
+	h.sess.Attach(late)
+	hello := recvFrame(t, late)
+	queue, ok := hello["queue"].([]any)
+	if !ok || len(queue) != 1 {
+		t.Fatalf("hello queue = %v", hello["queue"])
+	}
+	item := queue[0].(map[string]any)
+	if item["queue_id"] != qid || item["status"] != "waiting" || item["verdict"] != "wait" || item["request_id"] != "rB" {
+		t.Fatalf("hello queue item = %v", item)
 	}
 }
