@@ -64,6 +64,20 @@ func TestLastTranscriptModelIgnoresSidechainEntries(t *testing.T) {
 	}
 }
 
+func TestLastTranscriptModelSkipsSyntheticEntries(t *testing.T) {
+	// Arrange — the CLI synthesized the last entry locally (error text,
+	// context warning), stamping the "<synthetic>" placeholder on it.
+	dir := writeTranscript(t, "/w", "uuid",
+		assistantLine("opus"),
+		assistantLine("<synthetic>"))
+	// Act
+	got, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	// Assert — the placeholder names no model; the scan stays on the real one.
+	if err != nil || got != "opus" {
+		t.Errorf("model = %q, err = %v, want opus", got, err)
+	}
+}
+
 func TestLastTranscriptModelSkipsMalformedLines(t *testing.T) {
 	// Arrange — a half-flushed final write is normal for an append-only log.
 	dir := writeTranscript(t, "/w", "uuid",

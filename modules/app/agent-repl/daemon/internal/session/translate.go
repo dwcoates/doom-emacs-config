@@ -102,12 +102,20 @@ func NewTranslator() *Translator {
 	}
 }
 
+// syntheticModel is the placeholder the CLI stamps on assistant messages
+// it synthesizes locally (error text, context warnings) instead of
+// receiving from the API. It names no real model, so the mirror never
+// adopts it — a webapp picker handed it would list "<synthetic>" as a
+// selectable model.
+const syntheticModel = "<synthetic>"
+
 // SetModel adopts MODEL as the session's model and yields the frame
-// announcing the move, or nil when MODEL is empty or already the mirror's
-// value. The single funnel for every origin, so a no-op switch can never
-// put a frame on the wire and each origin cannot drift from the others.
+// announcing the move, or nil when MODEL is empty, the CLI's synthetic
+// placeholder, or already the mirror's value. The single funnel for every
+// origin, so a no-op switch can never put a frame on the wire and each
+// origin cannot drift from the others.
 func (t *Translator) SetModel(model, origin string) protocol.L2Frame {
-	if model == "" || model == t.Model {
+	if model == "" || model == syntheticModel || model == t.Model {
 		return nil
 	}
 	t.Model = model

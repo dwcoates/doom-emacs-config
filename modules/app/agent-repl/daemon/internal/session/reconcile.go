@@ -116,7 +116,10 @@ func lastAssistantModel(tail []byte) string {
 		if err := json.Unmarshal(entry.Message, &meta); err != nil {
 			continue
 		}
-		if meta.Model != "" {
+		// A locally synthesized entry names the CLI's placeholder, not a
+		// model; skipping it keeps the scan on the last REAL model so a
+		// drifted mirror is still corrected when the tail ends synthetic.
+		if meta.Model != "" && meta.Model != syntheticModel {
 			model = meta.Model
 		}
 	}

@@ -428,6 +428,19 @@ func TestTranslatorSetModelIgnoresAnEmptyModel(t *testing.T) {
 	}
 }
 
+func TestTranslatorSetModelIgnoresTheSyntheticPlaceholder(t *testing.T) {
+	// Arrange — a locally synthesized assistant message names "<synthetic>",
+	// which is no model; adopting it would hand the picker a bogus option.
+	tr := NewTranslator()
+	tr.Model = "opus"
+	// Act
+	frame := tr.SetModel("<synthetic>", "agent")
+	// Assert
+	if frame != nil || tr.Model != "opus" {
+		t.Errorf("frame = %v, mirror = %q, want nil / opus", frame, tr.Model)
+	}
+}
+
 func TestTranslatorSetModelCmdAnnouncesTheSwitchOnlyOnAck(t *testing.T) {
 	// Arrange — a switch the SDK has not confirmed is not a switch.
 	tr := NewTranslator()
