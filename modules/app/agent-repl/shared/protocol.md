@@ -1177,6 +1177,13 @@ under `s.mu`) and re-acquires the lock to apply its verdict.
 - Schema: `{verdict: "interrupt"|"wait", reason: string}` both required.
 - Prompt is injection-hardened: the running-task text and the new
   message are DATA, not instructions; no tools; one-line reason.
+- Interrupting is framed as non-destructive: an `interrupt` only
+  delivers the message NOW rather than after the turn, and the agent
+  re-plans the prior work from it (continuing, adjusting, reordering,
+  or dropping it). So the prompt treats conditional stops (`stop if
+  X`), ordering/sequencing constraints (`do X before Y`), and added
+  scope the running task should respect as `interrupt`, and breaks
+  genuine ambiguity toward `interrupt` rather than `wait`.
 - **Fails closed to `wait`** on any error, timeout (~20s), non-zero
   exit, or unparseable output — a classifier failure must NEVER
   interrupt live work. A failure still emits a `queue-classified`
