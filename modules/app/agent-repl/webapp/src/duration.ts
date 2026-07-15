@@ -82,3 +82,29 @@ export function formatDurationCeil(ms: number): string {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   return seconds === 0 ? "0s" : formatDuration(seconds * 1000);
 }
+
+/**
+ * Elapsed wall time as a relative age, two levels deep at second resolution
+ * and TRUNCATED toward zero: `0s`, `45s`, `5m 30s`, `1h 5m`, `2d 3h`. The
+ * coarsest unit that fits leads, the next unit down follows, and every finer
+ * unit is dropped rather than folded back into the pair — so 1h5m30s reads
+ * `1h 5m`, never the rounded `1h 6m`.
+ *
+ * Truncation (not `formatElapsed`'s minor-unit rounding) is what an "ago"
+ * label wants: it reports the time that has definitely elapsed, so a stamp
+ * holds at `1h 5m` for the whole minute rather than jumping to `1h 6m`
+ * halfway through it. The second level is dropped when it is zero (`1h`, not
+ * `1h 0m`). A negative span (a stamp fractionally ahead of the reader's own
+ * clock) floors to `0s` rather than counting backward.
+ */
+export function formatAge(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600) % 24;
+  const days = Math.floor(totalSeconds / 86400);
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return `${seconds}s`;
+}
