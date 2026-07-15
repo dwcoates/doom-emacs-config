@@ -16,7 +16,7 @@ import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { blocksToText, isClearTurn, userTurnText } from "./turn.js";
+import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -1385,6 +1385,21 @@ export function repinsToTail(opts: {
   return opts.pinned;
 }
 
+/**
+ * Identity of the feed's clear-cut boundary: the request id of the
+ * `/clear` turn a cut feed opens on, or null for an uncut feed. ITEMS is
+ * the already-cut list (`itemsFromLastClear`), whose head is a `/clear`
+ * turn exactly when a cut happened. A change between renders means a
+ * `/clear` just landed, which is the renderer's cue to rebuild the feed
+ * rather than reconcile it (see `lastClearKey`).
+ */
+export function clearBoundary(items: readonly ConversationItem[]): string | null {
+  const first = items[0];
+  return first !== undefined && first.kind === "user-turn" && isClearTurn(first)
+    ? first.requestId
+    : null;
+}
+
 /** Items filled per backfill step during a restored-session render. */
 export const BACKFILL_CHUNK = 40;
 
@@ -1426,6 +1441,14 @@ export class FeedRenderer {
   private backfillQueue: Array<() => void> = [];
   /** Newest user turn seen by a render, so the next one spots a fresh send. */
   private lastUserTurn: string | null = null;
+  /**
+   * Request id of the /clear turn the feed last cut at, or null when it
+   * drew the whole item list. A render whose cut boundary MOVED rebuilds
+   * the feed from nothing: the cut shifts every index-based key
+   * (`user-turn:N`, `result:N`, …), so reconciling against the old node
+   * map would reuse stale pre-clear elements out of position.
+   */
+  private lastClearKey: string | null = null;
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -1624,10 +1647,16 @@ export class FeedRenderer {
     this.backfillQueue = [];
     this.container.innerHTML = "";
     this.nodes.clear();
-    const part = partitionFeed(state.items);
+    // A /clear clears the screen: the feed opens on the /clear bubble and
+    // its boundary rule, and the discarded turns are not drawn at all.
+    // The boundary is banked so the next live render reconciles instead
+    // of pointlessly rebuilding the feed this method just built.
+    const items = itemsFromLastClear(state.items);
+    this.lastClearKey = clearBoundary(items);
+    const part = partitionFeed(items);
     const panels = this.panelContext(part.children);
-    const finals = finalResponses(state.items);
-    const pulse = pulseTarget(state.items, state.turnInFlight, finals);
+    const finals = finalResponses(items);
+    const pulse = pulseTarget(items, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
     for (const entry of groupFeed(part.top)) {
       const key = this.entryKey(entry);
@@ -1737,10 +1766,21 @@ export class FeedRenderer {
       pinned: isPinnedToBottom(this.container),
     });
     this.lastUserTurn = turnId;
-    const part = partitionFeed(state.items);
+    // A /clear clears the screen: only the /clear bubble and what follows
+    // it render. A cut that just MOVED rebuilds the feed from nothing —
+    // the cut shifts every index-based key, so reconciling would reuse
+    // stale pre-clear elements out of position.
+    const items = itemsFromLastClear(state.items);
+    const boundary = clearBoundary(items);
+    if (boundary !== this.lastClearKey) {
+      this.container.innerHTML = "";
+      this.nodes.clear();
+    }
+    this.lastClearKey = boundary;
+    const part = partitionFeed(items);
     const panels = this.panelContext(part.children);
-    const finals = finalResponses(state.items);
-    const pulse = pulseTarget(state.items, state.turnInFlight, finals);
+    const finals = finalResponses(items);
+    const pulse = pulseTarget(items, state.turnInFlight, finals);
     const seen = new Set<string>();
     for (const feedEntry of groupFeed(part.top)) {
       const key = this.entryKey(feedEntry);

@@ -4,6 +4,7 @@ import {
   activeGroupMember,
   activityTicker,
   backfillChunks,
+  clearBoundary,
   compactionBannerHtml,
   diffHtml,
   finalResponses,
@@ -1517,6 +1518,44 @@ describe("clear divider", () => {
     const html = renderItem(item);
     // Assert — the breathing prompt bubble is the signal now, so the note is gone.
     expect(html).toBe("");
+  });
+});
+
+describe("clearBoundary", () => {
+  it("names the /clear turn a cut feed opens on by its request id", () => {
+    // Arrange — an already-cut list, as itemsFromLastClear hands the renderer.
+    const items = [userTurnAt(9, 0, "/clear", "r7"), textAt(9, 1)];
+    // Act + Assert
+    expect(clearBoundary(items)).toBe("r7");
+  });
+
+  it("reports null for an uncut feed", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0, "do the thing"), textAt(9, 1)];
+    // Act + Assert
+    expect(clearBoundary(items)).toBeNull();
+  });
+
+  it("reports null for an empty feed", () => {
+    // Arrange + Act + Assert
+    expect(clearBoundary([])).toBeNull();
+  });
+
+  it("reports null when a non-turn item heads the feed", () => {
+    // Arrange
+    const items = [textAt(9, 1), userTurnAt(9, 2, "/clear")];
+    // Act + Assert — a /clear that is not the head did not produce this cut.
+    expect(clearBoundary(items)).toBeNull();
+  });
+
+  it("distinguishes two /clear cuts by their request ids", () => {
+    // Arrange — the SECOND clear must read as a new boundary, or the
+    // renderer would reconcile stale nodes across it instead of rebuilding.
+    const first = clearBoundary([userTurnAt(9, 0, "/clear", "r1")]);
+    // Act
+    const second = clearBoundary([userTurnAt(10, 0, "/clear", "r2")]);
+    // Assert
+    expect(second).not.toBe(first);
   });
 });
 
