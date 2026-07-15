@@ -38,6 +38,13 @@ export const CAPPED_SELECTOR = CAPPED_CLASSES.map((c) => `.${c}`).join(", ");
 /** The class that lifts a capped section's height cap. */
 export const EXPANDED_CLASS = "expanded";
 
+/**
+ * Class of the body a subagent card's activity panel drops (its child
+ * items). A capped section inside one belongs to a NESTED child, not to
+ * the card itself — the distinction `ownsSection` draws.
+ */
+export const PANEL_CLASS = "agent-panel";
+
 /** Controls that own their own click, so a click on one never toggles. */
 export const CLICK_THROUGH_SELECTOR = "a, button, summary";
 
@@ -152,6 +159,29 @@ export function applyExpanded(sections: ArrayLike<Section>, keys: readonly strin
 /** The capped sections inside one rendered feed item, in document order. */
 export function sectionsIn(item: HTMLElement): HTMLElement[] {
   return [...item.querySelectorAll<HTMLElement>(CAPPED_SELECTOR)];
+}
+
+/**
+ * True when CARD owns SECTION directly — the section is not a capped box
+ * belonging to a child rendered inside an open activity panel. Reveal
+ * (see `FeedRenderer.revealAgent`) lays a clicked agent's OWN input and
+ * output out in full without also un-capping every nested child's box.
+ */
+export function ownsSection<
+  T extends { parentElement: T | null; classList: ClassTest },
+>(section: T, card: T): boolean {
+  return ancestorMatching(section, card, (n) => n.classList.contains(PANEL_CLASS)) === null;
+}
+
+/**
+ * Lay out at full length every capped section CARD owns directly (input,
+ * progress, output), leaving the sections nested in an open activity
+ * panel alone. A section the user later clicks toggles back to its cap.
+ */
+export function expandOwnSections(card: HTMLElement): void {
+  for (const section of sectionsIn(card)) {
+    if (ownsSection(section, card)) section.classList.add(EXPANDED_CLASS);
+  }
 }
 
 /**

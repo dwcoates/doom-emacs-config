@@ -208,8 +208,18 @@ async function boot(): Promise<void> {
     const target = e.target as HTMLElement;
     if (target.closest("[data-agents-toggle]")) {
       setCounterMenu(counterMenu === "agents" ? null : "agents");
-    } else if (target.closest("[data-tasks-toggle]")) {
+      return;
+    }
+    if (target.closest("[data-tasks-toggle]")) {
       setCounterMenu(counterMenu === "tasks" ? null : "tasks");
+      return;
+    }
+    // A click on a subagent row jumps the feed to that agent's bubble and
+    // opens it, then dismisses the roster so the revealed card is unobscured.
+    const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
+    if (agentId) {
+      feed.revealAgent(agentId);
+      setCounterMenu(null);
     }
   });
   // An open overlay closes the way every dropdown does: click off it, or Escape.

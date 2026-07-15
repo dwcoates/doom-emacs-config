@@ -181,7 +181,10 @@ export function counterOverlayHtml(
       const rowClass = `${spec.item}-row${e.nested ? " nested" : ""}${
         inactive ? " inactive" : ""
       }`;
-      return `<li class="${rowClass}">
+      // The id is the entry's stable key (a subagent's tool-use id, a
+      // task's id): it addresses the row so a click can act on the entry
+      // it names — the subagent roster jumps the feed to that agent's card.
+      return `<li class="${rowClass}" data-${spec.item}-id="${escapeHtml(e.id)}">
         <span class="${spec.item}-dot ${spec.item}-${e.status}" aria-hidden="true">●</span>
         <span class="${spec.item}-desc">${escapeHtml(headline)}</span>
         ${detail}

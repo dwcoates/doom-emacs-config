@@ -283,6 +283,9 @@ body {
   white-space: nowrap;
 }
 .agent-row:hover, .task-row:hover { background: var(--bg); }
+/* A subagent row jumps the feed to that agent's bubble on click, so it
+   reads as pressable; task rows carry no such action. */
+.agent-row { cursor: pointer; }
 /* An entry another entry spawned is indented under the roster, so the
    nesting the feed shows through parent_tool_use_id survives into the list. */
 .agent-row.nested, .task-row.nested { padding-left: 1.25rem; }

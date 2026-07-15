@@ -1063,6 +1063,13 @@ describe("subagent roster styles", () => {
     expect(agentsOverlay).toMatch(/overflow-y:\s*auto/);
   });
 
+  it("reads an agent row as pressable, since a click jumps the feed to its card", () => {
+    // Arrange / Act — the row-specific rule, distinct from the shared row block.
+    const agentRow = blockAfter(css, ".agent-row {");
+    // Assert
+    expect(agentRow).toMatch(/cursor:\s*pointer/);
+  });
+
   it("renders the chip as a pointer target so it reads as pressable", () => {
     // Arrange / Act
     // Assert
