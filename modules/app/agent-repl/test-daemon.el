@@ -343,6 +343,25 @@ multi-repo config dir as work, matching how sessions record the dirs."
                    (format "personal=,work=%s"
                            (expand-file-name "~/.claude-chesscom"))))))
 
+(ert-deftest agent-repl-test-daemon-command-carries-widget-assets-dir ()
+  "A configured widget-assets dir rides to the daemon expanded."
+  ;; Arrange
+  (let ((agent-repl-frontend-widget-assets-dir "~/ee/apps/cee-web-widget/dist"))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member (expand-file-name "~/ee/apps/cee-web-widget/dist")
+                      (cdr (member "-widget-assets" cmd)))))))
+
+(ert-deftest agent-repl-test-daemon-command-omits-widget-assets-when-empty ()
+  "An empty widget-assets dir keeps the flag off the argv entirely."
+  ;; Arrange
+  (let ((agent-repl-frontend-widget-assets-dir ""))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should-not (member "-widget-assets" cmd)))))
+
 (ert-deftest agent-repl-test-daemon-command-carries-remediation-dir ()
   "The daemon argv nominates the checkout the lost-session analyst works in."
   ;; Arrange
