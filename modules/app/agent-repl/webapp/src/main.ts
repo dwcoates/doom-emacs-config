@@ -10,6 +10,7 @@
 import { sessionSubagents } from "./agents.js";
 import { sessionTasks } from "./tasks.js";
 import { countedTurns } from "./turn-clock.js";
+import { configureChessGames } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
@@ -79,6 +80,9 @@ async function boot(): Promise<void> {
   let ws: WsClient;
 
   const store = new ConversationStore();
+  // Chess-game bubbles fetch their payload through the daemon and mount
+  // the in-place-served widget; the session getter tracks rebinds.
+  configureChessGames({ base: httpBase, session: () => activeSessionId });
   const feedEl = must("feed");
   // Sections only take the wheel in their left/right gutters, so wheeling
   // over one scrolls the feed past it instead of scrolling it.

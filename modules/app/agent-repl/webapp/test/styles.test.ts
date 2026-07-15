@@ -1557,3 +1557,22 @@ describe("AskUserQuestion picker border", () => {
     expect(brighter).toBe(true);
   });
 });
+
+describe("chess-game container", () => {
+  const chessGame = blockAfter(css, ".chess-game {");
+  const chessError = blockAfter(css, ".chess-game-error");
+
+  it("maps the widget theme variables onto the webapp palette", () => {
+    // Arrange / Act — the .chess-game rule.
+    // Assert
+    expect(chessGame).toMatch(/--chess-widget-bg:\s*var\(--card\)/);
+    expect(chessGame).toMatch(/--chess-widget-fg:\s*var\(--fg\)/);
+    expect(chessGame).toMatch(/--chess-widget-accent:\s*var\(--accent\)/);
+  });
+
+  it("styles the in-frame error readably", () => {
+    // Arrange / Act / Assert
+    expect(chessError).toMatch(/color:/);
+    expect(chessError).toMatch(/border:/);
+  });
+});
