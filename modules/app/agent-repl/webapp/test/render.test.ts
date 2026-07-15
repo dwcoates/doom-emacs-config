@@ -1680,6 +1680,48 @@ describe("clear divider", () => {
     // Assert — the breathing prompt bubble is the signal now, so the note is gone.
     expect(html).toBe("");
   });
+
+  it("draws no (no content) reply bubble beneath a /clear divider", () => {
+    // Arrange — the feed a /clear leaves: its bubble, the re-init note, and
+    // the CLI's contextless placeholder answer.
+    const reply: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "(no content)",
+      done: true,
+      ts: TEXT_TS,
+    };
+    const items: ConversationItem[] = [
+      userTurnAt(9, 0, "/clear", "r7"),
+      { kind: "system", subtype: "init" },
+      reply,
+      result(),
+    ];
+    const finals = finalResponses(items);
+    // Act
+    const html = renderItem(reply, undefined, finals);
+    // Assert — nothing renders, so no green bubble sits under the divider.
+    expect(html).toBe("");
+  });
+
+  it("swallows the /clear reply's result so no standalone chip trails the divider", () => {
+    // Arrange — the placeholder answer still anchors the closing result, so
+    // the result folds into the (empty-rendered) bubble rather than printing
+    // its own chip beneath the divider.
+    const reply: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "(no content)",
+      done: true,
+      ts: TEXT_TS,
+    };
+    const closer = result();
+    const finals = finalResponses([userTurnAt(9, 0, "/clear", "r7"), reply, closer]);
+    // Act + Assert
+    expect(rendersEmpty(closer, finals)).toBe(true);
+  });
 });
 
 describe("clearBoundary", () => {
@@ -2424,6 +2466,53 @@ describe("rendersEmpty", () => {
   it("counts an OPEN textless thinking block as drawn, since its spinner shows", () => {
     // Arrange + Act + Assert
     expect(rendersEmpty(thinking("k1", false, ""))).toBe(false);
+  });
+
+  it("counts the CLI's (no content) placeholder bubble as undrawn", () => {
+    // Arrange — the empty reply a /clear's re-init leaves behind.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "(no content)",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts a (no content) placeholder padded with whitespace as undrawn", () => {
+    // Arrange — a trailing newline must not smuggle the placeholder past.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "  (no content)\n",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts an ordinary text bubble as drawn", () => {
+    // Arrange + Act + Assert — only the exact placeholder is suppressed.
+    expect(rendersEmpty(text("b1"))).toBe(false);
+  });
+
+  it("counts a bubble that merely quotes (no content) mid-sentence as drawn", () => {
+    // Arrange — a real answer discussing the placeholder is not the placeholder.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "the CLI printed (no content) there",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(false);
   });
 
   it("counts a result whose chip a response bubble swallowed as undrawn", () => {
