@@ -71,6 +71,7 @@ import {
   type GameContainer,
   chessGameFileUrl,
   chessGameKind,
+  splitChessGameSegments,
   configureChessGames,
   hydrateChessGames,
   parseSessionPointer,
@@ -318,5 +319,52 @@ describe("releaseChessGames", () => {
     releaseChessGames(rootOf(el));
     // Assert
     expect(unmounted).toBe(true);
+  });
+});
+
+
+describe("splitChessGameSegments", () => {
+  const marker = "---> agent-repl-chess-game-file: /ws/chess-game-a.pgn <---";
+
+  it("returns one text segment when no marker is present", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments("a\nb", false)).toEqual([{ text: "a\nb" }]);
+  });
+
+  it("splits text around a marker in order", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments(`intro\n${marker}\noutro`, false)).toEqual([
+      { text: "intro" },
+      { path: "/ws/chess-game-a.pgn" },
+      { text: "outro" },
+    ]);
+  });
+
+  it("handles multiple markers", () => {
+    // Arrange + Act
+    const segs = splitChessGameSegments(`${marker}\nmid\n${marker}`, false);
+    // Assert
+    expect(segs).toEqual([
+      { path: "/ws/chess-game-a.pgn" },
+      { text: "mid" },
+      { path: "/ws/chess-game-a.pgn" },
+    ]);
+  });
+
+  it("treats an indented marker as ordinary text", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments(`  ${marker}`, false)).toEqual([{ text: `  ${marker}` }]);
+  });
+
+  it("drops a trailing partial marker while streaming", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments("done\n---> agent-repl-che", true)).toEqual([{ text: "done" }]);
+  });
+
+  it("keeps a trailing partial marker when the block is done", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments("done\n---> agent-repl-che", false)).toEqual([
+      { text: "done\n---> agent-repl-che" },
+    ]);
   });
 });

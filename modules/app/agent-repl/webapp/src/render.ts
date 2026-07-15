@@ -17,7 +17,12 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
-import { hydrateChessGames, releaseChessGames } from "./chess-game.js";
+import {
+  chessGameContainerHtml,
+  hydrateChessGames,
+  releaseChessGames,
+  splitChessGameSegments,
+} from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
@@ -417,17 +422,22 @@ function TextStream(
     chip && chip.sincePrevFinalMs >= 1000
       ? ResultChip(chip, chip.sincePrevFinalMs, true)
       : "";
-  // A bare metaprompt TLDR tree (no code fence — fenced trees are the
-  // markdown fence handler's job) renders as hanging-indent tree lines;
-  // the markdown pipeline would shear its wrapped branches to column 0.
-  if (!item.text.includes("```") && isMetapromptTree(item.text)) {
-    return Bubble(
-      cls,
-      `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}${watchers}${closer}`,
-      item.ts,
-    );
-  }
-  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}${watchers}${closer}`, item.ts);
+  // Chess-game markers split the body FIRST: they must work inside a
+  // TLDR-tree response too, and the tree renderer below never sees
+  // markdown handling. Each text segment then picks its own pipeline.
+  const body = splitChessGameSegments(item.text, !item.done)
+    .map((seg) => {
+      if ("path" in seg) return chessGameContainerHtml(seg.path);
+      // A bare metaprompt TLDR tree (no code fence — fenced trees are the
+      // markdown fence handler's job) renders as hanging-indent tree lines;
+      // the markdown pipeline would shear its wrapped branches to column 0.
+      if (!seg.text.includes("```") && isMetapromptTree(seg.text)) {
+        return `<div class="mp-tree">${renderTreeHtml(seg.text, inline)}</div>`;
+      }
+      return renderMarkdown(seg.text);
+    })
+    .join("");
+  return Bubble(cls, `${body}${cursor}${watchers}${closer}`, item.ts);
 }
 
 function Thinking(item: ThinkingItem): string {
