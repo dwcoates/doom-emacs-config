@@ -322,80 +322,15 @@ describe("the bubble pulse", () => {
   });
 });
 
-describe("the tool-card pulse", () => {
-  const pulsing = blockAfter(css, ".tool-card.pulsing {");
-  const reducedPulse = blockAfter(
-    blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
-    ".tool-card.pulsing",
-  );
-
-  it("breathes a flagged card on the same endless breath the bubbles take", () => {
-    // Arrange / Act — the .tool-card.pulsing rule reuses @keyframes bubble-breathe.
-    // Assert
-    expect(pulsing).toMatch(/animation:\s*bubble-breathe\s+[\d.]+s\s+ease-in-out\s+infinite/);
-  });
-
-  it("drops the breath entirely under reduced motion, alongside the bubbles", () => {
-    // Arrange / Act — the reduced-motion .tool-card.pulsing override.
-    // Assert
-    expect(reducedPulse).toMatch(/animation:\s*none/);
-  });
-
-  it("points the generic card's breath at the card-pulse token", () => {
-    // Arrange / Act — the .tool-card base rule.
-    // Assert
-    expect(blockAfter(css, ".tool-card {")).toMatch(/--pulse-to:\s*var\(--card-pulse\)/);
-  });
-
-  it("points the async card's breath at the async-pulse token", () => {
-    // Arrange / Act — the shared skill/agent wash rule (one wash, one breath).
-    // Assert
-    expect(blockAfter(css, ".tool-card.tool-skill")).toMatch(
-      /--pulse-to:\s*var\(--async-pulse\)/,
-    );
-  });
-
-  it("deepens the light-theme grey card at the top of the breath", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, "--card"), token(lightTheme, "--card-pulse")];
-    // Act / Assert
-    expect(luminance(deep) < luminance(near)).toBe(true);
-  });
-
-  it("lifts the dark-theme grey card at the top of the breath, where deepening would vanish", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, "--card"), token(darkTheme, "--card-pulse")];
-    // Act / Assert
-    expect(luminance(deep) > luminance(near)).toBe(true);
-  });
-
-  it("keeps the light-theme grey card's breath shallow enough to read under a card body", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, "--card"), token(lightTheme, "--card-pulse")];
-    // Act / Assert
-    expect(Math.abs(luminance(deep) - luminance(near))).toBeLessThan(30);
-  });
-
-  it("keeps the dark-theme grey card's breath shallow enough to read under a card body", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, "--card"), token(darkTheme, "--card-pulse")];
-    // Act / Assert
-    expect(Math.abs(luminance(deep) - luminance(near))).toBeLessThan(30);
-  });
-});
-
 /**
  * Every breathing section takes the SAME breath and differs only in the wash it
- * takes it from — the working frontier from the assistant purple, the just-sent
- * prompt from the user blue, and a running card from its own wash — so the
- * palette contract is one table run per role rather than suites drifting apart.
- * The generic grey card sits out this table: its wash is near-achromatic, so a
- * hue-drift bound is meaningless and its own suite pins it by luminance alone.
+ * takes it from — the working frontier from the assistant purple and the
+ * just-sent prompt from the user blue — so the palette contract is one table
+ * run per role rather than suites drifting apart.
  */
 describe.each([
   { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
   { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
-  { role: "async-card", wash: "--async-card", far: "--async-pulse" },
 ])("$role pulse palette", ({ wash, far }) => {
   it("keeps the light-theme breath inside the bubble's own hue", () => {
     // Arrange
