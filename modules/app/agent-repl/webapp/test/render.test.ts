@@ -2883,6 +2883,51 @@ describe("TextStream metaprompt trees", () => {
   });
 });
 
+describe("TextStream chess-game markers", () => {
+  const marker =
+    "---> agent-repl-chess-game-file: /ws/.claude/emacs/cee-web-widget/chess-game-ab.pgn <---";
+
+  it("renders a marker inside a metaprompt-tree response as a widget container", () => {
+    // Arrange — a TLDR tree whose last line is the marker: the tree
+    // renderer must not swallow it.
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "b1",
+      messageId: "m1",
+      text: `Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More\n\n${marker}`,
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain(`class="chess-game"`);
+    expect(html).not.toContain("agent-repl-chess-game-file");
+  });
+
+  it("keeps prose flowing around a marker in one bubble", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "b1",
+      messageId: "m1",
+      text: `intro line\n${marker}\noutro line`,
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    const intro = html.indexOf("intro line");
+    const widget = html.indexOf(`class="chess-game"`);
+    const outro = html.indexOf("outro line");
+    expect(intro).toBeGreaterThanOrEqual(0);
+    expect(widget).toBeGreaterThan(intro);
+    expect(outro).toBeGreaterThan(widget);
+  });
+});
+
 describe("lastUserTurnId", () => {
   /** A user turn carrying the given request id. */
   const turn = (requestId: string): ConversationItem => ({

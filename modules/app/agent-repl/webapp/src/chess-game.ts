@@ -57,6 +57,42 @@ export function chessGameContainerHtml(path: string): string {
   );
 }
 
+/** One piece of a bubble body: literal text, or a game payload path. */
+export type ChessGameSegment = { text: string } | { path: string };
+
+/**
+ * Splits response text on marker lines, so the bubble renderer can lay
+ * out each text segment through its own pipeline (markdown OR the
+ * metaprompt-tree renderer) with widget containers between them. The
+ * marker must be handled ABOVE that pipeline choice: a marker inside a
+ * TLDR-tree response would otherwise be rendered literally by the tree
+ * renderer, which never sees markdown handling.
+ */
+export function splitChessGameSegments(src: string, streamTail: boolean): ChessGameSegment[] {
+  const lines = src.split("\n");
+  if (streamTail && isPartialChessGameMarker(lines[lines.length - 1])) {
+    lines.pop();
+  }
+  const segments: ChessGameSegment[] = [];
+  let buf: string[] = [];
+  const flush = (): void => {
+    if (buf.length > 0) {
+      segments.push({ text: buf.join("\n") });
+      buf = [];
+    }
+  };
+  for (const line of lines) {
+    if (line.startsWith(CHESS_GAME_MARKER)) {
+      flush();
+      segments.push({ path: chessGameMarkerPath(line) });
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  return segments;
+}
+
 /* ------------------------------------------------------------------ *
  * Widget host: fetches the payload through the daemon's validated
  * /sessions/{id}/chess-game route and mounts the embeddable widget
