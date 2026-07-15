@@ -413,7 +413,7 @@ export interface PanelContext {
 
 /** True when the child renders something the panel and ticker count. */
 function visibleChild(item: ConversationItem): boolean {
-  return !isInvisibleItem(item);
+  return !rendersEmpty(item);
 }
 
 /** One child item's ticker line, or "" when it offers nothing live. */
@@ -1281,21 +1281,11 @@ export type FeedEntry =
   | { kind: "group"; members: ToolItem[]; indexes: number[] };
 
 /**
- * True when ITEM renders nothing — a suppressed tool or a user turn
- * that was nothing but injected spans — so it can never break a run.
- */
-function isInvisibleItem(item: ConversationItem): boolean {
-  if (item.kind === "tool") return SUPPRESSED_TOOLS.has(item.toolName);
-  if (item.kind === "user-turn") return userTurnText(item) === "";
-  return false;
-}
-
-/**
  * Collapse consecutive same-tool cards into tab groups: three Bash calls
  * in a row become one group of three, selectable by tabs, while a
  * singleton stays a plain card. Any VISIBLE item of another shape breaks
- * a run; invisible items are held aside and re-emitted after the group
- * (they render nothing, so their position among empty nodes is moot).
+ * a run; items that render nothing (`rendersEmpty`) are held aside and
+ * re-emitted after the group (their position among empty nodes is moot).
  */
 export function groupFeed(top: readonly ConversationItem[]): FeedEntry[] {
   const entries: FeedEntry[] = [];
@@ -1316,7 +1306,7 @@ export function groupFeed(top: readonly ConversationItem[]): FeedEntry[] {
   };
 
   top.forEach((item, index) => {
-    if (isInvisibleItem(item)) {
+    if (rendersEmpty(item)) {
       if (run) {
         held.push({ item, index });
       } else {

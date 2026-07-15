@@ -3039,6 +3039,45 @@ describe("groupFeed", () => {
     expect(entries[0].kind).toBe("group");
   });
 
+  it("lets a closed textless thinking block ride through a run without breaking it", () => {
+    // Arrange — an adaptive-thinking model withholds the text, so the block
+    // renders nothing yet sits between two same-tool calls.
+    const empty = thinking("k1", true, "");
+    // Act
+    const entries = groupFeed([bash("t1"), empty, bash("t2")]);
+    // Assert — one group, with the invisible thinking re-emitted after it.
+    expect(entries[0].kind).toBe("group");
+    expect(entries).toHaveLength(2);
+  });
+
+  it("still breaks a run on a closed thinking block that has text to show", () => {
+    // Arrange — a visible thinking disclosure is a real bubble.
+    const shown = thinking("k1", true, "reasoning");
+    // Act
+    const entries = groupFeed([bash("t1"), shown, bash("t2")]);
+    // Assert
+    expect(entries.map((e) => e.kind)).toEqual(["item", "item", "item"]);
+  });
+
+  it("still breaks a run on an OPEN textless thinking block, whose spinner shows", () => {
+    // Arrange — while streaming, an empty thinking block draws a spinner.
+    const streaming = thinking("k1", false, "");
+    // Act
+    const entries = groupFeed([bash("t1"), streaming, bash("t2")]);
+    // Assert
+    expect(entries.map((e) => e.kind)).toEqual(["item", "item", "item"]);
+  });
+
+  it("lets a system:init note ride through a run without breaking it", () => {
+    // Arrange — session (re)init draws no bubble.
+    const init: ConversationItem = { kind: "system", subtype: "init" };
+    // Act
+    const entries = groupFeed([bash("t1"), init, bash("t2")]);
+    // Assert
+    expect(entries[0].kind).toBe("group");
+    expect(entries).toHaveLength(2);
+  });
+
   it("groups consecutive Agent cards like any other run", () => {
     // Arrange
     const a1: ToolItem = { ...agentTool("a1") };
