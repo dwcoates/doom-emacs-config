@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentReveal,
   PanelContext,
   activeGroupMember,
   activityTicker,
@@ -16,6 +17,7 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
+  planAgentReveal,
   pulseTarget,
   renderItem,
   rendersEmpty,
@@ -3056,6 +3058,73 @@ describe("activeGroupMember", () => {
     const members = [bash("t1", "a", { isError: false }), bash("t2", "b")];
     // Act + Assert
     expect(activeGroupMember(members, "t-gone")).toBe("t2");
+  });
+});
+
+/** A nested subagent tool item, carrying the card that spawned it. */
+function nestedAgentTool(id: string, parent: string): ToolItem {
+  return { ...agentTool(id), parentToolUseId: parent };
+}
+
+describe("planAgentReveal", () => {
+  it("reveals a lone top-level subagent as its own bubble with its panel open", () => {
+    // Arrange — a single Agent card, ungrouped.
+    const items = [userTurnAt(9, 0), agentTool("a1")];
+    // Act
+    const plan = planAgentReveal(items, "a1");
+    // Assert
+    expect(plan).toEqual<AgentReveal>({
+      key: "tool:a1",
+      groupKey: null,
+      tabMember: null,
+      panelIds: ["a1"],
+    });
+  });
+
+  it("pins the clicked member's tab when the subagent sits in a run group", () => {
+    // Arrange — two consecutive Agent cards collapse into one tab group.
+    const items = [userTurnAt(9, 0), agentTool("a1"), agentTool("a2")];
+    // Act
+    const plan = planAgentReveal(items, "a2");
+    // Assert — the group is keyed by its first member; a2's tab must be pinned.
+    expect(plan).toEqual<AgentReveal>({
+      key: "group:a1",
+      groupKey: "group:a1",
+      tabMember: "a2",
+      panelIds: ["a2"],
+    });
+  });
+
+  it("scrolls to the outermost ancestor and opens the whole panel chain for a nested subagent", () => {
+    // Arrange — a2 was spawned by top-level a1, so it has no bubble of its own.
+    const items = [userTurnAt(9, 0), agentTool("a1"), nestedAgentTool("a2", "a1")];
+    // Act
+    const plan = planAgentReveal(items, "a2");
+    // Assert — land on a1's bubble, opening a2's panel (its output) and a1's (holding a2).
+    expect(plan).toEqual<AgentReveal>({
+      key: "tool:a1",
+      groupKey: null,
+      tabMember: null,
+      panelIds: ["a2", "a1"],
+    });
+  });
+
+  it("returns null for an id no tool item carries", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), agentTool("a1")];
+    // Act + Assert
+    expect(planAgentReveal(items, "ghost")).toBeNull();
+  });
+
+  it("returns null for a subagent a /clear discarded from the feed", () => {
+    // Arrange — the agent precedes the clear, so it is off the current context.
+    const items = [
+      userTurnAt(9, 0),
+      agentTool("a1"),
+      userTurnAt(9, 1, "/clear", "r2"),
+    ];
+    // Act + Assert
+    expect(planAgentReveal(items, "a1")).toBeNull();
   });
 });
 

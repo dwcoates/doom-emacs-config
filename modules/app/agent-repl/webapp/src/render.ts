@@ -8,7 +8,13 @@ import { SUBAGENT_TOOLS, agentsMenuHtml } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { tasksMenuHtml } from "./tasks.js";
 import { formatDuration, formatDurationCeil } from "./duration.js";
-import { CLICK_THROUGH_SELECTOR, applyExpanded, expandedKeys, sectionsIn } from "./expand.js";
+import {
+  CLICK_THROUGH_SELECTOR,
+  applyExpanded,
+  expandOwnSections,
+  expandedKeys,
+  sectionsIn,
+} from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
 import { inline, renderMarkdown } from "./markdown.js";
@@ -1335,6 +1341,70 @@ export function activeGroupMember(members: readonly ToolItem[], pinned?: string)
   return members[members.length - 1].toolUseId;
 }
 
+/**
+ * How the renderer surfaces a subagent's card and where the feed then
+ * jumps: `planAgentReveal` derives it purely; `FeedRenderer.revealAgent`
+ * applies it.
+ */
+export interface AgentReveal {
+  /** DOM key of the top-level feed-item carrying (or nesting) the agent. */
+  key: string;
+  /** When that feed-item is a consecutive-run tab group, its active-tab key. */
+  groupKey: string | null;
+  /** The top-level member to pin as that group's active tab, else null. */
+  tabMember: string | null;
+  /** Tool ids whose activity panels open so the agent and its output show. */
+  panelIds: string[];
+}
+
+/**
+ * Plan how to reveal subagent AGENTID from the roster: which top-level
+ * feed-item to scroll to, whether to pin a tab to surface it, and which
+ * activity panels to open so its card (and, for a nested agent, every
+ * panel above it) lays its output out.
+ *
+ * A top-level subagent reveals as its own bubble with its own panel open.
+ * A nested subagent (one another subagent spawned) has no top-level
+ * bubble, so the plan scrolls to its outermost ancestor and opens the
+ * whole panel chain down to it. Null when no live feed item carries the
+ * id — unknown, or discarded by a `/clear`.
+ */
+export function planAgentReveal(
+  items: readonly ConversationItem[],
+  agentId: string,
+): AgentReveal | null {
+  const visible = itemsFromLastClear(items);
+  const parentOf = new Map<string, string | undefined>();
+  for (const item of visible) {
+    if (item.kind === "tool") parentOf.set(item.toolUseId, item.parentToolUseId);
+  }
+  if (!parentOf.has(agentId)) return null;
+  // Ancestor chain from the agent up to its outermost tool ancestor. It is
+  // exactly the set of panels to open: each ancestor's panel holds the next
+  // card down, and the agent's own panel holds its output. A cycle guard
+  // keeps a corrupt parent link from looping.
+  const chain: string[] = [];
+  const seen = new Set<string>();
+  let cur: string | undefined = agentId;
+  while (cur !== undefined && parentOf.has(cur) && !seen.has(cur)) {
+    seen.add(cur);
+    chain.push(cur);
+    cur = parentOf.get(cur);
+  }
+  const outermost = chain[chain.length - 1];
+  for (const entry of groupFeed(partitionFeed(visible).top)) {
+    if (entry.kind === "item") {
+      if (entry.item.kind === "tool" && entry.item.toolUseId === outermost) {
+        return { key: `tool:${outermost}`, groupKey: null, tabMember: null, panelIds: chain };
+      }
+    } else if (entry.members.some((m) => m.toolUseId === outermost)) {
+      const key = `group:${entry.members[0].toolUseId}`;
+      return { key, groupKey: key, tabMember: outermost, panelIds: chain };
+    }
+  }
+  return null;
+}
+
 /** A tab's short label: the member's headline, else its name and ordinal. */
 function tabLabel(item: ToolItem, index: number): string {
   const head = toolHeadline(item);
@@ -1506,6 +1576,29 @@ export class FeedRenderer {
     this.msgDrafts.delete(id);
     this.actions.sendPrompt?.(`Use SendMessage to relay this to agent ${id}: ${text}`);
     if (this.lastState) this.render(this.lastState);
+  }
+
+  /**
+   * Reveal a subagent's card from the roster dropdown: pin its tab when it
+   * lives in a consecutive-run group, open the activity panels that surface
+   * it and its output, scroll its (or its outermost ancestor's) bubble to
+   * the top of the feed, and lay that card's own capped sections out in
+   * full. Answers whether the agent was found in the current feed.
+   */
+  revealAgent(agentId: string): boolean {
+    if (!this.lastState) return false;
+    const plan = planAgentReveal(this.lastState.items, agentId);
+    if (!plan) return false;
+    if (plan.groupKey !== null && plan.tabMember !== null) {
+      this.activeTabs.set(plan.groupKey, plan.tabMember);
+    }
+    for (const id of plan.panelIds) this.openPanels.add(id);
+    this.render(this.lastState);
+    const node = this.nodes.get(plan.key)?.el;
+    if (!node) return false;
+    node.scrollIntoView({ block: "start" });
+    expandOwnSections(node);
+    return true;
   }
 
   /** A click on a tab chip pins that member as its group's active card. */
