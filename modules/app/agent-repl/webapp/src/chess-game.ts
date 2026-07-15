@@ -75,6 +75,9 @@ export function splitChessGameSegments(src: string, streamTail: boolean): ChessG
   }
   const segments: ChessGameSegment[] = [];
   let buf: string[] = [];
+  // A marker inside a fenced code block is literal text (someone quoting
+  // the marker syntax), so fence interiors are never intercepted.
+  let inFence = false;
   const flush = (): void => {
     if (buf.length > 0) {
       segments.push({ text: buf.join("\n") });
@@ -82,7 +85,10 @@ export function splitChessGameSegments(src: string, streamTail: boolean): ChessG
     }
   };
   for (const line of lines) {
-    if (line.startsWith(CHESS_GAME_MARKER)) {
+    if (line.startsWith("```")) {
+      inFence = !inFence;
+      buf.push(line);
+    } else if (!inFence && line.startsWith(CHESS_GAME_MARKER)) {
       flush();
       segments.push({ path: chessGameMarkerPath(line) });
     } else {
