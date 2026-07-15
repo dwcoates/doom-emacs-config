@@ -8,6 +8,7 @@
 (declare-function agent-repl--ws-frontend "frontends" (ws))
 (declare-function agent-repl-frontend-running-p-fn "frontends" (frontend))
 (declare-function agent-repl--frontend-dispatch-show "frontends" (ws))
+(declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
 
 ;; Defined in worktree.el, which may load after this file; referenced only
 ;; at call time by `agent-repl--doom-config-tree-p'.
@@ -850,13 +851,22 @@ fails — closing the race between `SessionStart' (which flips Emacs
 to ready) and the agent's TUI input-area becoming interactive.
 
 RETRIES is the number of resends already performed for the prompt at
-the head of PENDING; nil/0 on the first attempt."
+the head of PENDING; nil/0 on the first attempt.
+
+A workspace born from generation is never switched to (the no-switch
+contract on the sentinel-driven path), so its `:input-buffer' is still
+nil at this point — `agent-repl--send' would then skip
+`agent-repl--history-push' entirely and the preemptive prompt would
+never land in input history.  `agent-repl--ensure-input-buffer' heads
+that off by materializing the (unshown) input buffer first, the same
+buffer the panel-show path later adopts."
   (agent-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
                     ws (length pending) (or retries 0))
   (unless (agent-repl--pending-delivery-alive-p ws nil)
     (error "agent-repl--deliver-pending-prompts: frontend session is gone for ws=%s — %d prompt(s) lost"
            ws (length pending)))
   (when pending
+    (agent-repl--ensure-input-buffer ws)
     (let ((retries (or retries 0)))
       (agent-repl--send
        (car pending) ws nil
