@@ -3,6 +3,7 @@ import {
   CAPPED_CLASSES,
   CAPPED_SELECTOR,
   EXPANDED_CLASS,
+  PANEL_CLASS,
   Section,
   applyExpanded,
   cappedSectionAt,
@@ -10,6 +11,7 @@ import {
   expandedKeys,
   isCappedSection,
   isExpanded,
+  ownsSection,
   toggleExpanded,
 } from "../src/expand.js";
 
@@ -261,5 +263,25 @@ describe("applyExpanded", () => {
     applyExpanded(after, expandedKeys(before));
     // Assert
     expect(after.map((s) => s.classes.has(EXPANDED_CLASS))).toEqual([false, true]);
+  });
+});
+
+describe("ownsSection", () => {
+  it("owns a card's own output box", () => {
+    // Arrange — the card's own result, no activity panel between it and the card.
+    const card = node("card", null, "feed-item");
+    const out = node("out", card, "tool-output");
+    // Act + Assert
+    expect(ownsSection(out, card)).toBe(true);
+  });
+
+  it("disowns an output box nested inside an open activity panel", () => {
+    // Arrange — a child card's output, rendered inside the agent's panel.
+    const card = node("card", null, "feed-item");
+    const panel = node("panel", card, PANEL_CLASS);
+    const childCard = node("child", panel, "tool-card");
+    const out = node("out", childCard, "tool-output");
+    // Act + Assert
+    expect(ownsSection(out, card)).toBe(false);
   });
 });

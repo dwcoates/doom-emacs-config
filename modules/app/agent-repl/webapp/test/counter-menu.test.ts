@@ -250,6 +250,21 @@ describe("counterOverlayHtml", () => {
     expect(html).toContain("hunt the flake");
   });
 
+  it("addresses each row by the entry's id so a click can act on it", () => {
+    // Arrange + Act — the id is how the subagent roster jumps the feed to a card.
+    const html = counterOverlayHtml(SPEC, [active({ id: "toolu_42" })], 0);
+    // Assert
+    expect(html).toContain(`data-thing-id="toolu_42"`);
+  });
+
+  it("escapes markup in the addressable id", () => {
+    // Arrange + Act — the id is interpolated into an attribute value.
+    const html = counterOverlayHtml(SPEC, [active({ id: `a"><b` })], 0);
+    // Assert
+    expect(html).not.toContain(`id="a"><b"`);
+    expect(html).toContain("&quot;");
+  });
+
   it("stands the placeholder in for a summary that has not streamed yet", () => {
     // Arrange + Act
     const html = counterOverlayHtml(SPEC, [active({ summary: "", status: "starting" })], 0);
