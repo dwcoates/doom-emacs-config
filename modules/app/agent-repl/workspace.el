@@ -1458,16 +1458,24 @@ workspace's plist.  This is the single view chokepoint every
 perspective activation funnels through, so the project picker
 \(`agent-repl-switch-to-project') can sort by most-recently-viewed and
 `agent-repl--state-save' can persist the stamp for dead workspaces."
-  (let ((name (agent-repl--ws-current-name)))
-    (when name
-      ;; Stamp only known agent-repl workspaces; a foreign persp (the main
-      ;; persp, a non-agent-repl one) has no hash entry, and `--ws-put'
-      ;; would otherwise STUB-CREATE a spurious :project-dir-less entry.
-      (when (agent-repl--ws-known-p name)
-        (agent-repl--ws-put name :last-viewed-at (current-time)))
-      (setq agent-repl--workspace-history
-            (cons name (cl-remove name agent-repl--workspace-history
-                                  :test #'string=))))))
+  ;; Suppressed during `agent-repl--eager-open-panels': the transient
+  ;; activation of a just-generated background workspace is not a real
+  ;; visit, so recording it would make `SPC b p' treat the generated
+  ;; workspace as the caller's previous one and stamp a phantom
+  ;; `:last-viewed-at'.
+  (if agent-repl--eager-open-in-progress
+      (agent-repl--log (agent-repl--ws-current-name)
+                        "record-workspace-history: suppressed (eager-open in progress)")
+    (let ((name (agent-repl--ws-current-name)))
+      (when name
+        ;; Stamp only known agent-repl workspaces; a foreign persp (the main
+        ;; persp, a non-agent-repl one) has no hash entry, and `--ws-put'
+        ;; would otherwise STUB-CREATE a spurious :project-dir-less entry.
+        (when (agent-repl--ws-known-p name)
+          (agent-repl--ws-put name :last-viewed-at (current-time)))
+        (setq agent-repl--workspace-history
+              (cons name (cl-remove name agent-repl--workspace-history
+                                    :test #'string=)))))))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--record-workspace-history)
 
