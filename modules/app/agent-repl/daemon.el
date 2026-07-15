@@ -127,6 +127,18 @@ Set to nil to hand the analyst no --permission-mode at all."
                  string)
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-widget-assets-dir
+  (or (getenv "AGENT_REPL_WIDGET_ASSETS") "")
+  "Directory of embeddable-widget assets `claude-repld' serves in place.
+Names a widget dist directory (e.g. an explanation-engine checkout's
+`apps/cee-web-widget/dist') that the daemon mounts read-only at
+/widget-assets/ — nothing is ever copied into this repo.  The webapp
+probes that mount to enable chess-game bubbles.  Empty disables the
+flag; the daemon then also honors $AGENT_REPL_WIDGET_ASSETS from its
+own inherited environment."
+  :type 'string
+  :group 'agent-repl)
+
 ;;;; ---- State ------------------------------------------------------------
 
 (defvar agent-repl--frontend-daemon-process nil
@@ -213,6 +225,9 @@ endpoint to exactly these roots."
       (when agent-repl-frontend-remediation-permission-mode
         (list "-remediation-permission-mode"
               agent-repl-frontend-remediation-permission-mode))))
+   (unless (string-empty-p agent-repl-frontend-widget-assets-dir)
+     (list "-widget-assets"
+           (expand-file-name agent-repl-frontend-widget-assets-dir)))
    (when-let ((claude (executable-find "claude")))
      (list "-claude-bin" claude))))
 
