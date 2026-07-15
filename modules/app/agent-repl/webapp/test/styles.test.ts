@@ -990,6 +990,38 @@ describe("activity fold", () => {
     expect(blockAfter(css, "\n.agent-ticker")).toMatch(/color:\s*var\(--muted\)/);
   });
 
+  it("rounds the ticker into a pill, like a tab chip", () => {
+    // Arrange / Act — the ticker wears the same pill radius as .tab-chip.
+    // Assert
+    expect(blockAfter(css, "\n.agent-ticker")).toMatch(/border-radius:\s*99px/);
+  });
+
+  it("backs the ticker pill with the card grey, matching a tab chip", () => {
+    // Arrange / Act — same fill as .tab-chip, so the two read as one form.
+    // Assert
+    expect(blockAfter(css, "\n.agent-ticker")).toMatch(/background:\s*var\(--card\)/);
+  });
+
+  it("lays the child-feed panel on the main-GUI background so nested bubbles never clash with the card teal", () => {
+    // Arrange / Act — the wrapper's whole purpose is to replace the async
+    // teal under the nested bubbles with the neutral feed background.
+    // Assert
+    expect(blockAfter(css, ".agent-panel {")).toMatch(/background:\s*var\(--bg\)/);
+  });
+
+  it("wraps the child-feed panel as a rounded bubble", () => {
+    // Arrange / Act — the wrapper is a bubble, not a bare background band.
+    // Assert
+    expect(blockAfter(css, ".agent-panel {")).toMatch(/border-radius:\s*8px/);
+  });
+
+  it("pads the child-feed panel so nested bubbles keep their border distance", () => {
+    // Arrange / Act — the padding is the gap the nested bubbles had to the
+    // card, now held against this wrapper (they shrink to make room).
+    // Assert
+    expect(blockAfter(css, ".agent-panel {")).toMatch(/padding:\s*0\.5rem\s+0\.75rem/);
+  });
+
   it("tints the needs-permission badge in the accent", () => {
     // Arrange / Act
     // Assert
