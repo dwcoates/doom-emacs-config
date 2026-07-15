@@ -1028,7 +1028,7 @@ func TestReplayClientAbsorbsFullRingBurst(t *testing.T) {
 	sess := New(Config{ID: "s_test", Shim: shim, Logf: func(string, ...any) {}})
 	const ringSize = 1500
 	sess.mu.Lock()
-	for i := 0; i < ringSize; i++ {
+	for range ringSize {
 		sess.broadcastLocked([]protocol.L2Frame{&protocol.TextDeltaFrame{
 			Envelope: protocol.Envelope{Type: "text-delta"}, BlockID: "b1", Text: "x",
 		}})
@@ -1042,7 +1042,7 @@ func TestReplayClientAbsorbsFullRingBurst(t *testing.T) {
 		t.Fatalf("replay-request: %v", err)
 	}
 	// Assert: every frame was queued and the client was not dropped.
-	for i := 0; i < ringSize; i++ {
+	for i := range ringSize {
 		select {
 		case _, ok := <-client.Send:
 			if !ok {
