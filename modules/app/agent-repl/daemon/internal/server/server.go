@@ -140,8 +140,8 @@ type Server struct {
 	// sweep runs on demand rather than on a wall clock.
 	idleSweepTicks <-chan time.Time
 	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
-	stopped   chan struct{}
-	stopOnce  sync.Once
+	stopped  chan struct{}
+	stopOnce sync.Once
 
 	mu       sync.Mutex
 	sessions map[string]*session.Session
@@ -379,8 +379,87 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
 	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
+	mux.HandleFunc("GET /sessions/{id}/chess-game", s.handleChessGameFile)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
 	return mux
+}
+
+// chessGameDirParts is the fixed worktree-relative directory the
+// /show-chess-game skill writes game payload files into. The route below
+// serves ONLY files directly inside it.
+var chessGameDirParts = []string{".claude", "emacs", "cee-web-widget"}
+
+// sessionCWD reports the working directory a session runs in, live or
+// dormant, without rehydrating a dormant record (reading a game file
+// must not spawn a shim).
+func (s *Server) sessionCWD(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess := s.sessions[id]; sess != nil {
+		return sess.Info().CWD, true
+	}
+	if rec, ok := s.dormant[id]; ok {
+		return rec.CWD, true
+	}
+	return "", false
+}
+
+// handleChessGameFile serves a chess-game payload file that the session's
+// agent wrote under its worktree (the marker channel of the chess-board
+// widget: the response text carries only the file path, and the webapp
+// fetches the payload here). The path is caller-supplied, so it is
+// validated down to "a chess-game-* file directly inside THIS session's
+// <cwd>/.claude/emacs/cee-web-widget/" before any read happens.
+func (s *Server) handleChessGameFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	cwd, known := s.sessionCWD(id)
+	if !known {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if cwd == "" {
+		httpError(w, http.StatusNotFound, "session has no working directory")
+		return
+	}
+	raw := r.URL.Query().Get("path")
+	if raw == "" {
+		httpError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	path, err := chessGamePath(cwd, raw)
+	if err != nil {
+		httpError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			httpError(w, http.StatusNotFound, "game file not found")
+			return
+		}
+		s.logf("session %s: read chess-game file %s: %v", id, path, err)
+		httpError(w, http.StatusInternalServerError, "reading game file failed")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if _, err := w.Write(data); err != nil {
+		s.logf("session %s: write chess-game response: %v", id, err)
+	}
+}
+
+// chessGamePath validates a marker-carried path against the session's
+// worktree: after cleaning, the file must sit DIRECTLY inside
+// <cwd>/.claude/emacs/cee-web-widget/ and be named chess-game-*.
+func chessGamePath(cwd, raw string) (string, error) {
+	clean := filepath.Clean(raw)
+	dir := filepath.Join(append([]string{cwd}, chessGameDirParts...)...)
+	if filepath.Dir(clean) != dir {
+		return "", fmt.Errorf("path is outside the session's %s directory", filepath.Join(chessGameDirParts...))
+	}
+	if !strings.HasPrefix(filepath.Base(clean), "chess-game-") {
+		return "", fmt.Errorf("game file name must start with chess-game-")
+	}
+	return clean, nil
 }
 
 // loginAccount resolves the account a login route is being asked about,

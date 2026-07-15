@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2966,5 +2967,147 @@ func TestTaskOutputServesARecordedTask(t *testing.T) {
 	}
 	if body["done"] != false {
 		t.Errorf("done = %v, want false", body["done"])
+	}
+}
+
+// createSessionAt creates a session whose shim runs in cwd.
+func (h *harness) createSessionAt(t *testing.T, cwd string) string {
+	t.Helper()
+	body := fmt.Sprintf(`{"cwd":%q}`, cwd)
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	select {
+	case shim := <-h.shims:
+		t.Cleanup(shim.end)
+	case <-time.After(recvTimeout):
+		t.Fatal("spawn was not invoked")
+	}
+	return out.SessionID
+}
+
+// getChessGame fetches the chess-game route for path on session id.
+func (h *harness) getChessGame(t *testing.T, id, path string) *http.Response {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions/" + id + "/chess-game?path=" + url.QueryEscape(path))
+	if err != nil {
+		t.Fatalf("GET chess-game: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func TestChessGamePathValidation(t *testing.T) {
+	// Arrange
+	cwd := filepath.Join(string(filepath.Separator), "ws", "root")
+	dir := filepath.Join(cwd, ".claude", "emacs", "cee-web-widget")
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"file directly inside the widget dir", filepath.Join(dir, "chess-game-abc123.pgn"), false},
+		{"file at the worktree root", filepath.Join(cwd, "chess-game-abc123.pgn"), true},
+		{"traversal escaping the widget dir", filepath.Join(dir, "..", "..", "..", "chess-game-abc123.pgn"), true},
+		{"file nested one level deeper", filepath.Join(dir, "sub", "chess-game-abc123.pgn"), true},
+		{"name missing the chess-game- prefix", filepath.Join(dir, "game-abc123.pgn"), true},
+		{"another worktree's widget dir", filepath.Join(string(filepath.Separator), "other", ".claude", "emacs", "cee-web-widget", "chess-game-abc123.pgn"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := chessGamePath(cwd, tt.raw)
+			// Assert
+			if gotErr := err != nil; gotErr != tt.wantErr {
+				t.Errorf("chessGamePath(%q) error = %v, wantErr %t", tt.raw, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestChessGameFileServesAValidatedFile(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cwd := t.TempDir()
+	dir := filepath.Join(cwd, ".claude", "emacs", "cee-web-widget")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "chess-game-abc123.pgn")
+	if err := os.WriteFile(path, []byte("1. e4 e5 *"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	id := h.createSessionAt(t, cwd)
+	// Act
+	resp := h.getChessGame(t, id, path)
+	// Assert
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "1. e4 e5 *" {
+		t.Errorf("body = %q, want the file content", body)
+	}
+}
+
+func TestChessGameFileIs404ForAnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp := h.getChessGame(t, "s_nope", "/anywhere/chess-game-x.pgn")
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestChessGameFileIs400WithoutAPath(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id := h.createSessionAt(t, t.TempDir())
+	// Act
+	resp := h.getChessGame(t, id, "")
+	// Assert
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestChessGameFileIs403OutsideTheSessionWorktree(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id := h.createSessionAt(t, t.TempDir())
+	// Act
+	resp := h.getChessGame(t, id, filepath.Join(t.TempDir(), ".claude", "emacs", "cee-web-widget", "chess-game-x.pgn"))
+	// Assert
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestChessGameFileIs404ForAMissingFile(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cwd := t.TempDir()
+	id := h.createSessionAt(t, cwd)
+	// Act
+	resp := h.getChessGame(t, id, filepath.Join(cwd, ".claude", "emacs", "cee-web-widget", "chess-game-missing.pgn"))
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
