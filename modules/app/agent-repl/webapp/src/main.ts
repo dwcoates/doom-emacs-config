@@ -10,7 +10,7 @@
 import { sessionSubagents } from "./agents.js";
 import { sessionTasks } from "./tasks.js";
 import { countedTurns } from "./turn-clock.js";
-import { configureChessGames } from "./chess-game.js";
+import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
@@ -83,6 +83,9 @@ async function boot(): Promise<void> {
   // Chess-game bubbles fetch their payload through the daemon and mount
   // the in-place-served widget; the session getter tracks rebinds.
   configureChessGames({ base: httpBase, session: () => activeSessionId });
+  // The Emacs host's webview-buffer keys step the active board through
+  // this hook (out-of-band: the xwidget cannot deliver keys into the page).
+  installChessNavHook(window as unknown as Record<string, unknown>);
   const feedEl = must("feed");
   // Sections only take the wheel in their left/right gutters, so wheeling
   // over one scrolls the feed past it instead of scrolling it.

@@ -1049,3 +1049,69 @@ reopen mid-initialize (the \"webview buffer is null/dead\" cascade)."
 (provide 'test-frontend)
 
 ;;; test-frontend.el ends here
+
+;;;; ---- Chess-board keyboard navigation ---------------------------------------
+
+(ert-deftest agent-repl-test-frontend-chess-step-script-shape ()
+  "The step script guards on the hook and passes the direction."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--frontend-chess-step-script "back")
+                 (concat "window.agentReplChessStep && "
+                         "window.agentReplChessStep(\"back\");"))))
+
+(ert-deftest agent-repl-test-frontend-chess-back-evaluates-in-current-buffer ()
+  "The back command drives the current buffer's webview with the back script."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+               (lambda (b script) (push (cons b script) calls))))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl-frontend-chess-back)
+        ;; Assert
+        (should (equal calls
+                       (list (cons (current-buffer)
+                                   (agent-repl--frontend-chess-step-script "back")))))))))
+
+(ert-deftest agent-repl-test-frontend-chess-forward-evaluates-in-current-buffer ()
+  "The forward command drives the current buffer's webview with the forward script."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+               (lambda (b script) (push (cons b script) calls))))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl-frontend-chess-forward)
+        ;; Assert
+        (should (equal calls
+                       (list (cons (current-buffer)
+                                   (agent-repl--frontend-chess-step-script "forward")))))))))
+
+(ert-deftest agent-repl-test-frontend-chess-hook-name-matches-webapp ()
+  "The nav hook name lisp calls is the one the webapp plants on `window'.
+webapp/src/chess-game.ts exports `CHESS_NAV_HOOK'; a rename on either
+side silently turns the keys into no-ops."
+  ;; Arrange
+  (let* ((ts (expand-file-name "webapp/src/chess-game.ts" agent-repl--frontend-root))
+         (source (progn
+                   (should (file-exists-p ts))
+                   (with-temp-buffer
+                     (insert-file-contents ts)
+                     (buffer-string)))))
+    ;; Act + Assert
+    (should (string-match-p
+             (format "CHESS_NAV_HOOK = \"%s\""
+                     (regexp-quote agent-repl-frontend-chess-step-hook))
+             source))))
+
+(ert-deftest agent-repl-test-frontend-webview-map-binds-chess-nav-keys ()
+  "The webview minor-mode map routes h/l and the arrows to board stepping."
+  ;; Arrange + Act + Assert
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "h"))
+              #'agent-repl-frontend-chess-back))
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "l"))
+              #'agent-repl-frontend-chess-forward))
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "<left>"))
+              #'agent-repl-frontend-chess-back))
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "<right>"))
+              #'agent-repl-frontend-chess-forward)))
