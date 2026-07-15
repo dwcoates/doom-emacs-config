@@ -4993,7 +4993,7 @@ the right fork-from name."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
                    (setq captured-fork-from fork-from))))
         (agent-repl-fork-worktree-workspace nil)
         (should (equal captured-fork-from "test-ws"))))))
@@ -5016,7 +5016,7 @@ the right fork-from name."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
                    (setq captured-fork-from fork-from))))
         (agent-repl-fork-worktree-workspace "source-ws")
         (should (equal captured-fork-from "source-ws"))))))
@@ -5037,7 +5037,7 @@ the right fork-from name."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-fork-worktree-workspace "source-ws")
         (should (equal captured-git-root "/tmp/source-repo/"))))))
@@ -5063,7 +5063,7 @@ JSON, so it eagerly resolves at entry-point time."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-fork-worktree-workspace nil)
         (should (equal captured-git-root "/tmp/ambient-repo/"))))))
@@ -5082,7 +5082,7 @@ JSON, so it eagerly resolves at entry-point time."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-fork-worktree-workspace nil)
         (should (equal captured-base "HEAD"))))))
@@ -5108,7 +5108,7 @@ JSON, so it eagerly resolves at entry-point time."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'head)
         (should (equal captured-git-root "/tmp/ambient-repo/"))))))
@@ -5124,7 +5124,7 @@ JSON, so it eagerly resolves at entry-point time."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'head "explicit-ws")
         (should (equal captured-git-root "/tmp/explicit-repo/"))))))
@@ -5143,7 +5143,7 @@ JSON, so it eagerly resolves at entry-point time."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-fork-worktree-workspace "fork-source")
         (should (equal captured-git-root "/tmp/fork-source-repo/"))))))
@@ -6525,6 +6525,20 @@ booted idle with no first message."
               "raw" "prefixed" "/tmp/repo/" "HEAD" "source-ws")))
     (should (string-match-p "\"fork_from\": \"source-ws\"" out))))
 
+(ert-deftest agent-repl-test-workspace-generation-prompt-omits-model-when-nil ()
+  "When MODEL is nil, no `model' line is emitted — the workspace falls
+back to `agent-repl-interactive-model'."
+  (let ((out (agent-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil nil)))
+    (should-not (string-match-p "\"model\"" out))))
+
+(ert-deftest agent-repl-test-workspace-generation-prompt-emits-model-when-set ()
+  "When MODEL is set, the prompt instructs the model to emit a matching
+`model' field so the spawned workspace boots under `--model MODEL'."
+  (let ((out (agent-repl--workspace-generation-prompt
+              "raw" "prefixed" "/tmp/repo/" "HEAD" nil "sonnet")))
+    (should (string-match-p "\"model\": \"sonnet\"" out))))
+
 (ert-deftest agent-repl-test-workspace-generation-prompt-tells-model-not-to-ask ()
   "The prompt instructs the model not to request permission — in headless
 `-p' mode there is no one to approve, and the spawn previously died
@@ -6666,6 +6680,38 @@ misattributes them to whichever workspace owns that project-dir — flipping
       (should (equal (file-name-as-directory captured-cwd)
                      (file-name-as-directory temporary-file-directory))))))
 
+(ert-deftest agent-repl-test-spawn-workspace-generation-threads-model-to-prompt ()
+  "The MODEL arg is forwarded to `agent-repl--workspace-generation-prompt'
+so the emitted JSON carries a `model' field for the spawned workspace."
+  (let ((captured-model :unset))
+    (cl-letf (((symbol-function 'agent-repl--workspace-generation-prompt)
+               (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                 (setq captured-model model)
+                 "PROMPT"))
+              ((symbol-function 'make-process) (lambda (&rest _) (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--spawn-workspace-generation
+       "raw" "prefixed" "/tmp/repo/" "HEAD" nil "sonnet")
+      (should (equal captured-model "sonnet")))))
+
+(ert-deftest agent-repl-test-spawn-workspace-generation-passes-nil-model-when-absent ()
+  "When MODEL is omitted, `agent-repl--workspace-generation-prompt' receives
+nil so no `model' field is emitted."
+  (let ((captured-model :unset))
+    (cl-letf (((symbol-function 'agent-repl--workspace-generation-prompt)
+               (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                 (setq captured-model model)
+                 "PROMPT"))
+              ((symbol-function 'make-process) (lambda (&rest _) (make-marker)))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--spawn-workspace-generation
+       "raw" "prefixed" "/tmp/repo/" "HEAD" nil)
+      (should (null captured-model)))))
+
 ;;;; ---- Tests: workspace-generation logging helpers ----
 
 (ert-deftest agent-repl-test-workspace-generation-id-returns-non-empty-hex ()
@@ -6803,7 +6849,7 @@ passing through."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-worktree-workspace 'head)
         (should (equal captured-base "HEAD"))))))
@@ -6821,7 +6867,7 @@ as a freshness gesture, but the new branch is rooted in local master."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-worktree-workspace 'master)
         (should (equal captured-base "master"))))))
@@ -6850,7 +6896,7 @@ to fail."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'master)
         (should-not master-path-called)
@@ -6874,7 +6920,7 @@ to fail."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'head)
         (should-not master-path-called)
@@ -6889,7 +6935,7 @@ to fail."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
                    (setq captured-fork-from fork-from))))
         (agent-repl-create-worktree-workspace 'head)
         (should (null captured-fork-from))))))
@@ -6926,7 +6972,7 @@ to fail."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'head "source-ws")
         (should (equal captured-git-root "/tmp/source-repo/"))))))
@@ -6944,7 +6990,7 @@ to fail."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-worktree-workspace 'head nil)
         (should (equal captured-git-root "/tmp/ambient-repo/"))))))
@@ -6959,7 +7005,7 @@ handed to the spawn helper as PREFIXED-PROMPT."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-worktree-workspace 'head)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -6976,7 +7022,7 @@ unprefixed — the prefix is reserved for the new ws session, not for naming."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-raw raw))))
         (agent-repl-create-worktree-workspace 'head)
         (should (equal captured-raw "do the thing"))
@@ -7204,7 +7250,7 @@ firing is visible in the log even if the inner command bails."
                 ((symbol-function 'read-string)
                  (lambda (&rest _) "do the thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-fork-worktree-workspace nil)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -9539,7 +9585,7 @@ edit the doom config."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-git-root agent-repl--doom-config-dir))
@@ -9554,7 +9600,7 @@ edit the doom config."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -9568,7 +9614,7 @@ spawned agent's first message) so the inner agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -9585,7 +9631,7 @@ for slug generation and should not get polluted with skill names like
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-raw "tweak the modeline"))
@@ -9599,7 +9645,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -9626,10 +9672,36 @@ starts a fresh agent session rather than resuming someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
                    (setq captured-fork-from fork-from))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (null captured-fork-from))))))
+
+(ert-deftest agent-repl-test-create-doom-oneshot-forwards-model-to-spawn ()
+  "A MODEL passed to the doom one-shot flows through to
+`agent-repl--spawn-workspace-generation' so the workspace boots under it."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl-create-doom-oneshot-workspace nil "sonnet")
+        (should (equal captured-model "sonnet"))))))
+
+(ert-deftest agent-repl-test-create-doom-oneshot-passes-nil-model-by-default ()
+  "The plain doom one-shot passes no model, so spawn receives nil and the
+workspace falls back to `agent-repl-interactive-model'."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "tweak the modeline"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl-create-doom-oneshot-workspace)
+        (should (null captured-model))))))
 
 (ert-deftest agent-repl-test-oneshot-merge-suffix-mentions-stop-on-ambiguity ()
   "The merge suffix tells the spawned agent to STOP (not push on) when it
@@ -9655,7 +9727,7 @@ top of in-flight doom-config work."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-base "HEAD"))))))
@@ -9673,7 +9745,7 @@ changes from `master' to HEAD."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-git-root agent-repl--doom-config-dir))))))
@@ -9687,7 +9759,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (string-match-p "/workspace-merge" captured-prefixed))
@@ -9703,7 +9775,7 @@ generation — same constraint as the master variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-raw "tweak the modeline"))
@@ -9732,7 +9804,7 @@ and existing call sites that pass no arguments."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "tweak the modeline"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -10651,7 +10723,7 @@ workspace's project, so SPC j O always dispatches into that repo."
                 ((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-git-root
@@ -10669,7 +10741,7 @@ workspace's project, so SPC j O always dispatches into that repo."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from)
+                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
                    (setq captured-base base))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-base "master"))))))
@@ -10684,7 +10756,7 @@ the spawned agent knows to invoke
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (string-match-p
@@ -10705,7 +10777,7 @@ must mention `/workspace-merge', and it must appear textually AFTER the
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (let ((pr-pos (string-match
@@ -10725,7 +10797,7 @@ commands like `/create-or-update-pr', which would derail the slug."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from)
+                 (lambda (raw _prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-raw raw))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (equal captured-raw "add caching to thing"))
@@ -10740,7 +10812,7 @@ prefix so the spawned agent runs autonomously without waiting."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
@@ -10769,10 +10841,36 @@ someone else's."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "add caching to thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from)
+                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
                    (setq captured-fork-from fork-from))))
         (agent-repl-create-explanation-engine-oneshot-workspace)
         (should (null captured-fork-from))))))
+
+(ert-deftest agent-repl-test-create-explanation-engine-oneshot-forwards-model-to-spawn ()
+  "A MODEL passed to the explanation-engine one-shot flows through to
+`agent-repl--spawn-workspace-generation' so the workspace boots under it."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl-create-explanation-engine-oneshot-workspace "opus")
+        (should (equal captured-model "opus"))))))
+
+(ert-deftest agent-repl-test-create-explanation-engine-oneshot-passes-nil-model-by-default ()
+  "The plain explanation-engine one-shot passes no model, so spawn receives
+nil and the workspace falls back to `agent-repl-interactive-model'."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl-create-explanation-engine-oneshot-workspace)
+        (should (null captured-model))))))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-command-has-expected-flags ()
   "The PR command string must match exactly what the user specified for
@@ -10948,7 +11046,7 @@ variant inherits the validation — no caller can accidentally skip it."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from)
+                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
                    (setq captured-git-root git-root))))
         (agent-repl--create-pinned-oneshot-workspace
          "/tmp/some-pinned-repo/" 'master "SUFFIX" "test-tag")
@@ -10964,7 +11062,7 @@ workspace-name slug clean across every one-shot variant."
       (cl-letf (((symbol-function 'read-from-minibuffer)
                  (lambda (&rest _) "do a thing"))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw prefixed _git-root _base _fork-from)
+                 (lambda (raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-raw raw)
                    (setq captured-prefixed prefixed))))
         (agent-repl--create-pinned-oneshot-workspace
@@ -10972,6 +11070,114 @@ workspace-name slug clean across every one-shot variant."
         (should-not (string-match-p "::SENTINEL-SUFFIX::" captured-raw))
         (should (string-match-p "::SENTINEL-SUFFIX::"
                                 captured-prefixed))))))
+
+(ert-deftest agent-repl-test-create-pinned-oneshot-forwards-model-to-spawn ()
+  "MODEL is forwarded to `agent-repl--spawn-workspace-generation' as its
+6th argument so the generated workspace boots under `--model MODEL'."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag" "sonnet")
+        (should (equal captured-model "sonnet"))))))
+
+(ert-deftest agent-repl-test-create-pinned-oneshot-passes-nil-model-when-absent ()
+  "When no MODEL is supplied, spawn receives nil so the workspace falls
+back to `agent-repl-interactive-model' — same as the plain one-shot."
+  (agent-repl-test--with-clean-state
+    (let ((captured-model :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "do a thing"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw _prefixed _git-root _base _fork-from &optional model)
+                   (setq captured-model model))))
+        (agent-repl--create-pinned-oneshot-workspace
+         "/tmp/repo/" 'master "SUFFIX" "test-tag")
+        (should (null captured-model))))))
+
+;;;; ---- Tests: agent-repl--read-oneshot-model ----
+
+(ert-deftest agent-repl-test-read-oneshot-model-returns-entry ()
+  "The reader returns the alias typed at the minibuffer verbatim."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "sonnet")))
+    (should (equal (agent-repl--read-oneshot-model) "sonnet"))))
+
+(ert-deftest agent-repl-test-read-oneshot-model-trims-whitespace ()
+  "Surrounding whitespace is stripped from the typed alias."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "  opus  ")))
+    (should (equal (agent-repl--read-oneshot-model) "opus"))))
+
+(ert-deftest agent-repl-test-read-oneshot-model-rejects-empty ()
+  "An empty entry signals `user-error' — the model-picking variants exist
+precisely to specify a model, so a blank answer is a mistake."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "")))
+    (should-error (agent-repl--read-oneshot-model) :type 'user-error)))
+
+(ert-deftest agent-repl-test-read-oneshot-model-rejects-whitespace-only ()
+  "A whitespace-only entry signals `user-error' after trimming."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "   ")))
+    (should-error (agent-repl--read-oneshot-model) :type 'user-error)))
+
+(ert-deftest agent-repl-test-read-oneshot-model-offers-candidates ()
+  "The reader seeds `completing-read' with `agent-repl-oneshot-model-candidates'
+so known aliases complete."
+  (let ((captured-collection :unset)
+        (agent-repl-oneshot-model-candidates '("opus" "sonnet")))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (setq captured-collection collection)
+                 "opus")))
+      (agent-repl--read-oneshot-model)
+      (should (equal captured-collection '("opus" "sonnet"))))))
+
+;;;; ---- Tests: model-picking one-shot commands ----
+
+(ert-deftest agent-repl-test-doom-oneshot-with-model-reads-then-delegates ()
+  "The `SPC j C-o' command reads a model, then dispatches the doom one-shot
+with that model as the second arg (BASE left nil to default to master)."
+  (let ((captured-base :unset)
+        (captured-model :unset))
+    (cl-letf (((symbol-function 'agent-repl--read-oneshot-model)
+               (lambda () "sonnet"))
+              ((symbol-function 'agent-repl-create-doom-oneshot-workspace)
+               (lambda (&optional base model)
+                 (setq captured-base base)
+                 (setq captured-model model))))
+      (agent-repl-create-doom-oneshot-workspace-with-model)
+      (should (null captured-base))
+      (should (equal captured-model "sonnet")))))
+
+(ert-deftest agent-repl-test-explanation-engine-oneshot-with-model-reads-then-delegates ()
+  "The `SPC j C-O' command reads a model, then dispatches the
+explanation-engine one-shot with that model."
+  (let ((captured-model :unset))
+    (cl-letf (((symbol-function 'agent-repl--read-oneshot-model)
+               (lambda () "opus"))
+              ((symbol-function 'agent-repl-create-explanation-engine-oneshot-workspace)
+               (lambda (&optional model)
+                 (setq captured-model model))))
+      (agent-repl-create-explanation-engine-oneshot-workspace-with-model)
+      (should (equal captured-model "opus")))))
+
+(ert-deftest agent-repl-test-doom-oneshot-with-model-aborts-on-empty-model ()
+  "When the model reader aborts (empty entry -> `user-error'), the doom
+one-shot flow is never dispatched."
+  (let ((delegated nil))
+    (cl-letf (((symbol-function 'agent-repl--read-oneshot-model)
+               (lambda () (user-error "A model alias is required")))
+              ((symbol-function 'agent-repl-create-doom-oneshot-workspace)
+               (lambda (&rest _) (setq delegated t))))
+      (should-error (agent-repl-create-doom-oneshot-workspace-with-model)
+                    :type 'user-error)
+      (should-not delegated))))
 
 ;;;; ---- Tests: one-shot prompt C-RET no-action suffix ----
 
@@ -11067,7 +11273,7 @@ to the spawned agent."
                    (concat "do a thing"
                            agent-repl--oneshot-no-action-suffix)))
                 ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl--create-pinned-oneshot-workspace
          "/tmp/repo/" 'master "SUFFIX" "test-tag")

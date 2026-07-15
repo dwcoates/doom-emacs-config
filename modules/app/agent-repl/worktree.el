@@ -797,15 +797,15 @@ that matches the flavor's pinned dir.  nil means no oneshot has been
 created for the flavor in this Emacs session.
 
 Consumed by `agent-repl-amend-doom-oneshot-prompt' /
-`agent-repl-amend-explanation-engine-oneshot-prompt' (`SPC j C-o' /
-`SPC j C-O') to route an amended prompt either to the existing
+`agent-repl-amend-explanation-engine-oneshot-prompt' (`SPC j M-o' /
+`SPC j M-O') to route an amended prompt either to the existing
 workspace (when a real dirname is present) or onto
 `agent-repl--oneshot-amended-prompts' (when still `:generating').")
 
 (defvar agent-repl--oneshot-amended-prompts nil
   "Plist mapping oneshot flavor (`:doom', `:explanation-engine') to a
-FIFO list of amended-oneshot prompts that arrived via `SPC j C-o' /
-`SPC j C-O' BEFORE the corresponding workspace materialized.  Each
+FIFO list of amended-oneshot prompts that arrived via `SPC j M-o' /
+`SPC j M-O' BEFORE the corresponding workspace materialized.  Each
 flavor's list is drained by `agent-repl--oneshot-track-workspace' into
 the new workspace's `:pending-prompts' so they are delivered in the
 same burst as the original preemptive prompt.")
@@ -831,7 +831,7 @@ headless `claude -p' workspace-generation spawn exits non-zero).
 This backstop covers the third case: the spawn was somehow lost
 without either path firing (process killed externally, watcher
 missed the JSON drop, etc.) — without the backstop the flavor would
-stay `:generating' forever and `SPC j C-o' / `SPC j C-O' would queue
+stay `:generating' forever and `SPC j M-o' / `SPC j M-O' would queue
 amended prompts onto a workspace that will never materialize.
 Defaults to 600s (10min); set to nil to disable the backstop."
   :type '(choice (const :tag "Disabled" nil) integer)
@@ -869,7 +869,7 @@ later workspace for the same flavor."
   "Mark FLAVOR as in-flight: clear any queued amended prompts and set
 `agent-repl--oneshot-last-ws[FLAVOR]' to `:generating'.  Called at the
 start of `agent-repl--create-pinned-oneshot-workspace' so a subsequent
-`SPC j C-o' / `SPC j C-O' enqueues onto the new generation rather than
+`SPC j M-o' / `SPC j M-O' enqueues onto the new generation rather than
 the previous one's workspace.
 
 Schedules a `agent-repl-oneshot-generation-backstop-seconds' timer
@@ -994,6 +994,15 @@ Explanation-engine flavor counterpart of
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-oneshot-model-candidates
+  '("opus" "sonnet" "haiku" "fable")
+  "Model aliases offered for completion by `agent-repl--read-oneshot-model'.
+Used by the `SPC j C-o' / `SPC j C-O' model-picking one-shot variants to
+seed `completing-read'.  Completion is non-strict, so any alias the
+backend accepts may be typed even when absent from this list."
+  :type '(repeat string)
+  :group 'agent-repl)
+
 (defcustom agent-repl-workspace-generation-extra-args
   '("--permission-mode" "bypassPermissions")
   "Extra arguments appended to the headless `claude -p' invocation.
@@ -1035,7 +1044,7 @@ When CAP is nil, returns S unchanged.  S may be nil; treated as \"\"."
         (concat (substring s 0 cap) "...[truncated]")
       s)))
 
-(defun agent-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from)
+(defun agent-repl--workspace-generation-prompt (raw-prompt prefixed-prompt git-root base-commit fork-from &optional model)
   "Build the prompt sent to headless claude for workspace generation.
 RAW-PROMPT is the user's preemptive prompt — used purely as the source
 material for the slugified workspace name.
@@ -1044,7 +1053,13 @@ new workspace's first message; emitted verbatim into the JSON `prompt'
 field.
 GIT-ROOT, BASE-COMMIT, FORK-FROM are the deterministic values the
 caller already knows; the model is told to copy them through unchanged
-rather than re-derive them."
+rather than re-derive them.
+MODEL, when non-nil, is the per-workspace agent model alias the spawned
+workspace's initial session should boot under; it is emitted as a
+deterministic `model' field on the create entry so
+`agent-repl--handle-create-command' threads it through as `--model'.
+When nil, no `model' field is emitted and the workspace falls back to
+`agent-repl-interactive-model'."
   (concat
    "Use the /workspace-generation skill to create a workspace (or, rarely, multiple"
    " workspaces) for the provided user prompt..\n"
@@ -1061,6 +1076,8 @@ rather than re-derive them."
    "  \"prompt\": the VERBATIM user-prompt string above (everything between the second <<< and >>>)\n"
    (format "  \"git_root\": %S\n" git-root)
    (format "  \"base_commit\": %S\n" base-commit)
+   (when model
+     (format "  \"model\": %S\n" model))
    (when fork-from
      (format "  \"fork_from\": %S\n" fork-from))
    "\n"
@@ -1095,7 +1112,7 @@ On non-zero/non-numeric STATUS:
     or explanation-engine dir), eagerly clears that flavor's
     `:generating' sentinel + amended-prompts queue via
     `agent-repl--oneshot-clear-flavor-on-failure' so subsequent
-    `SPC j C-o' / `SPC j C-O' presses do not queue onto a workspace
+    `SPC j M-o' / `SPC j M-O' presses do not queue onto a workspace
     that will never materialize."
   (let* ((trimmed (string-trim (or raw-out "")))
          (snippet (agent-repl--workspace-generation-truncate
@@ -1128,10 +1145,16 @@ stays unit-testable without a real process."
             (agent-repl--workspace-generation-finalize gen-id status event raw-out git-root))
         (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
 
-(defun agent-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from)
+(defun agent-repl--spawn-workspace-generation (raw-prompt prefixed-prompt git-root base-commit fork-from &optional model)
   "Async-spawn `claude -p --model haiku' to generate a workspace command file.
-RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM are
+RAW-PROMPT, PREFIXED-PROMPT, GIT-ROOT, BASE-COMMIT, FORK-FROM, MODEL are
 threaded through to `agent-repl--workspace-generation-prompt'.
+
+MODEL is the per-workspace agent model alias the spawned workspace's
+initial session should boot under (distinct from
+`agent-repl-workspace-generation-model', which is the model that RUNS
+this headless name-generation pass).  When nil, no `model' field is
+emitted and the workspace falls back to `agent-repl-interactive-model'.
 
 A short correlation ID (GEN-ID) is generated per spawn and embedded in
 every log line — spawn-time summary, prompt-body dump, sentinel exit,
@@ -1151,13 +1174,13 @@ asynchronously."
                agent-repl-workspace-generation-model
                agent-repl-workspace-generation-extra-args))
          (proc-input (agent-repl--workspace-generation-prompt
-                      raw-prompt prefixed-prompt git-root base-commit fork-from))
+                      raw-prompt prefixed-prompt git-root base-commit fork-from model))
          (prompt-snippet (agent-repl--workspace-generation-truncate
                           proc-input
                           agent-repl-workspace-generation-prompt-log-cap)))
     (agent-repl--log nil
-                      "spawn-workspace-generation[%s]: git-root=%s base-commit=%s fork-from=%s prompt-len=%d"
-                      gen-id git-root base-commit (or fork-from "nil") (length proc-input))
+                      "spawn-workspace-generation[%s]: git-root=%s base-commit=%s fork-from=%s model=%s prompt-len=%d"
+                      gen-id git-root base-commit (or fork-from "nil") (or model "nil") (length proc-input))
     (agent-repl--log nil
                       "spawn-workspace-generation[%s]: prompt=%S"
                       gen-id prompt-snippet)
@@ -1283,8 +1306,8 @@ session.  When nil, the session falls back to
       (agent-repl--ws-put ws :pending-initial-buffers t)
       (agent-repl--enqueue-preemptive-prompt ws preemptive-prompt)
       ;; If this finalize matches an in-flight oneshot flavor, record the
-      ;; workspace name and append any amended prompts queued by `SPC j C-o'
-      ;; / `SPC j C-O' onto `:pending-prompts'.  Must run AFTER
+      ;; workspace name and append any amended prompts queued by `SPC j M-o'
+      ;; / `SPC j M-O' onto `:pending-prompts'.  Must run AFTER
       ;; `--enqueue-preemptive-prompt' (which overwrites `:pending-prompts'
       ;; with the lone preemptive prompt) so the amended prompts ride after
       ;; it rather than getting clobbered.
@@ -1669,7 +1692,7 @@ Inherits `minibuffer-local-map' so `RET' submits the typed text
 unchanged; `C-RET' submits it with `agent-repl--oneshot-no-action-suffix'
 appended via `agent-repl--oneshot-prompt-submit-no-action'.")
 
-(defun agent-repl--create-pinned-oneshot-workspace (git-root base suffix tag)
+(defun agent-repl--create-pinned-oneshot-workspace (git-root base suffix tag &optional model)
   "Internal helper for one-shot workspace creators pinned to GIT-ROOT.
 Shared by every `agent-repl-create-<repo>-oneshot-workspace' command —
 do not duplicate this body in a new one-shot, dispatch through here.
@@ -1688,6 +1711,13 @@ the log line, and the user-facing 'Generating ... workspace name'
 message — keeps debugging output distinguishable across one-shot
 variants without diverging the underlying flow.
 
+MODEL, when non-nil, is the per-workspace agent model alias forwarded to
+`agent-repl--spawn-workspace-generation' so the generated workspace's
+initial session boots under `--model MODEL' (the `SPC j C-o' / `SPC j C-O'
+model-picking variants supply it).  When nil, the workspace falls back to
+`agent-repl-interactive-model' exactly as the plain `SPC j o' / `SPC j O'
+variants do.
+
 The suffix is appended to the PREFIXED prompt but NOT to the raw
 description used for slug generation, so the workspace name stays clean.
 The headless `claude' that runs `/workspace-generation' itself MUST NOT
@@ -1705,9 +1735,9 @@ investigates and reports without making changes."
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let* ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt suffix)))
-      (agent-repl--log nil "%s: base=%s git-root=%s base-commit=%s"
-                        tag base git-root base-commit)
-      ;; Reset tracking BEFORE the spawn so any `SPC j C-o' / `SPC j C-O'
+      (agent-repl--log nil "%s: base=%s git-root=%s base-commit=%s model=%s"
+                        tag base git-root base-commit (or model "nil"))
+      ;; Reset tracking BEFORE the spawn so any `SPC j M-o' / `SPC j M-O'
       ;; pressed while generation is in-flight queues onto this oneshot
       ;; rather than the previous one's workspace.
       (agent-repl--oneshot-reset-flavor
@@ -1715,9 +1745,9 @@ investigates and reports without making changes."
       (agent-repl--info nil "Generating %s workspace name via `claude -p --model %s'..."
                         tag agent-repl-workspace-generation-model)
       (agent-repl--spawn-workspace-generation
-       raw-prompt prefixed-prompt git-root base-commit nil))))
+       raw-prompt prefixed-prompt git-root base-commit nil model))))
 
-(defun agent-repl-create-doom-oneshot-workspace (&optional base)
+(defun agent-repl-create-doom-oneshot-workspace (&optional base model)
   "Create a one-shot worktree workspace rooted in `~/.config/doom'.
 Equivalent of `SPC TAB N' but pinned to the doom-config repo regardless
 of the calling workspace, and with an instruction appended to the
@@ -1733,13 +1763,19 @@ symbol key in `agent-repl--worktree-base-commits':
                        (whatever branch is checked out at
                        `~/.config/doom').  Use when iterating on a
                        doom-config branch and you want the one-shot to
-                       build on top of in-flight work."
+                       build on top of in-flight work.
+
+MODEL, when non-nil, is the per-workspace agent model alias the spawned
+workspace's initial session boots under (supplied by the `SPC j C-o'
+model-picking variant `agent-repl-create-doom-oneshot-workspace-with-model').
+When nil, the workspace falls back to `agent-repl-interactive-model'."
   (interactive)
   (agent-repl--create-pinned-oneshot-workspace
    agent-repl--doom-config-dir
    (or base 'master)
    agent-repl--oneshot-merge-suffix
-   "doom-oneshot"))
+   "doom-oneshot"
+   model))
 
 (defun agent-repl-create-doom-oneshot-workspace-from-current-branch ()
   "Create a one-shot doom-config worktree branched off HEAD.
@@ -1752,7 +1788,7 @@ regardless of the calling workspace, and the spawned agent receives the
   (interactive)
   (agent-repl-create-doom-oneshot-workspace 'head))
 
-(defun agent-repl-create-explanation-engine-oneshot-workspace ()
+(defun agent-repl-create-explanation-engine-oneshot-workspace (&optional model)
   "Create a one-shot worktree workspace rooted in the explanation-engine
 repo (`~/workspace/ChessCom/explanation-engine').
 
@@ -1766,13 +1802,57 @@ deviations:
      branch and queue it for merge) instead of `/workspace-merge' (host
      cherry-pick + reload).  The cherry-pick/reload procedure makes
      sense for doom-config but not for a service repo where the change
-     should land via the normal PR flow."
+     should land via the normal PR flow.
+
+MODEL, when non-nil, is the per-workspace agent model alias the spawned
+workspace's initial session boots under (supplied by the `SPC j C-O'
+model-picking variant
+`agent-repl-create-explanation-engine-oneshot-workspace-with-model').
+When nil, the workspace falls back to `agent-repl-interactive-model'."
   (interactive)
   (agent-repl--create-pinned-oneshot-workspace
    agent-repl--explanation-engine-dir
    'master
    agent-repl--oneshot-create-pr-suffix
-   "explanation-engine-oneshot"))
+   "explanation-engine-oneshot"
+   model))
+
+(defun agent-repl--read-oneshot-model ()
+  "Read and return a per-workspace agent model alias from the minibuffer.
+Completes against `agent-repl-oneshot-model-candidates' but does NOT
+require a match, so any alias the backend accepts may be typed.  Signals
+`user-error' when the entry is empty or whitespace — the model-picking
+`SPC j C-o' / `SPC j C-O' variants exist precisely to specify a model,
+so a blank answer is a mistake rather than a request for the default."
+  (let ((model (string-trim
+                (completing-read "One-shot agent model: "
+                                 agent-repl-oneshot-model-candidates
+                                 nil nil))))
+    (when (string-empty-p model)
+      (user-error "A model alias is required"))
+    model))
+
+(defun agent-repl-create-doom-oneshot-workspace-with-model ()
+  "Prompt for an agent model, then create a doom one-shot booted under it.
+Model-picking counterpart of `agent-repl-create-doom-oneshot-workspace'
+bound to `SPC j C-o': reads the model first via
+`agent-repl--read-oneshot-model', then dispatches the ordinary doom
+one-shot flow with that model threaded through so the generated
+workspace's initial session runs under `--model MODEL'."
+  (interactive)
+  (agent-repl-create-doom-oneshot-workspace nil (agent-repl--read-oneshot-model)))
+
+(defun agent-repl-create-explanation-engine-oneshot-workspace-with-model ()
+  "Prompt for an agent model, then create an explanation-engine one-shot under it.
+Model-picking counterpart of
+`agent-repl-create-explanation-engine-oneshot-workspace' bound to
+`SPC j C-O': reads the model first via `agent-repl--read-oneshot-model',
+then dispatches the ordinary explanation-engine one-shot flow with that
+model threaded through so the generated workspace's initial session runs
+under `--model MODEL'."
+  (interactive)
+  (agent-repl-create-explanation-engine-oneshot-workspace
+   (agent-repl--read-oneshot-model)))
 
 (defun agent-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
   "Create a new worktree workspace branched from local `master'.

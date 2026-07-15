@@ -838,8 +838,10 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Enqueue input as deferred prompt"        "RET" #'agent-repl-queue-deferred-prompt
        :desc "One-shot doom edit (from master)"        "o" #'agent-repl-create-doom-oneshot-workspace
        :desc "One-shot explanation-engine edit (PR on success)" "O" #'agent-repl-create-explanation-engine-oneshot-workspace
-       :desc "Amend last doom one-shot (send/queue)"   "C-o" #'agent-repl-amend-doom-oneshot-prompt
-       :desc "Amend last explanation-engine one-shot (send/queue)" "C-S-o" #'agent-repl-amend-explanation-engine-oneshot-prompt
+       :desc "One-shot doom edit, pick model (from master)"    "C-o" #'agent-repl-create-doom-oneshot-workspace-with-model
+       :desc "One-shot explanation-engine edit, pick model (PR on success)" "C-S-o" #'agent-repl-create-explanation-engine-oneshot-workspace-with-model
+       :desc "Amend last doom one-shot (send/queue)"   "M-o" #'agent-repl-amend-doom-oneshot-prompt
+       :desc "Amend last explanation-engine one-shot (send/queue)" "M-S-o" #'agent-repl-amend-explanation-engine-oneshot-prompt
        :desc "Kill workspace"           "d" #'agent-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'agent-repl-rebase-onto-origin-master
