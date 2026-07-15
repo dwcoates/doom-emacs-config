@@ -856,6 +856,12 @@ function PermissionPrompt(item: PermissionItem, selections?: QuestionSelections)
  * replaces the pick, multiSelect toggles), a submit enabled once every
  * question has a selection, and a decline path. Selection state lives
  * in the RENDERER, not the DOM, so it survives per-delta re-renders.
+ *
+ * Question text and option labels render inline markdown (via `inline`)
+ * so backtick-wrapped code and other inline markup read the same as they
+ * do in message bubbles; the raw label still keys selection and answers,
+ * so this is display-only. The option description stays plain-escaped
+ * because it lives in a `title` tooltip, which cannot carry markup.
  */
 function QuestionPrompt(
   item: PermissionItem,
@@ -874,7 +880,7 @@ function QuestionPrompt(
         <div class="perm-head">Question <span class="badge ${
           item.resolution.decision === "allow" ? "ok" : "err"
         }">${label}</span></div>
-        ${questions.map((q) => `<div class="q-text">${escapeHtml(q.question)}</div>`).join("")}
+        ${questions.map((q) => `<div class="q-text">${inline(escapeHtml(q.question))}</div>`).join("")}
       </div>`;
   }
   const rid = escapeHtml(item.requestId);
@@ -885,13 +891,13 @@ function QuestionPrompt(
         (o, oi) =>
           `<button class="q-opt${picked?.has(o.label) ? " selected" : ""}" data-q-req="${rid}" data-q-idx="${qi}" data-q-opt="${oi}" title="${escapeHtml(
             o.description,
-          )}">${escapeHtml(o.label)}</button>`,
+          )}">${inline(escapeHtml(o.label))}</button>`,
       )
       .join("");
     return `
       <div class="q-block">
         <span class="badge q-chip">${escapeHtml(q.header)}</span>
-        <div class="q-text">${escapeHtml(q.question)}${
+        <div class="q-text">${inline(escapeHtml(q.question))}${
           q.multiSelect ? ` <span class="q-multi">(select all that apply)</span>` : ""
         }</div>
         <div class="q-opts">${opts}</div>
