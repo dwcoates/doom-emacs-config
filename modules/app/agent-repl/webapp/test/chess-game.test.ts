@@ -69,9 +69,13 @@ import {
   type ChessWidgetHandle,
   type ChessWidgetMountOpts,
   type GameContainer,
+  CHESS_NAV_HOOK,
+  type ChessStepDirection,
   chessGameFileUrl,
   chessGameKind,
+  installChessNavHook,
   splitChessGameSegments,
+  stepActiveChessGame,
   configureChessGames,
   hydrateChessGames,
   parseSessionPointer,
@@ -125,14 +129,20 @@ describe("chessGameFileUrl", () => {
 
 interface FakeContainer extends GameContainer {
   dataset: { gameFile?: string; chessHydrated?: string };
+  click(): void;
 }
 
 function fakeContainer(path: string, feedKey = "k1"): FakeContainer {
+  const listeners: Array<() => void> = [];
   return {
     isConnected: true,
     innerHTML: "spinner",
     dataset: { gameFile: path },
     closest: () => ({ getAttribute: () => feedKey }),
+    addEventListener: (_type: string, listener: () => void) => {
+      listeners.push(listener);
+    },
+    click: () => listeners.forEach((l) => l()),
   };
 }
 
@@ -366,5 +376,92 @@ describe("splitChessGameSegments", () => {
     expect(splitChessGameSegments("done\n---> agent-repl-che", false)).toEqual([
       { text: "done\n---> agent-repl-che" },
     ]);
+  });
+});
+
+
+describe("out-of-band navigation", () => {
+  afterEach(() => configureChessGames(null));
+
+  function arrangeNav(withStep: boolean): string[] {
+    const steps: string[] = [];
+    configureChessGames({
+      base: "http://d:1",
+      session: () => "s_1",
+      loadMount: async () => () => ({
+        unmount: () => {},
+        serializeState: () => null,
+        ...(withStep ? { step: (d: ChessStepDirection) => steps.push(d) } : {}),
+      }),
+      fetchText: async () => "1. e4 *",
+    });
+    return steps;
+  }
+
+  it("steps the last-clicked board through the window hook", async () => {
+    // Arrange
+    const steps = arrangeNav(true);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(el));
+    await flush();
+    el.click();
+    const target: Record<string, unknown> = {};
+    installChessNavHook(target);
+    const hook = target[CHESS_NAV_HOOK] as (d: string) => boolean;
+    // Act + Assert
+    expect(hook("forward")).toBe(true);
+    expect(hook("back")).toBe(true);
+    expect(steps).toEqual(["forward", "back"]);
+  });
+
+  it("does nothing before any board was clicked", async () => {
+    // Arrange
+    const steps = arrangeNav(true);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(el));
+    await flush();
+    // Act + Assert
+    expect(stepActiveChessGame("forward")).toBe(false);
+    expect(steps).toEqual([]);
+  });
+
+  it("reports false when the widget build predates the step extension", async () => {
+    // Arrange
+    arrangeNav(false);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(el));
+    await flush();
+    el.click();
+    // Act + Assert
+    expect(stepActiveChessGame("forward")).toBe(false);
+  });
+
+  it("keeps stepping after a re-render swaps the container", async () => {
+    // Arrange — click the first container, then simulate the innerHTML
+    // rewrite: release it and hydrate a FRESH container (same item).
+    const steps = arrangeNav(true);
+    const first = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(first));
+    await flush();
+    first.click();
+    releaseChessGames(rootOf(first));
+    const second = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(second));
+    await flush();
+    // Act + Assert
+    expect(stepActiveChessGame("back")).toBe(true);
+    expect(steps).toEqual(["back"]);
+  });
+
+  it("stops stepping a released board", async () => {
+    // Arrange
+    arrangeNav(true);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    hydrateChessGames(rootOf(el));
+    await flush();
+    el.click();
+    releaseChessGames(rootOf(el));
+    // Act + Assert
+    expect(stepActiveChessGame("forward")).toBe(false);
   });
 });
