@@ -5181,6 +5181,84 @@ receives nil so the session uses the interactive-model default."
         (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
         (should (null captured-model))))))
 
+;;;; ---- Tests: eager-open of a generated workspace's REPL ----
+
+(ert-deftest agent-repl-test-eager-open-panels-drains-target-under-guard ()
+  "eager-open-panels switches to WS and runs the three panel drains for it,
+with `agent-repl--eager-open-in-progress' bound while they run so the
+activation-reactive hooks stay suppressed."
+  (agent-repl-test--with-clean-state
+    (let ((switched nil) (drains nil) (guard-seen nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller"))
+                ((symbol-function 'agent-repl--restore-focus) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (push ws switched)))
+                ((symbol-function 'agent-repl--drain-pending-magit)
+                 (lambda (ws)
+                   (push (cons :magit ws) drains)
+                   (push agent-repl--eager-open-in-progress guard-seen)))
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers)
+                 (lambda (ws) (push (cons :init ws) drains)))
+                ((symbol-function 'agent-repl--drain-pending-show-panels)
+                 (lambda (ws) (push (cons :show ws) drains))))
+        (agent-repl--eager-open-panels "gen-ws")
+        (should (equal switched '("gen-ws")))
+        (should (equal (reverse drains)
+                       '((:magit . "gen-ws") (:init . "gen-ws") (:show . "gen-ws"))))
+        (should (equal guard-seen '(t)))))))
+
+(ert-deftest agent-repl-test-eager-open-panels-clears-guard-after-return ()
+  "eager-open-panels leaves `agent-repl--eager-open-in-progress' nil once it
+returns, so a real later switch is not suppressed."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller"))
+              ((symbol-function 'agent-repl--restore-focus) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--ws-switch) #'ignore)
+              ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+              ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+              ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore))
+      (agent-repl--eager-open-panels "gen-ws")
+      (should-not agent-repl--eager-open-in-progress))))
+
+(ert-deftest agent-repl-test-eager-open-panels-restores-focus-on-drain-error ()
+  "eager-open-panels restores the caller's focus even when a drain signals —
+the `agent-repl--with-preserved-focus' unwind contract."
+  (agent-repl-test--with-clean-state
+    (let ((restored nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller"))
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (&rest _) (setq restored t)))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-magit)
+                 (lambda (&rest _) (error "boom")))
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore))
+        (should-error (agent-repl--eager-open-panels "gen-ws"))
+        (should restored)
+        (should-not agent-repl--eager-open-in-progress)))))
+
+(ert-deftest agent-repl-test-worktree-generation-eager-open-callback-uses-dirname ()
+  "The generation eager-open callback opens panels for the DIRNAME
+workspace and ignores PATH."
+  (agent-repl-test--with-clean-state
+    (let ((opened :unset))
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (ws) (setq opened ws))))
+        (agent-repl--worktree-generation-eager-open-callback "/tmp/path" "gen-ws")
+        (should (equal opened "gen-ws"))))))
+
+(ert-deftest agent-repl-test-create-worktree-from-command-passes-eager-open-callback ()
+  "The generation path passes the eager-open callback (not nil) so a
+generated workspace opens its REPL into its own perspective on creation
+rather than only on first switch."
+  (agent-repl-test--with-clean-state
+    (let ((captured-cb :unset))
+      (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
+                 (lambda (_name _fork _prompt cb &rest _) (setq captured-cb cb))))
+        (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
+        (should (eq captured-cb
+                    #'agent-repl--worktree-generation-eager-open-callback))))))
+
 (ert-deftest agent-repl-test-finalize-worktree-workspace-stores-source-ws-dir ()
   "Finalize persists :source-ws-dir on the new workspace's plist."
   (agent-repl-test--with-clean-state

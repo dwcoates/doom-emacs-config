@@ -488,8 +488,16 @@ Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (agent-repl--log (agent-repl--ws-current-name) "after-persp-activated: entry cache=%S"
                     (or (agent-repl--ws-names-cache) "(unbound)"))
-  (let ((ws (agent-repl--ws-current-name)))
-    (run-at-time 0 nil #'agent-repl--on-workspace-switch ws)))
+  ;; Suppressed during `agent-repl--eager-open-panels': its transient
+  ;; switch-in/build/switch-back would otherwise schedule a deferred
+  ;; `--on-workspace-switch' for the background workspace that fires after
+  ;; focus has returned to the caller and reclaims the caller's frame with
+  ;; the background workspace's panels (the eviction bug `--gui-boot' documents).
+  (if agent-repl--eager-open-in-progress
+      (agent-repl--log (agent-repl--ws-current-name)
+                        "after-persp-activated: suppressed (eager-open in progress)")
+    (let ((ws (agent-repl--ws-current-name)))
+      (run-at-time 0 nil #'agent-repl--on-workspace-switch ws))))
 
 (when (modulep! :ui workspaces)
   (agent-repl--ws-add-before-deactivate-hook #'agent-repl--before-persp-deactivate)

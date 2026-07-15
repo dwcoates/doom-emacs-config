@@ -23,6 +23,30 @@ Cancelled and reset whenever this file is re-evaluated.")
 
 (agent-repl--cancel-all-timers)
 
+(defvar agent-repl--eager-open-in-progress nil
+  "Non-nil while `agent-repl--eager-open-panels' transiently activates a
+background workspace to pre-build its REPL panels at generation time.
+
+The two `persp-activated-functions' reactions that would misfire on the
+eager-open switch-in / build-panels / switch-back consult this flag and
+no-op while it is set:
+
+- `agent-repl--after-persp-activated' must NOT schedule the async
+  `agent-repl--on-workspace-switch' — that deferred pass would fire for
+  the now-background workspace after focus has returned to the caller and
+  reclaim the caller's frame with the background workspace's panels (the
+  eviction bug `agent-repl--gui-boot' documents).  The panels are built
+  directly by `agent-repl--eager-open-panels' via the same drains that
+  pass would run, so suppressing it loses no work.
+- `agent-repl--record-workspace-history' must NOT record the transient
+  visit — otherwise `SPC b p' would treat the just-generated workspace as
+  the caller's previous workspace and stamp a phantom `:last-viewed-at'.
+
+The drawer's activation reactions are deliberately LEFT to run: they set
+the background workspace's own drawer state (cursor on its entry, drawer
+visibility) which persp-mode then saves into that workspace's window
+configuration, so its drawer is already correct on the first real switch.")
+
 (defgroup agent-repl nil
   "Claude Code REPL integration for Doom Emacs."
   :group 'tools
