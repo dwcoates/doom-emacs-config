@@ -1131,3 +1131,25 @@ pre {
   min-height: 0;
   padding: 0.4rem;
 }
+
+/* Chess-game widget containers (marker channel, chess-game.ts): the
+   embeddable board reads its theme through --chess-widget-* custom
+   properties, mapped here onto the webapp palette so boards follow the
+   GUI in both schemes. */
+.chess-game {
+  margin: 0.5em 0;
+  --chess-widget-bg: var(--card);
+  --chess-widget-fg: var(--fg);
+  --chess-widget-border: var(--border);
+  --chess-widget-accent: var(--accent);
+  --chess-widget-btn-bg: var(--card);
+  --chess-widget-max-width: 420px;
+}
+.chess-game-error {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: #b91c1c;
+  background: color-mix(in srgb, #b91c1c 8%, var(--bg));
+}

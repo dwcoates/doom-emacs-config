@@ -56,3 +56,207 @@ export function chessGameContainerHtml(path: string): string {
     `</div>`
   );
 }
+
+/* ------------------------------------------------------------------ *
+ * Widget host: fetches the payload through the daemon's validated
+ * /sessions/{id}/chess-game route and mounts the embeddable widget
+ * (served in place at /widget-assets/) into the container. The widget's
+ * protocol is chess-generic (see its chess-widget.d.ts): mount(el, opts)
+ * -> { unmount, serializeState }.
+ * ------------------------------------------------------------------ */
+
+/** The widget's host protocol, mirrored structurally (engine-free). */
+export interface ChessWidgetHandle {
+  unmount(): void;
+  serializeState(): unknown;
+}
+export interface ChessWidgetMountOpts {
+  source: string;
+  kind: "pgn" | "fen" | "session";
+  backend?: { url: string };
+  state?: unknown;
+  onStateChange?: (state: unknown) => void;
+}
+export type ChessWidgetMount = (container: unknown, opts: ChessWidgetMountOpts) => ChessWidgetHandle;
+
+/** What the hydrator touches on a container element (structural, so
+ * tests drive it with plain objects; a real HTMLElement satisfies it). */
+export interface GameContainer {
+  isConnected: boolean;
+  innerHTML: string;
+  dataset: { gameFile?: string; chessHydrated?: string };
+  closest(selectors: string): { getAttribute(name: string): string | null } | null;
+}
+
+/** What the hydrator needs from a bubble root (HTMLElement satisfies). */
+export interface ChessGameRoot {
+  querySelectorAll(selectors: string): ArrayLike<unknown>;
+}
+
+const CHESS_GAME_SELECTOR = ".chess-game[data-game-file]";
+const WIDGET_BUNDLE_PATH = "/widget-assets/chess-widget.js";
+
+export interface ChessGameConfig {
+  /** Daemon HTTP base, e.g. http://127.0.0.1:8787 */
+  base: string;
+  /** Live session id (a getter: rebind swaps the id under the view). */
+  session: () => string;
+  /** Test seam: replaces the dynamic bundle import. */
+  loadMount?: () => Promise<ChessWidgetMount>;
+  /** Test seam: replaces fetch-as-text (throws on any non-OK). */
+  fetchText?: (url: string) => Promise<string>;
+}
+
+let config: ChessGameConfig | null = null;
+let mountPromise: Promise<ChessWidgetMount> | null = null;
+/** Serialized per-widget view state, surviving innerHTML rewrites. */
+const gameStates = new Map<string, unknown>();
+/** Live mount handles, keyed by container identity. */
+const gameHandles = new WeakMap<object, ChessWidgetHandle>();
+
+/** Installs the host config (main.ts boot). Resets caches, so tests can
+ * reconfigure freely. */
+export function configureChessGames(cfg: ChessGameConfig | null): void {
+  config = cfg;
+  mountPromise = null;
+  gameStates.clear();
+}
+
+/** Game kind by payload file extension; null for an unsupported one. */
+export function chessGameKind(path: string): ChessWidgetMountOpts["kind"] | null {
+  if (path.endsWith(".pgn")) return "pgn";
+  if (path.endsWith(".fen")) return "fen";
+  if (path.endsWith(".session")) return "session";
+  return null;
+}
+
+/**
+ * A .session payload names a live engine-daemon session: line 1 the
+ * daemon's HTTP base URL, line 2 the session id.
+ */
+export function parseSessionPointer(text: string): { backend: string; session: string } | null {
+  const lines = text.split("\n").map((l) => l.trim());
+  if (!lines[0]?.startsWith("http") || !lines[1]) return null;
+  return { backend: lines[0], session: lines[1] };
+}
+
+/** The daemon URL serving a marker-carried payload path. */
+export function chessGameFileUrl(base: string, sessionId: string, path: string): string {
+  return `${base}/sessions/${sessionId}/chess-game?path=${encodeURIComponent(path)}`;
+}
+
+function errorHtml(msg: string): string {
+  return `<div class="chess-game-error">chess game: ${escapeHtml(msg)}</div>`;
+}
+
+async function fetchTextDefault(url: string): Promise<string> {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    let msg = `daemon answered ${resp.status}`;
+    try {
+      const body = (await resp.json()) as { error?: string };
+      if (body.error) msg = body.error;
+    } catch {
+      // Non-JSON error body: the status line above already carries it.
+    }
+    throw new Error(msg);
+  }
+  return resp.text();
+}
+
+function loadMount(cfg: ChessGameConfig): Promise<ChessWidgetMount> {
+  if (mountPromise === null) {
+    mountPromise = (async () => {
+      if (cfg.loadMount) return cfg.loadMount();
+      const mod = (await import(/* @vite-ignore */ `${cfg.base}${WIDGET_BUNDLE_PATH}`)) as {
+        default?: ChessWidgetMount;
+      };
+      if (typeof mod.default !== "function") {
+        throw new Error("widget bundle carries no mount export");
+      }
+      return mod.default;
+    })();
+    // A failed load must not poison the capability forever: the daemon
+    // may gain the -widget-assets mount on its next restart.
+    mountPromise.catch(() => {
+      mountPromise = null;
+    });
+  }
+  return mountPromise;
+}
+
+/** Builds the widget mount options for one payload (fetch + classify). */
+export async function chessGameMountOpts(
+  path: string,
+  cfg: ChessGameConfig,
+  savedState: unknown,
+): Promise<ChessWidgetMountOpts> {
+  const kind = chessGameKind(path);
+  if (kind === null) {
+    throw new Error(`unsupported game file type: ${path}`);
+  }
+  const fetchText = cfg.fetchText ?? fetchTextDefault;
+  const text = await fetchText(chessGameFileUrl(cfg.base, cfg.session(), path));
+  if (kind === "session") {
+    const ptr = parseSessionPointer(text);
+    if (ptr === null) {
+      throw new Error("malformed session pointer file (want: backend URL line, session id line)");
+    }
+    return { source: ptr.session, kind, backend: { url: ptr.backend }, state: savedState };
+  }
+  return { source: text, kind, state: savedState };
+}
+
+/**
+ * Mounts widgets into every un-hydrated chess-game container under
+ * `root`. Fire-and-forget per container: failures render as readable
+ * errors inside the container frame, never thrown past the feed.
+ */
+export function hydrateChessGames(root: ChessGameRoot): void {
+  const containers = Array.from(root.querySelectorAll(CHESS_GAME_SELECTOR)) as GameContainer[];
+  containers.forEach((el, idx) => {
+    if (el.dataset.chessHydrated) return;
+    el.dataset.chessHydrated = "1";
+    const path = el.dataset.gameFile;
+    if (!path) return;
+    if (config === null) {
+      throw new Error("chess-game hydrator is not configured");
+    }
+    const cfg = config;
+    const feedKey = el.closest(".feed-item")?.getAttribute("data-key") ?? "";
+    const stateKey = `${feedKey}::${path}::${idx}`;
+    void (async () => {
+      try {
+        const [mount, opts] = await Promise.all([
+          loadMount(cfg),
+          chessGameMountOpts(path, cfg, gameStates.get(stateKey)),
+        ]);
+        // The container may have been replaced by a newer re-render while
+        // the payload loaded; mounting into a detached node would leak.
+        if (!el.isConnected) return;
+        opts.onStateChange = (s) => gameStates.set(stateKey, s);
+        gameHandles.set(el, mount(el, opts));
+      } catch (err) {
+        if (el.isConnected) {
+          el.innerHTML = errorHtml(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+  });
+}
+
+/**
+ * Unmounts every live widget under `root`. Called before a bubble's
+ * innerHTML rewrite (and before node removal) so widget resources are
+ * released ahead of their containers being dropped.
+ */
+export function releaseChessGames(root: ChessGameRoot): void {
+  const containers = Array.from(root.querySelectorAll(CHESS_GAME_SELECTOR)) as GameContainer[];
+  for (const el of containers) {
+    const handle = gameHandles.get(el);
+    if (handle) {
+      handle.unmount();
+      gameHandles.delete(el);
+    }
+  }
+}

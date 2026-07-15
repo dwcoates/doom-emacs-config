@@ -17,6 +17,7 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
+import { hydrateChessGames, releaseChessGames } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
@@ -1969,6 +1970,7 @@ export class FeedRenderer {
     // the user has meanwhile scrolled up.
     this.lastUserTurn = lastUserTurnId(state.items);
     this.backfillQueue = [];
+    releaseChessGames(this.container);
     this.container.innerHTML = "";
     this.nodes.clear();
     // A /clear clears the screen: the feed opens on the /clear bubble and
@@ -2023,6 +2025,7 @@ export class FeedRenderer {
         const { el, entry } = shells[i];
         const html = this.entryHtml(entry, finals, pulse, panels);
         el.innerHTML = html;
+        hydrateChessGames(el);
         const node = this.nodes.get(el.dataset.key ?? "");
         if (node) node.html = html;
       }
@@ -2129,8 +2132,10 @@ export class FeedRenderer {
         // body when its result lands, which would otherwise re-cap a
         // command the user had just expanded.
         const open = expandedKeys(sectionsIn(entry.el));
+        releaseChessGames(entry.el);
         entry.el.innerHTML = html;
         applyExpanded(sectionsIn(entry.el), open);
+        hydrateChessGames(entry.el);
         entry.html = html;
       }
     }
@@ -2165,6 +2170,7 @@ export class FeedRenderer {
     });
     for (const [key, entry] of this.nodes) {
       if (!seen.has(key)) {
+        releaseChessGames(entry.el);
         entry.el.remove();
         this.nodes.delete(key);
       }
