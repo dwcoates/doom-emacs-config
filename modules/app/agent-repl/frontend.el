@@ -238,14 +238,57 @@ WKWebView has no menu bar of its own to copy a mouse-made highlight with."
   (interactive)
   (agent-repl--frontend-webview-selection #'agent-repl--frontend-yank-selection))
 
+;;;; ---- Chess-board keyboard navigation (out-of-band) -------------------------
+
+(defconst agent-repl-frontend-chess-step-hook "agentReplChessStep"
+  "Name of the webapp global that steps the active chess board.
+The webapp plants it on `window' at boot (`CHESS_NAV_HOOK' in
+webapp/src/chess-game.ts) — the two names are one contract and MUST
+match.  It takes \"back\" or \"forward\" and routes to the board the
+user last clicked.")
+
+(defun agent-repl--frontend-chess-step-script (direction)
+  "Return the JS that steps the active chess board DIRECTION.
+Guarded on the hook's existence: a webview mid-boot or mid-navigation
+has no hook yet, and that is an expected state rather than a violated
+invariant — a page that has not finished booting holds no boards."
+  (format "window.%s && window.%s(%S);"
+          agent-repl-frontend-chess-step-hook
+          agent-repl-frontend-chess-step-hook
+          direction))
+
+(defun agent-repl-frontend-chess-back ()
+  "Unplay one move on the current webview's active chess board.
+Out-of-band keyboard navigation: the NS xwidget cannot reliably deliver
+keyboard events into the page, so the webview buffer's keys drive the
+board over the execute-script channel instead.  No-op (page-side) when
+no board has been clicked."
+  (interactive)
+  (agent-repl--frontend-webview-execute-script
+   (current-buffer) (agent-repl--frontend-chess-step-script "back")))
+
+(defun agent-repl-frontend-chess-forward ()
+  "Play one move on the current webview's active chess board.
+See `agent-repl-frontend-chess-back' for the out-of-band rationale."
+  (interactive)
+  (agent-repl--frontend-webview-execute-script
+   (current-buffer) (agent-repl--frontend-chess-step-script "forward")))
+
 (defvar agent-repl-frontend-webview-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "y") #'agent-repl-frontend-copy-selection)
     (define-key map (kbd "C-c") #'agent-repl-frontend-copy-selection)
+    (define-key map (kbd "h") #'agent-repl-frontend-chess-back)
+    (define-key map (kbd "l") #'agent-repl-frontend-chess-forward)
+    (define-key map (kbd "<left>") #'agent-repl-frontend-chess-back)
+    (define-key map (kbd "<right>") #'agent-repl-frontend-chess-forward)
     map)
   "Keymap of `agent-repl-frontend-webview-mode'.
 `C-c' shadows the mode-specific prefix in webview buffers, which host no
-`C-c' bindings of their own — the webview is chrome, not an editor.")
+`C-c' bindings of their own — the webview is chrome, not an editor.
+`h'/`l' and the arrows step the active chess board (see
+`agent-repl-frontend-chess-back'), keys that would otherwise be inert
+char motions over a buffer holding no text.")
 
 ;;;###autoload
 (define-minor-mode agent-repl-frontend-webview-mode
@@ -274,6 +317,19 @@ own bindings."
     (evil-define-key* state agent-repl-frontend-webview-mode-map
                       (kbd "y") #'agent-repl-frontend-copy-selection
                       (kbd "C-c") #'agent-repl-frontend-copy-selection)))
+
+;; Evil's motion state owns `h'/`l' and the arrows (char motions), and
+;; those land in the echo area as "Beginning of line"/"End of line" over
+;; a buffer with no text — so the chess-nav keys are planted in the evil
+;; auxiliary maps too.  Motion-ish states only: insert/emacs state keeps
+;; plain typing semantics.
+(when (fboundp 'evil-define-key*)
+  (dolist (state '(normal motion visual))
+    (evil-define-key* state agent-repl-frontend-webview-mode-map
+                      (kbd "h") #'agent-repl-frontend-chess-back
+                      (kbd "l") #'agent-repl-frontend-chess-forward
+                      (kbd "<left>") #'agent-repl-frontend-chess-back
+                      (kbd "<right>") #'agent-repl-frontend-chess-forward)))
 
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 

@@ -105,7 +105,12 @@ export function splitChessGameSegments(src: string, streamTail: boolean): ChessG
 export interface ChessWidgetHandle {
   unmount(): void;
   serializeState(): unknown;
+  /** Programmatic move stepping (optional protocol extension): absent on
+   * widget builds that predate it, present once the widget ships it. */
+  step?(direction: ChessStepDirection): void;
 }
+
+export type ChessStepDirection = "back" | "forward";
 export interface ChessWidgetMountOpts {
   source: string;
   kind: "pgn" | "fen" | "session";
@@ -122,6 +127,7 @@ export interface GameContainer {
   innerHTML: string;
   dataset: { gameFile?: string; chessHydrated?: string };
   closest(selectors: string): { getAttribute(name: string): string | null } | null;
+  addEventListener(type: string, listener: () => void): void;
 }
 
 /** What the hydrator needs from a bubble root (HTMLElement satisfies). */
@@ -149,6 +155,12 @@ let mountPromise: Promise<ChessWidgetMount> | null = null;
 const gameStates = new Map<string, unknown>();
 /** Live mount handles, keyed by container identity. */
 const gameHandles = new WeakMap<object, ChessWidgetHandle>();
+/** Live mounts by widget state key — a plain Map (not the WeakMap above)
+ * because the out-of-band nav hook must resolve the ACTIVE board even
+ * after its container was swapped by an innerHTML rewrite. */
+const liveGames = new Map<string, { el: GameContainer; handle: ChessWidgetHandle }>();
+/** State key of the board the user last clicked into (nav hook target). */
+let activeGameKey: string | null = null;
 
 /** Installs the host config (main.ts boot). Resets caches, so tests can
  * reconfigure freely. */
@@ -156,6 +168,8 @@ export function configureChessGames(cfg: ChessGameConfig | null): void {
   config = cfg;
   mountPromise = null;
   gameStates.clear();
+  liveGames.clear();
+  activeGameKey = null;
 }
 
 /** Game kind by payload file extension; null for an unsupported one. */
@@ -261,6 +275,11 @@ export function hydrateChessGames(root: ChessGameRoot): void {
     const cfg = config;
     const feedKey = el.closest(".feed-item")?.getAttribute("data-key") ?? "";
     const stateKey = `${feedKey}::${path}::${idx}`;
+    // Clicking into a board makes it the out-of-band nav hook's target;
+    // registered before the async mount so a click during loading counts.
+    el.addEventListener("click", () => {
+      activeGameKey = stateKey;
+    });
     void (async () => {
       try {
         const [mount, opts] = await Promise.all([
@@ -271,7 +290,9 @@ export function hydrateChessGames(root: ChessGameRoot): void {
         // the payload loaded; mounting into a detached node would leak.
         if (!el.isConnected) return;
         opts.onStateChange = (s) => gameStates.set(stateKey, s);
-        gameHandles.set(el, mount(el, opts));
+        const handle = mount(el, opts);
+        gameHandles.set(el, handle);
+        liveGames.set(stateKey, { el, handle });
       } catch (err) {
         if (el.isConnected) {
           el.innerHTML = errorHtml(err instanceof Error ? err.message : String(err));
@@ -293,6 +314,38 @@ export function releaseChessGames(root: ChessGameRoot): void {
     if (handle) {
       handle.unmount();
       gameHandles.delete(el);
+      for (const [key, entry] of liveGames) {
+        if (entry.el === el) liveGames.delete(key);
+      }
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Out-of-band navigation: the Emacs host cannot deliver keyboard
+ * events into the page (NS xwidget limitation), so its webview-buffer
+ * keys drive the active board over the execute-script channel through
+ * the window hook installed below.
+ * ------------------------------------------------------------------ */
+
+/** Name of the window global the Emacs host invokes (one contract with
+ * `agent-repl-frontend-chess-step-hook` in frontend.el — MUST match). */
+export const CHESS_NAV_HOOK = "agentReplChessStep";
+
+/**
+ * Steps the most recently clicked board. False when no board was
+ * clicked yet, when the active board is gone, or when the mounted
+ * widget build predates the protocol's optional step extension.
+ */
+export function stepActiveChessGame(direction: ChessStepDirection): boolean {
+  if (activeGameKey === null) return false;
+  const entry = liveGames.get(activeGameKey);
+  if (!entry || entry.handle.step === undefined) return false;
+  entry.handle.step(direction);
+  return true;
+}
+
+/** Plants the nav hook on the host global (main.ts boot). */
+export function installChessNavHook(target: Record<string, unknown>): void {
+  target[CHESS_NAV_HOOK] = (direction: ChessStepDirection) => stepActiveChessGame(direction);
 }
