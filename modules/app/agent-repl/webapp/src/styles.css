@@ -78,10 +78,12 @@
   /* The async teal, shared by every card that is a whole conversation or
      process of its own rather than one more file read: a skill handoff, a
      spawned subagent, and any detached background work to come. ONE hue at
-     ONE depth — a tad darker than the old subagent teal (styles.test.ts
-     pins the darkening against the old hex), with the status chip backed by
-     the card grey (.tool-card .badge) so the wash never tints it. */
-  --async-card: #8fdfd0;
+     ONE depth — a tad darker than the old subagent teal, then darkened a
+     second notch on request (styles.test.ts pins the wash below BOTH the
+     pre-unification hex and the first-unification hex so neither darkening
+     can silently regress), with the status chip backed by the card grey
+     (.tool-card .badge) so the wash never tints it. */
+  --async-card: #84cdbf;
   --async-border: #4fb8a8;
   /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
      floats on, so a `token` inside a sentence of prose reads as typeable at a
@@ -118,7 +120,7 @@
     --clear-divider: #ef4444;
     --final-response: #4ade80;
     --q-border: #facc15;
-    --async-card: #0c5b52;
+    --async-card: #0b5048;
     --async-border: #4fc4b0;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
