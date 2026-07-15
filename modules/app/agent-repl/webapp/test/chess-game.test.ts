@@ -366,6 +366,13 @@ describe("splitChessGameSegments", () => {
     expect(splitChessGameSegments(`  ${marker}`, false)).toEqual([{ text: `  ${marker}` }]);
   });
 
+  it("leaves a marker inside a code fence as literal text", () => {
+    // Arrange + Act + Assert
+    expect(splitChessGameSegments("```\n" + marker + "\n```", false)).toEqual([
+      { text: "```\n" + marker + "\n```" },
+    ]);
+  });
+
   it("drops a trailing partial marker while streaming", () => {
     // Arrange + Act + Assert
     expect(splitChessGameSegments("done\n---> agent-repl-che", true)).toEqual([{ text: "done" }]);
