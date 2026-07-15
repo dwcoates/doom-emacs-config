@@ -682,6 +682,36 @@ describe("subagent card", () => {
     // Act / Assert
     expect(luminance(wash)).toBeLessThan(luminance("#0f6b60"));
   });
+
+  it("darkens the light-theme wash a second notch below the first-unification teal", () => {
+    // Arrange — #8fdfd0 is the first-unification light card, pinned here so the
+    // requested second darkening cannot silently regress back to it.
+    const wash = token(lightTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#8fdfd0"));
+  });
+
+  it("darkens the dark-theme wash a second notch below the first-unification teal", () => {
+    // Arrange — #0c5b52 is the first-unification dark card, pinned here so the
+    // requested second darkening cannot silently regress back to it.
+    const wash = token(darkTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#0c5b52"));
+  });
+
+  it("keeps the darkened light-theme wash inside the turquoise band", () => {
+    // Arrange / Act — darkening must not drift the hue off teal.
+    const wash = token(lightTheme, "--async-card");
+    // Assert
+    expect(isTurquoise(wash)).toBe(true);
+  });
+
+  it("keeps the darkened dark-theme wash inside the turquoise band", () => {
+    // Arrange / Act — darkening must not drift the hue off teal.
+    const wash = token(darkTheme, "--async-card");
+    // Assert
+    expect(isTurquoise(wash)).toBe(true);
+  });
 });
 
 describe("subagent input fold", () => {
