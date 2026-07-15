@@ -9,6 +9,7 @@ import {
   compactionBannerHtml,
   diffHtml,
   finalResponses,
+  formatBubbleTime,
   formatTurnTime,
   groupFeed,
   groupHtml,
@@ -167,6 +168,40 @@ describe("formatTurnTime", () => {
     const ts = new Date(2026, 4, 24, 9, 5).toISOString();
     // Act + Assert
     expect(formatTurnTime(ts)).toBe("09:05");
+  });
+});
+
+describe("formatBubbleTime", () => {
+  it("renders a fresh stamp as seconds ago", () => {
+    // Arrange — the reader's clock three seconds past the stamp.
+    const ts = new Date(2026, 4, 24, 14, 32).toISOString();
+    const now = Date.parse(ts) + 3_000;
+    // Act + Assert
+    expect(formatBubbleTime(ts, now)).toBe("3s ago");
+  });
+
+  it("renders minutes and seconds ago at two-level granularity", () => {
+    // Arrange
+    const ts = new Date(2026, 4, 24, 14, 32).toISOString();
+    const now = Date.parse(ts) + 330_000;
+    // Act + Assert — `5m 30s ago`, never `5.5m ago`.
+    expect(formatBubbleTime(ts, now)).toBe("5m 30s ago");
+  });
+
+  it("drops the seconds once a stamp passes an hour", () => {
+    // Arrange
+    const ts = new Date(2026, 4, 24, 14, 32).toISOString();
+    const now = Date.parse(ts) + 3_930_000;
+    // Act + Assert — `1h 5m ago`, never `1h 5m 30s ago`.
+    expect(formatBubbleTime(ts, now)).toBe("1h 5m ago");
+  });
+
+  it("defaults the clock to now so a stamp ages against the reader's time", () => {
+    // Arrange — a stamp firmly in the past, so the default `Date.now()` is
+    // always after it however long the test runs later.
+    const ts = new Date(2026, 4, 24, 14, 32).toISOString();
+    // Act + Assert
+    expect(formatBubbleTime(ts).endsWith(" ago")).toBe(true);
   });
 });
 
@@ -490,11 +525,12 @@ describe("diffHtml", () => {
 });
 
 describe("renderItem", () => {
-  it("stamps a user prompt bubble with its send time", () => {
-    // Arrange
+  it("stamps a user prompt bubble with its relative age", () => {
+    // Arrange — a send time firmly in the past, so the age reads `… ago`
+    // however long the test runs after it (exact math is formatBubbleTime's).
     const item = userTurnAt(14, 32);
     // Act + Assert
-    expect(renderItem(item)).toContain(`<span class="turn-ts">14:32</span>`);
+    expect(renderItem(item)).toMatch(/<span class="turn-ts">[^<]+ ago<\/span>/);
   });
 
   it("keeps the prompt text alongside its send-time stamp", () => {
@@ -508,18 +544,18 @@ describe("renderItem", () => {
     );
   });
 
-  it("stamps an agent response bubble with the time its block opened", () => {
+  it("stamps an agent response bubble with a relative age", () => {
     // Arrange
     const item = textAt(14, 33);
     // Act + Assert
-    expect(renderItem(item)).toContain(`<span class="turn-ts">14:33</span>`);
+    expect(renderItem(item)).toMatch(/<span class="turn-ts">[^<]+ ago<\/span>/);
   });
 
   it("stamps a response rendered as a metaprompt tree", () => {
     // Arrange — the tree path builds its own bubble, so it needs the stamp too.
     const item = textAt(14, 34, "Response (👀 no changes made)\n\n1 👀 Answer\n└── 1.1 First");
     // Act + Assert
-    expect(renderItem(item)).toContain(`<span class="turn-ts">14:34</span>`);
+    expect(renderItem(item)).toMatch(/<span class="turn-ts">[^<]+ ago<\/span>/);
   });
 
   it("stamps the corner of a response bubble rather than its text column", () => {
@@ -528,7 +564,7 @@ describe("renderItem", () => {
     // Act
     const html = renderItem(item);
     // Assert — the stamp is the body column's sibling, so it never sits in the prose.
-    expect(html).toContain(`</div><span class="turn-ts">14:33</span></div>`);
+    expect(html).toMatch(/<\/div><span class="turn-ts">[^<]+ ago<\/span><\/div>/);
   });
 
   it("keeps a streaming response's cursor inside the body column", () => {

@@ -460,6 +460,13 @@ describe("turn stamp", () => {
     expect(stamp).toMatch(/flex:\s*none/);
   });
 
+  it("keeps the multi-token relative age on a single line", () => {
+    // Arrange / Act — `5m 30s ago` carries inner spaces the fixed HH:MM never
+    // had, so the stamp must not wrap at them into a two-line corner label.
+    // Assert
+    expect(stamp).toMatch(/white-space:\s*nowrap/);
+  });
+
   it("sets the stamp smaller than the text it dates", () => {
     // Arrange
     const stampSize = Number(stamp.match(/font-size:\s*([\d.]+)rem/)?.[1]);

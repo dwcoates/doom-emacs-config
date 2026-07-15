@@ -373,6 +373,10 @@ pre {
   font-size: 0.65rem;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+  /* The relative age is multi-token (`5m 30s ago`), so its inner spaces are
+     wrap opportunities the fixed `HH:MM` never had — keep the whole label on
+     one line so it stays a single corner stamp rather than stacking. */
+  white-space: nowrap;
   margin: -0.3rem -0.5rem 0 0;
 }
 .bubble.assistant {

@@ -7,7 +7,7 @@
 import { SUBAGENT_TOOLS, agentsMenuHtml } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { tasksMenuHtml } from "./tasks.js";
-import { formatDuration, formatDurationCeil } from "./duration.js";
+import { formatAge, formatDuration, formatDurationCeil } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
   applyExpanded,
@@ -243,9 +243,11 @@ export function modelOptionsHtml(
 // --- per-item components ------------------------------------------------------
 
 /**
- * Envelope ts (ISO8601, §2.1) as the local wall-clock time the user sees
- * on their own machine, zero-padded 24-hour `HH:MM` — the whole clock
- * face would drown out the prompt it labels.
+ * An ISO8601 ts (§2.1) as the local wall-clock time the reader's own
+ * machine shows, zero-padded 24-hour `HH:MM`. The wake line names an
+ * absolute future moment a scheduled wakeup fires (`wakes ~10:10`), which
+ * a relative label could not; the bubble stamp itself is relative (see
+ * `formatBubbleTime`).
  */
 export function formatTurnTime(ts: string): string {
   const at = new Date(ts);
@@ -255,8 +257,23 @@ export function formatTurnTime(ts: string): string {
 }
 
 /**
+ * The bubble stamp as a relative age: how long ago the envelope ts (§2.1)
+ * was, with an `ago` postfix — `5s ago`, `5m 30s ago`, `1h 5m ago` (see
+ * `formatAge` for the two-level second-resolution shape). NOW-MS defaults
+ * to the reader's clock, so a re-render re-reads it and the stamp ages on
+ * its own without the markup having to hold a timer.
+ *
+ * The daemon's absolute ts stays the source of truth on the item, so a
+ * stale session reloaded later recomputes the correct age against the new
+ * `now` rather than freezing at whatever the age was when it was recorded.
+ */
+export function formatBubbleTime(ts: string, nowMs: number = Date.now()): string {
+  return `${formatAge(nowMs - Date.parse(ts))} ago`;
+}
+
+/**
  * The one bubble shape, shared by the user's prompt and the agent's
- * response: a body column, then the turn's time stamped into the
+ * response: a body column, then the turn's relative age stamped into the
  * top-right corner. CSS pins and shrinks the stamp (see `.turn-ts`); the
  * markup only has to hand it the same corner in both bubbles.
  *
@@ -265,7 +282,7 @@ export function formatTurnTime(ts: string): string {
  */
 function Bubble(cls: string, body: string, ts: string): string {
   return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-ts">${escapeHtml(
-    formatTurnTime(ts),
+    formatBubbleTime(ts),
   )}</span></div>`;
 }
 

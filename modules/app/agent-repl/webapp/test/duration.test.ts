@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatAge,
   formatDuration,
   formatDurationCeil,
   formatElapsed,
@@ -141,5 +142,82 @@ describe("formatDurationCeil", () => {
   it("floors a negative span to zero seconds", () => {
     // Arrange + Act + Assert — a skewed clock counts from zero, never backwards.
     expect(formatDurationCeil(-2_000)).toBe("0s");
+  });
+});
+
+describe("formatAge", () => {
+  it("reports a zero span in seconds", () => {
+    // Arrange + Act + Assert — seconds are the finest unit, so zero reads `0s`.
+    expect(formatAge(0)).toBe("0s");
+  });
+
+  it("floors a sub-second span to zero seconds", () => {
+    // Arrange + Act + Assert — under a second has definitely elapsed no seconds.
+    expect(formatAge(500)).toBe("0s");
+  });
+
+  it("reports a span under a minute in whole seconds", () => {
+    // Arrange + Act + Assert
+    expect(formatAge(45_000)).toBe("45s");
+  });
+
+  it("keeps the last second before a minute in seconds", () => {
+    // Arrange + Act + Assert
+    expect(formatAge(59_999)).toBe("59s");
+  });
+
+  it("drops the seconds off a whole-minute span", () => {
+    // Arrange + Act + Assert — a bare `1m`, never `1m 0s`.
+    expect(formatAge(60_000)).toBe("1m");
+  });
+
+  it("carries a minute's leftover in whole seconds", () => {
+    // Arrange + Act + Assert — `5m 30s`, never the fractional `5.5m`.
+    expect(formatAge(330_000)).toBe("5m 30s");
+  });
+
+  it("truncates a minute's part-second rather than rounding it", () => {
+    // Arrange + Act + Assert — 5m 30.9s is 5m 30s of elapsed time.
+    expect(formatAge(330_900)).toBe("5m 30s");
+  });
+
+  it("keeps the last second before an hour in minutes and seconds", () => {
+    // Arrange + Act + Assert — truncation cannot promote 59m 59s to 1h.
+    expect(formatAge(3_599_999)).toBe("59m 59s");
+  });
+
+  it("drops the minutes off a whole-hour span", () => {
+    // Arrange + Act + Assert — a bare `1h`, never `1h 0m`.
+    expect(formatAge(3_600_000)).toBe("1h");
+  });
+
+  it("carries an hour's leftover in whole minutes", () => {
+    // Arrange + Act + Assert
+    expect(formatAge(3_900_000)).toBe("1h 5m");
+  });
+
+  it("truncates an hour's leftover seconds rather than rounding the minute up", () => {
+    // Arrange + Act + Assert — 1h 5m 30s reads `1h 5m`, never the rounded `1h 6m`.
+    expect(formatAge(3_930_000)).toBe("1h 5m");
+  });
+
+  it("truncates an hour's leftover even a second short of the next minute", () => {
+    // Arrange + Act + Assert — 1h 5m 59s still reads `1h 5m`, not `1h 6m`.
+    expect(formatAge(3_959_000)).toBe("1h 5m");
+  });
+
+  it("drops the hours off a whole-day span", () => {
+    // Arrange + Act + Assert — a bare `1d`, never `1d 0h`.
+    expect(formatAge(86_400_000)).toBe("1d");
+  });
+
+  it("carries a day's leftover in whole hours", () => {
+    // Arrange + Act + Assert — a stale session reloaded days later stays two-level.
+    expect(formatAge(268_200_000)).toBe("3d 2h");
+  });
+
+  it("floors a stamp ahead of the reader's clock to zero seconds", () => {
+    // Arrange + Act + Assert — a skewed clock counts from zero, never backwards.
+    expect(formatAge(-2_000)).toBe("0s");
   });
 });
