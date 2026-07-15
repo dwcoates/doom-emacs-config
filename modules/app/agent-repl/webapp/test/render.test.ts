@@ -1295,6 +1295,101 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-q-submit");
   });
 
+  it("renders backtick-wrapped question text as inline code", () => {
+    // Arrange — a pending question whose text names a code symbol.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Default to `nil`?",
+            header: "Default",
+            options: [{ label: "yes", description: "use nil" }],
+          },
+        ],
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the backticks became a <code> span, not literal backticks.
+    expect(html).toContain("Default to <code>nil</code>?");
+    expect(html).not.toContain("`nil`");
+  });
+
+  it("renders a backtick-wrapped option label as inline code", () => {
+    // Arrange — an option label naming a code literal.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which value?",
+            header: "Value",
+            options: [{ label: "use `nil`", description: "the nil literal" }],
+          },
+        ],
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the button label carries a <code> span.
+    expect(html).toContain("use <code>nil</code></button>");
+  });
+
+  it("renders backtick-wrapped question text as inline code when resolved", () => {
+    // Arrange — an answered question whose text names a code symbol.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Default to `nil`?",
+            header: "Default",
+            options: [{ label: "yes", description: "use nil" }],
+          },
+        ],
+      },
+      resolution: { decision: "allow" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the resolved echo also renders the code span.
+    expect(html).toContain("Default to <code>nil</code>?");
+  });
+
+  it("leaves an option description's backticks plain in its title tooltip", () => {
+    // Arrange — a description carrying backticks lives in a title attribute,
+    // which cannot render markup, so it must stay literal (escape-only).
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which value?",
+            header: "Value",
+            options: [{ label: "yes", description: "the `nil` literal" }],
+          },
+        ],
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — no <code> injected into the tooltip; backticks stay literal.
+    expect(html).toContain('title="the `nil` literal"');
+  });
+
   it("hides the raw partial input JSON of a still-streaming call", () => {
     // Arrange — input still streaming: raw partial JSON must NOT show.
     const item: ToolItem = {
