@@ -135,7 +135,17 @@ Widget code is plain TS in `webapp/src/` (flat, matching the existing layout), e
    - Every `CeeError` surfaces visibly in the widget frame (never swallowed, per error-handling policy).
    - Tests: fake transport implementing the used features; lifecycle, caching, error surfacing.
 
-### Phase 2 — rendering
+### Delivery channel (IMPLEMENTED — supersedes the fence trigger below)
+
+The shipped integration is the **marker channel**, not the ```` ```pgn ```` fence:
+
+- The `/show-chess-game` skill (home skills dir) writes the payload command-side to `<worktree>/.claude/emacs/cee-web-widget/chess-game-<hash>.{pgn,fen,session}` and the response carries only `---> agent-repl-chess-game-file: <path> <---`.
+- `renderMarkdown` (`webapp/src/markdown.ts`) suppresses marker lines via a line-start string match and emits a `chess-game` container (processing indicator until hydration); text flows around it in the same bubble; a trailing partial marker is withheld while streaming.
+- `webapp/src/chess-game.ts` hydrates containers: dynamic import of `/widget-assets/chess-widget.js`, payload fetch via `GET /sessions/{id}/chess-game?path=…` (daemon-validated to the session worktree's game dir), kind by extension, per-item serialized state across `innerHTML` rewrites, in-frame errors.
+- `claude-repld` serves the widget dist **in place** via `-widget-assets` (env `AGENT_REPL_WIDGET_ASSETS`; elisp `agent-repl-frontend-widget-assets-dir`) — nothing is copied into this repo.
+- `.session` payloads mirror a live engine daemon session (backend URL line 1, session id line 2).
+
+### Phase 2 — rendering (historical plan)
 
 4. `src/chessboard.ts` — widget HTML:
    - `chessboardHtml(state): string` — inline SVG board (squares, coordinates, last-move highlight, selected-square + legal-target markers) with Unicode piece glyphs for v1; per-node positions come from CEE (`get_ergonomic_position`/`get_fen`).
