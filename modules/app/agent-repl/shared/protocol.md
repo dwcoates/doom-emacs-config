@@ -128,7 +128,9 @@ interface PermissionDecisionCmd {
 
 Abort the in-flight assistant turn. Maps to the SDK `query.interrupt()`
 method. The aborted turn still terminates with a `result` event, whose
-`subtype` is `"aborted"`.
+`subtype` is `"aborted"`. At the daemon layer a client interrupt also
+clears the in-flight message queue (§2.13) so the abort is total:
+nothing parked auto-runs afterward.
 
 ```ts
 interface InterruptCmd {
@@ -1212,6 +1214,16 @@ item, run it through `OnUserMessageCmd` (which broadcasts its
 became), and `SendRaw` it to the shim. A verdict that arrives after
 its item has already drained is discarded (the item is gone).
 
+**User interrupt clears the queue.** A client `interrupt` command
+(webapp Esc, Emacs `C-c C-k`) means "stop everything": before the
+interrupt is forwarded to the shim, every queued item is dropped with
+`queue-removed` (`reason: "interrupted"`), so the aborted turn's
+`result` finds the queue empty and nothing auto-starts — the session
+stays silent until the user's next prompt. The queue-escalation
+interrupt (a classifier `interrupt` verdict or `queue-run-now`) is
+daemon-originated and does NOT clear the queue: its whole point is
+that the promoted front item drains after the abort.
+
 **User overrides** (daemon-handled Layer-2 commands, NOT forwarded to
 the shim, reusing the command-shape convention like `replay-request`):
 
@@ -1251,7 +1263,7 @@ interface QueueClassifiedFrame extends WsEnvelope {
 interface QueueRemovedFrame extends WsEnvelope {
   type: "queue-removed";
   queue_id: string;
-  reason: "drained" | "cancelled" | "session_end";
+  reason: "drained" | "cancelled" | "interrupted" | "session_end";
   request_id?: RequestId;             // present when reason === "drained"
 }
 ```

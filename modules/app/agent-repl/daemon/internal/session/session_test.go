@@ -1628,6 +1628,64 @@ func TestQueueRunNowEscalatesLikeInterrupt(t *testing.T) {
 	}
 }
 
+func TestQueueUserInterruptDropsEveryParkedItem(t *testing.T) {
+	// Arrange — two items parked behind a running turn.
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qidB := enqueueWait(t, h, c, g, "rB", "second")
+	qidC := enqueueWait(t, h, c, g, "rC", "third")
+	// Act — a user interrupt (webapp Esc / Emacs C-c C-k): stop everything.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"interrupt","request_id":"x"}`)); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	// Assert — a queue-removed(interrupted) per parked item, front-to-back.
+	removedB := waitForFrameType(t, c, "queue-removed")
+	if removedB["reason"] != "interrupted" || removedB["queue_id"] != qidB {
+		t.Fatalf("removed B = %v", removedB)
+	}
+	removedC := waitForFrameType(t, c, "queue-removed")
+	if removedC["reason"] != "interrupted" || removedC["queue_id"] != qidC {
+		t.Fatalf("removed C = %v", removedC)
+	}
+	if len(h.sess.Info().Queue) != 0 {
+		t.Fatalf("queue = %+v, want empty", h.sess.Info().Queue)
+	}
+}
+
+func TestQueueDoesNotDrainAfterUserInterrupt(t *testing.T) {
+	// Arrange — a parked item behind a running turn, then a user interrupt.
+	g := newGatedClassifier()
+	h := newClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	enqueueWait(t, h, c, g, "rB", "second")
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"interrupt","request_id":"x"}`)); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if !strings.Contains(string(recvSent(t, h.shim)), `"interrupt"`) {
+		t.Fatal("interrupt not forwarded")
+	}
+	// Act — the aborted turn's result lands.
+	pushResult(t, h)
+	waitForFrameType(t, c, "result")
+	// Info serializes with Run's locked event section, so once it returns
+	// any drain the result triggered has fully broadcast and forwarded.
+	_ = h.sess.Info()
+	// Assert — nothing auto-starts: no further frame, nothing forwarded.
+	select {
+	case data := <-c.Send:
+		var m map[string]any
+		_ = json.Unmarshal(data, &m)
+		t.Fatalf("post-interrupt frame = %v, want silence", m)
+	default:
+	}
+	select {
+	case line := <-h.shim.sent:
+		t.Fatalf("post-interrupt forward = %s, want none", line)
+	default:
+	}
+}
+
 func TestQueueStaleOverrideIsNoOpNotError(t *testing.T) {
 	// Arrange
 	g := newGatedClassifier()

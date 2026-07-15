@@ -800,6 +800,14 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 		s.broadcastLocked([]protocol.L2Frame{frame})
 		return s.shim.SendRaw(ndjson(raw))
 	case "interrupt":
+		// A user interrupt stops EVERYTHING: the in-flight turn AND every
+		// parked queued message (§2.13). Without the clear, the aborted
+		// turn's result would hit Run's drain hook and auto-start the
+		// front queued item as a fresh turn — new activity right after
+		// the user asked for silence. Queue escalation does NOT pass
+		// through here (escalateLocked sends interruptCmdLine straight
+		// to the shim), so run-now's promote-and-preempt drain survives.
+		s.clearQueueLocked("interrupted")
 		s.broadcastLocked(s.translator.OnInterruptCmd())
 		return s.shim.SendRaw(ndjson(raw))
 	case "set-permission-mode":
@@ -964,7 +972,7 @@ func (s *Session) drainQueueLocked() error {
 }
 
 // clearQueueLocked drops every queued item with queue-removed(reason),
-// front-to-back (session-end teardown).
+// front-to-back (session-end teardown and user interrupt).
 func (s *Session) clearQueueLocked(reason string) {
 	for _, item := range s.queue.drainAll() {
 		s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
