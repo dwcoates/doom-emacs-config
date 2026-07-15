@@ -41,6 +41,7 @@ func main() {
 		retention      = flag.Int("retention", 4096, "per-session frame retention window for replay")
 		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "hibernate a session (free its node+CLI pair, keep it replayable) after this long without a real act; 0 disables")
 		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
+		widgetAssets   = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
 		classifyQueue  = flag.Bool("classify-queue", envBool("AGENT_REPL_CLASSIFY_QUEUE", true), "classify a message submitted mid-turn (interrupt vs wait) via a headless model (§2.13)")
@@ -163,6 +164,13 @@ func main() {
 	mux.Handle("/accounts", srv.Handler())
 	if *webappDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(*webappDir)))
+	}
+	// Widget assets are served in place from wherever they were built
+	// (e.g. an explanation-engine checkout's dist), never copied into
+	// this repo: the mount existing is what the webapp's capability
+	// probe detects.
+	if *widgetAssets != "" {
+		mux.Handle("/widget-assets/", http.StripPrefix("/widget-assets/", http.FileServer(http.Dir(*widgetAssets))))
 	}
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
