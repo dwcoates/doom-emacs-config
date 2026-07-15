@@ -699,6 +699,22 @@ describe("subagent card", () => {
     expect(luminance(wash)).toBeLessThan(luminance("#0c5b52"));
   });
 
+  it("darkens the light-theme wash a third notch below the second-unification teal", () => {
+    // Arrange — #84cdbf is the second-unification light card, pinned here so the
+    // requested third darkening cannot silently regress back to it.
+    const wash = token(lightTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#84cdbf"));
+  });
+
+  it("darkens the dark-theme wash a third notch below the second-unification teal", () => {
+    // Arrange — #0b5048 is the second-unification dark card, pinned here so the
+    // requested third darkening cannot silently regress back to it.
+    const wash = token(darkTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#0b5048"));
+  });
+
   it("keeps the darkened light-theme wash inside the turquoise band", () => {
     // Arrange / Act — darkening must not drift the hue off teal.
     const wash = token(lightTheme, "--async-card");
