@@ -49,8 +49,12 @@ type Translator struct {
 	// decides. It therefore follows observed truth from every direction:
 	// system:init, an acked set-model, the model reported on each
 	// main-chain assistant message, and the periodic transcript reconcile.
-	Model          string
-	CWD            string
+	Model string
+	CWD   string
+	// ConfigDir is the session's CLAUDE_CONFIG_DIR (empty means the
+	// default), the personal-skills root the Skill render hint resolves a
+	// skill name against. Seeded once at construction from CreateOpts.
+	ConfigDir      string
 	PermissionMode protocol.PermissionMode
 	// Models is the selectable-model menu from the shim's `models` event.
 	Models []protocol.ModelInfo
@@ -686,7 +690,7 @@ func (t *Translator) onToolResult(evt *protocol.L1Event) []protocol.L2Frame {
 		Content:   evt.Content,
 	}
 	if meta, ok := t.tools[evt.ToolUseID]; ok {
-		frame.Render = renderHint(meta.name, meta.input, evt.Content)
+		frame.Render = renderHint(meta.name, meta.input, evt.Content, t.ConfigDir, t.CWD)
 	}
 	return []protocol.L2Frame{frame}
 }

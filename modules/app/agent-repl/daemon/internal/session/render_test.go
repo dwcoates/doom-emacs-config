@@ -2,9 +2,22 @@ package session
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// writeSkill creates dir/SKILL.md with body, failing the test on error.
+func writeSkill(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+}
 
 func TestPermissionPreview(t *testing.T) {
 	tests := []struct {
@@ -89,14 +102,23 @@ func TestPermissionPreview(t *testing.T) {
 }
 
 func TestRenderHint(t *testing.T) {
+	// Two skill roots the Skill case resolves against: a project-local
+	// .claude/skills under cwd, and a personal <configDir>/skills.
+	projectCWD := t.TempDir()
+	writeSkill(t, filepath.Join(projectCWD, ".claude", "skills", "local-skill"), "# Local Skill\nbody")
+	configDir := t.TempDir()
+	writeSkill(t, filepath.Join(configDir, "skills", "personal-skill"), "# Personal Skill\nbody")
+
 	tests := []struct {
-		name     string
-		tool     string
-		input    string
-		content  string
-		wantKind string
-		wantNil  bool
-		check    func(t *testing.T, h map[string]any)
+		name      string
+		tool      string
+		input     string
+		content   string
+		configDir string
+		cwd       string
+		wantKind  string
+		wantNil   bool
+		check     func(t *testing.T, h map[string]any)
 	}{
 		{
 			name:     "bash render carries stdout",
@@ -178,6 +200,50 @@ func TestRenderHint(t *testing.T) {
 			},
 		},
 		{
+			name:     "skill render carries the local SKILL.md body",
+			tool:     "Skill",
+			input:    `{"skill":"local-skill"}`,
+			content:  `"Launching skill: local-skill"`,
+			cwd:      projectCWD,
+			wantKind: "skill",
+			check: func(t *testing.T, h map[string]any) {
+				if h["content"] != "# Local Skill\nbody" {
+					t.Errorf("content = %v", h["content"])
+				}
+			},
+		},
+		{
+			name:      "skill render falls back to the personal config-dir skill",
+			tool:      "Skill",
+			input:     `{"skill":"personal-skill"}`,
+			content:   `"Launching skill: personal-skill"`,
+			configDir: configDir,
+			wantKind:  "skill",
+			check: func(t *testing.T, h map[string]any) {
+				if h["content"] != "# Personal Skill\nbody" {
+					t.Errorf("content = %v", h["content"])
+				}
+			},
+		},
+		{
+			name:      "namespaced plugin skill resolves through no root and is nil",
+			tool:      "Skill",
+			input:     `{"skill":"gns-cowork:gns-bootstrap"}`,
+			content:   `"Launching skill: gns-cowork:gns-bootstrap"`,
+			configDir: configDir,
+			cwd:       projectCWD,
+			wantNil:   true,
+		},
+		{
+			name:      "skill with no readable SKILL.md is nil",
+			tool:      "Skill",
+			input:     `{"skill":"missing-skill"}`,
+			content:   `"Launching skill: missing-skill"`,
+			configDir: configDir,
+			cwd:       projectCWD,
+			wantNil:   true,
+		},
+		{
 			name:    "read render is nil",
 			tool:    "Read",
 			input:   `{"file_path":"/f"}`,
@@ -195,7 +261,7 @@ func TestRenderHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			hint := renderHint(tt.tool, json.RawMessage(tt.input), json.RawMessage(tt.content))
+			hint := renderHint(tt.tool, json.RawMessage(tt.input), json.RawMessage(tt.content), tt.configDir, tt.cwd)
 			// Assert
 			if tt.wantNil {
 				if hint != nil {
