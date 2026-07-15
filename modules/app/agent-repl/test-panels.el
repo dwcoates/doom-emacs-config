@@ -1537,6 +1537,36 @@ latest one."
         (should (cl-every (lambda (e) (equal (cdr e) "captured-ws"))
                           received-ws))))))
 
+;;;; ---- Tests: after-persp-activated eager-open suppression ----
+
+(ert-deftest agent-repl-test-panels-after-persp-activated-schedules-switch ()
+  "after-persp-activated schedules --on-workspace-switch for the active ws
+when no eager-open is in progress."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil)
+          (agent-repl--eager-open-in-progress nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'run-at-time)
+                 (lambda (_secs _rep fn &rest args) (setq scheduled (cons fn args)))))
+        (agent-repl--after-persp-activated)
+        (should (eq (car scheduled) #'agent-repl--on-workspace-switch))
+        (should (equal (cdr scheduled) '("ws1")))))))
+
+(ert-deftest agent-repl-test-panels-after-persp-activated-suppressed-during-eager-open ()
+  "after-persp-activated does NOT schedule --on-workspace-switch while
+`agent-repl--eager-open-in-progress' is set: the eager-open transient
+switch builds panels synchronously, and a deferred pass firing after
+focus returns to the caller would reclaim the caller's frame with the
+background workspace's panels."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil)
+          (agent-repl--eager-open-in-progress t))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq scheduled t))))
+        (agent-repl--after-persp-activated)
+        (should-not scheduled)))))
+
 ;;;; ---- Tests: maybe-autoselect-input ----
 
 (ert-deftest agent-repl-test-panels-maybe-autoselect-input-selects-visible-input ()

@@ -11,6 +11,10 @@
 (declare-function agent-repl--ws-frontend-name "frontends" (ws))
 (declare-function agent-repl--ws-frontend "frontends" (ws))
 (declare-function agent-repl-frontend-kill-fn "frontends" (frontend))
+(declare-function agent-repl--drain-pending-magit "panels" (ws))
+(declare-function agent-repl--drain-pending-initial-buffers "panels" (ws))
+(declare-function agent-repl--drain-pending-show-panels "panels" (ws))
+(declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -1242,6 +1246,54 @@ not resolve to a known workspace, or that workspace carries no
                 (override (agent-repl--ws-get parent-ws :config-dir-override)))
       (agent-repl--ws-put ws :config-dir-override override))))
 
+(defun agent-repl--eager-open-panels (ws)
+  "Build WS's REPL panels into WS's OWN perspective without stealing focus.
+
+Called from `agent-repl--finalize-worktree-workspace' for a workspace
+generated in the BACKGROUND (no switch callback), so the workspace's
+agent-repl is laid out and mounted the moment the workspace is
+generated rather than only when the user first switches to it.
+
+Runs the SAME drains a real workspace switch runs
+\(`agent-repl--drain-pending-magit', `agent-repl--drain-pending-initial-buffers',
+`agent-repl--drain-pending-show-panels'), but wraps them in a transient
+perspective switch that `agent-repl--with-preserved-focus' unwinds, so
+the caller's active workspace / window / buffer are all restored when
+this returns.  The whole switch-in / build / switch-back is one
+synchronous execution, so Emacs never redisplays the intermediate frame
+and the caller sees no flash; persp-mode saves WS's now-panel-bearing
+window configuration when the unwind switches away from WS, so the first
+real switch to WS displays the built layout (with its webview already
+mounted) instead of mounting it then.
+
+`agent-repl--eager-open-in-progress' is bound around the whole dance so
+the activation-reactive hooks that must not fire for a background
+workspace are suppressed — see that variable's docstring for why the
+async `--on-workspace-switch' schedule and the workspace-history record
+would misfire here."
+  (agent-repl--log ws "eager-open-panels: ws=%s building panels in own perspective" ws)
+  (let ((agent-repl--eager-open-in-progress t))
+    (agent-repl--with-preserved-focus
+      (agent-repl--ws-switch ws)
+      (agent-repl--drain-pending-magit ws)
+      (agent-repl--drain-pending-initial-buffers ws)
+      (agent-repl--drain-pending-show-panels ws))))
+
+(defun agent-repl--worktree-generation-eager-open-callback (_path dirname)
+  "Open generated workspace DIRNAME's REPL into its OWN perspective.
+Passed as the creation CALLBACK for the BACKGROUND generation path
+\(`agent-repl--create-worktree-from-command'), where the caller's focus
+must stay put — so, unlike the interactive
+`agent-repl--worktree-creation-switch-callback', this deliberately does
+NOT switch to the new workspace; `agent-repl--eager-open-panels' builds
+its panels behind a transient, focus-restoring switch instead.  Runs
+OUTSIDE `agent-repl--finalize-worktree-workspace''s focus-preservation
+wrapper like every creation callback, which is exactly why eager-open
+carries its own `agent-repl--with-preserved-focus'.  PATH is unused —
+`agent-repl--eager-open-panels' resolves everything from the workspace
+name DIRNAME."
+  (agent-repl--eager-open-panels dirname))
+
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id
                                                        callback &optional source-dir no-agent model)
@@ -2409,8 +2461,14 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
     (agent-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s model=%s"
                       name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil")
                       (or model "nil"))
+    ;; CALLBACK = the eager-open callback (not nil): a generated workspace
+    ;; opens its REPL into its OWN perspective the moment it is created,
+    ;; without stealing the caller's focus (`--worktree-generation-eager-open-callback'
+    ;; runs outside finalize's focus wrapper and switches back after building).
     (agent-repl--do-create-worktree-workspace
-     name fork-session-id prompt nil priority base-commit git-root source-dir nil model)))
+     name fork-session-id prompt
+     #'agent-repl--worktree-generation-eager-open-callback
+     priority base-commit git-root source-dir nil model)))
 
 (defcustom agent-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.

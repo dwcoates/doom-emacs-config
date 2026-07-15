@@ -1702,6 +1702,30 @@ identity-distinct string injected by `agent-repl-set-priority' from
         (should (equal agent-repl--workspace-history '("main")))
         (should-not (agent-repl--ws-known-p "main"))))))
 
+(ert-deftest agent-repl-test-record-workspace-history-suppressed-during-eager-open ()
+  "record-workspace-history does not record the transient visit while
+`agent-repl--eager-open-in-progress' is set — the eager-open switch to a
+just-generated background workspace is not a real visit, so `SPC b p'
+must not treat it as the caller's previous workspace."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("caller"))
+          (agent-repl--eager-open-in-progress t))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "generated")))
+        (agent-repl--record-workspace-history)
+        (should (equal agent-repl--workspace-history '("caller")))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-eager-open-skips-last-viewed-stamp ()
+  "record-workspace-history does not stamp :last-viewed-at on the
+transiently activated workspace while eager-open is in progress."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (agent-repl--eager-open-in-progress t))
+      (agent-repl--ws-put "generated" :project-dir "/tmp/g")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "generated"))
+                ((symbol-function 'current-time) (lambda () '(25000 0))))
+        (agent-repl--record-workspace-history)
+        (should-not (agent-repl--ws-get "generated" :last-viewed-at))))))
+
 ;;;; ---- Tests: --ws-new ----
 
 (ert-deftest agent-repl-test-ws-new-with-name-delegates-to-workspace-new ()
