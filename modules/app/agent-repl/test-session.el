@@ -997,12 +997,20 @@ directory-keyed primitive."
   "Run BODY with `agent-repl--send' and `run-at-time' mocked.
 SEND-SLOT is a cons cell; each send pushes its prompt onto (car SEND-SLOT).
 TIMER-SLOT is a cons cell; the most recent scheduled thunk is stored at
-(car TIMER-SLOT) for synchronous firing."
+(car TIMER-SLOT) for synchronous firing.
+
+Also stubs `agent-repl--ensure-input-buffer' to a no-op: these tests mock
+`agent-repl--send' itself (the history-recording pipeline is exercised
+separately, see `agent-repl-test-deliver-pending-prompts-records-history'),
+so the real buffer-creating implementation would only leak a stray
+`*agent-panel-input-WS*' buffer into the test's Emacs instance."
   (declare (indent 2))
   `(cl-letf (((symbol-function 'agent-repl--send)
               (lambda (p _ws _force-meta on-settle)
                 (setcar ,send-slot (cons p (car ,send-slot)))
                 (when on-settle (funcall on-settle))))
+             ((symbol-function 'agent-repl--ensure-input-buffer)
+              (lambda (_ws) nil))
              ((symbol-function 'run-at-time)
               (lambda (_delay _repeat fn &rest args)
                 (setcar ,timer-slot (lambda () (apply fn args))))))
@@ -1078,6 +1086,33 @@ without sending again."
         (funcall (car timer-slot))   ; retry 2
         (funcall (car timer-slot))   ; give up — no further send
         (should (equal (car sent) '("a" "a" "a")))))))
+
+(ert-deftest agent-repl-test-deliver-pending-prompts-records-history ()
+  "The preemptive prompt delivered to a freshly generated (never-switched-to)
+workspace lands in that workspace's input history, exactly like a prompt
+typed into a live input buffer.  Regression test: a generated workspace's
+`:input-buffer' is nil until the panel is first shown, and
+`agent-repl--commit-input-buffer' silently skips `agent-repl--history-push'
+when its INPUT-BUF argument is nil, so without the
+`agent-repl--ensure-input-buffer' call in `agent-repl--deliver-pending-prompts'
+this prompt would reach the agent but never be recorded."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-deliver-hist-" t))
+          (buf nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend 'gui)
+            (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+            (agent-repl--ws-put "ws1" :project-dir tmpdir)
+            (cl-letf (((symbol-function 'agent-repl--do-send) (lambda (&rest _) nil))
+                      ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+              (agent-repl--deliver-pending-prompts '("build the feature") "ws1"))
+            (setq buf (agent-repl--ws-get "ws1" :input-buffer))
+            (should (buffer-live-p buf))
+            (should (equal (buffer-local-value 'agent-repl--input-history buf)
+                           '("build the feature"))))
+        (delete-directory tmpdir t)
+        (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-deliver-pending-prompts-errors-when-not-alive ()
   "deliver-pending-prompts signals an error immediately when the frontend
