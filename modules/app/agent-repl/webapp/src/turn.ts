@@ -39,8 +39,10 @@ export function userTurnText(item: UserTurnItem): string {
 /**
  * Whether a user turn is the `/clear` command — the prompt that drops the
  * CLI's context and re-inits the session. Its bubble opens the feed after a
- * clear, carrying the context boundary rule beneath it, above the
- * re-initialized conversation (`system: init`, then a contextless reply).
+ * clear, carrying the context boundary rule beneath it and nothing else:
+ * the re-init's chrome (`system: init`, then the CLI's contextless
+ * `(no content)` reply) all render empty, so the divider is the last thing
+ * the clear leaves on screen.
  */
 export function isClearTurn(item: UserTurnItem): boolean {
   return userTurnText(item).trim() === "/clear";
