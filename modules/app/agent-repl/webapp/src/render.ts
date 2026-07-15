@@ -507,7 +507,6 @@ function ActivitySection(
 // on the card background — so they read as one signal, not two competing ones.
 function ToolCard(
   item: ToolItem,
-  isPulsing = false,
   panels?: PanelContext,
   tabBar = "",
 ): string {
@@ -544,7 +543,7 @@ function ToolCard(
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
   return `
-    <div class="tool-card tool-${variant.toLowerCase()}${isPulsing ? " pulsing" : ""}">
+    <div class="tool-card tool-${variant.toLowerCase()}">
       ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}</div>
       ${toolInput(item)}
@@ -1014,6 +1013,11 @@ export function rendersEmpty(
       return SUPPRESSED_TOOLS.has(item.toolName);
     case "result":
       return finals?.swallowed.has(item) ?? false;
+    // The SDK's session (re)init announces itself with no user-facing content:
+    // the breathing prompt bubble is the "received, working" signal now, so
+    // the textual `system: init` note is dropped from the feed entirely.
+    case "system":
+      return item.subtype === "init";
     default:
       return false;
   }
@@ -1023,7 +1027,6 @@ export function rendersEmpty(
 export type PulseTarget =
   | { kind: "user-turn"; requestId: string }
   | { kind: "text"; blockId: string }
-  | { kind: "tool"; toolUseId: string }
   | null;
 
 /**
@@ -1031,9 +1034,6 @@ export type PulseTarget =
  * running session always shows a single slow beat somewhere at its tail.
  *
  * Exactly one of these takes the breath, in tail-first precedence:
- * - a RUNNING TOOL CARD at the tail breathes until its badge flips to
- *   done/error, covering the second its arc spends deliberately hidden (see
- *   `.tool-spinner`) so a call in flight is never a wholly still card.
  * - the WORKING FRONTIER (the last response a still-running turn has
  *   finished) breathes once the agent has written something, so a reader who
  *   has caught up sees it is still writing rather than that it went quiet.
@@ -1045,6 +1045,8 @@ export type PulseTarget =
  * - the turn is not in flight, so nothing more is coming at all;
  * - a response is streaming, and its own cursor is the live signal;
  * - a thinking indicator is running, and its spinner is the live signal;
+ * - a tool call is running at the tail, and its own run badge (the arc in
+ *   `.badge.run`) is the live signal, so the feed shows brief dead air;
  * - a settled section (a done tool, a retry, an error) followed the prompt
  *   before the agent wrote a word, and IT is now the progress on show.
  *
@@ -1083,13 +1085,12 @@ export function pulseTarget(
     if (item.kind === "text") {
       return item.done ? { kind: "text", blockId: item.blockId } : null;
     }
-    // A running tool card (no result badge yet) at the tail IS the frontier:
-    // it breathes until its badge flips to done/error, filling the second its
-    // arc stays hidden. A card the agent has moved past (something visible
-    // follows it) is history, so the frontier falls back to the text above.
-    if (item.kind === "tool" && atTail && !item.result) {
-      return { kind: "tool", toolUseId: item.toolUseId };
-    }
+    // A running tool card at the tail no longer takes the beat: its own run
+    // badge (the arc spinning in `.badge.run`) is the live signal, so the feed
+    // shows brief dead air rather than a second beat competing with it. A
+    // settled card falls through, letting the finished response above it
+    // breathe as the working frontier.
+    if (item.kind === "tool" && atTail && !item.result) return null;
     atTail = false;
   }
   return null;
@@ -1100,9 +1101,6 @@ export function isPulsed(item: ConversationItem, pulse: PulseTarget): boolean {
   if (!pulse) return false;
   if (pulse.kind === "text") {
     return item.kind === "text" && item.blockId === pulse.blockId;
-  }
-  if (pulse.kind === "tool") {
-    return item.kind === "tool" && item.toolUseId === pulse.toolUseId;
   }
   return item.kind === "user-turn" && item.requestId === pulse.requestId;
 }
@@ -1184,7 +1182,7 @@ function SystemNote(item: SystemItem): string {
  * bubble above it has already drawn it.
  *
  * IS-PULSING marks the one section that breathes (`pulseTarget`), which is
- * the prompt, a finished response, or a running tool card. PANELS carries
+ * the prompt or a finished response. PANELS carries
  * the feed partition's child lists, letting a spawning card fold its
  * confined children into an activity panel (and letting those children
  * recurse through this same function).
@@ -1205,7 +1203,7 @@ export function renderItem(
     case "thinking":
       return Thinking(item);
     case "tool":
-      return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item, isPulsing, panels);
+      return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item, panels);
     case "permission":
       return PermissionPrompt(item, selections);
     case "result":
@@ -1367,7 +1365,7 @@ export function groupHtml(
   const errBadge = failed > 0 ? `<span class="badge err">${failed} failed</span>` : "";
   const active = members.find((m) => m.toolUseId === activeId) ?? members[members.length - 1];
   const tabBar = `<div class="tab-bar">${tabs}${errBadge}</div>`;
-  return `<div class="feed-group">${ToolCard(active, false, panels, tabBar)}</div>`;
+  return `<div class="feed-group">${ToolCard(active, panels, tabBar)}</div>`;
 }
 
 /**

@@ -83,13 +83,6 @@
      the card grey (.tool-card .badge) so the wash never tints it. */
   --async-card: #8fdfd0;
   --async-border: #4fb8a8;
-  /* The far end of the breath a RUNNING tool card takes (see
-     .tool-card.pulsing): each card wash one shade deeper, the same way the
-     bubble washes deepen for --user-pulse / --assistant-pulse. Two tokens
-     because a card wears one of two washes (generic grey, async teal) and
-     the breath must stay inside whichever it wears. */
-  --card-pulse: #e8eaed;
-  --async-pulse: #79d6c4;
   /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
      floats on, so a `token` inside a sentence of prose reads as typeable at a
      glance. A transparent BLACK wash, never a --fg one: --fg flips light in the
@@ -127,11 +120,6 @@
     --q-border: #facc15;
     --async-card: #0c5b52;
     --async-border: #4fc4b0;
-    /* Dark-theme card breath LIFTS the wash instead of deepening it, the same
-       inversion --user-pulse / --assistant-pulse make, since deepening a dark
-       wash would move the eye too little to read as motion. */
-    --card-pulse: #262a34;
-    --async-pulse: #127c6f;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 }
@@ -458,16 +446,9 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card);
-  --pulse-to: var(--card-pulse);
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
 }
-/* A running tool card breathes as the working frontier (see `pulseTarget`),
-   taking the SAME slow breath the bubbles take (@keyframes bubble-breathe,
-   rocking toward --pulse-to) so the whole app has one beat, not two. It is a
-   wash under the head's fast arc, filling the second the arc stays hidden;
-   both drop together under reduced motion below. */
-.tool-card.pulsing { animation: bubble-breathe 2s ease-in-out infinite; }
 /* The async wash: a skill handoff and a spawned subagent are each a whole
    conversation of their own, not one more file read, and the one shared teal
    makes them findable in a long feed of grey tool cards. Depth no longer
@@ -476,7 +457,6 @@ pre {
 .tool-card.tool-agent,
 .tool-card.tool-task {
   background: var(--async-card);
-  --pulse-to: var(--async-pulse);
   border-color: var(--async-border);
 }
 .skill-launch { font-weight: 600; }
@@ -974,10 +954,8 @@ pre {
   }
   /* A breath is a hint, never the sole liveness signal (the topbar spinner and
      the running tool arcs both still say a turn is in flight), so it drops
-     entirely rather than degrading to something slower — for the card that
-     breathes as the running frontier just as for the bubbles. */
-  .bubble.pulsing,
-  .tool-card.pulsing {
+     entirely rather than degrading to something slower. */
+  .bubble.pulsing {
     animation: none;
   }
   /* The compaction bar's sweep is a hint, not the sole signal (the
