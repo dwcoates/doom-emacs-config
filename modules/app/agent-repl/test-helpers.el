@@ -330,17 +330,23 @@ from START (default 0), or nil when NEEDLE does not occur."
           (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
                             temporary-file-directory))
 
-  ;; Suppress timers at load time
+  ;; Suppress timers at load time.  Both the periodic (`run-with-timer')
+  ;; and idle (`run-with-idle-timer') registrations that fire at module
+  ;; load — e.g. the drawer's MERGED-section auto-clear idle timer — are
+  ;; overridden so no real timer leaks into the batch test process.
   (defvar agent-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
+  (defvar agent-repl-test--orig-run-with-idle-timer (symbol-function 'run-with-idle-timer))
   (advice-add 'run-with-timer :override (lambda (&rest _) nil))
+  (advice-add 'run-with-idle-timer :override (lambda (&rest _) nil))
 
   ;; Load the module
   (load (expand-file-name "config.el" (file-name-directory
                                         (or load-file-name buffer-file-name)))
         nil t)
 
-  ;; Restore run-with-timer after loading
+  ;; Restore run-with-timer / run-with-idle-timer after loading
   (advice-remove 'run-with-timer (lambda (&rest _) nil))
+  (advice-remove 'run-with-idle-timer (lambda (&rest _) nil))
 
   ;; Restore file-notify-add-watch after loading
   (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub))

@@ -4301,5 +4301,58 @@ short-circuit the redraw."
           (agent-repl--merge-progress-put "ws" :commit-index 1)
           (should-not (equal before (agent-repl-drawer--render-signature))))))))
 
+;;;; ---- Idle auto-clear of the MERGED section ----
+
+(ert-deftest agent-repl-drawer-test-merged-workspace-keys-selects-merged-only ()
+  "`--merged-workspace-keys' returns only workspaces in the MERGED section."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "done" :repl-state :merged)
+    (agent-repl-drawer-test--register "live" :agent-state :idle)
+    (agent-repl-drawer-test--register "flight" :merging t)
+    (should (equal (agent-repl-drawer--merged-workspace-keys) '("done")))))
+
+(ert-deftest agent-repl-drawer-test-merged-workspace-keys-empty-when-none-merged ()
+  "`--merged-workspace-keys' returns nil when no workspace is MERGED."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "live" :agent-state :idle)
+    (should (null (agent-repl-drawer--merged-workspace-keys)))))
+
+(ert-deftest agent-repl-drawer-test-clear-merged-finishes-merged-workspace ()
+  "`clear-merged-section' finishes each MERGED-section workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "done" :repl-state :merged)
+    (let ((finished nil))
+      (cl-letf (((symbol-function 'agent-repl--finish-workspace)
+                 (lambda (ws) (push ws finished)))
+                ((symbol-function 'agent-repl-drawer--refresh-if-visible)
+                 #'ignore))
+        (agent-repl-drawer-clear-merged-section))
+      (should (equal finished '("done"))))))
+
+(ert-deftest agent-repl-drawer-test-clear-merged-spares-non-merged-workspace ()
+  "`clear-merged-section' never finishes a workspace outside the MERGED section."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "done" :repl-state :merged)
+    (agent-repl-drawer-test--register "live" :agent-state :idle)
+    (let ((finished nil))
+      (cl-letf (((symbol-function 'agent-repl--finish-workspace)
+                 (lambda (ws) (push ws finished)))
+                ((symbol-function 'agent-repl-drawer--refresh-if-visible)
+                 #'ignore))
+        (agent-repl-drawer-clear-merged-section))
+      (should-not (member "live" finished)))))
+
+(ert-deftest agent-repl-drawer-test-clear-merged-noops-when-section-empty ()
+  "`clear-merged-section' calls no teardown when the MERGED section is empty."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "live" :agent-state :idle)
+    (let ((called nil))
+      (cl-letf (((symbol-function 'agent-repl--finish-workspace)
+                 (lambda (_ws) (setq called t)))
+                ((symbol-function 'agent-repl-drawer--refresh-if-visible)
+                 #'ignore))
+        (agent-repl-drawer-clear-merged-section))
+      (should-not called))))
+
 (provide 'test-drawer)
 ;;; test-drawer.el ends here
