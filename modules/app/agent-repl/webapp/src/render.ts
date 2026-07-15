@@ -98,6 +98,15 @@ const SPECIAL_TOOLS = new Set([
  */
 const SUPPRESSED_TOOLS = new Set(["AskUserQuestion", "ToolSearch", "TaskUpdate"]);
 
+/**
+ * The CLI's placeholder for an assistant message that carried no text of
+ * its own. The `/clear` re-init emits one as its contextless reply — the
+ * empty answer that would otherwise sit under the divider as a green
+ * `(no content)` bubble — so a body that is nothing but this placeholder
+ * draws nothing, exactly as the `system: init` beside it does.
+ */
+const EMPTY_CONTENT_PLACEHOLDER = "(no content)";
+
 function contentToText(
   content: string | Array<{ type: string; text?: string }>,
 ): string {
@@ -1045,6 +1054,12 @@ export function rendersEmpty(
     // A textless thinking block leaves nothing behind once it closes.
     case "thinking":
       return item.done && item.text === "";
+    // The CLI's empty-message placeholder (`EMPTY_CONTENT_PLACEHOLDER`) is
+    // no answer at all: a `/clear`'s contextless reply is the common one,
+    // and a green `(no content)` bubble under the divider is exactly what
+    // the clear should have left no room for.
+    case "text":
+      return item.text.trim() === EMPTY_CONTENT_PLACEHOLDER;
     // AskUserQuestion's UI IS the permission picker card — the generic tool
     // card would just dump the questions JSON (input) and the "User has
     // answered…" echo (result) alongside it. ToolSearch is deferred-tool
