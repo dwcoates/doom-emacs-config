@@ -837,7 +837,10 @@ interface ToolUseResultFrame extends WsEnvelope {
     | { kind: "bash";  stdout: string; stderr: string; exit_code?: number }
     | { kind: "diff";  file_path: string; unified_diff: string }
     | { kind: "grep";  matches: Array<{ file: string; line: number; text: string }> }
-    | { kind: "task";  summary: string };
+    | { kind: "task";  summary: string }
+    // Launched skill's SKILL.md body, read from disk by the daemon so the
+    // Skill card can show the full skill contents alongside its invocation.
+    | { kind: "skill"; content: string };
 }
 ```
 

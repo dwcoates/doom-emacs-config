@@ -668,11 +668,15 @@ function toolInput(item: ToolItem): string {
     const to = typeof item.input.to === "string" ? `→ ${item.input.to}: ` : "";
     return `<div class="file-path">${escapeHtml(`${to}${item.input.summary}`)}</div>`;
   }
-  // Skill announces the launch and nothing else: the input's `args` is the
-  // prompt the skill is handed, which the feed already carries as the user
-  // turn or the agent's own text.
+  // Skill's input section IS its invocation: the skill name and, when the
+  // call carried them, the args it was handed — the "/skill args" a user
+  // would type. Capped and click-expandable like a Bash command, since the
+  // args can run long. The skill's full SKILL.md body is the separate
+  // content section the result renders (see toolResult).
   if (item.toolName === "Skill" && item.input && typeof item.input.skill === "string") {
-    return `<div class="skill-launch">Launching skill: ${escapeHtml(item.input.skill)}</div>`;
+    const args =
+      typeof item.input.args === "string" && item.input.args !== "" ? ` ${item.input.args}` : "";
+    return `<pre class="cmd skill-input">/${escapeHtml(item.input.skill)}${escapeHtml(args)}</pre>`;
   }
   // Any other tool folds to a headline when its input offers one: the
   // interesting field on a line, the full JSON one click away (the same
@@ -707,6 +711,11 @@ function toolResult(item: ToolItem): string {
           .join("\n")}</pre>`;
       case "task":
         return `<pre class="tool-output">${escapeHtml(r.summary)}</pre>`;
+      case "skill":
+        // The launched skill's full SKILL.md body, the content section
+        // paired with the invocation the input renders. Capped and
+        // click-expandable like a Bash output.
+        return `<pre class="tool-output skill-content">${escapeHtml(r.content)}</pre>`;
     }
   }
   if (item.toolName === "Read" && !item.result.isError) {
@@ -718,9 +727,12 @@ function toolResult(item: ToolItem): string {
   if (item.toolName === "SendMessage" && !item.result.isError) {
     return "";
   }
-  // Skill's success result is the very "Launching skill: <name>" line the
-  // card's input already renders. Errors fall through below so a skill that
-  // failed to launch stays loud.
+  // A Skill result with a skill render hint rendered its SKILL.md body as
+  // the content section above. Without one — a skill the daemon could not
+  // resolve to a SKILL.md (a plugin skill, a missing file) — the raw
+  // "Launching skill: <name>" echo adds nothing over the invocation the
+  // input already shows, so it is suppressed. Errors fall through below so
+  // a skill that failed to launch stays loud.
   if (item.toolName === "Skill" && !item.result.isError) {
     return "";
   }

@@ -204,7 +204,7 @@ type ToolUseInputEndFrame struct {
 // RenderHint is the optional pre-rendered payload on tool-use-result
 // frames. Kind selects which of the remaining fields apply.
 type RenderHint struct {
-	Kind string `json:"kind"` // bash | diff | grep | task
+	Kind string `json:"kind"` // bash | diff | grep | task | skill
 
 	// bash
 	Stdout   string `json:"stdout,omitempty"`
@@ -220,6 +220,10 @@ type RenderHint struct {
 
 	// task
 	Summary string `json:"summary,omitempty"`
+
+	// skill — the SKILL.md body the launched skill injects, so the card can
+	// show the full skill contents alongside its invocation.
+	Content string `json:"content,omitempty"`
 }
 
 type GrepMatch struct {

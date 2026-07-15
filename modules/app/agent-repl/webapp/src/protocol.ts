@@ -240,7 +240,10 @@ export type RenderHint =
   | { kind: "bash"; stdout: string; stderr: string; exit_code?: number }
   | { kind: "diff"; file_path: string; unified_diff: string }
   | { kind: "grep"; matches: Array<{ file: string; line: number; text: string }> }
-  | { kind: "task"; summary: string };
+  | { kind: "task"; summary: string }
+  // The launched skill's full SKILL.md body, sourced by the daemon so the
+  // card can show the skill contents alongside its invocation.
+  | { kind: "skill"; content: string };
 
 export interface ToolUseResultFrame extends WsEnvelope {
   type: "tool-use-result";
