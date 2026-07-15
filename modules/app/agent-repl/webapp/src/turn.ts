@@ -38,22 +38,17 @@ export function userTurnText(item: UserTurnItem): string {
 
 /**
  * Whether a user turn is the `/clear` command — the prompt that drops the
- * CLI's context and re-inits the session. Its bubble carries the context
- * boundary rule beneath it, splitting the discarded conversation above from
- * the re-initialized one (`system: init`, then a contextless reply) below.
+ * CLI's context and re-inits the session. Its bubble opens the feed after a
+ * clear, carrying the context boundary rule beneath it, above the
+ * re-initialized conversation (`system: init`, then a contextless reply).
  */
 export function isClearTurn(item: UserTurnItem): boolean {
   return userTurnText(item).trim() === "/clear";
 }
 
 /**
- * The items the session's CURRENT context carries: everything after the
- * last `/clear`, or all of them when the session never cleared.
- *
- * The feed keeps the discarded turns on screen behind the divider, so any
- * projection that speaks for the CONTEXT (what the agent still knows)
- * rather than the SCROLLBACK (what the user can still scroll to) has to
- * cut them here.
+ * Index of the last `/clear` turn in ITEMS, or -1 when the session never
+ * cleared.
  *
  * The `/clear` turn is the cut rather than the `system: init` frame it
  * provokes, even though the store treats that init as the clear: a
@@ -64,12 +59,43 @@ export function isClearTurn(item: UserTurnItem): boolean {
  * command envelope back to it precisely so a replayed session draws the
  * same boundary it drew live.
  */
+function lastClearIndex(items: readonly ConversationItem[]): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user-turn" && isClearTurn(item)) return i;
+  }
+  return -1;
+}
+
+/**
+ * The items the session's CURRENT context carries: everything after the
+ * last `/clear`, or all of them when the session never cleared.
+ *
+ * Any projection that speaks for the CONTEXT (what the agent still knows)
+ * cuts here; the `/clear` turn itself is chrome, not context, so it falls
+ * outside the cut.
+ */
 export function itemsSinceClear(
   items: readonly ConversationItem[],
 ): readonly ConversationItem[] {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === "user-turn" && isClearTurn(item)) return items.slice(i + 1);
-  }
-  return items;
+  const i = lastClearIndex(items);
+  return i === -1 ? items : items.slice(i + 1);
+}
+
+/**
+ * The items the feed still DRAWS: the last `/clear` turn and everything
+ * after it, or all items when the session never cleared.
+ *
+ * A `/clear` clears the SCREEN as well as the context — the discarded
+ * turns leave the feed entirely rather than lingering behind the divider —
+ * so the feed opens on the `/clear` bubble, the boundary rule beneath it,
+ * and the re-initialized conversation below. One item wider than
+ * `itemsSinceClear`: the `/clear` turn stays visible as the record of the
+ * cut, even though the context it names no longer carries it.
+ */
+export function itemsFromLastClear(
+  items: readonly ConversationItem[],
+): readonly ConversationItem[] {
+  const i = lastClearIndex(items);
+  return i === -1 ? items : items.slice(i);
 }

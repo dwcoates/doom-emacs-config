@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { ConversationItem, ToolItem, UserTurnItem } from "../src/store.js";
-import { isClearTurn, itemsSinceClear, userTurnText } from "../src/turn.js";
+import { isClearTurn, itemsFromLastClear, itemsSinceClear, userTurnText } from "../src/turn.js";
 
 /** A user turn carrying the given prompt text. */
 function userTurn(text: string): UserTurnItem {
@@ -134,6 +134,60 @@ describe("itemsSinceClear", () => {
     const items: ConversationItem[] = [tool("t1"), userTurn("/clear"), tool("t2")];
     // Act
     itemsSinceClear(items);
+    // Assert
+    expect(items).toHaveLength(3);
+  });
+});
+
+describe("itemsFromLastClear", () => {
+  it("keeps every item of a session that never cleared", () => {
+    // Arrange
+    const items: ConversationItem[] = [userTurn("do the thing"), tool("t1")];
+    // Act + Assert
+    expect(itemsFromLastClear(items)).toEqual(items);
+  });
+
+  it("drops the items before the /clear", () => {
+    // Arrange
+    const items: ConversationItem[] = [tool("t1"), userTurn("/clear"), tool("t2")];
+    // Act
+    const kept = itemsFromLastClear(items);
+    // Assert
+    expect(kept).toEqual([items[1], items[2]]);
+  });
+
+  it("keeps the /clear turn itself as the head of the cut", () => {
+    // Arrange
+    const clear = userTurn("/clear");
+    const items: ConversationItem[] = [tool("t1"), clear];
+    // Act + Assert
+    expect(itemsFromLastClear(items)[0]).toBe(clear);
+  });
+
+  it("cuts at the LAST /clear when the session cleared twice", () => {
+    // Arrange
+    const items: ConversationItem[] = [
+      userTurn("/clear"),
+      tool("t1"),
+      userTurn("/clear"),
+      tool("t2"),
+    ];
+    // Act + Assert
+    expect(itemsFromLastClear(items)).toEqual([items[2], items[3]]);
+  });
+
+  it("keeps the items a system init left standing, since a resume re-inits too", () => {
+    // Arrange -- only a typed /clear cuts the feed; a resume's init does not.
+    const items: ConversationItem[] = [tool("t1"), { kind: "system", subtype: "init" }];
+    // Act + Assert
+    expect(itemsFromLastClear(items)).toEqual(items);
+  });
+
+  it("leaves the source items untouched", () => {
+    // Arrange
+    const items: ConversationItem[] = [tool("t1"), userTurn("/clear"), tool("t2")];
+    // Act
+    itemsFromLastClear(items);
     // Assert
     expect(items).toHaveLength(3);
   });

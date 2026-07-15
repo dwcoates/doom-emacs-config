@@ -54,7 +54,7 @@ function stringField(item: ToolItem, key: string): string {
  * counter entries.
  *
  * A subagent spawned before the last `/clear` is gone from that context
- * even though its tool card is still on screen above the divider, so the
+ * (and, since the clear cuts the feed too, off screen with it), so the
  * roster starts where the context starts (`itemsSinceClear`).
  *
  * `deactivatedAtTurn` maps straight from the item's stamp: an active
