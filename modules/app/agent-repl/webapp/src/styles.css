@@ -516,8 +516,40 @@ pre {
 }
 .agent-activity.open { cursor: default; }
 .agent-activity.open > .agent-ticker { cursor: zoom-out; }
-.agent-ticker { color: var(--muted); font-style: italic; }
-.agent-panel { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.35rem; }
+/* The ticker is the badge you click to reveal the child feed, rendered in
+   the same pill form as a consecutive-run tab chip (see .tab-chip) so the
+   two read as one vocabulary — only its LOCATION differs (it sits at the
+   fold's top, never in the tab bar). max-width keeps a long "N steps · …"
+   line from spilling past the card. */
+.agent-ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+}
+/* The child-feed panel is itself a bubble laid on the main-GUI background,
+   NOT on the card's async teal: the nested response bubbles (assistant
+   purple, user blue, tool grey) sit on --bg exactly as they do at the top
+   feed level, so none of them clashes with the teal beneath the card. Its
+   padding mirrors the card's own (0.5rem 0.75rem), so the nested bubbles
+   keep the same border distance they had to the card — now to this wrapper
+   — and shrink commensurately to make room for it. */
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
 /* Consecutive like-cards collapse into one tabbed group: the chip row
