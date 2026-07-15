@@ -803,9 +803,10 @@ export class ConversationStore {
         break;
       }
       case "queue-removed":
-        // The item left the queue (drained into a user-turn, cancelled, or
-        // dropped on session end). The user-turn it drained into arrives as
-        // its own frame; here we only drop the parked entry.
+        // The item left the queue (drained into a user-turn, cancelled,
+        // dropped by a user interrupt, or dropped on session end). The
+        // user-turn it drained into arrives as its own frame; here we only
+        // drop the parked entry.
         s.queued = s.queued.filter((q) => q.queue_id !== frame.queue_id);
         break;
     }

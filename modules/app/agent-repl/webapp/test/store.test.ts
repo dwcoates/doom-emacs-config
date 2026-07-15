@@ -1281,6 +1281,16 @@ describe("ConversationStore in-flight queue", () => {
     expect(store.state.queued).toHaveLength(0);
   });
 
+  it("drops a parked item on queue-removed(interrupted)", () => {
+    // Arrange — a user interrupt clears the daemon queue (§2.13).
+    const store = newStore();
+    store.applyRaw(queueAdded());
+    // Act
+    store.applyRaw(frame("queue-removed", { queue_id: "q1", reason: "interrupted" }));
+    // Assert
+    expect(store.state.queued).toHaveLength(0);
+  });
+
   it("seeds the queue from the hello snapshot on a fresh join", () => {
     // Arrange
     autoSeq = 0;

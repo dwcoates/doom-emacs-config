@@ -394,12 +394,14 @@ export interface QueueClassifiedFrame extends WsEnvelope {
 /**
  * A queued item left the queue: `drained` (it became the `user-turn` named
  * by `request_id` and went to the shim), `cancelled` (the user removed it),
- * or `session_end` (the session ended before it ran).
+ * `interrupted` (a user interrupt dropped every parked item so nothing
+ * auto-runs after the abort), or `session_end` (the session ended before
+ * it ran).
  */
 export interface QueueRemovedFrame extends WsEnvelope {
   type: "queue-removed";
   queue_id: string;
-  reason: "drained" | "cancelled" | "session_end";
+  reason: "drained" | "cancelled" | "interrupted" | "session_end";
   request_id?: string;
 }
 

@@ -394,12 +394,13 @@ type QueueClassifiedFrame struct {
 }
 
 // QueueRemovedFrame announces a queued item leaving the queue: drained to
-// the shim as its own turn, cancelled by the user, or dropped on session
-// end. RequestID is present only when the item drained.
+// the shim as its own turn, cancelled by the user, dropped by a user
+// interrupt, or dropped on session end. RequestID is present only when
+// the item drained.
 type QueueRemovedFrame struct {
 	Envelope
 	QueueID   string `json:"queue_id"`
-	Reason    string `json:"reason"`               // drained | cancelled | session_end
+	Reason    string `json:"reason"`               // drained | cancelled | interrupted | session_end
 	RequestID string `json:"request_id,omitempty"` // present when reason == "drained"
 }
 
