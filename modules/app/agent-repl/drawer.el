@@ -194,6 +194,19 @@ Default is near-black."
   :type 'color
   :group 'agent-repl)
 
+(defcustom agent-repl-merged-clear-idle-seconds (* 8 60 60)
+  "Idle seconds after which the drawer's MERGED section auto-clears.
+When Emacs has been inactive (no user input) for this long, every
+workspace in the drawer's MERGED bucket is finished via
+`agent-repl--finish-workspace' — the same teardown the drawer `x' key
+runs — removing each one's git worktree and hash entry so the section
+empties.  A repeating idle timer fires the clear once per idle period
+once idle reaches this threshold.  The merged workspaces' commits have
+already landed in their source branches, so removing the now-redundant
+worktrees is safe.  Defaults to eight hours."
+  :type 'integer
+  :group 'agent-repl)
+
 ;;;; Faces ------------------------------------------------------------------
 
 (defface agent-repl-drawer-workspace-name
@@ -1971,6 +1984,48 @@ Intended to be called from the 1Hz poll in `status.el'."
       (dolist (win (get-buffer-window-list buf nil t))
         (when (window-live-p win)
           (set-window-point win (point)))))))
+
+;;;; Idle auto-clear of the MERGED section -----------------------------------
+
+(defun agent-repl-drawer--merged-workspace-keys ()
+  "Return the visible workspaces currently bucketed under the MERGED section.
+Filters `agent-repl-drawer--visible-workspace-keys' down to those whose
+`agent-repl-drawer--workspace-section' is `:merged' — exactly the members
+the drawer renders beneath its MERGED header."
+  (cl-remove-if-not
+   (lambda (ws) (eq (agent-repl-drawer--workspace-section ws) :merged))
+   (agent-repl-drawer--visible-workspace-keys)))
+
+(defun agent-repl-drawer-clear-merged-section ()
+  "Finish every workspace in the drawer's MERGED section.
+Runs `agent-repl--finish-workspace' on each MERGED-bucket entry — the
+same teardown the drawer `x' key performs — removing each one's git
+worktree and hash entry so the MERGED section empties.
+
+Fired automatically by an idle timer after
+`agent-repl-merged-clear-idle-seconds' of Emacs inactivity; the merged
+workspaces' commits have already landed in their source branches, so
+removing the now-redundant worktrees is safe.  A no-op when the MERGED
+section is empty.  Also callable interactively."
+  (interactive)
+  (let ((merged (agent-repl-drawer--merged-workspace-keys)))
+    (when merged
+      (agent-repl--log nil "clear-merged-section: finishing %d merged workspace(s): %S"
+                        (length merged) merged)
+      (dolist (ws merged)
+        (agent-repl--finish-workspace ws))
+      (agent-repl-drawer--refresh-if-visible))))
+
+;; Repeating idle timer: once Emacs has been idle for
+;; `agent-repl-merged-clear-idle-seconds', empty the drawer's MERGED
+;; section.  A repeating idle timer runs its function once per idle
+;; period (when idle first reaches the threshold), not continuously
+;; while idle, which is exactly the cadence we want.  Registered in
+;; `agent-repl--timers' so `agent-repl--cancel-all-timers' tears it
+;; down on module reload rather than leaking a second timer.
+(push (run-with-idle-timer agent-repl-merged-clear-idle-seconds t
+                           #'agent-repl-drawer-clear-merged-section)
+      agent-repl--timers)
 
 ;;;; Display + toggle -------------------------------------------------------
 
