@@ -3,6 +3,8 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -60,7 +62,9 @@ func permissionPreview(toolName string, input json.RawMessage) *protocol.Permiss
 
 // renderHint builds the optional §2.6 render payload for a
 // tool-use-result frame. Returns nil when no richer rendering applies.
-func renderHint(toolName string, input, content json.RawMessage) *protocol.RenderHint {
+// configDir and cwd are the session's roots the Skill case resolves a
+// skill name against; the other kinds ignore them.
+func renderHint(toolName string, input, content json.RawMessage, configDir, cwd string) *protocol.RenderHint {
 	switch toolName {
 	case "Bash":
 		return &protocol.RenderHint{Kind: "bash", Stdout: contentText(content)}
@@ -97,8 +101,55 @@ func renderHint(toolName string, input, content json.RawMessage) *protocol.Rende
 	// still carry the old name, so both take the task summary hint.
 	case "Task", "Agent":
 		return &protocol.RenderHint{Kind: "task", Summary: truncate(contentText(content), taskSummaryLimit)}
+	case "Skill":
+		var in struct {
+			Skill string `json:"skill"`
+		}
+		if err := json.Unmarshal(input, &in); err == nil && in.Skill != "" {
+			if body := skillContent(in.Skill, configDir, cwd); body != "" {
+				return &protocol.RenderHint{Kind: "skill", Content: body}
+			}
+		}
 	}
 	return nil
+}
+
+// skillContent reads a named skill's SKILL.md — the body the skill injects
+// when it launches — so the card can show the full skill contents. It
+// searches the project's local skills first (the nearest .claude/skills
+// walking up from cwd, so a local skill overrides a personal one of the
+// same name), then the personal <configDir>/skills. Namespaced plugin
+// skills (name contains ':') resolve through neither, and any skill with no
+// readable SKILL.md, so both yield "".
+func skillContent(name, configDir, cwd string) string {
+	if name == "" || strings.ContainsRune(name, ':') {
+		return ""
+	}
+	for _, dir := range skillSearchDirs(configDir, cwd) {
+		if body, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md")); err == nil {
+			return string(body)
+		}
+	}
+	return ""
+}
+
+// skillSearchDirs is the ordered list of skills/ roots a skill name is
+// resolved against: every .claude/skills from cwd up to the filesystem
+// root, then the personal <configDir>/skills.
+func skillSearchDirs(configDir, cwd string) []string {
+	var dirs []string
+	for dir := cwd; dir != ""; {
+		dirs = append(dirs, filepath.Join(dir, ".claude", "skills"))
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if cd := ClaudeConfigDir(configDir); cd != "" {
+		dirs = append(dirs, filepath.Join(cd, "skills"))
+	}
+	return dirs
 }
 
 // contentText flattens a Layer-1 tool content payload (string or

@@ -1110,7 +1110,7 @@ describe("renderItem", () => {
     expect(html).toContain("stderr");
   });
 
-  it("renders Skill as its launch line, not its input JSON", () => {
+  it("renders the Skill invocation as an expandable input section, not raw input JSON", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
@@ -1123,13 +1123,14 @@ describe("renderItem", () => {
     };
     // Act
     const html = renderItem(item);
-    // Assert
-    expect(html).toContain("Launching skill: debug-logs");
-    expect(html).not.toContain("tool-input");
+    // Assert — the skill-input class is what makes the section click-expandable.
+    expect(html).toContain("skill-input");
+    expect(html).toContain("/debug-logs");
+    expect(html).not.toContain('"skill":"debug-logs"');
   });
 
-  it("omits the Skill args from the launch line", () => {
-    // Arrange — the skill's prompt is already in the feed as the turn that asked for it.
+  it("shows the Skill args in the invocation input section", () => {
+    // Arrange — the args are what the skill was invoked with, part of the input.
     const item: ToolItem = {
       kind: "tool",
       toolUseId: "t1",
@@ -1140,7 +1141,31 @@ describe("renderItem", () => {
       inputDone: true,
     };
     // Act + Assert
-    expect(renderItem(item)).not.toContain("emacs crashed twice");
+    expect(renderItem(item)).toContain("/debug-logs emacs crashed twice");
+  });
+
+  it("renders the SKILL.md body as an expandable content section from a skill render hint", () => {
+    // Arrange
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs" },
+      inputJson: `{"skill":"debug-logs"}`,
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "Launching skill: debug-logs",
+        render: { kind: "skill", content: "# Debug Logs\nread the log" },
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the skill-content class is what makes the body click-expandable.
+    expect(html).toContain("skill-content");
+    expect(html).toContain("# Debug Logs");
+    expect(html).toContain("read the log");
   });
 
   it("tags the Skill card with the class its turquoise wash hangs on", () => {
@@ -1158,8 +1183,9 @@ describe("renderItem", () => {
     expect(renderItem(item)).toContain("tool-card tool-skill");
   });
 
-  it("suppresses the successful Skill result, which only echoes the launch line", () => {
-    // Arrange
+  it("suppresses a successful Skill result that carries no skill render hint", () => {
+    // Arrange — no render hint means the daemon could not resolve a SKILL.md
+    // (a plugin skill, a missing file), so only the raw launch echo is left.
     const item: ToolItem = {
       kind: "tool",
       toolUseId: "t1",
@@ -1170,8 +1196,10 @@ describe("renderItem", () => {
       inputDone: true,
       result: { isError: false, content: "Launching skill: debug-logs" },
     };
-    // Act + Assert — the launch line renders once (from the input), not twice.
-    expect(renderItem(item)).not.toContain("tool-output");
+    // Act + Assert — no content section when there is nothing to show.
+    const html = renderItem(item);
+    expect(html).not.toContain("tool-output");
+    expect(html).not.toContain("skill-content");
   });
 
   it("keeps Skill error results visible", () => {

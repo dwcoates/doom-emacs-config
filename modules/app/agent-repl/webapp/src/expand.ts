@@ -30,6 +30,8 @@ export const CAPPED_CLASSES = [
   "bash-input",
   "bash-output",
   "diff-output",
+  "skill-input",
+  "skill-content",
 ] as const;
 
 /** Selector matching every capped section (an element may carry several). */

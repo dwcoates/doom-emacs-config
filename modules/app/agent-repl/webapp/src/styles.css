@@ -472,7 +472,6 @@ pre {
   background: var(--async-card);
   border-color: var(--async-border);
 }
-.skill-launch { font-weight: 600; }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
@@ -544,7 +543,7 @@ pre {
    5 each, independently scrollable) and --cap-extra absorbs the
    .tool-output dashed-divider padding where inherited. Everything past
    the cap stays reachable by scrolling. */
-.tool-read-output, .bash-input, .bash-output, .diff-output {
+.tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
   overflow-y: auto;
   max-height: calc(var(--cap-lines) * 1.4em + var(--cap-extra, 0px));
@@ -553,11 +552,15 @@ pre {
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
 .diff-output { --cap-lines: 10; }
+/* A skill invocation caps like a Bash command; the skill's SKILL.md body
+   caps like a Bash output, the extra absorbing the .tool-output divider. */
+.skill-input { --cap-lines: 5; }
+.skill-content { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 /* Click-to-expand: a click anywhere on a capped section lifts its cap and
    lays the section out at full length, and the next click restores the
    preview. The cursor names the click's next move. One selector entry per
    CAPPED_CLASSES entry in expand.ts, which styles.test.ts enforces. */
-.tool-input, .tool-output, .tool-read-output, .bash-input, .bash-output, .diff-output {
+.tool-input, .tool-output, .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   cursor: zoom-in;
 }
 /* Declared after every cap rule, so source order lifts the cap at equal

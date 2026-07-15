@@ -298,6 +298,7 @@ func New(cfg Config) *Session {
 	}
 	translator := NewTranslator()
 	translator.CWD = cfg.CWD
+	translator.ConfigDir = cfg.ConfigDir
 	translator.Model = cfg.Model
 	if cfg.PermissionMode != "" && protocol.ValidPermissionMode(cfg.PermissionMode) {
 		translator.PermissionMode = protocol.PermissionMode(cfg.PermissionMode)
