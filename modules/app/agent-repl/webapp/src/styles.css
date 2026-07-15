@@ -407,7 +407,7 @@ pre {
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .md li { margin: 0.15em 0; }
 .md blockquote { margin: 0.4em 0; padding: 0.1em 0.8em; border-left: 3px solid var(--accent); color: var(--muted); }
-.md code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
+.md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
 .md pre.md-code code { background: none; padding: 0; font-size: 0.85rem; }
 .md a { color: var(--accent); }
@@ -830,6 +830,9 @@ pre {
    as the block's title rather than a footnote. */
 .q-chip { background: var(--q-opt-bg); color: var(--accent); font-size: 1.05rem; }
 .q-text { margin: 0.3em 0 0.45em; font-weight: 600; font-style: italic; }
+/* Inline code inside the italic question / bold option label reads as code
+   rather than inheriting the surrounding emphasis. */
+.q-text code, .q-opt code { font-style: normal; font-weight: normal; }
 .q-multi { font-weight: 400; color: var(--muted); font-size: 0.85em; }
 .q-opts { display: flex; flex-wrap: wrap; gap: 0.4em; }
 .q-opt {

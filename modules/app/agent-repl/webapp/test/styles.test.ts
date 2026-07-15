@@ -1139,9 +1139,13 @@ describe("task roster styles", () => {
   });
 });
 
-const inlineCode = blockAfter(css, ".md code {");
+const inlineCode = blockAfter(css, ".md code, .q-text code, .q-opt code {");
 const fencedBlock = blockAfter(css, ".md pre.md-code {");
 const fencedInner = blockAfter(css, ".md pre.md-code code");
+// Leading newline anchors the standalone reset rule: the same selector also
+// appears mid-line inside the shared chip rule (".md code, .q-text code, …"),
+// where it is preceded by a space rather than a line break.
+const pickerCodeReset = blockAfter(css, "\n.q-text code, .q-opt code {");
 
 /** The value bound to `--code-bg` inside a palette block. */
 function codeBg(block: string): string {
@@ -1276,7 +1280,7 @@ describe("queued-card (§2.13 in-flight queue)", () => {
 
 const qOpt = blockAfter(css, ".q-opt {");
 const qChip = blockAfter(css, ".q-chip");
-const qText = blockAfter(css, ".q-text");
+const qText = blockAfter(css, ".q-text {");
 const baseBadge = blockAfter(css, ".badge {");
 const pendingQuestion = blockAfter(css, ".permission.pending.question");
 const permissionBase = blockAfter(css, ".permission {");
@@ -1373,6 +1377,26 @@ describe("AskUserQuestion question text", () => {
     // Arrange / Act — the .q-text rule.
     // Assert
     expect(qText).toMatch(/font-style:\s*italic/);
+  });
+});
+
+describe("AskUserQuestion inline code", () => {
+  it("joins the picker's code spans to the message-bubble chip rule", () => {
+    // Arrange / Act — the shared inline-code selector now lists the picker.
+    // Assert
+    expect(css).toMatch(/\.md code,\s*\.q-text code,\s*\.q-opt code\s*\{/);
+  });
+
+  it("uprights code inside the italic question text", () => {
+    // Arrange / Act — the picker-code reset rule; without it code inherits italic.
+    // Assert
+    expect(pickerCodeReset).toMatch(/font-style:\s*normal/);
+  });
+
+  it("unbolds code inside the bold option label", () => {
+    // Arrange / Act — the picker-code reset rule; without it code inherits weight 600.
+    // Assert
+    expect(pickerCodeReset).toMatch(/font-weight:\s*normal/);
   });
 });
 
