@@ -2939,6 +2939,45 @@ function panelCtx(children: ConversationItem[], open = false): PanelContext {
   };
 }
 
+describe("agent bubble topbar", () => {
+  /** panelCtx plus a stub strip renderer that names the agent it was asked for. */
+  function topbarPanels(): PanelContext {
+    return {
+      ...panelCtx([]),
+      agentTopbar: (agent) => `<div class="agent-topbar">strip:${agent.toolUseId}</div>`,
+    };
+  }
+
+  it("folds the agent-scoped strip into a subagent card through the panels hook", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, false, topbarPanels());
+    // Assert — the hook was called with THIS agent's item.
+    expect(html).toContain("strip:a1");
+  });
+
+  it("keeps the strip out of a non-subagent card", () => {
+    // Arrange + Act — a Bash card with the same hook wired.
+    const html = renderItem(tool(), undefined, undefined, false, topbarPanels());
+    // Assert
+    expect(html).not.toContain("strip:");
+  });
+
+  it("renders no strip when the hook is not wired", () => {
+    // Arrange + Act — a PanelContext without agentTopbar (older callers).
+    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([]));
+    // Assert
+    expect(html).not.toContain("agent-topbar");
+  });
+
+  it("seats the strip under the card head, above the input", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, false, topbarPanels());
+    // Assert
+    expect(html.indexOf("agent-topbar")).toBeGreaterThan(html.indexOf("tool-head"));
+    expect(html.indexOf("agent-topbar")).toBeLessThan(html.indexOf("agent-input"));
+  });
+});
+
 describe("activity panel", () => {
   it("renders no activity fold on a card without children", () => {
     // Arrange + Act
