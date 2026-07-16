@@ -46,6 +46,12 @@ var (
 	// its journal.jsonl is the run's progress stream.
 	workflowDirRe = regexp.MustCompile(`Transcript dir:\s*(\S+)`)
 	taskSpoolRe   = regexp.MustCompile(`^(/private)?/tmp/claude-\d+/`)
+	// Background agents announce differently from shells and workflows:
+	// "agentId: a1 … output_file: /tmp/claude-<uid>/…/tasks/a1.output".
+	// Their output file lands in the same tasks spool, so the same
+	// confinement predicate guards it (see parseAgentSpawn).
+	agentSpawnIDRe   = regexp.MustCompile(`agentId:\s*([A-Za-z0-9_-]+)`)
+	agentSpawnPathRe = regexp.MustCompile(`output_file:\s*(\S+\.output)`)
 )
 
 // spawnAnnouncement is the (task id, output file) pair a backgrounded
@@ -114,22 +120,113 @@ func allowedTaskOutputPath(path string) bool {
 		strings.HasSuffix(clean, ".output")
 }
 
-// superviseTailersLocked reacts to a translated frame batch: a spawn
-// announcement starts a tailer (once per task id), and a task's
-// completion notification releases its tailer, which does one final
-// catch-up read before exiting. Callers hold s.mu.
+// parseAgentSpawn extracts a background agent's (id, output file) from a
+// tool result: "agentId: a1 … output_file: <path>". Its output file lands
+// in the same tasks spool a shell's does, so allowedTaskOutputPath guards
+// it identically. Recorded for the poll route but NOT tailed — an agent's
+// output file is its full JSONL transcript, far too verbose to push into
+// the retention ring.
+func parseAgentSpawn(f protocol.L2Frame) *spawnAnnouncement {
+	r, ok := f.(*protocol.ToolUseResultFrame)
+	if !ok || r.IsError {
+		return nil
+	}
+	text := contentText(r.Content)
+	id := agentSpawnIDRe.FindStringSubmatch(text)
+	path := agentSpawnPathRe.FindStringSubmatch(text)
+	if id == nil || path == nil || !allowedTaskOutputPath(path[1]) {
+		return nil
+	}
+	return &spawnAnnouncement{TaskID: id[1], Path: filepath.Clean(path[1]), ToolUseID: r.ToolUseID}
+}
+
+// taskPathRec is a detached task's output location plus what the poll
+// route needs beyond the bytes: when the task was armed (for a live
+// elapsed the SDK heartbeat stops feeding once the spawning call settles)
+// and whether its completion notification has landed.
+type taskPathRec struct {
+	path      string
+	spawnedAt time.Time
+	done      bool
+}
+
+// recordTaskPathLocked durably records a detached task's output path (see
+// taskPaths). First path wins, so a later notification cannot move a live
+// tail's file out from under it. Callers hold s.mu.
+func (s *Session) recordTaskPathLocked(taskID, path string) {
+	if taskID == "" || path == "" {
+		return
+	}
+	if _, ok := s.taskPaths[taskID]; ok {
+		return
+	}
+	s.taskPaths[taskID] = taskPathRec{path: path, spawnedAt: s.now()}
+}
+
+// markTaskDoneLocked flips a recorded task's done flag once its completion
+// notification lands. A notification for an unrecorded task id is ignored.
+// Callers hold s.mu.
+func (s *Session) markTaskDoneLocked(taskID string) {
+	if rec, ok := s.taskPaths[taskID]; ok {
+		rec.done = true
+		s.taskPaths[taskID] = rec
+	}
+}
+
+// superviseTailersLocked reacts to a translated frame batch: a shell or
+// workflow spawn starts a tailer (once per task id) AND records its path;
+// a background-agent spawn only records its path (never tailed); and a
+// task's completion notification releases its tailer — which does one
+// final catch-up read before exiting — while KEEPING the recorded path so
+// the final output stays pollable. Callers hold s.mu.
 func (s *Session) superviseTailersLocked(frames []protocol.L2Frame) {
+	root := ClaudeConfigDir(s.configDir)
 	for _, f := range frames {
-		if ann := parseSpawnAnnouncement(f, ClaudeConfigDir(s.configDir)); ann != nil {
+		if ann := parseSpawnAnnouncement(f, root); ann != nil {
+			s.recordTaskPathLocked(ann.TaskID, ann.Path)
 			s.startTailerLocked(*ann)
+		} else if ann := parseAgentSpawn(f); ann != nil {
+			s.recordTaskPathLocked(ann.TaskID, ann.Path)
 		}
 		if n, ok := f.(*protocol.TaskNotificationFrame); ok && n.TaskID != "" {
 			if stop, ok := s.tailers[n.TaskID]; ok {
 				delete(s.tailers, n.TaskID)
 				close(stop)
 			}
+			// The completion notification is the fallback path source for a
+			// background agent whose spawn result named none, and it marks
+			// the task done for the poll route.
+			if n.OutputFile != "" && allowedTaskOutputPath(n.OutputFile) {
+				s.recordTaskPathLocked(n.TaskID, filepath.Clean(n.OutputFile))
+			}
+			s.markTaskDoneLocked(n.TaskID)
 		}
 	}
+}
+
+// TaskOutput serves a bounded tail of a detached task's output file for
+// the poll route (§ watcher-bubble expansion), reading ONLY a path this
+// session recorded for itself and re-validating the confinement
+// predicates — never a client-supplied path. It returns the appended text
+// from OFFSET, the next cursor, whether the task has completed, and a live
+// elapsed. ok is false when the session recorded no such task id.
+func (s *Session) TaskOutput(taskID string, offset int64) (text string, next int64, done bool, elapsedMs int64, ok bool) {
+	s.mu.Lock()
+	rec, present := s.taskPaths[taskID]
+	now := s.now()
+	s.mu.Unlock()
+	if !present {
+		return "", offset, false, 0, false
+	}
+	elapsedMs = now.Sub(rec.spawnedAt).Milliseconds()
+	// Belt-and-suspenders on the security boundary: only validated paths
+	// are ever recorded, so a failure here is a bug, but a file served over
+	// HTTP fails closed rather than trusting the record.
+	if !allowedTaskOutputPath(rec.path) && !allowedJournalPath(rec.path, ClaudeConfigDir(s.configDir)) {
+		return "", offset, rec.done, elapsedMs, false
+	}
+	text, next = readTailChunk(rec.path, offset)
+	return text, next, rec.done, elapsedMs, true
 }
 
 func (s *Session) startTailerLocked(ann spawnAnnouncement) {

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -368,6 +369,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
 	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)
+	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
@@ -560,6 +562,48 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, s.logf, map[string]any{"commands": commands})
+}
+
+// handleTaskOutput serves a bounded, session-scoped tail of a detached
+// task's output file (§ watcher-bubble expansion). Read-only and pollable
+// exactly like handleCommands: it resolves for ATTACH, so a webapp polling
+// an expanded watcher fold never resurrects a hibernated session, and it
+// serves only a path the session recorded for itself (see Session.TaskOutput).
+//
+// The `offset` query param is the byte cursor the client advances across
+// polls; the response carries the next cursor, whether the task has
+// completed, and a live elapsed the frozen SDK heartbeat no longer feeds.
+func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.resolveForAttach(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	var offset int64
+	if q := r.URL.Query().Get("offset"); q != "" {
+		n, err := strconv.ParseInt(q, 10, 64)
+		if err != nil || n < 0 {
+			httpError(w, http.StatusBadRequest, "invalid offset")
+			return
+		}
+		offset = n
+	}
+	text, next, done, elapsedMs, ok := sess.TaskOutput(r.PathValue("taskId"), offset)
+	if !ok {
+		httpError(w, http.StatusNotFound, "no such task")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string]any{
+		"text":       text,
+		"offset":     next,
+		"done":       done,
+		"elapsed_ms": elapsedMs,
+	})
 }
 
 // handleRefreshCommands asks the shim to re-resolve the menu, and returns
