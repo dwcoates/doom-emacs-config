@@ -97,6 +97,22 @@
      theme's percentage is deeper, because the same wash over a dark bubble
      moves the eye far less than it does over a white one. */
   --code-bg: color-mix(in srgb, #000000 13%, transparent);
+  /* Feed search (search.ts). Two washes, the isearch split: --search-match is
+     every other match (Emacs' lazy-highlight), --search-current is the one the
+     user is ON (Emacs' isearch face), and the gap between them has to be big
+     enough to find the current match in a screen of hits without hunting.
+     Yellow into orange rather than a hue from the status palette: a search
+     highlight is transient chrome the user summoned, not a claim about the
+     conversation, and find-in-page has been yellow in every browser for
+     twenty years. The pair sits clear of --thinking's orange dot and
+     --info-tokens' amber, neither of which ever washes a run of text. */
+  --search-match: #fef08a;
+  --search-current: #fb923c;
+  /* Search marks wash text that already carries its own color (highlighted
+     code, muted paths), so both washes pin a foreground dark enough to read
+     against them in EITHER theme — the mark is a background change, and the
+     text under it must not go along for the ride. */
+  --search-fg: #1a1a1a;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -121,6 +137,13 @@
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
+    /* Both washes stay bright in the dark theme rather than being dimmed to
+       suit it: the mark is the thing the user is hunting for, so it is the one
+       place the stylesheet WANTS to shout against the background. --search-fg
+       does not flip with the theme for the same reason the wash does not —
+       dark text on a bright wash is the readable pair in both. */
+    --search-match: #eab308;
+    --search-current: #f97316;
     --remediation: #facc15;
     --interrupted: #facc15;
     --clear-divider: #ef4444;
@@ -908,7 +931,24 @@ pre {
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--border);
+  /* The search's echo line takes a full row above the input (flex-basis:
+     100%), so the composer keeps its one-row shape whenever no search runs. */
+  flex-wrap: wrap;
 }
+/* The feed search's echo area (search.ts). Collapsed to nothing until a
+   search puts text in it, so the composer does not reserve a row for a
+   feature that is not running. Monospace because it echoes the query
+   verbatim, and the user must be able to see exactly what they typed. */
+#search-status {
+  flex-basis: 100%;
+  display: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.25rem 0.4rem;
+  white-space: pre-wrap;
+}
+#search-status.on { display: block; }
 #composer-input {
   flex: 1;
   resize: none;
@@ -920,6 +960,46 @@ pre {
   font-family: inherit;
 }
 #send-btn { cursor: pointer; }
+
+/* --- Feed search marks (search.ts) --------------------------------------
+   One <mark> per match, wrapped around the matched TEXT only (never around
+   an element), which is what lets these rules win over the syntax palette:
+   a mark inside an .hljs-* span sets its own color directly, where the
+   span's color merely inherits. */
+.search-match {
+  background: var(--search-match);
+  color: var(--search-fg);
+  border-radius: 2px;
+}
+/* The current match outranks its neighbours: the louder wash plus a ring,
+   because on a screen full of hits the wash alone is not findable. Declared
+   after .search-match so source order decides at equal specificity — the
+   same discipline .expanded uses over the cap rules, and no !important. */
+.search-current {
+  background: var(--search-current);
+  box-shadow: 0 0 0 2px var(--search-current);
+}
+
+/* --- Search reveal (search.ts) ------------------------------------------
+   What .expanded does for a click, .search-revealed does for a search that
+   landed inside a fold — same effect, different owner. Two classes rather
+   than one because the renderer PERSISTS .expanded across a re-render
+   (expandedKeys/applyExpanded) as the user's own state: a search borrowing
+   it would have its reveal laundered into a click it never made, and could
+   no longer tell what it was entitled to close when the user aborts.
+   Declared after every cap rule, so source order lifts the cap at equal
+   specificity and no !important is needed. */
+.search-revealed {
+  max-height: none;
+  overflow-y: visible;
+}
+/* The display folds, whose bodies are hidden outright rather than capped —
+   a subagent's whole prompt, a tool's raw input JSON. Mirrors the .expanded
+   pair above them; a match in one is why the search opened it. */
+.agent-input.search-revealed .agent-json,
+.folded-input.search-revealed .folded-json {
+  display: block;
+}
 
 /* --- Syntax highlighting (highlight.js token classes) -------------------
    Scoped under .hljs (the <code> wrapper both markdown fences and Read
