@@ -342,7 +342,7 @@ pre {
 /* No max-width: every feed section spans the full feed width, matching
    the tool cards, so nothing renders narrower than its neighbors. Every
    bubble reserves its border box up front, so a turn's final response
-   gaining the green border on completion recolors 2px that were already
+   gaining the green border on completion recolors 1px that were already
    laid out rather than reflowing the feed under a reader mid-sentence. */
 /* Every bubble — the user's prompt and the agent's response alike — is a
    body column plus the turn's time stamped into the top-right corner. The
@@ -351,7 +351,7 @@ pre {
 .bubble {
   padding: 0.6rem 0.9rem;
   border-radius: 8px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   display: flex;
   align-items: flex-start;
   gap: 0.9rem;

@@ -237,10 +237,10 @@ describe("final-response border", () => {
   });
 
   it("reserves the border box on every bubble so the green border never reflows the feed", () => {
-    // Arrange / Act — the shared .bubble rule lays the 2px out up front, and the
+    // Arrange / Act — the shared .bubble rule lays the 1px out up front, and the
     // final-response rule only recolors it.
     // Assert
-    expect(bubble).toMatch(/border:\s*2px\s+solid\s+transparent/);
+    expect(bubble).toMatch(/border:\s*1px\s+solid\s+transparent/);
     expect(finalBubble).not.toMatch(/border:\s/);
   });
 
