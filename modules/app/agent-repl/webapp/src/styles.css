@@ -557,6 +557,35 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+/* The watcher fold inside a final-response bubble (§ watcher-bubble
+   expansion): the collapsed ticker mirrors an activity fold's pill, and the
+   open body reuses .agent-panel wholesale. A dashed top rule sets it off
+   from the answer prose above it. The spinner in the ticker is the sole
+   live signal — a final-response bubble belongs to an ended turn, which
+   never breathes, so the arc is what says a watcher is still running. */
+.watcher-fold {
+  border-top: 1px dashed var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  cursor: zoom-in;
+}
+.watcher-fold.open { cursor: default; }
+.watcher-fold.open > .watcher-ticker { cursor: zoom-out; }
+.watcher-ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+}
+.watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
+.watcher-head { display: flex; align-items: center; gap: 0.5rem; }
+
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
 /* Consecutive like-cards collapse into one tabbed group: the chip row
