@@ -51,26 +51,35 @@ export function spawnedTaskIds(item: ToolItem): string[] {
   return ids;
 }
 
+/**
+ * The task id a call addresses, or null when it addresses none: a
+ * detached-task poll names it `task_id`, a task-list update `taskId`.
+ */
+function claimedTaskId(item: ToolItem): string | null {
+  if (TASK_POLL_TOOLS.has(item.toolName) && typeof item.input?.task_id === "string") {
+    return item.input.task_id;
+  }
+  if (item.toolName === "TaskUpdate" && typeof item.input?.taskId === "string") {
+    return item.input.taskId;
+  }
+  return null;
+}
+
 /** The parent id an item claims, or undefined for main-chain items. */
 function claimedParent(
   item: ConversationItem,
   toolParents: ReadonlyMap<string, string | undefined>,
-  spawnByTaskId: ReadonlyMap<string, string>,
-  createByTaskId: ReadonlyMap<string, string>,
+  ownerByTaskId: ReadonlyMap<string, string>,
 ): string | undefined {
   switch (item.kind) {
     case "tool": {
       if (item.parentToolUseId !== undefined) return item.parentToolUseId;
-      // A poll of a detached task belongs to the card that spawned the
-      // task, so the polling call folds into the spawner's panel.
-      if (TASK_POLL_TOOLS.has(item.toolName) && typeof item.input?.task_id === "string") {
-        return spawnByTaskId.get(item.input.task_id);
-      }
-      // A task-list update belongs to the card that created its task, so
-      // the task's history folds into that card's panel as nested bubbles.
-      if (item.toolName === "TaskUpdate" && typeof item.input?.taskId === "string") {
-        return createByTaskId.get(item.input.taskId);
-      }
+      // A task-addressed call belongs to the card that owns its task id:
+      // a poll of a detached task folds into the spawner that announced
+      // the id, and a task-list update folds into the TaskCreate card
+      // whose result named it. One claims table serves both.
+      const taskId = claimedTaskId(item);
+      if (taskId !== null) return ownerByTaskId.get(taskId);
       return undefined;
     }
     case "text":
@@ -94,28 +103,28 @@ function claimedParent(
 export function partitionFeed(items: readonly ConversationItem[]): FeedPartition {
   const known = new Set<string>();
   const toolParents = new Map<string, string | undefined>();
-  const spawnByTaskId = new Map<string, string>();
-  const createByTaskId = new Map<string, string>();
+  // The claims table task-addressed calls fold by (see claimedParent):
+  // task id → the card that owns it, registered by spawn announcements
+  // and settled TaskCreate results alike. A reused id goes to its most
+  // recent owner, since a later claimant's polls and updates are the
+  // ones still arriving.
+  const ownerByTaskId = new Map<string, string>();
   for (const item of items) {
     if (item.kind !== "tool") continue;
     known.add(item.toolUseId);
     toolParents.set(item.toolUseId, item.parentToolUseId);
     for (const id of spawnedTaskIds(item)) {
-      spawnByTaskId.set(id, item.toolUseId);
+      ownerByTaskId.set(id, item.toolUseId);
     }
-    // The harness id a settled TaskCreate reported names the card its
-    // task's updates fold under (see claimedParent).
     if (item.toolName === "TaskCreate") {
       const id = taskIdFromCreateResult(item);
-      if (id !== null && !createByTaskId.has(id)) {
-        createByTaskId.set(id, item.toolUseId);
-      }
+      if (id !== null) ownerByTaskId.set(id, item.toolUseId);
     }
   }
   const top: ConversationItem[] = [];
   const children = new Map<string, ConversationItem[]>();
   for (const item of items) {
-    const parent = claimedParent(item, toolParents, spawnByTaskId, createByTaskId);
+    const parent = claimedParent(item, toolParents, ownerByTaskId);
     if (parent !== undefined && known.has(parent) && !(item.kind === "tool" && parent === item.toolUseId)) {
       const list = children.get(parent) ?? [];
       list.push(item);
