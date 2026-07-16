@@ -47,6 +47,7 @@ import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
+import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
@@ -96,6 +97,10 @@ async function boot(): Promise<void> {
 
   const store = new ConversationStore();
   const feedEl = must("feed");
+  // The search's echo area: isearch keeps its query out of the text being
+  // searched, and so does this — the composer's draft stays untouched while
+  // a search runs, and the query shows up here instead.
+  const searchStatusEl = must("search-status");
   // Chess-game bubbles fetch their payload through the daemon and mount
   // the in-place-served widget; the session getter tracks rebinds, and
   // the pinning pair lets an async board mount restore the feed's tail.
@@ -119,7 +124,22 @@ async function boot(): Promise<void> {
   // The Emacs host snaps the feed to its newest message through this hook
   // whenever the user switches to the workspace holding this webview.
   installHostTailHook(window as unknown as HostGlobal, feedEl);
+  // Incremental search over the feed (isearch semantics), driven from the
+  // composer's keys below. Built before the renderer because the renderer
+  // must announce every render to it: the marks live in item DOM that a
+  // render rewrites wholesale, so they are re-derived rather than kept.
+  //
+  // The hook is planted whether or not this page has a composer. Emacs runs
+  // the webview with `composer=0` and cannot deliver keys into the page at
+  // all, so the hook is the host's only way in — same contract as the chess
+  // nav hook, and it answers the status line for the host to echo.
+  const search = new FeedSearch(feedEl, (text) => {
+    searchStatusEl.textContent = text;
+    searchStatusEl.classList.toggle("on", text !== "");
+  });
+  installSearchHook(window as unknown as SearchHost, search);
   const feed = new FeedRenderer(feedEl, {
+    onRendered: () => search.refresh(),
     decidePermission: (requestId, behavior) => {
       ws.send(
         behavior === "allow"
@@ -464,6 +484,11 @@ async function boot(): Promise<void> {
     // send handler so neither can shadow the other — they share no chord.
     installNavKeys(input, nav);
     input.addEventListener("keydown", (e) => {
+      // The search gets first refusal, and the order is the whole point:
+      // `RET` accepts a running search and must NOT also send the draft.
+      // One handler asking in order, rather than two racing listeners, is
+      // what makes that precedence a fact you can read here.
+      if (search.handleKey(e)) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         submit();

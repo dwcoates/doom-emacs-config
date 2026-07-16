@@ -33,7 +33,13 @@
          collapsed) otherwise. -->
     <div id="compact-progress-slot"></div>
     <main id="feed"></main>
+    <!-- The feed search's echo area: `C-s` in the composer starts an
+         incremental search over the feed, and the query, the position among
+         the matches, and any folds the search could not reach are reported
+         here rather than in the composer, which keeps its draft. Empty (and
+         so collapsed) whenever no search is running. -->
     <footer id="composer">
+      <div id="search-status"></div>
       <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
       <button id="send-btn">send</button>
     </footer>

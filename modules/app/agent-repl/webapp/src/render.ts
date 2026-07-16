@@ -92,6 +92,23 @@ export interface Actions {
    * Present only when a daemon backs the webapp.
    */
   addSupport?(command: string): Promise<string>;
+  /**
+   * Fired after every render, once the feed's DOM is settled.
+   *
+   * A render rewrites the `innerHTML` of every item whose HTML changed,
+   * which silently destroys anything a non-renderer put inside one — the
+   * feed search's `<mark>`s (search.ts) being the case in hand. Derived DOM
+   * like that cannot be re-applied by the same capture/re-apply the
+   * renderer's OWN state uses (`expandedKeys`), because the renderer does
+   * not know what it is or when it is wanted, so it announces the render
+   * instead and lets the owner re-derive.
+   *
+   * Every render path calls it, including the ones the renderer drives
+   * itself (a reveal, a tab click, a watcher poll) — a hook wired only to
+   * the boot path's renders would drop the highlight on exactly the
+   * re-renders nobody thought about.
+   */
+  onRendered?(): void;
 }
 
 /**
@@ -2305,9 +2322,14 @@ export class FeedRenderer {
       // Content added above the viewport grows scrollHeight; shift
       // scrollTop by the growth so the tail stays in view.
       this.container.scrollTop += this.container.scrollHeight - before;
+      // Per chunk, not once at the end: a backfill step is where an older
+      // item's text actually reaches the DOM, so anything derived from that
+      // text (the search's marks) is stale until the step that lands it.
+      this.actions.onRendered?.();
     };
     const chunks = backfillChunks(shells.length, BACKFILL_CHUNK);
     if (chunks.length > 0) fillChunk(chunks[0]);
+    else this.actions.onRendered?.();
     parkAtTail(this.container);
     this.backfillQueue = chunks.slice(1).map((c) => () => fillChunk(c));
     this.scheduleBackfill();
@@ -2452,5 +2474,6 @@ export class FeedRenderer {
     if (toTail) {
       parkAtTail(this.container);
     }
+    this.actions.onRendered?.();
   }
 }
