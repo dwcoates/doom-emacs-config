@@ -123,7 +123,6 @@ Must match the `SKILLS_SRC' default in `.claude/install.sh' (or the
 (defconst agent-repl--managed-local-skills
   '("runtime-eval-code"
     "workspace-close"
-    "workspace-open"
     "emit-workspace-commands.sh")
   "Bare names for repo-local managed skills.
 Sourced from `agent-repl-local-skills-src-dir' (this repo's
@@ -132,7 +131,12 @@ array in `.claude/install.sh'.
 
 debug-logs is deliberately absent: it is PROJECT-scoped via the
 checked-in `<repo>/.claude/skills/debug-logs' symlink, not a
-user-level `~/.claude/skills' link.")
+user-level `~/.claude/skills' link.
+
+The former `workspace-open' skill is deliberately absent: it was
+superseded by the `create-or-update-workspace' skill's `open' verb
+(which already claims `/workspace-open' as its legacy alias), so it is
+no longer managed here.")
 
 (defcustom agent-repl-local-skills-src-dir
   (when load-file-name

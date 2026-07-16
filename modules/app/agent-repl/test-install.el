@@ -868,12 +868,6 @@ It moved to the repo-local list, so leaving it here would re-introduce the
 dangling explanation-engine canonical-impl path that broke install."
   (should-not (member "emit-workspace-commands.sh" agent-repl--managed-skills)))
 
-(ert-deftest agent-repl-test-managed-local-skills-includes-workspace-open ()
-  "Repo-local skills list must include `workspace-open' (regression guard).
-`/workspace-open' owns the JSON contract that the editor's `\"open\"'
-handler dispatches against to re-establish a closed/nuked workspace."
-  (should (member "workspace-open" agent-repl--managed-local-skills)))
-
 (ert-deftest agent-repl-test-emit-workspace-commands-skill-file-exists ()
   "The checked-in repo-local emit-workspace-commands.sh must exist and be executable.
 Regression guard so the dispatch emitter the skill run.sh wrappers exec
@@ -910,33 +904,6 @@ script. A non-executable or missing file breaks every dispatch."
                    (or agent-repl-local-skills-src-dir
                        (error "agent-repl-local-skills-src-dir is unset"))))
          (run-sh (expand-file-name "runtime-eval-code/run.sh" src-dir)))
-    (should (file-exists-p run-sh))
-    (should (file-executable-p run-sh))))
-
-(ert-deftest agent-repl-test-workspace-open-skill-file-exists ()
-  "The checked-in workspace-open SKILL.md must exist with required frontmatter.
-Regression guard so the file is not silently moved or deleted —
-`/workspace-open' depends on it being discoverable at install time."
-  (let* ((src-dir (expand-file-name
-                   (or agent-repl-local-skills-src-dir
-                       (error "agent-repl-local-skills-src-dir is unset"))))
-         (skill-md (expand-file-name "workspace-open/SKILL.md" src-dir)))
-    (should (file-exists-p skill-md))
-    (with-temp-buffer
-      (insert-file-contents skill-md)
-      (goto-char (point-min))
-      (should (looking-at "^---\n"))
-      (should (re-search-forward "^name: workspace-open$" nil t))
-      (should (re-search-forward "^description: " nil t)))))
-
-(ert-deftest agent-repl-test-workspace-open-run-sh-executable ()
-  "The checked-in workspace-open run.sh must exist and be executable.
-Regression guard: the SKILL.md dispatch step pipes JSON into run.sh; a
-non-executable or missing file breaks every `/workspace-open' dispatch."
-  (let* ((src-dir (expand-file-name
-                   (or agent-repl-local-skills-src-dir
-                       (error "agent-repl-local-skills-src-dir is unset"))))
-         (run-sh (expand-file-name "workspace-open/run.sh" src-dir)))
     (should (file-exists-p run-sh))
     (should (file-executable-p run-sh))))
 
@@ -984,6 +951,14 @@ Regression guard: it was renamed/absorbed into `runtime-eval-code'.
 Leaving the old name in the managed list would create a broken symlink
 on install (no source directory matches it any more)."
   (should-not (member "workspace-eval" agent-repl--managed-local-skills)))
+
+(ert-deftest agent-repl-test-managed-local-skills-no-workspace-open ()
+  "The legacy `workspace-open' skill name must NOT be present.
+Regression guard: it was superseded by the `create-or-update-workspace'
+skill's `open' verb (which claims `/workspace-open' as its legacy alias).
+Leaving the old name in the managed list would demand a host symlink
+whose repo-local source directory no longer exists."
+  (should-not (member "workspace-open" agent-repl--managed-local-skills)))
 
 (ert-deftest agent-repl-test-managed-skills-includes-build-skill ()
   "External managed-skills list must include `build-skill' (regression guard).
