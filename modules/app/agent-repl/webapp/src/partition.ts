@@ -7,13 +7,17 @@
  * items carrying a parent_tool_use_id leave the top-level feed and land
  * in their owning card's child list, which the renderer draws inside
  * that card's activity panel. The mechanism is parent-generic — an
- * Agent's children and a Workflow's children nest identically.
+ * Agent's children and a Workflow's children nest identically — and two
+ * kinds of main-chain call claim a parent by TASK ID instead: a poll of
+ * a detached task folds into the card that spawned it, and a task-list
+ * update folds into the TaskCreate card that named its task.
  *
  * Orphans stay top-level: a child whose parent card the feed does not
  * hold (ring eviction, partial replay) renders where it always did
  * rather than vanishing — pollution is recoverable, silence is not.
  */
 import { ConversationItem, PermissionItem, ToolItem } from "./store.js";
+import { taskIdFromCreateResult } from "./tasks.js";
 
 export interface FeedPartition {
   /** Top-level items in feed order: parentless items plus orphans. */
@@ -52,6 +56,7 @@ function claimedParent(
   item: ConversationItem,
   toolParents: ReadonlyMap<string, string | undefined>,
   spawnByTaskId: ReadonlyMap<string, string>,
+  createByTaskId: ReadonlyMap<string, string>,
 ): string | undefined {
   switch (item.kind) {
     case "tool": {
@@ -60,6 +65,11 @@ function claimedParent(
       // task, so the polling call folds into the spawner's panel.
       if (TASK_POLL_TOOLS.has(item.toolName) && typeof item.input?.task_id === "string") {
         return spawnByTaskId.get(item.input.task_id);
+      }
+      // A task-list update belongs to the card that created its task, so
+      // the task's history folds into that card's panel as nested bubbles.
+      if (item.toolName === "TaskUpdate" && typeof item.input?.taskId === "string") {
+        return createByTaskId.get(item.input.taskId);
       }
       return undefined;
     }
@@ -85,6 +95,7 @@ export function partitionFeed(items: readonly ConversationItem[]): FeedPartition
   const known = new Set<string>();
   const toolParents = new Map<string, string | undefined>();
   const spawnByTaskId = new Map<string, string>();
+  const createByTaskId = new Map<string, string>();
   for (const item of items) {
     if (item.kind !== "tool") continue;
     known.add(item.toolUseId);
@@ -92,11 +103,19 @@ export function partitionFeed(items: readonly ConversationItem[]): FeedPartition
     for (const id of spawnedTaskIds(item)) {
       spawnByTaskId.set(id, item.toolUseId);
     }
+    // The harness id a settled TaskCreate reported names the card its
+    // task's updates fold under (see claimedParent).
+    if (item.toolName === "TaskCreate") {
+      const id = taskIdFromCreateResult(item);
+      if (id !== null && !createByTaskId.has(id)) {
+        createByTaskId.set(id, item.toolUseId);
+      }
+    }
   }
   const top: ConversationItem[] = [];
   const children = new Map<string, ConversationItem[]>();
   for (const item of items) {
-    const parent = claimedParent(item, toolParents, spawnByTaskId);
+    const parent = claimedParent(item, toolParents, spawnByTaskId, createByTaskId);
     if (parent !== undefined && known.has(parent) && !(item.kind === "tool" && parent === item.toolUseId)) {
       const list = children.get(parent) ?? [];
       list.push(item);
