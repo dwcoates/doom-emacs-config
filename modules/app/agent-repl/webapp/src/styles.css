@@ -585,6 +585,9 @@ pre {
 }
 .watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
 .watcher-head { display: flex; align-items: center; gap: 0.5rem; }
+/* The live elapsed the poll feeds (the store's frozen heartbeat is only a
+   fallback): a muted monospace figure trailing the watcher's badge. */
+.watcher-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }

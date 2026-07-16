@@ -7,7 +7,7 @@
 import { SUBAGENT_TOOLS, agentsMenuHtml } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { tasksMenuHtml } from "./tasks.js";
-import { formatAge, formatDuration, formatDurationCeil } from "./duration.js";
+import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
   applyExpanded,
@@ -24,6 +24,7 @@ import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { watchersByBubble } from "./watchers.js";
+import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -59,6 +60,17 @@ export interface Actions {
    * queues behind an in-flight one; the button's label says as much.
    */
   sendPrompt?(text: string): void;
+  /**
+   * Fetch a bounded chunk of a detached task's output tail from OFFSET
+   * (§ watcher-bubble expansion). Present only when a daemon backs the
+   * webapp; the watcher fold degrades to store-streamed tails without it.
+   */
+  fetchTaskTail?(taskId: string, offset: number): Promise<{
+    text: string;
+    offset: number;
+    done: boolean;
+    elapsed_ms: number;
+  }>;
 }
 
 /** One AskUserQuestion entry as carried in the tool input. */
@@ -451,6 +463,13 @@ export interface PanelContext {
    * armed no detached work.
    */
   watchers?: ReadonlyMap<string, readonly ToolItem[]>;
+  /**
+   * The poller's accumulated tail for a watcher's task id, when a fold is
+   * open and the daemon has been polled (see watcher-poll.ts). Fills the
+   * tail for a background agent the WS never streamed, and the live elapsed
+   * a settled call's frozen heartbeat no longer feeds.
+   */
+  taskTail?(taskId: string): TaskTail | undefined;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -672,9 +691,13 @@ function agentComposer(item: ToolItem, panels?: PanelContext): string {
  * output uses. Kept after the notification lands too — the tail's last
  * catch-up read IS the task's final output.
  */
+function taskOutputPre(text: string): string {
+  if (text === "") return "";
+  return `<pre class="tool-output task-live-output">${escapeHtml(text)}</pre>`;
+}
+
 function liveTaskOutput(item: ToolItem): string {
-  if (item.taskOutput === undefined || item.taskOutput === "") return "";
-  return `<pre class="tool-output task-live-output">${escapeHtml(item.taskOutput)}</pre>`;
+  return taskOutputPre(item.taskOutput ?? "");
 }
 
 /**
@@ -715,14 +738,27 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   const ids = spawnedTaskIds(item);
   const label = ids.length > 0 ? `${item.toolName} · ${ids.join(", ")}` : item.toolName;
   const headline = toolHeadline(item);
+  // The poller's tail for this watcher, if a fold is open and a daemon has
+  // answered — this is the ONLY tail a background agent ever has, since the
+  // WS never streamed it into item.taskOutput.
+  const polled = ids.map((id) => panels?.taskTail?.(id)).find(Boolean);
   const status = item.notification
     ? `<span class="badge ok">done</span>`
     : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`;
+  // Live elapsed comes from the poll (which the daemon computes from the
+  // spawn time); the store's progressElapsedS freezes once the spawning
+  // call settles, so it is only the fallback.
+  const elapsedMs = polled?.elapsedMs ?? (item.progressElapsedS !== undefined ? item.progressElapsedS * 1000 : undefined);
+  const elapsed = elapsedMs !== undefined ? `<span class="watcher-elapsed">${escapeHtml(formatElapsed(elapsedMs))}</span>` : "";
   const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
   const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
+  // Store-streamed tail (backgrounded Bash) wins when present; otherwise
+  // the polled tail (a background agent's only source).
+  const streamed = item.taskOutput ?? "";
+  const tail = taskOutputPre(streamed !== "" ? streamed : polled?.text ?? "");
   return `<div class="watcher-row">
-      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}</div>
-      ${desc}${progress}${liveTaskOutput(item)}${taskControls(item)}${agentComposer(item, panels)}
+      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${elapsed}</div>
+      ${desc}${progress}${tail}${taskControls(item)}${agentComposer(item, panels)}
     </div>`;
 }
 
@@ -1633,6 +1669,25 @@ export function backfillChunks(count: number, chunkSize: number): number[][] {
 }
 
 /**
+ * The detached-task ids in currently-OPEN watcher folds — the set the
+ * poller should poll. Only open folds contribute, so polling is scoped to
+ * exactly the watchers the user is actively watching.
+ */
+export function openWatcherTaskIds(
+  watchers: ReadonlyMap<string, readonly ToolItem[]>,
+  isOpen: (id: string) => boolean,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const [blockId, list] of watchers) {
+    if (!isOpen(`watchers:${blockId}`)) continue;
+    for (const w of list) {
+      for (const id of spawnedTaskIds(w)) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
  * Feed renderer: reconciles the item list into `container`, reusing
  * nodes by key and only rewriting nodes whose HTML changed.
  */
@@ -1661,10 +1716,22 @@ export class FeedRenderer {
    * map would reuse stale pre-clear elements out of position.
    */
   private lastClearKey: string | null = null;
+  /**
+   * Polls the daemon for watcher tails while their folds are open (see
+   * watcher-poll.ts). Null when no daemon fetch was wired, in which case
+   * the fold falls back to store-streamed tails only.
+   */
+  private watcherPoller: WatcherPoller | null = null;
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
     this.actions = actions;
+    if (actions.fetchTaskTail) {
+      const fetchTail = actions.fetchTaskTail;
+      this.watcherPoller = new WatcherPoller(fetchTail, () => {
+        if (this.lastState) this.render(this.lastState);
+      });
+    }
     container.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       const allow = target.getAttribute("data-perm-allow");
@@ -1784,7 +1851,17 @@ export class FeedRenderer {
       selections: this.questionSelections,
       drafts: this.msgDrafts,
       watchers,
+      taskTail: (id) => this.watcherPoller?.tail(id),
     };
+  }
+
+  /**
+   * Point the poller at the watchers in currently-open folds. Called after
+   * every render so opening a fold starts its polls and closing one stops
+   * them; a no-op when no daemon fetch was wired.
+   */
+  private syncWatcherPolls(watchers: ReadonlyMap<string, readonly ToolItem[]>): void {
+    this.watcherPoller?.sync(openWatcherTaskIds(watchers, (id) => this.openPanels.has(id)));
   }
 
   /** The DOM key one grouped-feed entry reconciles under. */
@@ -1893,7 +1970,9 @@ export class FeedRenderer {
     const items = itemsFromLastClear(state.items);
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
-    const panels = this.panelContext(part.children, watchersByBubble(items));
+    const watchers = watchersByBubble(items);
+    const panels = this.panelContext(part.children, watchers);
+    this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
@@ -2017,7 +2096,9 @@ export class FeedRenderer {
     }
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
-    const panels = this.panelContext(part.children, watchersByBubble(items));
+    const watchers = watchersByBubble(items);
+    const panels = this.panelContext(part.children, watchers);
+    this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
     const seen = new Set<string>();
