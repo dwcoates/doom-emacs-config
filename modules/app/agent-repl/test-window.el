@@ -405,6 +405,127 @@ nil) — defensive for callers passing stale buffer references."
   (should-not (agent-repl-window--benign-undeletable-error-p nil))
   (should-not (agent-repl-window--benign-undeletable-error-p '(user-error "Nope"))))
 
+;;;; ---- Layout reconciliation (--ensure-layout) ----
+
+(cl-defun agent-repl-window-test--run-ensure-layout
+    (&key show-view show-input (current-ws "cur") kill-view eager
+          in-progress setup after)
+  "Drive `agent-repl-window--ensure-layout' over a real window layout.
+Registers a view and an input buffer for workspace \"cur\", displays
+the view buffer when SHOW-VIEW and the input buffer when SHOW-INPUT
+\(in a split below when both), kills the view buffer when KILL-VIEW,
+binds the eager-open / repair-in-progress guards to EAGER /
+IN-PROGRESS, reports CURRENT-WS as the active workspace, and stubs the
+frontend show dispatch.  SETUP, when non-nil, is a thunk run after the
+layout is built (for fixtures like a drawer side window or another
+workspace's panel); AFTER, when non-nil, is a thunk run after the
+reconcile while the layout is still live (for window-liveness
+assertions the temp-frame restore would otherwise destroy).  Returns
+the list of workspaces a repair was dispatched for."
+  (let ((view-buf (generate-new-buffer " *elt-view*"))
+        (input-buf (generate-new-buffer " *elt-input*"))
+        (dispatched '()))
+    (unwind-protect
+        (agent-repl-test--with-clean-state
+          (agent-repl-window-test--with-temp-frame
+            (agent-repl--ws-put "cur" :frontend-buffer view-buf)
+            (agent-repl--ws-put "cur" :input-buffer input-buf)
+            (when show-view
+              (set-window-buffer (selected-window) view-buf))
+            (when show-input
+              (set-window-buffer (if show-view
+                                     (split-window (selected-window))
+                                   (selected-window))
+                                 input-buf))
+            (when kill-view (kill-buffer view-buf))
+            (when setup (funcall setup))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () current-ws))
+                      ((symbol-function 'agent-repl--frontend-dispatch-show)
+                       (lambda (ws) (push ws dispatched))))
+              (let ((agent-repl--eager-open-in-progress eager)
+                    (agent-repl-window--ensure-layout-in-progress in-progress))
+                (agent-repl-window--ensure-layout)))
+            (when after (funcall after))
+            (nreverse dispatched)))
+      (when (buffer-live-p view-buf) (kill-buffer view-buf))
+      (when (buffer-live-p input-buf) (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-restores-input-when-view-only ()
+  "View window present without its input partner → a repair is
+dispatched through the workspace's frontend (the input panel comes back)."
+  (should (equal (agent-repl-window-test--run-ensure-layout :show-view t)
+                 '("cur"))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-restores-view-when-input-only ()
+  "Input window present without its view partner (view buffer live) → a
+repair is dispatched through the workspace's frontend (the view comes back)."
+  (should (equal (agent-repl-window-test--run-ensure-layout :show-input t)
+                 '("cur"))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-when-both-present ()
+  "Both panel windows present → the layout already conforms and no
+repair is dispatched."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-view t :show-input t)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-when-neither-present ()
+  "Neither panel window present (hidden/closed workspace) → no repair;
+a deliberately hidden workspace is never resurrected."
+  (should-not (agent-repl-window-test--run-ensure-layout)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-leaves-drawer-untouched ()
+  "A drawer side window beside a view-only drift is not disturbed: the
+repair dispatches and the drawer window survives the reconcile."
+  (let ((drawer-buf (generate-new-buffer " *elt-drawer*"))
+        (drawer-win nil))
+    (unwind-protect
+        (should (equal
+                 (agent-repl-window-test--run-ensure-layout
+                  :show-view t
+                  :setup (lambda ()
+                           (setq drawer-win
+                                 (display-buffer-in-side-window
+                                  drawer-buf '((side . left) (slot . 0)))))
+                  :after (lambda ()
+                           (should (window-live-p drawer-win))))
+                 '("cur")))
+      (kill-buffer drawer-buf))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-ignores-other-workspace-panels ()
+  "Another workspace's half-present panel never triggers a repair —
+reconciliation is scoped to the current workspace's own pair."
+  (let ((other-buf (generate-new-buffer " *elt-other-input*")))
+    (unwind-protect
+        (should-not
+         (agent-repl-window-test--run-ensure-layout
+          :setup (lambda ()
+                   (agent-repl--ws-put "other" :input-buffer other-buf)
+                   (set-window-buffer (selected-window) other-buf))))
+      (kill-buffer other-buf))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-without-workspace ()
+  "No current workspace → no repair even when a drift is on the frame."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-view t :current-ws nil)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-during-eager-open ()
+  "An eager-open build in flight suppresses the reconcile — the mount
+lays the panels out itself and a repair would fight it."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-view t :eager t)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-noop-when-repair-in-flight ()
+  "A repair already dispatching suppresses a nested reconcile pass."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-view t :in-progress t)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-skips-dead-view-buffer ()
+  "Input window present but the view buffer dead → no repair; remounting
+a view would mean creating a webview/session from a window-change hook."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-input t :kill-view t)))
+
 ;;;; ---- delete-where: benign-error suppression ----
 
 (ert-deftest agent-repl-window-test-delete-where-skips-main-window-quietly ()

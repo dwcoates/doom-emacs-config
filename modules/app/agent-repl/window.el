@@ -32,10 +32,10 @@
 ;;   • Tab-bar shuffle.
 ;;   • Magit advice glue.
 ;;
-;; Today the module ships only the side-window-aware subset-deletion
-;; primitive — that single helper retires the dedicated SPC-g-g bug
-;; and provides the foundation for migrating the other inlined window
-;; recipes in subsequent steps.
+;; Today the module ships the panel finders, per-window hardening, the
+;; side-window-aware subset-deletion primitive (the helper that retired
+;; the dedicated SPC-g-g bug), and the `--ensure-layout' reconciler;
+;; the remaining bullets stay reserved for follow-up migrations.
 
 ;;; Code:
 
@@ -282,6 +282,75 @@ list of windows that were actually deleted."
              (agent-repl--warn nil "window--delete-buffer-windows: could not delete %s: %S"
                                win err))))))
     (nreverse deleted)))
+
+;;;; --- Layout reconciliation -----------------------------------------------
+
+(defvar agent-repl-window--ensure-layout-in-progress nil
+  "Non-nil while `agent-repl-window--ensure-layout' dispatches a repair.
+The repair remounts the two-panel layout, which re-fires
+`window-configuration-change-hook'.  Pure window work cannot re-enter
+the debounced handler mid-repair (timers never preempt running lisp),
+but a frontend show path that yields to the timer queue (`sleep-for' /
+`accept-process-output' while waiting on a daemon) would let a pending
+window-change timer start a second repair under the first — this flag
+makes that nested pass a no-op.")
+
+(defun agent-repl-window--ensure-layout ()
+  "Restore the current workspace's two-panel layout when half of it is missing.
+
+The declarative target: a workspace presenting its agent panels shows
+BOTH of them — the view filling the frame's main area with the input
+panel split below it, the canonical recipe built by
+`agent-repl--frontend-display-webview'.  Any window-configuration
+change can knock one window of the pair off the frame (e.g. quitting a
+fullscreen magit-status restores a saved configuration captured without
+the input window).  Runs from the debounced
+`window-configuration-change-hook' handler
+\(`agent-repl--on-window-change'), diffs the frame against the target,
+and repairs by re-dispatching the workspace's frontend show — the same
+recipe every explicit panel-show uses, so the repaired layout cannot
+drift from the canonical one.
+
+The trigger is strictly \"exactly one of the two panel windows is
+present\".  Everything else is an expected state and a no-op:
+
+- BOTH present: the layout already conforms.
+- NEITHER present: the workspace's panels are hidden or closed
+  \(`agent-repl--hide-panels', the `SPC o c' / `SPC o C' paths); a
+  repair here would resurrect a deliberately hidden layout.
+- No current workspace: nothing to reconcile against.
+- `agent-repl--eager-open-in-progress' set: a background workspace
+  build is laying panels out itself; a concurrent repair would fight
+  that mount.
+- `agent-repl-window--ensure-layout-in-progress' set: a repair is
+  already dispatching (see that variable).
+- Input window present but the VIEW buffer dead: the surviving input
+  window of a died/rebound webview.  Remounting the view would mean
+  creating a webview (and possibly a daemon session) from a
+  window-change hook; that state is instead healed by the next explicit
+  show, whose mount deletes or reclaims the stale input window.
+
+Only the CURRENT workspace is reconciled: other workspaces' drifted
+panels are `agent-repl--sync-panels''s territory, and side windows (the
+drawer) are neither counted as panels nor touched.
+
+Returns non-nil when a repair was dispatched, nil on every no-op."
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (and ws
+               (not agent-repl--eager-open-in-progress)
+               (not agent-repl-window--ensure-layout-in-progress))
+      (let ((view-win (agent-repl-window--panel-window :view ws))
+            (input-win (agent-repl-window--panel-window :input ws)))
+        (when (xor view-win input-win)
+          (if (not (buffer-live-p (agent-repl-window--panel-buffer :view ws)))
+              (progn
+                (agent-repl--log ws "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show" ws)
+                nil)
+            (agent-repl--log ws "window--ensure-layout: ws=%s missing=%s — remounting panels through the frontend"
+                             ws (if view-win "input" "view"))
+            (let ((agent-repl-window--ensure-layout-in-progress t))
+              (agent-repl--frontend-dispatch-show ws))
+            t))))))
 
 (provide 'agent-repl-window)
 ;;; window.el ends here
