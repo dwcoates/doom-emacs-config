@@ -12,6 +12,7 @@ import {
   nextCounterMenu,
   topbarClickAction,
 } from "./topbar.js";
+import { taskCreateToolUseId } from "./tasks.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -1588,50 +1589,51 @@ export function activeGroupMember(members: readonly ToolItem[], pinned?: string)
 }
 
 /**
- * How the renderer surfaces a subagent's card and where the feed then
- * jumps: `planAgentReveal` derives it purely; `FeedRenderer.revealAgent`
+ * How the renderer surfaces a tool call's card and where the feed then
+ * jumps: `planToolReveal` derives it purely; `FeedRenderer.revealToolCard`
  * applies it.
  */
-export interface AgentReveal {
-  /** DOM key of the top-level feed-item carrying (or nesting) the agent. */
+export interface ToolReveal {
+  /** DOM key of the top-level feed-item carrying (or nesting) the call. */
   key: string;
   /** When that feed-item is a consecutive-run tab group, its active-tab key. */
   groupKey: string | null;
   /** The top-level member to pin as that group's active tab, else null. */
   tabMember: string | null;
-  /** Tool ids whose activity panels open so the agent and its output show. */
+  /** Tool ids whose activity panels open so the call and its output show. */
   panelIds: string[];
 }
 
 /**
- * Plan how to reveal subagent AGENTID from the roster: which top-level
- * feed-item to scroll to, whether to pin a tab to surface it, and which
- * activity panels to open so its card (and, for a nested agent, every
- * panel above it) lays its output out.
+ * Plan how to reveal tool call TOOLUSEID's card — a roster entry's bubble:
+ * a subagent's card, or a task's `TaskCreate` card — from the topbar
+ * dropdowns: which top-level feed-item to scroll to, whether to pin a tab
+ * to surface it, and which activity panels to open so its card (and, for
+ * a nested call, every panel above it) lays its output out.
  *
- * A top-level subagent reveals as its own bubble with its own panel open.
- * A nested subagent (one another subagent spawned) has no top-level
- * bubble, so the plan scrolls to its outermost ancestor and opens the
- * whole panel chain down to it. Null when no live feed item carries the
- * id — unknown, or discarded by a `/clear`.
+ * A top-level call reveals as its own bubble with its own panel open.
+ * A nested call (one a subagent made) has no top-level bubble, so the
+ * plan scrolls to its outermost ancestor and opens the whole panel chain
+ * down to it. Null when no live feed item carries the id — unknown, or
+ * discarded by a `/clear`.
  */
-export function planAgentReveal(
+export function planToolReveal(
   items: readonly ConversationItem[],
-  agentId: string,
-): AgentReveal | null {
+  toolUseId: string,
+): ToolReveal | null {
   const visible = itemsFromLastClear(items);
   const parentOf = new Map<string, string | undefined>();
   for (const item of visible) {
     if (item.kind === "tool") parentOf.set(item.toolUseId, item.parentToolUseId);
   }
-  if (!parentOf.has(agentId)) return null;
-  // Ancestor chain from the agent up to its outermost tool ancestor. It is
+  if (!parentOf.has(toolUseId)) return null;
+  // Ancestor chain from the call up to its outermost tool ancestor. It is
   // exactly the set of panels to open: each ancestor's panel holds the next
-  // card down, and the agent's own panel holds its output. A cycle guard
+  // card down, and the call's own panel holds its output. A cycle guard
   // keeps a corrupt parent link from looping.
   const chain: string[] = [];
   const seen = new Set<string>();
-  let cur: string | undefined = agentId;
+  let cur: string | undefined = toolUseId;
   while (cur !== undefined && parentOf.has(cur) && !seen.has(cur)) {
     seen.add(cur);
     chain.push(cur);
@@ -1886,15 +1888,36 @@ export class FeedRenderer {
   }
 
   /**
-   * Reveal a subagent's card from the roster dropdown: pin its tab when it
-   * lives in a consecutive-run group, open the activity panels that surface
-   * it and its output, scroll its (or its outermost ancestor's) bubble to
-   * the top of the feed, and lay that card's own capped sections out in
-   * full. Answers whether the agent was found in the current feed.
+   * Reveal a subagent's card from the roster dropdown. A subagent row's id
+   * IS its card's tool-use id, so the reveal is direct.
    */
   revealAgent(agentId: string): boolean {
+    return this.revealToolCard(agentId);
+  }
+
+  /**
+   * Reveal the `TaskCreate` card behind roster task TASKID (see
+   * `taskCreateToolUseId`): a task's harness id first maps back to the
+   * call that created it, whose card is the task's one bubble in the feed.
+   * Answers whether that bubble was found — false when the id names no
+   * create, or when the create's card is off the current feed.
+   */
+  revealTask(taskId: string): boolean {
     if (!this.lastState) return false;
-    const plan = planAgentReveal(this.lastState.items, agentId);
+    const toolUseId = taskCreateToolUseId(this.lastState.items, taskId);
+    return toolUseId !== null && this.revealToolCard(toolUseId);
+  }
+
+  /**
+   * Reveal tool call TOOLUSEID's card: pin its tab when it lives in a
+   * consecutive-run group, open the activity panels that surface it and
+   * its output, scroll its (or its outermost ancestor's) bubble to the top
+   * of the feed, and lay that card's own capped sections out in full.
+   * Answers whether the card was found in the current feed.
+   */
+  private revealToolCard(toolUseId: string): boolean {
+    if (!this.lastState) return false;
+    const plan = planToolReveal(this.lastState.items, toolUseId);
     if (!plan) return false;
     if (plan.groupKey !== null && plan.tabMember !== null) {
       this.activeTabs.set(plan.groupKey, plan.tabMember);
