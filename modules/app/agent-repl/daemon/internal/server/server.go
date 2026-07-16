@@ -22,10 +22,12 @@ import (
 	"github.com/gorilla/websocket"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/addsupport"
 	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
+	"claude-repld/internal/workspacecmd"
 )
 
 // CreateOpts is the POST /sessions request body.
@@ -380,6 +382,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
 	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
 	mux.HandleFunc("GET /sessions/{id}/chess-game", s.handleChessGameFile)
+	mux.HandleFunc("POST /sessions/{id}/add-support", s.handleAddSupport)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
 	return mux
 }
@@ -402,6 +405,79 @@ func (s *Server) sessionCWD(id string) (string, bool) {
 		return rec.CWD, true
 	}
 	return "", false
+}
+
+// sessionDirs reports a session's working directory and its
+// CLAUDE_CONFIG_DIR, resolving a live session ahead of a dormant record
+// exactly as sessionCWD does. An empty ConfigDir names the CLI's own
+// default root rather than "unknown".
+func (s *Server) sessionDirs(id string) (cwd, configDir string, known bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess := s.sessions[id]; sess != nil {
+		info := sess.Info()
+		return info.CWD, info.ConfigDir, true
+	}
+	if rec, ok := s.dormant[id]; ok {
+		return rec.CWD, rec.ConfigDir, true
+	}
+	return "", "", false
+}
+
+// handleAddSupport asks Emacs to open a workspace that builds graphical
+// support for a slash command the CLI refused in this environment.
+//
+// The daemon detects nothing here and generates nothing: the webapp spots
+// the refusal and the user presses the button, and workspace generation
+// belongs entirely to Emacs. All this does is compose the request and drop
+// it on the channel Emacs already watches, so a 202 means "asked", never
+// "created" — the daemon never learns the outcome and must not imply it.
+func (s *Server) handleAddSupport(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	cwd, configDir, known := s.sessionDirs(id)
+	if !known {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	// git_root is mandatory downstream and Emacs refuses a create without
+	// it, so a session with no cwd cannot be served rather than guessed at.
+	if cwd == "" {
+		httpError(w, http.StatusConflict, "session has no working directory to open a workspace against")
+		return
+	}
+	var body struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if err := addsupport.ValidateCommand(body.Command); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dir, err := workspacecmd.Dir()
+	if err != nil {
+		s.logf("session %s: resolve workspace-commands dir: %v", id, err)
+		httpError(w, http.StatusInternalServerError, "resolving the workspace-commands directory failed")
+		return
+	}
+	cmd := workspacecmd.NewCreate(
+		addsupport.WorkspaceName(body.Command),
+		cwd,
+		addsupport.Prompt(body.Command, configDir),
+	)
+	path, err := workspacecmd.Emit(dir, []workspacecmd.Create{cmd})
+	if err != nil {
+		s.logf("session %s: emit add-support workspace command for /%s: %v", id, body.Command, err)
+		httpError(w, http.StatusInternalServerError, "emitting the workspace command failed")
+		return
+	}
+	s.logf("session %s: asked Emacs to open workspace %q for unsupported /%s (%s)",
+		id, cmd.Name, body.Command, path)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]string{"workspace": cmd.Name})
 }
 
 // handleChessGameFile serves a chess-game payload file that the session's
