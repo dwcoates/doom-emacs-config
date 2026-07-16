@@ -1336,7 +1336,15 @@ function ResultChip(
   secondResolution = false,
 ): string {
   const done = isTurnComplete(item);
-  const parts = done ? [] : [escapeHtml(item.subtype)];
+  // A turn cut off by an interrupt is not a failure — the user chose to stop
+  // it — so the "aborted" subtype (the shim's word for an interrupt-ended
+  // turn) names itself "interrupted" in the yellow `.interrupted` tone rather
+  // than reading the SDK's error red the way a genuine error subtype does.
+  // The tone wins over `item.isError`, which the SDK still sets on an abort.
+  const interrupted = item.subtype === "aborted";
+  const tone = interrupted ? "interrupted" : item.isError ? "err" : "ok";
+  const label = interrupted ? "interrupted" : escapeHtml(item.subtype);
+  const parts = done ? [] : [label];
   parts.push(
     secondResolution ? formatDurationCeil(durationMs) : formatDuration(durationMs),
   );
@@ -1345,7 +1353,7 @@ function ResultChip(
     parts.push(formatTokenDelta(item.context.delta));
   }
   return `
-    <div class="result ${item.isError ? "err" : "ok"}${done ? " done" : ""}">
+    <div class="result ${tone}${done ? " done" : ""}">
       ${parts.join(" · ")}
     </div>`;
 }

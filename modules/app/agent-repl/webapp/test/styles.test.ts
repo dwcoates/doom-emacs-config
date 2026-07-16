@@ -184,6 +184,28 @@ describe("remediation notice", () => {
   });
 });
 
+describe("interrupted chip", () => {
+  it("paints the interrupt-ended turn's chip in the interrupted yellow", () => {
+    // Arrange / Act — the .result.interrupted rule.
+    // Assert
+    expect(blockAfter(css, ".result.interrupted")).toMatch(/color:\s*var\(--interrupted\)/);
+  });
+
+  it("defines a yellow interrupted token for the light theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(lightTheme, "--interrupted"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+
+  it("defines a yellow interrupted token for the dark theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(darkTheme, "--interrupted"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+});
+
 describe("clear divider", () => {
   it("paints the /clear boundary rule with its own token", () => {
     // Arrange / Act — the .clear-divider rule.

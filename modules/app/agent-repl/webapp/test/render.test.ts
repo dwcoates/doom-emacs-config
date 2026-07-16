@@ -1878,18 +1878,33 @@ describe("ResultChip", () => {
     expect(html).not.toMatch(/\bin\b/);
   });
 
-  it("labels an aborted turn's chip with its subtype", () => {
-    // Arrange + Act — only a turn that ended some other way names how.
+  it("labels an aborted turn's chip 'interrupted' rather than its raw subtype", () => {
+    // Arrange + Act — an interrupt-ended turn reads as interrupted, not aborted.
     const html = renderItem(resultItem("aborted"));
     // Assert
-    expect(html).toContain("aborted · 12ms");
+    expect(html).toContain("interrupted · 12ms");
   });
 
-  it("withholds the done class from an aborted turn's chip", () => {
-    // Arrange — aborted is not an error, so its chip is .ok but not complete.
+  it("never prints the raw 'aborted' subtype on an interrupted turn's chip", () => {
+    // Arrange + Act — the shim's word for the subtype never reaches the reader.
     const html = renderItem(resultItem("aborted"));
     // Assert
-    expect(html).toContain(`class="result ok"`);
+    expect(html).not.toContain("aborted");
+  });
+
+  it("marks an aborted turn's chip with the interrupted tone", () => {
+    // Arrange — an interrupt is not a failure, so its chip is yellow, not red.
+    const html = renderItem(resultItem("aborted"));
+    // Assert
+    expect(html).toContain(`class="result interrupted"`);
+  });
+
+  it("keeps the interrupted tone even when the SDK flags the aborted turn an error", () => {
+    // Arrange — the SDK still sets is_error on an abort, but the user's own
+    // interrupt is never the error red.
+    const html = renderItem(resultItem("aborted", true));
+    // Assert
+    expect(html).toContain(`class="result interrupted"`);
   });
 
   it("withholds the done class from a failed turn's chip", () => {
@@ -1905,7 +1920,7 @@ describe("ResultChip", () => {
     // Act
     const html = renderItem(item);
     // Assert — 12ms is durationMs; 7ms (sincePrevFinalMs) must not surface.
-    expect(html).toContain("aborted · 12ms");
+    expect(html).toContain("interrupted · 12ms");
     expect(html).not.toContain("7ms");
   });
 
@@ -2131,7 +2146,7 @@ describe("swallowed chips", () => {
     // Act
     const html = renderItem(closer, undefined, finals);
     // Assert
-    expect(html).toContain(`class="result ok"`);
+    expect(html).toContain(`class="result interrupted"`);
   });
 
   it("still prints the standalone chip of a completed turn that wrote no answer", () => {
