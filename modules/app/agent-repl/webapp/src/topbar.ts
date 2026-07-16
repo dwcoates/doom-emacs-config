@@ -188,6 +188,45 @@ export function agentTopbarHtml(
   )}">${topbarInfoHtml(agentTopbarDatapoints(items, agent, nowMs), open)}</div>`;
 }
 
+// --- counter click delegation ---------------------------------------------
+
+/**
+ * The subset of a DOM element the click classifier reads. Structural
+ * rather than `Element` so the classification is testable without a DOM
+ * in the dep tree — the same discipline the timer host follows.
+ */
+export interface ClickTarget {
+  closest(selector: string): { getAttribute(name: string): string | null } | null;
+}
+
+/** One strip click's meaning: flip a counter overlay, or reveal an agent row. */
+export type TopbarClick =
+  | { kind: "toggle"; menu: "agents" | "tasks" }
+  | { kind: "reveal"; agentId: string };
+
+/**
+ * Classify a click inside a topbar strip into the verb it asks for, or
+ * null for a click on nothing actionable. Both delegations — the
+ * header's (main.ts) and the agent bubbles' (FeedRenderer) — route
+ * through this, so the strip's click vocabulary can never fork between
+ * the two surfaces that render it.
+ */
+export function topbarClickAction(target: ClickTarget): TopbarClick | null {
+  if (target.closest("[data-agents-toggle]")) return { kind: "toggle", menu: "agents" };
+  if (target.closest("[data-tasks-toggle]")) return { kind: "toggle", menu: "tasks" };
+  const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
+  if (agentId) return { kind: "reveal", agentId };
+  return null;
+}
+
+/** The disclosure after a chip click: the open menu closes, any other opens. */
+export function nextCounterMenu(
+  current: "agents" | "tasks" | null,
+  clicked: "agents" | "tasks",
+): "agents" | "tasks" | null {
+  return current === clicked ? null : clicked;
+}
+
 /** One live agent the bubble tick keeps counting for. */
 export interface AgentClockEntry {
   id: string;
