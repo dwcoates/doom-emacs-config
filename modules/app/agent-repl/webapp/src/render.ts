@@ -530,22 +530,51 @@ export function activityTicker(children: readonly ConversationItem[]): string {
  * closed. Open state lives in the RENDERER (like question selections),
  * because the fold must survive the card's own re-renders.
  */
+/**
+ * The shared skeleton of a click-to-open fold: a pill ticker as the
+ * collapsed face and a panel body that exists in the HTML only while open,
+ * with open state carried on the wrapper's class and a `data-panel-toggle`
+ * the FeedRenderer's delegated handler flips. The activity fold on a
+ * spawning card (ActivitySection) and the watcher fold on a final-response
+ * bubble (WatcherPanel) both render through this, differing only in their
+ * classes, ticker face, and body.
+ *
+ * BODY is a thunk, not a string: it is called only when the fold is open,
+ * so a hundred buffered children (or watcher tails) cost nothing to render
+ * while the fold stays closed.
+ */
+function Fold(opts: {
+  id: string;
+  foldClass: string;
+  tickerClass: string;
+  ticker: string;
+  body: () => string;
+  open: boolean;
+}): string {
+  const panel = opts.open ? `<div class="agent-panel">${opts.body()}</div>` : "";
+  return `<div class="${opts.foldClass}${opts.open ? " open" : ""}" data-panel-toggle="${escapeHtml(opts.id)}">
+      <div class="${opts.tickerClass}">${opts.ticker} <span class="agent-caret" aria-hidden="true">${
+        opts.open ? "▴" : "▾"
+      }</span></div>${panel}
+    </div>`;
+}
+
 function ActivitySection(
   id: string,
   children: readonly ConversationItem[],
   panels: PanelContext,
 ): string {
-  const open = panels.isOpen(id);
-  const body = open
-    ? `<div class="agent-panel">${children
+  return Fold({
+    id,
+    foldClass: "agent-activity",
+    tickerClass: "agent-ticker",
+    ticker: escapeHtml(activityTicker(children)),
+    body: () =>
+      children
         .map((c) => `<div class="feed-child">${renderItem(c, panels.selections, undefined, false, panels)}</div>`)
-        .join("")}</div>`
-    : "";
-  return `<div class="agent-activity${open ? " open" : ""}" data-panel-toggle="${escapeHtml(id)}">
-      <div class="agent-ticker">${escapeHtml(activityTicker(children))} <span class="agent-caret" aria-hidden="true">${
-        open ? "▴" : "▾"
-      }</span></div>${body}
-    </div>`;
+        .join(""),
+    open: panels.isOpen(id),
+  });
 }
 
 // IS-PULSING breathes the card while it is the running frontier (see
@@ -713,18 +742,16 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
 function WatcherPanel(blockId: string, panels?: PanelContext): string {
   const watchers = panels?.watchers?.get(blockId) ?? [];
   if (watchers.length === 0) return "";
-  const id = `watchers:${blockId}`;
-  const open = panels?.isOpen(id) ?? false;
   const live = watchers.filter((w) => !w.notification).length;
-  const body = open
-    ? `<div class="agent-panel">${watchers.map((w) => WatcherRow(w, panels)).join("")}</div>`
-    : "";
   const arc = live > 0 ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
-  return `<div class="watcher-fold${open ? " open" : ""}" data-panel-toggle="${escapeHtml(id)}">
-      <div class="watcher-ticker">${arc}${escapeHtml(watcherFace(watchers.length, live))} <span class="agent-caret" aria-hidden="true">${
-        open ? "▴" : "▾"
-      }</span></div>${body}
-    </div>`;
+  return Fold({
+    id: `watchers:${blockId}`,
+    foldClass: "watcher-fold",
+    tickerClass: "watcher-ticker",
+    ticker: `${arc}${escapeHtml(watcherFace(watchers.length, live))}`,
+    body: () => watchers.map((w) => WatcherRow(w, panels)).join(""),
+    open: panels?.isOpen(`watchers:${blockId}`) ?? false,
+  });
 }
 
 function toolInput(item: ToolItem): string {
