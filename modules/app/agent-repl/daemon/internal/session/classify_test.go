@@ -104,6 +104,22 @@ func TestClassifierPromptGuidance(t *testing.T) {
 	}
 }
 
+func TestClassifierPromptAlwaysInterruptsElispEvalResults(t *testing.T) {
+	// Arrange — a runtime code-evaluation result must always interrupt,
+	// regardless of the running task, since the agent must see it right
+	// away rather than let it sit behind the current turn.
+	prompt := classifierPrompt("running task", "new message")
+	// Assert
+	for _, want := range []string{"Elisp eval result", "Elisp eval ERROR"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("classifier prompt missing always-interrupt header %q", want)
+		}
+	}
+	if !strings.Contains(prompt, "Always return \"interrupt\"") {
+		t.Errorf("classifier prompt missing the always-interrupt directive")
+	}
+}
+
 func TestClassifierPromptStillMarksDataBlocksAsData(t *testing.T) {
 	// Arrange + Act — injection-hardening must survive the reword.
 	prompt := classifierPrompt("running task", "new message")
