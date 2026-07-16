@@ -608,6 +608,14 @@ describe("topbarClickAction", () => {
     });
   });
 
+  it("classifies a click on a task row as a reveal of that task's bubble", () => {
+    // Arrange + Act + Assert
+    expect(topbarClickAction(clickOn(".task-row", { "data-task-id": "3" }))).toEqual({
+      kind: "reveal-task",
+      taskId: "3",
+    });
+  });
+
   it("classifies a click on nothing actionable as null", () => {
     // Arrange + Act + Assert — plain strip text is not a control.
     expect(topbarClickAction(clickOn(".info-tokens"))).toBeNull();
@@ -616,6 +624,11 @@ describe("topbarClickAction", () => {
   it("classifies an agent row missing its id as null", () => {
     // Arrange + Act + Assert — no id means nothing to reveal.
     expect(topbarClickAction(clickOn(".agent-row"))).toBeNull();
+  });
+
+  it("classifies a task row missing its id as null", () => {
+    // Arrange + Act + Assert — no id means nothing to reveal.
+    expect(topbarClickAction(clickOn(".task-row"))).toBeNull();
   });
 });
 
