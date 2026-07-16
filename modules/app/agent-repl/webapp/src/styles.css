@@ -261,30 +261,18 @@ body {
    below the topbar without displacing the row it hangs from. */
 .agents-menu, .tasks-menu, .tokens-menu { position: relative; display: inline-block; }
 
-.info-agents {
+.info-agents, .info-tasks, .info-tokens {
   font: inherit;
-  color: var(--info-agents);
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
 }
-.info-tasks {
-  font: inherit;
-  color: var(--info-tasks);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-.info-tokens {
-  font: inherit;
-  color: var(--info-tokens);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
+/* Only the color tells one chip from another: each keeps its own
+   datapoint token from the session-info palette. */
+.info-agents { color: var(--info-agents); }
+.info-tasks { color: var(--info-tasks); }
+.info-tokens { color: var(--info-tokens); }
 .info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
 .agents-caret, .tasks-caret, .tokens-caret { font-size: 0.7rem; }
 /* The one datapoint that is not a settled number: entries still working
