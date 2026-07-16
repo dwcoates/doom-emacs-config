@@ -98,6 +98,33 @@ interface TaskRecord {
  * completed on, so the recency window can age it out.
  */
 export function sessionTasks(items: readonly ConversationItem[]): CounterEntry[] {
+  return taskEntries(items, () => true);
+}
+
+/**
+ * The tasks the agent AGENTID itself drove — its own `TaskCreate` /
+ * `TaskUpdate` calls, folded exactly as the session roster folds — the
+ * agent-scoped twin of `sessionTasks`, feeding a bubble topbar's counter.
+ * The harness task list is session-global, so a task the agent only
+ * UPDATED still rows here (its subject as the agent's calls named it);
+ * completion ages stay on the session's counted-turn clock.
+ */
+export function agentTasks(
+  items: readonly ConversationItem[],
+  agentId: string,
+): CounterEntry[] {
+  return taskEntries(items, (item) => item.parentToolUseId === agentId);
+}
+
+/**
+ * The task fold behind both rosters: ITEMS is always the FULL session
+ * list (so `countedTurns` stamps ages on the session clock), and IN-SCOPE
+ * picks which task calls the roster counts.
+ */
+function taskEntries(
+  items: readonly ConversationItem[],
+  inScope: (item: ToolItem) => boolean,
+): CounterEntry[] {
   const byId = new Map<string, TaskRecord>();
   let order = 0;
 
@@ -120,6 +147,7 @@ export function sessionTasks(items: readonly ConversationItem[]): CounterEntry[]
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (item.kind !== "tool" || !TASK_TOOLS.has(item.toolName)) continue;
+    if (!inScope(item)) continue;
 
     if (item.toolName === "TaskCreate") {
       // Before the result lands the id is unknown, so the row keys off the

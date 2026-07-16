@@ -50,30 +50,57 @@ function stringField(item: ToolItem, key: string): string {
 }
 
 /**
- * Every subagent the session's current context carries, in spawn order, as
- * counter entries.
- *
- * A subagent spawned before the last `/clear` is gone from that context
- * (and, since the clear cuts the feed too, off screen with it), so the
- * roster starts where the context starts (`itemsSinceClear`).
+ * One subagent call as a roster row. NESTED marks the row as
+ * spawned-by-another, which the overlay renders indented.
  *
  * `deactivatedAtTurn` maps straight from the item's stamp: an active
  * subagent (no result) is unstamped, which reads as null (never
  * deactivated); a settled one carries the counted turn its result landed
  * on, which the recency window ages against.
  */
+function subagentEntry(item: ToolItem, nested: boolean): CounterEntry {
+  return {
+    id: item.toolUseId,
+    summary: stringField(item, "description"),
+    detail: stringField(item, "subagent_type"),
+    status: subagentStatus(item),
+    nested,
+    deactivatedAtTurn: item.deactivatedAtTurn ?? null,
+  };
+}
+
+/**
+ * Every subagent the session's current context carries, in spawn order, as
+ * counter entries.
+ *
+ * A subagent spawned before the last `/clear` is gone from that context
+ * (and, since the clear cuts the feed too, off screen with it), so the
+ * roster starts where the context starts (`itemsSinceClear`).
+ */
 export function sessionSubagents(items: readonly ConversationItem[]): CounterEntry[] {
   const entries: CounterEntry[] = [];
   for (const item of itemsSinceClear(items)) {
     if (item.kind !== "tool" || !SUBAGENT_TOOLS.has(item.toolName)) continue;
-    entries.push({
-      id: item.toolUseId,
-      summary: stringField(item, "description"),
-      detail: stringField(item, "subagent_type"),
-      status: subagentStatus(item),
-      nested: item.parentToolUseId !== undefined,
-      deactivatedAtTurn: item.deactivatedAtTurn ?? null,
-    });
+    entries.push(subagentEntry(item, item.parentToolUseId !== undefined));
+  }
+  return entries;
+}
+
+/**
+ * The subagents belonging DIRECTLY to the agent AGENTID, in spawn order —
+ * the agent-scoped twin of `sessionSubagents`, feeding a bubble topbar's
+ * counter. Grandchildren stay out (they belong to the child agent's own
+ * roster), so every row is a direct spawn and none reads as nested.
+ */
+export function agentSubagents(
+  items: readonly ConversationItem[],
+  agentId: string,
+): CounterEntry[] {
+  const entries: CounterEntry[] = [];
+  for (const item of items) {
+    if (item.kind !== "tool" || !SUBAGENT_TOOLS.has(item.toolName)) continue;
+    if (item.parentToolUseId !== agentId) continue;
+    entries.push(subagentEntry(item, false));
   }
   return entries;
 }
