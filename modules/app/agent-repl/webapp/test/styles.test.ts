@@ -1339,8 +1339,10 @@ describe("inline-code chip", () => {
 
 /* The task timer is the one topbar datapoint that rewrites itself while the
    user is looking at it, so its styling has a job the other datapoints do not:
-   hold the strip still as the digits move. */
-const taskTimer = blockAfter(css, "#session-info .info-time {");
+   hold the strip still as the digits move. Scoped to .topbar-info, the
+   class both renderings of the strip carry (the header's #session-info and
+   each subagent bubble's .agent-topbar). */
+const taskTimer = blockAfter(css, ".topbar-info .info-time {");
 
 describe("task timer styles", () => {
   it("colors the timer with its own datapoint token", () => {
