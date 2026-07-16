@@ -202,6 +202,96 @@ choose\": no model flag is sent."
     ;; Act / Assert
     (should-error (agent-repl--frontend-create-session "/w"))))
 
+;;;; ---- resume_transcript_missing hard-fail ----------------------------------
+
+(defun agent-repl-test--resume-missing-body (&optional resume-id searched)
+  "Return a (422 . BODY) response mimicking the daemon's hard-fail.
+RESUME-ID defaults to \"uuid-gone\"; SEARCHED defaults to one path."
+  (cons 422 (json-encode
+             `((code . "resume_transcript_missing")
+               (resume_id . ,(or resume-id "uuid-gone"))
+               (searched_paths . ,(vconcat (or searched '("/cfg/projects/-w/uuid-gone.jsonl"))))
+               (error . "loud message")))))
+
+(ert-deftest agent-repl-test-frontend-create-hard-fails-on-missing-transcript ()
+  "A resume_transcript_missing hard-fail signals the distinct
+`agent-repl-resume-transcript-missing' rather than starting fresh."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+             (lambda (&rest _) "resume-investigate-uuid-gon")))
+    (agent-repl-test--with-http
+        (lambda (&rest _) (agent-repl-test--resume-missing-body))
+      ;; Act / Assert
+      (should-error (agent-repl--frontend-create-session "/w" nil "uuid-gone")
+                    :type 'agent-repl-resume-transcript-missing))))
+
+(ert-deftest agent-repl-test-frontend-create-hard-fail-names-investigation-ws ()
+  "The surfaced hard-fail error names the investigation workspace."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+             (lambda (&rest _) "resume-investigate-uuid-gon")))
+    (agent-repl-test--with-http
+        (lambda (&rest _) (agent-repl-test--resume-missing-body))
+      ;; Act
+      (let ((err (should-error (agent-repl--frontend-create-session "/w" nil "uuid-gone"))))
+        ;; Assert
+        (should (string-match-p "resume-investigate-uuid-gon"
+                                (error-message-string err)))))))
+
+(ert-deftest agent-repl-test-frontend-create-hard-fail-dispatches-investigation ()
+  "The hard-fail opens an investigation workspace instead of a fresh session."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (resume-id searched cwd)
+                 (setq captured (list resume-id searched cwd)) "ws")))
+      (agent-repl-test--with-http
+          (lambda (&rest _)
+            (agent-repl-test--resume-missing-body "uuid-gone" '("/p/uuid-gone.jsonl")))
+        ;; Act
+        (ignore-errors (agent-repl--frontend-create-session "/w/tree" nil "uuid-gone"))
+        ;; Assert — the lost session, its searched paths, and the cwd flow through.
+        (should (equal captured '("uuid-gone" ("/p/uuid-gone.jsonl") "/w/tree")))))))
+
+(ert-deftest agent-repl-test-frontend-create-hard-fail-falls-back-to-requested-resume ()
+  "When the body omits resume_id, the requested resume id is used."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (resume-id &rest _) (setq captured resume-id) "ws")))
+      (agent-repl-test--with-http
+          (lambda (&rest _)
+            (cons 422 (json-encode '((code . "resume_transcript_missing")))))
+        ;; Act
+        (ignore-errors (agent-repl--frontend-create-session "/w" nil "requested-uuid"))
+        ;; Assert
+        (should (equal captured "requested-uuid"))))))
+
+(ert-deftest agent-repl-test-frontend-create-other-errors-stay-generic ()
+  "A non-2xx WITHOUT the resume_transcript_missing code stays a plain error."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 400 "invalid permission_mode"))
+    ;; Act
+    (let ((err (should-error (agent-repl--frontend-create-session "/w"))))
+      ;; Assert — not misclassified as the resume hard-fail.
+      (should-not (eq (car err) 'agent-repl-resume-transcript-missing))
+      (should (string-match-p "invalid permission_mode" (error-message-string err))))))
+
+(ert-deftest agent-repl-test-frontend-resume-missing-predicate-matches ()
+  "The predicate returns the parsed body on the hard-fail code."
+  (should (agent-repl--frontend-resume-transcript-missing
+           (json-encode '((code . "resume_transcript_missing") (resume_id . "x"))))))
+
+(ert-deftest agent-repl-test-frontend-resume-missing-predicate-ignores-other-code ()
+  "The predicate returns nil for an unrelated error code."
+  (should-not (agent-repl--frontend-resume-transcript-missing
+               (json-encode '((code . "internal"))))))
+
+(ert-deftest agent-repl-test-frontend-resume-missing-predicate-ignores-non-json ()
+  "The predicate returns nil (never signals) on a non-JSON body."
+  (should-not (agent-repl--frontend-resume-transcript-missing "not json at all")))
+
 ;;;; ---- liveness -------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-live-p-true-for-listed ()

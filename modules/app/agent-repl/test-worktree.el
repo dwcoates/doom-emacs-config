@@ -12264,4 +12264,80 @@ silently lose commits and desync the index."
     (should (equal '(("aaa1111" . "feat: a\tb"))
                    (agent-repl--range-commits "/tmp/x" "master" "HEAD")))))
 
+;;;; ---- Tests: resume-transcript-missing investigation ----
+
+(ert-deftest agent-repl-test-resume-investigation-prompt-names-lost-session ()
+  "The investigation prompt names the lost resume id."
+  (let ((p (agent-repl--resume-investigation-prompt
+            "3ef2f8f5-uuid" '("/cfg/projects/-w/3ef2f8f5-uuid.jsonl"))))
+    (should (string-match-p "3ef2f8f5-uuid" p))))
+
+(ert-deftest agent-repl-test-resume-investigation-prompt-searches-both-config-dirs ()
+  "The investigation prompt directs the agent at BOTH config dirs."
+  (let ((p (agent-repl--resume-investigation-prompt "u" nil)))
+    (should (string-match-p "\\.claude`" p))
+    (should (string-match-p "\\.claude-chesscom" p))))
+
+(ert-deftest agent-repl-test-resume-investigation-prompt-lists-searched-paths ()
+  "Daemon-reported searched paths appear in the prompt."
+  (let ((p (agent-repl--resume-investigation-prompt "u" '("/a.jsonl" "/b.jsonl"))))
+    (should (string-match-p "/a.jsonl, /b.jsonl" p))))
+
+(ert-deftest agent-repl-test-resume-investigation-prompt-handles-no-paths ()
+  "A nil searched-paths renders a placeholder rather than erroring."
+  (let ((p (agent-repl--resume-investigation-prompt "u" nil)))
+    (should (string-match-p "(none reported)" p))))
+
+(ert-deftest agent-repl-test-dispatch-resume-investigation-creates-off-master ()
+  "Dispatch schedules a create off master with the investigation prompt."
+  (let ((agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal))
+        scheduled)
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "/repo"))
+              ((symbol-function 'agent-repl--disambiguate-workspace-name)
+               (lambda (name &rest _) name))
+              ((symbol-function 'run-at-time)
+               (lambda (_secs _rep fn &rest args) (setq scheduled (cons fn args)))))
+      ;; Act
+      (let ((name (agent-repl--dispatch-resume-investigation
+                   "uuid-gone" '("/p/uuid-gone.jsonl") "/w/tree")))
+        ;; Assert — name derived from the lost id.
+        (should (equal name "resume-investigate-uuid-gon"))
+        (should (eq (car scheduled) #'agent-repl--create-worktree-from-command))
+        (pcase-let ((`(,git-root ,ws-name ,prompt ,prio ,fork ,base ,model)
+                     (cdr scheduled)))
+          (should (equal git-root "/repo/"))
+          (should (equal ws-name "resume-investigate-uuid-gon"))
+          (should (string-match-p "uuid-gone" prompt))
+          (should (null prio))
+          (should (null fork))
+          (should (equal base agent-repl-master-branch-name))
+          (should (null model)))))))
+
+(ert-deftest agent-repl-test-dispatch-resume-investigation-is-idempotent ()
+  "A repeat dispatch for the same resume id reuses the workspace, no re-create."
+  (let ((agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal))
+        (creates 0))
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "/repo"))
+              ((symbol-function 'agent-repl--disambiguate-workspace-name)
+               (lambda (name &rest _) name))
+              ((symbol-function 'run-at-time)
+               (lambda (&rest _) (setq creates (1+ creates)))))
+      ;; Act — dispatch twice for the same lost session.
+      (let ((first (agent-repl--dispatch-resume-investigation "uuid-gone" nil "/w"))
+            (second (agent-repl--dispatch-resume-investigation "uuid-gone" nil "/w")))
+        ;; Assert — same name, exactly one create scheduled.
+        (should (equal first second))
+        (should (= creates 1))))))
+
+(ert-deftest agent-repl-test-dispatch-resume-investigation-signals-without-git-root ()
+  "An unresolvable git root signals rather than creating a rootless worktree."
+  (let ((agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal)))
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) ""))
+              ((symbol-function 'run-at-time)
+               (lambda (&rest _) (error "must not schedule a create without a git root"))))
+      (should-error (agent-repl--dispatch-resume-investigation "uuid-gone" nil "/w")))))
+
 ;;; test-worktree.el ends here

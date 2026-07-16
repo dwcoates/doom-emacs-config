@@ -2641,6 +2641,83 @@ entry in the same JSON batch is disambiguated away from NAME."
   (when (hash-table-p agent-repl--workspace-names-in-flight)
     (puthash name t agent-repl--workspace-names-in-flight)))
 
+;;; Resume-transcript-missing investigation
+;;
+;; When claude-repld HARD-FAILS a --resume because the target session has
+;; no transcript in its config dir (the daemon's resume viability gate /
+;; `resume_transcript_missing'), the client does NOT fall back to a fresh
+;; conversation.  It opens a dedicated investigation workspace whose agent
+;; hunts for the lost session across both config dirs and diagnoses why
+;; the transcript is gone, and the failing create re-raises a loud,
+;; non-recoverable error naming that workspace.
+
+(defvar agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal)
+  "Hash of resume-id -> investigation workspace name already dispatched.
+Guards `agent-repl--dispatch-resume-investigation' so a repeated create
+attempt for the same lost session (the frontend reattach loop retries)
+references the existing investigation workspace instead of spawning a
+duplicate for every retry.")
+
+(defun agent-repl--resume-investigation-prompt (resume-id searched-paths)
+  "Compose the investigation directive for lost resume target RESUME-ID.
+SEARCHED-PATHS is the list of transcript paths the daemon already
+stat'd (from its `resume_transcript_missing' body).  The agent is tasked
+to locate the session across BOTH config dirs and diagnose why its
+transcript is missing."
+  (format
+   (concat
+    "A claude-repld `--resume` was HARD-FAILED: session %s has no transcript in its config "
+    "dir, so the daemon refused to start it (it will not silently fall back to a fresh "
+    "conversation). The daemon already stat'd: %s.\n\n"
+    "Investigate and report — do not start unrelated work:\n"
+    "1. Search for %s across BOTH config dirs, `~/.claude` and `~/.claude-chesscom`, under each "
+    "of `projects/`, `session-env/`, and `tasks/`. Report every hit (transcript, env stub, task "
+    "record) with its full path, or confirm its absence in each location.\n"
+    "2. Determine WHY the transcript is missing: never written, cleaned up/rotated, or minted "
+    "under a different id (e.g. inside the Docker sandbox). Cross-reference the live session's "
+    "transcript in the same project dir to see which id actually persisted.\n"
+    "3. Summarize the most likely cause and the fastest way to recover the lost conversation, if "
+    "any.")
+   resume-id
+   (if searched-paths (mapconcat #'identity searched-paths ", ") "(none reported)")
+   resume-id))
+
+(defun agent-repl--dispatch-resume-investigation (resume-id searched-paths cwd)
+  "Open (exactly once per RESUME-ID) an investigation workspace for a lost session.
+RESUME-ID is the durable claude session uuid whose transcript the daemon
+could not find; SEARCHED-PATHS is the daemon-reported list of paths it
+stat'd; CWD is the failed workspace's project dir, used to resolve the
+repository the investigation worktree branches from (off master).
+
+Returns the bare investigation workspace name.  Idempotent: a repeat
+call for the same RESUME-ID returns the previously-created workspace
+without dispatching another, so the frontend reattach loop's retries do
+not spawn a fleet of duplicates.  Signals when the repository cannot be
+resolved from CWD — the investigation must land in a real worktree."
+  (or (gethash resume-id agent-repl--resume-investigation-workspaces)
+      (let* ((raw-root (agent-repl--git-string-quiet
+                        "-C" (expand-file-name cwd) "rev-parse" "--show-toplevel"))
+             (git-root (and (stringp raw-root) (not (string-empty-p raw-root))
+                            (file-name-as-directory raw-root))))
+        (unless git-root
+          (error "agent-repl: cannot resolve git root from %s for a resume investigation" cwd))
+        (let* ((base (format "resume-investigate-%s"
+                             (substring resume-id 0 (min 8 (length resume-id)))))
+               (name (agent-repl--disambiguate-workspace-name base git-root))
+               (prompt (agent-repl--resume-investigation-prompt resume-id searched-paths)))
+          (agent-repl--reserve-workspace-name name)
+          (agent-repl--log name
+                            "dispatch-resume-investigation: resume-id=%s git-root=%s -> ws=%s"
+                            resume-id git-root name)
+          ;; Defer the create off this call stack (mirrors
+          ;; `agent-repl--dispatch-merge-remediation'): the caller sits in
+          ;; the frontend create-session error path, while the create does
+          ;; persp/session work that belongs on a fresh main-loop turn.
+          (run-at-time 0 nil #'agent-repl--create-worktree-from-command
+                       git-root name prompt nil nil agent-repl-master-branch-name nil)
+          (puthash resume-id name agent-repl--resume-investigation-workspaces)
+          name))))
+
 (defun agent-repl--handle-create-command (cmd delay)
   "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds.
 When CMD contains a \"fork_from\" field, resolves it to a session ID so the
