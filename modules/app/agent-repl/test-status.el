@@ -2303,6 +2303,28 @@ the flag-clear invariant."
     (agent-repl--update-all-workspace-states--finalize)
     (should-not agent-repl--update-in-flight)))
 
+(ert-deftest agent-repl-test-update-all-finalize-pushes-sidebar ()
+  "The terminal finalize step asks the sidebar bridge to push.
+The bridge's own signature gate decides whether a POST happens; the
+finalize step's contract is only that the push entry point is invoked
+once per pass."
+  (agent-repl-test--with-clean-state
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl-sidebar--push)
+                 (lambda (&optional _force) (setq pushes (1+ pushes)))))
+        (agent-repl--update-all-workspace-states--finalize))
+      (should (equal 1 pushes)))))
+
+(ert-deftest agent-repl-test-update-all-finalize-clears-flag-when-sidebar-errors ()
+  "An erroring sidebar push cannot wedge the update chain: the in-flight
+flag still clears."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--update-in-flight (float-time))
+    (cl-letf (((symbol-function 'agent-repl-sidebar--push)
+               (lambda (&optional _force) (error "boom"))))
+      (ignore-errors (agent-repl--update-all-workspace-states--finalize)))
+    (should-not agent-repl--update-in-flight)))
+
 ;;;; ---- Tests: mid-chain ws removal ----
 
 (ert-deftest agent-repl-test-update-all-step-skips-removed-ws ()
