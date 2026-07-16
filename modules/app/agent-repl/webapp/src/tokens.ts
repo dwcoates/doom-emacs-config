@@ -13,6 +13,7 @@
  * split apart, the whole-tree totals summed from the per-model map
  * (the only figure that counts subagents), and each model's own slice.
  */
+import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
 import { ModelUsage, Usage } from "./protocol.js";
 import { contextTokens } from "./store.js";
@@ -167,8 +168,11 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
 export function tokensMenuHtml(data: TokenMenuData, open: boolean): string {
   const figure =
     data.topLevel === null ? "—" : formatTokens(contextTokens(data.topLevel));
-  return `<span class="tokens-menu">
-      <button type="button" class="info-tokens" data-tokens-toggle aria-expanded="${open}" aria-haspopup="true" title="top-level agent input tokens (uncached + cache read + cache write), subagents excluded — click for the full breakdown">tokens: ${figure} <span class="tokens-caret" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
-      ${open ? tokensOverlayHtml(data) : ""}
-    </span>`;
+  return dropdownChipHtml(
+    "tokens",
+    `tokens: ${figure}`,
+    "top-level agent input tokens (uncached + cache read + cache write), subagents excluded — click for the full breakdown",
+    open,
+    () => tokensOverlayHtml(data),
+  );
 }
