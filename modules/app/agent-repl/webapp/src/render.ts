@@ -12,8 +12,7 @@ import {
   nextCounterMenu,
   topbarClickAction,
 } from "./topbar.js";
-import { countLabel } from "./counter-menu.js";
-import { taskCreateToolUseId, taskUpdatesByCreate } from "./tasks.js";
+import { taskCreateToolUseId } from "./tasks.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -136,10 +135,12 @@ const SPECIAL_TOOLS = new Set([
 
 /**
  * Tool names whose cards are suppressed entirely: AskUserQuestion's UI
- * IS the permission picker card, ToolSearch is deferred-tool schema
- * plumbing, and TaskUpdate is task-list bookkeeping — all feed noise.
+ * IS the permission picker card and ToolSearch is deferred-tool schema
+ * plumbing — both feed noise. TaskUpdate is NOT here: the partition
+ * confines an update to its task's TaskCreate card, where it renders as
+ * a nested history bubble (see toolInput's TaskUpdate form).
  */
-const SUPPRESSED_TOOLS = new Set(["AskUserQuestion", "ToolSearch", "TaskUpdate"]);
+const SUPPRESSED_TOOLS = new Set(["AskUserQuestion", "ToolSearch"]);
 
 /**
  * The CLI's placeholder for an assistant message that carried no text of
@@ -452,12 +453,6 @@ export interface PanelContext {
    */
   taskTail?(taskId: string): TaskTail | undefined;
   /**
-   * The TaskUpdate calls belonging to each TaskCreate card, keyed by the
-   * create's tool-use id (see tasks.ts taskUpdatesByCreate). Feeds the
-   * card's update-stream fold; absent when the renderer wired none.
-   */
-  taskUpdates?: ReadonlyMap<string, readonly ToolItem[]>;
-  /**
    * How far a support request has got for each refused slash command
    * (renderer-owned, like selections). A command absent from the map has
    * an untouched button still offering.
@@ -658,7 +653,6 @@ function ToolCard(
       ${progress}
       ${activity}
       ${toolResult(item)}
-      ${TaskStreamPanel(item, panels)}
       ${liveTaskOutput(item)}
       ${taskControls(item)}
       ${agentComposer(item, panels)}
@@ -814,62 +808,6 @@ function taskUpdateBadge(status: string): string {
   return `<span class="badge ${tone}">${escapeHtml(status.replace("_", " "))}</span>`;
 }
 
-/**
- * One row of a TaskCreate card's update stream: a nested bubble recording
- * a single TaskUpdate — its status transition as a badge, the subject the
- * update (re)named, and, when the update itself failed, the error text
- * kept loud. The panel wraps it `.feed-child`, so it reads exactly like a
- * child card in a subagent's activity panel.
- */
-function TaskUpdateCard(item: ToolItem): string {
-  const status = typeof item.input?.status === "string" ? item.input.status : "";
-  const subject = typeof item.input?.subject === "string" ? item.input.subject : "";
-  const badge = status !== "" ? taskUpdateBadge(status) : "";
-  const line = subject !== "" ? `<div class="file-path">${escapeHtml(subject)}</div>` : "";
-  const err = item.result?.isError
-    ? `<pre class="tool-output stderr">${escapeHtml(contentToText(item.result.content))}</pre>`
-    : "";
-  return `<div class="tool-card task-update">
-      <div class="tool-head"><span class="tool-name">TaskUpdate</span>${badge}</div>
-      ${line}${err}
-    </div>`;
-}
-
-/** The collapsed face of a task's update stream: count, newest status. */
-export function taskStreamFace(updates: readonly ToolItem[]): string {
-  const noun = countLabel("update", updates.length);
-  for (let i = updates.length - 1; i >= 0; i--) {
-    const status = updates[i].input?.status;
-    if (typeof status === "string" && status !== "") {
-      return `${noun} · ${status.replace("_", " ")}`;
-    }
-  }
-  return noun;
-}
-
-/**
- * The update-stream fold a TaskCreate card carries: the task's TaskUpdate
- * history — the calls the feed itself suppresses as bookkeeping — rendered
- * as nested bubbles behind a click, exactly as a subagent card's activity
- * panel renders its children. Open state lives in the RENDERER
- * (openPanels) keyed `task-stream:<toolUseId>`, so the fold survives the
- * card's per-frame re-renders and `revealTask` can open it on arrival.
- */
-function TaskStreamPanel(item: ToolItem, panels?: PanelContext): string {
-  if (item.toolName !== "TaskCreate") return "";
-  const updates = panels?.taskUpdates?.get(item.toolUseId) ?? [];
-  if (updates.length === 0) return "";
-  return Fold({
-    id: `task-stream:${item.toolUseId}`,
-    foldClass: "task-stream",
-    tickerClass: "agent-ticker",
-    ticker: escapeHtml(taskStreamFace(updates)),
-    body: () =>
-      updates.map((u) => `<div class="feed-child">${TaskUpdateCard(u)}</div>`).join(""),
-    open: panels?.isOpen(`task-stream:${item.toolUseId}`) ?? false,
-  });
-}
-
 function toolInput(item: ToolItem): string {
   // While the input is still streaming, item.input is unparsed and the
   // only material is the accumulating RAW partial JSON — flashing that
@@ -911,6 +849,19 @@ function toolInput(item: ToolItem): string {
   if (item.toolName === "SendMessage" && item.input && typeof item.input.summary === "string") {
     const to = typeof item.input.to === "string" ? `→ ${item.input.to}: ` : "";
     return `<div class="file-path">${escapeHtml(`${to}${item.input.summary}`)}</div>`;
+  }
+  // A task-list update reads as its transition: the status it moved the
+  // task to (badged) and the subject it (re)named. Nested in its task's
+  // create-card panel by the partition, the line IS the history bubble. An
+  // update carrying neither field falls through to the generic JSON fold.
+  if (item.toolName === "TaskUpdate" && item.input) {
+    const status = typeof item.input.status === "string" ? item.input.status : "";
+    const subject = typeof item.input.subject === "string" ? item.input.subject : "";
+    if (status !== "" || subject !== "") {
+      const badge = status !== "" ? taskUpdateBadge(status) : "";
+      const line = subject !== "" ? ` ${escapeHtml(subject)}` : "";
+      return `<div class="file-path">${badge}${line}</div>`;
+    }
   }
   // Skill's input section IS its invocation: the skill name and, when the
   // call carried them, the args it was handed — the "/skill args" a user
@@ -973,6 +924,12 @@ function toolResult(item: ToolItem): string {
   // nothing over the summary line. Errors still fall through below so
   // failures stay loud.
   if (item.toolName === "SendMessage" && !item.result.isError) {
+    return "";
+  }
+  // A TaskUpdate's success echo ("Task #1 updated successfully") adds
+  // nothing over the transition line its input renders. Errors fall
+  // through below, so an update that never applied stays loud.
+  if (item.toolName === "TaskUpdate" && !item.result.isError) {
     return "";
   }
   // A Skill result with a skill render hint rendered its SKILL.md body as
@@ -1328,9 +1285,12 @@ export function rendersEmpty(
     // AskUserQuestion's UI IS the permission picker card — the generic tool
     // card would just dump the questions JSON (input) and the "User has
     // answered…" echo (result) alongside it. ToolSearch is deferred-tool
-    // schema plumbing and TaskUpdate is task-list bookkeeping: both pure
-    // feed noise.
+    // schema plumbing: pure feed noise. A TaskUpdate draws nothing until
+    // its input closes — before that the partition cannot know which
+    // create card owns it, and a card that flashed top-level then jumped
+    // into a panel would read as a glitch.
     case "tool":
+      if (item.toolName === "TaskUpdate" && !item.inputDone) return true;
       return SUPPRESSED_TOOLS.has(item.toolName);
     case "result":
       // A refused slash command's card is the turn's ONLY content, so it
@@ -1974,37 +1934,33 @@ export class FeedRenderer {
    * Reveal the `TaskCreate` card behind roster task TASKID (see
    * `taskCreateToolUseId`): a task's harness id first maps back to the
    * call that created it, whose card is the task's one bubble in the feed.
-   * The card arrives with its update-stream fold open, so the task's
-   * history is on show without a second click. Answers whether that bubble
-   * was found — false when the id names no create, or when the create's
-   * card is off the current feed.
+   * The reveal opens the card's activity panel (the plan's panel chain
+   * names the card itself), which is where the task's update history
+   * nests, so the history is on show without a second click. Answers
+   * whether that bubble was found — false when the id names no create, or
+   * when the create's card is off the current feed.
    */
   revealTask(taskId: string): boolean {
     if (!this.lastState) return false;
     const toolUseId = taskCreateToolUseId(this.lastState.items, taskId);
-    return (
-      toolUseId !== null &&
-      this.revealToolCard(toolUseId, [`task-stream:${toolUseId}`])
-    );
+    return toolUseId !== null && this.revealToolCard(toolUseId);
   }
 
   /**
    * Reveal tool call TOOLUSEID's card: pin its tab when it lives in a
    * consecutive-run group, open the activity panels that surface it and
-   * its output (plus any EXTRA-PANELS the caller wants laid open, e.g. a
-   * task card's update-stream fold), scroll its (or its outermost
-   * ancestor's) bubble to the top of the feed, and lay that card's own
-   * capped sections out in full. Answers whether the card was found in
-   * the current feed.
+   * its output, scroll its (or its outermost ancestor's) bubble to the top
+   * of the feed, and lay that card's own capped sections out in full.
+   * Answers whether the card was found in the current feed.
    */
-  private revealToolCard(toolUseId: string, extraPanels: readonly string[] = []): boolean {
+  private revealToolCard(toolUseId: string): boolean {
     if (!this.lastState) return false;
     const plan = planToolReveal(this.lastState.items, toolUseId);
     if (!plan) return false;
     if (plan.groupKey !== null && plan.tabMember !== null) {
       this.activeTabs.set(plan.groupKey, plan.tabMember);
     }
-    for (const id of [...plan.panelIds, ...extraPanels]) this.openPanels.add(id);
+    for (const id of plan.panelIds) this.openPanels.add(id);
     this.render(this.lastState);
     const node = this.nodes.get(plan.key)?.el;
     if (!node) return false;
@@ -2097,7 +2053,6 @@ export class FeedRenderer {
   private panelContext(
     children: ReadonlyMap<string, readonly ConversationItem[]>,
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
-    taskUpdates: ReadonlyMap<string, readonly ToolItem[]>,
   ): PanelContext {
     return {
       children,
@@ -2105,7 +2060,6 @@ export class FeedRenderer {
       selections: this.questionSelections,
       drafts: this.msgDrafts,
       watchers,
-      taskUpdates,
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
@@ -2293,7 +2247,7 @@ export class FeedRenderer {
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers, taskUpdatesByCreate(items));
+    const panels = this.panelContext(part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
@@ -2421,7 +2375,7 @@ export class FeedRenderer {
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers, taskUpdatesByCreate(items));
+    const panels = this.panelContext(part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);

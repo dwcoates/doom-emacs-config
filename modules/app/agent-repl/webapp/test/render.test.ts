@@ -24,7 +24,6 @@ import {
   renderItem,
   rendersEmpty,
   repinsToTail,
-  taskStreamFace,
   wakeRemainingLabel,
   navTokensForEntry,
 } from "../src/render.js";
@@ -2536,17 +2535,17 @@ describe("renderItem tool previews", () => {
     );
   });
 
-  it("suppresses the tool card for TaskUpdate", () => {
-    // Arrange — task-list bookkeeping is feed noise, not conversation.
+  it("renders nothing for a TaskUpdate whose input is still streaming", () => {
+    // Arrange — pre-input the partition cannot yet claim the update, and a
+    // card that flashed top-level then jumped into a panel would glitch.
     const item: ToolItem = {
       kind: "tool",
     ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "TaskUpdate",
       messageId: "m1",
-      input: { task_id: "1", status: "completed" },
-      inputJson: `{"task_id":"1"}`,
-      inputDone: true,
+      inputJson: `{"taskId":"1`,
+      inputDone: false,
     };
     // Act + Assert
     expect(renderItem(item)).toBe("");
@@ -3127,117 +3126,101 @@ function taskUpdateTool(over: Partial<ToolItem> = {}): ToolItem {
   };
 }
 
-/** A PanelContext carrying UPDATES for the tc1 create card, open per OPEN. */
-function taskStreamCtx(updates: ToolItem[], open = false): PanelContext {
+/** A PanelContext confining CHILDREN under the tc1 create card, open per OPEN. */
+function taskChildrenCtx(children: ConversationItem[], open = false): PanelContext {
   return {
-    children: new Map(),
+    children: new Map([["tc1", children]]),
     isOpen: () => open,
-    taskUpdates: new Map([["tc1", updates]]),
   };
 }
 
-describe("task update stream", () => {
-  it("renders no stream fold on a create card without updates", () => {
-    // Arrange + Act
-    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([]));
-    // Assert
-    expect(html).not.toContain("task-stream");
-  });
-
-  it("shows the collapsed face while closed and none of the update bubbles", () => {
-    // Arrange + Act
-    const html = renderItem(
-      taskCreateTool(),
-      undefined,
-      undefined,
-      false,
-      taskStreamCtx([taskUpdateTool()]),
+describe("task update card", () => {
+  it("badges the transition with the working tone while the task moves", () => {
+    // Arrange + Act + Assert
+    expect(renderItem(taskUpdateTool())).toContain(
+      `<span class="badge run">in progress</span>`,
     );
-    // Assert
-    expect(html).toContain("1 update · in progress");
-    expect(html).not.toContain("task-update");
   });
 
-  it("renders one nested bubble per update inside the open panel", () => {
+  it("lands a completed transition on the settled ok tone", () => {
     // Arrange
-    const updates = [
-      taskUpdateTool(),
-      taskUpdateTool({ toolUseId: "u2", input: { taskId: "1", status: "completed" } }),
-    ];
-    // Act
-    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx(updates, true));
-    // Assert
-    expect(html).toContain("agent-panel");
-    expect(html.match(/feed-child/g)).toHaveLength(2);
+    const done = taskUpdateTool({ input: { taskId: "1", status: "completed" } });
+    // Act + Assert
+    expect(renderItem(done)).toContain(`<span class="badge ok">completed</span>`);
   });
 
-  it("badges an update bubble with its status transition", () => {
-    // Arrange + Act
-    const html = renderItem(
-      taskCreateTool(),
-      undefined,
-      undefined,
-      false,
-      taskStreamCtx([taskUpdateTool()], true),
-    );
-    // Assert
-    expect(html).toContain(`<span class="badge run">in progress</span>`);
+  it("lands a deleted transition on the error tone", () => {
+    // Arrange
+    const gone = taskUpdateTool({ input: { taskId: "1", status: "deleted" } });
+    // Act + Assert
+    expect(renderItem(gone)).toContain(`<span class="badge err">deleted</span>`);
   });
 
-  it("carries the subject an update renamed", () => {
+  it("carries the subject the update renamed", () => {
     // Arrange
     const renamed = taskUpdateTool({ input: { taskId: "1", subject: "new name" } });
-    // Act
-    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([renamed], true));
-    // Assert
-    expect(html).toContain("new name");
+    // Act + Assert
+    expect(renderItem(renamed)).toContain("new name");
+  });
+
+  it("escapes markup in the subject", () => {
+    // Arrange
+    const sly = taskUpdateTool({ input: { taskId: "1", subject: "<img src=x>" } });
+    // Act + Assert
+    expect(renderItem(sly)).not.toContain("<img");
+  });
+
+  it("suppresses the success echo the harness prints", () => {
+    // Arrange — the ack adds nothing over the transition line.
+    const settled = taskUpdateTool({
+      result: { isError: false, content: "Task #1 updated successfully" },
+    });
+    // Act + Assert
+    expect(renderItem(settled)).not.toContain("updated successfully");
   });
 
   it("keeps a failed update's error text loud", () => {
     // Arrange
     const failed = taskUpdateTool({ result: { isError: true, content: "no such task" } });
     // Act
-    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([failed], true));
+    const html = renderItem(failed);
     // Assert
     expect(html).toContain("no such task");
     expect(html).toContain("stderr");
   });
 
-  it("escapes markup in an update's subject", () => {
-    // Arrange
-    const sly = taskUpdateTool({ input: { taskId: "1", subject: "<img src=x>" } });
-    // Act
-    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([sly], true));
-    // Assert
-    expect(html).not.toContain("<img");
-  });
-
-  it("never folds a stream into a non-TaskCreate card", () => {
-    // Arrange — a Bash card whose id happens to key an updates entry.
-    const impostor: ToolItem = { ...taskCreateTool(), toolName: "Bash" };
-    // Act
-    const html = renderItem(impostor, undefined, undefined, false, taskStreamCtx([taskUpdateTool()]));
-    // Assert
-    expect(html).not.toContain("task-stream");
-  });
-});
-
-describe("taskStreamFace", () => {
-  it("reports the count alone when no update carries a status", () => {
-    // Arrange
-    const rename = taskUpdateTool({ input: { taskId: "1", subject: "new name" } });
+  it("falls back to the raw input JSON when neither status nor subject moved", () => {
+    // Arrange — a metadata-only update has no transition line to draw.
+    const bare = taskUpdateTool({ input: { taskId: "1" }, inputJson: `{"taskId":"1"}` });
     // Act + Assert
-    expect(taskStreamFace([rename])).toBe("1 update");
+    expect(renderItem(bare)).toContain(`<pre class="tool-input">`);
   });
 
-  it("names the newest status among several updates", () => {
-    // Arrange
-    const updates = [
-      taskUpdateTool(),
-      taskUpdateTool({ toolUseId: "u2", input: { taskId: "1", status: "completed" } }),
-    ];
-    // Act + Assert
-    expect(taskStreamFace(updates)).toBe("2 updates · completed");
+  it("nests a task's updates inside the create card's open activity panel", () => {
+    // Arrange + Act — the partition confines updates as ordinary children.
+    const html = renderItem(
+      taskCreateTool(),
+      undefined,
+      undefined,
+      false,
+      taskChildrenCtx([taskUpdateTool()], true),
+    );
+    // Assert
+    expect(html).toContain("agent-panel");
+    expect(html).toContain(`<span class="badge run">in progress</span>`);
+  });
+
+  it("faces the closed create-card fold with the update count", () => {
+    // Arrange + Act
+    const html = renderItem(
+      taskCreateTool(),
+      undefined,
+      undefined,
+      false,
+      taskChildrenCtx([taskUpdateTool()]),
+    );
+    // Assert
+    expect(html).toContain("1 step · TaskUpdate");
   });
 });
 
