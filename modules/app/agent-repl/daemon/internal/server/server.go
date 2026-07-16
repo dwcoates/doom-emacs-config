@@ -28,7 +28,9 @@ import (
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
+	"claude-repld/internal/sidebaraction"
 	"claude-repld/internal/workspacecmd"
+	"claude-repld/internal/workspaces"
 )
 
 // CreateOpts is the POST /sessions request body.
@@ -122,6 +124,10 @@ type Server struct {
 	sentinel   session.SentinelSink
 	remediator Remediator
 	registry   *registry.Registry
+	// workspaces relays the Emacs drawer's sidebar snapshot stream
+	// (shared/protocol.md, "Workspace sidebar stream"): Emacs POSTs the
+	// latest view-model and connected sidebars receive it verbatim.
+	workspaces *workspaces.Hub
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability as
 	// unconfigured.
@@ -259,9 +265,10 @@ func New(cfg Config) *Server {
 			// permissive by design.
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
-		sessions:  map[string]*session.Session{},
-		dormant:   map[string]registry.Record{},
-		switching: map[string]struct{}{},
+		workspaces: workspaces.NewHub(),
+		sessions:   map[string]*session.Session{},
+		dormant:    map[string]registry.Record{},
+		switching:  map[string]struct{}{},
 	}
 	// A -fake daemon must leave the registry untouched: fake sessions
 	// have no transcripts, so the prune below would destroy every REAL
@@ -385,6 +392,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}/chess-game", s.handleChessGameFile)
 	mux.HandleFunc("POST /sessions/{id}/add-support", s.handleAddSupport)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
+	mux.HandleFunc("POST /workspaces/status", s.handleWorkspaceStatusIngest)
+	mux.HandleFunc("GET /workspaces/status", s.handleWorkspaceStatus)
+	mux.HandleFunc("GET /workspaces/stream", s.handleWorkspaceStream)
+	mux.HandleFunc("POST /workspaces/action", s.handleWorkspaceAction)
 	return mux
 }
 
@@ -1577,6 +1588,154 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			s.logf("server: client frame rejected: %v", err)
 		}
 	}
+}
+
+// maxSnapshotBytes caps a POST /workspaces/status body. A drawer
+// view-model is a few KB; 8 MiB is generous headroom that still keeps a
+// runaway client from ballooning daemon memory, since the hub retains
+// the whole body as the latest snapshot.
+const maxSnapshotBytes = 8 << 20
+
+// handleWorkspaceStatusIngest accepts the Emacs drawer's latest sidebar
+// snapshot. Validation is shape-only — valid JSON whose top-level type
+// tags it as a workspace-snapshot — because the daemon relays the
+// view-model without interpreting it (Emacs owns every fact in it).
+func (s *Server) handleWorkspaceStatusIngest(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSnapshotBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("snapshot exceeds the %d-byte cap", int64(maxSnapshotBytes)))
+			return
+		}
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
+		return
+	}
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid snapshot JSON: %v", err))
+		return
+	}
+	if probe.Type != "workspace-snapshot" {
+		httpError(w, http.StatusBadRequest,
+			fmt.Sprintf(`snapshot type must be "workspace-snapshot", got %q`, probe.Type))
+		return
+	}
+	s.workspaces.SetLatest(body)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleWorkspaceStatus serves the latest sidebar snapshot one-shot: the
+// poll/bootstrap path for clients that hold no stream socket.
+func (s *Server) handleWorkspaceStatus(w http.ResponseWriter, _ *http.Request) {
+	data := s.workspaces.Latest()
+	if data == nil {
+		httpError(w, http.StatusNotFound, "no workspace snapshot has been ingested")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(data); err != nil {
+		s.logf("server: write workspace snapshot: %v", err)
+	}
+}
+
+// handleWorkspaceStream streams sidebar snapshots over a WebSocket: the
+// latest one immediately on attach (when one exists), then every newly
+// ingested snapshot as its own text message. Inbound messages are read
+// and discarded by contract — the read loop exists only to observe the
+// close.
+func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logf("server: websocket upgrade: %v", err)
+		return
+	}
+
+	// Attach primes the client with the latest snapshot, so a fresh
+	// sidebar renders without waiting for the next Emacs push.
+	client := workspaces.NewClient()
+	s.workspaces.Attach(client)
+
+	// Writer: hub snapshot queue → socket. Owns the socket's write side
+	// and its closure.
+	go func() {
+		defer func() {
+			if err := conn.Close(); err != nil {
+				s.logf("server: websocket close: %v", err)
+			}
+		}()
+		for data := range client.Send {
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				s.logf("server: websocket write: %v", err)
+				s.workspaces.Detach(client)
+				// Drain remaining snapshots so Detach's close(Send) is safe.
+				for range client.Send { //nolint:revive
+				}
+				return
+			}
+		}
+	}()
+
+	// Reader: runs on the handler goroutine, solely to detect the close.
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			s.workspaces.Detach(client)
+			return
+		}
+	}
+}
+
+// handleWorkspaceAction accepts one sidebar action and relays it to
+// Emacs as a sidebar-action file (see internal/sidebaraction). The 202
+// carries the minted id so the frontend can match the outcome Emacs
+// reports through the snapshot's last_action_result; whether the action
+// is known, permitted, or successful is entirely Emacs's business.
+func (s *Server) handleWorkspaceAction(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action    string         `json:"action"`
+		Targets   []string       `json:"targets"`
+		Args      map[string]any `json:"args"`
+		Confirmed bool           `json:"confirmed"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if body.Action == "" {
+		httpError(w, http.StatusBadRequest, "action must be non-empty")
+		return
+	}
+	dir, err := sidebaraction.Dir()
+	if err != nil {
+		s.logf("server: resolve sidebar-actions dir: %v", err)
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	id, err := sidebaraction.NewID()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	path, err := sidebaraction.Emit(dir, sidebaraction.Action{
+		ID:        id,
+		Action:    body.Action,
+		Targets:   body.Targets,
+		Args:      body.Args,
+		Confirmed: body.Confirmed,
+		TS:        s.now().Unix(),
+	})
+	if err != nil {
+		s.logf("server: emit sidebar action %q: %v", body.Action, err)
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.logf("server: asked Emacs to run sidebar action %q (%s)", body.Action, path)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]string{"id": id})
 }
 
 func (s *Server) lookup(id string) *session.Session {

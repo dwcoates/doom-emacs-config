@@ -162,6 +162,7 @@ func main() {
 	mux.Handle("/sessions/", srv.Handler())
 	mux.Handle("/remediation", srv.Handler())
 	mux.Handle("/accounts", srv.Handler())
+	mux.Handle("/workspaces/", srv.Handler())
 	if *webappDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(*webappDir)))
 	}
