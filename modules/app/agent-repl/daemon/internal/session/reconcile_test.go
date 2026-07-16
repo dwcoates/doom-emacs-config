@@ -217,6 +217,35 @@ func TestReconcileModelAdoptsTheTranscriptModelIntoTheMirror(t *testing.T) {
 	}
 }
 
+func TestReconcileModelKeepsTheContextVariantTheTranscriptCannotName(t *testing.T) {
+	// Arrange — the exact drift seen in the wild: a session the user put on
+	// `claude-fable-5[1m]` whose transcript names the served model
+	// `claude-fable-5`, because the suffix picked a context window rather
+	// than a model. Calling that drift downgraded the mirror, and a revive
+	// relaunches the CLI from the mirror, so the 1M context evaporated.
+	sess, shim, _ := reconcilable(t, "claude-fable-5[1m]", "claude-fable-5")
+	defer shim.end()
+	// Act
+	sess.ReconcileModel()
+	// Assert
+	if got := sess.Info().Model; got != "claude-fable-5[1m]" {
+		t.Errorf("mirror = %q, want claude-fable-5[1m]", got)
+	}
+}
+
+func TestReconcileModelStillAdoptsARealFamilyChangeOverAVariantMirror(t *testing.T) {
+	// Arrange — the variant must not make the mirror unfixable: a genuine
+	// switch to another family is still reconciled.
+	sess, shim, _ := reconcilable(t, "claude-fable-5[1m]", "claude-opus-4-8")
+	defer shim.end()
+	// Act
+	sess.ReconcileModel()
+	// Assert
+	if got := sess.Info().Model; got != "claude-opus-4-8" {
+		t.Errorf("mirror = %q, want claude-opus-4-8", got)
+	}
+}
+
 func TestReconcileModelIsSilentWhenTheMirrorAgrees(t *testing.T) {
 	// Arrange — the steady state, which must put NOTHING on the wire.
 	sess, shim, _ := reconcilable(t, "haiku", "haiku")
