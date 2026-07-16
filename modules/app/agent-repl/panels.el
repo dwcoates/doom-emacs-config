@@ -622,8 +622,9 @@ the close is reversible only by an explicit panel-show."
 
 ;;;; Window synchronization
 
-;; Auto-close orphaned panels: if one is closed, close the other.
-;; Also refresh the hide overlay in case a window change invalidated it.
+;; Reap orphaned panels drifted in from OTHER workspaces; the current
+;; workspace's own half-missing pair is instead healed by the
+;; window-change reconciler (`agent-repl-window--ensure-layout').
 (defun agent-repl--extract-panel-id (name)
   "Extract the workspace identifier from a agent panel buffer NAME.
 Returns the identifier string, or nil if NAME is not a agent panel buffer.
@@ -737,12 +738,18 @@ deletion that follows."
 
 (defun agent-repl--on-window-change ()
   "Deferred handler for window configuration changes.
-Syncs orphaned panels.  It also used to refresh the hide-overlay that
-blanked the vterm's bottom rows (the TUI drew its own input box there,
-which Emacs's input panel replaced); the webview hides its composer
-declaratively instead, so there is nothing left to refresh."
+Sweeps orphaned panels drifted in from other workspaces
+\(`agent-repl--sync-panels'), then reconciles the current workspace's
+own two-panel layout (`agent-repl-window--ensure-layout') so a window
+change that knocked exactly one of the view/input pair off the frame
+heals back to the canonical shape.  It also used to refresh the
+hide-overlay that blanked the vterm's bottom rows (the TUI drew its
+own input box there, which Emacs's input panel replaced); the webview
+hides its composer declaratively instead, so there is nothing left to
+refresh."
   (agent-repl--log-verbose (agent-repl--ws-current-name) "on-window-change")
-  (agent-repl--sync-panels))
+  (agent-repl--sync-panels)
+  (agent-repl-window--ensure-layout))
 
 (defmacro agent-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.
