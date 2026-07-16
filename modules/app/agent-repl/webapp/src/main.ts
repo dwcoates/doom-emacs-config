@@ -31,7 +31,7 @@ import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { compactionBannerHtml, FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
-import { installEdgeScroll } from "./scroll.js";
+import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
@@ -80,13 +80,19 @@ async function boot(): Promise<void> {
   let ws: WsClient;
 
   const store = new ConversationStore();
+  const feedEl = must("feed");
   // Chess-game bubbles fetch their payload through the daemon and mount
-  // the in-place-served widget; the session getter tracks rebinds.
-  configureChessGames({ base: httpBase, session: () => activeSessionId });
+  // the in-place-served widget; the session getter tracks rebinds, and
+  // the pinning pair lets an async board mount restore the feed's tail.
+  configureChessGames({
+    base: httpBase,
+    session: () => activeSessionId,
+    isPinned: () => isPinnedToBottom(feedEl),
+    parkFeed: () => parkAtTail(feedEl),
+  });
   // The Emacs host's webview-buffer keys step the active board through
   // this hook (out-of-band: the xwidget cannot deliver keys into the page).
   installChessNavHook(window as unknown as Record<string, unknown>);
-  const feedEl = must("feed");
   // Sections only take the wheel in their left/right gutters, so wheeling
   // over one scrolls the feed past it instead of scrolling it.
   installEdgeScroll(feedEl);
