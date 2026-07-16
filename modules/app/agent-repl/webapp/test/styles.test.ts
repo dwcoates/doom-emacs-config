@@ -1149,6 +1149,8 @@ describe("tab groups", () => {
    against the stylesheet source. */
 const agentsMenu = blockAfter(css, ".agents-menu");
 const agentsOverlay = blockAfter(css, ".agents-overlay");
+/* Every chip shares one button-reset rule; only the color rule is per-chip. */
+const chipReset = blockAfter(css, ".info-agents, .info-tasks, .info-tokens {");
 const agentsToggle = blockAfter(css, ".info-agents {");
 const runningDot = blockAfter(css, ".agent-dot.agent-starting,");
 const reducedDot = blockAfter(
@@ -1195,9 +1197,9 @@ describe("subagent roster styles", () => {
   });
 
   it("renders the chip as a pointer target so it reads as pressable", () => {
-    // Arrange / Act
+    // Arrange / Act — the shared chip reset carries the affordance.
     // Assert
-    expect(agentsToggle).toMatch(/cursor:\s*pointer/);
+    expect(chipReset).toMatch(/cursor:\s*pointer/);
   });
 
   it("colors the chip with its own datapoint token", () => {
@@ -1652,9 +1654,10 @@ describe("the nav marker", () => {
 /* The tokens breakdown hangs off the same dropdown anchoring as the rosters
    (its stems join their shared rules), but its rows are stat pairs, not
    roster entries — the value alignment is its own contract. */
-// The leading newline pins the marker to the chip's own rule: the strip's
-// scoped color rule (".topbar-info .info-tokens") would otherwise match first.
-const tokensToggle = blockAfter(css, "\n.info-tokens {");
+// The leading newline pins the marker to the chip's own color rule: the
+// strip's scoped rule (".topbar-info .info-tokens") would otherwise match
+// first, since it precedes the chips section.
+const tokensToggle = blockAfter(css, "\n.info-tokens { color");
 const tokensValue = blockAfter(css, ".tokens-value {");
 const tokensSubRow = blockAfter(css, ".tokens-row.sub {");
 
@@ -1672,9 +1675,10 @@ describe("tokens dropdown styles", () => {
   });
 
   it("renders the chip as a pointer target so it reads as pressable", () => {
-    // Arrange / Act — the figure became the dropdown's trigger button.
+    // Arrange / Act — the shared chip reset must name the tokens chip.
     // Assert
-    expect(tokensToggle).toMatch(/cursor:\s*pointer/);
+    expect(css).toMatch(/\.info-agents, \.info-tasks, \.info-tokens \{/);
+    expect(chipReset).toMatch(/cursor:\s*pointer/);
   });
 
   it("keeps the chip on its established datapoint token", () => {
