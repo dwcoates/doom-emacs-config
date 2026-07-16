@@ -1,9 +1,22 @@
 # Output navigation — design assessment
 
+> **Superseded — kept for its architecture survey, not its recommendation.**
+> Feed navigation now ships: `webapp/src/nav.ts` (the cycle), `output-nav.el`
+> (the elisp commands), bound in `agent-repl-input-mode-map`. Sections (a),
+> (b) and (c) below still describe the architecture accurately. The verdict
+> in (d) does not: it recommends the stateless Approach B, and what shipped
+> is B's viewport seeding fused with C's cursor and highlight, because a
+> stateless scan cannot meet the requirement that a re-render never lose an
+> in-flight cycle — it has no position to lose OR keep, and re-pins to tail
+> silently move it. The shipped cursor is a reconcile-stable `data-key`,
+> which is what makes C's bookkeeping cheap enough to be worth it: there is
+> nothing to invalidate, since a key that stops resolving IS the
+> invalidation. Cycling wraps at both ends, and open question 1 is settled
+> per-block-but-finals-only. `agentReplNavigate` shipped as designed here.
+
 Assessment for adding keyboard-driven semantic navigation to the agent-repl
 output window: jump between user prompts, agent final responses, all agent
-responses, and pages, with keybindings driven from the input form. This is a
-design document only; nothing here is implemented.
+responses, and pages, with keybindings driven from the input form.
 
 ## TLDR
 
