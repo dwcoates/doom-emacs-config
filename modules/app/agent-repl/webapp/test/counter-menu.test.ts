@@ -10,6 +10,7 @@ import {
   counterOverlayHtml,
   isActive,
   isVisible,
+  missingBubbleNotice,
   pruneByRecency,
   turnsAgoLabel,
   turnsSince,
@@ -153,6 +154,15 @@ describe("countLabel", () => {
   it("pluralizes several entries", () => {
     // Arrange + Act + Assert
     expect(countLabel("task", 3)).toBe("3 tasks");
+  });
+});
+
+describe("missingBubbleNotice", () => {
+  it("names the counter's noun so the notice says which roster missed", () => {
+    // Arrange + Act + Assert
+    expect(missingBubbleNotice(SPEC)).toBe(
+      "thing has no bubble in the current feed (discarded by /clear)",
+    );
   });
 });
 
