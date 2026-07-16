@@ -6,6 +6,7 @@ import {
   sessionTasks,
   taskCreateToolUseId,
   taskIdFromCreateResult,
+  taskUpdatesByCreate,
   tasksMenuHtml,
 } from "../src/tasks.js";
 import { CounterEntry } from "../src/counter-menu.js";
@@ -129,6 +130,58 @@ describe("taskCreateToolUseId", () => {
     });
     // Act + Assert
     expect(taskCreateToolUseId([taskCreate(), second], "2")).toBe("c2");
+  });
+});
+
+describe("taskUpdatesByCreate", () => {
+  it("claims an update under the create that named its task", () => {
+    // Arrange + Act
+    const map = taskUpdatesByCreate([taskCreate(), taskUpdate()]);
+    // Assert
+    expect(map.get("c1")).toEqual([taskUpdate()]);
+  });
+
+  it("keeps a task's updates in call order", () => {
+    // Arrange
+    const second = taskUpdate({ toolUseId: "u2", input: { taskId: "1", status: "completed" } });
+    // Act
+    const map = taskUpdatesByCreate([taskCreate(), taskUpdate(), second]);
+    // Assert
+    expect(map.get("c1")?.map((u) => u.toolUseId)).toEqual(["u1", "u2"]);
+  });
+
+  it("drops an update naming a task no create reported", () => {
+    // Arrange
+    const orphan = taskUpdate({ input: { taskId: "9", status: "completed" } });
+    // Act + Assert
+    expect(taskUpdatesByCreate([taskCreate(), orphan]).size).toBe(0);
+  });
+
+  it("drops an update whose create has not settled", () => {
+    // Arrange — no create result means no harness id to claim through.
+    const items = [taskCreate({ result: undefined }), taskUpdate()];
+    // Act + Assert
+    expect(taskUpdatesByCreate(items).size).toBe(0);
+  });
+
+  it("skips an update whose input is still streaming", () => {
+    // Arrange
+    const streaming = taskUpdate({ inputDone: false });
+    // Act + Assert
+    expect(taskUpdatesByCreate([taskCreate(), streaming]).size).toBe(0);
+  });
+
+  it("lands each task's updates under its own create", () => {
+    // Arrange — a second task with its own update.
+    const create2 = taskCreate({
+      toolUseId: "c2",
+      result: { isError: false, content: "Task #2 created successfully: another" },
+    });
+    const update2 = taskUpdate({ toolUseId: "u2", input: { taskId: "2", status: "completed" } });
+    // Act
+    const map = taskUpdatesByCreate([taskCreate(), create2, taskUpdate(), update2]);
+    // Assert
+    expect([map.get("c1")?.length, map.get("c2")?.length]).toEqual([1, 1]);
   });
 });
 
