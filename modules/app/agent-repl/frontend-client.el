@@ -43,8 +43,19 @@
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
+(declare-function agent-repl--dispatch-resume-investigation "agent-repl-worktree" (resume-id searched-paths cwd))
 
 (defvar url-http-response-status)
+
+;; Signalled when the daemon HARD-FAILS a --resume because the target
+;; session has no transcript in its config dir (§2.10 resume viability
+;; gate, `code: "resume_transcript_missing"').  NON-recoverable by
+;; design: rather than degrade to a fresh conversation, the client opens
+;; an investigation workspace for the lost session and re-raises this,
+;; naming that workspace.  Derived from `error' so existing
+;; `condition-case' handlers still catch it.
+(define-error 'agent-repl-resume-transcript-missing
+  "agent-repl: resume target has no transcript" 'error)
 
 ;;;; ---- Customization ----------------------------------------------------
 
@@ -161,10 +172,53 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
 
 ;;;; ---- Session CRUD -------------------------------------------------------
 
+(defun agent-repl--frontend-parse-json (body)
+  "Parse BODY (a JSON string) into an alist, or nil when BODY is blank.
+Object keys decode to symbols and JSON arrays to lists (matching
+`agent-repl--frontend-api').  Signals on undecodable non-blank BODY."
+  (when (and body (not (string-empty-p (string-trim body))))
+    (json-parse-string body :object-type 'alist :array-type 'list)))
+
+(defun agent-repl--frontend-resume-transcript-missing (body)
+  "Return BODY's parsed alist when it is the daemon's `resume_transcript_missing'
+hard-fail, else nil.  Never signals: a non-JSON or unrelated error body
+returns nil so the generic error path handles it."
+  (let ((parsed (ignore-errors (agent-repl--frontend-parse-json body))))
+    (and (equal (alist-get 'code parsed) "resume_transcript_missing")
+         parsed)))
+
+(defun agent-repl--frontend-handle-resume-transcript-missing (cwd resume missing)
+  "React to the daemon HARD-FAILING a --resume whose transcript is gone.
+MISSING is the parsed `resume_transcript_missing' body (carrying
+`resume_id' and `searched_paths'); CWD is the failed workspace's project
+dir; RESUME is the id the create requested (fallback for `resume_id').
+
+Opens an investigation workspace for the lost session via
+`agent-repl--dispatch-resume-investigation', then signals a loud,
+NON-recoverable `agent-repl-resume-transcript-missing' naming that
+workspace so the create fails hard instead of degrading to a fresh
+conversation.  Never returns normally."
+  (let* ((resume-id (or (alist-get 'resume_id missing) resume))
+         (searched (alist-get 'searched_paths missing))
+         (ws-name (agent-repl--dispatch-resume-investigation resume-id searched cwd)))
+    (signal 'agent-repl-resume-transcript-missing
+            (list (format (concat "resume target %s has no transcript — refusing a fresh "
+                                  "conversation; opened investigation workspace `%s' to locate "
+                                  "the lost session and diagnose the loss")
+                          resume-id ws-name)
+                  resume-id ws-name))))
+
 (defun agent-repl--frontend-create-session (cwd &optional model resume)
   "POST /sessions rooted at CWD; return the new session id.
 MODEL and RESUME (a durable claude session uuid) are optional
 passthroughs.  Signals on HTTP failure or a malformed response.
+
+When the daemon HARD-FAILS a RESUME whose transcript it cannot find
+\(HTTP 422, `code: \"resume_transcript_missing\"'), this does NOT start a
+fresh conversation: it opens an investigation workspace for the lost
+session and signals a non-recoverable
+`agent-repl-resume-transcript-missing' naming that workspace, via
+`agent-repl--frontend-handle-resume-transcript-missing'.
 
 MODEL defaults to `agent-repl-interactive-model' when nil, matching the
 CLI-launch path (`agent-repl--compute-claude-flags'): a gui session that
@@ -194,11 +248,27 @@ silently run as whichever account the daemon happened to inherit."
                           (when config-dir `(("config_dir" . ,config-dir)))
                           (when agent-repl-frontend-permission-mode
                             `(("permission_mode" . ,agent-repl-frontend-permission-mode)))))
-         (resp (agent-repl--frontend-api "POST" "/sessions" payload))
-         (id (alist-get 'session_id resp)))
-    (unless (and (stringp id) (not (string-empty-p id)))
-      (error "agent-repl: POST /sessions returned no session_id: %S" resp))
-    id))
+         ;; Bypass `agent-repl--frontend-api' (which collapses every
+         ;; non-2xx into one opaque error) so the create can DETECT the
+         ;; daemon's structured `resume_transcript_missing' hard-fail and
+         ;; branch on it, rather than reparsing an error message string.
+         (url (concat (agent-repl--frontend-base-url) "/sessions"))
+         (resp (agent-repl--frontend-http-request "POST" url (json-encode payload)))
+         (status (car resp))
+         (body (cdr resp)))
+    (cond
+     ((and (integerp status) (<= 200 status 299))
+      (let* ((parsed (agent-repl--frontend-parse-json body))
+             (id (alist-get 'session_id parsed)))
+        (unless (and (stringp id) (not (string-empty-p id)))
+          (error "agent-repl: POST /sessions returned no session_id: %S" parsed))
+        id))
+     (t
+      (let ((missing (agent-repl--frontend-resume-transcript-missing body)))
+        (if missing
+            (agent-repl--frontend-handle-resume-transcript-missing cwd resume missing)
+          (error "agent-repl: POST /sessions failed (HTTP %s): %s"
+                 status (string-trim (or body "")))))))))
 
 (defun agent-repl--frontend-list-sessions ()
   "Return the daemon's session list (alist entries, possibly nil)."
