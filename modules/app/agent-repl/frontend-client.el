@@ -122,6 +122,14 @@ external call so tests mock it via `cl-letf'; registered in
   "Return the daemon's HTTP base URL from the configured address."
   (format "http://%s" agent-repl-frontend-daemon-addr))
 
+(defun agent-repl--frontend-parse-json (body)
+  "Parse BODY (a JSON string) into an alist, or nil when BODY is blank.
+Object keys decode to symbols and JSON arrays to lists.  Signals the raw
+`json-parse-string' error on undecodable non-blank BODY; callers wanting
+a request-scoped message (`agent-repl--frontend-api') wrap it."
+  (when (and body (not (string-empty-p (string-trim body))))
+    (json-parse-string body :object-type 'alist :array-type 'list)))
+
 (defun agent-repl--frontend-api (method path &optional payload-alist)
   "Issue METHOD PATH against the daemon and return the parsed JSON body.
 PAYLOAD-ALIST, when non-nil, is JSON-encoded as the request body.
@@ -136,12 +144,11 @@ bodies (e.g. DELETE's 204)."
     (unless (and (integerp status) (<= 200 status 299))
       (error "agent-repl: %s %s failed (HTTP %s): %s"
              method path status (string-trim (or body ""))))
-    (when (and body (not (string-empty-p (string-trim body))))
-      (condition-case err
-          (json-parse-string body :object-type 'alist :array-type 'list)
-        (error
-         (error "agent-repl: %s %s returned undecodable JSON (%s): %s"
-                method path (error-message-string err) body))))))
+    (condition-case err
+        (agent-repl--frontend-parse-json body)
+      (error
+       (error "agent-repl: %s %s returned undecodable JSON (%s): %s"
+              method path (error-message-string err) body)))))
 
 ;;;; ---- Readiness ---------------------------------------------------------
 
@@ -171,13 +178,6 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
     t))
 
 ;;;; ---- Session CRUD -------------------------------------------------------
-
-(defun agent-repl--frontend-parse-json (body)
-  "Parse BODY (a JSON string) into an alist, or nil when BODY is blank.
-Object keys decode to symbols and JSON arrays to lists (matching
-`agent-repl--frontend-api').  Signals on undecodable non-blank BODY."
-  (when (and body (not (string-empty-p (string-trim body))))
-    (json-parse-string body :object-type 'alist :array-type 'list)))
 
 (defun agent-repl--frontend-resume-transcript-missing (body)
   "Return BODY's parsed alist when it is the daemon's `resume_transcript_missing'
