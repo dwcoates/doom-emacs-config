@@ -945,10 +945,16 @@ interface PermissionResolvedFrame extends WsEnvelope {
 Periodic incremental usage update separate from `result`, so the SPA
 can update the token chip mid-turn.
 
+A subagent's request carries the SUBAGENT's context, not the session's,
+so its usage rides ATTRIBUTED: `parent_tool_use_id` names the spawning
+call, the SPA banks the figure on that agent's bubble topbar, and only
+a bare (unattributed) frame moves the session token count.
+
 ```ts
 interface UsageFrame extends WsEnvelope {
   type: "usage";
   message_id: string;
+  parent_tool_use_id?: string;  // owning subagent call; absent on main-chain
   usage: Usage;
   cost_usd?: number;
 }
