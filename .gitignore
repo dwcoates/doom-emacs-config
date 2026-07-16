@@ -9,3 +9,4 @@
 **/.DS_Store
 .agents-sandbox/mounts
 .agents-sandbox/sandbox.log
+modules/app/agent-repl/skills/**/.last-update.json
