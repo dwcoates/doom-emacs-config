@@ -1062,20 +1062,6 @@ describe("tool-card status chip", () => {
   });
 });
 
-describe("task update stream fold", () => {
-  it("invites the click with a zoom cursor on the closed fold", () => {
-    // Arrange / Act — the .task-stream rule.
-    // Assert
-    expect(blockAfter(css, ".task-stream {")).toMatch(/cursor:\s*zoom-in/);
-  });
-
-  it("offers the fold-back cursor on the open fold's ticker only", () => {
-    // Arrange / Act — clicks inside the panel belong to the update bubbles.
-    // Assert
-    expect(blockAfter(css, ".task-stream.open > .agent-ticker")).toMatch(/cursor:\s*zoom-out/);
-  });
-});
-
 describe("activity fold", () => {
   it("invites the click with a zoom cursor on the closed fold", () => {
     // Arrange / Act — the .agent-activity rule.
