@@ -157,10 +157,25 @@
 
 * { box-sizing: border-box; }
 
+/* A row, not a column: the workspace sidebar sits beside the main column
+   and spans the full viewport height (drawer parity — full north/south
+   stretch, beside the topbar rather than below it). */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+}
+
+/* The main column keeps the old body layout: topbar over feed over
+   composer. `min-width: 0` is load-bearing — without it flex items refuse
+   to shrink below content width, so the main column could not absorb a
+   horizontal resize and the fixed-width sidebar would get squeezed. */
+#main-col {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -1350,4 +1365,172 @@ pre {
   font-size: 0.85rem;
   color: #b91c1c;
   background: color-mix(in srgb, #b91c1c 8%, var(--bg));
+}
+
+/* ---------------------------------------------------------------------
+   Workspace sidebar (the Emacs drawer, ported — sidebar.ts).
+
+   Deliberately DARK in both themes: the drawer renders on a near-black
+   #0a0a0a in Emacs regardless of theme, and the sidebar keeps that
+   identity, so its palette is fixed colors rather than theme vars.
+   Fixed width: `flex: 0 0` never grows or shrinks, and #main-col's
+   min-width: 0 makes the main column absorb ALL horizontal resize. */
+#sidebar {
+  flex: 0 0 var(--sidebar-width, 340px);
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  background: #0a0a0a;
+  color: #d4d4d4;
+  border-right: 1px solid var(--border);
+  font-size: 0.8rem;
+  outline: none;
+  padding: 0.35rem 0 0.75rem;
+  /* The one muted grey every secondary sidebar text shares. */
+  --sb-muted: #8b949e;
+}
+#sidebar[hidden] { display: none; }
+
+/* Section headers: bold title over a thin ─-rule line, both muted-framed
+   like the drawer's section-title + rule pair. */
+#sidebar .sidebar-section { display: block; }
+#sidebar .sidebar-section-title {
+  font-weight: bold;
+  padding: 0.55rem 0.5rem 0;
+}
+#sidebar .sidebar-section-rule {
+  color: var(--sb-muted);
+  padding: 0 0.5rem 0.25rem;
+  line-height: 0.9;
+  user-select: none;
+}
+#sidebar .sidebar-empty {
+  font-style: italic;
+  color: var(--sb-muted);
+  padding: 0.1rem 0.5rem 0.2rem 1.3rem;
+}
+
+/* One rendered line: a fixed-width gutter column (where the cursor arrow
+   or mark dot lands) beside the content, which carries the per-depth
+   indent as padding so the gutter stays at column 0 at every depth. */
+#sidebar .sidebar-line {
+  display: flex;
+  align-items: baseline;
+  padding: 0 0.4rem 0 0.3rem;
+}
+#sidebar .sidebar-gutter {
+  flex: 0 0 1.1em;
+  white-space: pre;
+  user-select: none;
+}
+#sidebar .sidebar-line-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#sidebar .sidebar-cursor-arrow { color: var(--accent); font-weight: bold; }
+#sidebar .sidebar-marked { color: red; font-weight: bold; }
+#sidebar .sidebar-row.sidebar-at-cursor { background: rgba(255, 255, 255, 0.07); }
+
+/* Repo group headers: white, bold, a notch larger than workspace names
+   (drawer group-label face), with the ▾/▸ fold glyph in front. */
+#sidebar .sidebar-group { margin-top: 0.45rem; cursor: pointer; }
+#sidebar .sidebar-fold { color: #d4d4d4; }
+#sidebar .sidebar-group-label {
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 1.15em;
+}
+
+/* Workspace rows: two lines — header (glyph, priority chip, bold name,
+   dirty dot) plus an italic muted summary. HIDDEN-section entries dim. */
+#sidebar .sidebar-ws { margin: 0.1rem 0 0.35rem; cursor: pointer; }
+#sidebar .sidebar-dim { opacity: 0.5; }
+#sidebar .sidebar-glyph { white-space: pre; }
+#sidebar .sidebar-name { font-weight: bold; }
+#sidebar .sidebar-dirty { color: #d4d4d4; }
+#sidebar .sidebar-priority {
+  display: inline-block;
+  border: 1px solid #4b5563;
+  border-radius: 3px;
+  background: #1f2937;
+  color: #e5e7eb;
+  padding: 0 0.3em;
+  font-size: 0.85em;
+  line-height: 1.3;
+}
+#sidebar .sidebar-ws-summary .sidebar-line-body {
+  font-style: italic;
+  color: var(--sb-muted);
+}
+
+/* Expanded detail lines: muted label, value colored by field class —
+   the drawer's detail-face palette verbatim. */
+#sidebar .sidebar-detail-label { color: var(--sb-muted); }
+#sidebar .sidebar-detail-branch { color: deepskyblue; }
+#sidebar .sidebar-detail-merge-target { color: springgreen; }
+#sidebar .sidebar-detail-merged-time { color: springgreen; font-style: italic; }
+#sidebar .sidebar-detail-ahead-master { color: springgreen; font-weight: bold; }
+#sidebar .sidebar-detail-ahead-source { color: gold; font-weight: bold; }
+#sidebar .sidebar-detail-last-commit { color: mediumorchid; }
+#sidebar .sidebar-detail-dirty { color: tomato; font-weight: bold; }
+#sidebar .sidebar-detail-last-prompt { color: lightsteelblue; font-style: italic; }
+#sidebar .sidebar-detail-pending { color: orange; font-weight: bold; }
+#sidebar .sidebar-detail-merged-in { color: springgreen; }
+#sidebar .sidebar-detail-merge-status { color: cyan; font-weight: bold; }
+
+/* MERGE QUEUE rows: ⟳/💥/⛔ glyph, orchid SHA, subject (springgreen bold
+   while applying, muted while queued) ellipsized by overflow so a long
+   subject costs no second line, gold elapsed clock, tomato conflict
+   detail. Separators reuse the repo-header styling but are non-navigable. */
+#sidebar .sidebar-mq-separator { margin-top: 0.45rem; }
+#sidebar .sidebar-mq-glyph { flex: 0 0 1.4em; white-space: pre; }
+#sidebar .sidebar-mq-sha { color: mediumorchid; margin-right: 0.45em; }
+#sidebar .sidebar-mq-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#sidebar .sidebar-mq-current { color: springgreen; font-weight: bold; }
+#sidebar .sidebar-mq-pending { color: var(--sb-muted); }
+#sidebar .sidebar-mq-elapsed { color: gold; font-weight: bold; margin-left: 0.5em; }
+#sidebar .sidebar-mq-conflict { color: tomato; font-weight: bold; }
+
+/* The staleness badge: Emacs heartbeats every ≤30 s, so a snapshot older
+   than ~90 s means "Emacs gone", not "idle". Sticky so it stays visible
+   over a scrolled list. */
+#sidebar .sidebar-stale {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #451a03;
+  color: #fbbf24;
+  font-weight: bold;
+  padding: 0.3rem 0.5rem;
+}
+
+/* The action-failure toast: Emacs refusals (last_action_result.ok false)
+   surface here rather than vanishing. Dismissable, auto-clears. */
+#sidebar .sidebar-toast {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  background: #450a0a;
+  color: #fca5a5;
+  padding: 0.3rem 0.5rem;
+}
+#sidebar .sidebar-toast-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
 }

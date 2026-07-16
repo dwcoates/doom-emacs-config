@@ -6,46 +6,56 @@
     <title>claude-repl</title>
   </head>
   <body>
-    <header id="topbar">
-      <span id="conn-status">connecting…</span>
-      <span id="spinner" class="spinner">●</span>
-      <button id="account" title="the Claude account this session runs as — click for account actions"></button>
-      <span id="remediation"></span>
-      <span id="session-info" class="topbar-info"></span>
-      <select id="model-select" title="model"></select>
-      <select id="mode-select" title="permission mode">
-        <option value="default">default</option>
-        <option value="acceptEdits">acceptEdits</option>
-        <option value="bypassPermissions">bypassPermissions</option>
-        <option value="plan">plan</option>
-        <option value="auto">auto</option>
-        <option value="manual">manual</option>
-        <option value="dontAsk">dontAsk</option>
-        <option value="delegate">delegate</option>
-      </select>
-    </header>
-    <!-- The account chip's dropdown: one re-auth verb for the current
-         account, one switch verb per other canonical root. Built on open
-         from the daemon's roster, so the identities are live. -->
-    <div id="account-menu" hidden></div>
-    <!-- The compaction-in-progress banner slot: filled with an indeterminate
-         "Compacting conversation…" bar while a /compact runs, empty (and so
-         collapsed) otherwise. -->
-    <div id="compact-progress-slot"></div>
-    <main id="feed"></main>
-    <!-- The feed search's echo area: `C-s` in the composer starts an
-         incremental search over the feed, and the query, the position among
-         the matches, and any folds the search could not reach are reported
-         here rather than in the composer, which keeps its draft. Empty (and
-         so collapsed) whenever no search is running. -->
-    <footer id="composer">
-      <div id="search-status"></div>
-      <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
-      <button id="send-btn">send</button>
-    </footer>
+    <!-- The workspace sidebar (the Emacs drawer, ported). First body child
+         so it spans the full viewport height beside the main column; hidden
+         until ?sidebar=1 opts in AND the Emacs-owned visibility flag says
+         show. tabindex=-1: never a tab stop, focusable only by click. -->
+    <aside id="sidebar" hidden tabindex="-1"></aside>
+    <!-- The main column: absorbs ALL horizontal resize while the sidebar
+         stays at its fixed width. -->
+    <div id="main-col">
+      <header id="topbar">
+        <span id="conn-status">connecting…</span>
+        <span id="spinner" class="spinner">●</span>
+        <button id="account" title="the Claude account this session runs as — click for account actions"></button>
+        <span id="remediation"></span>
+        <span id="session-info" class="topbar-info"></span>
+        <select id="model-select" title="model"></select>
+        <select id="mode-select" title="permission mode">
+          <option value="default">default</option>
+          <option value="acceptEdits">acceptEdits</option>
+          <option value="bypassPermissions">bypassPermissions</option>
+          <option value="plan">plan</option>
+          <option value="auto">auto</option>
+          <option value="manual">manual</option>
+          <option value="dontAsk">dontAsk</option>
+          <option value="delegate">delegate</option>
+        </select>
+      </header>
+      <!-- The account chip's dropdown: one re-auth verb for the current
+           account, one switch verb per other canonical root. Built on open
+           from the daemon's roster, so the identities are live. -->
+      <div id="account-menu" hidden></div>
+      <!-- The compaction-in-progress banner slot: filled with an indeterminate
+           "Compacting conversation…" bar while a /compact runs, empty (and so
+           collapsed) otherwise. -->
+      <div id="compact-progress-slot"></div>
+      <main id="feed"></main>
+      <!-- The feed search's echo area: `C-s` in the composer starts an
+           incremental search over the feed, and the query, the position among
+           the matches, and any folds the search could not reach are reported
+           here rather than in the composer, which keeps its draft. Empty (and
+           so collapsed) whenever no search is running. -->
+      <footer id="composer">
+        <div id="search-status"></div>
+        <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button id="send-btn">send</button>
+      </footer>
+    </div>
     <!-- The login terminal. Hidden until the login button opens it: the
          daemon owns the pty, this is where it gets rendered, and a human
-         drives it exactly as they drove the vterm it replaces. -->
+         drives it exactly as they drove the vterm it replaces. It is
+         position:fixed, so it stays outside #main-col. -->
     <div id="login-overlay" hidden>
       <div id="login-panel">
         <header id="login-header">
