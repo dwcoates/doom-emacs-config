@@ -145,6 +145,60 @@ describe("partitionFeed", () => {
     expect(part.children.get("w1")).toEqual([child]);
   });
 
+  it("folds a TaskUpdate onto the create card whose result named its task", () => {
+    // Arrange — a settled create reporting #1, then an update to task 1.
+    const create = {
+      ...tool("c1", "TaskCreate"),
+      result: { isError: false, content: "Task #1 created successfully: wire" },
+    };
+    const update = { ...tool("u1", "TaskUpdate"), input: { taskId: "1" } };
+    // Act
+    const part = partitionFeed([create, update]);
+    // Assert
+    expect(part.children.get("c1")).toEqual([update]);
+  });
+
+  it("keeps an update top-level when no create reported its task id", () => {
+    // Arrange — the create settled as #1, but the update names task 9.
+    const create = {
+      ...tool("c1", "TaskCreate"),
+      result: { isError: false, content: "Task #1 created successfully: wire" },
+    };
+    const update = { ...tool("u1", "TaskUpdate"), input: { taskId: "9" } };
+    // Act
+    const part = partitionFeed([create, update]);
+    // Assert
+    expect(part.top).toContain(update);
+  });
+
+  it("keeps an update top-level while its create's result is pending", () => {
+    // Arrange — an unsettled create has reported no harness id yet.
+    const update = { ...tool("u1", "TaskUpdate"), input: { taskId: "1" } };
+    // Act
+    const part = partitionFeed([tool("c1", "TaskCreate"), update]);
+    // Assert
+    expect(part.top).toContain(update);
+  });
+
+  it("folds each task's updates onto its own create", () => {
+    // Arrange — two settled creates, one update each.
+    const create1 = {
+      ...tool("c1", "TaskCreate"),
+      result: { isError: false, content: "Task #1 created successfully: one" },
+    };
+    const create2 = {
+      ...tool("c2", "TaskCreate"),
+      result: { isError: false, content: "Task #2 created successfully: two" },
+    };
+    const update1 = { ...tool("u1", "TaskUpdate"), input: { taskId: "1" } };
+    const update2 = { ...tool("u2", "TaskUpdate"), input: { taskId: "2" } };
+    // Act
+    const part = partitionFeed([create1, create2, update1, update2]);
+    // Assert
+    expect(part.children.get("c1")).toEqual([update1]);
+    expect(part.children.get("c2")).toEqual([update2]);
+  });
+
   it("folds a TaskOutput poll onto the card whose result announced the task id", () => {
     // Arrange — a backgrounded Bash announcing bg1, then its poll.
     const spawn = {
