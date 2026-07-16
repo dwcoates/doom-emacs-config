@@ -321,6 +321,13 @@ export interface PermissionResolvedFrame extends WsEnvelope {
 export interface UsageFrame extends WsEnvelope {
   type: "usage";
   message_id: string;
+  /**
+   * The subagent call whose conversation this usage belongs to; absent on
+   * main-chain usage. A subagent's request carries the SUBAGENT's context,
+   * not the session's, so the store banks an attributed frame on that
+   * agent's tool item instead of the session's standing figure.
+   */
+  parent_tool_use_id?: string;
   usage: Usage;
   cost_usd?: number;
 }
