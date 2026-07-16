@@ -357,6 +357,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "worktree")
 (agent-repl--load-module "rename")
 (agent-repl--load-module "drawer")
+;; WHY: sidebar.el projects the drawer's view-model to the GUI and shares
+;; the drawer buffer's marked/expanded sets, so drawer.el must be loaded.
+;; It also POSTs through frontend-client.el's base-url helper.
+(agent-repl--load-module "sidebar")
 (agent-repl--load-module "hide-project-dirs")
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")

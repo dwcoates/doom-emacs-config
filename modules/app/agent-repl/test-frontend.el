@@ -157,6 +157,22 @@ agent panel it is, with no special-casing left to carve out."
     (should (string-match-p "parent_ws=parent-tree"
                             (agent-repl--frontend-webview-url "ws1" "s_1")))))
 
+(ert-deftest agent-repl-test-frontend-webview-url-carries-sidebar-flag ()
+  "With the sidebar bridge enabled, the webview URL gains sidebar=1."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl-sidebar-enabled t))
+      ;; Act / Assert
+      (should (string-match-p "sidebar=1"
+                              (agent-repl--frontend-webview-url "ws1" "s_1"))))))
+
+(ert-deftest agent-repl-test-frontend-webview-url-omits-sidebar-flag-when-disabled ()
+  "With the sidebar bridge disabled, the webview URL carries no sidebar param."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl-sidebar-enabled nil))
+      ;; Act / Assert
+      (should-not (string-match-p "sidebar="
+                                  (agent-repl--frontend-webview-url "ws1" "s_1"))))))
+
 (ert-deftest agent-repl-test-frontend-sync-webview-no-op-when-binding-matches ()
   "sync-webview does not touch a webview already bound to the session."
   ;; Arrange

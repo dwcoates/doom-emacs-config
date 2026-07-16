@@ -1718,8 +1718,13 @@ signature short-circuit covers the no-change case) and clears the
 in-flight flag.  Wrapped in `unwind-protect' so the flag clears even
 if the drawer refresh errors, preventing permanent timer wedging."
   (unwind-protect
-      (when (fboundp 'agent-repl-drawer--refresh-if-visible)
-        (agent-repl-drawer--refresh-if-visible))
+      (progn
+        (when (fboundp 'agent-repl-drawer--refresh-if-visible)
+          (agent-repl-drawer--refresh-if-visible))
+        ;; The GUI sidebar rides the same tick: its own signature gate
+        ;; (plus heartbeat) inside `--push' covers the no-change case.
+        (when (fboundp 'agent-repl-sidebar--push)
+          (agent-repl-sidebar--push)))
     (setq agent-repl--update-in-flight nil)))
 
 (defun agent-repl--update-all-workspace-states-now ()
