@@ -1,6 +1,12 @@
 # Design: the workspace drawer as a native GUI sidebar
 
-Status: **proposed — awaiting sign-off. No production code written.**
+Status: **Phase 1 implemented** (opt-in via `agent-repl-sidebar-enabled` →
+`?sidebar=1`; drawer untouched and canonical). As-built deltas from the
+proposal: marks/expanded stay owned by the singleton drawer buffer (the
+sidebar reads and mutates them there — same shared-set semantics as
+"promote to global", zero drawer.el churn); priority badges render as
+text chips (PNG serving deferred); `cmd/claude-repld/main.go` needed the
+`/workspaces/` mux mount alongside the server-side routes.
 Scope: `webapp/` (`index.html`, `styles.css`, new `sidebar.ts`), `daemon/internal/`
 (new `workspaces` package + `workspacecmd` extension), `shared/protocol.md` (new
 workspace-stream section), Emacs side (`drawer.el` view-model extraction,
