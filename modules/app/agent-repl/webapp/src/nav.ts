@@ -106,26 +106,40 @@ export function matchingIndexes(attrs: readonly string[], cls: NavClass): number
 export const SEED_EPS_PX = 2;
 
 /**
- * Where a cycle starts when nothing is marked yet: the wrapper the
- * viewport's top edge currently sits on.
+ * Where a cycle ENTERS when nothing is marked yet: the nearest match in
+ * the direction asked for, counting from the viewport's top edge.
  *
  * The feed may be scrolled anywhere and there is no cursor in it, so the
  * only honest origin is what the user is LOOKING at — not the tail, which
- * would throw away the position they deliberately scrolled to. Returns -1
- * when the viewport sits above every wrapper, which makes a forward cycle
- * find the first match and a backward one wrap to the last.
+ * would throw away the position they deliberately scrolled to.
+ *
+ * The first press enters the cycle rather than stepping through it, so a
+ * match already at the top of the viewport is where a forward cycle
+ * STARTS, not what it skips. That press still says something even though
+ * it scrolls nowhere: the marker appears on it. Every press after that has
+ * a cursor and steps (`cycleTarget`).
+ *
+ * Wraps like every other step: scrolled past the last match, a forward
+ * entry comes back to the first.
  */
-export function seedIndex(
-  tops: readonly number[],
-  viewportTop: number,
-  epsilonPx: number = SEED_EPS_PX,
-): number {
-  let idx = -1;
-  for (let i = 0; i < tops.length; i++) {
-    if (tops[i] > viewportTop + epsilonPx) break;
-    idx = i;
+export function seedTarget(opts: {
+  matches: readonly number[];
+  tops: readonly number[];
+  viewportTop: number;
+  dir: NavDirection;
+  epsilonPx?: number;
+}): number | null {
+  const { matches, tops, viewportTop, dir } = opts;
+  const eps = opts.epsilonPx ?? SEED_EPS_PX;
+  if (matches.length === 0) return null;
+  if (dir === 1) {
+    const below = matches.find((m) => tops[m] >= viewportTop - eps);
+    return below ?? matches[0];
   }
-  return idx;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    if (tops[matches[i]] <= viewportTop + eps) return matches[i];
+  }
+  return matches[matches.length - 1];
 }
 
 /**
@@ -253,14 +267,13 @@ export function cycleDecision(opts: {
   // A cursor whose item left the feed resolves to -1 and re-seeds, rather
   // than anchoring the cycle to a key nothing carries any more.
   const marked = cursor === null ? -1 : items.findIndex((i) => i.key === cursor);
-  const from =
-    marked >= 0
-      ? marked
-      : seedIndex(
-          items.map((i) => i.top),
-          scrollTop,
-        );
-  return cycleTarget({ matches, from, dir });
+  if (marked >= 0) return cycleTarget({ matches, from: marked, dir });
+  return seedTarget({
+    matches,
+    tops: items.map((i) => i.top),
+    viewportTop: scrollTop,
+    dir,
+  });
 }
 
 /**
