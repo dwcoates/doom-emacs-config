@@ -140,6 +140,32 @@ export function missingBubbleNotice(spec: CounterSpec): string {
 }
 
 /**
+ * The chip-and-overlay shell every topbar dropdown hangs from: a button
+ * in the session-datapoint run (label, caret, matching data-toggle) and,
+ * when open, the overlay it drops. STEM names the DOM family (`agents` →
+ * `.agents-menu`, `data-agents-toggle`, `.agents-caret`); LABEL-HTML is
+ * the caller's chip content, already escaped where it needs to be; the
+ * OVERLAY thunk runs only while the chip is open, so a closed chip never
+ * pays for the list it is not showing. Shared by the counter menus here
+ * and the tokens menu (`tokens.ts`), so the chips can never drift in
+ * shape.
+ */
+export function dropdownChipHtml(
+  stem: string,
+  labelHtml: string,
+  title: string,
+  open: boolean,
+  overlay: () => string,
+): string {
+  return `<span class="${stem}-menu">
+      <button type="button" class="info-${stem}" data-${stem}-toggle aria-expanded="${open}" aria-haspopup="true" title="${escapeHtml(
+        title,
+      )}">${labelHtml} <span class="${stem}-caret" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
+      ${open ? overlay() : ""}
+    </span>`;
+}
+
+/**
  * A counter's chip and (when open) its overlay. Renders to nothing when
  * the pruned roster is empty: a zero chip is a control over an empty list,
  * so it hides until the session has something to count.
@@ -162,12 +188,13 @@ export function counterMenuHtml(
     busy > 0
       ? ` <span class="${spec.menu}-running">${busy} ${escapeHtml(spec.busyNoun)}</span>`
       : "";
-  return `<span class="${spec.menu}-menu">
-      <button type="button" class="info-${spec.menu}" data-${spec.menu}-toggle aria-expanded="${open}" aria-haspopup="true" title="${escapeHtml(
-        spec.title,
-      )}">${escapeHtml(countLabel(spec.noun, visible.length))}${badge} <span class="${spec.menu}-caret" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
-      ${open ? counterOverlayHtml(spec, visible, currentTurn) : ""}
-    </span>`;
+  return dropdownChipHtml(
+    spec.menu,
+    `${escapeHtml(countLabel(spec.noun, visible.length))}${badge}`,
+    spec.title,
+    open,
+    () => counterOverlayHtml(spec, visible, currentTurn),
+  );
 }
 
 /**
