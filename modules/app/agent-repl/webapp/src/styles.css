@@ -620,6 +620,20 @@ pre {
   background: var(--card);
   color: var(--muted);
 }
+/* The update-stream fold on a TaskCreate card: the task's TaskUpdate
+   history rendered as nested bubbles behind a click. It mirrors the
+   activity fold's pill-and-panel form exactly, reusing .agent-ticker for
+   the pill and .agent-panel for the open body, so only the fold's own
+   cursor states need naming here. */
+.task-stream {
+  border-top: 1px dashed var(--border);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  cursor: zoom-in;
+}
+.task-stream.open { cursor: default; }
+.task-stream.open > .agent-ticker { cursor: zoom-out; }
+
 .watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
 .watcher-head { display: flex; align-items: center; gap: 0.5rem; }
 /* The live elapsed the poll feeds (the store's frozen heartbeat is only a

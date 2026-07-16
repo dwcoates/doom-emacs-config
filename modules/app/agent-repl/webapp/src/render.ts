@@ -12,7 +12,8 @@ import {
   nextCounterMenu,
   topbarClickAction,
 } from "./topbar.js";
-import { taskCreateToolUseId } from "./tasks.js";
+import { countLabel } from "./counter-menu.js";
+import { taskCreateToolUseId, taskUpdatesByCreate } from "./tasks.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -451,6 +452,12 @@ export interface PanelContext {
    */
   taskTail?(taskId: string): TaskTail | undefined;
   /**
+   * The TaskUpdate calls belonging to each TaskCreate card, keyed by the
+   * create's tool-use id (see tasks.ts taskUpdatesByCreate). Feeds the
+   * card's update-stream fold; absent when the renderer wired none.
+   */
+  taskUpdates?: ReadonlyMap<string, readonly ToolItem[]>;
+  /**
    * How far a support request has got for each refused slash command
    * (renderer-owned, like selections). A command absent from the map has
    * an untouched button still offering.
@@ -651,6 +658,7 @@ function ToolCard(
       ${progress}
       ${activity}
       ${toolResult(item)}
+      ${TaskStreamPanel(item, panels)}
       ${liveTaskOutput(item)}
       ${taskControls(item)}
       ${agentComposer(item, panels)}
@@ -792,6 +800,73 @@ function WatcherPanel(blockId: string, panels?: PanelContext): string {
     ticker: `${arc}${escapeHtml(watcherFace(watchers.length, live))}`,
     body: () => watchers.map((w) => WatcherRow(w, panels)).join(""),
     open: panels?.isOpen(`watchers:${blockId}`) ?? false,
+  });
+}
+
+/**
+ * One update's badge tone: `completed` lands the settled ok wash,
+ * `deleted` the error red, and anything still moving (`pending`,
+ * `in_progress`) the working orange — without the spinner, since the row
+ * records a transition that already happened, not live work.
+ */
+function taskUpdateBadge(status: string): string {
+  const tone = status === "completed" ? "ok" : status === "deleted" ? "err" : "run";
+  return `<span class="badge ${tone}">${escapeHtml(status.replace("_", " "))}</span>`;
+}
+
+/**
+ * One row of a TaskCreate card's update stream: a nested bubble recording
+ * a single TaskUpdate — its status transition as a badge, the subject the
+ * update (re)named, and, when the update itself failed, the error text
+ * kept loud. The panel wraps it `.feed-child`, so it reads exactly like a
+ * child card in a subagent's activity panel.
+ */
+function TaskUpdateCard(item: ToolItem): string {
+  const status = typeof item.input?.status === "string" ? item.input.status : "";
+  const subject = typeof item.input?.subject === "string" ? item.input.subject : "";
+  const badge = status !== "" ? taskUpdateBadge(status) : "";
+  const line = subject !== "" ? `<div class="file-path">${escapeHtml(subject)}</div>` : "";
+  const err = item.result?.isError
+    ? `<pre class="tool-output stderr">${escapeHtml(contentToText(item.result.content))}</pre>`
+    : "";
+  return `<div class="tool-card task-update">
+      <div class="tool-head"><span class="tool-name">TaskUpdate</span>${badge}</div>
+      ${line}${err}
+    </div>`;
+}
+
+/** The collapsed face of a task's update stream: count, newest status. */
+export function taskStreamFace(updates: readonly ToolItem[]): string {
+  const noun = countLabel("update", updates.length);
+  for (let i = updates.length - 1; i >= 0; i--) {
+    const status = updates[i].input?.status;
+    if (typeof status === "string" && status !== "") {
+      return `${noun} · ${status.replace("_", " ")}`;
+    }
+  }
+  return noun;
+}
+
+/**
+ * The update-stream fold a TaskCreate card carries: the task's TaskUpdate
+ * history — the calls the feed itself suppresses as bookkeeping — rendered
+ * as nested bubbles behind a click, exactly as a subagent card's activity
+ * panel renders its children. Open state lives in the RENDERER
+ * (openPanels) keyed `task-stream:<toolUseId>`, so the fold survives the
+ * card's per-frame re-renders and `revealTask` can open it on arrival.
+ */
+function TaskStreamPanel(item: ToolItem, panels?: PanelContext): string {
+  if (item.toolName !== "TaskCreate") return "";
+  const updates = panels?.taskUpdates?.get(item.toolUseId) ?? [];
+  if (updates.length === 0) return "";
+  return Fold({
+    id: `task-stream:${item.toolUseId}`,
+    foldClass: "task-stream",
+    tickerClass: "agent-ticker",
+    ticker: escapeHtml(taskStreamFace(updates)),
+    body: () =>
+      updates.map((u) => `<div class="feed-child">${TaskUpdateCard(u)}</div>`).join(""),
+    open: panels?.isOpen(`task-stream:${item.toolUseId}`) ?? false,
   });
 }
 
@@ -1899,30 +1974,37 @@ export class FeedRenderer {
    * Reveal the `TaskCreate` card behind roster task TASKID (see
    * `taskCreateToolUseId`): a task's harness id first maps back to the
    * call that created it, whose card is the task's one bubble in the feed.
-   * Answers whether that bubble was found — false when the id names no
-   * create, or when the create's card is off the current feed.
+   * The card arrives with its update-stream fold open, so the task's
+   * history is on show without a second click. Answers whether that bubble
+   * was found — false when the id names no create, or when the create's
+   * card is off the current feed.
    */
   revealTask(taskId: string): boolean {
     if (!this.lastState) return false;
     const toolUseId = taskCreateToolUseId(this.lastState.items, taskId);
-    return toolUseId !== null && this.revealToolCard(toolUseId);
+    return (
+      toolUseId !== null &&
+      this.revealToolCard(toolUseId, [`task-stream:${toolUseId}`])
+    );
   }
 
   /**
    * Reveal tool call TOOLUSEID's card: pin its tab when it lives in a
    * consecutive-run group, open the activity panels that surface it and
-   * its output, scroll its (or its outermost ancestor's) bubble to the top
-   * of the feed, and lay that card's own capped sections out in full.
-   * Answers whether the card was found in the current feed.
+   * its output (plus any EXTRA-PANELS the caller wants laid open, e.g. a
+   * task card's update-stream fold), scroll its (or its outermost
+   * ancestor's) bubble to the top of the feed, and lay that card's own
+   * capped sections out in full. Answers whether the card was found in
+   * the current feed.
    */
-  private revealToolCard(toolUseId: string): boolean {
+  private revealToolCard(toolUseId: string, extraPanels: readonly string[] = []): boolean {
     if (!this.lastState) return false;
     const plan = planToolReveal(this.lastState.items, toolUseId);
     if (!plan) return false;
     if (plan.groupKey !== null && plan.tabMember !== null) {
       this.activeTabs.set(plan.groupKey, plan.tabMember);
     }
-    for (const id of plan.panelIds) this.openPanels.add(id);
+    for (const id of [...plan.panelIds, ...extraPanels]) this.openPanels.add(id);
     this.render(this.lastState);
     const node = this.nodes.get(plan.key)?.el;
     if (!node) return false;
@@ -2015,6 +2097,7 @@ export class FeedRenderer {
   private panelContext(
     children: ReadonlyMap<string, readonly ConversationItem[]>,
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
+    taskUpdates: ReadonlyMap<string, readonly ToolItem[]>,
   ): PanelContext {
     return {
       children,
@@ -2022,6 +2105,7 @@ export class FeedRenderer {
       selections: this.questionSelections,
       drafts: this.msgDrafts,
       watchers,
+      taskUpdates,
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
@@ -2209,7 +2293,7 @@ export class FeedRenderer {
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const panels = this.panelContext(part.children, watchers, taskUpdatesByCreate(items));
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
@@ -2337,7 +2421,7 @@ export class FeedRenderer {
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const panels = this.panelContext(part.children, watchers, taskUpdatesByCreate(items));
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
