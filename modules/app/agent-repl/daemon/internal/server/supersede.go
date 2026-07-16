@@ -66,7 +66,32 @@ func (s *Server) supersedeResumeConflicts(opts CreateOpts) {
 	for _, sess := range s.sessions {
 		held = append(held, sess)
 	}
+	// A dormant record is a session too — just one whose CLI has not been
+	// rebuilt since the daemon restarted. Leaving it would let the id
+	// materialize and revive into a SECOND CLI on this very transcript
+	// later, which is precisely the conflict being closed here, so it is
+	// dropped now and its holder rebinds to the session that owns the
+	// conversation instead.
+	var stale []string
+	for id, rec := range s.dormant {
+		if rec.ClaudeSessionID == "" {
+			continue
+		}
+		if transcriptOwner(rec.ConfigDir, rec.CWD, rec.ClaudeSessionID) == want {
+			delete(s.dormant, id)
+			stale = append(stale, id)
+		}
+	}
 	s.mu.Unlock()
+
+	for _, id := range stale {
+		s.logf("session %s: dormant record superseded by a newer resume of %s — dropping it so %s cannot gain a second writer on revive",
+			id, opts.Resume, want)
+		if err := s.registry.Delete(id); err != nil {
+			s.logf("session %s: superseded registry delete FAILED — the record may rehydrate into a second CLI on %s: %v",
+				id, want, err)
+		}
+	}
 
 	for _, sess := range held {
 		info := sess.Info()

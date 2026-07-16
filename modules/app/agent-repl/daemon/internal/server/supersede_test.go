@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 )
 
@@ -191,6 +192,44 @@ func TestSupersedeSkipsAnAlreadyTerminalHolder(t *testing.T) {
 	// Assert — its original death reason survives untouched.
 	if got := h.srv.lookup(dead).Info().DeathReason; got != before {
 		t.Fatalf("death reason = %q, want the original %q", got, before)
+	}
+}
+
+func TestResumeDropsADormantRecordOnTheSameTranscript(t *testing.T) {
+	// Arrange — a record left by a previous daemon, still holding uuid-1.
+	// Left in place it would materialize and revive into a SECOND CLI on
+	// the transcript the new session is about to own.
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "uuid-1")
+	h, reg, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_old", CWD: "/w", ConfigDir: cfg, ClaudeSessionID: "uuid-1"})
+
+	// Act
+	createResumed(t, h, cfg, "/w", "uuid-1")
+	h.awaitShim(t)
+
+	// Assert — the stale id stops resolving, so its holder rebinds.
+	if _, ok := reg.Get("s_old"); ok {
+		t.Fatal("a dormant record on the resumed transcript must be dropped")
+	}
+}
+
+func TestResumeKeepsADormantRecordOnAnotherTranscript(t *testing.T) {
+	// Arrange — a record for a DIFFERENT conversation, which the new
+	// resume has no claim over.
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "uuid-1")
+	writeTranscript(t, cfg, "uuid-2")
+	h, reg, _ := rehydrationHarness(t, false,
+		registry.Record{SessionID: "s_old", CWD: "/w", ConfigDir: cfg, ClaudeSessionID: "uuid-2"})
+
+	// Act
+	createResumed(t, h, cfg, "/w", "uuid-1")
+	h.awaitShim(t)
+
+	// Assert — an unrelated conversation still rehydrates.
+	if _, ok := reg.Get("s_old"); !ok {
+		t.Fatal("a dormant record on another transcript must survive")
 	}
 }
 
