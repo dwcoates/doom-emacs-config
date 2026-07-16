@@ -373,7 +373,7 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
   (agent-repl--gns-sockets-close-then
    ws
    (lambda ()
-     (agent-repl--close-workspace ws 'preserve-entry)
+     (agent-repl--merge-close-workspace ws 'preserve-entry)
      (when main-dir
        (agent-repl--refresh-magit-status-for-dir main-dir ws)))))
 
