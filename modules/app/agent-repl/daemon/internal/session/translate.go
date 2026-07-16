@@ -745,6 +745,7 @@ func (t *Translator) onResult(evt *protocol.L1Event) []protocol.L2Frame {
 		NumTurns:      evt.NumTurns,
 		TotalCostUSD:  evt.TotalCostUSD,
 		Usage:         usage,
+		ModelUsage:    evt.ModelUsage,
 		IsError:       evt.IsError,
 	}
 	if evt.Result != nil {

@@ -48,6 +48,20 @@ type Usage struct {
 	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
 }
 
+// ModelUsage is one model's slice of a result's model_usage map. Unlike
+// Usage — which the SDK scopes to the top-level agent loop only — this
+// aggregation counts subagent requests too, so summing the map's entries
+// is the session's whole-tree spend.
+type ModelUsage struct {
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+	WebSearchRequests        int     `json:"web_search_requests"`
+	CostUSD                  float64 `json:"cost_usd"`
+	ContextWindow            int     `json:"context_window"`
+}
+
 // ModelInfo is one selectable model, from the SDK's supportedModels().
 // Shared by both layers: the shim reports it, the daemon caches it, the
 // hello republishes it.
@@ -106,15 +120,16 @@ type L1Event struct {
 	Message json.RawMessage `json:"message,omitempty"`
 
 	// result
-	Subtype           string             `json:"subtype,omitempty"`
-	DurationMS        int64              `json:"duration_ms,omitempty"`
-	DurationAPIMS     int64              `json:"duration_api_ms,omitempty"`
-	NumTurns          int                `json:"num_turns,omitempty"`
-	TotalCostUSD      float64            `json:"total_cost_usd,omitempty"`
-	Usage             *Usage             `json:"usage,omitempty"`
-	Result            *string            `json:"result,omitempty"`
-	IsError           bool               `json:"is_error,omitempty"`
-	PermissionDenials []PermissionDenial `json:"permission_denials,omitempty"`
+	Subtype           string                `json:"subtype,omitempty"`
+	DurationMS        int64                 `json:"duration_ms,omitempty"`
+	DurationAPIMS     int64                 `json:"duration_api_ms,omitempty"`
+	NumTurns          int                   `json:"num_turns,omitempty"`
+	TotalCostUSD      float64               `json:"total_cost_usd,omitempty"`
+	Usage             *Usage                `json:"usage,omitempty"`
+	ModelUsage        map[string]ModelUsage `json:"model_usage,omitempty"`
+	Result            *string               `json:"result,omitempty"`
+	IsError           bool                  `json:"is_error,omitempty"`
+	PermissionDenials []PermissionDenial    `json:"permission_denials,omitempty"`
 
 	// permission-request
 	ToolUseID   string          `json:"tool_use_id,omitempty"`

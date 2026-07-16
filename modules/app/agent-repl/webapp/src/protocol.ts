@@ -24,6 +24,22 @@ export interface Usage {
   cache_read_input_tokens?: number;
 }
 
+/**
+ * One model's slice of a result's `model_usage` map. Unlike `Usage` —
+ * which the SDK scopes to the top-level agent loop only — this
+ * aggregation counts subagent requests too, so summing the map's
+ * entries is the session's whole-tree spend.
+ */
+export interface ModelUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  web_search_requests: number;
+  cost_usd: number;
+  context_window: number;
+}
+
 /** One selectable model (§1.2 `models`). */
 export interface ModelInfo {
   value: string;
@@ -112,6 +128,15 @@ export type ResultSubtype =
   | "error_during_execution"
   | "aborted";
 
+/**
+ * End-of-turn marker (§2.4). `usage` and `model_usage` scope differently:
+ * `usage` is the TOP-LEVEL agent loop's cumulative session spend (a
+ * subagent's requests are never added to it), `model_usage` the per-model
+ * cumulative spend with subagents INCLUDED. Both are session-cumulative
+ * snapshots — each result supersedes the previous one rather than adding
+ * to it. `model_usage` is absent on a synthetic replay result and from a
+ * pre-`model_usage` shim.
+ */
 export interface ResultFrame extends WsEnvelope {
   type: "result";
   subtype: ResultSubtype;
@@ -120,6 +145,7 @@ export interface ResultFrame extends WsEnvelope {
   num_turns: number;
   total_cost_usd: number;
   usage: Usage;
+  model_usage?: Record<string, ModelUsage>;
   is_error: boolean;
   result_text?: string;
 }
