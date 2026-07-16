@@ -24,12 +24,9 @@ import {
   renderItem,
   rendersEmpty,
   repinsToTail,
-  sessionInfoHtml,
   wakeRemainingLabel,
 } from "../src/render.js";
-import { CounterEntry } from "../src/counter-menu.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
-import { TIMER_SLOT } from "../src/timer.js";
 import {
   ConversationItem,
   ResultItem,
@@ -37,19 +34,6 @@ import {
   ThinkingItem,
   ToolItem,
 } from "../src/store.js";
-
-/** A counter entry, defaulted to an active one that never prunes. */
-function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
-  return {
-    id: "t1",
-    summary: "hunt the flake",
-    detail: "Explore",
-    status: "running",
-    nested: false,
-    deactivatedAtTurn: null,
-    ...over,
-  };
-}
 
 /** When the agent opened a text block, for the items that do not assert on it. */
 const TEXT_TS = new Date(2026, 4, 24, 9, 5).toISOString();
@@ -205,174 +189,6 @@ describe("formatBubbleTime", () => {
     const ts = new Date(2026, 4, 24, 14, 32).toISOString();
     // Act + Assert
     expect(formatBubbleTime(ts).endsWith(" ago")).toBe(true);
-  });
-});
-
-describe("sessionInfoHtml", () => {
-  it("renders the parent workspace datapoint from parent_ws", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("my-feature", null);
-    // Assert
-    expect(html).toContain(`parent workspace: <span class="info-ws">my-feature</span>`);
-  });
-
-  it("omits the parent workspace datapoint when parent_ws is absent", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml(null, null);
-    // Assert — no dangling label or leading delimiter.
-    expect(html).not.toContain("parent workspace");
-    expect(html.startsWith("time:")).toBe(true);
-  });
-
-  it("omits the parent workspace datapoint when parent_ws is empty", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml("", null)).not.toContain("parent workspace");
-  });
-
-  it("escapes markup in the parent workspace name", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml("<b>ws", null)).not.toContain("<b>");
-  });
-
-  it("joins the datapoints with the dot separator", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null);
-    // Assert
-    expect(html).toContain("</span> · tokens:");
-  });
-
-  it("does not print the model, which the picker now both names and switches", () => {
-    // Arrange + Act + Assert — printing it here too would duplicate the
-    // dropdown sitting immediately to its right.
-    expect(sessionInfoHtml("ws", null)).not.toContain("model:");
-  });
-
-  it("renders the context token count with thousands separators", () => {
-    // Arrange + Act + Assert — the count is precomputed context occupancy,
-    // not a usage object the header re-sums.
-    expect(sessionInfoHtml(null, 123456)).toContain(
-      `tokens: <span class="info-tokens">123,456</span>`,
-    );
-  });
-
-  it("shows a dash when the context size is unknown", () => {
-    // Arrange + Act + Assert — a `/clear` and a compaction each leave a
-    // context size behind without reporting it, so `null` is unknown, not 0.
-    expect(sessionInfoHtml(null, null)).toContain(
-      `tokens: <span class="info-tokens">—</span>`,
-    );
-  });
-
-  it("renders a genuine zero as zero, not a dash", () => {
-    // Arrange + Act + Assert — 0 is a known-empty context, distinct from
-    // the unknown `null`.
-    expect(sessionInfoHtml(null, 0)).toContain(
-      `tokens: <span class="info-tokens">0</span>`,
-    );
-  });
-
-  it("no longer renders the in/out counter or the cost estimate", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", 10);
-    // Assert
-    expect(html).not.toContain("in/");
-    expect(html).not.toContain("out");
-    expect(html).not.toContain("$");
-  });
-
-  it("appends the subagent chip after the token datapoint", () => {
-    // Arrange
-    const agents = [counterEntry()];
-    // Act
-    const html = sessionInfoHtml("ws", null, agents, [], 0, false, false);
-    // Assert
-    expect(html).toContain("</span> · <span class=\"agents-menu\">");
-  });
-
-  it("counts the session's subagents on the chip", () => {
-    // Arrange
-    const agents = [counterEntry(), counterEntry({ id: "t2" })];
-    // Act + Assert
-    expect(sessionInfoHtml("ws", null, agents, [], 0)).toContain("2 agents");
-  });
-
-  it("drops the subagent roster when the agents chip is open", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [counterEntry()], [], 0, true, false);
-    // Assert
-    expect(html).toContain("agents-overlay");
-  });
-
-  it("omits the subagent chip when the session spawned none", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml("ws", null, [], [], 0)).not.toContain("agents-menu");
-  });
-
-  it("appends the task chip to the right of the agents chip", () => {
-    // Arrange
-    const agents = [counterEntry()];
-    const tasks = [counterEntry({ id: "k1" })];
-    // Act
-    const html = sessionInfoHtml("ws", null, agents, tasks, 0);
-    // Assert — source order is left-to-right in the datapoint run.
-    expect(html.indexOf("tasks-menu")).toBeGreaterThan(html.indexOf("agents-menu"));
-  });
-
-  it("counts the session's tasks on the task chip", () => {
-    // Arrange
-    const tasks = [counterEntry({ id: "k1" }), counterEntry({ id: "k2" })];
-    // Act + Assert
-    expect(sessionInfoHtml("ws", null, [], tasks, 0)).toContain("2 tasks");
-  });
-
-  it("drops the task roster when the task chip is open", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], [counterEntry({ id: "k1" })], 0, false, true);
-    // Assert
-    expect(html).toContain("tasks-overlay");
-  });
-
-  it("omits the task chip when the session created none", () => {
-    // Arrange + Act + Assert
-    expect(sessionInfoHtml("ws", null, [], [], 0)).not.toContain("tasks-menu");
-  });
-
-  it("leaves no dangling separator when the session has neither counter", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], [], 0);
-    // Assert
-    expect(html.endsWith("</span>")).toBe(true);
-  });
-
-  it("renders the running task's elapsed time", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "5m 30s");
-    // Assert
-    expect(html).toContain(
-      `time: <span class="info-time" data-task-timer>5m 30s</span>`,
-    );
-  });
-
-  it("reads the idle label when no task is running", () => {
-    // Arrange + Act + Assert — the default, since the store starts idle.
-    expect(sessionInfoHtml("ws", null)).toContain(
-      `time: <span class="info-time" data-task-timer>--</span>`,
-    );
-  });
-
-  it("marks the timer span so the tick can repaint it alone", () => {
-    // Arrange + Act — a whole-strip rewrite once a second would be churn.
-    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "12s");
-    // Assert
-    expect(html).toContain(TIMER_SLOT);
-  });
-
-  it("places the timer between the parent workspace and the token count", () => {
-    // Arrange + Act
-    const html = sessionInfoHtml("ws", null, [], [], 0, false, false, "12s");
-    // Assert
-    expect(html.indexOf("time:")).toBeGreaterThan(html.indexOf("parent workspace:"));
-    expect(html.indexOf("time:")).toBeLessThan(html.indexOf("tokens:"));
   });
 });
 

@@ -7,9 +7,7 @@
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
-import { sessionSubagents } from "./agents.js";
-import { sessionTasks } from "./tasks.js";
-import { countedTurns } from "./turn-clock.js";
+import { sessionTopbarDatapoints, topbarInfoHtml } from "./topbar.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
@@ -31,7 +29,7 @@ import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
-import { compactionBannerHtml, FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
+import { compactionBannerHtml, FeedRenderer, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
@@ -192,17 +190,12 @@ async function boot(): Promise<void> {
 
   const renderChrome = (): void => {
     const s = store.state;
-    // sessionInfoHtml escapes every value it interpolates.
-    infoEl.innerHTML = sessionInfoHtml(
-      parentWs,
-      s.contextTokens,
-      sessionSubagents(s.items),
-      sessionTasks(s.items),
-      countedTurns(s.items),
-      counterMenu === "agents",
-      counterMenu === "tasks",
-      timerLabel,
-    );
+    // topbarInfoHtml escapes every value it interpolates. The same strip
+    // renderer draws the agent-scoped bubble topbars (see topbar.ts).
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, timerLabel), {
+      agentsOpen: counterMenu === "agents",
+      tasksOpen: counterMenu === "tasks",
+    });
     // After the strip exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
     timer.sync(s.turnStartedAt);

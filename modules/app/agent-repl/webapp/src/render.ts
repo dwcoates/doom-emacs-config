@@ -4,9 +4,8 @@
  * PermissionPrompt. The feed renderer reuses one element per item key
  * so streaming updates do not rebuild the whole list.
  */
-import { SUBAGENT_TOOLS, agentsMenuHtml } from "./agents.js";
-import { CounterEntry } from "./counter-menu.js";
-import { tasksMenuHtml } from "./tasks.js";
+import { SUBAGENT_TOOLS } from "./agents.js";
+import { formatTokens } from "./topbar.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -28,7 +27,6 @@ import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
-import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { watchersByBubble } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
@@ -155,62 +153,8 @@ function contentToText(
 
 // --- topbar chrome ------------------------------------------------------------
 
-/** Token counts as the topbar and the result chip both write them: `300,000`. */
-function formatTokens(n: number): string {
-  return n.toLocaleString("en-US");
-}
-
-/**
- * Topbar session datapoints: `parent workspace: <ws> · time: <elapsed> ·
- * tokens: <n> · <k> agents ▾ · <k> tasks ▾` (the vterm modeline's context
- * mirror). The parent workspace entry is omitted entirely when PARENT-WS is
- * absent or empty, as is each counter chip before the session gives it
- * something to count; each value gets its own color via the info-* classes.
- *
- * The model is NOT here. It moved into the #model-select picker, which
- * both names the live model and switches it — printing it again as text
- * immediately left of a dropdown showing the same thing is noise.
- *
- * The two counter chips are the shared `counter-menu` facade: the subagent
- * roster and the task roster. AGENTS-OPEN / TASKS-OPEN are the caller's
- * disclosure state for each (only one is ever open at a time), and
- * CURRENT-TURN is the counted-turn clock their recency windows age against.
- *
- * TIMER-LABEL is how long the running task has taken so far (`IDLE_LABEL`
- * when none is). Its span is marked so the caller's once-a-second tick can
- * repaint that one value without rewriting the whole strip — the two paint
- * paths agree because the tick writes exactly what this would have.
- *
- * CONTEXT-TOKENS is the conversation's CURRENT size (what the next request
- * will carry), never the session's cumulative spend. `null` means the size
- * is genuinely unknown — a `/clear` and a compaction each leave one behind
- * without reporting it — and prints as a dash rather than a lying `0`.
- */
-export function sessionInfoHtml(
-  parentWs: string | null,
-  contextTokens: number | null,
-  agents: readonly CounterEntry[] = [],
-  tasks: readonly CounterEntry[] = [],
-  currentTurn = 0,
-  agentsOpen = false,
-  tasksOpen = false,
-  timerLabel: string = IDLE_LABEL,
-): string {
-  const parts: string[] = [];
-  if (parentWs) {
-    parts.push(`parent workspace: <span class="info-ws">${escapeHtml(parentWs)}</span>`);
-  }
-  parts.push(
-    `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(timerLabel)}</span>`,
-  );
-  const tokens = contextTokens === null ? "—" : formatTokens(contextTokens);
-  parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
-  const agentsMenu = agentsMenuHtml(agents, agentsOpen, currentTurn);
-  if (agentsMenu !== "") parts.push(agentsMenu);
-  const tasksMenu = tasksMenuHtml(tasks, tasksOpen, currentTurn);
-  if (tasksMenu !== "") parts.push(tasksMenu);
-  return parts.join(" · ");
-}
+// The topbar datapoint strip moved to topbar.ts, where ONE renderer
+// serves both the session header and the agent-scoped bubble strips.
 
 /**
  * The compaction-in-progress banner: shown while the SDK is compacting the

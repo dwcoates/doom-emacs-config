@@ -233,15 +233,21 @@ body {
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
 
-#session-info { color: var(--muted); margin-left: auto; }
-#session-info .info-ws { color: var(--info-ws); }
-#session-info .info-model { color: var(--info-model); }
-#session-info .info-tokens { color: var(--info-tokens); }
+#session-info { margin-left: auto; }
+
+/* The datapoint strip's value colors, shared by BOTH renderings of the
+   strip: the header's #session-info and each subagent bubble's
+   .agent-topbar (see topbar.ts). Style a new datapoint against
+   .topbar-info and every surface picks it up. */
+.topbar-info { color: var(--muted); }
+.topbar-info .info-ws { color: var(--info-ws); }
+.topbar-info .info-model { color: var(--info-model); }
+.topbar-info .info-tokens { color: var(--info-tokens); }
 
 /* The running task's timer: the one datapoint that rewrites itself once a
    second, so fixed-width digits keep everything to its right from twitching
    on every tick. */
-#session-info .info-time {
+.topbar-info .info-time {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
 }
