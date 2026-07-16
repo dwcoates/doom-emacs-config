@@ -180,6 +180,24 @@ describe("partitionFeed", () => {
     expect(part.top).toContain(update);
   });
 
+  it("hands a reused task id to its most recent owner", () => {
+    // Arrange — two creates both settled as #1 (a reset task counter);
+    // the update belongs to the newer claimant, whose calls still arrive.
+    const older = {
+      ...tool("c1", "TaskCreate"),
+      result: { isError: false, content: "Task #1 created successfully: old" },
+    };
+    const newer = {
+      ...tool("c2", "TaskCreate"),
+      result: { isError: false, content: "Task #1 created successfully: new" },
+    };
+    const update = { ...tool("u1", "TaskUpdate"), input: { taskId: "1" } };
+    // Act
+    const part = partitionFeed([older, newer, update]);
+    // Assert
+    expect(part.children.get("c2")).toEqual([update]);
+  });
+
   it("folds each task's updates onto its own create", () => {
     // Arrange — two settled creates, one update each.
     const create1 = {
