@@ -4,6 +4,7 @@ import {
   TASK_TOOLS,
   agentTasks,
   sessionTasks,
+  taskCreateToolUseId,
   taskIdFromCreateResult,
   tasksMenuHtml,
 } from "../src/tasks.js";
@@ -92,6 +93,42 @@ describe("taskIdFromCreateResult", () => {
     const item = taskCreate({ result: { isError: false, content: "created" } });
     // Act + Assert
     expect(taskIdFromCreateResult(item)).toBeNull();
+  });
+});
+
+describe("taskCreateToolUseId", () => {
+  it("maps a settled create's harness id back to its tool-use id", () => {
+    // Arrange + Act + Assert
+    expect(taskCreateToolUseId([taskCreate()], "1")).toBe("c1");
+  });
+
+  it("maps an unsettled create by its tool-use id fallback", () => {
+    // Arrange — no result yet, so the roster row keys off the tool-use id.
+    const item = taskCreate({ result: undefined });
+    // Act + Assert
+    expect(taskCreateToolUseId([item], "c1")).toBe("c1");
+  });
+
+  it("is null when no create names the id", () => {
+    // Arrange + Act + Assert
+    expect(taskCreateToolUseId([taskCreate()], "9")).toBeNull();
+  });
+
+  it("never resolves through a TaskUpdate, only through the create", () => {
+    // Arrange — an update against task #1 whose create is absent.
+    const items = [taskUpdate()];
+    // Act + Assert
+    expect(taskCreateToolUseId(items, "1")).toBeNull();
+  });
+
+  it("resolves each of several creates to its own card", () => {
+    // Arrange — a second create carrying task #2.
+    const second = taskCreate({
+      toolUseId: "c2",
+      result: { isError: false, content: "Task #2 created successfully: another" },
+    });
+    // Act + Assert
+    expect(taskCreateToolUseId([taskCreate(), second], "2")).toBe("c2");
   });
 });
 

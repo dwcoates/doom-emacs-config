@@ -81,6 +81,29 @@ export function taskIdFromCreateResult(item: ToolItem): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * The `TaskCreate` tool-use id behind roster entry TASKID — the reverse of
+ * the roster projection, mapping a clicked row back to the feed card that
+ * created its task. That card is the task's ONE bubble: `TaskUpdate` cards
+ * are suppressed from the feed entirely. A row keys off the harness id its
+ * create's result reported, falling back to the create's own tool-use id
+ * while the result is pending (the same fallback `sessionTasks` applies),
+ * so the lookup matches by the same key. Null when no create matches —
+ * the id names no task this session created.
+ */
+export function taskCreateToolUseId(
+  items: readonly ConversationItem[],
+  taskId: string,
+): string | null {
+  for (const item of items) {
+    if (item.kind !== "tool" || item.toolName !== "TaskCreate") continue;
+    if ((taskIdFromCreateResult(item) ?? item.toolUseId) === taskId) {
+      return item.toolUseId;
+    }
+  }
+  return null;
+}
+
 /** A task under construction as the fold accumulates create+update calls. */
 interface TaskRecord {
   id: string;
