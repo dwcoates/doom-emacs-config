@@ -7,44 +7,22 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { IDLE_LABEL, TICK_MS, TaskTimer, TimerHost, timerLabel } from "../src/timer.js";
+import { IDLE_LABEL, TICK_MS, TaskTimer, timerLabel } from "../src/timer.js";
+import { clockHarness } from "./clock-harness.js";
 
 /** The turn start the daemon stamps, as an envelope ts. */
 const START = "2026-07-13T12:00:00.000Z";
 const START_MS = Date.parse(START);
 
-/** A hand-driven clock and scheduler, plus the paints the timer made. */
+/** The shared clock harness, plus the paints the timer made. */
 function harness() {
-  let now = START_MS;
-  let nextId = 1;
-  const intervals = new Map<number, { handler: () => void; ms: number }>();
+  const core = clockHarness(START_MS);
   const painted: string[] = [];
-
-  const host: TimerHost = {
-    setInterval: (handler, ms) => {
-      const id = nextId++;
-      intervals.set(id, { handler, ms });
-      return id;
-    },
-    clearInterval: (id) => {
-      intervals.delete(id);
-    },
-    now: () => now,
-  };
-
   return {
-    host,
+    ...core,
     painted,
-    intervals,
-    /** Advance the clock and fire every live interval once per tick crossed. */
-    advance(ms: number): void {
-      for (let elapsed = 0; elapsed < ms; elapsed += TICK_MS) {
-        now += TICK_MS;
-        for (const interval of [...intervals.values()]) interval.handler();
-      }
-    },
     timer(): TaskTimer {
-      return new TaskTimer(host, (label) => painted.push(label));
+      return new TaskTimer(core.host, (label) => painted.push(label));
     },
   };
 }
