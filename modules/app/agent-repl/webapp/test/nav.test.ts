@@ -10,7 +10,11 @@ import {
   CLASS_MODIFIERS,
   NAV_CLASSES,
   NAV_CURRENT_CLASS,
+  NAV_ATTR,
   NAV_HOOK,
+  FeedNav,
+  installNavHook,
+  installNavKeys,
   type NavItem,
   type NavKeyEvent,
   cycleDecision,
@@ -21,7 +25,7 @@ import {
   navChord,
   navTokensForItem,
   nextCursor,
-  seedIndex,
+  seedTarget,
 } from "../src/nav.js";
 import { TextItem, ThinkingItem, ToolItem, UserTurnItem } from "../src/store.js";
 
@@ -119,17 +123,39 @@ describe("matchingIndexes", () => {
   });
 });
 
-describe("seedIndex", () => {
-  it("seeds at the wrapper the viewport top sits on", () => {
-    expect(seedIndex([0, 100, 200, 300], 210)).toBe(2);
+describe("seedTarget", () => {
+  // Wrappers at 0/100/200/300; the prompts are the outer two.
+  const tops = [0, 100, 200, 300];
+  const matches = [0, 3];
+
+  it("enters at the match sitting at the viewport top rather than skipping it", () => {
+    // The first press ENTERS the cycle: skipping the prompt the user is
+    // looking at would make every cycle start one stop too far along.
+    expect(seedTarget({ matches, tops, viewportTop: 0, dir: 1 })).toBe(0);
   });
 
-  it("seeds above every wrapper when the feed is scrolled to the top", () => {
-    expect(seedIndex([0, 100], -5)).toBe(-1);
+  it("enters forward at the first match below the viewport", () => {
+    expect(seedTarget({ matches, tops, viewportTop: 150, dir: 1 })).toBe(3);
   });
 
-  it("counts a wrapper sitting a sub-pixel above the viewport top as seeded", () => {
-    expect(seedIndex([0, 100], 99)).toBe(1);
+  it("enters backward at the last match above the viewport", () => {
+    expect(seedTarget({ matches, tops, viewportTop: 150, dir: -1 })).toBe(0);
+  });
+
+  it("enters at a match a sub-pixel above the viewport top, which is still the one on screen", () => {
+    expect(seedTarget({ matches, tops, viewportTop: 1, dir: 1 })).toBe(0);
+  });
+
+  it("wraps forward to the first match when scrolled past every one", () => {
+    expect(seedTarget({ matches, tops, viewportTop: 900, dir: 1 })).toBe(0);
+  });
+
+  it("wraps backward to the last match when scrolled above every one", () => {
+    expect(seedTarget({ matches, tops, viewportTop: -50, dir: -1 })).toBe(3);
+  });
+
+  it("finds nothing to enter when the class has no matches", () => {
+    expect(seedTarget({ matches: [], tops, viewportTop: 0, dir: 1 })).toBeNull();
   });
 });
 
@@ -165,10 +191,19 @@ describe("cycleDecision", () => {
     item("text:a", "response", 100),
     item("tool:t1", "tool", 200),
     item("text:b", "response final", 300),
+    item("user-turn:1", "prompt", 400),
   ];
 
-  it("seeds a first press from the viewport rather than the tail", () => {
+  it("seeds a first press from the viewport, not from the tail", () => {
+    // Scrolled between the two prompts: a viewport-seeded forward cycle
+    // takes the one just below, where a tail-seeded one would wrap round
+    // to the one at the top.
     const target = cycleDecision({ items: feed, cursor: null, scrollTop: 150, cls: "prompt", dir: 1 });
+    expect(target).toBe(4);
+  });
+
+  it("seeds a backward first press from the viewport too", () => {
+    const target = cycleDecision({ items: feed, cursor: null, scrollTop: 150, cls: "prompt", dir: -1 });
     expect(target).toBe(0);
   });
 
@@ -305,5 +340,194 @@ describe("the host contract", () => {
 
   it("names the marker class styles.css draws", () => {
     expect(NAV_CURRENT_CLASS).toBe("nav-current");
+  });
+});
+
+/**
+ * The DOM assembly: FeedNav and the two installers.
+ *
+ * jsdom is not in the dep tree, so the feed is faked down to exactly the
+ * surface FeedNav touches. Worth testing despite the fake because the
+ * assembly is where the cursor actually persists and where "focus never
+ * leaves the composer" is either honored or lost.
+ */
+describe("FeedNav", () => {
+  /** A feed-item wrapper, faked to the surface FeedNav reads and writes. */
+  const wrapper = (key: string, nav: string, top: number) => {
+    const classes = new Set<string>();
+    const reveals: string[] = [];
+    return {
+      dataset: { key },
+      offsetTop: top,
+      classes,
+      reveals,
+      getAttribute: (name: string) => (name === NAV_ATTR ? nav : null),
+      classList: {
+        add: (c: string) => classes.add(c),
+        remove: (c: string) => classes.delete(c),
+      },
+      scrollIntoView: (arg: { block: string }) => reveals.push(arg.block),
+    };
+  };
+
+  /** A feed holding WRAPPERS, scrolled to SCROLLTOP. */
+  const feedOf = (wrappers: ReturnType<typeof wrapper>[], scrollTop = 0) => {
+    const el = { scrollTop, querySelectorAll: () => wrappers };
+    return { el: el as unknown as HTMLElement, wrappers };
+  };
+
+  /** A prompt / response / prompt feed, as a short conversation renders. */
+  const conversation = () => [
+    wrapper("user-turn:0", "prompt", 0),
+    wrapper("text:a", "response final", 100),
+    wrapper("user-turn:1", "prompt", 200),
+  ];
+
+  it("marks the bubble it lands on", () => {
+    const { el, wrappers } = feedOf(conversation());
+    new FeedNav(el).cycle("prompt", 1);
+    expect(wrappers[0].classes.has(NAV_CURRENT_CLASS)).toBe(true);
+  });
+
+  it("brings the bubble it lands on into view", () => {
+    const { el, wrappers } = feedOf(conversation());
+    new FeedNav(el).cycle("prompt", 1);
+    expect(wrappers[0].reveals).toEqual(["nearest"]);
+  });
+
+  it("moves off the marked bubble on the next press rather than re-landing on it", () => {
+    const { el, wrappers } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.cycle("prompt", 1);
+    nav.cycle("prompt", 1);
+    expect(wrappers[2].classes.has(NAV_CURRENT_CLASS)).toBe(true);
+  });
+
+  it("leaves the marker on only one bubble at a time", () => {
+    const { el, wrappers } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.cycle("prompt", 1);
+    nav.cycle("prompt", 1);
+    expect(wrappers.filter((w) => w.classes.has(NAV_CURRENT_CLASS))).toHaveLength(1);
+  });
+
+  it("wraps from the last prompt back to the first", () => {
+    const { el, wrappers } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.cycle("prompt", 1);
+    nav.cycle("prompt", 1);
+    nav.cycle("prompt", 1);
+    expect(wrappers[0].classes.has(NAV_CURRENT_CLASS)).toBe(true);
+  });
+
+  it("reports nothing to move to when the feed holds no bubble of the class", () => {
+    const { el } = feedOf([wrapper("user-turn:0", "prompt", 0)]);
+    expect(new FeedNav(el).cycle("tool", 1)).toBe(false);
+  });
+
+  it("keeps the cycle's place when a streaming turn re-renders the feed", () => {
+    // Arrange: cycle onto a bubble, then re-render the same turn — the
+    // wrappers are rebuilt but keep their keys, as the reconciler does.
+    const first = feedOf(conversation());
+    const nav = new FeedNav(first.el);
+    nav.reconcile("r1");
+    nav.cycle("prompt", 1);
+    nav.cycle("prompt", 1);
+    expect(nav.current).toBe("user-turn:1");
+    // Act
+    nav.reconcile("r1");
+    // Assert
+    expect(nav.current).toBe("user-turn:1");
+  });
+
+  it("re-marks the cursor's bubble after a render that rebuilt every node", () => {
+    // Arrange: the restored-session render throws the nodes away, so the
+    // marker must be re-applied rather than assumed to have survived.
+    const { el, wrappers } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.reconcile("r1");
+    nav.cycle("prompt", 1);
+    wrappers[0].classes.clear();
+    // Act
+    nav.reconcile("r1");
+    // Assert
+    expect(wrappers[0].classes.has(NAV_CURRENT_CLASS)).toBe(true);
+  });
+
+  it("retires the cycle when the user sends a new prompt", () => {
+    const { el } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.reconcile("r1");
+    nav.cycle("prompt", 1);
+    // Act
+    nav.reconcile("r2");
+    // Assert
+    expect(nav.current).toBeNull();
+  });
+
+  it("takes the marker off the feed when the cycle is retired", () => {
+    const { el, wrappers } = feedOf(conversation());
+    const nav = new FeedNav(el);
+    nav.reconcile("r1");
+    nav.cycle("prompt", 1);
+    nav.reconcile("r2");
+    expect(wrappers.some((w) => w.classes.has(NAV_CURRENT_CLASS))).toBe(false);
+  });
+});
+
+describe("installNavKeys", () => {
+  /** A composer capturing its handler, plus the events it let through. */
+  const composer = () => {
+    let handler: ((e: unknown) => void) | null = null;
+    return {
+      el: {
+        addEventListener: (_: string, h: (e: unknown) => void) => {
+          handler = h;
+        },
+      } as unknown as HTMLElement,
+      press: (over: Partial<NavKeyEvent> & { preventDefault: () => void }) => {
+        handler?.({ ...key(), ...over });
+      },
+    };
+  };
+
+  const feed = () =>
+    ({
+      scrollTop: 0,
+      querySelectorAll: () => [],
+    }) as unknown as HTMLElement;
+
+  it("swallows a cycle chord so the composer never types it", () => {
+    const c = composer();
+    let prevented = false;
+    installNavKeys(c.el, new FeedNav(feed()));
+    c.press({ code: "KeyJ", ctrlKey: true, shiftKey: true, preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(true);
+  });
+
+  it("leaves an ordinary keystroke to the composer, so typing keeps working", () => {
+    const c = composer();
+    let prevented = false;
+    installNavKeys(c.el, new FeedNav(feed()));
+    c.press({ code: "KeyJ", preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(false);
+  });
+});
+
+describe("installNavHook", () => {
+  const feed = () =>
+    ({ scrollTop: 0, querySelectorAll: () => [] }) as unknown as HTMLElement;
+
+  it("plants the hook under the name output-nav.el calls", () => {
+    const target: Record<string, unknown> = {};
+    installNavHook(target, new FeedNav(feed()));
+    expect(typeof target[NAV_HOOK]).toBe("function");
+  });
+
+  it("raises on a class the two halves disagree about, rather than cycling nothing", () => {
+    const target: Record<string, unknown> = {};
+    installNavHook(target, new FeedNav(feed()));
+    const hook = target[NAV_HOOK] as (c: string, d: number) => boolean;
+    expect(() => hook("thinking", 1)).toThrow(/unknown nav class/);
   });
 });
