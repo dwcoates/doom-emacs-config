@@ -34,6 +34,7 @@ import { installEdgeScroll } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
+import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
 
 function must<T extends HTMLElement>(id: string): T {
@@ -129,6 +130,9 @@ async function boot(): Promise<void> {
         content: text,
       });
     },
+    // Watcher folds poll this while open (§ watcher-bubble expansion),
+    // targeting the CURRENT session so a rebind moves the polls with it.
+    fetchTaskTail: (taskId, offset) => fetchTaskTail(httpBase, activeSessionId, taskId, offset),
   });
 
   const statusEl = must("conn-status");

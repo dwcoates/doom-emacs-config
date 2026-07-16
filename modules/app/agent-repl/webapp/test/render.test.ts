@@ -18,6 +18,7 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
+  openWatcherTaskIds,
   planAgentReveal,
   pulseTarget,
   renderItem,
@@ -3706,5 +3707,59 @@ describe("watcher fold", () => {
     const html = renderItem(text("b1"), undefined, undefined, false, watcherPanels([watcher()]));
     // Assert
     expect(html).not.toContain("watcher-fold");
+  });
+
+  it("renders a watcher's polled tail when the store streamed none", () => {
+    // Arrange — a background agent has no store taskOutput, only the poll.
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => true,
+      watchers: new Map([["b1", [watcher("bg1")]]]),
+      taskTail: (id) =>
+        id === "bg1" ? { text: "polled line", offset: 11, done: false, elapsedMs: 3000 } : undefined,
+    };
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    // Assert
+    expect(html).toContain("polled line");
+    expect(html).toContain("watcher-elapsed");
+  });
+
+  it("prefers the store-streamed tail over the polled one", () => {
+    // Arrange — a backgrounded Bash streams over the WS, so the store wins.
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => true,
+      watchers: new Map([["b1", [watcher("bg1", { taskOutput: "streamed line" })]]]),
+      taskTail: () => ({ text: "polled line", offset: 11, done: false, elapsedMs: 0 }),
+    };
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    // Assert
+    expect(html).toContain("streamed line");
+    expect(html).not.toContain("polled line");
+  });
+});
+
+describe("openWatcherTaskIds", () => {
+  it("collects task ids only from open folds", () => {
+    // Arrange
+    const watchers = new Map<string, ToolItem[]>([
+      ["b1", [watcher("bg1")]],
+      ["b2", [watcher("bg2")]],
+    ]);
+    // Act — only b1's fold is open.
+    const ids = openWatcherTaskIds(watchers, (id) => id === "watchers:b1");
+    // Assert
+    expect([...ids]).toEqual(["bg1"]);
+  });
+
+  it("is empty when no fold is open", () => {
+    // Arrange
+    const watchers = new Map<string, ToolItem[]>([["b1", [watcher("bg1")]]]);
+    // Act
+    const ids = openWatcherTaskIds(watchers, () => false);
+    // Assert
+    expect(ids.size).toBe(0);
   });
 });
