@@ -5485,11 +5485,14 @@ display strings and resolves the chosen display back to its payload."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--read-workspace-via-picker))))
 
-(ert-deftest agent-repl-cmd-test-open-selection/live-switches ()
-  "A live payload switches in place via --ws-switch, never reviving."
+(ert-deftest agent-repl-cmd-test-open-selection/live-perspective-switches ()
+  "A workspace with a live PERSPECTIVE switches in place via --ws-switch,
+never reviving."
   (agent-repl-test--with-clean-state
     (let (switched revived)
-      (cl-letf (((symbol-function 'agent-repl--ws-switch)
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--ws-switch)
                  (lambda (name &rest _) (setq switched name)))
                 ((symbol-function 'agent-repl--picker-revive)
                  (lambda (&rest _) (setq revived t)))
@@ -5499,11 +5502,14 @@ display strings and resolves the chosen display back to its payload."
         (should (equal switched "w"))
         (should-not revived)))))
 
-(ert-deftest agent-repl-cmd-test-open-selection/dead-ensures-then-revives ()
-  "A dead payload ensures the directory then revives, never a plain switch."
+(ert-deftest agent-repl-cmd-test-open-selection/no-perspective-ensures-then-revives ()
+  "A workspace with no live perspective ensures the directory then revives,
+never a plain switch."
   (agent-repl-test--with-clean-state
     (let (ensured revived switched)
-      (cl-letf (((symbol-function 'agent-repl--ws-switch)
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch)
                  (lambda (&rest _) (setq switched t)))
                 ((symbol-function 'agent-repl--picker-ensure-directory)
                  (lambda (name dir) (setq ensured (cons name dir))))
@@ -5513,6 +5519,30 @@ display strings and resolves the chosen display back to its payload."
         (agent-repl--picker-open-selection
          '(:name "w" :project-dir "/tmp/w" :live-p nil))
         (should (equal ensured '("w" . "/tmp/w")))
+        (should (equal revived '("w" . "/tmp/w")))
+        (should-not switched)))))
+
+(ert-deftest agent-repl-cmd-test-open-selection/registered-but-no-perspective-revives ()
+  "A workspace that is REGISTERED (:live-p t) but has NO live perspective
+revives instead of switching.  Switching would reach `+workspace-switch'
+and error \"... is not an available workspace\" because no perspective
+exists.  Regression for the `SPC p p' failure on a workspace left
+registered-but-perspective-less by a merge or close with preserve-entry:
+the decision must key on `agent-repl--ws-open-p', not PAYLOAD's `:live-p'."
+  (agent-repl-test--with-clean-state
+    (let (switched revived)
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (&rest _) nil))            ; no live perspective
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (setq switched t)))
+                ((symbol-function 'agent-repl--picker-ensure-directory)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--picker-revive)
+                 (lambda (name dir) (setq revived (cons name dir))))
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+        ;; :live-p t (a non-tombstoned registry entry) MUST NOT drive a switch.
+        (agent-repl--picker-open-selection
+         '(:name "w" :project-dir "/tmp/w" :live-p t))
         (should (equal revived '("w" . "/tmp/w")))
         (should-not switched)))))
 
