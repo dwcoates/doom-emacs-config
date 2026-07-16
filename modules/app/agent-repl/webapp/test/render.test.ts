@@ -1042,6 +1042,7 @@ describe("renderItem", () => {
     // should render as HTML rather than surviving as literal `#`/`**`.
     const item: ToolItem = {
       kind: "tool",
+      ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1066,6 +1067,7 @@ describe("renderItem", () => {
     // Arrange — the class the phantom-top-margin reset in styles.css hangs on.
     const item: ToolItem = {
       kind: "tool",
+      ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
