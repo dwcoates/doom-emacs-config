@@ -104,6 +104,40 @@ export function taskCreateToolUseId(
   return null;
 }
 
+/**
+ * The settled `TaskUpdate` calls belonging to each `TaskCreate` card,
+ * keyed by the create's tool-use id and in call order — the projection
+ * behind the card's update-stream fold (see render.ts). An update names
+ * its task by the harness id, which exists only once the create's result
+ * reported it, so only updates naming a settled create can be claimed;
+ * an update naming an unknown task claims nothing, as does one whose
+ * input has not finished streaming.
+ */
+export function taskUpdatesByCreate(
+  items: readonly ConversationItem[],
+): ReadonlyMap<string, readonly ToolItem[]> {
+  const createByTaskId = new Map<string, string>();
+  for (const item of items) {
+    if (item.kind !== "tool" || item.toolName !== "TaskCreate") continue;
+    const id = taskIdFromCreateResult(item);
+    if (id !== null && !createByTaskId.has(id)) {
+      createByTaskId.set(id, item.toolUseId);
+    }
+  }
+  const updates = new Map<string, ToolItem[]>();
+  for (const item of items) {
+    if (item.kind !== "tool" || item.toolName !== "TaskUpdate" || !item.inputDone) {
+      continue;
+    }
+    const create = createByTaskId.get(stringField(item, "taskId"));
+    if (create === undefined) continue;
+    const list = updates.get(create) ?? [];
+    list.push(item);
+    updates.set(create, list);
+  }
+  return updates;
+}
+
 /** A task under construction as the fold accumulates create+update calls. */
 interface TaskRecord {
   id: string;
