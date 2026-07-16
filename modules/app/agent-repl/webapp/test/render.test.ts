@@ -1201,8 +1201,54 @@ describe("renderItem", () => {
     const html = renderItem(item);
     // Assert — the skill-content class is what makes the body click-expandable.
     expect(html).toContain("skill-content");
-    expect(html).toContain("# Debug Logs");
     expect(html).toContain("read the log");
+  });
+
+  it("renders the SKILL.md body as formatted markdown, not escaped plain text", () => {
+    // Arrange — a skill IS a markdown file, so its heading and bold text
+    // should render as HTML rather than surviving as literal `#`/`**`.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs" },
+      inputJson: `{"skill":"debug-logs"}`,
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "Launching skill: debug-logs",
+        render: { kind: "skill", content: "# Debug Logs\n**read** the log" },
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("<h1>Debug Logs</h1>");
+    expect(html).toContain("<strong>read</strong>");
+    expect(html).not.toContain("# Debug Logs");
+  });
+
+  it("wraps the rendered SKILL.md body in the skill-content-md class", () => {
+    // Arrange — the class the phantom-top-margin reset in styles.css hangs on.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Skill",
+      messageId: "m1",
+      input: { skill: "debug-logs" },
+      inputJson: `{"skill":"debug-logs"}`,
+      inputDone: true,
+      result: {
+        isError: false,
+        content: "Launching skill: debug-logs",
+        render: { kind: "skill", content: "read the log" },
+      },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(
+      `class="tool-output skill-content skill-content-md"`,
+    );
   });
 
   it("tags the Skill card with the class its turquoise wash hangs on", () => {
