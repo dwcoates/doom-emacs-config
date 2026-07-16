@@ -24,7 +24,7 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then pri
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
 # debug-logs is deliberately absent: it is PROJECT-scoped (checked-in
 # <repo>/.claude/skills symlink), not a user-level installed skill.
-LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close workspace-open emit-workspace-commands.sh )
+LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh, the
 # pre-commit hook, a manifest with one cached skill 'foo' whose impl is
