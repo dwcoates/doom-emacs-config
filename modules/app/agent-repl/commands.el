@@ -2592,18 +2592,28 @@ display state, clears any tombstone, and resumes the durable session."
 
 (defun agent-repl--picker-open-selection (payload)
   "Open the workspace described by PAYLOAD (:name :project-dir :live-p).
-A live workspace switches in place via `agent-repl--ws-switch'.  A
-removed workspace is revived from persisted state via
-`agent-repl--picker-revive', after `agent-repl--picker-ensure-directory'
-recreates its worktree/directory when missing.  Then hydrates the
-priority badge and flashes the tab on a deferred timer, mirroring the
-PROJECT-arg path of `agent-repl-switch-to-project'.  Re-activating the
-workspace stamps its `:last-viewed-at' via the persp-activated hook, so
-the picker reorders it to the front next time."
+A workspace that still has a live perspective switches in place via
+`agent-repl--ws-switch'.  One WITHOUT a live perspective is revived
+from persisted state via `agent-repl--picker-revive', after
+`agent-repl--picker-ensure-directory' recreates its worktree/directory
+when missing.  Then hydrates the priority badge and flashes the tab on
+a deferred timer, mirroring the PROJECT-arg path of
+`agent-repl-switch-to-project'.  Re-activating the workspace stamps its
+`:last-viewed-at' via the persp-activated hook, so the picker reorders
+it to the front next time.
+
+The switch-vs-revive decision keys on `agent-repl--ws-open-p' (does a
+live PERSPECTIVE exist?), NOT on PAYLOAD's `:live-p' (which reports
+`agent-repl--ws-live-p' — merely a non-tombstoned REGISTRY entry).  A
+merge or a close with `preserve-entry' leaves a workspace registered
+but perspective-less; routing that on `:live-p' sent it to
+`agent-repl--ws-switch' -> `+workspace-switch', which errors
+\"... is not an available workspace\" because no perspective exists.
+Keying on perspective existence revives it instead."
   (let ((name (plist-get payload :name))
         (dir (plist-get payload :project-dir)))
     (when name
-      (if (plist-get payload :live-p)
+      (if (agent-repl--ws-open-p name)
           (agent-repl--ws-switch name)
         (agent-repl--picker-ensure-directory name dir)
         (agent-repl--picker-revive name dir))
