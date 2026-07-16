@@ -79,6 +79,20 @@ describe("topbar", () => {
     expect(topbar.indexOf(`id="model-select"`)).toBeGreaterThan(topbar.indexOf(`id="session-info"`));
   });
 
+  it("names the header #topbar, the hook the picker content-sizing rule scopes to", () => {
+    // Arrange / Act — styles.css sizes pickers via `#topbar select`, so a
+    // renamed header would silently drop both pickers back to widest-option width.
+    // Assert
+    expect(topbar).toContain(`id="topbar"`);
+  });
+
+  it("mounts the permission-mode picker inside the topbar, where the sizing rule reaches it", () => {
+    // Arrange / Act — the `#topbar select` rule only sizes a picker the
+    // header actually contains.
+    // Assert
+    expect(topbar).toContain(`id="mode-select"`);
+  });
+
   it("starts the model picker empty so its options come only from the daemon", () => {
     // Arrange / Act — unlike #mode-select's fixed enum, the model menu is
     // whatever the account's CLI reports; hardcoding options here would let
