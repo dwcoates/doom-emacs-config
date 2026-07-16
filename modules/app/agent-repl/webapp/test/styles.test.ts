@@ -134,6 +134,22 @@ describe("composer input", () => {
   });
 });
 
+const topbarPicker = blockAfter(css, "#topbar select");
+
+describe("topbar pickers", () => {
+  it("sizes a picker to its selected option rather than to the widest one", () => {
+    // Arrange / Act — the #topbar select rule.
+    // Assert
+    expect(topbarPicker).toMatch(/field-sizing:\s*content/);
+  });
+
+  it("leaves the picker unpinned by a width, which would defeat the content sizing", () => {
+    // Arrange / Act — an explicit width would override the intrinsic size.
+    // Assert
+    expect(topbarPicker).not.toMatch(/(^|[^-])width:/);
+  });
+});
+
 const alarmDot = blockAfter(css, ".spinner.alarm");
 const alarmKeyframes = blockAfter(css, "@keyframes gone-alarm");
 

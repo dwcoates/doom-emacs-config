@@ -155,6 +155,17 @@ body {
 #conn-status { color: var(--err); }
 #conn-status.ok { color: var(--ok); }
 
+/* The topbar pickers size to the CURRENT selection, not to the widest option
+   in the menu. A default-width <select> reserves room for its longest entry
+   forever, so `auto` sits in a box cut for `bypassPermissions` and the strip
+   carries dead space the selection never fills. `field-sizing: content` hands
+   the width back to the selected option's own text, so a picker shrinks and
+   grows as the choice does. Scoped to the strip rather than named per id, so
+   a picker added to the topbar later is sized the same way by default. */
+#topbar select {
+  field-sizing: content;
+}
+
 .spinner { color: var(--muted); opacity: 0; transition: opacity 0.2s; }
 .spinner.on { opacity: 1; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
