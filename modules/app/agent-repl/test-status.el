@@ -2885,6 +2885,47 @@ newline, so the join controls the row count and thus the tab-bar height."
       (should (equal (substring-no-properties result)
                      (substring-no-properties expected))))))
 
+;;;; ---- Tests: tabline entry width (pixel-accurate measurement) ----
+
+(ert-deftest agent-repl-test-tabline-entry-width-plain-text ()
+  "A plain-text entry (no display property) is measured by `string-width'."
+  (should (= 3 (agent-repl--tabline-entry-width "abc"))))
+
+(ert-deftest agent-repl-test-tabline-entry-width-image-measured-in-pixels ()
+  "An entry carrying a `display' property is measured in pixels and
+converted to columns, not by its (tiny) character length."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 40))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
+    ;; character length is 1, but 40px / 10px-per-column = 4 columns.
+    (should (= 4 (agent-repl--tabline-entry-width
+                  (propertize " " 'display "img"))))))
+
+(ert-deftest agent-repl-test-tabline-entry-width-rounds-up ()
+  "A pixel width that is not a whole number of columns rounds UP, so the
+estimate never under-reserves and a row can never pixel-overflow."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 41))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
+    ;; 41px / 10 = 4.1 columns -> ceil -> 5.
+    (should (= 5 (agent-repl--tabline-entry-width
+                  (propertize " " 'display "img"))))))
+
+(ert-deftest agent-repl-test-tabline-entry-width-minimum-one ()
+  "An empty entry never measures less than one column."
+  (should (= 1 (agent-repl--tabline-entry-width ""))))
+
+(ert-deftest agent-repl-test-tabline-rows-image-pixel-width-forces-elision ()
+  "An image-bearing entry whose PIXEL width overflows the row budget is
+elided behind a `+N' badge, even though its one-character length would
+fit both rows.  The column-accurate width from
+`agent-repl--tabline-entry-width' is what stops a badge-bearing row
+from physically wrapping to a third row (the tab-bar livelock); with
+the old character-length measurement no badge would appear."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 30))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 1)))
+    (let* ((img (propertize " " 'display "badge")) ; 1 char, 30 px-columns
+           (rows (agent-repl--tabline-rows (list "aa" img "bb" "cc" "dd") 1 20 2)))
+      (should (cl-some (lambda (r) (string-match-p "\\+[0-9]+" r)) rows)))))
+
 ;;;; ---- Tests: tabline row join (face-extension guard) ----
 
 (ert-deftest agent-repl-test-join-tabline-rows-empty ()

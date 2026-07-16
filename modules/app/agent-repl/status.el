@@ -1208,6 +1208,30 @@ of `(length COUNTS)' strings, none containing a newline."
         (push row rows)))
     (nreverse rows)))
 
+(defun agent-repl--tabline-entry-width (entry)
+  "Return ENTRY's rendered width in character-column units.
+
+The tab-bar packs entries against a column budget (see
+`agent-repl--tabline-rows'), but physical line wrapping is decided in
+PIXELS.  Measuring an entry by its character `length' undercounts any
+entry carrying a `display' image: a priority badge is one space wide
+in characters but a whole glyph wide in pixels (see
+`agent-repl--tab-priority-image-str').  A row the packer believed fit
+could then overflow the frame in pixels and wrap to a third physical
+row — the `ns_change_tab_bar_height' livelock this whole subsystem
+exists to prevent.
+
+Entries with no `display' property are measured with `string-width'
+\(exact for mono and wide/CJK glyphs, and equal to `length' for plain
+ASCII, so pre-existing fit decisions are unchanged).  An entry that
+carries a `display' property is measured with `string-pixel-width'
+and converted to columns by dividing by `frame-char-width', rounded
+UP so the estimate never under-reserves.  Never returns less than 1."
+  (max 1
+       (if (text-property-not-all 0 (length entry) 'display nil entry)
+           (ceiling (string-pixel-width entry) (max 1 (frame-char-width)))
+         (string-width entry))))
+
 (defun agent-repl--tabline-rows (entries current-pos width max-rows)
   "Pack ENTRIES into EXACTLY MAX-ROWS rows, each no wider than WIDTH.
 
@@ -1233,14 +1257,16 @@ agree and redisplay livelocks at 100% CPU retrying the resize
 \(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/).  Elision
 behind badges, not wrapping to a further row, absorbs any overflow.
 
-WIDTH is treated as a character count (`length' of propertized
-strings), which is approximate for entries containing display-property
-images but stable across renders, so the fit decision cannot
-oscillate."
+WIDTH and the per-row caps are column budgets.  Entry widths are
+measured with `agent-repl--tabline-entry-width', which counts an
+image-bearing entry by its pixel width (converted to columns), not
+its character length — a column-accurate width is what keeps this
+fixed two-row fit decision from letting a badge-bearing row overflow
+the frame in pixels and wrap to a third physical row."
   (let ((n (length entries)))
     (if (= n 0)
         (make-list max-rows "")
-      (let* ((widths (mapcar #'length entries))
+      (let* ((widths (mapcar #'agent-repl--tabline-entry-width entries))
              ;; Do all entries fit MAX-ROWS full-width rows?  If so, no
              ;; badges and no windowing are needed.
              (full (agent-repl--pack-first-fit
