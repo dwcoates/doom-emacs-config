@@ -23,6 +23,7 @@ import { ModelInfo, QueuedItem } from "./protocol.js";
 import { isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
+import { watchersByBubble } from "./watchers.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
@@ -380,11 +381,20 @@ export function queuedCardKey(item: QueuedItem): string {
  * the response the same way the user bubble's dates the prompt, and it
  * does not jump while the block streams.
  */
-function TextStream(item: TextItem, chip: ResultItem | null, isPulsing = false): string {
+function TextStream(
+  item: TextItem,
+  chip: ResultItem | null,
+  isPulsing = false,
+  panels?: PanelContext,
+): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
   const cls = `bubble assistant md${chip ? " final-response" : ""}${
     isPulsing ? " pulsing" : ""
   }`;
+  // Only a FINAL response (one carrying a chip) folds in its turn's
+  // watchers: a mid-turn commentary bubble is not the answer the watcher
+  // belongs to, so it stays inert prose.
+  const watchers = chip ? WatcherPanel(item.blockId, panels) : "";
   // A turn that closed in under a second reports no time worth a chip, so the
   // final-response badge is dropped entirely below that floor rather than
   // rounding a negligible span up to a `1s` the reader never asked for. The
@@ -400,11 +410,11 @@ function TextStream(item: TextItem, chip: ResultItem | null, isPulsing = false):
   if (!item.text.includes("```") && isMetapromptTree(item.text)) {
     return Bubble(
       cls,
-      `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}${closer}`,
+      `<div class="mp-tree">${renderTreeHtml(item.text, inline)}</div>${cursor}${watchers}${closer}`,
       item.ts,
     );
   }
-  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}${closer}`, item.ts);
+  return Bubble(cls, `${renderMarkdown(item.text)}${cursor}${watchers}${closer}`, item.ts);
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -435,6 +445,12 @@ export interface PanelContext {
   selections?: QuestionSelections;
   /** Message-composer drafts per agent id (renderer-owned, like selections). */
   drafts?: ReadonlyMap<string, string>;
+  /**
+   * Watcher tool items a final-response bubble folds in, keyed by the
+   * bubble's block id (see watchers.ts). Absent for a bubble whose turn
+   * armed no detached work.
+   */
+  watchers?: ReadonlyMap<string, readonly ToolItem[]>;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -650,6 +666,65 @@ function taskControls(item: ToolItem): string {
     })
     .join("");
   return `<div class="task-controls">${buttons}</div>`;
+}
+
+/** The collapsed face of a watcher fold: how many watchers, how many live. */
+function watcherFace(total: number, live: number): string {
+  const noun = `${total} watcher${total === 1 ? "" : "s"}`;
+  return live > 0 ? `${noun} · ${live} live` : `${noun} · done`;
+}
+
+/**
+ * One watcher's row inside a bubble's fold: its identity and live/settled
+ * badge, then the SAME live surface its own tool card carries — the
+ * daemon's file tail, the stop control, and the message composer — reused
+ * wholesale rather than re-implemented. A watcher is live until its
+ * completion notification lands, which is when the arc gives way to a
+ * settled badge.
+ */
+function WatcherRow(item: ToolItem, panels?: PanelContext): string {
+  const ids = spawnedTaskIds(item);
+  const label = ids.length > 0 ? `${item.toolName} · ${ids.join(", ")}` : item.toolName;
+  const headline = toolHeadline(item);
+  const status = item.notification
+    ? `<span class="badge ok">done</span>`
+    : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`;
+  const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
+  const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
+  return `<div class="watcher-row">
+      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}</div>
+      ${desc}${progress}${liveTaskOutput(item)}${taskControls(item)}${agentComposer(item, panels)}
+    </div>`;
+}
+
+/**
+ * The watcher fold a final-response bubble carries (§ watcher-bubble
+ * expansion): the detached tasks its turn armed, behind a click. Modeled
+ * on ActivitySection — the panel body exists in the HTML only while open,
+ * and open state lives in the RENDERER (openPanels), so the fold survives
+ * the bubble's per-frame re-renders as its watchers' tail grows. Keyed
+ * `watchers:<blockId>` so it never collides with a card's activity panel.
+ *
+ * The live arc rides the collapsed ticker rather than the bubble: a final
+ * response belongs to an ENDED turn, where the bubble breath never runs, so
+ * the spinner is the only honest "still live" signal left after the turn
+ * closed.
+ */
+function WatcherPanel(blockId: string, panels?: PanelContext): string {
+  const watchers = panels?.watchers?.get(blockId) ?? [];
+  if (watchers.length === 0) return "";
+  const id = `watchers:${blockId}`;
+  const open = panels?.isOpen(id) ?? false;
+  const live = watchers.filter((w) => !w.notification).length;
+  const body = open
+    ? `<div class="agent-panel">${watchers.map((w) => WatcherRow(w, panels)).join("")}</div>`
+    : "";
+  const arc = live > 0 ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
+  return `<div class="watcher-fold${open ? " open" : ""}" data-panel-toggle="${escapeHtml(id)}">
+      <div class="watcher-ticker">${arc}${escapeHtml(watcherFace(watchers.length, live))} <span class="agent-caret" aria-hidden="true">${
+        open ? "▴" : "▾"
+      }</span></div>${body}
+    </div>`;
 }
 
 function toolInput(item: ToolItem): string {
@@ -1255,7 +1330,7 @@ export function renderItem(
     case "user-turn":
       return UserTurn(item, isPulsing);
     case "text":
-      return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing);
+      return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing, panels);
     case "thinking":
       return Thinking(item);
     case "tool":
@@ -1672,12 +1747,16 @@ export class FeedRenderer {
   }
 
   /** The PanelContext this renderer's state backs. */
-  private panelContext(children: ReadonlyMap<string, readonly ConversationItem[]>): PanelContext {
+  private panelContext(
+    children: ReadonlyMap<string, readonly ConversationItem[]>,
+    watchers: ReadonlyMap<string, readonly ToolItem[]>,
+  ): PanelContext {
     return {
       children,
       isOpen: (id) => this.openPanels.has(id),
       selections: this.questionSelections,
       drafts: this.msgDrafts,
+      watchers,
     };
   }
 
@@ -1787,7 +1866,7 @@ export class FeedRenderer {
     const items = itemsFromLastClear(state.items);
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
-    const panels = this.panelContext(part.children);
+    const panels = this.panelContext(part.children, watchersByBubble(items));
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
@@ -1911,7 +1990,7 @@ export class FeedRenderer {
     }
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
-    const panels = this.panelContext(part.children);
+    const panels = this.panelContext(part.children, watchersByBubble(items));
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
     const seen = new Set<string>();

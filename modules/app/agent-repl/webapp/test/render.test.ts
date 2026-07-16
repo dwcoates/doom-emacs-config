@@ -3635,3 +3635,76 @@ describe("agent message composer", () => {
     expect(html).toContain(`value="status pls"`);
   });
 });
+
+// --- watcher fold (in a final-response bubble) ---------------------------------
+
+/** A backgrounded-Bash watcher announcing TASKID, plus any overrides. */
+function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: "w1",
+    messageId: "m1",
+    toolName: "Bash",
+    inputJson: "{}",
+    input: { command: "poll.sh" },
+    inputDone: true,
+    result: { isError: false, content: `Command running in background with ID: ${taskId}.` },
+    ...over,
+  };
+}
+
+/** A PanelContext folding WATCHERS into block b1, open per OPEN. */
+function watcherPanels(watchers: ToolItem[], open = false): PanelContext {
+  return {
+    children: new Map(),
+    isOpen: () => open,
+    watchers: new Map([["b1", watchers]]),
+  };
+}
+
+describe("watcher fold", () => {
+  it("renders no fold on a final bubble whose turn armed no watcher", () => {
+    // Arrange + Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([]));
+    // Assert
+    expect(html).not.toContain("watcher-fold");
+  });
+
+  it("shows a live ticker face and none of the row while closed", () => {
+    // Arrange + Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).toContain("watcher-fold");
+    expect(html).toContain("1 watcher · 1 live");
+    expect(html).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
+    expect(html).not.toContain("watcher-row");
+  });
+
+  it("reveals the watcher row and its live tail when open", () => {
+    // Arrange
+    const w = watcher("bg1", { taskOutput: "polling the queue…" });
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w], true));
+    // Assert
+    expect(html).toContain("watcher-row");
+    expect(html).toContain("task-live-output");
+    expect(html).toContain("polling the queue…");
+  });
+
+  it("drops the arc for a done face once the notification lands", () => {
+    // Arrange — the completion notification settles the watcher.
+    const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
+    // Assert
+    expect(html).toContain("1 watcher · done");
+    expect(html).not.toContain("tool-spinner");
+  });
+
+  it("never folds watchers into a non-final commentary bubble", () => {
+    // Arrange — no finals, so the bubble carries no closing chip.
+    const html = renderItem(text("b1"), undefined, undefined, false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).not.toContain("watcher-fold");
+  });
+});
