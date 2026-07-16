@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AgentReveal,
   PanelContext,
+  ToolReveal,
   activeGroupMember,
   activityTicker,
   backfillChunks,
@@ -19,7 +19,7 @@ import {
   lastUserTurnId,
   modelOptionsHtml,
   openWatcherTaskIds,
-  planAgentReveal,
+  planToolReveal,
   pulseTarget,
   renderItem,
   rendersEmpty,
@@ -3258,14 +3258,14 @@ function nestedAgentTool(id: string, parent: string): ToolItem {
   return { ...agentTool(id), parentToolUseId: parent };
 }
 
-describe("planAgentReveal", () => {
+describe("planToolReveal", () => {
   it("reveals a lone top-level subagent as its own bubble with its panel open", () => {
     // Arrange — a single Agent card, ungrouped.
     const items = [userTurnAt(9, 0), agentTool("a1")];
     // Act
-    const plan = planAgentReveal(items, "a1");
+    const plan = planToolReveal(items, "a1");
     // Assert
-    expect(plan).toEqual<AgentReveal>({
+    expect(plan).toEqual<ToolReveal>({
       key: "tool:a1",
       groupKey: null,
       tabMember: null,
@@ -3277,9 +3277,9 @@ describe("planAgentReveal", () => {
     // Arrange — two consecutive Agent cards collapse into one tab group.
     const items = [userTurnAt(9, 0), agentTool("a1"), agentTool("a2")];
     // Act
-    const plan = planAgentReveal(items, "a2");
+    const plan = planToolReveal(items, "a2");
     // Assert — the group is keyed by its first member; a2's tab must be pinned.
-    expect(plan).toEqual<AgentReveal>({
+    expect(plan).toEqual<ToolReveal>({
       key: "group:a1",
       groupKey: "group:a1",
       tabMember: "a2",
@@ -3291,9 +3291,9 @@ describe("planAgentReveal", () => {
     // Arrange — a2 was spawned by top-level a1, so it has no bubble of its own.
     const items = [userTurnAt(9, 0), agentTool("a1"), nestedAgentTool("a2", "a1")];
     // Act
-    const plan = planAgentReveal(items, "a2");
+    const plan = planToolReveal(items, "a2");
     // Assert — land on a1's bubble, opening a2's panel (its output) and a1's (holding a2).
-    expect(plan).toEqual<AgentReveal>({
+    expect(plan).toEqual<ToolReveal>({
       key: "tool:a1",
       groupKey: null,
       tabMember: null,
@@ -3305,7 +3305,7 @@ describe("planAgentReveal", () => {
     // Arrange
     const items = [userTurnAt(9, 0), agentTool("a1")];
     // Act + Assert
-    expect(planAgentReveal(items, "ghost")).toBeNull();
+    expect(planToolReveal(items, "ghost")).toBeNull();
   });
 
   it("returns null for a subagent a /clear discarded from the feed", () => {
@@ -3316,7 +3316,29 @@ describe("planAgentReveal", () => {
       userTurnAt(9, 1, "/clear", "r2"),
     ];
     // Act + Assert
-    expect(planAgentReveal(items, "a1")).toBeNull();
+    expect(planToolReveal(items, "a1")).toBeNull();
+  });
+
+  it("plans a reveal for a non-subagent card, a task's TaskCreate", () => {
+    // Arrange — the task roster resolves its rows to TaskCreate tool-use ids.
+    const create: ToolItem = {
+      kind: "tool",
+      toolUseId: "tc1",
+      messageId: "m1",
+      toolName: "TaskCreate",
+      inputJson: "{}",
+      input: { subject: "wire the counter" },
+      inputDone: true,
+    };
+    // Act
+    const plan = planToolReveal([userTurnAt(9, 0), create], "tc1");
+    // Assert
+    expect(plan).toEqual<ToolReveal>({
+      key: "tool:tc1",
+      groupKey: null,
+      tabMember: null,
+      panelIds: ["tc1"],
+    });
   });
 });
 
