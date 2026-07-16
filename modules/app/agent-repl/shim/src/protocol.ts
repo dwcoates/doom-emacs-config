@@ -53,6 +53,23 @@ export interface Usage {
   cache_read_input_tokens?: number;
 }
 
+/**
+ * One model's slice of a result's `model_usage` map. Unlike `Usage`, this
+ * aggregation COUNTS SUBAGENT REQUESTS (the SDK's result `usage` covers
+ * only the top-level agent loop), so summing the map's entries is the
+ * session's whole-tree spend. Normalized from the SDK's camelCase
+ * `modelUsage` to the wire's snake_case.
+ */
+export interface ModelUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  web_search_requests: number;
+  cost_usd: number;
+  context_window: number;
+}
+
 /** One selectable model, from the SDK's `query.supportedModels()`. */
 export interface ModelInfo {
   value: string;
@@ -293,6 +310,12 @@ export interface ResultEvt {
   num_turns: number;
   total_cost_usd: number;
   usage: Usage;
+  /**
+   * Per-model usage including subagents, mirrored from the SDK result's
+   * `modelUsage`. Absent when the SDK reports none — `usage` above
+   * excludes subagent spend, so this map is the only whole-tree figure.
+   */
+  model_usage?: Record<string, ModelUsage>;
   result?: string;
   is_error: boolean;
   permission_denials?: Array<{

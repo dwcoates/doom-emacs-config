@@ -847,6 +847,68 @@ describe("ShimSession SDK message mapping", () => {
     ]);
   });
 
+  it("forwards the result's per-model usage normalized to snake_case", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act — the SDK reports modelUsage in camelCase, subagents included.
+    await drive(h, {
+      type: "result",
+      uuid: "u5b",
+      subtype: "success",
+      duration_ms: 10,
+      duration_api_ms: 8,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 3, output_tokens: 4 },
+      modelUsage: {
+        "claude-opus-4-8": {
+          inputTokens: 30,
+          outputTokens: 40,
+          cacheReadInputTokens: 50,
+          cacheCreationInputTokens: 60,
+          webSearchRequests: 2,
+          costUSD: 0.12,
+          contextWindow: 1000000,
+        },
+      },
+      is_error: false,
+      result: "done",
+    });
+    // Assert
+    expect(h.eventsOfType("result")[0].model_usage).toEqual({
+      "claude-opus-4-8": {
+        input_tokens: 30,
+        output_tokens: 40,
+        cache_read_input_tokens: 50,
+        cache_creation_input_tokens: 60,
+        web_search_requests: 2,
+        cost_usd: 0.12,
+        context_window: 1000000,
+      },
+    });
+  });
+
+  it("omits model_usage when the SDK reports an empty map", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act — some SDK result paths yield modelUsage: {}.
+    await drive(h, {
+      type: "result",
+      uuid: "u5c",
+      subtype: "success",
+      duration_ms: 10,
+      duration_api_ms: 8,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 3, output_tokens: 4 },
+      modelUsage: {},
+      is_error: false,
+      result: "done",
+    });
+    // Assert
+    expect(h.eventsOfType("result")[0]).not.toHaveProperty("model_usage");
+  });
+
   it("collapses unknown SDK error subtypes to error_during_execution", async () => {
     // Arrange
     const h = makeHarness();

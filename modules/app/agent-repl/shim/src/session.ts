@@ -11,6 +11,7 @@ import {
   ContentBlock,
   ContentBlockToolResult,
   ModelInfo,
+  ModelUsage,
   PermissionDecisionCmd,
   PermissionMode,
   ProtocolError,
@@ -542,6 +543,7 @@ export class ShimSession {
     const denials = msg.permission_denials as
       | Array<{ tool_use_id: string; tool_name: string; message?: string }>
       | undefined;
+    const modelUsage = normalizeModelUsage(msg.modelUsage);
     const evt: ResultEvt = {
       type: "result",
       session_id: this.deps.sessionId,
@@ -552,6 +554,7 @@ export class ShimSession {
       num_turns: (msg.num_turns as number) ?? 0,
       total_cost_usd: (msg.total_cost_usd as number) ?? 0,
       usage: normalizeUsage(msg.usage),
+      ...(modelUsage !== undefined ? { model_usage: modelUsage } : {}),
       is_error: (msg.is_error as boolean) ?? false,
       ...(denials && denials.length > 0
         ? {
@@ -645,6 +648,35 @@ function normalizeUsage(usage: unknown): ResultEvt["usage"] {
       ? { cache_read_input_tokens: u.cache_read_input_tokens }
       : {}),
   };
+}
+
+/**
+ * The SDK result's `modelUsage` map (camelCase, per-model, INCLUDING
+ * subagent spend), normalized to the wire's snake_case `model_usage`.
+ * Returns undefined when the SDK reports no map (or an empty one): the
+ * result's plain `usage` covers only the top-level loop, so an absent
+ * map means "no whole-tree figure", not "zero".
+ */
+function normalizeModelUsage(
+  modelUsage: unknown,
+): Record<string, ModelUsage> | undefined {
+  if (typeof modelUsage !== "object" || modelUsage === null) return undefined;
+  const entries = Object.entries(modelUsage as Record<string, unknown>);
+  if (entries.length === 0) return undefined;
+  const out: Record<string, ModelUsage> = {};
+  for (const [model, raw] of entries) {
+    const u = (raw ?? {}) as Record<string, number | undefined>;
+    out[model] = {
+      input_tokens: u.inputTokens ?? 0,
+      output_tokens: u.outputTokens ?? 0,
+      cache_creation_input_tokens: u.cacheCreationInputTokens ?? 0,
+      cache_read_input_tokens: u.cacheReadInputTokens ?? 0,
+      web_search_requests: u.webSearchRequests ?? 0,
+      cost_usd: u.costUSD ?? 0,
+      context_window: u.contextWindow ?? 0,
+    };
+  }
+  return out;
 }
 
 function errMessage(err: unknown): string {
