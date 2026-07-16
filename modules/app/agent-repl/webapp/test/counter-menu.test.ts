@@ -8,6 +8,7 @@ import {
   countLabel,
   counterMenuHtml,
   counterOverlayHtml,
+  dropdownChipHtml,
   isActive,
   isVisible,
   missingBubbleNotice,
@@ -350,5 +351,50 @@ describe("counterOverlayHtml", () => {
     const html = counterOverlayHtml(SPEC, [active({ detail: "<img src=x>" })], 0);
     // Assert
     expect(html).not.toContain("<img");
+  });
+});
+
+describe("dropdownChipHtml", () => {
+  it("stamps the stem across the menu class, toggle attribute, and caret class", () => {
+    // Arrange + Act — one stem names the whole DOM family.
+    const html = dropdownChipHtml("things", "3 things", "t", false, () => "");
+    // Assert
+    expect(html).toContain(`class="things-menu"`);
+    expect(html).toContain("data-things-toggle");
+    expect(html).toContain(`class="things-caret"`);
+  });
+
+  it("escapes markup in the title", () => {
+    // Arrange + Act
+    const html = dropdownChipHtml("things", "3 things", `"><img src=x>`, false, () => "");
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+
+  it("passes the label through as HTML so callers can embed badges", () => {
+    // Arrange + Act — the counters' running badge is a span inside the label.
+    const html = dropdownChipHtml("things", `x <span class="b">1</span>`, "t", false, () => "");
+    // Assert
+    expect(html).toContain(`x <span class="b">1</span>`);
+  });
+
+  it("builds the overlay only while open", () => {
+    // Arrange — a closed chip must not pay for the list it is not showing.
+    let built = 0;
+    const overlay = () => {
+      built++;
+      return "<ul></ul>";
+    };
+    // Act
+    dropdownChipHtml("things", "x", "t", false, overlay);
+    dropdownChipHtml("things", "x", "t", true, overlay);
+    // Assert
+    expect(built).toBe(1);
+  });
+
+  it("flips the caret with the disclosure state", () => {
+    // Arrange + Act + Assert
+    expect(dropdownChipHtml("things", "x", "t", true, () => "")).toContain("▴");
+    expect(dropdownChipHtml("things", "x", "t", false, () => "")).toContain("▾");
   });
 });
