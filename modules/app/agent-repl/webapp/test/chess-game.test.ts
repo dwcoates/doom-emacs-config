@@ -387,6 +387,66 @@ describe("splitChessGameSegments", () => {
 });
 
 
+describe("feed re-pinning around board mounts", () => {
+  afterEach(() => configureChessGames(null));
+
+  function arrangePin(pinned: boolean): { parks: number[] } {
+    const parks: number[] = [];
+    configureChessGames({
+      base: "http://d:1",
+      session: () => "s_1",
+      isPinned: () => pinned,
+      parkFeed: () => parks.push(1),
+      loadMount: async () => () => ({ unmount: () => {}, serializeState: () => null }),
+      fetchText: async () => "1. e4 *",
+    });
+    return { parks };
+  }
+
+  it("re-parks a pinned feed after the board mounts", async () => {
+    // Arrange
+    const { parks } = arrangePin(true);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    // Act
+    hydrateChessGames(rootOf(el));
+    await flush();
+    // Assert
+    expect(parks).toHaveLength(1);
+  });
+
+  it("leaves an unpinned feed alone", async () => {
+    // Arrange
+    const { parks } = arrangePin(false);
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    // Act
+    hydrateChessGames(rootOf(el));
+    await flush();
+    // Assert
+    expect(parks).toHaveLength(0);
+  });
+
+  it("does not re-park when the mount fails", async () => {
+    // Arrange
+    const { parks } = arrangePin(true);
+    configureChessGames({
+      base: "http://d:1",
+      session: () => "s_1",
+      isPinned: () => true,
+      parkFeed: () => parks.push(1),
+      loadMount: async () => {
+        throw new Error("assets missing");
+      },
+      fetchText: async () => "1. e4 *",
+    });
+    const el = fakeContainer("/ws/chess-game-a.pgn");
+    // Act
+    hydrateChessGames(rootOf(el));
+    await flush();
+    // Assert
+    expect(parks).toHaveLength(0);
+  });
+});
+
 describe("out-of-band navigation", () => {
   afterEach(() => configureChessGames(null));
 
