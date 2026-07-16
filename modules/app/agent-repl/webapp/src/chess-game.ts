@@ -149,6 +149,16 @@ export interface ChessGameConfig {
   base: string;
   /** Live session id (a getter: rebind swaps the id under the view). */
   session: () => string;
+  /**
+   * Host feed pinning probe: true when the transcript sits at its tail.
+   * Read synchronously when hydration begins, BEFORE the async mount
+   * grows the bubble — a mounted board adds hundreds of pixels after
+   * the renderer already parked the feed, which would otherwise leave
+   * the view stranded above the tail and break follow-the-output.
+   */
+  isPinned?: () => boolean;
+  /** Host feed re-park, invoked after a mount grew a pinned feed. */
+  parkFeed?: () => void;
   /** Test seam: replaces the dynamic bundle import. */
   loadMount?: () => Promise<ChessWidgetMount>;
   /** Test seam: replaces fetch-as-text (throws on any non-OK). */
@@ -286,6 +296,9 @@ export function hydrateChessGames(root: ChessGameRoot): void {
     el.addEventListener("click", () => {
       activeGameKey = stateKey;
     });
+    // Captured NOW, not after the mount: the mount itself grows the feed
+    // past the tail, which would read as "not pinned" afterward.
+    const pinned = config.isPinned?.() ?? false;
     void (async () => {
       try {
         const [mount, opts] = await Promise.all([
@@ -299,6 +312,9 @@ export function hydrateChessGames(root: ChessGameRoot): void {
         const handle = mount(el, opts);
         gameHandles.set(el, handle);
         liveGames.set(stateKey, { el, handle });
+        // A pinned feed follows its tail: restore it under the growth
+        // this mount just added beneath the parked position.
+        if (pinned) cfg.parkFeed?.();
       } catch (err) {
         if (el.isConnected) {
           el.innerHTML = errorHtml(err instanceof Error ? err.message : String(err));
