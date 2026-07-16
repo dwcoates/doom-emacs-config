@@ -6,6 +6,7 @@
  *   ?session=<id>       join an existing session (else one is created)
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
+ *   ?sidebar=1          show the workspace sidebar (the Emacs drawer, ported)
  */
 import {
   TOPBAR_AGENT_ATTR,
@@ -46,6 +47,7 @@ import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
+import { initSidebar } from "./sidebar.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import { ConversationStore } from "./store.js";
@@ -78,6 +80,12 @@ async function boot(): Promise<void> {
   const daemon = params.get("daemon") ?? location.host;
   const httpBase = `${location.protocol === "https:" ? "https" : "http"}://${daemon}`;
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
+
+  // The workspace sidebar is opt-in (?sidebar=1). Without the param the
+  // aside stays hidden and no /workspaces/stream socket ever opens.
+  if (params.get("sidebar") === "1") {
+    initSidebar({ el: must("sidebar"), httpBase, wsBase });
+  }
 
   let joined = params.get("session");
   if (!joined) {
