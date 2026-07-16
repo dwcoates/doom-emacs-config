@@ -8,8 +8,9 @@
 import { describe, expect, it } from "vitest";
 
 import { AgentClock } from "../src/agent-clock.js";
-import { TICK_MS, TimerHost } from "../src/timer.js";
+import { TICK_MS } from "../src/timer.js";
 import { AgentClockEntry } from "../src/topbar.js";
+import { clockHarness } from "./clock-harness.js";
 
 /** When the fixture agents started, as their tool-use-start stamps. */
 const START = "2026-07-13T12:00:00.000Z";
@@ -20,38 +21,15 @@ function liveAgent(id = "a1", startedAt = START): AgentClockEntry {
   return { id, startedAt };
 }
 
-/** A hand-driven clock and scheduler, plus the paints the clock made. */
+/** The shared clock harness, plus the paints the clock made. */
 function harness() {
-  let now = START_MS;
-  let nextId = 1;
-  const intervals = new Map<number, { handler: () => void; ms: number }>();
+  const core = clockHarness(START_MS);
   const painted: Array<{ id: string; label: string }> = [];
-
-  const host: TimerHost = {
-    setInterval: (handler, ms) => {
-      const id = nextId++;
-      intervals.set(id, { handler, ms });
-      return id;
-    },
-    clearInterval: (id) => {
-      intervals.delete(id);
-    },
-    now: () => now,
-  };
-
   return {
-    host,
+    ...core,
     painted,
-    intervals,
-    /** Advance the clock and fire every live interval once per tick crossed. */
-    advance(ms: number): void {
-      for (let elapsed = 0; elapsed < ms; elapsed += TICK_MS) {
-        now += TICK_MS;
-        for (const interval of [...intervals.values()]) interval.handler();
-      }
-    },
     clock(): AgentClock {
-      return new AgentClock(host, (id, label) => painted.push({ id, label }));
+      return new AgentClock(core.host, (id, label) => painted.push({ id, label }));
     },
   };
 }
