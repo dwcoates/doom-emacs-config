@@ -405,6 +405,45 @@ nil) — defensive for callers passing stale buffer references."
   (should-not (agent-repl-window--benign-undeletable-error-p nil))
   (should-not (agent-repl-window--benign-undeletable-error-p '(user-error "Nope"))))
 
+;;;; ---- Restorable predicate (--panels-restorable-p) ----
+
+(ert-deftest agent-repl-window-test-panels-restorable-p-live-view ()
+  "A live view buffer makes the workspace's panels restorable."
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *restorable-view*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :frontend-buffer buf)
+            (should (agent-repl-window--panels-restorable-p "ws")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-window-test-panels-restorable-p-nil-when-view-dead ()
+  "A dead view buffer makes the workspace's panels non-restorable."
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *restorable-view-dead*")))
+      (agent-repl--ws-put "ws" :frontend-buffer buf)
+      (kill-buffer buf)
+      (should-not (agent-repl-window--panels-restorable-p "ws")))))
+
+(ert-deftest agent-repl-window-test-panels-restorable-p-nil-when-view-missing ()
+  "A workspace with no view buffer recorded is non-restorable."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl-window--panels-restorable-p "ws"))))
+
+(ert-deftest agent-repl-window-test-panels-restorable-p-ignores-dead-input ()
+  "A dead input buffer does not gate restorability — the mount path
+recreates it (`agent-repl--ensure-input-buffer')."
+  (agent-repl-test--with-clean-state
+    (let ((view-buf (generate-new-buffer " *restorable-view-2*"))
+          (input-buf (generate-new-buffer " *restorable-input*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws" :frontend-buffer view-buf)
+            (agent-repl--ws-put "ws" :input-buffer input-buf)
+            (kill-buffer input-buf)
+            (should (agent-repl-window--panels-restorable-p "ws")))
+        (when (buffer-live-p view-buf) (kill-buffer view-buf))))))
+
 ;;;; ---- Layout reconciliation (--ensure-layout) ----
 
 (cl-defun agent-repl-window-test--run-ensure-layout
