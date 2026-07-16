@@ -878,29 +878,51 @@ func postCreate(t *testing.T, h *harness, body string) string {
 	return out.SessionID
 }
 
-func TestCreateSessionDropsUnresumableResume(t *testing.T) {
+func TestCreateSessionHardFailsUnresumableResume(t *testing.T) {
 	// Arrange: a config dir with no transcript for the resume target.
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	h, captured := resumeGateHarness(t)
 	// Act
-	id := postCreate(t, h, `{"cwd":"/w","resume":"uuid-gone"}`)
-	// Assert: the shim was spawned WITHOUT the doomed --resume.
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
+		bytes.NewBufferString(`{"cwd":"/w","resume":"uuid-gone"}`))
+	if err != nil {
+		t.Fatalf("POST /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert: the create HARD-FAILS (no fresh start, no doomed --resume).
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	var body struct {
+		Code          string   `json:"code"`
+		ResumeID      string   `json:"resume_id"`
+		SearchedPaths []string `json:"searched_paths"`
+		Error         string   `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "resume_transcript_missing" {
+		t.Fatalf("code = %q, want resume_transcript_missing", body.Code)
+	}
+	if body.ResumeID != "uuid-gone" {
+		t.Fatalf("resume_id = %q, want uuid-gone", body.ResumeID)
+	}
+	if len(body.SearchedPaths) == 0 {
+		t.Fatalf("searched_paths empty, want the stat'd transcript path")
+	}
+	if body.Error == "" {
+		t.Fatalf("error message empty, want a loud human-readable message")
+	}
+	// And NO shim was spawned: the create was rejected before launch, so
+	// nothing took the lost session's place.
+	select {
+	case <-h.shims:
+		t.Fatal("a shim was spawned; want the create rejected before any launch")
+	default:
+	}
 	if captured.Resume != "" {
-		t.Fatalf("spawn opts.Resume = %q, want dropped (empty)", captured.Resume)
-	}
-	// And the drop is visible in-band as a recoverable error frame.
-	conn := h.dial(t, id)
-	hello := readFrame(t, conn)
-	if hello["claude_session_id"] != nil && hello["claude_session_id"] != "" {
-		t.Fatalf("hello claude_session_id = %v, want empty for a fresh session", hello["claude_session_id"])
-	}
-	req, _ := json.Marshal(map[string]any{"type": "replay-request", "from_seq": hello["resume_from_seq"]})
-	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
-		t.Fatalf("replay-request: %v", err)
-	}
-	frame := readFrame(t, conn)
-	if frame["type"] != "error" || frame["code"] != "resume_unavailable" || frame["recoverable"] != true {
-		t.Fatalf("frame = %v, want recoverable resume_unavailable error", frame)
+		t.Fatalf("spawn captured Resume = %q, want no spawn at all", captured.Resume)
 	}
 }
 

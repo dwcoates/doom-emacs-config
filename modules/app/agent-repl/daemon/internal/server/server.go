@@ -1045,26 +1045,28 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode))
 		return
 	}
-	id := newSessionID()
 	// Resume viability gate: the CLI hard-exits (fatal_error) when asked
 	// to --resume a session id with no transcript in this daemon's
-	// config dir — e.g. an id minted inside the Docker sandbox or under
-	// another CLAUDE_CONFIG_DIR. Spawning anyway yields a session that
-	// dies within seconds and a client-side death loop (every send
-	// recreates another doomed session). Start FRESH instead and tell
-	// the webapp why in-band; nothing about this is silent.
-	var droppedResume string
-	var droppedPath string
+	// config dir — e.g. an id minted inside the Docker sandbox, under
+	// another CLAUDE_CONFIG_DIR, or one whose transcript was deleted.
+	// Silently downgrading to a FRESH conversation (the old behavior)
+	// buries a genuinely lost session, so instead HARD-FAIL the create
+	// before spawning anything: the response carries a machine-detectable
+	// code plus the resume id and every path stat'd, so the Emacs client
+	// opens an investigation workspace for the lost session and surfaces
+	// the loss loudly rather than either running a doomed --resume or
+	// papering over it with a blank conversation. Fake sessions skip the
+	// gate — the scripted SDK has no transcripts by design.
 	if opts.Resume != "" && !opts.Fake && !s.forceFake {
 		path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
 		if _, statErr := os.Stat(path); statErr != nil {
-			s.logf("session %s: resume target %s has no transcript at %s — starting fresh instead of a doomed --resume: %v",
-				id, opts.Resume, path, statErr)
-			droppedResume = opts.Resume
-			droppedPath = path
-			opts.Resume = ""
+			s.logf("session create REJECTED: resume target %s has no transcript at %s — hard-failing so the client opens an investigation workspace instead of a doomed --resume or a silent fresh start: %v",
+				opts.Resume, path, statErr)
+			writeResumeTranscriptMissing(w, opts.Resume, []string{path})
+			return
 		}
 	}
+	id := newSessionID()
 	// Register BEFORE launch: transcript seeding fires the registrar's
 	// claude_session_id write-through, which updates this record. Fake
 	// sessions are never registered — they have no durable transcript,
@@ -1087,9 +1089,6 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, fmt.Sprintf("spawn shim: %v", err))
 		return
-	}
-	if droppedResume != "" {
-		sess.NoteResumeUnavailable(droppedResume, droppedPath)
 	}
 	s.mu.Lock()
 	s.sessions[id] = sess
@@ -1578,6 +1577,26 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 	w.WriteHeader(status)
 	// Encoding a map[string]string cannot fail; ignore is unreachable.
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// writeResumeTranscriptMissing hard-fails a create whose --resume target
+// has no transcript in this daemon's config dir. No session is spawned:
+// the body carries a machine-detectable code plus the resume id and
+// every path stat'd so the Emacs client can open an investigation
+// workspace for the lost session instead of silently starting fresh.
+// Non-recoverable by construction — there is no session to recover.
+func writeResumeTranscriptMissing(w http.ResponseWriter, resumeID string, searchedPaths []string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	// Encoding strings and a []string cannot fail; ignore is unreachable.
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"code":           "resume_transcript_missing",
+		"resume_id":      resumeID,
+		"searched_paths": searchedPaths,
+		"error": fmt.Sprintf(
+			"resume target %s has no transcript in this daemon's config dir (searched %s); refusing to start a fresh conversation — the client will open an investigation workspace",
+			resumeID, strings.Join(searchedPaths, ", ")),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, logf func(string, ...any), v any) {
