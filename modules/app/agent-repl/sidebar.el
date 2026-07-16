@@ -576,54 +576,40 @@ drawer refreshes, and a snapshot is force-pushed either way."
           (agent-repl-drawer--refresh-if-visible))
         (agent-repl-sidebar--push t)))))
 
+(defconst agent-repl-sidebar--actions-watcher
+  '(:label "sidebar-actions-watch"
+    :dir-var agent-repl-sidebar-actions-dir
+    :prefix-var agent-repl-sidebar-actions-file-prefix
+    :regexp-var agent-repl-sidebar-actions-file-regexp
+    :descriptor-var agent-repl-sidebar--actions-watch
+    :process-fn agent-repl-sidebar--process-action-file
+    :register-fn agent-repl-sidebar--register-actions-watch
+    :drain-fn agent-repl-sidebar--drain-action-files
+    :handler-fn agent-repl-sidebar--actions-watch-handler)
+  "dir-watcher spec for the sidebar action channel.
+See dir-watcher.el for the key contract; every value is a symbol so
+defcustom edits, test `let'-bindings, and `cl-letf' stubs of the named
+functions all resolve at use time.")
+
 (defun agent-repl-sidebar--drain-action-files ()
   "Process every sidebar action file currently in the actions directory.
 Catch-up path for files that landed while the watch was down.  Returns
 the number of files processed."
-  (let* ((dir (expand-file-name agent-repl-sidebar-actions-dir))
-         (files (when (file-directory-p dir)
-                  (directory-files dir t agent-repl-sidebar-actions-file-regexp))))
-    (dolist (file files)
-      (agent-repl-sidebar--process-action-file file))
-    (length files)))
+  (agent-repl--dir-watcher-drain agent-repl-sidebar--actions-watcher))
 
 (defun agent-repl-sidebar--actions-watch-handler (event)
   "Handle a file-notify EVENT for the sidebar actions directory.
-Same shape as `agent-repl--workspace-commands-watch-handler': dispatch
-matching creates/renames, re-arm + drain when the watch dies."
-  (let* ((action (nth 1 event))
-         (file (if (eq action 'renamed)
-                   (nth 3 event)
-                 (nth 2 event))))
-    (cond
-     ((and (memq action '(changed created renamed))
-           file
-           (string-prefix-p agent-repl-sidebar-actions-file-prefix
-                            (file-name-nondirectory file)))
-      (agent-repl-sidebar--process-action-file file))
-     ((or (eq action 'stopped)
-          (and (eq action 'deleted)
-               file
-               (string= (file-name-as-directory (expand-file-name file))
-                        (file-name-as-directory
-                         (expand-file-name agent-repl-sidebar-actions-dir)))))
-      (agent-repl--log nil "sidebar-actions-watch: watch lost (action=%s) — re-arming"
-                       action)
-      (agent-repl-sidebar--register-actions-watch)
-      (agent-repl-sidebar--drain-action-files)))))
+Dispatches matching creates/renames to
+`agent-repl-sidebar--process-action-file'; a lost watch re-arms and
+drains.  See `agent-repl--dir-watcher-handle-event' for the shared
+semantics."
+  (agent-repl--dir-watcher-handle-event
+   agent-repl-sidebar--actions-watcher event))
 
 (defun agent-repl-sidebar--register-actions-watch ()
   "Register the file-notify watch on the sidebar actions directory.
 Tears down any existing watch first to avoid duplicates on re-eval."
-  (let ((dir (expand-file-name agent-repl-sidebar-actions-dir)))
-    (make-directory dir t)
-    (when (and agent-repl-sidebar--actions-watch
-               (file-notify-valid-p agent-repl-sidebar--actions-watch))
-      (file-notify-rm-watch agent-repl-sidebar--actions-watch))
-    (setq agent-repl-sidebar--actions-watch
-          (file-notify-add-watch
-           dir '(change)
-           #'agent-repl-sidebar--actions-watch-handler))))
+  (agent-repl--dir-watcher-register agent-repl-sidebar--actions-watcher))
 
 (agent-repl-sidebar--register-actions-watch)
 

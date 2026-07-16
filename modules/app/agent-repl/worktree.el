@@ -99,75 +99,42 @@ it to the WS perspective without displaying it."
 
 (defvar agent-repl--workspace-generation-watch nil)
 
+(defconst agent-repl--workspace-commands-watcher
+  '(:label "workspace-commands-watch"
+    :dir-var agent-repl-workspace-commands-output-dir
+    :prefix-var agent-repl-workspace-commands-file-prefix
+    :regexp-var agent-repl-workspace-commands-file-regexp
+    :descriptor-var agent-repl--workspace-generation-watch
+    :process-fn agent-repl--process-workspace-commands-file
+    :register-fn agent-repl--register-workspace-commands-watch
+    :drain-fn agent-repl--drain-workspace-commands-files
+    :handler-fn agent-repl--workspace-commands-watch-handler)
+  "dir-watcher spec for the workspace-commands channel.
+See dir-watcher.el for the key contract; every value is a symbol so
+defcustom edits, test `let'-bindings, and `cl-letf' stubs of the named
+functions all resolve at use time.")
+
 (defun agent-repl--drain-workspace-commands-files ()
   "Process every workspace_commands_*.json currently in the output dir.
 Used to catch files that landed while the file-notify watch was down
 \(e.g. after the output directory was deleted and recreated, which
 invalidates the watch).  Returns the number of files processed."
-  (let* ((dir (expand-file-name agent-repl-workspace-commands-output-dir))
-         (files (when (file-directory-p dir)
-                  (directory-files dir t agent-repl-workspace-commands-file-regexp))))
-    (dolist (file files)
-      (agent-repl--log nil "drain-workspace-commands-files: processing file=%s" file)
-      (agent-repl--process-workspace-commands-file file))
-    (length files)))
+  (agent-repl--dir-watcher-drain agent-repl--workspace-commands-watcher))
 
 (defun agent-repl--workspace-commands-watch-handler (event)
   "Handle a file-notify EVENT for the workspace commands output directory.
 Dispatches to `agent-repl--process-workspace-commands-file' when a
-workspace_commands_*.json file is created, changed, or renamed.
-
-When the event is `stopped' (or the watched directory itself is
-`deleted' — both fire when `~/.claude/output' is removed and recreated,
-which silently invalidates the watch descriptor and would otherwise
-strand every future generated command file), the watch is re-armed via
-`agent-repl--register-workspace-commands-watch' and any files that
-landed during the gap are drained."
-  (let* ((action (nth 1 event))
-         ;; renamed events carry (descriptor renamed old-file new-file)
-         ;; all other events carry (descriptor action file)
-         (file (if (eq action 'renamed)
-                   (nth 3 event)
-                 (nth 2 event))))
-    (agent-repl--log nil "workspace-commands-watch-handler: action=%s file=%s" action file)
-    (cond
-     ((and (memq action '(changed created renamed))
-           (string-prefix-p agent-repl-workspace-commands-file-prefix
-                            (file-name-nondirectory file)))
-      (agent-repl--process-workspace-commands-file file))
-     ((or (eq action 'stopped)
-          ;; `deleted' of the watched dir ITSELF means the watch is lost;
-          ;; a `deleted' of an individual command file (routine cleanup
-          ;; after processing) must NOT trigger a re-arm.
-          (and (eq action 'deleted)
-               file
-               (string= (file-name-as-directory (expand-file-name file))
-                        (file-name-as-directory
-                         (expand-file-name agent-repl-workspace-commands-output-dir)))))
-      ;; The watched directory went away — re-arm and pick up anything
-      ;; written while the watch was dead so `SPC j o' keeps working.
-      (agent-repl--log nil "workspace-commands-watch-handler: watch lost (action=%s) — re-arming" action)
-      (agent-repl--register-workspace-commands-watch)
-      (let ((n (agent-repl--drain-workspace-commands-files)))
-        (agent-repl--log nil "workspace-commands-watch-handler: re-armed and drained %d pending file(s)" n)))
-     (t
-      (agent-repl--log nil "workspace-commands-watch-handler: skipped (wrong action or wrong prefix)")))))
+workspace_commands_*.json file is created, changed, or renamed; a lost
+watch (`stopped', or `deleted' of the directory itself) re-arms and
+drains.  See `agent-repl--dir-watcher-handle-event' for the shared
+semantics."
+  (agent-repl--dir-watcher-handle-event
+   agent-repl--workspace-commands-watcher event))
 
 (defun agent-repl--register-workspace-commands-watch ()
   "Register a file-notify watch on ~/.claude-emacs/output/ for workspace command files.
 Tears down any existing watch first to avoid duplicates on re-eval."
-  (let ((output-dir (expand-file-name agent-repl-workspace-commands-output-dir)))
-    (make-directory output-dir t)
-    (when (and agent-repl--workspace-generation-watch
-               (file-notify-valid-p agent-repl--workspace-generation-watch))
-      (file-notify-rm-watch agent-repl--workspace-generation-watch))
-    (agent-repl--log nil "workspace-commands-watch: registering watch on %s for workspace_commands_*.json"
-                      output-dir)
-    (setq agent-repl--workspace-generation-watch
-          (file-notify-add-watch
-           output-dir
-           '(change)
-           #'agent-repl--workspace-commands-watch-handler))))
+  (agent-repl--dir-watcher-register agent-repl--workspace-commands-watcher))
 
 (agent-repl--register-workspace-commands-watch)
 
