@@ -2887,3 +2887,84 @@ func TestRefreshCommandsIs404ForAnUnknownSession(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+// getTaskOutput requests a detached task's tail, decoding the JSON body on
+// a 200 and leaving it nil otherwise (so status-only cases stay terse).
+func (h *harness) getTaskOutput(t *testing.T, sessionID, taskID, query string) (*http.Response, map[string]any) {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions/" + sessionID + "/tasks/" + taskID + "/output" + query)
+	if err != nil {
+		t.Fatalf("GET task output: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		return resp, nil
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode task output: %v", err)
+	}
+	return resp, body
+}
+
+func TestTaskOutputIs404ForAnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp, _ := h.getTaskOutput(t, "s_nope", "bg1", "")
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTaskOutputIs404ForAnUnknownTask(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act — the session exists but recorded no such task.
+	resp, _ := h.getTaskOutput(t, id, "bg-nope", "")
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTaskOutputRejectsANegativeOffset(t *testing.T) {
+	// Arrange — the offset is a byte cursor, so a negative one is malformed.
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act
+	resp, _ := h.getTaskOutput(t, id, "bg1", "?offset=-1")
+	// Assert
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTaskOutputServesARecordedTask(t *testing.T) {
+	// Arrange — announce a spawn so the session records the task's spool path.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	shim.pushEvent(t, `{"type":"tool-result","tool_use_id":"tu1","content":"with ID: bg1. Output is being written to: /tmp/claude-0/srv/tasks/bg1.output."}`)
+	// Act — poll until the recording crosses the shim channel.
+	var body map[string]any
+	deadline := time.Now().Add(recvTimeout)
+	for time.Now().Before(deadline) {
+		if resp, b := h.getTaskOutput(t, id, "bg1", ""); resp.StatusCode == http.StatusOK {
+			body = b
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Assert — a well-formed poll response, still live (no notification yet).
+	if body == nil {
+		t.Fatal("task output never became available")
+	}
+	if _, ok := body["offset"]; !ok {
+		t.Errorf("body missing offset: %v", body)
+	}
+	if body["done"] != false {
+		t.Errorf("done = %v, want false", body["done"])
+	}
+}
