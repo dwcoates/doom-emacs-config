@@ -322,6 +322,83 @@ to the main repo's `.git', and the helper returns its parent."
                "/nonexistent/agent-repl-test/repo/.git")))
     (should (null (agent-repl--main-worktree-path "/tmp/whatever")))))
 
+;;;; ---- Tests: main-worktree-p ----
+;;
+;; `agent-repl--main-worktree-p' is a pure filesystem check: the main
+;; worktree's `.git' is a directory; a linked worktree's `.git' is a
+;; `gitdir:' pointer FILE.
+
+(ert-deftest agent-repl-test-main-worktree-p-dot-git-directory ()
+  "A dir whose `.git' is a directory is the main worktree."
+  (let ((repo (make-temp-file "agent-repl-test-mwp-" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" repo) t)
+          (should (agent-repl--main-worktree-p repo)))
+      (delete-directory repo t))))
+
+(ert-deftest agent-repl-test-main-worktree-p-dot-git-file ()
+  "A dir whose `.git' is a plain pointer file is a LINKED worktree, not main."
+  (let ((wt (make-temp-file "agent-repl-test-mwp-wt-" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name ".git" wt)
+            (insert "gitdir: /somewhere/.git/worktrees/wt\n"))
+          (should-not (agent-repl--main-worktree-p wt)))
+      (delete-directory wt t))))
+
+(ert-deftest agent-repl-test-main-worktree-p-no-dot-git ()
+  "A dir with no `.git' entry at all is not the main worktree."
+  (let ((dir (make-temp-file "agent-repl-test-mwp-none-" t)))
+    (unwind-protect
+        (should-not (agent-repl--main-worktree-p dir))
+      (delete-directory dir t))))
+
+(ert-deftest agent-repl-test-main-worktree-p-nil-dir ()
+  "A nil directory is not the main worktree (and does not error)."
+  (should-not (agent-repl--main-worktree-p nil)))
+
+;;;; ---- Tests: merge-close-workspace (main-worktree guard) ----
+;;
+;; A merge tears down the merged workspace via `--close-workspace', but
+;; must NEVER close a repo's MAIN worktree — doing so is what made
+;; `explanation-engine' vanish from persp-mode ("... is not an available
+;; workspace" on `SPC p p').
+
+(ert-deftest agent-repl-test-merge-close-workspace-refuses-main-worktree ()
+  "A merge must NOT close a repo's MAIN worktree (its `.git' is a
+directory): the close is skipped and nil is returned."
+  (agent-repl-test--with-clean-state
+    (let ((repo (make-temp-file "agent-repl-test-mcw-main-" t))
+          (closed nil))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name ".git" repo) t)
+            (agent-repl--ws-put "explanation-engine" :project-dir repo)
+            (cl-letf (((symbol-function 'agent-repl--close-workspace)
+                       (lambda (&rest _) (setq closed t))))
+              (should-not (agent-repl--merge-close-workspace
+                           "explanation-engine" 'preserve-entry))
+              (should-not closed)))
+        (delete-directory repo t)))))
+
+(ert-deftest agent-repl-test-merge-close-workspace-closes-linked-worktree ()
+  "A merge closes a normal LINKED worktree (its `.git' is a pointer file),
+forwarding PRESERVE-ENTRY, and returns non-nil."
+  (agent-repl-test--with-clean-state
+    (let ((wt (make-temp-file "agent-repl-test-mcw-wt-" t))
+          (closed-args nil))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name ".git" wt)
+              (insert "gitdir: /main/.git/worktrees/feature\n"))
+            (agent-repl--ws-put "feature-x" :project-dir wt)
+            (cl-letf (((symbol-function 'agent-repl--close-workspace)
+                       (lambda (ws &optional pe) (setq closed-args (list ws pe)))))
+              (should (agent-repl--merge-close-workspace "feature-x" 'preserve-entry))
+              (should (equal closed-args '("feature-x" preserve-entry)))))
+        (delete-directory wt t)))))
+
 ;;;; ---- Tests: checkout-master-in-worktree ----
 ;;
 ;; `agent-repl--checkout-master-in-worktree' shells out via

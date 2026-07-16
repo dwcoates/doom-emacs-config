@@ -346,6 +346,21 @@ fails or the resolved path is not a live directory."
         (when (file-directory-p parent)
           parent)))))
 
+(defun agent-repl--main-worktree-p (dir)
+  "Return non-nil when DIR is a git repository's MAIN worktree.
+
+The main worktree is the original clone: its `.git' is a real
+DIRECTORY.  A linked worktree created by `git worktree add' instead
+has a `.git' FILE holding a `gitdir:' pointer into the main worktree's
+`.git/worktrees/<name>'.  Distinguishing the two is a pure filesystem
+check — no git invocation.
+
+Returns nil when DIR is nil/not a string, does not exist, or has no
+`.git' entry, so callers treat \"unknown\" as \"not the main
+worktree\"."
+  (and (stringp dir)
+       (file-directory-p (expand-file-name ".git" dir))))
+
 (defun agent-repl--maybe-fast-forward-master (git-root)
   "Fast-forward local `master' to `origin/master' when safe.
 GIT-ROOT is any directory inside the repository.  Runs synchronously
@@ -2124,6 +2139,37 @@ entry point separately lets `agent-repl--handle-close-command' and
 their call sites without each duplicating the underlying primitive."
   (agent-repl--nuke-one-workspace ws preserve-entry))
 
+(defun agent-repl--merge-close-workspace (ws &optional preserve-entry)
+  "Close WS as a merge teardown step, UNLESS WS is a repo's MAIN worktree.
+
+A merge tears the merged workspace's editor state down via
+`agent-repl--close-workspace' (session, buffers, perspective).  That is
+correct for a disposable feature worktree, but the MAIN worktree of a
+repository is its permanent home base — never a merge source to be
+retired.  Closing it makes the repo's primary workspace vanish from
+persp-mode, so `SPC p p' can no longer switch to it and reports
+\"... is not an available workspace\".
+
+Detects the main worktree by its `.git' being a directory rather than a
+`gitdir:' pointer file (`agent-repl--main-worktree-p', keyed on WS's
+`:project-dir').  When WS is the main worktree the close is REFUSED and
+logged loudly (never silently swallowed); the rest of the merge
+finalization still runs.  Returns non-nil when the close ran, nil when
+it was refused.  PRESERVE-ENTRY is forwarded to
+`agent-repl--close-workspace'."
+  (let ((dir (agent-repl--ws-get ws :project-dir)))
+    (if (agent-repl--main-worktree-p dir)
+        (progn
+          (agent-repl--log ws
+                            "merge-close-workspace: REFUSED ws=%s dir=%s — main worktree (.git is a directory); merge must not close it"
+                            ws (or dir "nil"))
+          (agent-repl--warn ws
+                            "not closing workspace '%s' on merge — it is the repository's main worktree"
+                            ws)
+          nil)
+      (agent-repl--close-workspace ws preserve-entry)
+      t)))
+
 (defun agent-repl--finish-workspace (ws)
   "Tear down workspace WS: kill agent session, remove state, kill persp, remove worktree.
 WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
@@ -2344,7 +2390,7 @@ do this."
                       "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
                       ws (or repo-root "nil"))
     (agent-repl--log ws "workspace-merge-async: calling close-workspace ws=%s" ws)
-    (agent-repl--close-workspace ws 'preserve-entry)
+    (agent-repl--merge-close-workspace ws 'preserve-entry)
     (agent-repl--log ws "workspace-merge-async: close-workspace done elapsed=%.3fs — spawning thread"
                       (- (float-time) t0-async))
     (make-thread
@@ -4689,7 +4735,7 @@ off so the user resolves in magit directly."
                  (agent-repl--gns-sockets-close-then
                   target-ws
                   (lambda ()
-                    (agent-repl--close-workspace target-ws 'preserve-entry)
+                    (agent-repl--merge-close-workspace target-ws 'preserve-entry)
                     (agent-repl--refresh-magit-status-for-dir
                      project-root target-ws)))))))
             ;; Refresh the drawer's `:detail-*' cache so its rendering
