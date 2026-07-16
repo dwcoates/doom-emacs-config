@@ -5,7 +5,13 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
-import { TOPBAR_AGENT_ATTR, agentTopbarHtml, formatTokens } from "./topbar.js";
+import {
+  TOPBAR_AGENT_ATTR,
+  agentTopbarHtml,
+  formatTokens,
+  nextCounterMenu,
+  topbarClickAction,
+} from "./topbar.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -1897,27 +1903,20 @@ export class FeedRenderer {
   private handleAgentTopbarClick(target: HTMLElement): boolean {
     const host = target.closest(`[${TOPBAR_AGENT_ATTR}]`);
     if (!host) return false;
-    const agentId = host.getAttribute(TOPBAR_AGENT_ATTR) ?? "";
-    if (target.closest("[data-agents-toggle]")) {
-      this.toggleAgentMenu(agentId, "agents");
-      return true;
-    }
-    if (target.closest("[data-tasks-toggle]")) {
-      this.toggleAgentMenu(agentId, "tasks");
-      return true;
-    }
-    const rowId = target.closest(".agent-row")?.getAttribute("data-agent-id");
-    if (rowId) {
+    const action = topbarClickAction(target);
+    if (!action) return false;
+    if (action.kind === "toggle") {
+      this.toggleAgentMenu(host.getAttribute(TOPBAR_AGENT_ATTR) ?? "", action.menu);
+    } else {
       this.agentMenus.clear();
-      this.revealAgent(rowId);
-      return true;
+      this.revealAgent(action.agentId);
     }
-    return false;
+    return true;
   }
 
   /** Flip one bubble counter's overlay, closing every other bubble's. */
   private toggleAgentMenu(agentId: string, menu: "agents" | "tasks"): void {
-    const next = this.agentMenus.get(agentId) === menu ? null : menu;
+    const next = nextCounterMenu(this.agentMenus.get(agentId) ?? null, menu);
     this.agentMenus.clear();
     if (next !== null) this.agentMenus.set(agentId, next);
     this.rerender();

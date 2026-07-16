@@ -9,8 +9,10 @@
  */
 import {
   TOPBAR_AGENT_ATTR,
+  nextCounterMenu,
   runningAgentClocks,
   sessionTopbarDatapoints,
+  topbarClickAction,
   topbarInfoHtml,
 } from "./topbar.js";
 import { AgentClock } from "./agent-clock.js";
@@ -240,24 +242,20 @@ async function boot(): Promise<void> {
 
   // The chips are re-created by every renderChrome, so the toggles are
   // delegated off the topbar rather than bound to nodes that will not
-  // survive the turn. Opening one counter closes the other.
+  // survive the turn. Opening one counter closes the other. The click
+  // vocabulary is the strip's own (topbarClickAction), shared with the
+  // agent bubbles' delegation in the FeedRenderer.
   infoEl.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("[data-agents-toggle]")) {
-      setCounterMenu(counterMenu === "agents" ? null : "agents");
+    const action = topbarClickAction(e.target as HTMLElement);
+    if (!action) return;
+    if (action.kind === "toggle") {
+      setCounterMenu(nextCounterMenu(counterMenu, action.menu));
       return;
     }
-    if (target.closest("[data-tasks-toggle]")) {
-      setCounterMenu(counterMenu === "tasks" ? null : "tasks");
-      return;
-    }
-    // A click on a subagent row jumps the feed to that agent's bubble and
-    // opens it, then dismisses the roster so the revealed card is unobscured.
-    const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
-    if (agentId) {
-      feed.revealAgent(agentId);
-      setCounterMenu(null);
-    }
+    // A subagent row jumps the feed to that agent's bubble and opens it,
+    // then dismisses the roster so the revealed card is unobscured.
+    feed.revealAgent(action.agentId);
+    setCounterMenu(null);
   });
   // An open overlay closes the way every dropdown does: click off it, or
   // Escape. The agent bubbles' topbar overlays dismiss on the same
