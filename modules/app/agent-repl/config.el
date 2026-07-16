@@ -354,6 +354,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; workspace.el must precede it too — every one of those is loaded above.
 (agent-repl--load-module "explain-config")
 (agent-repl--load-module "merge-handlers")
+;; WHY: dir-watcher.el is the shared watched-directory intake that
+;; worktree.el (workspace commands) and sidebar.el (sidebar actions)
+;; both register against at load time.
+(agent-repl--load-module "dir-watcher")
 (agent-repl--load-module "worktree")
 (agent-repl--load-module "rename")
 (agent-repl--load-module "drawer")
