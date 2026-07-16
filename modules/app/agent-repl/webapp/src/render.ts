@@ -1972,7 +1972,6 @@ export class FeedRenderer {
 
   /** The PanelContext this renderer's state backs. */
   private panelContext(
-    items: readonly ConversationItem[],
     children: ReadonlyMap<string, readonly ConversationItem[]>,
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
   ): PanelContext {
@@ -1985,9 +1984,13 @@ export class FeedRenderer {
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
+      // The FULL item list, not the feed's clear-cut one: the roster
+      // retention stamps (`deactivatedAtTurn`) ride the whole-session
+      // counted-turn clock, so the strip's own clock must too — a cut
+      // list's smaller count would freeze every settled row at "just now".
       agentTopbar: (agent) =>
         agentTopbarHtml(
-          items,
+          this.lastState?.items ?? [],
           agent,
           {
             agentsOpen: this.agentMenus.get(agent.toolUseId) === "agents",
@@ -2151,7 +2154,7 @@ export class FeedRenderer {
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(items, part.children, watchers);
+    const panels = this.panelContext(part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
@@ -2278,7 +2281,7 @@ export class FeedRenderer {
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(items, part.children, watchers);
+    const panels = this.panelContext(part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
