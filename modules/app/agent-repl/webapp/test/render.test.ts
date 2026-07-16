@@ -25,6 +25,7 @@ import {
   rendersEmpty,
   repinsToTail,
   wakeRemainingLabel,
+  navTokensForEntry,
 } from "../src/render.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import {
@@ -3916,5 +3917,87 @@ describe("unsupported slash-command card", () => {
     );
     // Assert
     expect(html).toContain(`data-add-support="plugin:cmd"`);
+  });
+});
+
+/**
+ * The nav tokens the renderer stamps on each feed-item wrapper, which are
+ * the anchors the keyboard cycle (nav.ts) walks. Kept honest here rather
+ * than in nav.test.ts because finality is a RENDER-time derivation: only
+ * this module knows which text block closes a turn.
+ */
+describe("navTokensForEntry", () => {
+  /** The entry a single item renders as, with its finality resolved. */
+  const entryFor = (items: ConversationItem[], index = 0) => {
+    const entries = groupFeed(items);
+    return { entry: entries[index], finals: finalResponses(items) };
+  };
+
+  it("stamps a user turn as a prompt stop", () => {
+    // Arrange
+    const { entry, finals } = entryFor([userTurnAt(9, 0)]);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("prompt");
+  });
+
+  it("stamps a turn-closing text block as the turn's final response", () => {
+    // Arrange
+    const items = [userTurnAt(9, 0), text("b1"), result("success")];
+    const { entry, finals } = entryFor(items, 1);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("response final");
+  });
+
+  it("withholds the final token from an aborted turn's last text block", () => {
+    // Arrange: an aborted turn never produced a final response, so its
+    // trailing commentary must not become a stop on the response cycle.
+    const items = [userTurnAt(9, 0), text("b1"), result("error_during_execution")];
+    const { entry, finals } = entryFor(items, 1);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("response");
+  });
+
+  it("withholds the final token from a still-streaming text block", () => {
+    // Arrange: no result has landed, so the turn has no final response yet.
+    const items = [userTurnAt(9, 0), text("b1", false)];
+    const { entry, finals } = entryFor(items, 1);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("response");
+  });
+
+  it("stamps a tool card as a tool stop", () => {
+    // Arrange
+    const { entry, finals } = entryFor([bash("t1")]);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("tool");
+  });
+
+  it("stamps a whole consecutive-run tab group as one tool stop", () => {
+    // Arrange: a run of same-tool calls renders as a single tab group, so
+    // the cycle must stop on it once rather than once per member.
+    const { entry, finals } = entryFor([bash("t1"), bash("t2")]);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("tool");
+  });
+
+  it("leaves a thinking block off every cycle", () => {
+    // Arrange
+    const { entry, finals } = entryFor([thinking("k1")]);
+    // Act
+    const tokens = navTokensForEntry(entry, finals);
+    // Assert
+    expect(tokens).toBe("");
   });
 });

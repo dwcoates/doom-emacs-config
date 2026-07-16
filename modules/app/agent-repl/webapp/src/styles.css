@@ -1115,6 +1115,19 @@ pre {
    card) render as empty nodes: hide them so #feed's gap does not show. */
 .feed-item:empty { display: none; }
 
+/* The bubble the keyboard cycle (nav.ts) currently sits on.
+
+   Focus never leaves the input box while cycling, so the feed has no
+   caret and this bar is the ONLY thing saying where the cycle is: without
+   it, two adjacent bubbles both on screen are indistinguishable and the
+   scroll position is left to imply the answer. An inset shadow draws it
+   without shifting layout the way a real border would, and it rides the
+   wrapper (not the bubble) so it lands the same on every bubble kind. */
+.feed-item.nav-current {
+  box-shadow: inset 3px 0 0 var(--accent);
+  border-radius: 4px;
+}
+
 /* ---- The login terminal ----------------------------------------------------
 
    The Claude login is a full-screen TUI, gated behind stateful prompts

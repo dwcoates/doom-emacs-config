@@ -316,6 +316,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "workspace-status-export")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "sentinel")
+;; WHY: output-nav.el defines the feed-cycling commands that
+;; `agent-repl-input-mode-map' (input.el) binds, and drives them through
+;; the webview script boundary in frontend.el -- both sides already loaded
+;; above.  Ahead of input.el so the commands exist before the map cites
+;; them, though `map!' stores symbols and would resolve them either way.
+(agent-repl--load-module "output-nav")
 (agent-repl--load-module "input")
 ;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
 ;; `agent-repl-input-mode-map' (input.el) and writes captured images under
