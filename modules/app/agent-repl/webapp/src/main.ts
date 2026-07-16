@@ -30,6 +30,7 @@ import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
+import { requestSupportWorkspace } from "./unsupported.js";
 import { compactionBannerHtml, FeedRenderer, modelOptionsHtml, sessionInfoHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { ConversationStore } from "./store.js";
@@ -146,6 +147,11 @@ async function boot(): Promise<void> {
     // Watcher folds poll this while open (§ watcher-bubble expansion),
     // targeting the CURRENT session so a rebind moves the polls with it.
     fetchTaskTail: (taskId, offset) => fetchTaskTail(httpBase, activeSessionId, taskId, offset),
+    // The unsupported-command card's button. Targets the CURRENT session
+    // so a rebind opens the workspace against the checkout in view, and
+    // resolves to the workspace name Emacs was asked for — Emacs, not the
+    // daemon, decides what actually happens next.
+    addSupport: (command) => requestSupportWorkspace(httpBase, activeSessionId, command),
   });
 
   const statusEl = must("conn-status");

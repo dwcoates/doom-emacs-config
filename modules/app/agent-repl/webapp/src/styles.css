@@ -954,6 +954,17 @@ pre {
   cursor: not-allowed;
 }
 
+/* An unsupported slash command's card (see unsupported.ts). Rings in the
+   --err red a refusal carries, scoped to .pending so the card fades to the
+   settled grey once the support workspace has been asked for. The in-flight
+   button dims exactly like the picker's, since both mean "already sent". */
+.permission.pending.unsupported { border-color: var(--err); }
+.permission.unsupported .perm-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.unsupported-err { color: var(--err); font-style: normal; font-weight: normal; }
+
 /* --- pending indicators (running tool call, textless thinking) ------------- */
 /* Textless thinking: an orange spinner, with no quote bar, so the "model is
    working" beat reads as progress rather than as quoted content. */
