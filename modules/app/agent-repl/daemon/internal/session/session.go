@@ -124,8 +124,14 @@ type Session struct {
 	clients  map[*Client]struct{}
 	// tailers holds one release channel per detached task being tailed,
 	// keyed by task id; closing a channel ends that tail (see tailer.go).
-	tailers  map[string]chan struct{}
-	terminal bool
+	tailers map[string]chan struct{}
+	// taskPaths records every detached task's output-file location for the
+	// whole life of the session, so the poll route (§ watcher-bubble
+	// expansion) can serve a bounded tail on demand — even after a task's
+	// completion notification released its live tailer (a background agent
+	// is recorded here but never tailed). Guarded by mu.
+	taskPaths map[string]taskPathRec
+	terminal  bool
 	// queue is the in-flight message FIFO (§2.13): user messages submitted
 	// while a turn is in flight, held here so the daemon — not the SDK's
 	// opaque buffer — owns ordering. Guarded by mu.
@@ -329,6 +335,7 @@ func New(cfg Config) *Session {
 		tailInterval:      cfg.TaskTailInterval,
 		clients:           map[*Client]struct{}{},
 		tailers:           map[string]chan struct{}{},
+		taskPaths:         map[string]taskPathRec{},
 		lastActive:        cfg.Now(),
 		done:              make(chan struct{}),
 	}

@@ -305,3 +305,143 @@ func TestSessionTailerStopsAfterTheCompletionNotification(t *testing.T) {
 		t.Fatal("tailer still supervised after its notification")
 	}
 }
+
+func TestParseAgentSpawnExtractsIDAndPath(t *testing.T) {
+	// Arrange — a background agent's result names agentId and output_file.
+	frame := announcementFrame(t, "Launched. agentId: a1 output_file: /tmp/claude-501/s/tasks/a1.output", false)
+	// Act
+	ann := parseAgentSpawn(frame)
+	// Assert
+	if ann == nil || ann.TaskID != "a1" || ann.Path != "/tmp/claude-501/s/tasks/a1.output" || ann.ToolUseID != "t1" {
+		t.Fatalf("ann = %+v", ann)
+	}
+}
+
+func TestParseAgentSpawnIgnoresErrorResults(t *testing.T) {
+	// Arrange
+	frame := announcementFrame(t, "agentId: a1 output_file: /tmp/claude-501/s/tasks/a1.output", true)
+	// Act + Assert
+	if parseAgentSpawn(frame) != nil {
+		t.Fatal("an error result announces no tailable agent")
+	}
+}
+
+func TestParseAgentSpawnRefusesPathsOutsideTheSpool(t *testing.T) {
+	// Arrange
+	frame := announcementFrame(t, "agentId: a1 output_file: /etc/passwd.output", false)
+	// Act + Assert
+	if parseAgentSpawn(frame) != nil {
+		t.Fatal("a path outside the task spool must be refused")
+	}
+}
+
+// awaitTaskOutput polls TaskOutput until the session has recorded TASKID,
+// which lands a moment after the announcing event crosses the shim channel.
+func awaitTaskOutput(t *testing.T, s *Session, taskID string) string {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		if text, _, _, _, ok := s.TaskOutput(taskID, 0); ok {
+			return text
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("task %s never recorded", taskID)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func TestSessionServesRecordedTaskOutput(t *testing.T) {
+	// Arrange — a backgrounded shell whose spool file already has output.
+	path := spoolFile(t, "bg11.output")
+	if err := os.WriteFile(path, []byte("progress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	s := New(Config{ID: "s1", Shim: shim, ModelReconcileInterval: -1, TaskTailInterval: 5 * time.Millisecond})
+	s.Attach(s.NewReplayClient())
+	go s.Run()
+	defer func() { shim.end(); <-s.Done() }()
+	// Act — announce the spawn, then poll the tail.
+	content, _ := json.Marshal("with ID: bg11. Output is being written to: " + path + ".")
+	shim.events <- &protocol.L1Event{Type: "tool-result", ToolUseID: "tu11", Content: content}
+	text := awaitTaskOutput(t, s, "bg11")
+	// Assert
+	if !strings.Contains(text, "progress") {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestSessionTaskOutputStaysPollableAfterCompletion(t *testing.T) {
+	// Arrange — a tailed task whose completion notification will land.
+	path := spoolFile(t, "bg12.output")
+	if err := os.WriteFile(path, []byte("final output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	s := New(Config{ID: "s1", Shim: shim, ModelReconcileInterval: -1, TaskTailInterval: 5 * time.Millisecond})
+	s.Attach(s.NewReplayClient())
+	go s.Run()
+	defer func() { shim.end(); <-s.Done() }()
+	content, _ := json.Marshal("with ID: bg12. Output is being written to: " + path + ".")
+	shim.events <- &protocol.L1Event{Type: "tool-result", ToolUseID: "tu12", Content: content}
+	awaitTaskOutput(t, s, "bg12")
+	// Act — the notification settles the task; the path is kept, not dropped.
+	note, _ := json.Marshal(map[string]string{
+		"text": "<task-notification><task-id>bg12</task-id></task-notification>",
+	})
+	shim.events <- &protocol.L1Event{Type: "system", Subtype: "task_notification", Data: note}
+	// Assert — TaskOutput still serves the final output and reports done.
+	deadline := time.After(5 * time.Second)
+	for {
+		text, _, done, _, ok := s.TaskOutput("bg12", 0)
+		if ok && done {
+			if !strings.Contains(text, "final output") {
+				t.Fatalf("text = %q", text)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("task never reported done")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func TestSessionRecordsAgentPathWithoutTailing(t *testing.T) {
+	// Arrange — a background agent's verbose transcript is polled, never streamed.
+	path := spoolFile(t, "a2.output")
+	if err := os.WriteFile(path, []byte("agent transcript\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := newFakeShim()
+	s := New(Config{ID: "s1", Shim: shim, ModelReconcileInterval: -1, TaskTailInterval: 5 * time.Millisecond})
+	s.Attach(s.NewReplayClient())
+	go s.Run()
+	defer func() { shim.end(); <-s.Done() }()
+	// Act
+	content, _ := json.Marshal("agentId: a2 output_file: " + path)
+	shim.events <- &protocol.L1Event{Type: "tool-result", ToolUseID: "tua2", Content: content}
+	text := awaitTaskOutput(t, s, "a2")
+	// Assert — recorded and pollable, but no live tailer was started for it.
+	if !strings.Contains(text, "agent transcript") {
+		t.Fatalf("text = %q", text)
+	}
+	s.mu.Lock()
+	_, tailed := s.tailers["a2"]
+	s.mu.Unlock()
+	if tailed {
+		t.Fatal("a background agent should be recorded, not tailed")
+	}
+}
+
+func TestSessionTaskOutputUnknownIDIsNotOk(t *testing.T) {
+	// Arrange — a session that recorded no tasks.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	// Act + Assert
+	if _, _, _, _, ok := s.TaskOutput("nope", 0); ok {
+		t.Fatal("an unrecorded task id must not resolve")
+	}
+}
