@@ -7,6 +7,31 @@
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-alerter-executable "alerter"
+  "Name or path of the alerter binary.
+alerter is the clickable notification backend: it posts through the
+UNUserNotificationCenter API current macOS supports and reports a banner
+click on stdout, which agent-repl turns into a focus-Emacs-and-switch-to-
+workspace action (see `agent-repl--notify-backend-alerter')."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-notification-sender "org.gnu.Emacs"
+  "Bundle identifier the alerter backend attributes its banner to.
+macOS foregrounds a notification's originating app when the banner is
+clicked, so attributing the banner to Emacs makes a click bring Emacs
+forward.  Set to the bundle identifier of the running Emacs.app."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-notification-click-timeout-seconds 60
+  "Seconds a clickable alerter banner waits for a click before self-dismissing.
+alerter blocks until the banner is clicked or dismissed, or until this
+many seconds elapse, so this bounds how long a workspace-ready
+notification stays clickable from Notification Center."
+  :type 'number
+  :group 'agent-repl)
+
 (defcustom agent-repl-osascript-executable "osascript"
   "Name or path of the osascript binary."
   :type 'string
@@ -66,7 +91,7 @@ spawns its -execute command under."
 ;; `agent-repl-notify-timeout-seconds' and kills it, converting the silent
 ;; hang into a loud, sentinel-reported failure.
 
-(defun agent-repl--notify-process-sentinel (ws backend buffer &optional timer-cell)
+(defun agent-repl--notify-process-sentinel (ws backend buffer &optional timer-cell on-activate)
   "Return a process sentinel reporting a notification command's result.
 WS is the workspace name (or nil).  BACKEND is a symbol naming the backend
 \(for log context).  BUFFER captures the command's stdout/stderr and is
@@ -74,6 +99,12 @@ killed once the process terminates.  TIMER-CELL, when non-nil, is a
 one-element list whose car holds the hang-watchdog timer (see
 `agent-repl--notify-spawn'); the timer is cancelled on termination so a
 command that exits on its own leaves no pending watchdog behind.
+
+ON-ACTIVATE, when non-nil, is called with the command's trimmed output
+string on a zero exit, so a backend that reports a user click via its
+stdout (alerter) can act on it in-process.  An error it signals is logged
+loudly via `agent-repl--do-log' rather than propagated, keeping the
+sentinel non-signalling.
 
 A zero exit is logged at the gated `agent-repl--log' level; a non-zero
 exit (or signal termination, including the watchdog's kill) is logged
@@ -90,7 +121,15 @@ Emacs's process machinery, where a hard error would simply be dropped."
           (cancel-timer (car timer-cell))
           (setcar timer-cell nil))
         (if (and (integerp status) (zerop status))
-            (agent-repl--log ws "notify-backend=%s ok" backend)
+            (progn
+              (agent-repl--log ws "notify-backend=%s ok" backend)
+              (when on-activate
+                (condition-case err
+                    (funcall on-activate (or output ""))
+                  (error
+                   (agent-repl--do-log
+                    ws "notify-backend=%s on-activate ERROR: %s"
+                    (list backend (error-message-string err)))))))
           (agent-repl--do-log
            ws "notify-backend=%s FAILED status=%s event=%s output=%s"
            (list backend status (string-trim (or event "")) (or output ""))))
@@ -112,20 +151,29 @@ buffer survives the hang.  No-op when PROC already terminated."
      (list backend agent-repl-notify-timeout-seconds))
     (delete-process proc)))
 
-(defun agent-repl--notify-spawn (ws backend program &rest args)
+(defun agent-repl--notify-spawn (ws backend program args &optional watchdog-seconds on-activate)
   "Spawn PROGRAM with ARGS for a desktop notification, surfacing failures.
 WS is the workspace name (or nil).  BACKEND is a symbol naming the backend
-\(for log context).  Unlike a bare fire-and-forget `start-process', the
-command's output is captured into a temporary buffer and its exit status
-is reported via `agent-repl--notify-process-sentinel', so a notification
-tool that exits non-zero is logged rather than silently swallowed.
+\(for log context).  ARGS is the list of arguments passed to PROGRAM.
+Unlike a bare fire-and-forget `start-process', the command's output is
+captured into a temporary buffer and its exit status is reported via
+`agent-repl--notify-process-sentinel', so a notification tool that exits
+non-zero is logged rather than silently swallowed.
 
-A live process is additionally bounded by a hang watchdog scheduled for
-`agent-repl-notify-timeout-seconds' (see `agent-repl--notify-kill-hung'),
-so a tool that never exits — and therefore never delivers a banner nor
-reaches the sentinel — is killed and logged instead of leaking forever.
-The watchdog timer is handed to the sentinel through a one-element cell so
-a normally-exiting command cancels it.
+A live process is bounded by a hang watchdog (see
+`agent-repl--notify-kill-hung'), so a tool that never exits — and
+therefore never delivers a banner nor reaches the sentinel — is killed and
+logged instead of leaking forever.  WATCHDOG-SECONDS is how long the
+process may run before the watchdog kills it; nil uses
+`agent-repl-notify-timeout-seconds'.  A backend whose command is EXPECTED
+to stay alive awaiting user interaction (the clickable alerter banner)
+passes a value beyond its own self-dismiss timeout so a waiting command is
+not mistaken for a hang.  The watchdog timer is handed to the sentinel
+through a one-element cell so a normally-exiting command cancels it.
+
+ON-ACTIVATE is threaded to the sentinel and called with the command's
+trimmed output on a zero exit, letting a backend that reports a user click
+via its stdout (alerter) act on it.
 
 Returns the spawned process, or nil when `start-process' yields a
 non-process value (e.g. a test stub) — in which case the capture buffer is
@@ -138,9 +186,9 @@ cleaned up immediately so no orphan buffer leaks."
     (if (processp proc)
         (progn
           (set-process-sentinel
-           proc (agent-repl--notify-process-sentinel ws backend buffer timer-cell))
+           proc (agent-repl--notify-process-sentinel ws backend buffer timer-cell on-activate))
           (setcar timer-cell
-                  (run-at-time agent-repl-notify-timeout-seconds nil
+                  (run-at-time (or watchdog-seconds agent-repl-notify-timeout-seconds) nil
                                #'agent-repl--notify-kill-hung proc ws backend)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))
@@ -150,13 +198,21 @@ cleaned up immediately so no orphan buffer leaks."
 ;;
 ;; A finished-notification is emitted per-workspace (WS).  Making it
 ;; clickable means: clicking the banner focuses Emacs and switches to the
-;; workspace that finished.  Only terminal-notifier can carry a click
-;; action (its -execute flag runs a shell command on click); osascript's
-;; `display notification' has no click hook at all.  The click action is a
-;; small emacsclient invocation that evaluates
-;; `agent-repl--notification-activate', which raises the Emacs frame and
-;; jumps to WS.  For that emacsclient call to reach us, a live Emacs server
-;; must exist, so `agent-repl--ensure-server' starts one lazily.
+;; workspace that finished.  Both routes to the click converge on
+;; `agent-repl--notification-activate', which jumps to WS and raises Emacs.
+;;
+;; The primary route is alerter, which delivers on current macOS and
+;; reports a click on its stdout.  Emacs owns that process, so its sentinel
+;; calls `agent-repl--notification-activate' directly in-process — no
+;; emacsclient, no server, no shell command.  The banner is attributed to
+;; Emacs via -sender so macOS foregrounds Emacs on the click too.
+;;
+;; The fallback route is terminal-notifier's -execute flag, which runs a
+;; shell command on click (osascript's `display notification' has no click
+;; hook at all).  There the click action is a small emacsclient invocation
+;; that evaluates `agent-repl--notification-activate', and for that
+;; emacsclient call to reach us a live Emacs server must exist, so
+;; `agent-repl--ensure-server' starts one lazily.
 
 (defun agent-repl--ensure-server ()
   "Ensure the Emacs server is running so notification clicks reach Emacs.
@@ -207,12 +263,12 @@ surfaced to the log via `agent-repl--notify-spawn'."
   (let ((click (agent-repl--notification-click-command ws)))
     (when click
       (agent-repl--ensure-server))
-    (apply #'agent-repl--notify-spawn ws 'terminal-notifier
-           agent-repl-terminal-notifier-executable
-           "-title" title
-           "-message" message
-           "-sound" agent-repl-notification-sound
-           (when click (list "-execute" click)))))
+    (agent-repl--notify-spawn
+     ws 'terminal-notifier agent-repl-terminal-notifier-executable
+     (append (list "-title" title
+                   "-message" message
+                   "-sound" agent-repl-notification-sound)
+             (when click (list "-execute" click))))))
 
 (defun agent-repl--notify-backend-osascript (ws title message)
   "Send a desktop notification via osascript for WS.
@@ -220,23 +276,75 @@ TITLE and MESSAGE are the notification fields.  The command's exit status
 is captured and surfaced to the log via `agent-repl--notify-spawn', so an
 osascript invocation that exits non-zero (or whose notification the OS
 suppresses with a diagnostic) is logged instead of swallowed."
-  (agent-repl--notify-spawn ws 'osascript
-                             agent-repl-osascript-executable "-e"
-                             (format "display notification %S with title %S sound name %S"
-                                     message title agent-repl-notification-sound)))
+  (agent-repl--notify-spawn
+   ws 'osascript agent-repl-osascript-executable
+   (list "-e" (format "display notification %S with title %S sound name %S"
+                      message title agent-repl-notification-sound))))
+
+(defun agent-repl--alerter-click-p (output)
+  "Return non-nil when alerter OUTPUT reports the banner was clicked.
+alerter prints an @-prefixed activation token on exit: `@CONTENTCLICKED'
+when the notification body is clicked and `@ACTIONCLICKED' for an action
+button, versus `@TIMEOUT'/`@CLOSED' for a self-dismiss or dismissal.  Only
+a click should focus Emacs and switch workspaces, so a dismissal returns
+nil and leaves Emacs undisturbed."
+  (let ((token (string-trim (or output ""))))
+    (or (string-prefix-p "@CONTENTCLICKED" token)
+        (string-prefix-p "@ACTIONCLICKED" token))))
+
+(defun agent-repl--notify-backend-alerter (ws title message)
+  "Send a clickable desktop notification via alerter for WS.
+TITLE and MESSAGE are the notification fields.  alerter posts through the
+UNUserNotificationCenter API current macOS supports, so it delivers a
+banner where terminal-notifier only hangs.  Unlike osascript, alerter
+blocks until the banner is clicked or dismissed — or self-dismisses after
+`agent-repl-notification-click-timeout-seconds' — printing an activation
+token to stdout.  The banner is attributed to Emacs via -sender
+\(`agent-repl-notification-sender') so a click foregrounds Emacs, and the
+on-activate handler runs in-process to focus Emacs and switch to WS when
+the token reports a click (see `agent-repl--alerter-click-p' and
+`agent-repl--notification-activate').  A -group keyed to WS coalesces
+repeat notifications for the same workspace.
+
+Because alerter is EXPECTED to stay alive awaiting a click, the hang
+watchdog is set beyond its self-dismiss timeout so a waiting banner is not
+mistaken for a hang."
+  (let* ((timeout agent-repl-notification-click-timeout-seconds)
+         (keyed (and ws (stringp ws) (not (string-empty-p ws)))))
+    (agent-repl--notify-spawn
+     ws 'alerter agent-repl-alerter-executable
+     (append (list "-title" title
+                   "-message" message
+                   "-sound" agent-repl-notification-sound
+                   "-sender" agent-repl-notification-sender
+                   "-timeout" (number-to-string timeout))
+             (when keyed (list "-group" (concat "agent-repl:" ws))))
+     (+ timeout agent-repl-notify-timeout-seconds)
+     (lambda (output)
+       (when (agent-repl--alerter-click-p output)
+         (agent-repl--notification-activate ws))))))
 
 (defun agent-repl--select-notification-backend ()
   "Select the best available desktop notification backend.
-Prefers osascript, whose `display notification' still posts a banner on
-current macOS.  terminal-notifier would be the richer backend — it alone
-carries a click action (-execute), which is what made a finished-
-notification clickable — but terminal-notifier 2.0.0 is built on the
-NSUserNotification API that macOS 26 removed: it hangs forever, delivers
-no banner, and never exits.  Delivery beats clickability, so osascript
-wins whenever it is present, and terminal-notifier is kept only as the
-fallback for a host without osascript.  Signals an error if no supported
-notification tool is found."
+Prefers alerter: it delivers through the UNUserNotificationCenter API
+current macOS supports AND carries a click action, so a workspace-ready
+banner both appears and, when clicked, focuses Emacs and switches to the
+originating workspace (see `agent-repl--notify-backend-alerter').
+
+Falls back to osascript, whose `display notification' still posts a banner
+on current macOS but has no click hook at all, so its notifications are
+not clickable.
+
+terminal-notifier is the last resort: it alone once carried a click action
+via -execute, but terminal-notifier 2.0.0 is built on the NSUserNotification
+API that macOS 26 removed — it hangs forever, delivers no banner, and never
+exits.  It is kept only for a host lacking both alerter and osascript.
+
+Signals an error if no supported notification tool is found."
   (cond
+   ((executable-find agent-repl-alerter-executable)
+    (agent-repl--log nil "select-notification-backend: backend=alerter")
+    #'agent-repl--notify-backend-alerter)
    ((executable-find agent-repl-osascript-executable)
     (agent-repl--log nil "select-notification-backend: backend=osascript")
     #'agent-repl--notify-backend-osascript)
@@ -244,7 +352,7 @@ notification tool is found."
     (agent-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'agent-repl--notify-backend-terminal-notifier)
    (t
-    (error "agent-repl: no notification backend available (neither osascript nor terminal-notifier found)"))))
+    (error "agent-repl: no notification backend available (none of alerter, osascript, terminal-notifier found)"))))
 
 (defvar agent-repl--notification-backend (agent-repl--select-notification-backend)
   "Desktop notification backend function, selected at load time based on available platform tools.")
