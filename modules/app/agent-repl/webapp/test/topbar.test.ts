@@ -43,12 +43,17 @@ function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
   };
 }
 
-/** One scope's datapoints, defaulted to an idle scope with nothing counted. */
+/**
+ * One scope's datapoints, defaulted to an idle scope with nothing
+ * counted. The default carries no token menu — agent-scope semantics,
+ * where the tokens datapoint is the plain context figure.
+ */
 function datapoints(over: Partial<TopbarDatapoints> = {}): TopbarDatapoints {
   return {
     parentWs: null,
     timerLabel: IDLE_LABEL,
     contextTokens: null,
+    tokenMenu: null,
     agents: [],
     tasks: [],
     currentTurn: 0,
@@ -56,7 +61,7 @@ function datapoints(over: Partial<TopbarDatapoints> = {}): TopbarDatapoints {
   };
 }
 
-/** The strip for DATAPOINTS with both overlays closed unless OPEN says so. */
+/** The strip for DATAPOINTS with every overlay closed unless OPEN says so. */
 function strip(
   over: Partial<TopbarDatapoints> = {},
   open: Partial<TopbarDisclosure> = {},
@@ -64,6 +69,7 @@ function strip(
   return topbarInfoHtml(datapoints(over), {
     agentsOpen: false,
     tasksOpen: false,
+    tokensOpen: false,
     ...open,
   });
 }
@@ -84,6 +90,9 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     turnStartedAt: null,
     lastFinalResponseAt: null,
     contextTokens: null,
+    resultUsage: null,
+    turnUsage: new Map(),
+    modelUsage: null,
     compacting: false,
     interrupting: false,
     costUsd: null,
@@ -301,6 +310,26 @@ describe("topbarInfoHtml", () => {
     );
   });
 
+  it("renders the tokens dropdown chip when the scope carries a token menu", () => {
+    // Arrange — the session scope's tokens datapoint.
+    const html2 = strip({
+      tokenMenu: { topLevel: { input_tokens: 7, output_tokens: 1 }, models: null },
+    });
+    // Assert — the figure is the dropdown's trigger, not a plain span.
+    expect(html2).toContain("data-tokens-toggle");
+    expect(html2).toContain("tokens: 7 ");
+  });
+
+  it("drops the usage breakdown when the tokens chip is open", () => {
+    // Arrange + Act
+    const html2 = strip(
+      { tokenMenu: { topLevel: null, models: null } },
+      { tokensOpen: true },
+    );
+    // Assert
+    expect(html2).toContain("tokens-overlay");
+  });
+
   it("no longer renders the in/out counter or the cost estimate", () => {
     // Arrange + Act
     const html = strip({ parentWs: "ws", contextTokens: 10 });
@@ -402,11 +431,40 @@ describe("topbarInfoHtml", () => {
 });
 
 describe("sessionTopbarDatapoints", () => {
-  it("reads the session's standing context tokens", () => {
-    // Arrange + Act
+  it("projects the session's cumulative usage into the tokens dropdown", () => {
+    // Arrange — the last result's session-cumulative snapshot.
+    const state = storeState({ resultUsage: { input_tokens: 10, output_tokens: 20 } });
+    // Act
+    const d = sessionTopbarDatapoints(state, null, IDLE_LABEL);
+    // Assert
+    expect(d.tokenMenu?.topLevel).toEqual({ input_tokens: 10, output_tokens: 20 });
+  });
+
+  it("hands the whole-tree per-model map to the dropdown", () => {
+    // Arrange
+    const modelUsage = {
+      m: {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        web_search_requests: 0,
+        cost_usd: 0.01,
+        context_window: 1,
+      },
+    };
+    // Act
+    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null, IDLE_LABEL);
+    // Assert
+    expect(d.tokenMenu?.models).toEqual(modelUsage);
+  });
+
+  it("projects no plain standing, which stays in the store for the result chips", () => {
+    // Arrange + Act — the strip's session tokens datapoint is the
+    // dropdown; a standing here would render nothing anyway.
     const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null, IDLE_LABEL);
     // Assert
-    expect(d.contextTokens).toBe(200_000);
+    expect(d.contextTokens).toBeNull();
   });
 
   it("passes the parent workspace through", () => {
@@ -477,6 +535,11 @@ describe("agentTopbarDatapoints", () => {
     expect(agentTopbarDatapoints([agentItem()], agentItem(), NOW_MS).contextTokens).toBeNull();
   });
 
+  it("carries no tokens dropdown, which is session-only", () => {
+    // Arrange + Act + Assert — a bubble has no session-wide usage map.
+    expect(agentTopbarDatapoints([agentItem()], agentItem(), NOW_MS).tokenMenu).toBeNull();
+  });
+
   it("ticks the agent's own elapsed clock", () => {
     // Arrange + Act + Assert
     expect(agentTopbarDatapoints([agentItem()], agentItem(), NOW_MS).timerLabel).toBe("1m 30s");
@@ -516,21 +579,21 @@ describe("agentTopbarDatapoints", () => {
 describe("agentTopbarHtml", () => {
   it("marks the wrapper with the agent it is scoped to", () => {
     // Arrange + Act
-    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false }, NOW_MS);
+    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false, tokensOpen: false }, NOW_MS);
     // Assert — the tick and the click delegation both key off this.
     expect(html2).toContain(`${TOPBAR_AGENT_ATTR}="a1"`);
   });
 
   it("carries the shared topbar-info styling class", () => {
     // Arrange + Act
-    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false }, NOW_MS);
+    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false, tokensOpen: false }, NOW_MS);
     // Assert — one CSS contract styles the header strip and the bubble strip.
     expect(html2).toContain(`class="agent-topbar topbar-info"`);
   });
 
   it("carries a timer slot the bubble tick can repaint", () => {
     // Arrange + Act
-    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false }, NOW_MS);
+    const html2 = agentTopbarHtml([agentItem()], agentItem(), { agentsOpen: false, tasksOpen: false, tokensOpen: false }, NOW_MS);
     // Assert
     expect(html2).toContain(TIMER_SLOT);
   });
@@ -540,7 +603,7 @@ describe("agentTopbarHtml", () => {
     const agent = agentItem({ toolUseId: `a"1` });
     // Act + Assert
     expect(
-      agentTopbarHtml([agent], agent, { agentsOpen: false, tasksOpen: false }, NOW_MS),
+      agentTopbarHtml([agent], agent, { agentsOpen: false, tasksOpen: false, tokensOpen: false }, NOW_MS),
     ).not.toContain(`="a"1"`);
   });
 });
@@ -597,6 +660,14 @@ describe("topbarClickAction", () => {
     expect(topbarClickAction(clickOn("[data-tasks-toggle]"))).toEqual({
       kind: "toggle",
       menu: "tasks",
+    });
+  });
+
+  it("classifies a click on the tokens chip as the tokens toggle", () => {
+    // Arrange + Act + Assert — the session strip's usage-breakdown chip.
+    expect(topbarClickAction(clickOn("[data-tokens-toggle]"))).toEqual({
+      kind: "toggle",
+      menu: "tokens",
     });
   });
 

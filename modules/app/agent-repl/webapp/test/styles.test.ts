@@ -1648,3 +1648,56 @@ describe("the nav marker", () => {
     expect(body).not.toMatch(/\b(padding|margin)/);
   });
 });
+
+/* The tokens breakdown hangs off the same dropdown anchoring as the rosters
+   (its stems join their shared rules), but its rows are stat pairs, not
+   roster entries — the value alignment is its own contract. */
+// The leading newline pins the marker to the chip's own rule: the strip's
+// scoped color rule (".topbar-info .info-tokens") would otherwise match first.
+const tokensToggle = blockAfter(css, "\n.info-tokens {");
+const tokensValue = blockAfter(css, ".tokens-value {");
+const tokensSubRow = blockAfter(css, ".tokens-row.sub {");
+
+describe("tokens dropdown styles", () => {
+  it("anchors the overlay on the tokens menu that drops it", () => {
+    // Arrange / Act — the shared dropdown rule must name the tokens stem.
+    // Assert
+    expect(css).toMatch(/\.agents-menu, \.tasks-menu, \.tokens-menu \{/);
+  });
+
+  it("lifts the tokens overlay out of the topbar's flex row", () => {
+    // Arrange / Act — the shared overlay rule must name the tokens stem.
+    // Assert
+    expect(css).toMatch(/\.agents-overlay, \.tasks-overlay, \.tokens-overlay \{/);
+  });
+
+  it("renders the chip as a pointer target so it reads as pressable", () => {
+    // Arrange / Act — the figure became the dropdown's trigger button.
+    // Assert
+    expect(tokensToggle).toMatch(/cursor:\s*pointer/);
+  });
+
+  it("keeps the chip on its established datapoint token", () => {
+    // Arrange / Act — the figure's color survives the span-to-button move.
+    // Assert
+    expect(tokensToggle).toMatch(/color:\s*var\(--info-tokens\)/);
+  });
+
+  it("right-aligns the stat values off the labels", () => {
+    // Arrange / Act — margin-left auto in the row's flex is the alignment.
+    // Assert
+    expect(tokensValue).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("sets the stat figures in tabular digits so columns of them align", () => {
+    // Arrange / Act
+    // Assert
+    expect(tokensValue).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it("indents a total's constituent rows beneath it", () => {
+    // Arrange / Act — the sub rows read as children of the input total.
+    // Assert
+    expect(tokensSubRow).toMatch(/padding-left:/);
+  });
+});

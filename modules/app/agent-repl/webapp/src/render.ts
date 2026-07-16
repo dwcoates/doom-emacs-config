@@ -7,12 +7,13 @@
 import { SUBAGENT_TOOLS } from "./agents.js";
 import {
   TOPBAR_AGENT_ATTR,
+  TopbarMenu,
   agentTopbarHtml,
-  formatTokens,
   nextCounterMenu,
   topbarClickAction,
 } from "./topbar.js";
 import { taskCreateToolUseId } from "./tasks.js";
+import { formatTokens } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -165,6 +166,8 @@ function contentToText(
 
 // The topbar datapoint strip moved to topbar.ts, where ONE renderer
 // serves both the session header and the agent-scoped bubble strips.
+// The session's tokens datapoint there is the tokens dropdown chip
+// (`tokens.ts`); an agent strip keeps its plain context-size figure.
 
 /**
  * The compaction-in-progress banner: shown while the SDK is compacting the
@@ -1859,7 +1862,7 @@ export class FeedRenderer {
    * the card's per-frame re-renders; at most one entry, mirroring the
    * header's one-overlay-at-a-time rule feed-wide.
    */
-  private agentMenus = new Map<string, "agents" | "tasks">();
+  private agentMenus = new Map<string, TopbarMenu>();
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -1995,7 +1998,7 @@ export class FeedRenderer {
   }
 
   /** Flip one bubble counter's overlay, closing every other bubble's. */
-  private toggleAgentMenu(agentId: string, menu: "agents" | "tasks"): void {
+  private toggleAgentMenu(agentId: string, menu: TopbarMenu): void {
     const next = nextCounterMenu(this.agentMenus.get(agentId) ?? null, menu);
     this.agentMenus.clear();
     if (next !== null) this.agentMenus.set(agentId, next);
@@ -2074,6 +2077,9 @@ export class FeedRenderer {
           {
             agentsOpen: this.agentMenus.get(agent.toolUseId) === "agents",
             tasksOpen: this.agentMenus.get(agent.toolUseId) === "tasks",
+            // An agent strip renders no tokens chip (its tokens datapoint
+            // is the plain context figure), so nothing ever opens here.
+            tokensOpen: false,
           },
           Date.now(),
         ),

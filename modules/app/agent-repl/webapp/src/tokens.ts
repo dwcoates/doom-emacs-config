@@ -1,0 +1,174 @@
+/**
+ * Tokens dropdown — the topbar token figure and the breakdown overlay
+ * behind it. A sibling of the counter menus (`agents.ts`, `tasks.ts`):
+ * the same chip-plus-overlay shape, the same renderer-owned disclosure
+ * state, but stat rows rather than a roster, so it renders directly
+ * instead of specializing the counter-menu facade.
+ *
+ * The chip's figure is the TOP-LEVEL agent's cumulative input-side
+ * tokens — uncached input plus cache read plus cache write, the "single
+ * input tokens figure" convention — with every subagent's spend
+ * excluded (§2.4: a result's `usage` never contains sidechain spend).
+ * The overlay is where the resolution lives: the top-level dimensions
+ * split apart, the whole-tree totals summed from the per-model map
+ * (the only figure that counts subagents), and each model's own slice.
+ */
+import { escapeHtml } from "./highlight.js";
+import { ModelUsage, Usage } from "./protocol.js";
+import { contextTokens } from "./store.js";
+
+/** Everything the dropdown knows how to break down. */
+export interface TokenMenuData {
+  /** The top-level agent's cumulative usage; null before any is known. */
+  topLevel: Usage | null;
+  /**
+   * Per-model usage INCLUDING subagents (§2.4 `model_usage`); null until
+   * a result carries one — the whole-tree rows dash until then.
+   */
+  models: Record<string, ModelUsage> | null;
+}
+
+/** Token counts as the topbar and the result chip both write them: `300,000`. */
+export function formatTokens(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+/**
+ * A cost estimate row's text. Two decimals once the figure is readable
+ * at that resolution, four below a dime so small spends do not all
+ * collapse into `$0.00`.
+ */
+function formatCost(usd: number): string {
+  return `$${usd.toFixed(usd < 0.1 ? 4 : 2)}`;
+}
+
+/** The four token dimensions every usage payload carries, defaulted. */
+interface UsageDims {
+  input: number;
+  cacheCreation: number;
+  cacheRead: number;
+  output: number;
+}
+
+function dimsOfUsage(u: Usage): UsageDims {
+  return {
+    input: u.input_tokens,
+    cacheCreation: u.cache_creation_input_tokens ?? 0,
+    cacheRead: u.cache_read_input_tokens ?? 0,
+    output: u.output_tokens,
+  };
+}
+
+function dimsOfModelUsage(u: ModelUsage): UsageDims {
+  return {
+    input: u.input_tokens,
+    cacheCreation: u.cache_creation_input_tokens,
+    cacheRead: u.cache_read_input_tokens,
+    output: u.output_tokens,
+  };
+}
+
+/**
+ * The whole-tree totals: the per-model map summed. Context windows are
+ * deliberately not summed — a capacity is per-model, not additive — so
+ * that dimension stays on the per-model rows only.
+ */
+function totalDims(models: Record<string, ModelUsage>): UsageDims {
+  const total: UsageDims = { input: 0, cacheCreation: 0, cacheRead: 0, output: 0 };
+  for (const u of Object.values(models)) {
+    total.input += u.input_tokens;
+    total.cacheCreation += u.cache_creation_input_tokens;
+    total.cacheRead += u.cache_read_input_tokens;
+    total.output += u.output_tokens;
+  }
+  return total;
+}
+
+function row(label: string, value: string, sub = false): string {
+  return `<li class="tokens-row${sub ? " sub" : ""}"><span class="tokens-label">${escapeHtml(
+    label,
+  )}</span><span class="tokens-value">${escapeHtml(value)}</span></li>`;
+}
+
+function section(title: string, rows: string[]): string {
+  return `<li class="tokens-section">${escapeHtml(title)}</li>${rows.join("")}`;
+}
+
+/**
+ * The stat rows one usage payload expands into: the input-side total the
+ * chip's convention headlines, its three constituents indented under it,
+ * then the output side.
+ */
+function usageRows(d: UsageDims): string[] {
+  return [
+    row("input", formatTokens(d.input + d.cacheRead + d.cacheCreation)),
+    row("uncached", formatTokens(d.input), true),
+    row("cache read", formatTokens(d.cacheRead), true),
+    row("cache write", formatTokens(d.cacheCreation), true),
+    row("output", formatTokens(d.output)),
+  ];
+}
+
+/** The dashes a section shows before its data source has reported. */
+function unknownRows(): string[] {
+  return [row("input", "—"), row("output", "—")];
+}
+
+/**
+ * The dropped breakdown: the top-level agent's dimensions, the recursive
+ * whole-tree totals, then one section per model (most expensive first).
+ * Sections whose source has not reported yet dash rather than lie with
+ * zeros; the per-model sections simply wait (nothing to itemize).
+ */
+export function tokensOverlayHtml(data: TokenMenuData): string {
+  const sections: string[] = [];
+  sections.push(
+    section(
+      "top-level agent",
+      data.topLevel === null ? unknownRows() : usageRows(dimsOfUsage(data.topLevel)),
+    ),
+  );
+  const modelMap = data.models ?? {};
+  const models = Object.entries(modelMap);
+  if (models.length === 0) {
+    sections.push(section("all agents", unknownRows()));
+  } else {
+    const totals = totalDims(modelMap);
+    const totalCost = models.reduce((sum, [, u]) => sum + u.cost_usd, 0);
+    const totalSearches = models.reduce((sum, [, u]) => sum + u.web_search_requests, 0);
+    sections.push(
+      section("all agents", [
+        ...usageRows(totals),
+        row("web searches", formatTokens(totalSearches)),
+        row("cost", formatCost(totalCost)),
+      ]),
+    );
+    models.sort(([na, a], [nb, b]) => b.cost_usd - a.cost_usd || na.localeCompare(nb));
+    for (const [model, u] of models) {
+      sections.push(
+        section(model, [
+          ...usageRows(dimsOfModelUsage(u)),
+          row("web searches", formatTokens(u.web_search_requests)),
+          row("cost", formatCost(u.cost_usd)),
+          row("context window", formatTokens(u.context_window)),
+        ]),
+      );
+    }
+  }
+  return `<ul class="tokens-overlay" role="menu">${sections.join("")}</ul>`;
+}
+
+/**
+ * The chip and (when open) its overlay. Unlike the counters — which hide
+ * until the session has something to count — the chip always renders:
+ * the token figure is a session-constant datapoint, and before any usage
+ * is known it reads a dash rather than a lying zero.
+ */
+export function tokensMenuHtml(data: TokenMenuData, open: boolean): string {
+  const figure =
+    data.topLevel === null ? "—" : formatTokens(contextTokens(data.topLevel));
+  return `<span class="tokens-menu">
+      <button type="button" class="info-tokens" data-tokens-toggle aria-expanded="${open}" aria-haspopup="true" title="top-level agent input tokens (uncached + cache read + cache write), subagents excluded — click for the full breakdown">tokens: ${figure} <span class="tokens-caret" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
+      ${open ? tokensOverlayHtml(data) : ""}
+    </span>`;
+}

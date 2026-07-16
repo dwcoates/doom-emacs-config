@@ -19,9 +19,11 @@
  *   bubble (its `tool-use-start` ts to its result, or to now while it
  *   runs — kept ticking by the same once-a-second discipline, see
  *   `agent-clock.ts`).
- * - tokens — the conversation's CURRENT context size: the session's
- *   standing figure, or the subagent conversation's own (the attributed
- *   `usage` frames banked on its tool item).
+ * - tokens — the session renders its CUMULATIVE usage behind the tokens
+ *   dropdown (`tokens.ts`: the chip is the top-level agent's input-side
+ *   spend, the overlay the whole-tree resolution); an agent bubble
+ *   renders its conversation's CURRENT context size as a plain figure
+ *   (the attributed `usage` frames banked on its tool item).
  * - agents / tasks — the counter rosters, session-wide or filtered to the
  *   agent's DIRECT children (see `agents.ts` / `tasks.ts`).
  */
@@ -29,15 +31,11 @@ import { agentSubagents, agentsMenuHtml, sessionSubagents, SUBAGENT_TOOLS } from
 import { CounterEntry } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import { ConversationItem, StoreState, ToolItem } from "./store.js";
+import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.js";
 import { agentTasks, sessionTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
+import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
 import { countedTurns } from "./turn-clock.js";
-
-/** Token counts as the topbar and the result chip both write them: `300,000`. */
-export function formatTokens(n: number): string {
-  return n.toLocaleString("en-US");
-}
 
 /**
  * One scope's values for every datapoint the strip renders. Both builders
@@ -49,8 +47,19 @@ export interface TopbarDatapoints {
   parentWs: string | null;
   /** The scope's elapsed clock, pre-formatted (`5m 30s`, or `--` idle). */
   timerLabel: string;
-  /** The scope's CURRENT context size; null is unknown and prints a dash. */
+  /**
+   * The scope's plain tokens figure — its conversation's CURRENT context
+   * size — rendered only when `tokenMenu` is null; null is unknown and
+   * prints a dash.
+   */
   contextTokens: number | null;
+  /**
+   * The session scope's tokens datapoint: its cumulative usage behind the
+   * tokens dropdown (`tokens.ts`). An agent scope passes null — a bubble
+   * has no session-wide usage map — and renders the plain `contextTokens`
+   * figure instead.
+   */
+  tokenMenu: TokenMenuData | null;
   /** The scope's subagent roster (see `agents.ts`). */
   agents: readonly CounterEntry[];
   /** The scope's task roster (see `tasks.ts`). */
@@ -59,10 +68,12 @@ export interface TopbarDatapoints {
   currentTurn: number;
 }
 
-/** Which counter overlay the strip's owner currently has open. */
+/** Which of the strip's overlays its owner currently has open. */
 export interface TopbarDisclosure {
   agentsOpen: boolean;
   tasksOpen: boolean;
+  /** The tokens breakdown; only the session strip renders its chip. */
+  tokensOpen: boolean;
 }
 
 /**
@@ -87,11 +98,13 @@ export interface TopbarDisclosure {
  * whole strip — the two paint paths agree because the tick writes exactly
  * what this would have.
  *
- * CONTEXT-TOKENS is the scope's CURRENT context size (what its next
- * request will carry), never a cumulative spend. `null` means the size is
- * genuinely unknown — a `/clear` and a compaction each leave one behind
- * without reporting it, and a subagent has none before its first request
- * — and prints as a dash rather than a lying `0`.
+ * The tokens datapoint splits by scope. With TOKEN-MENU set (the session)
+ * it is the tokens dropdown chip: the figure is that scope's CUMULATIVE
+ * input-side spend and the overlay its full breakdown. Without one (an
+ * agent bubble) it is the plain CONTEXT-TOKENS figure — the scope's
+ * CURRENT context size, whose `null` means genuinely unknown (a `/clear`,
+ * a compaction, a subagent before its first request) and prints as a dash
+ * rather than a lying `0`.
  */
 export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): string {
   const parts: string[] = [];
@@ -101,8 +114,12 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
   parts.push(
     `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(d.timerLabel)}</span>`,
   );
-  const tokens = d.contextTokens === null ? "—" : formatTokens(d.contextTokens);
-  parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
+  if (d.tokenMenu !== null) {
+    parts.push(tokensMenuHtml(d.tokenMenu, open.tokensOpen));
+  } else {
+    const tokens = d.contextTokens === null ? "—" : formatTokens(d.contextTokens);
+    parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
+  }
   const agentsMenu = agentsMenuHtml(d.agents, open.agentsOpen, d.currentTurn);
   if (agentsMenu !== "") parts.push(agentsMenu);
   const tasksMenu = tasksMenuHtml(d.tasks, open.tasksOpen, d.currentTurn);
@@ -124,7 +141,12 @@ export function sessionTopbarDatapoints(
   return {
     parentWs,
     timerLabel,
-    contextTokens: state.contextTokens,
+    // The session's tokens datapoint is the dropdown, not a standing: the
+    // chip reads the top-level agent's cumulative input-side spend and
+    // the overlay the whole-tree resolution. The context standing stays
+    // in the store (`contextTokens`) for the result chips.
+    contextTokens: null,
+    tokenMenu: { topLevel: topLevelUsage(state), models: state.modelUsage },
     agents: sessionSubagents(state.items),
     tasks: sessionTasks(state.items),
     currentTurn: countedTurns(state.items),
@@ -157,6 +179,9 @@ export function agentTopbarDatapoints(
     parentWs: null,
     timerLabel: agentElapsedLabel(agent, nowMs),
     contextTokens: agent.contextTokens ?? null,
+    // A bubble has no session-wide usage map to break down, so its
+    // tokens datapoint stays the plain context figure above.
+    tokenMenu: null,
     agents: agentSubagents(items, agent.toolUseId),
     tasks: agentTasks(items, agent.toolUseId),
     currentTurn: countedTurns(items),
@@ -199,9 +224,16 @@ export interface ClickTarget {
   closest(selector: string): { getAttribute(name: string): string | null } | null;
 }
 
-/** One strip click's meaning: flip a counter overlay, or reveal a roster row's bubble. */
+/**
+ * A strip dropdown's stem: which overlay a chip toggle names. The tokens
+ * chip renders only in the session strip, but the vocabulary is shared —
+ * a bubble delegation simply never sees its toggle.
+ */
+export type TopbarMenu = "agents" | "tasks" | "tokens";
+
+/** One strip click's meaning: flip a chip's overlay, or reveal a roster row's bubble. */
 export type TopbarClick =
-  | { kind: "toggle"; menu: "agents" | "tasks" }
+  | { kind: "toggle"; menu: TopbarMenu }
   | { kind: "reveal"; agentId: string }
   | { kind: "reveal-task"; taskId: string };
 
@@ -215,6 +247,7 @@ export type TopbarClick =
 export function topbarClickAction(target: ClickTarget): TopbarClick | null {
   if (target.closest("[data-agents-toggle]")) return { kind: "toggle", menu: "agents" };
   if (target.closest("[data-tasks-toggle]")) return { kind: "toggle", menu: "tasks" };
+  if (target.closest("[data-tokens-toggle]")) return { kind: "toggle", menu: "tokens" };
   const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
   if (agentId) return { kind: "reveal", agentId };
   const taskId = target.closest(".task-row")?.getAttribute("data-task-id");
@@ -224,9 +257,9 @@ export function topbarClickAction(target: ClickTarget): TopbarClick | null {
 
 /** The disclosure after a chip click: the open menu closes, any other opens. */
 export function nextCounterMenu(
-  current: "agents" | "tasks" | null,
-  clicked: "agents" | "tasks",
-): "agents" | "tasks" | null {
+  current: TopbarMenu | null,
+  clicked: TopbarMenu,
+): TopbarMenu | null {
   return current === clicked ? null : clicked;
 }
 
