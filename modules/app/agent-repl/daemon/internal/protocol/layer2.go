@@ -323,9 +323,13 @@ type PermissionResolvedFrame struct {
 
 type UsageFrame struct {
 	Envelope
-	MessageID string   `json:"message_id"`
-	Usage     Usage    `json:"usage"`
-	CostUSD   *float64 `json:"cost_usd,omitempty"`
+	MessageID string `json:"message_id"`
+	// The subagent call whose conversation this usage belongs to; empty on
+	// main-chain usage. Attribution is what lets the SPA bank a sidechain
+	// figure on that agent's bubble without flipping the session count.
+	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
+	Usage           Usage    `json:"usage"`
+	CostUSD         *float64 `json:"cost_usd,omitempty"`
 }
 
 type PermissionModeChangedFrame struct {
