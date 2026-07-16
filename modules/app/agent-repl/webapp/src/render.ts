@@ -1934,10 +1934,10 @@ export class FeedRenderer {
   /**
    * A click on an agent bubble's topbar: its counter chips toggle that
    * bubble's overlay (closing any other bubble's, as the header keeps one
-   * open at a time), and a subagent row inside an open overlay jumps the
-   * feed to that agent — the same verbs the header topbar delegates.
-   * Answers whether the click was the topbar's, so the caller stops
-   * before the card-level handlers see it.
+   * open at a time), and an agent or task row inside an open overlay
+   * jumps the feed to that entry's bubble — the same verbs the header
+   * topbar delegates. Answers whether the click was the topbar's, so the
+   * caller stops before the card-level handlers see it.
    */
   private handleAgentTopbarClick(target: HTMLElement): boolean {
     const host = target.closest(`[${TOPBAR_AGENT_ATTR}]`);
@@ -1946,9 +1946,12 @@ export class FeedRenderer {
     if (!action) return false;
     if (action.kind === "toggle") {
       this.toggleAgentMenu(host.getAttribute(TOPBAR_AGENT_ATTR) ?? "", action.menu);
-    } else {
+    } else if (action.kind === "reveal") {
       this.agentMenus.clear();
       this.revealAgent(action.agentId);
+    } else {
+      this.agentMenus.clear();
+      this.revealTask(action.taskId);
     }
     return true;
   }

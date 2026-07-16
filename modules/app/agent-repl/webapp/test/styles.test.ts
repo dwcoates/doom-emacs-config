@@ -1187,11 +1187,11 @@ describe("subagent roster styles", () => {
     expect(agentsOverlay).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("reads an agent row as pressable, since a click jumps the feed to its card", () => {
-    // Arrange / Act — the row-specific rule, distinct from the shared row block.
-    const agentRow = blockAfter(css, ".agent-row {");
+  it("reads every roster row as pressable, since a click jumps the feed to its bubble", () => {
+    // Arrange / Act — the shared row block, covering both rosters' rows.
+    const rosterRow = blockAfter(css, ".agent-row, .task-row {");
     // Assert
-    expect(agentRow).toMatch(/cursor:\s*pointer/);
+    expect(rosterRow).toMatch(/cursor:\s*pointer/);
   });
 
   it("renders the chip as a pointer target so it reads as pressable", () => {

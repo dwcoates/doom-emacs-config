@@ -199,10 +199,11 @@ export interface ClickTarget {
   closest(selector: string): { getAttribute(name: string): string | null } | null;
 }
 
-/** One strip click's meaning: flip a counter overlay, or reveal an agent row. */
+/** One strip click's meaning: flip a counter overlay, or reveal a roster row's bubble. */
 export type TopbarClick =
   | { kind: "toggle"; menu: "agents" | "tasks" }
-  | { kind: "reveal"; agentId: string };
+  | { kind: "reveal"; agentId: string }
+  | { kind: "reveal-task"; taskId: string };
 
 /**
  * Classify a click inside a topbar strip into the verb it asks for, or
@@ -216,6 +217,8 @@ export function topbarClickAction(target: ClickTarget): TopbarClick | null {
   if (target.closest("[data-tasks-toggle]")) return { kind: "toggle", menu: "tasks" };
   const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
   if (agentId) return { kind: "reveal", agentId };
+  const taskId = target.closest(".task-row")?.getAttribute("data-task-id");
+  if (taskId) return { kind: "reveal-task", taskId };
   return null;
 }
 

@@ -16,6 +16,13 @@ import {
   topbarInfoHtml,
 } from "./topbar.js";
 import { AgentClock } from "./agent-clock.js";
+import { AGENTS_SPEC } from "./agents.js";
+import { TASKS_SPEC } from "./tasks.js";
+import {
+  type CounterSpec,
+  MISSING_BUBBLE_NOTICE_MS,
+  missingBubbleNotice,
+} from "./counter-menu.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
@@ -241,6 +248,22 @@ async function boot(): Promise<void> {
     renderChrome();
   };
 
+  // The reveal half of a roster-row click: dismiss the roster either way so
+  // a revealed card is unobscured, and when the entry's bubble was NOT
+  // found, say so in #remediation (the topbar's one status-line slot) for a
+  // few seconds instead of silently doing nothing. The timed clear checks
+  // the slot still shows THIS notice, so it never wipes a login or
+  // remediation notice that landed meanwhile.
+  const settleRosterReveal = (spec: CounterSpec, revealed: boolean): void => {
+    setCounterMenu(null);
+    if (revealed) return;
+    const notice = missingBubbleNotice(spec);
+    remediationEl.textContent = notice;
+    window.setTimeout(() => {
+      if (remediationEl.textContent === notice) remediationEl.textContent = "";
+    }, MISSING_BUBBLE_NOTICE_MS);
+  };
+
   // The chips are re-created by every renderChrome, so the toggles are
   // delegated off the topbar rather than bound to nodes that will not
   // survive the turn. Opening one counter closes the other. The click
@@ -253,10 +276,13 @@ async function boot(): Promise<void> {
       setCounterMenu(nextCounterMenu(counterMenu, action.menu));
       return;
     }
-    // A subagent row jumps the feed to that agent's bubble and opens it,
-    // then dismisses the roster so the revealed card is unobscured.
-    feed.revealAgent(action.agentId);
-    setCounterMenu(null);
+    // A roster row jumps the feed to the entry's bubble — a subagent's
+    // card, a task's TaskCreate card — and lays it open.
+    if (action.kind === "reveal") {
+      settleRosterReveal(AGENTS_SPEC, feed.revealAgent(action.agentId));
+      return;
+    }
+    settleRosterReveal(TASKS_SPEC, feed.revealTask(action.taskId));
   });
   // An open overlay closes the way every dropdown does: click off it, or
   // Escape. The agent bubbles' topbar overlays dismiss on the same

@@ -125,6 +125,20 @@ export function countLabel(noun: string, count: number): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+/** How long a missing-bubble notice holds the topbar slot before clearing. */
+export const MISSING_BUBBLE_NOTICE_MS = 4000;
+
+/**
+ * The topbar notice for a roster row whose entry has no bubble in the
+ * current feed: a subagent discarded by `/clear`, or a task created before
+ * one (the task roster is harness-global, so its rows outlive the cut that
+ * removed their cards). A click on such a row must say why nothing moved
+ * rather than silently doing nothing.
+ */
+export function missingBubbleNotice(spec: CounterSpec): string {
+  return `${spec.noun} has no bubble in the current feed (discarded by /clear)`;
+}
+
 /**
  * A counter's chip and (when open) its overlay. Renders to nothing when
  * the pruned roster is empty: a zero chip is a control over an empty list,
@@ -183,7 +197,7 @@ export function counterOverlayHtml(
       }`;
       // The id is the entry's stable key (a subagent's tool-use id, a
       // task's id): it addresses the row so a click can act on the entry
-      // it names — the subagent roster jumps the feed to that agent's card.
+      // it names — both rosters jump the feed to the entry's bubble.
       return `<li class="${rowClass}" data-${spec.item}-id="${escapeHtml(e.id)}">
         <span class="${spec.item}-dot ${spec.item}-${e.status}" aria-hidden="true">●</span>
         <span class="${spec.item}-desc">${escapeHtml(headline)}</span>
