@@ -7,7 +7,13 @@
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
  */
-import { sessionTopbarDatapoints, topbarInfoHtml } from "./topbar.js";
+import {
+  TOPBAR_AGENT_ATTR,
+  runningAgentClocks,
+  sessionTopbarDatapoints,
+  topbarInfoHtml,
+} from "./topbar.js";
+import { AgentClock } from "./agent-clock.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
@@ -188,6 +194,18 @@ async function boot(): Promise<void> {
     slot.textContent = label;
   });
 
+  // The agent bubbles' own elapsed tick, the header timer's twin (see
+  // agent-clock.ts): one interval repaints every RUNNING agent's topbar
+  // slot, so a quiet agent's clock still moves between frames. A slot the
+  // feed does not currently hold — a bubble inside a closed activity
+  // panel — legitimately has nowhere to paint and is skipped.
+  const agentClock = new AgentClock(windowHost(window), (agentId, label) => {
+    const slot = feedEl.querySelector(
+      `[${TOPBAR_AGENT_ATTR}="${agentId}"] [${TIMER_SLOT}]`,
+    );
+    if (slot) slot.textContent = label;
+  });
+
   const renderChrome = (): void => {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
@@ -199,6 +217,9 @@ async function boot(): Promise<void> {
     // After the strip exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
     timer.sync(s.turnStartedAt);
+    // The bubble clocks reconcile on the same cadence: whichever agents are
+    // running keep their topbar slots ticking between frames.
+    agentClock.sync(runningAgentClocks(s.items));
     // Rebuilt only when the menu or the selection actually moved: this runs
     // on EVERY frame, and blowing the options away mid-turn would slam shut
     // a dropdown the user had open.
@@ -294,7 +315,9 @@ async function boot(): Promise<void> {
     store.reset();
     // The successor's turn is not this one's: stop the clock now rather than
     // letting it run on the dead session until the successor's hello lands.
+    // The dead session's agents are not the successor's either.
     timer.stop();
+    agentClock.stop();
     const url = new URL(location.href);
     url.searchParams.set("session", next);
     history.replaceState(null, "", url.toString());
