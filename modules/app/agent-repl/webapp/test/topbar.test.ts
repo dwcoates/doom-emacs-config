@@ -13,14 +13,17 @@ import { describe, expect, it } from "vitest";
 
 import html from "../index.html?raw";
 import {
+  ClickTarget,
   TOPBAR_AGENT_ATTR,
   TopbarDatapoints,
   TopbarDisclosure,
   agentElapsedLabel,
   agentTopbarDatapoints,
   agentTopbarHtml,
+  nextCounterMenu,
   runningAgentClocks,
   sessionTopbarDatapoints,
+  topbarClickAction,
   topbarInfoHtml,
 } from "../src/topbar.js";
 import { CounterEntry } from "../src/counter-menu.js";
@@ -569,5 +572,66 @@ describe("runningAgentClocks", () => {
     const nested = agentItem({ toolUseId: "c1", parentToolUseId: "a1" });
     // Act + Assert
     expect(runningAgentClocks([nested]).map((c) => c.id)).toEqual(["c1"]);
+  });
+});
+
+describe("topbarClickAction", () => {
+  /** A ClickTarget whose closest() matches only SELECTOR, answering ATTRS. */
+  function clickOn(selector: string, attrs: Record<string, string> = {}): ClickTarget {
+    return {
+      closest: (sel) =>
+        sel === selector ? { getAttribute: (name) => attrs[name] ?? null } : null,
+    };
+  }
+
+  it("classifies a click on the agents chip as the agents toggle", () => {
+    // Arrange + Act + Assert
+    expect(topbarClickAction(clickOn("[data-agents-toggle]"))).toEqual({
+      kind: "toggle",
+      menu: "agents",
+    });
+  });
+
+  it("classifies a click on the tasks chip as the tasks toggle", () => {
+    // Arrange + Act + Assert
+    expect(topbarClickAction(clickOn("[data-tasks-toggle]"))).toEqual({
+      kind: "toggle",
+      menu: "tasks",
+    });
+  });
+
+  it("classifies a click on a subagent row as a reveal of that agent", () => {
+    // Arrange + Act + Assert
+    expect(topbarClickAction(clickOn(".agent-row", { "data-agent-id": "a7" }))).toEqual({
+      kind: "reveal",
+      agentId: "a7",
+    });
+  });
+
+  it("classifies a click on nothing actionable as null", () => {
+    // Arrange + Act + Assert — plain strip text is not a control.
+    expect(topbarClickAction(clickOn(".info-tokens"))).toBeNull();
+  });
+
+  it("classifies an agent row missing its id as null", () => {
+    // Arrange + Act + Assert — no id means nothing to reveal.
+    expect(topbarClickAction(clickOn(".agent-row"))).toBeNull();
+  });
+});
+
+describe("nextCounterMenu", () => {
+  it("closes the menu whose chip was clicked again", () => {
+    // Arrange + Act + Assert
+    expect(nextCounterMenu("agents", "agents")).toBeNull();
+  });
+
+  it("opens a menu from the all-closed state", () => {
+    // Arrange + Act + Assert
+    expect(nextCounterMenu(null, "tasks")).toBe("tasks");
+  });
+
+  it("switches to the other menu, so only one is ever open", () => {
+    // Arrange + Act + Assert
+    expect(nextCounterMenu("agents", "tasks")).toBe("tasks");
   });
 });
