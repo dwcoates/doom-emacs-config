@@ -653,12 +653,7 @@ interface ErrorFrame extends WsEnvelope {
     | "shim_died"
     | "sdk_error"
     | "transport"
-    | "internal"
-    // create-time resume drop: the requested resume target had no
-    // transcript in the daemon's config dir (the CLI would hard-exit
-    // on --resume), so the session started as a FRESH conversation.
-    // Always recoverable; retained so late attachers see it.
-    | "resume_unavailable";
+    | "internal";
   message: string;
   recoverable: boolean;
 }
@@ -1078,14 +1073,18 @@ behavior and is logged, never fatal.
 
 **Resume viability gate.** Before spawning the shim, the create path
 stats the resume target's transcript. When it is absent (an id minted
-inside the Docker sandbox, under another `CLAUDE_CONFIG_DIR`, or
-otherwise foreign), the `--resume` flag is DROPPED — the CLI would
-hard-exit `fatal_error` on it, producing a dead session and a
-client-side death loop — and the session starts fresh with a retained
-recoverable `error` frame (`code: "resume_unavailable"`) naming the
-dropped target. Fake sessions (per-create `fake` or the daemon-wide
-`-fake` flag) skip the gate: the scripted SDK has no transcripts by
-design.
+inside the Docker sandbox, under another `CLAUDE_CONFIG_DIR`, or whose
+transcript was deleted), the create is HARD-FAILED with HTTP 422 and a
+structured JSON body — `{ "code": "resume_transcript_missing",
+"resume_id": <target>, "searched_paths": [<stat'd path>], "error":
+<message> }` — and NO session is spawned. Silently downgrading to a
+fresh conversation (the former behavior) buries a genuinely lost
+session, and the CLI would in any case hard-exit `fatal_error` on the
+doomed `--resume`. The Emacs client reacts to `resume_transcript_missing`
+by opening an investigation workspace for the lost session (searching
+both config dirs) and surfacing the loss loudly and non-recoverably.
+Fake sessions (per-create `fake` or the daemon-wide `-fake` flag) skip
+the gate: the scripted SDK has no transcripts by design.
 
 ### 2.11 Restart rehydration
 
