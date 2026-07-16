@@ -220,3 +220,28 @@ which is why every entry is `:ni' and not `:n'."
 
 (provide 'test-output-nav)
 ;;; test-output-nav.el ends here
+
+;;;; ---- The chord vacated for the feed search ------------------------------
+
+;; `map!' is stubbed in batch (see above), so these assert against
+;; input.el's source, which is where the claim lives.
+
+(ert-deftest agent-repl-test-output-nav-history-search-moved-off-c-r ()
+  "Prompt-history search answers to `C-M-r'.
+It was moved off `C-r' so the output feed's incremental search
+(webapp/src/search.ts) can have that chord, whose isearch reflex wants
+it; `C-M-r' keeps the command reachable rather than dropping it to
+`M-x'-only, since this is its ONLY binding."
+  ;; Arrange
+  (let ((src (agent-repl-test--input-source)))
+    ;; Act / Assert
+    (should (agent-repl-test--binds-chord-p src "C-M-r" "agent-repl-history-search"))))
+
+(ert-deftest agent-repl-test-output-nav-leaves-c-r-unbound-for-the-feed-search ()
+  "`C-r' is left unbound in the input map, vacated for the feed search.
+Re-binding it to anything here would take back the chord this move
+exists to give away."
+  ;; Arrange
+  (let ((src (agent-repl-test--input-source)))
+    ;; Act / Assert
+    (should-not (string-match-p ":ni +\"C-r\"" src))))
