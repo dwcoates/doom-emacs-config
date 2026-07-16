@@ -3102,6 +3102,7 @@ describe("activityTicker", () => {
 function taskCreateTool(id = "tc1"): ToolItem {
   return {
     kind: "tool",
+    ts: TEXT_TS,
     toolUseId: id,
     messageId: "m1",
     toolName: "TaskCreate",
@@ -3116,6 +3117,7 @@ function taskCreateTool(id = "tc1"): ToolItem {
 function taskUpdateTool(over: Partial<ToolItem> = {}): ToolItem {
   return {
     kind: "tool",
+    ts: TEXT_TS,
     toolUseId: "u1",
     messageId: "m1",
     toolName: "TaskUpdate",
@@ -3451,6 +3453,7 @@ describe("planToolReveal", () => {
     // Arrange — the task roster resolves its rows to TaskCreate tool-use ids.
     const create: ToolItem = {
       kind: "tool",
+      ts: TEXT_TS,
       toolUseId: "tc1",
       messageId: "m1",
       toolName: "TaskCreate",
