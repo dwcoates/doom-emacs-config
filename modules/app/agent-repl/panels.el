@@ -260,9 +260,10 @@ Reclaims through WS's own frontend: a live webview is re-displayed via
 `agent-repl--frontend-dispatch-show' (the webview + input layout,
 which clears the main area itself).
 
-No-op when WS has no live webview to reclaim the frame with, so the
-existing layout is left as-is."
-  (if (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
+No-op when WS has no live webview to reclaim the frame with
+\(`agent-repl-window--panels-restorable-p'), so the existing layout is
+left as-is."
+  (if (agent-repl-window--panels-restorable-p ws)
       (progn
         (agent-repl--log ws "reclaim-frame-fullscreen: showing gui view for ws=%s" ws)
         (agent-repl--frontend-dispatch-show ws))
@@ -322,11 +323,10 @@ flag because each workspace has its own panel buffers."
     ;; scratch, so there is no separate half-shown repair to make.
     (when (and (agent-repl--ws-get ws :panels-were-visible)
                (not (agent-repl--panels-visible-p))
-               ;; Only restore if this ws actually has a live view to show.
-               (let ((frontend-buf (agent-repl--ws-get ws :frontend-buffer))
-                     (input-buf (agent-repl--ws-get ws :input-buffer)))
-                 (and frontend-buf (buffer-live-p frontend-buf)
-                      input-buf (buffer-live-p input-buf))))
+               ;; Eligibility is a live VIEW buffer only: the mount
+               ;; recreates a dead/nil input buffer itself
+               ;; (`agent-repl--ensure-input-buffer').
+               (agent-repl-window--panels-restorable-p ws))
       (agent-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
       (agent-repl--frontend-dispatch-show ws))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
