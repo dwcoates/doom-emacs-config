@@ -183,11 +183,11 @@ async function boot(): Promise<void> {
   const loginCloseEl = must<HTMLButtonElement>("login-close");
   const parentWs = params.get("parent_ws");
 
-  // Which topbar counter dropdown is open (only one at a time). It lives
-  // HERE rather than in the DOM because renderChrome rewrites the whole
-  // topbar on every frame, which would otherwise collapse an overlay the
-  // user is reading mid-turn.
-  let counterMenu: "agents" | "tasks" | null = null;
+  // Which topbar dropdown is open (only one at a time): a counter roster
+  // or the tokens breakdown. It lives HERE rather than in the DOM because
+  // renderChrome rewrites the whole topbar on every frame, which would
+  // otherwise collapse an overlay the user is reading mid-turn.
+  let counterMenu: "agents" | "tasks" | "tokens" | null = null;
 
   // The running task's timer. Its tick writes the one span it owns rather
   // than re-rendering the topbar: a whole-strip rewrite once a second, on
@@ -223,6 +223,7 @@ async function boot(): Promise<void> {
     infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, timerLabel), {
       agentsOpen: counterMenu === "agents",
       tasksOpen: counterMenu === "tasks",
+      tokensOpen: counterMenu === "tokens",
     });
     // After the strip exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
@@ -242,7 +243,7 @@ async function boot(): Promise<void> {
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
 
-  const setCounterMenu = (menu: "agents" | "tasks" | null): void => {
+  const setCounterMenu = (menu: "agents" | "tasks" | "tokens" | null): void => {
     if (counterMenu === menu) return;
     counterMenu = menu;
     renderChrome();
@@ -289,7 +290,11 @@ async function boot(): Promise<void> {
   // gestures, so both handlers close them alongside the header's.
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
-    if (!target.closest(".agents-menu") && !target.closest(".tasks-menu")) {
+    if (
+      !target.closest(".agents-menu") &&
+      !target.closest(".tasks-menu") &&
+      !target.closest(".tokens-menu")
+    ) {
       setCounterMenu(null);
       feed.closeAgentMenus();
     }
