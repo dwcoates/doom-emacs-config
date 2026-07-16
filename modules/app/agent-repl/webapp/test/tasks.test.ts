@@ -13,6 +13,7 @@ import { ConversationItem, ToolItem, UserTurnItem } from "../src/store.js";
 function taskCreate(over: Partial<ToolItem> = {}): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: "c1",
     toolName: "TaskCreate",
     messageId: "m1",
@@ -28,6 +29,7 @@ function taskCreate(over: Partial<ToolItem> = {}): ToolItem {
 function taskUpdate(over: Partial<ToolItem> = {}): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: "u1",
     toolName: "TaskUpdate",
     messageId: "m2",

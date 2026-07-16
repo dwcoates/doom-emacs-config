@@ -128,6 +128,7 @@ function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
 function tool(done = false, toolUseId = "t1"): ConversationItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId,
     messageId: "m1",
     toolName: "Bash",
@@ -142,6 +143,7 @@ function tool(done = false, toolUseId = "t1"): ConversationItem {
 function suppressedTool(): ConversationItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: "t2",
     messageId: "m1",
     toolName: "ToolSearch",
@@ -928,6 +930,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -943,6 +946,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "WebFetch",
       messageId: "m1",
@@ -957,6 +961,7 @@ describe("renderItem", () => {
     // Arrange — input complete, result outstanding: the wait the arc marks.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -972,6 +977,7 @@ describe("renderItem", () => {
     // Arrange — a settled call carries the done badge, not motion.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -989,6 +995,7 @@ describe("renderItem", () => {
     // same arc the awaiting-result phase does.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Edit",
       messageId: "m1",
@@ -1004,6 +1011,7 @@ describe("renderItem", () => {
     // badge's label tells them apart.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Edit",
       messageId: "m1",
@@ -1019,6 +1027,7 @@ describe("renderItem", () => {
     // (--tool-title) hangs off; the class must stay on the header.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Edit",
       messageId: "m1",
@@ -1067,6 +1076,7 @@ describe("renderItem", () => {
     // would only dump the raw questions JSON next to it.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "AskUserQuestion",
       messageId: "m1",
@@ -1083,6 +1093,7 @@ describe("renderItem", () => {
     // conversation content.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "ToolSearch",
       messageId: "m1",
@@ -1098,6 +1109,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "SendMessage",
       messageId: "m1",
@@ -1116,6 +1128,7 @@ describe("renderItem", () => {
     // Arrange — the delivery echo adds nothing over the summary line.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "SendMessage",
       messageId: "m1",
@@ -1132,6 +1145,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "SendMessage",
       messageId: "m1",
@@ -1151,6 +1165,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1170,6 +1185,7 @@ describe("renderItem", () => {
     // Arrange — the args are what the skill was invoked with, part of the input.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1185,6 +1201,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1255,6 +1272,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1271,6 +1289,7 @@ describe("renderItem", () => {
     // (a plugin skill, a missing file), so only the raw launch echo is left.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1289,6 +1308,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1308,6 +1328,7 @@ describe("renderItem", () => {
     // Arrange — a malformed input must not silently render an empty card.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Skill",
       messageId: "m1",
@@ -1507,6 +1528,7 @@ describe("renderItem", () => {
     // Arrange — input still streaming: raw partial JSON must NOT show.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Read",
       messageId: "m1",
@@ -1524,6 +1546,7 @@ describe("renderItem", () => {
     // the body pulses nothing while it waits to be filled.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Read",
       messageId: "m1",
@@ -1541,6 +1564,7 @@ describe("renderItem", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -1560,6 +1584,7 @@ describe("renderItem", () => {
       isError = false,
     ): ToolItem => ({
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Read",
       messageId: "m1",
@@ -2677,6 +2702,7 @@ describe("renderItem tool previews", () => {
     // Arrange — the CLI renamed Task to Agent; the card must not regress to raw JSON.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Agent",
       messageId: "m1",
@@ -2694,6 +2720,7 @@ describe("renderItem tool previews", () => {
     // Arrange — task-list bookkeeping is feed noise, not conversation.
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "TaskUpdate",
       messageId: "m1",
@@ -2709,6 +2736,7 @@ describe("renderItem tool previews", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -2724,6 +2752,7 @@ describe("renderItem tool previews", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",
@@ -2744,6 +2773,7 @@ describe("renderItem tool previews", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Edit",
       messageId: "m1",
@@ -2766,6 +2796,7 @@ describe("renderItem subagent input", () => {
   function agentCall(toolName = "Agent"): ToolItem {
     return {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName,
       messageId: "m1",
@@ -2835,6 +2866,7 @@ describe("renderItem subagent input", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Agent",
       messageId: "m1",
@@ -3046,6 +3078,7 @@ describe("repinsToTail", () => {
 function agentTool(id = "a1"): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: id,
     messageId: "m1",
     toolName: "Agent",
@@ -3059,6 +3092,7 @@ function agentTool(id = "a1"): ToolItem {
 function childBash(id = "t2", parent = "a1"): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: id,
     messageId: "m1",
     toolName: "Bash",
@@ -3210,6 +3244,7 @@ describe("activityTicker", () => {
 function bash(id: string, command = "ls", result?: { isError: boolean }): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: id,
     messageId: "m1",
     toolName: "Bash",
@@ -3502,6 +3537,7 @@ describe("generic folded input", () => {
   function generic(name: string, input: Record<string, unknown>): ToolItem {
     return {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: name,
@@ -3550,6 +3586,7 @@ describe("scheduled-wakeup anchor", () => {
   function wake(input: Record<string, unknown>, resultTs?: string): ToolItem {
     return {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: "ScheduleWakeup",
@@ -3603,6 +3640,7 @@ describe("task stop control", () => {
   function bgSpawn(notified = false): ToolItem {
     return {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: "Bash",
@@ -3645,6 +3683,7 @@ describe("live task output", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: "Bash",
@@ -3690,6 +3729,7 @@ describe("agent message composer", () => {
   function bgAgent(notified = false): ToolItem {
     return {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: "Agent",
@@ -3749,6 +3789,7 @@ describe("agent message composer", () => {
 function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: "w1",
     messageId: "m1",
     toolName: "Bash",

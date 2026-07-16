@@ -268,6 +268,64 @@ describe("ConversationStore tool cards", () => {
     expect(item.result?.render).toMatchObject({ kind: "bash" });
   });
 
+  it("stamps the tool item with the tool-use-start envelope ts", () => {
+    // Arrange
+    const store = newStore();
+    // Act — frame() stamps every envelope with ts "T".
+    runToolStart(store);
+    // Assert — the agent-scoped elapsed clock counts from this stamp.
+    expect((store.state.items[0] as ToolItem).ts).toBe("T");
+  });
+
+  it("banks an attributed usage frame on the spawning agent's tool item", () => {
+    // Arrange — a subagent call the usage frame will name.
+    const store = newStore();
+    store.applyRaw(frame("tool-use-start", {
+      tool_use_id: "a1",
+      tool_name: "Agent",
+      message_id: "m1",
+    }));
+    // Act — the agent's own request declares its context size.
+    store.applyRaw(frame("usage", {
+      message_id: "m2",
+      parent_tool_use_id: "a1",
+      usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 90 },
+    }));
+    // Assert — input plus cache read, on the item.
+    expect((store.state.items[0] as ToolItem).contextTokens).toBe(100);
+  });
+
+  it("keeps an attributed usage frame away from the session standing", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("tool-use-start", {
+      tool_use_id: "a1",
+      tool_name: "Agent",
+      message_id: "m1",
+    }));
+    // Act — a sidechain figure that must not flip the topbar count.
+    store.applyRaw(frame("usage", {
+      message_id: "m2",
+      parent_tool_use_id: "a1",
+      usage: { input_tokens: 50_000, output_tokens: 2 },
+    }));
+    // Assert — the session's figure stays unknown, not the subagent's 50k.
+    expect(store.state.contextTokens).toBeNull();
+  });
+
+  it("drops an attributed usage frame naming a call the feed does not hold", () => {
+    // Arrange
+    const store = newStore();
+    // Act — attribution to an evicted (or interrupt-dropped) call.
+    store.applyRaw(frame("usage", {
+      message_id: "m2",
+      parent_tool_use_id: "gone",
+      usage: { input_tokens: 50_000, output_tokens: 2 },
+    }));
+    // Assert — nothing to bank on, and the session figure stays untouched.
+    expect(store.state.contextTokens).toBeNull();
+  });
+
   it("records tool progress text", () => {
     // Arrange
     const store = newStore();

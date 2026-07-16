@@ -18,6 +18,7 @@ function userTurn(text: string): UserTurnItem {
 function tool(toolUseId: string): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId,
     toolName: "Agent",
     messageId: "m1",

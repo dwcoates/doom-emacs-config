@@ -8,6 +8,7 @@ import { ConversationItem, ToolItem } from "../src/store.js";
 function agentTool(over: Partial<ToolItem> = {}): ToolItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: "t1",
     toolName: "Agent",
     messageId: "m1",

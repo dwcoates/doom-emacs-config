@@ -63,6 +63,19 @@ export interface ToolItem {
   toolName: string;
   messageId: string;
   parentToolUseId?: string;
+  /**
+   * Envelope ts of the `tool-use-start` frame: when the call opened. The
+   * agent-scoped topbar's elapsed clock counts from here (to `resultTs`
+   * once the call settles, to now while it runs).
+   */
+  ts: string;
+  /**
+   * When this call is a subagent's, the SUBAGENT conversation's own
+   * context size as its last attributed `usage` frame declared it (the
+   * same input+cache sum `contextTokens` computes for the session).
+   * Absent until the agent's first request reports one.
+   */
+  contextTokens?: number;
   inputJson: string;
   input?: Record<string, unknown>;
   inputDone: boolean;
@@ -575,6 +588,7 @@ export class ConversationStore {
           toolName: frame.tool_name,
           messageId: frame.message_id,
           parentToolUseId: frame.parent_tool_use_id,
+          ts: frame.ts,
           inputJson: "",
           inputDone: false,
         });
@@ -728,10 +742,21 @@ export class ConversationStore {
         // omits it — never a fabricated estimate.
         s.contextTokens = frame.post_tokens > 0 ? frame.post_tokens : null;
         break;
-      case "usage":
+      case "usage": {
+        // An attributed frame is a SUBAGENT conversation's standing, so it
+        // banks on that agent's tool item and never touches the session
+        // figure — the agent-scoped topbar reads it from there. An
+        // attribution naming a call the feed does not hold (evicted, or
+        // discarded by the interrupt gate) has no bubble to feed and drops.
+        if (frame.parent_tool_use_id !== undefined) {
+          const item = this.findTool(frame.parent_tool_use_id);
+          if (item) item.contextTokens = contextTokens(frame.usage);
+          break;
+        }
         s.contextTokens = contextTokens(frame.usage);
         if (frame.cost_usd !== undefined) s.costUsd = frame.cost_usd;
         break;
+      }
       case "permission-mode-changed":
         s.permissionMode = frame.mode;
         break;
