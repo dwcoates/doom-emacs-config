@@ -238,7 +238,9 @@ body {
 /* The datapoint strip's value colors, shared by BOTH renderings of the
    strip: the header's #session-info and each subagent bubble's
    .agent-topbar (see topbar.ts). Style a new datapoint against
-   .topbar-info and every surface picks it up. */
+   .topbar-info and every surface picks it up. The tokens color covers
+   both of that datapoint's shapes: the agent strip's plain span here,
+   and the session strip's chip button via its own rule below. */
 .topbar-info { color: var(--muted); }
 .topbar-info .info-ws { color: var(--info-ws); }
 .topbar-info .info-model { color: var(--info-model); }
@@ -252,12 +254,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Topbar counters (subagent roster + task roster): a chip in the
-   session-datapoint run that drops the full list. Both counters share this
-   styling — the shared counter-menu facade emits parallel class stems — and
-   only the chip color differs per counter. The menu anchors the overlay,
-   which hangs below the topbar without displacing the row it hangs from. */
-.agents-menu, .tasks-menu { position: relative; display: inline-block; }
+/* Topbar dropdowns (subagent roster, task roster, tokens breakdown): a chip
+   in the session-datapoint run that drops an overlay. The two counters share
+   the counter-menu facade's parallel class stems; the tokens menu emits the
+   same stems from its own module. The menu anchors the overlay, which hangs
+   below the topbar without displacing the row it hangs from. */
+.agents-menu, .tasks-menu, .tokens-menu { position: relative; display: inline-block; }
 
 .info-agents {
   font: inherit;
@@ -275,13 +277,21 @@ body {
   padding: 0;
   cursor: pointer;
 }
-.info-agents:hover, .info-tasks:hover { text-decoration: underline; }
-.agents-caret, .tasks-caret { font-size: 0.7rem; }
+.info-tokens {
+  font: inherit;
+  color: var(--info-tokens);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
+.agents-caret, .tasks-caret, .tokens-caret { font-size: 0.7rem; }
 /* The one datapoint that is not a settled number: entries still working
    read in the palette's in-flight orange, as the thinking indicator does. */
 .agents-running, .tasks-running { color: var(--thinking); }
 
-.agents-overlay, .tasks-overlay {
+.agents-overlay, .tasks-overlay, .tokens-overlay {
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
@@ -312,6 +322,42 @@ body {
 .agent-topbar .agents-overlay, .agent-topbar .tasks-overlay {
   right: auto;
   left: 0;
+}
+
+/* The tokens breakdown is stat rows under section headers, not a roster:
+   a label on the left, a right-aligned tabular figure, and a total's
+   constituents indented beneath it the way nested roster entries are. */
+.tokens-overlay { min-width: 16rem; }
+.tokens-section {
+  color: var(--tool-title);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.35rem 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tokens-section:not(:first-child) {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.tokens-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.1rem 0.35rem;
+  white-space: nowrap;
+}
+.tokens-row.sub { padding-left: 1.25rem; }
+.tokens-label { color: var(--muted); }
+.tokens-value {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.tokens-row.sub .tokens-label, .tokens-row.sub .tokens-value {
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 .agent-row, .task-row {
