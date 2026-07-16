@@ -21,6 +21,7 @@ import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostTailHook } from "./host.js";
+import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
   type RosterEntry,
@@ -37,7 +38,7 @@ import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
-import { compactionBannerHtml, FeedRenderer, modelOptionsHtml } from "./render.js";
+import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
@@ -274,8 +275,18 @@ async function boot(): Promise<void> {
     }
   });
 
+  // Keyboard cycling of the feed, driven from whichever input box this
+  // build has. The cursor is re-seated after every feed render (never
+  // before: the wrappers it resolves against must already exist), so a
+  // streaming turn cannot silently drop an in-flight cycle.
+  const nav = new FeedNav(feedEl);
+  // The Emacs GUI hides the composer below and owns input itself, so its
+  // chords reach the cycle as an injected script rather than a key event.
+  installNavHook(window as unknown as HostGlobal, nav);
+
   const rerender = (): void => {
     feed.render(store.state);
+    nav.reconcile(lastUserTurnId(store.state.items));
     renderChrome();
   };
 
@@ -364,6 +375,7 @@ async function boot(): Promise<void> {
           // fire next and flush the staged backfill in one gulp.
           frames.cancel();
           feed.renderRestored(store.state);
+          nav.reconcile(lastUserTurnId(store.state.items));
           renderChrome();
         } else if (result.changed) {
           // One paint per animation frame, however many messages land
@@ -416,6 +428,10 @@ async function boot(): Promise<void> {
       input.value = "";
     };
     must<HTMLButtonElement>("send-btn").addEventListener("click", submit);
+    // Cycle the output feed without ever leaving the composer: the chords
+    // are swallowed here, every other key still types. Armed before the
+    // send handler so neither can shadow the other — they share no chord.
+    installNavKeys(input, nav);
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();

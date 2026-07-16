@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
+import { NAV_CURRENT_CLASS } from "../src/nav.js";
 import css from "../src/styles.css?raw";
 
 /** Body of the first brace-balanced block introduced by `marker`. */
@@ -1623,5 +1624,27 @@ describe("chess-game container", () => {
     // Arrange / Act / Assert
     expect(chessError).toMatch(/color:/);
     expect(chessError).toMatch(/border:/);
+  });
+});
+
+/**
+ * The cycle's current-bubble marker. Focus stays in the input box while
+ * cycling, so this bar is the feed's only "you are here" signal — and it
+ * must not shift layout, or every step would reflow the feed under the
+ * user's eyes.
+ */
+describe("the nav marker", () => {
+  it("marks the cycled bubble under the class nav.ts applies", () => {
+    expect(css).toContain(`.feed-item.${NAV_CURRENT_CLASS}`);
+  });
+
+  it("draws the marker inside the wrapper's own box, so a step cannot reflow the feed", () => {
+    // An inset shadow paints within the existing box; a real border or any
+    // spacing would grow it, nudging every bubble below on each step.
+    // (border-radius is exempt: it rounds the box without widening it.)
+    const body = blockAfter(css, `.feed-item.${NAV_CURRENT_CLASS}`);
+    expect(body).toMatch(/box-shadow:\s*inset/);
+    expect(body).not.toMatch(/\bborder(-(top|right|bottom|left|width|style))?\s*:/);
+    expect(body).not.toMatch(/\b(padding|margin)/);
   });
 });

@@ -12,6 +12,9 @@ import {
   sectionFor,
   wheelAction,
   wheelDeltaPx,
+  type RevealBlock,
+  type RevealTarget,
+  revealNode,
 } from "../src/scroll.js";
 import { renderItem } from "../src/render.js";
 import { PermissionItem, ToolItem } from "../src/store.js";
@@ -378,5 +381,30 @@ describe("parkAtTail", () => {
     parkAtTail(box);
     // Assert
     expect(box.scrollTop).toBe(0);
+  });
+});
+
+/**
+ * The shared "bring this into view" primitive. The roster's agent reveal,
+ * the keyboard cycle, and any later match-stepping all move the feed
+ * through here, so that they cannot drift into moving it differently.
+ */
+describe("revealNode", () => {
+  /** A node recording how it was asked to scroll itself into view. */
+  const spy = (): { calls: RevealBlock[] } & RevealTarget => {
+    const calls: RevealBlock[] = [];
+    return { calls, scrollIntoView: (arg) => calls.push(arg.block) };
+  };
+
+  it("scrolls as little as it must by default, leaving a visible target where it is", () => {
+    const node = spy();
+    revealNode(node);
+    expect(node.calls).toEqual(["nearest"]);
+  });
+
+  it("puts a jumped-to node flush with the top when the caller asks for it", () => {
+    const node = spy();
+    revealNode(node, "start");
+    expect(node.calls).toEqual(["start"]);
   });
 });

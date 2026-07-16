@@ -193,7 +193,25 @@ marks the turn aborted."
       :ni "C-h"       #'evil-window-left
       :n  "<up>"        #'agent-repl--history-prev
       :n  "<down>"      #'agent-repl--history-next
-      :ni "C-r"         #'agent-repl-history-search)
+      :ni "C-r"         #'agent-repl-history-search
+      ;; Cycle the OUTPUT feed without leaving this buffer (output-nav.el):
+      ;; a modifier per bubble class, `j'/`k' for down/up per vim.  The
+      ;; webview scrolls and marks the bubble; focus stays here and typing
+      ;; keeps working.
+      ;;
+      ;; Both states MUST stay bound, and not only so the chords work in
+      ;; each.  `C-j'/`C-k' are bound on `override-global-map' (config.el)
+      ;; to `evil-window-down' and `kill-visual-line'; leaving a shifted
+      ;; chord unbound lets Emacs shift-translate it down to the unshifted
+      ;; one, so an unbound `C-S-k' here would silently KILL THE LINE the
+      ;; user is composing instead of cycling anything.  Binding the
+      ;; shifted chord is what suppresses that translation.
+      :ni "C-S-j"       #'agent-repl-output-next-prompt
+      :ni "C-S-k"       #'agent-repl-output-prev-prompt
+      :ni "M-S-j"       #'agent-repl-output-next-final
+      :ni "M-S-k"       #'agent-repl-output-prev-final
+      :ni "C-M-S-j"     #'agent-repl-output-next-tool
+      :ni "C-M-S-k"     #'agent-repl-output-prev-tool)
 
 ;; Visual-line motion bindings for the Claude input buffer.
 ;;

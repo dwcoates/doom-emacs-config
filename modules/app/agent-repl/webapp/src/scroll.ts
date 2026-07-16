@@ -91,6 +91,30 @@ export function parkAtTail(box: ScrollTail): void {
   box.scrollTop = box.scrollHeight;
 }
 
+/** Where a revealed node lands: flush with the top, or as little as possible. */
+export type RevealBlock = "start" | "nearest";
+
+/** The one method bringing a node into view needs. */
+export interface RevealTarget {
+  scrollIntoView(arg: { block: RevealBlock }): void;
+}
+
+/**
+ * Bring NODE into view inside the feed. The single "show me this bubble"
+ * primitive: the roster's agent reveal (render.ts), the keyboard cycle
+ * (nav.ts), and any later match-stepping (iterative search) must agree on
+ * the mechanic, or the feed lurches differently depending on which one
+ * moved it.
+ *
+ * `start` puts the node flush with the top, for a jump ARRIVING from
+ * elsewhere. `nearest` scrolls only as far as it must, which is what a
+ * cycle wants: a target already fully on screen should not be yanked
+ * anywhere, since the current-marker is what says where the cycle sits.
+ */
+export function revealNode(node: RevealTarget, block: RevealBlock = "nearest"): void {
+  node.scrollIntoView({ block });
+}
+
 /** True when the element both clips its content and scrolls it vertically. */
 export function isScrollBox(m: ScrollMetrics): boolean {
   if (m.overflowY !== "auto" && m.overflowY !== "scroll") return false;

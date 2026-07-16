@@ -32,7 +32,8 @@ import {
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { ModelInfo, QueuedItem } from "./protocol.js";
-import { isPinnedToBottom, parkAtTail } from "./scroll.js";
+import { navTokensForItem } from "./nav.js";
+import { isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { watchersByBubble } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
@@ -1650,6 +1651,21 @@ export function planAgentReveal(
   return null;
 }
 
+/**
+ * The semantic nav tokens one grouped-feed entry's wrapper carries, so
+ * the keyboard cycle (nav.ts) can walk it. A tab group is a run of tool
+ * calls, so it is a single `tool` stop however many members it holds.
+ *
+ * Re-derived every render rather than stamped once at creation: a
+ * streaming text bubble only BECOMES final when its turn's result lands,
+ * and a cycle that could not see that would skip the newest answer.
+ */
+export function navTokensForEntry(entry: FeedEntry, finals: FinalResponses): string {
+  if (entry.kind === "group") return "tool";
+  const item = entry.item;
+  return navTokensForItem(item, item.kind === "text" && finals.chips.has(item.blockId));
+}
+
 /** A tab's short label: the member's headline, else its name and ordinal. */
 function tabLabel(item: ToolItem, index: number): string {
   const head = toolHeadline(item);
@@ -1887,7 +1903,7 @@ export class FeedRenderer {
     this.render(this.lastState);
     const node = this.nodes.get(plan.key)?.el;
     if (!node) return false;
-    node.scrollIntoView({ block: "start" });
+    revealNode(node, "start");
     expandOwnSections(node);
     return true;
   }
@@ -2052,6 +2068,20 @@ export class FeedRenderer {
       : itemKey(entry.item, entry.index);
   }
 
+  /**
+   * Stamp EL's nav tokens for ENTRY. An item rendering nothing (a
+   * meta-only user turn, hidden by `.feed-item:empty`) is never a cycle
+   * stop: jumping to an invisible bubble reads as a dead keypress.
+   */
+  private stampNav(el: HTMLElement, entry: FeedEntry, finals: FinalResponses, html: string): void {
+    const tokens = html === "" ? "" : navTokensForEntry(entry, finals);
+    if (tokens === "") {
+      delete el.dataset.nav;
+    } else {
+      el.dataset.nav = tokens;
+    }
+  }
+
   /** One grouped-feed entry's HTML: the item's own, or its group's card. */
   private entryHtml(
     entry: FeedEntry,
@@ -2197,6 +2227,7 @@ export class FeedRenderer {
         const { el, entry } = shells[i];
         const html = this.entryHtml(entry, finals, pulse, panels);
         el.innerHTML = html;
+        this.stampNav(el, entry, finals, html);
         hydrateChessGames(el);
         const node = this.nodes.get(el.dataset.key ?? "");
         if (node) node.html = html;
@@ -2298,6 +2329,7 @@ export class FeedRenderer {
         entry = { el, html: "" };
         this.nodes.set(key, entry);
       }
+      this.stampNav(entry.el, feedEntry, finals, html);
       if (entry.html !== html) {
         // A section the user clicked open outlives the re-render of the
         // item that carries it: a running tool card rewrites its whole
