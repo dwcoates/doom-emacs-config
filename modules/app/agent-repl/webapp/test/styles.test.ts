@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import { NAV_CURRENT_CLASS } from "../src/nav.js";
+import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS } from "../src/search.js";
 import css from "../src/styles.css?raw";
 
 /** Body of the first brace-balanced block introduced by `marker`. */
@@ -1703,5 +1704,93 @@ describe("tokens dropdown styles", () => {
     // Arrange / Act — the sub rows read as children of the input total.
     // Assert
     expect(tokensSubRow).toMatch(/padding-left:/);
+  });
+});
+
+describe("feed search marks", () => {
+  const match = blockAfter(css, `.${MARK_CLASS} {`);
+  const current = blockAfter(css, `.${CURRENT_CLASS} {`);
+  const status = blockAfter(css, "#search-status {");
+
+  it("styles every match under the class search.ts injects", () => {
+    // Arrange / Act / Assert
+    expect(match).toMatch(/background:\s*var\(--search-match\)/);
+  });
+
+  it("pins the marked text's color, so a highlighted token keeps its contrast", () => {
+    // A mark lands inside .hljs-* spans whose color would otherwise carry the
+    // text right across the wash.
+    // Arrange / Act / Assert
+    expect(match).toMatch(/color:\s*var\(--search-fg\)/);
+  });
+
+  it("washes the current match differently from its neighbours", () => {
+    // Arrange / Act / Assert
+    expect(current).toMatch(/background:\s*var\(--search-current\)/);
+  });
+
+  it("outranks the other matches by source order rather than specificity", () => {
+    // Both classes ride the same element, so the later rule is the one that
+    // wins — the discipline .expanded uses over the cap rules.
+    // Arrange / Act
+    const at = css.indexOf(`.${MARK_CLASS} {`);
+    // Assert
+    expect(css.indexOf(`.${CURRENT_CLASS} {`)).toBeGreaterThan(at);
+  });
+
+  it("beats the plain match wash without reaching for !important", () => {
+    // Arrange / Act / Assert
+    expect(current).not.toContain("!important");
+  });
+
+  it("collapses the status line until a search puts text in it", () => {
+    // Arrange / Act / Assert
+    expect(status).toMatch(/display:\s*none/);
+    expect(css).toMatch(/#search-status\.on\s*\{\s*display:\s*block/);
+  });
+
+  it("lifts a revealed section's cap under the search's own class", () => {
+    // Arrange / Act
+    const revealed = blockAfter(css, `.${REVEAL_CLASS} {`);
+    // Assert
+    expect(revealed).toMatch(/max-height:\s*none/);
+  });
+
+  it("reveals the display folds the search opens, not just the capped ones", () => {
+    // A subagent's whole prompt (.agent-json) and a tool's raw input JSON
+    // (.folded-json) are display:none, not merely capped.
+    // Arrange / Act / Assert
+    expect(css).toMatch(/\.agent-input\.search-revealed \.agent-json/);
+    expect(css).toMatch(/\.folded-input\.search-revealed \.folded-json/);
+  });
+
+  it("lifts the cap by source order rather than !important", () => {
+    // Arrange / Act
+    const lastCap = Math.max(...CAPPED_CLASSES.map((c) => css.lastIndexOf(`.${c} {`)));
+    const revealed = blockAfter(css, `.${REVEAL_CLASS} {`);
+    // Assert
+    expect(css.indexOf(`.${REVEAL_CLASS} {`)).toBeGreaterThan(lastCap);
+    expect(revealed).not.toContain("!important");
+  });
+
+  it("keeps the current match's wash brighter than the page it sits on", () => {
+    // The mark is the thing being hunted for, so it is the one place the
+    // stylesheet shouts against the background rather than deferring to it.
+    // Arrange / Act
+    const dark = blockAfter(blockAfter(css, "@media (prefers-color-scheme: dark)"), ":root");
+    // Assert
+    expect(luminance(token(dark, "--search-current"))).toBeGreaterThan(
+      luminance(token(dark, "--bg")),
+    );
+  });
+
+  it("washes the current match louder than the others in the dark theme too", () => {
+    // Arrange / Act
+    const dark = blockAfter(blockAfter(css, "@media (prefers-color-scheme: dark)"), ":root");
+    // Assert — orange sits below yellow in perceived lightness, which is the
+    // gap that makes the current match findable among a screen of hits.
+    expect(luminance(token(dark, "--search-current"))).not.toBe(
+      luminance(token(dark, "--search-match")),
+    );
   });
 });
