@@ -441,6 +441,74 @@ func TestTranslatorSetModelIgnoresTheSyntheticPlaceholder(t *testing.T) {
 	}
 }
 
+func TestTranslatorSetModelKeepsTheContextVariantAgainstAnEchoedBaseID(t *testing.T) {
+	// Arrange — the API answers `claude-fable-5` for a session the user put
+	// on `claude-fable-5[1m]`, because the suffix picked a context window
+	// rather than a model. Adopting that echo would downgrade the mirror,
+	// and a revive relaunches the CLI from the mirror.
+	tr := NewTranslator()
+	tr.Model = "claude-fable-5[1m]"
+	// Act
+	frame := tr.SetModel("claude-fable-5", "agent")
+	// Assert
+	if frame != nil || tr.Model != "claude-fable-5[1m]" {
+		t.Errorf("frame = %v, mirror = %q, want nil / claude-fable-5[1m]", frame, tr.Model)
+	}
+}
+
+func TestTranslatorSetModelLetsAnEchoCorrectTheModelFamily(t *testing.T) {
+	// Arrange — a variant suffix must not make the mirror unfixable: a real
+	// switch to another family is still adopted from an echo.
+	tr := NewTranslator()
+	tr.Model = "claude-fable-5[1m]"
+	// Act
+	frame := tr.SetModel("claude-opus-4-8", "agent")
+	// Assert
+	if frame == nil || tr.Model != "claude-opus-4-8" {
+		t.Errorf("frame = %v, mirror = %q, want a frame / claude-opus-4-8", frame, tr.Model)
+	}
+}
+
+func TestTranslatorSetModelLetsTheUserDropTheContextVariant(t *testing.T) {
+	// Arrange — the user's own ack spells the id in full, so picking the
+	// plain variant deliberately must land rather than be read as an echo.
+	tr := NewTranslator()
+	tr.Model = "claude-fable-5[1m]"
+	// Act
+	frame := tr.SetModel("claude-fable-5", modelOriginUser)
+	// Assert
+	if frame == nil || tr.Model != "claude-fable-5" {
+		t.Errorf("frame = %v, mirror = %q, want a frame / claude-fable-5", frame, tr.Model)
+	}
+}
+
+func TestTranslatorSetModelAdoptsAVariantOverAPlainMirror(t *testing.T) {
+	// Arrange — the reverse direction is a genuine move the echo rule must
+	// not block, since the base id is not the variant's base-equal twin.
+	tr := NewTranslator()
+	tr.Model = "claude-fable-5"
+	// Act
+	frame := tr.SetModel("claude-fable-5[1m]", modelOriginUser)
+	// Assert
+	if frame == nil || tr.Model != "claude-fable-5[1m]" {
+		t.Errorf("frame = %v, mirror = %q, want a frame / claude-fable-5[1m]", frame, tr.Model)
+	}
+}
+
+func TestModelBaseStripsTheContextVariantSuffix(t *testing.T) {
+	// Arrange / Act / Assert
+	if got := modelBase("claude-fable-5[1m]"); got != "claude-fable-5" {
+		t.Errorf("modelBase = %q, want claude-fable-5", got)
+	}
+}
+
+func TestModelBaseLeavesAPlainIDAlone(t *testing.T) {
+	// Arrange / Act / Assert
+	if got := modelBase("claude-opus-4-8"); got != "claude-opus-4-8" {
+		t.Errorf("modelBase = %q, want claude-opus-4-8", got)
+	}
+}
+
 func TestTranslatorSetModelCmdAnnouncesTheSwitchOnlyOnAck(t *testing.T) {
 	// Arrange — a switch the SDK has not confirmed is not a switch.
 	tr := NewTranslator()
