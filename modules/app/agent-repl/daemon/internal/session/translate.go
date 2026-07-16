@@ -113,13 +113,42 @@ func NewTranslator() *Translator {
 // selectable model.
 const syntheticModel = "<synthetic>"
 
+// modelBase strips the CLI's bracketed context-variant suffix from a
+// model id, so `claude-fable-5[1m]` reduces to `claude-fable-5`. The
+// suffix selects a context window rather than a model, and the id is only
+// ever spelled with it on the way IN to the CLI.
+func modelBase(model string) string {
+	if i := strings.IndexByte(model, '['); i > 0 {
+		return model[:i]
+	}
+	return model
+}
+
+// modelOriginUser marks the one origin that carries a model id the user
+// actually spelled — the ack of their own set-model. Every other origin
+// is an ECHO of what the API served.
+const modelOriginUser = "user"
+
 // SetModel adopts MODEL as the session's model and yields the frame
 // announcing the move, or nil when MODEL is empty, the CLI's synthetic
 // placeholder, or already the mirror's value. The single funnel for every
 // origin, so a no-op switch can never put a frame on the wire and each
 // origin cannot drift from the others.
+//
+// An ECHOED id (init, agent, reconcile) names the model the API served
+// and structurally cannot carry the `[1m]` suffix: the API answers
+// `claude-fable-5` for a session running `claude-fable-5[1m]`, because
+// the suffix picked a context window, not a model. Taking that echo at
+// face value read as drift and silently downgraded the mirror to the base
+// id within one assistant turn — and since a revive relaunches the CLI
+// from the mirror, the user's 1M context quietly evaporated. So an echo
+// may correct the model FAMILY but never strips the variant the user
+// chose. Only the user's own ack, which spells the id in full, can.
 func (t *Translator) SetModel(model, origin string) protocol.L2Frame {
 	if model == "" || model == syntheticModel || model == t.Model {
+		return nil
+	}
+	if origin != modelOriginUser && model == modelBase(t.Model) {
 		return nil
 	}
 	t.Model = model
@@ -318,7 +347,7 @@ func (t *Translator) onAck(evt *protocol.L1Event) []protocol.L2Frame {
 	}
 	if model, ok := t.pendingModels[evt.RequestID]; ok {
 		delete(t.pendingModels, evt.RequestID)
-		if frame := t.SetModel(model, "user"); frame != nil {
+		if frame := t.SetModel(model, modelOriginUser); frame != nil {
 			return []protocol.L2Frame{frame}
 		}
 		return nil
