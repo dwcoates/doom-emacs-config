@@ -444,15 +444,17 @@ func (t *Translator) onStreamEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		}
 		t.currentMessage[parent] = se.Message.ID
 		t.streamed[se.Message.ID] = true
-		// Main-chain only. A subagent's request carries the SUBAGENT's
-		// context, so emitting its usage would flip the topbar token count
-		// to a sidechain figure for the length of every subagent — the same
-		// reason onAssistantMessage filters the model mirror on parent.
-		if parent == "" && se.Message.Usage != nil {
+		// A subagent's request carries the SUBAGENT's context, not the
+		// session's, so its usage is emitted ATTRIBUTED (parent set) rather
+		// than suppressed: the SPA banks it on that agent's bubble topbar
+		// and only a bare frame moves the session count. The model mirror in
+		// onAssistantMessage still filters on parent for the same reason.
+		if se.Message.Usage != nil {
 			return []protocol.L2Frame{&protocol.UsageFrame{
-				Envelope:  protocol.Envelope{Type: "usage"},
-				MessageID: se.Message.ID,
-				Usage:     *se.Message.Usage,
+				Envelope:        protocol.Envelope{Type: "usage"},
+				MessageID:       se.Message.ID,
+				ParentToolUseID: parent,
+				Usage:           *se.Message.Usage,
 			}}
 		}
 		return nil
@@ -540,15 +542,16 @@ func (t *Translator) onStreamEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		return []protocol.L2Frame{t.closeBlock(blk)}
 
 	case "message_delta":
-		// Main-chain only, mirroring message_start: a subagent's usage is
-		// not the session's context and must not overwrite the topbar count.
-		if parent != "" || se.Usage == nil {
+		// Attributed like message_start: a subagent's usage rides with its
+		// parent id so the SPA scopes it, never overwriting the topbar count.
+		if se.Usage == nil {
 			return nil
 		}
 		return []protocol.L2Frame{&protocol.UsageFrame{
-			Envelope:  protocol.Envelope{Type: "usage"},
-			MessageID: t.currentMessage[parent],
-			Usage:     *se.Usage,
+			Envelope:        protocol.Envelope{Type: "usage"},
+			MessageID:       t.currentMessage[parent],
+			ParentToolUseID: parent,
+			Usage:           *se.Usage,
 		}}
 
 	case "message_stop":

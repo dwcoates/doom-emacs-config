@@ -114,26 +114,45 @@ func TestTranslatorMessageDeltaEmitsUsage(t *testing.T) {
 	}
 }
 
-func TestTranslatorSubagentMessageStartEmitsNoUsage(t *testing.T) {
+func TestTranslatorSubagentMessageStartEmitsAttributedUsage(t *testing.T) {
 	// Arrange — a subagent's request carries the SUBAGENT's context, not the
-	// session's, so surfacing it would clobber the topbar token count.
+	// session's, so its usage rides ATTRIBUTED: the SPA banks it on that
+	// agent's bubble topbar instead of the session count.
 	tr := NewTranslator()
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"message_start","message":{"id":"sub1","role":"assistant","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}}`))
 	// Assert
-	if len(frames) != 0 {
-		t.Errorf("subagent message_start emitted %d frames, want none: %+v", len(frames), frames)
+	wantTypes(t, frames, "usage")
+	usage := frames[0].(*protocol.UsageFrame)
+	if usage.ParentToolUseID != "task1" || usage.MessageID != "sub1" {
+		t.Errorf("usage = %+v", usage)
 	}
 }
 
-func TestTranslatorSubagentMessageDeltaEmitsNoUsage(t *testing.T) {
+func TestTranslatorSubagentMessageDeltaEmitsAttributedUsage(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()
+	tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"message_start","message":{"id":"sub1","role":"assistant","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}}`))
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":9}}}`))
 	// Assert
-	if len(frames) != 0 {
-		t.Errorf("subagent message_delta emitted %d frames, want none: %+v", len(frames), frames)
+	wantTypes(t, frames, "usage")
+	usage := frames[0].(*protocol.UsageFrame)
+	if usage.ParentToolUseID != "task1" || usage.Usage.OutputTokens != 9 {
+		t.Errorf("usage = %+v", usage)
+	}
+}
+
+func TestTranslatorMainChainUsageCarriesNoAttribution(t *testing.T) {
+	// Arrange — a bare (unattributed) frame is what moves the session count,
+	// so the main chain must never grow a parent id.
+	tr := NewTranslator()
+	// Act
+	frames := startMessage(t, tr, "msg1")
+	// Assert
+	wantTypes(t, frames, "usage")
+	if got := frames[0].(*protocol.UsageFrame).ParentToolUseID; got != "" {
+		t.Errorf("main-chain usage ParentToolUseID = %q, want empty", got)
 	}
 }
 
