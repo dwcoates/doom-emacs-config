@@ -303,6 +303,20 @@ survive."
       ;; Both windows observable -> neither panel is orphaned.
       '("*agent-panel-input-cur*" "*agent-frontend-cur*")))))
 
+;;;; ---- Tests: on-window-change ----
+
+(ert-deftest agent-repl-test-panels-on-window-change-reconciles-after-sync ()
+  "on-window-change sweeps other workspaces' orphans first, then
+reconciles the current workspace's own layout."
+  (agent-repl-test--with-clean-state
+    (let ((calls '()))
+      (cl-letf (((symbol-function 'agent-repl--sync-panels)
+                 (lambda () (push 'sync calls)))
+                ((symbol-function 'agent-repl-window--ensure-layout)
+                 (lambda () (push 'ensure calls))))
+        (agent-repl--on-window-change))
+      (should (equal (nreverse calls) '(sync ensure))))))
+
 ;;;; ---- Tests: Defcustom defaults ----
 
 ;;;; ---- Tests: drain-pending-show-panels ----
