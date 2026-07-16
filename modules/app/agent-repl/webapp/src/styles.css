@@ -55,6 +55,10 @@
      between the --err red and the --thinking orange the alarm dot alternates
      between, so the topbar reads as one escalating band. */
   --remediation: #ca8a04;
+  /* An interrupt-ended turn's chip: the same true yellow the remediation
+     notice uses, since a turn the user chose to stop reads as a warning, not
+     the --err red a genuine failure carries. */
+  --interrupted: #ca8a04;
   /* The rule a /clear draws under its prompt: red, the loudest thing in the
      palette, because everything above it is context the session no longer has. */
   --clear-divider: #dc2626;
@@ -118,6 +122,7 @@
     --turn-complete-border: #6b5a22;
     --composer-bg: #0c0e12;
     --remediation: #facc15;
+    --interrupted: #facc15;
     --clear-divider: #ef4444;
     --final-response: #4ade80;
     --q-border: #facc15;
@@ -701,6 +706,7 @@ pre {
   padding: 0.1rem 0.75rem;
 }
 .result.err { color: var(--err); }
+.result.interrupted { color: var(--interrupted); }
 .result.done {
   background: var(--turn-complete-bg);
   border-color: var(--turn-complete-border);
