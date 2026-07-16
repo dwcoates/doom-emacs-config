@@ -1265,6 +1265,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A transcript takes exactly one writer, and this create is the newest
+	// claim on it, so any older session still holding it stands down BEFORE
+	// a second CLI exists (see supersede.go). Placed after the viability
+	// gate so a create that is about to be rejected never tears down a
+	// healthy session on its way out.
+	s.supersedeResumeConflicts(opts)
 	id := newSessionID()
 	// Register BEFORE launch: transcript seeding fires the registrar's
 	// claude_session_id write-through, which updates this record. Fake
