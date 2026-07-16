@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TASK_TOOLS,
+  agentTasks,
   sessionTasks,
   taskIdFromCreateResult,
   tasksMenuHtml,
@@ -216,6 +217,58 @@ describe("sessionTasks", () => {
     const [task] = sessionTasks([taskCreate()]);
     // Assert
     expect(task.nested).toBe(false);
+  });
+});
+
+describe("agentTasks", () => {
+  it("keeps only the task calls the given agent itself made", () => {
+    // Arrange — one create by agent a1, one main-chain create.
+    const items = [
+      taskCreate({ toolUseId: "c1", parentToolUseId: "a1" }),
+      taskCreate({
+        toolUseId: "c2",
+        input: { subject: "main-chain task" },
+        result: { isError: false, content: "Task #2 created successfully: main-chain task" },
+      }),
+    ];
+    // Act + Assert
+    expect(agentTasks(items, "a1").map((t) => t.id)).toEqual(["1"]);
+  });
+
+  it("rows a task the agent only updated, never created", () => {
+    // Arrange — the harness task list is session-global, so an update by
+    // the agent against a main-chain task still counts as the agent's.
+    const items = [
+      taskCreate(),
+      taskUpdate({ parentToolUseId: "a1", input: { taskId: "1", subject: "s", status: "in_progress" } }),
+    ];
+    // Act
+    const rows = agentTasks(items, "a1");
+    // Assert
+    expect(rows.map((t) => ({ id: t.id, status: t.status }))).toEqual([
+      { id: "1", status: "running" },
+    ]);
+  });
+
+  it("stamps a completion's age on the session's counted-turn clock", () => {
+    // Arrange — two counted turns precede the agent's completing update.
+    const items: ConversationItem[] = [
+      userTurn("first"),
+      userTurn("second"),
+      taskCreate({ parentToolUseId: "a1" }),
+      taskUpdate({ parentToolUseId: "a1", input: { taskId: "1", status: "completed" } }),
+    ];
+    // Act
+    const [task] = agentTasks(items, "a1");
+    // Assert
+    expect(task.deactivatedAtTurn).toBe(2);
+  });
+
+  it("keeps a nested agent's task calls out of another agent's roster", () => {
+    // Arrange — a2's create is not a1's.
+    const items = [taskCreate({ parentToolUseId: "a2" })];
+    // Act + Assert
+    expect(agentTasks(items, "a1")).toEqual([]);
   });
 });
 

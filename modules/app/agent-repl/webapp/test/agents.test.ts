@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SUBAGENT_TOOLS, agentsMenuHtml, sessionSubagents } from "../src/agents.js";
+import { SUBAGENT_TOOLS, agentSubagents, agentsMenuHtml, sessionSubagents } from "../src/agents.js";
 import { CounterEntry } from "../src/counter-menu.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 
@@ -195,6 +195,48 @@ describe("sessionSubagents", () => {
     const [agent] = sessionSubagents([item]);
     // Assert
     expect(agent.deactivatedAtTurn).toBeNull();
+  });
+});
+
+describe("agentSubagents", () => {
+  it("keeps only the subagents spawned directly by the given agent", () => {
+    // Arrange — one child of a1, one main-chain sibling.
+    const items = [
+      agentTool({ toolUseId: "a1" }),
+      agentTool({ toolUseId: "c1", parentToolUseId: "a1" }),
+      agentTool({ toolUseId: "s1" }),
+    ];
+    // Act
+    const entries = agentSubagents(items, "a1");
+    // Assert
+    expect(entries.map((e) => e.id)).toEqual(["c1"]);
+  });
+
+  it("leaves a grandchild to its own parent's roster", () => {
+    // Arrange — c1 under a1, g1 under c1.
+    const items = [
+      agentTool({ toolUseId: "a1" }),
+      agentTool({ toolUseId: "c1", parentToolUseId: "a1" }),
+      agentTool({ toolUseId: "g1", parentToolUseId: "c1" }),
+    ];
+    // Act + Assert
+    expect(agentSubagents(items, "a1").map((e) => e.id)).toEqual(["c1"]);
+  });
+
+  it("never marks a row nested, since every row is a direct spawn", () => {
+    // Arrange
+    const items = [agentTool({ toolUseId: "c1", parentToolUseId: "a1" })];
+    // Act
+    const [child] = agentSubagents(items, "a1");
+    // Assert
+    expect(child.nested).toBe(false);
+  });
+
+  it("ignores non-subagent children of the agent", () => {
+    // Arrange — a Bash call the agent ran is not a subagent.
+    const items = [agentTool({ toolUseId: "b1", toolName: "Bash", parentToolUseId: "a1" })];
+    // Act + Assert
+    expect(agentSubagents(items, "a1")).toEqual([]);
   });
 });
 
