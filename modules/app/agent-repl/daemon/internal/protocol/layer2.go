@@ -74,8 +74,13 @@ type ResultFrame struct {
 	NumTurns      int     `json:"num_turns"`
 	TotalCostUSD  float64 `json:"total_cost_usd"`
 	Usage         Usage   `json:"usage"`
-	IsError       bool    `json:"is_error"`
-	ResultText    string  `json:"result_text,omitempty"`
+	// ModelUsage is the per-model usage map INCLUDING subagent spend
+	// (Usage above excludes it), passed through from the shim's result
+	// event. Absent when the shim reported none — a synthetic replay
+	// result, or a pre-model_usage shim.
+	ModelUsage map[string]ModelUsage `json:"model_usage,omitempty"`
+	IsError    bool                  `json:"is_error"`
+	ResultText string                `json:"result_text,omitempty"`
 }
 
 type CompactBoundaryFrame struct {

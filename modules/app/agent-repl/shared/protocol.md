@@ -356,6 +356,15 @@ interface AssistantMessageEvt {
 
 Terminal event for one assistant turn. Mirrors the SDK's `SDKResultMessage`.
 
+The three usage-bearing fields scope differently, per the SDK's own cost
+accounting: `usage` counts the TOP-LEVEL agent loop only (a subagent's
+spend is never added to it), while `total_cost_usd` and `model_usage`
+count subagent requests too. The shim holds one long-lived streaming
+query per session, so all three are CUMULATIVE across the session, not
+per-turn: each result supersedes the previous one rather than adding to
+it. `model_usage` is normalized from the SDK's camelCase `modelUsage`
+and omitted when the SDK reports none (or an empty map).
+
 ```ts
 interface ResultEvt {
   type: "result";
@@ -370,7 +379,8 @@ interface ResultEvt {
   duration_api_ms: number;
   num_turns: number;
   total_cost_usd: number;
-  usage: Usage;
+  usage: Usage;                       // top-level agent loop ONLY
+  model_usage?: Record<string, ModelUsage>;  // per-model, subagents INCLUDED
   result?: string;                    // present iff subtype === "success"
   is_error: boolean;
   permission_denials?: Array<{
@@ -378,6 +388,16 @@ interface ResultEvt {
     tool_name: string;
     message?: string;
   }>;
+}
+
+interface ModelUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  web_search_requests: number;
+  cost_usd: number;
+  context_window: number;
 }
 ```
 
@@ -589,6 +609,13 @@ second tab) reports it true and keeps its running clock.
 
 End-of-turn marker. Drives the SPA "spinner off" + usage chip.
 
+`usage` and `model_usage` carry the §1 result event's scoping verbatim:
+`usage` is the top-level agent loop's cumulative session spend (subagents
+excluded), `model_usage` the per-model cumulative spend with subagents
+included. Both are session-cumulative snapshots — each result supersedes
+the previous one. `model_usage` is absent on a synthetic replay result
+(the transcript records none) and from a pre-`model_usage` shim.
+
 ```ts
 interface ResultFrame extends WsEnvelope {
   type: "result";
@@ -601,7 +628,8 @@ interface ResultFrame extends WsEnvelope {
   duration_api_ms: number;
   num_turns: number;
   total_cost_usd: number;
-  usage: Usage;
+  usage: Usage;                       // top-level agent loop ONLY
+  model_usage?: Record<string, ModelUsage>;  // per-model, subagents INCLUDED
   is_error: boolean;
   result_text?: string;               // for "success"
 }

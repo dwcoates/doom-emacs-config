@@ -642,6 +642,39 @@ func TestTranslatorResultMapsFields(t *testing.T) {
 	}
 }
 
+func TestTranslatorResultPassesModelUsageThrough(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — model_usage rides the shim's result event, per-model.
+	frames := tr.OnEvent(evt(t, `{"type":"result","session_id":"s1","uuid":"u","subtype":"success","duration_ms":10,"duration_api_ms":8,"num_turns":1,"total_cost_usd":0.02,"usage":{"input_tokens":1,"output_tokens":2},"model_usage":{"claude-opus-4-8":{"input_tokens":30,"output_tokens":40,"cache_creation_input_tokens":60,"cache_read_input_tokens":50,"web_search_requests":2,"cost_usd":0.12,"context_window":1000000}},"result":"done","is_error":false}`))
+	// Assert
+	wantTypes(t, frames, "result")
+	got := frames[0].(*protocol.ResultFrame).ModelUsage["claude-opus-4-8"]
+	want := protocol.ModelUsage{
+		InputTokens:              30,
+		OutputTokens:             40,
+		CacheCreationInputTokens: 60,
+		CacheReadInputTokens:     50,
+		WebSearchRequests:        2,
+		CostUSD:                  0.12,
+		ContextWindow:            1000000,
+	}
+	if got != want {
+		t.Errorf("model_usage entry = %+v, want %+v", got, want)
+	}
+}
+
+func TestTranslatorResultOmitsAbsentModelUsage(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a result without model_usage (synthetic replay, old shim).
+	frames := tr.OnEvent(evt(t, `{"type":"result","session_id":"s1","uuid":"u","subtype":"success","duration_ms":10,"duration_api_ms":8,"num_turns":1,"total_cost_usd":0.02,"usage":{"input_tokens":1,"output_tokens":2},"result":"done","is_error":false}`))
+	// Assert — nil map marshals away under omitempty, never as {}.
+	if frames[0].(*protocol.ResultFrame).ModelUsage != nil {
+		t.Errorf("model_usage = %+v, want nil", frames[0].(*protocol.ResultFrame).ModelUsage)
+	}
+}
+
 func TestTranslatorResultClosesDanglingBlocks(t *testing.T) {
 	// Arrange — a text block is left open (interrupted turn).
 	tr := NewTranslator()
