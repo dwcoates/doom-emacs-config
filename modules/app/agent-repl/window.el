@@ -285,6 +285,20 @@ list of windows that were actually deleted."
 
 ;;;; --- Layout reconciliation -----------------------------------------------
 
+(defun agent-repl-window--panels-restorable-p (ws)
+  "Return non-nil when WS's panel pair can be remounted through its frontend.
+The one hard requirement is a live VIEW buffer: the mount recipe
+\(`agent-repl--frontend-display-webview') recreates a dead or nil input
+buffer on the way in (`agent-repl--ensure-input-buffer'), but a dead
+view buffer would send the show dispatch down the open path — booting a
+webview (and possibly a daemon session), which no implicit restore path
+may do.  Shared by every implicit restore path — the window-change
+reconciler (`agent-repl-window--ensure-layout'), the persp-switch
+restore (`agent-repl--ensure-own-panels-on-persp-switch'), and the
+frame reclaim (`agent-repl--reclaim-frame-fullscreen') — so their
+eligibility checks cannot drift."
+  (buffer-live-p (agent-repl-window--panel-buffer :view ws)))
+
 (defvar agent-repl-window--ensure-layout-in-progress nil
   "Non-nil while `agent-repl-window--ensure-layout' dispatches a repair.
 The repair remounts the two-panel layout, which re-fires
@@ -342,7 +356,7 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
       (let ((view-win (agent-repl-window--panel-window :view ws))
             (input-win (agent-repl-window--panel-window :input ws)))
         (when (xor view-win input-win)
-          (if (not (buffer-live-p (agent-repl-window--panel-buffer :view ws)))
+          (if (not (agent-repl-window--panels-restorable-p ws))
               (progn
                 (agent-repl--log ws "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show" ws)
                 nil)

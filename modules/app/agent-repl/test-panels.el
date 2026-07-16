@@ -2813,6 +2813,31 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
         (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
         (should-not shown-ws)))))
 
+(ert-deftest agent-repl-test-panels-ensure-own-restores-when-input-dead ()
+  "ensure-own-panels-on-persp-switch re-shows when the view buffer is
+live even though the input buffer is dead — the mount recreates the
+input buffer (`agent-repl--ensure-input-buffer'), so only view
+liveness gates the restore."
+  (agent-repl-test--with-clean-state
+    (let ((shown-ws nil))
+      (agent-repl--ws-put "my-ws" :panels-were-visible t)
+      (let ((frontend-buf (get-buffer-create "*agent-frontend-my-ws*"))
+            (input-buf (get-buffer-create "*agent-panel-input-my-ws*")))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "my-ws" :frontend-buffer frontend-buf)
+              (agent-repl--ws-put "my-ws" :input-buffer input-buf)
+              (kill-buffer input-buf)
+              (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                        ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                        ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                        ((symbol-function 'agent-repl--frontend-dispatch-show)
+                         (lambda (ws) (setq shown-ws ws))))
+                (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+                (should (equal shown-ws "my-ws"))))
+          (kill-buffer frontend-buf)
+          (when (buffer-live-p input-buf) (kill-buffer input-buf)))))))
+
 ;;;; ---- Tests: stale-window-buffers ----
 
 (ert-deftest agent-repl-test-panels-stale-window-buffers-unique-live ()
