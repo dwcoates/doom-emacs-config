@@ -24,6 +24,7 @@ import {
   renderItem,
   rendersEmpty,
   repinsToTail,
+  taskStreamFace,
   wakeRemainingLabel,
   navTokensForEntry,
 } from "../src/render.js";
@@ -3093,6 +3094,150 @@ describe("activityTicker", () => {
   it("voices a waiting child permission", () => {
     // Arrange + Act + Assert
     expect(activityTicker([childPermission("t2")])).toBe("1 step · awaiting permission: Bash");
+  });
+});
+
+// --- task update stream ------------------------------------------------------------
+
+/** A settled TaskCreate card whose result named task #1. */
+function taskCreateTool(id = "tc1"): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: id,
+    messageId: "m1",
+    toolName: "TaskCreate",
+    inputJson: "{}",
+    input: { subject: "wire the counter" },
+    inputDone: true,
+    result: { isError: false, content: "Task #1 created successfully: wire the counter" },
+  };
+}
+
+/** A settled TaskUpdate against task #1. */
+function taskUpdateTool(over: Partial<ToolItem> = {}): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: "u1",
+    messageId: "m1",
+    toolName: "TaskUpdate",
+    inputJson: "{}",
+    input: { taskId: "1", status: "in_progress" },
+    inputDone: true,
+    ...over,
+  };
+}
+
+/** A PanelContext carrying UPDATES for the tc1 create card, open per OPEN. */
+function taskStreamCtx(updates: ToolItem[], open = false): PanelContext {
+  return {
+    children: new Map(),
+    isOpen: () => open,
+    taskUpdates: new Map([["tc1", updates]]),
+  };
+}
+
+describe("task update stream", () => {
+  it("renders no stream fold on a create card without updates", () => {
+    // Arrange + Act
+    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([]));
+    // Assert
+    expect(html).not.toContain("task-stream");
+  });
+
+  it("shows the collapsed face while closed and none of the update bubbles", () => {
+    // Arrange + Act
+    const html = renderItem(
+      taskCreateTool(),
+      undefined,
+      undefined,
+      false,
+      taskStreamCtx([taskUpdateTool()]),
+    );
+    // Assert
+    expect(html).toContain("1 update · in progress");
+    expect(html).not.toContain("task-update");
+  });
+
+  it("renders one nested bubble per update inside the open panel", () => {
+    // Arrange
+    const updates = [
+      taskUpdateTool(),
+      taskUpdateTool({ toolUseId: "u2", input: { taskId: "1", status: "completed" } }),
+    ];
+    // Act
+    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx(updates, true));
+    // Assert
+    expect(html).toContain("agent-panel");
+    expect(html.match(/feed-child/g)).toHaveLength(2);
+  });
+
+  it("badges an update bubble with its status transition", () => {
+    // Arrange + Act
+    const html = renderItem(
+      taskCreateTool(),
+      undefined,
+      undefined,
+      false,
+      taskStreamCtx([taskUpdateTool()], true),
+    );
+    // Assert
+    expect(html).toContain(`<span class="badge run">in progress</span>`);
+  });
+
+  it("carries the subject an update renamed", () => {
+    // Arrange
+    const renamed = taskUpdateTool({ input: { taskId: "1", subject: "new name" } });
+    // Act
+    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([renamed], true));
+    // Assert
+    expect(html).toContain("new name");
+  });
+
+  it("keeps a failed update's error text loud", () => {
+    // Arrange
+    const failed = taskUpdateTool({ result: { isError: true, content: "no such task" } });
+    // Act
+    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([failed], true));
+    // Assert
+    expect(html).toContain("no such task");
+    expect(html).toContain("stderr");
+  });
+
+  it("escapes markup in an update's subject", () => {
+    // Arrange
+    const sly = taskUpdateTool({ input: { taskId: "1", subject: "<img src=x>" } });
+    // Act
+    const html = renderItem(taskCreateTool(), undefined, undefined, false, taskStreamCtx([sly], true));
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+
+  it("never folds a stream into a non-TaskCreate card", () => {
+    // Arrange — a Bash card whose id happens to key an updates entry.
+    const impostor: ToolItem = { ...taskCreateTool(), toolName: "Bash" };
+    // Act
+    const html = renderItem(impostor, undefined, undefined, false, taskStreamCtx([taskUpdateTool()]));
+    // Assert
+    expect(html).not.toContain("task-stream");
+  });
+});
+
+describe("taskStreamFace", () => {
+  it("reports the count alone when no update carries a status", () => {
+    // Arrange
+    const rename = taskUpdateTool({ input: { taskId: "1", subject: "new name" } });
+    // Act + Assert
+    expect(taskStreamFace([rename])).toBe("1 update");
+  });
+
+  it("names the newest status among several updates", () => {
+    // Arrange
+    const updates = [
+      taskUpdateTool(),
+      taskUpdateTool({ toolUseId: "u2", input: { taskId: "1", status: "completed" } }),
+    ];
+    // Act + Assert
+    expect(taskStreamFace(updates)).toBe("2 updates · completed");
   });
 });
 
