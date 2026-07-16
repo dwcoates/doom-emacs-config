@@ -1228,6 +1228,37 @@ describe("subagent roster styles", () => {
   });
 });
 
+/* The agent-scoped topbar strip inside a subagent's bubble reuses the header
+   strip's markup wholesale (see topbar.ts), so its styling is only the
+   bubble-specific deltas: card-scale sizing, and overlays that must not hang
+   off the card's left edge. */
+const agentTopbar = blockAfter(css, ".agent-topbar {");
+const agentTopbarOverlay = blockAfter(css, ".agent-topbar .agents-overlay,");
+
+describe("agent bubble topbar styles", () => {
+  it("sizes the bubble strip down to card scale", () => {
+    // Arrange / Act — the header strip inherits the topbar's size; a bubble
+    // strip at that size would out-shout the card head above it.
+    // Assert
+    expect(agentTopbar).toMatch(/font-size:/);
+  });
+
+  it("flips a bubble overlay to extend rightward from its chip", () => {
+    // Arrange / Act — the shared overlay rule right-aligns for the header's
+    // far-right chips; a bubble's chips sit at the card's LEFT.
+    // Assert
+    expect(agentTopbarOverlay).toMatch(/left:\s*0/);
+    expect(agentTopbarOverlay).toMatch(/right:\s*auto/);
+  });
+
+  it("colors the bubble strip's datapoints through the shared topbar-info scope", () => {
+    // Arrange / Act — .agent-topbar declares no info-* colors of its own; a
+    // color it duplicated would drift from the header's the day one changes.
+    // Assert
+    expect(agentTopbar).not.toMatch(/--info-/);
+  });
+});
+
 const tasksToggle = blockAfter(css, ".info-tasks {");
 const inactiveDesc = blockAfter(css, ".agent-row.inactive .agent-desc,");
 const taskRunningDot = blockAfter(css, ".task-dot.task-starting,");
