@@ -299,6 +299,21 @@ body {
   box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
 }
 
+/* The agent-scoped topbar a subagent's bubble carries (see topbar.ts): the
+   header strip's own markup on its own line under the card head, sized
+   down to card scale. Its datapoint colors come from .topbar-info. */
+.agent-topbar {
+  font-size: 0.75rem;
+  margin: 0.15rem 0 0.35rem;
+}
+/* Counter overlays hang right-aligned off their chip, which suits the
+   header's far-right chips; a bubble's chips sit at the LEFT of the card,
+   so its overlays flip to extend rightward instead of off the card edge. */
+.agent-topbar .agents-overlay, .agent-topbar .tasks-overlay {
+  right: auto;
+  left: 0;
+}
+
 .agent-row, .task-row {
   display: flex;
   align-items: baseline;

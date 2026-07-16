@@ -5,7 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
-import { formatTokens } from "./topbar.js";
+import { TOPBAR_AGENT_ATTR, agentTopbarHtml, formatTokens } from "./topbar.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -454,6 +454,14 @@ export interface PanelContext {
    * stating the refusal rather than dangling a button that cannot work.
    */
   canAddSupport?: boolean;
+  /**
+   * The agent-scoped topbar strip a subagent's card carries (see
+   * topbar.ts): the SAME renderer the session header uses, scoped to
+   * AGENT. Renderer-owned (like selections) because the counter
+   * disclosure it bakes in must survive the card's per-frame re-renders.
+   * Absent, the card renders no strip.
+   */
+  agentTopbar?(agent: ToolItem): string;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -619,6 +627,10 @@ function ToolCard(
     pendingPerms > 0 ? `<span class="badge perm">needs permission</span>` : "";
   const activity =
     panels && children.length > 0 ? ActivitySection(item.toolUseId, children, panels) : "";
+  // A subagent's card carries its own live topbar right under the head:
+  // the session strip's renderer scoped to THIS agent (see topbar.ts).
+  const agentTopbar =
+    SUBAGENT_TOOLS.has(item.toolName) ? panels?.agentTopbar?.(item) ?? "" : "";
   // TABBAR, when a consecutive-run group hands one in, is the row of member
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
@@ -626,6 +638,7 @@ function ToolCard(
     <div class="tool-card tool-${variant.toLowerCase()}">
       ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}</div>
+      ${agentTopbar}
       ${toolInput(item)}
       ${progress}
       ${activity}
@@ -1781,6 +1794,13 @@ export class FeedRenderer {
    * re-render cannot wipe an in-flight ask back to an unpressed button.
    */
   private supportPhases = new Map<string, SupportPhase>();
+  /**
+   * Which counter overlay is open on which agent bubble's topbar, keyed
+   * by agent id. Renderer state (like openPanels) so the overlay survives
+   * the card's per-frame re-renders; at most one entry, mirroring the
+   * header's one-overlay-at-a-time rule feed-wide.
+   */
+  private agentMenus = new Map<string, "agents" | "tasks">();
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -1819,6 +1839,7 @@ export class FeedRenderer {
       if (msgTo !== null && msgTo !== undefined) this.sendAgentMessage(msgTo);
       const addSupport = target.closest("[data-add-support]")?.getAttribute("data-add-support");
       if (addSupport) this.requestAddSupport(addSupport);
+      if (this.handleAgentTopbarClick(target)) return;
       this.handleTabClick(target);
       this.handlePanelToggle(target);
     });
@@ -1865,6 +1886,54 @@ export class FeedRenderer {
     return true;
   }
 
+  /**
+   * A click on an agent bubble's topbar: its counter chips toggle that
+   * bubble's overlay (closing any other bubble's, as the header keeps one
+   * open at a time), and a subagent row inside an open overlay jumps the
+   * feed to that agent — the same verbs the header topbar delegates.
+   * Answers whether the click was the topbar's, so the caller stops
+   * before the card-level handlers see it.
+   */
+  private handleAgentTopbarClick(target: HTMLElement): boolean {
+    const host = target.closest(`[${TOPBAR_AGENT_ATTR}]`);
+    if (!host) return false;
+    const agentId = host.getAttribute(TOPBAR_AGENT_ATTR) ?? "";
+    if (target.closest("[data-agents-toggle]")) {
+      this.toggleAgentMenu(agentId, "agents");
+      return true;
+    }
+    if (target.closest("[data-tasks-toggle]")) {
+      this.toggleAgentMenu(agentId, "tasks");
+      return true;
+    }
+    const rowId = target.closest(".agent-row")?.getAttribute("data-agent-id");
+    if (rowId) {
+      this.agentMenus.clear();
+      this.revealAgent(rowId);
+      return true;
+    }
+    return false;
+  }
+
+  /** Flip one bubble counter's overlay, closing every other bubble's. */
+  private toggleAgentMenu(agentId: string, menu: "agents" | "tasks"): void {
+    const next = this.agentMenus.get(agentId) === menu ? null : menu;
+    this.agentMenus.clear();
+    if (next !== null) this.agentMenus.set(agentId, next);
+    this.rerender();
+  }
+
+  /**
+   * Close every bubble topbar's counter overlay. The dismissal gestures
+   * live at the document level with the header's (click-away, Escape), so
+   * main.ts calls this from the same handlers that close the header's.
+   */
+  closeAgentMenus(): void {
+    if (this.agentMenus.size === 0) return;
+    this.agentMenus.clear();
+    this.rerender();
+  }
+
   /** A click on a tab chip pins that member as its group's active card. */
   private handleTabClick(target: HTMLElement): void {
     const chip = target.closest("[data-tab-member]");
@@ -1903,6 +1972,7 @@ export class FeedRenderer {
 
   /** The PanelContext this renderer's state backs. */
   private panelContext(
+    items: readonly ConversationItem[],
     children: ReadonlyMap<string, readonly ConversationItem[]>,
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
   ): PanelContext {
@@ -1915,6 +1985,16 @@ export class FeedRenderer {
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
+      agentTopbar: (agent) =>
+        agentTopbarHtml(
+          items,
+          agent,
+          {
+            agentsOpen: this.agentMenus.get(agent.toolUseId) === "agents",
+            tasksOpen: this.agentMenus.get(agent.toolUseId) === "tasks",
+          },
+          Date.now(),
+        ),
     };
   }
 
@@ -2071,7 +2151,7 @@ export class FeedRenderer {
     this.lastClearKey = clearBoundary(items);
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const panels = this.panelContext(items, part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);
@@ -2198,7 +2278,7 @@ export class FeedRenderer {
     this.lastClearKey = boundary;
     const part = partitionFeed(items);
     const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const panels = this.panelContext(items, part.children, watchers);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(items);
     const pulse = pulseTarget(items, state.turnInFlight, finals);

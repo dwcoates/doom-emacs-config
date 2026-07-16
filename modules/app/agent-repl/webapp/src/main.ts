@@ -238,15 +238,21 @@ async function boot(): Promise<void> {
       setCounterMenu(null);
     }
   });
-  // An open overlay closes the way every dropdown does: click off it, or Escape.
+  // An open overlay closes the way every dropdown does: click off it, or
+  // Escape. The agent bubbles' topbar overlays dismiss on the same
+  // gestures, so both handlers close them alongside the header's.
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     if (!target.closest(".agents-menu") && !target.closest(".tasks-menu")) {
       setCounterMenu(null);
+      feed.closeAgentMenus();
     }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") setCounterMenu(null);
+    if (e.key === "Escape") {
+      setCounterMenu(null);
+      feed.closeAgentMenus();
+    }
   });
 
   const rerender = (): void => {
