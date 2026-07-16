@@ -193,7 +193,14 @@ marks the turn aborted."
       :ni "C-h"       #'evil-window-left
       :n  "<up>"        #'agent-repl--history-prev
       :n  "<down>"      #'agent-repl--history-next
-      :ni "C-r"         #'agent-repl-history-search
+      ;; Prompt-history search sits on `C-M-r', not the `C-r' its shell
+      ;; reflex would suggest: `C-r' is vacated for the output feed's
+      ;; incremental search (webapp/src/search.ts), whose isearch reflex
+      ;; wants it.  Deliberately left UNBOUND here rather than rebound --
+      ;; the two searches hunt different surfaces (this buffer's past
+      ;; prompts vs the output window's text), and the input box can only
+      ;; give the chord to one of them.
+      :ni "C-M-r"       #'agent-repl-history-search
       ;; Cycle the OUTPUT feed without leaving this buffer (output-nav.el):
       ;; a modifier per bubble class, `j'/`k' for down/up per vim.  The
       ;; webview scrolls and marks the bubble; focus stays here and typing
