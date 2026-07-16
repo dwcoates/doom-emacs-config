@@ -1529,6 +1529,133 @@ fallback + filename-prefix dispatch) is unchanged machinery.
   `permission_resolved` only from `:permission`), which makes
   duplicate delivery and hook/daemon interleavings order-independent.
 
+## Workspace sidebar stream (Emacs → daemon → webapp)
+
+The GUI's workspace sidebar mirrors the Emacs drawer. Emacs owns every
+fact the sidebar shows and computes the drawer's full **view-model**
+(sections → repo groups → workspace rows, plus the merge-queue commit
+stream); the daemon relays it; the webapp renders it verbatim. This
+stream is deliberately **not** part of the per-session Layer 2: it has
+no `seq`, no replay, and one snapshot always supersedes the previous
+one. `sidebar_version: 1`.
+
+### Endpoints
+
+- `POST /workspaces/status` — Emacs ingests the latest snapshot (JSON
+  body = the snapshot object below). Responds `204`. The daemon holds
+  only the most recent snapshot; there is no history.
+- `GET /workspaces/status` — one-shot fetch of the latest snapshot;
+  `404` when none has been ingested since daemon boot.
+- `GET /workspaces/stream` — WebSocket. On connect the daemon sends the
+  latest snapshot (when one exists); afterwards every ingested snapshot
+  is broadcast to all connected clients as one text message. Inbound
+  messages on this socket are ignored.
+- `POST /workspaces/action` — the sidebar's action channel (below).
+  Responds `202` with `{"id": "<action-id>"}`.
+
+### Snapshot object
+
+```jsonc
+{
+  "type": "workspace-snapshot",
+  "sidebar_version": 1,
+  "generated_at": 1752690000.123,     // Emacs float-time at build
+  "current_ws": "doom" ,              // active workspace name, or null
+  "sidebar_visible": true,            // the drawer/sidebar shared visibility flag
+  "merge_slow_threshold": 3.0,        // seconds before a commit's clock appears
+  "marks": ["ws-a"],                  // always an array, never null
+  "last_action_result": {             // most recent sidebar action outcome, or null
+    "id": "a1b2…", "ok": false, "error": "Cannot kill a MERGED workspace…"
+  },
+  "merge_queue": {                    // omitted entirely when the queue is idle
+    "count": 4,
+    "rows": [
+      { "kind": "separator", "project": "doom" },
+      { "kind": "commit", "sha": "82e4583", "subject": "feat: …",
+        "state": "current",           // current | conflict | pending | halted
+        "ws": "ws-a",
+        "started_at": 1752689990.0,   // present on the current commit only
+        "conflict_files": 2,          // conflict rows only
+        "resolver_phase": "analyzing",
+        "resolver_started_at": 1752689995.0 }
+    ]
+  },
+  "sections": [                       // in drawer order; HIDDEN omitted when empty
+    { "id": "main", "label": "MAIN", "count": 3,
+      "groups": [
+        { "key": "/repo/.git", "label": "doom", "folded": false,
+          "entries": [ /* ENTRY, pre-ordered, folded groups carry [] */ ] }
+      ] }
+  ]
+}
+```
+
+ENTRY (one workspace row, tree pre-flattened with `depth`):
+
+```jsonc
+{
+  "ws": "name", "depth": 0,
+  "section": "main",                  // main | hidden | merging | merged
+  "status": "thinking",               // render-status keyword sans colon, or null
+  "glyph": "⌛",                      // exact drawer glyph
+  "name_color": "#ff6b6b",            // drawer name-face foreground, or null
+  "priority": "p1",                   // or null
+  "summary": "…",                     // exactly what the drawer shows (incl. … / —)
+  "summary_pending": false,
+  "dirty": true, "hidden": false, "marked": false,
+  "expanded": false, "current": false,
+  "help": "Workspace: name",
+  "detail": {                         // null unless expanded; cached fields only
+    "merge_status": "update in progress · 3 commits",
+    "branch": "DWC/x", "merged_into": "master",
+    "merge_completed_at": 1752680000.0,
+    "trunk": "master", "ahead_master": 3,
+    "source_branch": "DWC/y", "ahead_source": 2,
+    "last_commit": "feat: …", "last_commit_time": "2 hours ago",
+    "dirty_count": 4, "last_prompt_at": 1752689000.0,
+    "pending_prompts": 1, "merged_in": ["ws-b"]
+  }
+}
+```
+
+Clock rendering is client-side: the browser ticks elapsed (`started_at`,
+`merge_slow_threshold`) and "ago" (`merge_completed_at`,
+`last_prompt_at`) readouts from the shipped epochs, so an unchanged
+snapshot never needs re-sending for time to pass. Emacs pushes on the
+drawer's own refresh triggers (signature-gated 1 Hz poll, workspace
+switch, action completion) plus a ≥30 s heartbeat so clients can
+distinguish "idle" from "Emacs gone" (stale badge past ~90 s).
+
+### Sidebar action files (daemon → Emacs side channel)
+
+Sidebar actions mutate Emacs-owned state, so they ride the same
+file-based pattern as workspace commands: the daemon validates shape
+only and drops one JSON file per action into
+`$AGENT_REPL_STATE_DIR/sidebar-actions/` named
+`sidebar_action_<id>.json` (dot-prefixed temp + rename, exactly like
+`workspacecmd`). Emacs watches the directory, executes, deletes the
+file, records `last_action_result`, and force-pushes a snapshot.
+
+```jsonc
+{
+  "id": "a1b2c3…",                    // daemon-minted, echoed in last_action_result
+  "action": "visit",                  // see enum below
+  "targets": ["ws-a"],                // workspace names (repo keys for toggle-fold)
+  "args": { "prompt": "…" },          // action-specific, may be {}
+  "confirmed": false,                 // true = user confirmed a destructive prompt
+  "ts": 1752690000
+}
+```
+
+Actions: `visit`, `nuke`, `kill`, `send-prompt` (args.prompt),
+`interrupt`, `merge-into-source`, `merge-child`, `new-child`,
+`new-fork`, `toggle-hidden`, `priority-up`, `priority-down`,
+`toggle-mark`, `clear-marks`, `toggle-expand`, `toggle-fold`,
+`refresh`, `hide-sidebar`. Emacs enforces the drawer's own gating
+(MERGED refusal rules, confirmation for finishing a MERGED workspace)
+and reports refusals through `last_action_result` rather than silently
+dropping them.
+
 ## Versioning & forward compatibility
 
 - Each layer's frame discriminator (`type`) is a closed enum at any
