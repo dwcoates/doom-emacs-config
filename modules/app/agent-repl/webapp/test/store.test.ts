@@ -7,6 +7,7 @@ import {
   ThinkingItem,
   ToolItem,
   UserTurnItem,
+  topLevelUsage,
 } from "../src/store.js";
 
 let autoSeq = 0;
@@ -1589,5 +1590,130 @@ describe("ConversationStore interrupt gating", () => {
     store.applyRaw(frame("tool-use-result", { tool_use_id: "t1", is_error: false, content: "done" }));
     // Assert — the update landed within the existing bubble.
     expect(toolItems(store)[0].result).toMatchObject({ isError: false });
+  });
+});
+
+describe("ConversationStore session usage tallies", () => {
+  it("starts with no top-level tally, which renders as a dash not a zero", () => {
+    // Arrange + Act
+    const store = newStore();
+    // Assert
+    expect(topLevelUsage(store.state)).toBeNull();
+  });
+
+  it("adopts a real result's usage as the tally baseline", () => {
+    // Arrange
+    const store = newStore();
+    // Act — results carry session-cumulative snapshots.
+    store.applyRaw(resultFrame({ usage: { input_tokens: 10, output_tokens: 20 } }));
+    // Assert
+    expect(topLevelUsage(store.state)).toEqual({ input_tokens: 10, output_tokens: 20 });
+  });
+
+  it("supersedes the baseline with the next result instead of adding", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(resultFrame({ usage: { input_tokens: 10, output_tokens: 20 } }));
+    // Act — the later snapshot already contains the earlier spend.
+    store.applyRaw(resultFrame({ usage: { input_tokens: 15, output_tokens: 30 } }));
+    // Assert
+    expect(topLevelUsage(store.state)).toEqual({ input_tokens: 15, output_tokens: 30 });
+  });
+
+  it("moves the tally mid-turn as usage frames stream in", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(resultFrame({ usage: { input_tokens: 10, output_tokens: 20 } }));
+    // Act — two REQUESTS (distinct messages) of the running turn.
+    store.applyRaw(frame("usage", { message_id: "m1", usage: { input_tokens: 3, output_tokens: 1 } }));
+    store.applyRaw(frame("usage", { message_id: "m2", usage: { input_tokens: 4, output_tokens: 2 } }));
+    // Assert — distinct messages add onto the baseline.
+    expect(topLevelUsage(store.state)).toMatchObject({ input_tokens: 17, output_tokens: 23 });
+  });
+
+  it("field-wise maxes repeated usage frames of one message rather than adding", () => {
+    // Arrange
+    const store = newStore();
+    // Act — message_start then message_delta of the SAME message: fields
+    // are cumulative within a message, so adding would double-count.
+    store.applyRaw(frame("usage", { message_id: "m1", usage: { input_tokens: 5, output_tokens: 1 } }));
+    store.applyRaw(frame("usage", { message_id: "m1", usage: { input_tokens: 5, output_tokens: 9 } }));
+    // Assert
+    expect(topLevelUsage(store.state)).toMatchObject({ input_tokens: 5, output_tokens: 9 });
+  });
+
+  it("drops the live increments once a result folds them into its snapshot", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("usage", { message_id: "m1", usage: { input_tokens: 5, output_tokens: 1 } }));
+    // Act — the closing result's cumulative figure includes m1's spend.
+    store.applyRaw(resultFrame({ usage: { input_tokens: 12, output_tokens: 4 } }));
+    // Assert — counting m1 again on top would double it.
+    expect(topLevelUsage(store.state)).toEqual({ input_tokens: 12, output_tokens: 4 });
+  });
+
+  it("ignores a zero-usage synthetic replay result instead of wiping the tally", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(resultFrame({ usage: { input_tokens: 10, output_tokens: 20 } }));
+    // Act — a transcript-seeded replay closes turns with usage-less results.
+    store.applyRaw(resultFrame({ usage: { input_tokens: 0, output_tokens: 0 } }));
+    // Assert
+    expect(topLevelUsage(store.state)).toEqual({ input_tokens: 10, output_tokens: 20 });
+  });
+
+  it("adopts a result's per-model usage map", () => {
+    // Arrange
+    const store = newStore();
+    const modelUsage = {
+      "claude-opus-4-8": {
+        input_tokens: 30,
+        output_tokens: 40,
+        cache_creation_input_tokens: 60,
+        cache_read_input_tokens: 50,
+        web_search_requests: 2,
+        cost_usd: 0.12,
+        context_window: 1000000,
+      },
+    };
+    // Act
+    store.applyRaw(resultFrame({ model_usage: modelUsage }));
+    // Assert
+    expect(store.state.modelUsage).toEqual(modelUsage);
+  });
+
+  it("keeps the prior per-model map when a result carries none", () => {
+    // Arrange — a real result with a map, then one without (old shim,
+    // synthetic replay result).
+    const store = newStore();
+    const modelUsage = {
+      m: {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        web_search_requests: 0,
+        cost_usd: 0.01,
+        context_window: 1,
+      },
+    };
+    store.applyRaw(resultFrame({ model_usage: modelUsage }));
+    // Act
+    store.applyRaw(resultFrame({}));
+    // Assert
+    expect(store.state.modelUsage).toEqual(modelUsage);
+  });
+
+  it("discards every tally on a fresh-join reset", () => {
+    // Arrange — a populated session, then a rebind onto a fresh hello.
+    const store = newStore();
+    store.applyRaw(frame("usage", { message_id: "m1", usage: { input_tokens: 5, output_tokens: 1 } }));
+    store.applyRaw(resultFrame({ usage: { input_tokens: 12, output_tokens: 4 } }));
+    store.reset();
+    // Act
+    store.applyRaw(hello());
+    // Assert
+    expect(topLevelUsage(store.state)).toBeNull();
+    expect(store.state.modelUsage).toBeNull();
   });
 });

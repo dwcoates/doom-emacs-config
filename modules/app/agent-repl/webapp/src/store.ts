@@ -11,6 +11,7 @@ import {
   HelloFrame,
   L2Frame,
   ModelInfo,
+  ModelUsage,
   PermissionMode,
   PermissionPreview,
   QueuedItem,
@@ -195,6 +196,67 @@ export function contextTokens(usage: Usage | null): number {
   );
 }
 
+/**
+ * Whether a usage payload carries no tokens at all. A real turn always
+ * spends input tokens, so an all-zero usage identifies the one producer
+ * that reports none: the synthetic result a transcript-seeded replay
+ * closes each turn with (§2.11) — the transcript records no usage, and
+ * adopting its zeros would wipe the session tallies on every rehydrate.
+ */
+function isZeroUsage(usage: Usage): boolean {
+  return contextTokens(usage) === 0 && usage.output_tokens === 0;
+}
+
+/**
+ * Field-wise max of two usage payloads for the SAME message: every
+ * field is cumulative within a message (`message_start` carries the
+ * input side, each `message_delta` a growing output count), so the max
+ * is the message's most complete figure and never double-counts.
+ */
+function maxUsage(a: Usage, b: Usage): Usage {
+  return {
+    input_tokens: Math.max(a.input_tokens, b.input_tokens),
+    output_tokens: Math.max(a.output_tokens, b.output_tokens),
+    cache_creation_input_tokens: Math.max(
+      a.cache_creation_input_tokens ?? 0,
+      b.cache_creation_input_tokens ?? 0,
+    ),
+    cache_read_input_tokens: Math.max(
+      a.cache_read_input_tokens ?? 0,
+      b.cache_read_input_tokens ?? 0,
+    ),
+  };
+}
+
+/** Field-wise sum of two usage payloads from DIFFERENT messages. */
+function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    cache_creation_input_tokens:
+      (a.cache_creation_input_tokens ?? 0) + (b.cache_creation_input_tokens ?? 0),
+    cache_read_input_tokens:
+      (a.cache_read_input_tokens ?? 0) + (b.cache_read_input_tokens ?? 0),
+  };
+}
+
+/**
+ * The top-level agent's cumulative session usage RIGHT NOW: the last
+ * real result's authoritative figure plus the per-message spend of the
+ * turn still running (`turnUsage` — cleared whenever a result lands, so
+ * nothing is counted twice). Subagent spend is in neither input (§2.4,
+ * §2.8), so it is not in the sum. `null` only before the session has
+ * reported any usage at all, which renders as a dash rather than a
+ * lying zero.
+ */
+export function topLevelUsage(state: StoreState): Usage | null {
+  let tally = state.resultUsage;
+  for (const usage of state.turnUsage.values()) {
+    tally = tally === null ? usage : addUsage(tally, usage);
+  }
+  return tally;
+}
+
 export type ConversationItem =
   | UserTurnItem
   | TextItem
@@ -277,6 +339,36 @@ export interface StoreState {
    */
   contextTokens: number | null;
   /**
+   * The top-level agent's CUMULATIVE session usage as of the last real
+   * result — the tokens dropdown's authoritative baseline. Results carry
+   * session-cumulative snapshots, so each one supersedes the previous
+   * rather than adding to it; the synthetic result a transcript-seeded
+   * replay closes turns with carries all-zero usage and is skipped, so a
+   * rehydrated session shows the last live figure instead of a lying 0.
+   * `null` until a real result lands. Per §2.4, subagent spend is NEVER
+   * in this figure — the SDK scopes a result's `usage` to the top-level
+   * agent loop.
+   */
+  resultUsage: Usage | null;
+  /**
+   * Per-message usage observed SINCE `resultUsage` was adopted, keyed by
+   * message id — the live increment that keeps the topbar tally moving
+   * mid-turn between results. Fields within one message are cumulative
+   * (`message_start` carries the input side, each `message_delta` a
+   * growing output count), so frames for the same message field-wise max
+   * rather than add. Cleared when a real result lands: that result's
+   * cumulative figure already includes these messages.
+   */
+  turnUsage: Map<string, Usage>;
+  /**
+   * Per-model usage INCLUDING subagents, from the latest result carrying
+   * a `model_usage` map — the only whole-tree token figure the SDK
+   * reports (`usage` above excludes sidechains). Session-cumulative like
+   * `resultUsage`; `null` until a result carries one (a synthetic replay
+   * result and a pre-`model_usage` shim never do).
+   */
+  modelUsage: Record<string, ModelUsage> | null;
+  /**
    * Whether a context compaction is IN PROGRESS: opened by a `compact-status`
    * frame (the SDK's `status: "compacting"`) and closed by the `compact-boundary`
    * that ends it. A compaction always runs inside a turn, so this is also
@@ -316,6 +408,9 @@ function initialState(): StoreState {
     turnStartedAt: null,
     lastFinalResponseAt: null,
     contextTokens: null,
+    resultUsage: null,
+    turnUsage: new Map(),
+    modelUsage: null,
     compacting: false,
     interrupting: false,
     costUsd: null,
@@ -493,6 +588,9 @@ export class ConversationStore {
     s.turnStartedAt = null;
     s.lastFinalResponseAt = null;
     s.contextTokens = null;
+    s.resultUsage = null;
+    s.turnUsage = new Map();
+    s.modelUsage = null;
     s.interrupting = false;
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
@@ -708,9 +806,19 @@ export class ConversationStore {
         // never leaves it stuck on.
         s.compacting = false;
         // `contextTokens` is deliberately NOT moved here: this frame's usage
-        // is the turn's cumulative spend, not the context it left behind.
+        // is the session's cumulative spend, not the context it left behind.
         // The standing figure is the one the turn's last request declared.
         s.costUsd = frame.total_cost_usd;
+        // The session tallies, by contrast, ARE this frame's business: its
+        // usage is the authoritative cumulative figure, superseding the
+        // baseline and the per-message increments it already includes. A
+        // synthetic replay result carries all-zero usage (the transcript
+        // records none) and must not wipe a live tally.
+        if (!isZeroUsage(frame.usage)) {
+          s.resultUsage = frame.usage;
+          s.turnUsage = new Map();
+        }
+        if (frame.model_usage !== undefined) s.modelUsage = frame.model_usage;
         break;
       }
       case "interrupt":
@@ -755,6 +863,16 @@ export class ConversationStore {
         }
         s.contextTokens = contextTokens(frame.usage);
         if (frame.cost_usd !== undefined) s.costUsd = frame.cost_usd;
+        // The live increment of the session tally: fold this request's
+        // usage into its message's entry so the topbar figure moves
+        // mid-turn instead of waiting for the result. Main-chain only —
+        // an attributed (subagent) frame banked on its tool item above
+        // and never reaches this tally.
+        const prior = s.turnUsage.get(frame.message_id);
+        s.turnUsage.set(
+          frame.message_id,
+          prior === undefined ? frame.usage : maxUsage(prior, frame.usage),
+        );
         break;
       }
       case "permission-mode-changed":
