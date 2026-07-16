@@ -3823,3 +3823,154 @@ describe("openWatcherTaskIds", () => {
     expect(ids.size).toBe(0);
   });
 });
+
+describe("unsupported slash-command card", () => {
+  function refusal(resultText: string | undefined): ResultItem {
+    return {
+      kind: "result",
+      subtype: "success",
+      durationMs: 1,
+      sincePrevFinalMs: 1,
+      numTurns: 1,
+      totalCostUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      isError: false,
+      resultText,
+      context: null,
+    };
+  }
+
+  /** A PanelContext carrying only the support state a card reads. */
+  function ctx(over: Partial<PanelContext> = {}): PanelContext {
+    return {
+      children: new Map(),
+      isOpen: () => false,
+      canAddSupport: true,
+      ...over,
+    };
+  }
+
+  it("replaces the result chip with the card for a refused command", () => {
+    // Arrange + Act
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx(),
+    );
+    // Assert
+    expect(html).toContain("unsupported");
+    expect(html).not.toContain(`class="result`);
+  });
+
+  it("offers the button naming the refused command", () => {
+    // Arrange + Act
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx(),
+    );
+    // Assert
+    expect(html).toContain(`data-add-support="status"`);
+    expect(html).toContain("Create workspace to add support");
+  });
+
+  it("still renders the ordinary chip for a turn that answered normally", () => {
+    // Arrange + Act
+    const html = renderItem(refusal("all done"), undefined, undefined, false, ctx());
+    // Assert
+    expect(html).toContain(`class="result`);
+    expect(html).not.toContain("data-add-support");
+  });
+
+  it("still renders the ordinary chip for a turn with no result text", () => {
+    // Arrange + Act
+    const html = renderItem(refusal(undefined), undefined, undefined, false, ctx());
+    // Assert
+    expect(html).toContain(`class="result`);
+  });
+
+  it("withholds the button when no daemon backs the webapp", () => {
+    // Arrange + Act — a button that cannot ask anything is worse than none.
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx({ canAddSupport: false }),
+    );
+    // Assert
+    expect(html).toContain("unsupported");
+    expect(html).not.toContain("data-add-support");
+  });
+
+  it("disables the button while the ask is in flight", () => {
+    // Arrange + Act
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx({ supportPhases: new Map([["status", { kind: "asking" }]]) }),
+    );
+    // Assert
+    expect(html).toContain("disabled");
+    expect(html).toContain("Asking Emacs");
+  });
+
+  it("names the requested workspace once the ask landed", () => {
+    // Arrange + Act
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx({ supportPhases: new Map([["status", { kind: "asked", workspace: "add-support-status" }]]) }),
+    );
+    // Assert
+    expect(html).toContain("add-support-status");
+    expect(html).not.toContain("data-add-support");
+  });
+
+  it("surfaces a failed ask rather than silently reoffering", () => {
+    // Arrange + Act
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx({ supportPhases: new Map([["status", { kind: "failed", error: "404 nope" }]]) }),
+    );
+    // Assert
+    expect(html).toContain("Asking failed");
+    expect(html).toContain("404 nope");
+  });
+
+  it("survives a finals pass that would swallow an ordinary chip", () => {
+    // Arrange — swallowing would drop the button along with the refusal.
+    const closer = refusal("/status isn't available in this environment.");
+    const finals = { swallowed: new Set([closer]), chips: new Map() } as unknown as ReturnType<
+      typeof finalResponses
+    >;
+    // Act
+    const html = renderItem(closer, undefined, finals, false, ctx());
+    // Assert
+    expect(html).toContain("data-add-support");
+  });
+
+  it("escapes a command name into the button attribute", () => {
+    // Arrange + Act — the name reaches an HTML attribute, so it is escaped.
+    const html = renderItem(
+      refusal("/plugin:cmd isn't available in this environment."),
+      undefined,
+      undefined,
+      false,
+      ctx(),
+    );
+    // Assert
+    expect(html).toContain(`data-add-support="plugin:cmd"`);
+  });
+});

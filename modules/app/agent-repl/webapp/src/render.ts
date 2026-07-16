@@ -17,6 +17,7 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
+import { parseUnsupportedCommand } from "./unsupported.js";
 import {
   chessGameContainerHtml,
   hydrateChessGames,
@@ -77,7 +78,23 @@ export interface Actions {
     done: boolean;
     elapsed_ms: number;
   }>;
+  /**
+   * Ask Emacs (via the daemon) to open a workspace that adds graphical
+   * support for a slash command this environment refused. Resolves to the
+   * workspace name Emacs was asked for; rejects when the ask never landed.
+   * Present only when a daemon backs the webapp.
+   */
+  addSupport?(command: string): Promise<string>;
 }
+
+/**
+ * How far a support request for one command has got. Absent means the
+ * button is untouched and still offering.
+ */
+export type SupportPhase =
+  | { kind: "asking" }
+  | { kind: "asked"; workspace: string }
+  | { kind: "failed"; error: string };
 
 /** One AskUserQuestion entry as carried in the tool input. */
 export interface AskQuestion {
@@ -481,6 +498,18 @@ export interface PanelContext {
    * a settled call's frozen heartbeat no longer feeds.
    */
   taskTail?(taskId: string): TaskTail | undefined;
+  /**
+   * How far a support request has got for each refused slash command
+   * (renderer-owned, like selections). A command absent from the map has
+   * an untouched button still offering.
+   */
+  supportPhases?: ReadonlyMap<string, SupportPhase>;
+  /**
+   * Whether anything can actually be asked for a support workspace, i.e.
+   * whether a daemon backs the webapp. False leaves the unsupported card
+   * stating the refusal rather than dangling a button that cannot work.
+   */
+  canAddSupport?: boolean;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -1109,6 +1138,49 @@ function QuestionPrompt(
     </div>`;
 }
 
+/**
+ * The card for a turn that ended in the CLI refusing a slash command this
+ * environment cannot run. The refusal itself is dead weight, so the card's
+ * point is the button: it asks Emacs to open a workspace that builds the
+ * feature properly (see unsupported.ts).
+ *
+ * With no `addSupport` action wired there is no daemon to ask, so the card
+ * states the refusal and offers nothing rather than dangling a dead button.
+ */
+function UnsupportedCommandCard(
+  command: string,
+  phase: SupportPhase | undefined,
+  offerable: boolean,
+): string {
+  const cmd = escapeHtml(command);
+  const head = `<div class="perm-head">Unsupported <span class="badge err">/${cmd}</span></div>`;
+  const why = `<div class="q-text">This environment can't run <code>/${cmd}</code>, so the CLI refused it.</div>`;
+  if (phase?.kind === "asked") {
+    return `
+      <div class="permission resolved unsupported">
+        <div class="perm-head">Unsupported <span class="badge ok">workspace requested</span></div>
+        <div class="q-text">Emacs was asked to open <code>${escapeHtml(phase.workspace)}</code> to add support for <code>/${cmd}</code>.</div>
+      </div>`;
+  }
+  const failed =
+    phase?.kind === "failed"
+      ? `<div class="q-text unsupported-err">Asking failed: ${escapeHtml(phase.error)}</div>`
+      : "";
+  if (!offerable) {
+    return `<div class="permission resolved unsupported">${head}${why}</div>`;
+  }
+  const asking = phase?.kind === "asking";
+  return `
+    <div class="permission pending unsupported">
+      ${head}${why}${failed}
+      <div class="perm-actions">
+        <button data-add-support="${cmd}"${asking ? " disabled" : ""}>${
+          asking ? "Asking Emacs…" : "Create workspace to add support"
+        }</button>
+      </div>
+    </div>`;
+}
+
 function permissionPreviewHtml(item: PermissionItem): string {
   const p = item.preview;
   if (!p) return "";
@@ -1217,6 +1289,10 @@ export function rendersEmpty(
     case "tool":
       return SUPPRESSED_TOOLS.has(item.toolName);
     case "result":
+      // A refused slash command's card is the turn's ONLY content, so it
+      // is never swallowed into a final-response bubble. Swallowing it
+      // would silently drop the button along with the refusal.
+      if (parseUnsupportedCommand(item.resultText) !== null) return false;
       return finals?.swallowed.has(item) ?? false;
     // The SDK's session (re)init announces itself with no user-facing content:
     // the breathing prompt bubble is the "received, working" signal now, so
@@ -1419,8 +1495,19 @@ export function renderItem(
       return SUPPRESSED_TOOLS.has(item.toolName) ? "" : ToolCard(item, panels);
     case "permission":
       return PermissionPrompt(item, selections);
-    case "result":
+    case "result": {
+      // A refused slash command's turn carries no answer and a meaningless
+      // near-zero duration, so its card replaces the chip outright.
+      const unsupported = parseUnsupportedCommand(item.resultText);
+      if (unsupported !== null) {
+        return UnsupportedCommandCard(
+          unsupported,
+          panels?.supportPhases?.get(unsupported),
+          panels?.canAddSupport ?? false,
+        );
+      }
       return ResultChip(item, item.durationMs);
+    }
     case "compact-boundary":
       return CompactDivider(item);
     case "error":
@@ -1741,6 +1828,11 @@ export class FeedRenderer {
    * the fold falls back to store-streamed tails only.
    */
   private watcherPoller: WatcherPoller | null = null;
+  /**
+   * Support-request phase per refused slash command. Renderer state so a
+   * re-render cannot wipe an in-flight ask back to an unpressed button.
+   */
+  private supportPhases = new Map<string, SupportPhase>();
 
   constructor(container: HTMLElement, actions: Actions) {
     this.container = container;
@@ -1777,6 +1869,8 @@ export class FeedRenderer {
       if (prompt) this.actions.sendPrompt?.(prompt);
       const msgTo = target.closest("[data-msg-send]")?.getAttribute("data-msg-send");
       if (msgTo !== null && msgTo !== undefined) this.sendAgentMessage(msgTo);
+      const addSupport = target.closest("[data-add-support]")?.getAttribute("data-add-support");
+      if (addSupport) this.requestAddSupport(addSupport);
       this.handleTabClick(target);
       this.handlePanelToggle(target);
     });
@@ -1871,7 +1965,45 @@ export class FeedRenderer {
       drafts: this.msgDrafts,
       watchers,
       taskTail: (id) => this.watcherPoller?.tail(id),
+      supportPhases: this.supportPhases,
+      canAddSupport: this.actions.addSupport !== undefined,
     };
+  }
+
+  /**
+   * Ask Emacs for a workspace that adds support for COMMAND, tracking the
+   * request's phase so the card reports it.
+   *
+   * A second click while one is in flight is dropped: the ask is not
+   * idempotent downstream (each emitted create opens another workspace),
+   * so a double-press must never become two workspaces.
+   */
+  private requestAddSupport(command: string): void {
+    const ask = this.actions.addSupport;
+    if (!ask) return;
+    if (this.supportPhases.get(command)?.kind === "asking") return;
+    this.supportPhases.set(command, { kind: "asking" });
+    this.rerender();
+    void ask(command).then(
+      (workspace) => {
+        this.supportPhases.set(command, { kind: "asked", workspace });
+        this.rerender();
+      },
+      (err: unknown) => {
+        // A failed ask is surfaced on the card, never swallowed into a
+        // button that quietly went back to looking unpressed.
+        this.supportPhases.set(command, {
+          kind: "failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.rerender();
+      },
+    );
+  }
+
+  /** Redraw from the last state, after renderer-owned state changed. */
+  private rerender(): void {
+    if (this.lastState) this.render(this.lastState);
   }
 
   /**
