@@ -289,6 +289,7 @@ describe("SECTION_CLASSES", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       toolName: "Bash",
       messageId: "m1",

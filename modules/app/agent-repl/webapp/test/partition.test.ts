@@ -5,6 +5,7 @@ import { ConversationItem } from "../src/store.js";
 function tool(id: string, name = "Bash", parent?: string): ConversationItem {
   return {
     kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
     toolUseId: id,
     messageId: "m1",
     toolName: name,
