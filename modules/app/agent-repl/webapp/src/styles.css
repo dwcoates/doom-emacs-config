@@ -671,6 +671,9 @@ pre {
 /* Markdown Reads render formatted (no gutter); same capped box, minus
    the phantom leading gap from the first block's own margin. */
 .tool-read-md > :first-child { margin-top: 0; }
+/* A skill's SKILL.md body renders formatted too, same capped box minus
+   the phantom leading gap. */
+.skill-content-md > :first-child { margin-top: 0; }
 .tool-progress { color: var(--muted); font-style: italic; }
 /* The scheduled-wakeup anchor: pending-work orange, like the run badge. */
 .wake-at { color: var(--thinking); font-style: italic; }

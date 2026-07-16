@@ -918,8 +918,12 @@ function toolResult(item: ToolItem): string {
       case "skill":
         // The launched skill's full SKILL.md body, the content section
         // paired with the invocation the input renders. Capped and
-        // click-expandable like a Bash output.
-        return `<pre class="tool-output skill-content">${escapeHtml(r.content)}</pre>`;
+        // click-expandable like a Bash output. A skill IS a markdown file,
+        // so its body renders formatted like a markdown Read preview
+        // (readResultHtml's .tool-read-md) rather than escaped plain text.
+        return `<div class="tool-output skill-content skill-content-md">${renderMarkdown(
+          r.content,
+        )}</div>`;
     }
   }
   if (item.toolName === "Read" && !item.result.isError) {
