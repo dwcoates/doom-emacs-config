@@ -126,6 +126,20 @@ agent panel it is, with no special-casing left to carve out."
             (should (eq first second))
             (should (= (length agent-repl-test--urls) 1))))))))
 
+(ert-deftest agent-repl-test-frontend-webview-aligns-default-directory ()
+  "A mounted webview's `default-directory' is realigned to WS's :project-dir."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                    "ws1" "s_1" "http://x/?session=s_1")))
+          ;; Assert
+          (should (equal (buffer-local-value 'default-directory buf) "/w/")))))))
+
 (ert-deftest agent-repl-test-frontend-webview-rebound-on-session-change ()
   "A session change kills the stale webview and mounts a fresh one."
   ;; Arrange

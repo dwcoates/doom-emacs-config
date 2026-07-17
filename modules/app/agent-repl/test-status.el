@@ -735,6 +735,54 @@ even when the full-tab background is suppressed."
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--ws-dir "ws1") :type 'error)))
 
+;;;; ---- Tests: align-buffer-to-ws-dir ----
+
+(ert-deftest agent-repl-test-align-buffer-to-ws-dir-repoints ()
+  "align-buffer-to-ws-dir sets the buffer's `default-directory' to :project-dir."
+  (agent-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*align-test*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (setq default-directory "/some/foreign/repo/"))
+            (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
+            (agent-repl--align-buffer-to-ws-dir buf "ws1")
+            (should (equal (buffer-local-value 'default-directory buf)
+                           "/home/user/project/")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-align-buffer-to-ws-dir-trailing-slash ()
+  "align-buffer-to-ws-dir appends a trailing slash to a slashless :project-dir."
+  (agent-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*align-test*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
+            (agent-repl--align-buffer-to-ws-dir buf "ws1")
+            (should (equal (buffer-local-value 'default-directory buf)
+                           "/home/user/project/")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-align-buffer-to-ws-dir-noop-when-dir-missing ()
+  "align-buffer-to-ws-dir leaves `default-directory' untouched when :project-dir is unset."
+  (agent-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*align-test*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (setq default-directory "/some/foreign/repo/"))
+            (agent-repl--align-buffer-to-ws-dir buf "ws1")
+            (should (equal (buffer-local-value 'default-directory buf)
+                           "/some/foreign/repo/")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-align-buffer-to-ws-dir-noop-when-buffer-dead ()
+  "align-buffer-to-ws-dir is a silent no-op when the buffer is dead."
+  (agent-repl-test--with-clean-state
+    (let ((buf (get-buffer-create "*align-test*")))
+      (kill-buffer buf)
+      (agent-repl--ws-put "ws1" :project-dir "/home/user/project")
+      ;; Must not error on a dead buffer.
+      (should-not (agent-repl--align-buffer-to-ws-dir buf "ws1")))))
+
 ;;;; ---- Tests: workspace-clean-p ----
 
 (ert-deftest agent-repl-test-workspace-clean-p-clean ()
