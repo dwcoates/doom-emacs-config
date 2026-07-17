@@ -1448,8 +1448,17 @@ export function rendersEmpty(
     // no answer at all: a `/clear`'s contextless reply is the common one,
     // and a green `(no content)` bubble under the divider is exactly what
     // the clear should have left no room for.
-    case "text":
-      return item.text.trim() === EMPTY_CONTENT_PLACEHOLDER;
+    //
+    // A body that is EMPTY OR WHITESPACE-ONLY is undrawn on the same terms:
+    // the `Bubble` shell would otherwise render nothing but its `.turn-ts`
+    // stamp, so a text block that opened but has not streamed yet (the
+    // `text-start`/first-`text-delta` gap) or one that closed on blank
+    // `final_text` would leave a lone timestamp floating with no visible
+    // bubble around it.
+    case "text": {
+      const body = item.text.trim();
+      return body === "" || body === EMPTY_CONTENT_PLACEHOLDER;
+    }
     // AskUserQuestion's UI IS the permission picker card — the generic tool
     // card would just dump the questions JSON (input) and the "User has
     // answered…" echo (result) alongside it. ToolSearch is deferred-tool
