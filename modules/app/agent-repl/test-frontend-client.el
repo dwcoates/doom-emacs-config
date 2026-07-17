@@ -649,6 +649,52 @@ the workspace's model.  Fails against that hardcoded nil, since
       (should (equal method "POST"))
       (should (string-suffix-p "/sessions/s_1/interrupt" url)))))
 
+(ert-deftest agent-repl-test-frontend-interrupt-session-sends-no-retract-target-by-default ()
+  "A plain interrupt names no turn, so the daemon retracts nothing."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((retracted . :false))))
+    ;; Act
+    (agent-repl--frontend-interrupt-session "s_1")
+    ;; Assert
+    (pcase-let ((`(,_ ,_ ,payload) (car requests)))
+      (should (null payload)))))
+
+(ert-deftest agent-repl-test-frontend-interrupt-session-carries-the-retract-target ()
+  "A retracting interrupt names the turn it means to withdraw."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((retracted . t))))
+    ;; Act
+    (agent-repl--frontend-interrupt-session "s_1" "r_9")
+    ;; Assert
+    (pcase-let ((`(,_ ,_ ,payload) (car requests)))
+      (should (string-match-p "\"retract_request_id\":\"r_9\"" payload)))))
+
+(ert-deftest agent-repl-test-frontend-interrupt-session-reports-a-retraction ()
+  "The daemon's `retracted' verdict is what the caller acts on."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((retracted . t))))
+    ;; Act / Assert
+    (should (agent-repl--frontend-interrupt-session "s_1" "r_9"))))
+
+(ert-deftest agent-repl-test-frontend-interrupt-session-reports-a-refused-retraction ()
+  "A turn the daemon declined to retract must not read as retracted."
+  ;; Arrange — the agent already answered, so the prompt stays on the feed.
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((retracted . :false))))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-interrupt-session "s_1" "r_9"))))
+
+(ert-deftest agent-repl-test-frontend-interrupt-session-reports-no-retraction-from-an-old-daemon ()
+  "A body with no `retracted' field reads as no retraction, never as one."
+  ;; Arrange — a daemon predating the retract route answers 202 with no body.
+  (agent-repl-test--with-http
+      (lambda (&rest _) (cons 202 ""))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-interrupt-session "s_1" "r_9"))))
+
 ;;;; ---- in-flight message queue (§2.13) ----------------------------------------
 
 (ert-deftest agent-repl-test-frontend-queue-run-now-posts-route ()
@@ -1331,3 +1377,80 @@ not an error."
 (provide 'test-frontend-client)
 
 ;;; test-frontend-client.el ends here
+
+;;;; ---- gui interrupt: gesture intent and retraction ---------------------------
+
+(defmacro agent-repl-test--with-interrupt (ws-plist retracted &rest body)
+  "Run BODY with workspace \"ws1\" carrying WS-PLIST and the interrupt route
+answering RETRACTED.  Binds `sent-to' to the (SESSION-ID . RETRACT-ID) the
+frontend asked for."
+  (declare (indent 2))
+  `(let ((sent-to nil))
+     (ignore sent-to)
+     (agent-repl-test--with-ws "ws1" ,ws-plist
+       (cl-letf (((symbol-function 'agent-repl--frontend-interrupt-session)
+                  (lambda (id &optional retract-id)
+                    (setq sent-to (cons id retract-id))
+                    ,retracted)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-gui-interrupt-escape-asks-to-retract-the-sent-turn ()
+  "C-c C-k means undo, so it names the turn it wants withdrawn."
+  ;; Arrange
+  (agent-repl-test--with-interrupt
+      '(:frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft")) t
+    ;; Act
+    (agent-repl--gui-interrupt "ws1" 'escape)
+    ;; Assert
+    (should (equal sent-to '("s_1" . "r_9")))))
+
+(ert-deftest agent-repl-test-gui-interrupt-escape-reports-a-retraction ()
+  "A withdrawn prompt is reported so the caller knows to restore it."
+  ;; Arrange
+  (agent-repl-test--with-interrupt
+      '(:frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft")) t
+    ;; Act / Assert
+    (should (eq (agent-repl--gui-interrupt "ws1" 'escape) 'retracted))))
+
+(ert-deftest agent-repl-test-gui-interrupt-escape-reports-a-plain-stop ()
+  "A turn the daemon kept is an ordinary interrupt, not an undo."
+  ;; Arrange — the agent already answered.
+  (agent-repl-test--with-interrupt
+      '(:frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft")) nil
+    ;; Act / Assert — non-nil (delivered) but never `retracted'.
+    (should (eq (agent-repl--gui-interrupt "ws1" 'escape) t))))
+
+(ert-deftest agent-repl-test-gui-interrupt-ctrl-c-never-retracts ()
+  "C-c C-c has just discarded the draft, so it must not hand a prompt back."
+  ;; Arrange
+  (agent-repl-test--with-interrupt
+      '(:frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft")) t
+    ;; Act
+    (agent-repl--gui-interrupt "ws1" 'ctrl-c)
+    ;; Assert — the gesture names no turn, so the daemon withdraws nothing.
+    (should (equal sent-to '("s_1" . nil)))))
+
+(ert-deftest agent-repl-test-gui-interrupt-escape-without-a-sent-turn-names-none ()
+  "With no send on record there is nothing to undo."
+  ;; Arrange
+  (agent-repl-test--with-interrupt '(:frontend-session-id "s_1") nil
+    ;; Act
+    (agent-repl--gui-interrupt "ws1" 'escape)
+    ;; Assert
+    (should (equal sent-to '("s_1" . nil)))))
+
+(ert-deftest agent-repl-test-gui-send-turn-records-the-sent-turn ()
+  "The send records what an undo of it would need: the id and the RAW text."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+               (lambda (&rest _) "r_9"))
+              ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+              ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
+              ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+              ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+      ;; Act — the prepared text carries decoration the user never typed.
+      (agent-repl--gui-send-turn "ws1" "META\n\nwrite a test" "write a test")
+      ;; Assert — RAW is recorded, since the decoration is not the user's to revise.
+      (should (equal (agent-repl--ws-get "ws1" :sent-turn)
+                     '(:request-id "r_9" :raw "write a test"))))))

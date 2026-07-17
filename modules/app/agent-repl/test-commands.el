@@ -704,6 +704,71 @@ state must not change."
       (agent-repl-interrupt)
       (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking)))))
 
+;;;; ---- agent-repl-interrupt: undo of an unanswered send ----
+
+(defmacro agent-repl-cmd-test--with-retract (outcome &rest body)
+  "Run BODY with `test-ws' holding a sent turn and a live input buffer,
+its frontend interrupt reporting OUTCOME.  Binds `input-buf' to the buffer."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((input-buf (generate-new-buffer " *agent-repl-test-input*")))
+       (unwind-protect
+           (progn
+             (agent-repl--ws-put "test-ws" :frontend 'gui)
+             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+             (agent-repl--ws-put "test-ws" :sent-turn '(:request-id "r_9" :raw "write a test"))
+             (cl-letf (((symbol-function '+workspace-current-name)
+                        (lambda () "test-ws"))
+                       ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+                        (lambda (_ws _kind) ,outcome))
+                       ((symbol-function 'run-at-time)
+                        (lambda (_time _repeat _fn _arg) nil)))
+               ,@body))
+         (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/restores-a-retracted-prompt ()
+  "A withdrawn prompt lands back in the input buffer to be revised."
+  (agent-repl-cmd-test--with-retract 'retracted
+    (agent-repl-interrupt)
+    (should (equal (with-current-buffer input-buf (buffer-string))
+                   "write a test"))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/clears-the-sent-turn-once-retracted ()
+  "A withdrawn turn is spent, so a second C-c C-k has nothing to undo."
+  (agent-repl-cmd-test--with-retract 'retracted
+    (agent-repl-interrupt)
+    (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/leaves-the-input-buffer-alone-on-a-plain-stop ()
+  "A turn the daemon kept leaves the feed showing the prompt, so nothing
+is handed back."
+  (agent-repl-cmd-test--with-retract t
+    (agent-repl-interrupt)
+    (should (equal (with-current-buffer input-buf (buffer-string)) ""))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/keeps-the-sent-turn-on-a-plain-stop ()
+  "A turn that still stands is still the one a later undo would name."
+  (agent-repl-cmd-test--with-retract t
+    (agent-repl-interrupt)
+    (should (equal (agent-repl--ws-get "test-ws" :sent-turn)
+                   '(:request-id "r_9" :raw "write a test")))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/never-restores-over-a-draft ()
+  "A draft typed since the send is not overwritten by the restore."
+  (agent-repl-cmd-test--with-retract 'retracted
+    (with-current-buffer input-buf (insert "a newer draft"))
+    (agent-repl-interrupt)
+    (should (equal (with-current-buffer input-buf (buffer-string)) "a newer draft"))))
+
+(ert-deftest agent-repl-cmd-test-restore-retracted-prompt/survives-a-dead-input-buffer ()
+  "A retraction whose input buffer died is logged, never signalled."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :input-buffer (generate-new-buffer " *dead*"))
+    (kill-buffer (agent-repl--ws-get "test-ws" :input-buffer))
+    (agent-repl--ws-put "test-ws" :sent-turn '(:request-id "r_9" :raw "write a test"))
+    (agent-repl--restore-retracted-prompt "test-ws")
+    (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
+
 ;;;; ---- agent-repl queue commands (§2.13) ----
 
 (ert-deftest agent-repl-cmd-test-queue-item-label/combines-preview-and-id ()

@@ -71,12 +71,14 @@ SEND-FN (WS INPUT RAW ON-SETTLE): deliver one prepared user turn.
 INPUT is the decorated text actually sent; RAW the undecorated
 original (history/posthooks currency).  ON-SETTLE, when non-nil, runs
 once the send is committed.
-INTERRUPT-FN (WS KIND): interrupt the in-flight turn.  KIND is a
-holdover from the vterm TUI's two interrupt gestures — `ctrl-c' (clear
-prompt line) vs `escape' (stop generation); every frontend registered
-today has a single wire-level interrupt and ignores it, but the
-parameter stays so the slot's shape does not need to change if a
-future frontend needs the distinction again.
+INTERRUPT-FN (WS KIND): interrupt the in-flight turn.  KIND names the
+gesture: `ctrl-c' (clear the prompt line) vs `escape' (stop
+generation).  Both began as the vterm TUI's two keystrokes; they now
+differ by INTENT, since `escape' before the agent has answered is an
+undo and may additionally retract the sent turn.  Returns `retracted'
+when the frontend withdrew the turn's prompt (the caller then owns that
+text and is expected to restore it), or any other non-nil value when
+the interrupt merely landed.  Nil means not delivered.
 RUNNING-P-FN (WS): non-nil when WS has a live session on this frontend.
 SHOW-FN (WS): make an already-running session's view visible.
 HIDE-FN (WS): hide the view without killing the session.
