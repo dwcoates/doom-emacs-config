@@ -123,10 +123,11 @@ export function mayNest(
  * draws at every depth.
  *
  * Two roots, matching the two fold surfaces. A spawning card's async
- * fold (`async:<toolUseId>`) contributes its poll source; a watcher fold
- * (`watchers:<blockId>`) contributes every id its watchers announced,
- * since a watcher row renders its tail inline the moment the fold opens.
- * From either root the walk descends into a transcript source's
+ * fold (`async:<toolUseId>`) contributes its poll source; an in-bubble
+ * catalog badge (`member:<host>:<toolUseId>`) contributes its own member's
+ * announced ids, since an open badge renders that member's tail inline (a
+ * WatcherRow) the moment it opens. From either root the walk descends into a
+ * transcript source's
  * accumulated tail — TAILTEXT, the poller's own state — because that
  * parse is where the nested spawn cards live: opening depth N's fold
  * polls its tail, whose parse reveals depth N+1's cards, whose folds
@@ -183,9 +184,11 @@ export function openSubfeedSourceIds(opts: {
   for (const item of opts.items) {
     if (item.kind === "tool") walkCard(item, 0, new Set());
   }
-  for (const [blockId, list] of opts.watchers) {
-    if (!opts.isOpen(`watchers:${blockId}`)) continue;
+  for (const [host, list] of opts.watchers) {
     for (const w of list) {
+      // Per-MEMBER now (see AsyncBadge): a badge polls its own member's
+      // source only while that badge's detail is the one open.
+      if (!opts.isOpen(`member:${host}:${w.toolUseId}`)) continue;
       for (const id of spawnedTaskIds(w)) ids.add(id);
       const source = effectiveAsyncSource(w);
       if (source) descendStream(w, source, 0, new Set([source.source_id]));

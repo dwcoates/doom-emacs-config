@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConversationItem, ToolItem } from "../src/store.js";
-import { isWatcher, watchersByBubble } from "../src/watchers.js";
+import { asyncByBubble, isWatcher } from "../src/watchers.js";
 
 function userTurn(requestId = "u1"): ConversationItem {
   return {
@@ -66,18 +66,18 @@ describe("isWatcher", () => {
   });
 });
 
-describe("watchersByBubble", () => {
-  it("maps a final bubble to a backgrounded-Bash watcher armed in its turn", () => {
+describe("asyncByBubble", () => {
+  it("maps a final bubble to a backgrounded-Bash member armed in its turn", () => {
     // Arrange
     const watcher = bgSpawner("t1", "bg1");
     const items = [userTurn(), watcher, text("b1"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.get("b1")).toEqual([watcher]);
   });
 
-  it("maps a background-agent watcher named by agentId in its result", () => {
+  it("maps a background-agent member named by agentId in its result", () => {
     // Arrange
     const agent: ToolItem = {
       ...tool("t1", "Agent"),
@@ -85,12 +85,12 @@ describe("watchersByBubble", () => {
     };
     const items = [userTurn(), agent, text("b1"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.get("b1")).toEqual([agent]);
   });
 
-  it("maps a watcher whose id came only from its landed notification", () => {
+  it("maps a member whose id came only from its landed notification", () => {
     // Arrange — no id in the result text, the notification is authoritative.
     const watcher: ToolItem = {
       ...tool("t1", "Agent"),
@@ -98,27 +98,38 @@ describe("watchersByBubble", () => {
     };
     const items = [userTurn(), watcher, text("b1"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.get("b1")).toEqual([watcher]);
   });
 
-  it("omits a bubble whose turn armed no watcher", () => {
+  it("omits a bubble whose turn armed no async work", () => {
     // Arrange
     const items = [userTurn(), tool("t1"), text("b1"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.size).toBe(0);
   });
 
-  it("omits a turn that did not end in success", () => {
-    // Arrange — an aborted turn's last text is a severed thought, not an answer.
-    const items = [userTurn(), bgSpawner("t1", "bg1"), text("b1"), result("aborted")];
+  it("maps an interrupted turn's survivors to its last text, never orphaning them", () => {
+    // Arrange — an aborted turn's background work outlives the severed turn.
+    const watcher = bgSpawner("t1", "bg1");
+    const items = [userTurn(), watcher, text("b1"), result("aborted")];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
-    expect(byBubble.size).toBe(0);
+    expect(byBubble.get("b1")).toEqual([watcher]);
+  });
+
+  it("hosts a tools-only turn's members on its prompt bubble when no final text exists", () => {
+    // Arrange — the turn armed background work but wrote no answer to host it.
+    const watcher = bgSpawner("t1", "bg1");
+    const items = [userTurn("u7"), watcher, result()];
+    // Act
+    const byBubble = asyncByBubble(items);
+    // Assert — the prompt bubble (the user-turn's request id) is the host.
+    expect(byBubble.get("u7")).toEqual([watcher]);
   });
 
   it("keys the LAST main-chain text before the result, not an earlier one", () => {
@@ -126,25 +137,35 @@ describe("watchersByBubble", () => {
     const watcher = bgSpawner("t1", "bg1");
     const items = [userTurn(), text("commentary"), watcher, text("answer"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.has("commentary")).toBe(false);
     expect(byBubble.get("answer")).toEqual([watcher]);
   });
 
-  it("never keys a subagent's parented prose as the final response", () => {
+  it("never keys a subagent's parented prose as the host bubble", () => {
     // Arrange — the parented text is commentary inside a card, not the answer.
     const watcher = bgSpawner("t1", "bg1");
     const items = [userTurn(), watcher, text("nested", "a1"), text("answer"), result()];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.has("nested")).toBe(false);
     expect(byBubble.get("answer")).toEqual([watcher]);
   });
 
-  it("scopes each bubble to its own turn's watchers, not a prior turn's", () => {
-    // Arrange — two turns, one watcher each.
+  it("keys nothing for a still-streaming turn, whose frontier is not yet quiescent", () => {
+    // Arrange — a live member armed but no result closing the turn yet.
+    const watcher = bgSpawner("t1", "bg1");
+    const items = [userTurn(), watcher, text("b1")];
+    // Act
+    const byBubble = asyncByBubble(items);
+    // Assert
+    expect(byBubble.size).toBe(0);
+  });
+
+  it("scopes each bubble to its own turn's members, not a prior turn's", () => {
+    // Arrange — two turns, one member each.
     const first = bgSpawner("t1", "bg1");
     const second = bgSpawner("t2", "bg2");
     const items = [
@@ -158,7 +179,7 @@ describe("watchersByBubble", () => {
       result(),
     ];
     // Act
-    const byBubble = watchersByBubble(items);
+    const byBubble = asyncByBubble(items);
     // Assert
     expect(byBubble.get("a1")).toEqual([first]);
     expect(byBubble.get("a2")).toEqual([second]);

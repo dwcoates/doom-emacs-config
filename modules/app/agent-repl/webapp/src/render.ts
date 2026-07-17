@@ -47,7 +47,7 @@ import { navTokensForItem } from "./nav.js";
 import { isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { gnsFolds } from "./gns.js";
-import { watchersByBubble } from "./watchers.js";
+import { asyncByBubble, isWatcher } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   CompactBoundaryItem,
@@ -280,6 +280,45 @@ export function retryingRowHtml(retrying: boolean): string {
 }
 
 /**
+ * The "monitoring…" indicator: the AMBER row saying background (async/detached)
+ * work continues while the main chain is IDLE. Distinct from the bucket-1 tail
+ * rows (thinking/working/retrying/interrupting), which all mean the main chain
+ * is ACTIVE — amber async-quiescence means "model available, background work
+ * still running". One markup, two homes: the collapsed face of a bubble's
+ * in-bubble catalog (AsyncCatalog), and the global feed-tail fallback shown
+ * when the owning bubble is scrolled off (see `showsMonitoringRow`). Reuses
+ * the textless-thinking arc (`.thinking-spinner`), tinted amber by
+ * `.monitoring-pending`, so "still watching" reads the same wherever it shows.
+ *
+ * Returns "" when not monitoring, so a caller can drop the node.
+ */
+export function monitoringRowHtml(monitoring: boolean): string {
+  if (!monitoring) return "";
+  return (
+    `<div class="monitoring-pending" role="status" aria-live="polite">` +
+    `<span class="thinking-spinner" aria-hidden="true"></span> monitoring…` +
+    `</div>`
+  );
+}
+
+/**
+ * Whether the GLOBAL `monitoring…` tail row shows: the session is IDLE (no
+ * turn in flight, so none of thinking/working/retrying/interrupting speak for
+ * the tail) yet live async continues somewhere in the feed. It is the
+ * always-visible amber signal for when the owning bubble is scrolled off or
+ * absent — the quiescent twin of the working row, and mutually exclusive with
+ * the whole bucket-1 tail, which only runs while a turn is in flight.
+ */
+export function showsMonitoringRow(opts: {
+  turnInFlight: boolean;
+  interrupting: boolean;
+  anyLiveAsync: boolean;
+}): boolean {
+  if (opts.turnInFlight || opts.interrupting) return false;
+  return opts.anyLiveAsync;
+}
+
+/**
  * The #model-select options: the live model SELECTED, every alternative
  * the daemon offers, and nothing invented.
  *
@@ -366,11 +405,18 @@ function Bubble(cls: string, body: string, ts: string, meta = ""): string {
  * now (see `pulseTarget`), which retired the prompt breath — so the bubble is
  * a plain `bubble user`, the same way a running tool card ignores the pulse.
  */
-function UserTurn(item: UserTurnItem): string {
+function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   const divider = isClearTurn(item)
     ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
     : "";
-  return `${Bubble("bubble user", `<pre>${escapeHtml(userTurnText(item))}</pre>`, item.ts)}${divider}`;
+  // A tools-only turn hosts its live async on its own prompt bubble (see
+  // asyncByBubble), so the prompt goes amber and catalogs that work too — the
+  // invariant holds even for a turn that wrote no answer to host it. The
+  // projection keys the prompt by the user-turn's request id.
+  const stateCls = hasLiveAsync(item.requestId, panels) ? " async-live" : "";
+  const catalog = AsyncCatalog(item.requestId, panels);
+  const body = `<pre>${escapeHtml(userTurnText(item))}</pre>${catalog}`;
+  return `${Bubble(`bubble user${stateCls}`, body, item.ts)}${divider}`;
 }
 
 /**
@@ -451,14 +497,20 @@ function TextStream(
   panels?: PanelContext,
 ): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
-  const cls = `bubble assistant md${chip ? " final-response" : ""}${
-    isPulsing ? " pulsing" : ""
-  }`;
-  // Only a FINAL response (one carrying a chip) folds in its turn's
-  // watchers: a mid-turn commentary bubble is not the answer the watcher
-  // belongs to, so it stays inert prose. The gns-sockets fold rides the
-  // same gate — its host is by construction a completed turn's answer.
-  const watchers = chip ? WatcherPanel(item.blockId, panels) : "";
+  // The async-quiescence invariant: a bubble owning LIVE async wears the
+  // amber border and lists that work as selectable badges inside it (see
+  // AsyncCatalog). Amber outranks the green final-response — the answer is
+  // landed but its background work is not — and flips to green once every
+  // member settles (amber → green quiescence). A bubble the projection does
+  // not host carries no members, so it never goes amber.
+  const liveAsync = hasLiveAsync(item.blockId, panels);
+  const stateCls = liveAsync ? " async-live" : chip ? " final-response" : "";
+  const cls = `bubble assistant md${stateCls}${isPulsing ? " pulsing" : ""}`;
+  // The catalog rides EVERY host bubble, not just a final one: an interrupted
+  // or tools-only turn hosts its survivors too (asyncByBubble), so a bubble
+  // with no chip can still own live async that must be enumerated in it. The
+  // gns-sockets fold stays the completed-answer full-segment view.
+  const catalog = AsyncCatalog(item.blockId, panels);
   const gns = chip ? GnsPanel(item.blockId, panels) : "";
   // A completed turn's stats ride in the bubble's top-right corner
   // (`resultMeta`): its elapsed time and the context delta it moved. A
@@ -480,7 +532,7 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${cursor}${watchers}${gns}`, item.ts, meta);
+  return Bubble(cls, `${body}${cursor}${catalog}${gns}`, item.ts, meta);
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -994,12 +1046,6 @@ function taskControls(item: ToolItem, panels?: PanelContext): string {
   return `<div class="task-controls">${buttons}</div>`;
 }
 
-/** The collapsed face of a watcher fold: how many watchers, how many live. */
-function watcherFace(total: number, live: number): string {
-  const noun = `${total} watcher${total === 1 ? "" : "s"}`;
-  return live > 0 ? `${noun} · ${live} live` : `${noun} · done`;
-}
-
 /**
  * One watcher's row inside a bubble's fold: its identity and live/settled
  * badge, then the SAME live surface its own tool card carries — the
@@ -1040,32 +1086,58 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
     </div>`;
 }
 
+/** A member's badge label: its tool name and first announced id, capped. */
+function asyncBadgeLabel(item: ToolItem): string {
+  const ids = spawnedTaskIds(item);
+  const label = ids.length > 0 ? `${item.toolName} · ${ids[0]}` : item.toolName;
+  return label.length > 24 ? `${label.slice(0, 23)}…` : label;
+}
+
 /**
- * The watcher fold a final-response bubble carries (§ watcher-bubble
- * expansion): the detached tasks its turn armed, behind a click. Modeled
- * on ActivitySection — the panel body exists in the HTML only while open,
- * and open state lives in the RENDERER (openPanels), so the fold survives
- * the bubble's per-frame re-renders as its watchers' tail grows. Keyed
- * `watchers:<blockId>` so it never collides with a card's activity panel.
- *
- * The live arc rides the collapsed ticker rather than the bubble: a final
- * response belongs to an ENDED turn, where the bubble breath never runs, so
- * the spinner is the only honest "still live" signal left after the turn
- * closed.
+ * One async member's badge in a bubble's catalog: a clickable amber pill
+ * naming the member, its live/settled dot leading. Keyed
+ * `member:<host>:<toolUseId>` — per MEMBER, not per bubble — so each badge
+ * toggles only its own detail (an open badge renders its `WatcherRow` below
+ * the strip), and open state lives in the RENDERER (openPanels) so a badge
+ * the user opened survives the bubble's per-frame re-renders. The key never
+ * collides with a spawning card's own `async:<toolUseId>` fold.
  */
-function WatcherPanel(blockId: string, panels?: PanelContext): string {
-  const watchers = panels?.watchers?.get(blockId) ?? [];
-  if (watchers.length === 0) return "";
-  const live = watchers.filter((w) => !watcherSettled(w, panels)).length;
-  const arc = live > 0 ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
-  return Fold({
-    id: `watchers:${blockId}`,
-    foldClass: "watcher-fold",
-    tickerClass: "watcher-ticker",
-    ticker: `${arc}${escapeHtml(watcherFace(watchers.length, live))}`,
-    body: () => watchers.map((w) => WatcherRow(w, panels)).join(""),
-    open: panels?.isOpen(`watchers:${blockId}`) ?? false,
-  });
+function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): string {
+  const id = `member:${hostId}:${item.toolUseId}`;
+  const settled = watcherSettled(item, panels);
+  const open = panels?.isOpen(id) ?? false;
+  return `<button type="button" class="async-badge${settled ? " settled" : ""}${
+    open ? " active" : ""
+  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${
+    settled ? "done" : "running"
+  }" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</button>`;
+}
+
+/**
+ * The in-bubble async catalog (async-quiescence UX): the bubble's live
+ * background work, enumerated as selectable amber badges at its BOTTOM, under
+ * a prominent bucket-1 `monitoring…` line while any member is live. This is
+ * the OTHER half of the invariant the amber border keys off — border and
+ * catalog read the SAME projection (`panels.watchers`), so a bubble is amber
+ * exactly when it lists live selectable work.
+ *
+ * Every host bubble carries it — a final response, an interrupted turn's last
+ * text, a tools-only turn's prompt — not just a completed answer. A quiesced
+ * catalog (all members settled) keeps its badges as history but drops the
+ * monitoring line, exactly as the border flips amber → green. Clicking a
+ * badge expands that member's `WatcherRow` — its live tail as nested bubbles
+ * (asyncStreamHtml), its stop control, its composer — below the strip.
+ */
+function AsyncCatalog(hostId: string, panels?: PanelContext): string {
+  const members = panels?.watchers?.get(hostId) ?? [];
+  if (members.length === 0) return "";
+  const live = members.some((m) => !watcherSettled(m, panels));
+  const badges = members.map((m) => AsyncBadge(hostId, m, panels)).join("");
+  const details = members
+    .filter((m) => panels?.isOpen(`member:${hostId}:${m.toolUseId}`) ?? false)
+    .map((m) => WatcherRow(m, panels))
+    .join("");
+  return `<div class="async-catalog">${monitoringRowHtml(live)}<div class="async-badges">${badges}</div>${details}</div>`;
 }
 
 /**
@@ -1866,7 +1938,7 @@ export function renderItem(
   if (rendersEmpty(item, finals)) return "";
   switch (item.kind) {
     case "user-turn":
-      return UserTurn(item);
+      return UserTurn(item, panels);
     case "text":
       return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing, panels);
     case "thinking":
@@ -2188,6 +2260,60 @@ export function panelToggleTarget<T extends { contains(node: T): boolean }>(
   if (toggle === null) return null;
   if (panel !== null && toggle.contains(panel)) return null;
   return toggle;
+}
+
+/**
+ * The ONE per-bubble async projection the amber border and the in-bubble
+ * catalog both read: every bubble that owns detached background work → its
+ * member tool items. Two sources, one map — the turn-hosted members
+ * (`asyncByBubble` over the visible feed) plus the gns-sockets bridge
+ * members, which `gnsFolds` re-hosts onto the answer above their upkeep
+ * segment. A bridge spawn is an async member too, so its host bubble goes
+ * amber and lists it as a badge exactly as any watcher's does — which is
+ * what keeps the invariant true for the one async source `asyncByBubble`
+ * cannot see (the bridge spawns it filtered out of the visible feed).
+ */
+export function asyncMembersByBubble(
+  visible: readonly ConversationItem[],
+  gnsByBubble: ReadonlyMap<string, readonly ConversationItem[]>,
+): Map<string, ToolItem[]> {
+  const byBubble = asyncByBubble(visible);
+  for (const [host, folded] of gnsByBubble) {
+    const members = folded.filter(isWatcher);
+    if (members.length === 0) continue;
+    const list = byBubble.get(host) ?? [];
+    list.push(...members);
+    byBubble.set(host, list);
+  }
+  return byBubble;
+}
+
+/**
+ * Whether HOST-ID's bubble owns at least one live (unsettled) async member,
+ * which is exactly when its border goes amber (see `watcherSettled`). A host
+ * whose members have all settled has quiesced — its border flips back to the
+ * green final-response (or to none), and the global `monitoring…` row drops.
+ */
+export function hasLiveAsync(
+  hostId: string,
+  panels?: PanelContext,
+): boolean {
+  return (panels?.watchers?.get(hostId) ?? []).some((m) => !watcherSettled(m, panels));
+}
+
+/**
+ * Whether ANY async member anywhere in the feed is still live — the global
+ * `monitoring…` row's gate (see `showsMonitoringRow`). Read over the whole
+ * item list rather than one host's members, so a live member that outlived
+ * its turn still lights the row even when its own bubble is scrolled off or
+ * was never hosted (an orphan the projection could not place). ITEMS is the
+ * clear-cut feed, so a member discarded by a /clear no longer counts.
+ */
+export function anyLiveAsync(
+  items: readonly ConversationItem[],
+  panels?: PanelContext,
+): boolean {
+  return items.some((i) => isWatcher(i) && !watcherSettled(i, panels));
 }
 
 /**
@@ -2649,7 +2775,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = watchersByBubble(visible);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(visible);
@@ -2675,6 +2801,23 @@ export class FeedRenderer {
       el.innerHTML = tailRow.html;
       this.container.appendChild(el);
       this.nodes.set(tailRow.key, { el, html: tailRow.html });
+    }
+    // The global `monitoring…` fallback, on the same idle-with-live-async
+    // terms render() shows it (see `showsMonitoringRow`), so a fresh join
+    // landing on a quiescent-but-still-watching session sees it immediately.
+    if (
+      showsMonitoringRow({
+        turnInFlight: state.turnInFlight,
+        interrupting: state.interrupting,
+        anyLiveAsync: anyLiveAsync(items, panels),
+      })
+    ) {
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = "monitoring";
+      el.innerHTML = monitoringRowHtml(true);
+      this.container.appendChild(el);
+      this.nodes.set("monitoring", { el, html: monitoringRowHtml(true) });
     }
     // The parked queue (§2.13) renders in full at the tail — a fresh join
     // with a pending queue must show it, and the cards are cheap enough to
@@ -2792,7 +2935,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = watchersByBubble(visible);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers);
     const finals = finalResponses(visible);
@@ -2832,6 +2975,19 @@ export class FeedRenderer {
     // precedence lives in `tailStatusRow`.
     const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
     if (tailRow) this.reconcileTailNode(tailRow.key, tailRow.html, seen);
+    // The global `monitoring…` row: the amber fallback for when the owning
+    // bubble is scrolled off, shown only while the session is idle and live
+    // async continues (mutually exclusive with the bucket-1 tail above, whose
+    // rows all mean the main chain is active).
+    if (
+      showsMonitoringRow({
+        turnInFlight: state.turnInFlight,
+        interrupting: state.interrupting,
+        anyLiveAsync: anyLiveAsync(items, panels),
+      })
+    ) {
+      this.reconcileTailNode("monitoring", monitoringRowHtml(true), seen);
+    }
     // The in-flight queue (§2.13) is a subdued section at the tail, after
     // every conversation item. Each card is re-appended so a live item node
     // appended above (the agent's streaming response during the running

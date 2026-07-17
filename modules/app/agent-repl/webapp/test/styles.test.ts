@@ -275,11 +275,11 @@ describe("final-response border", () => {
     expect(finalBubble).toMatch(/border-color:\s*var\(--final-response\)/);
   });
 
-  it("reserves the border box on every bubble so the green border never reflows the feed", () => {
-    // Arrange / Act — the shared .bubble rule lays the 1px out up front, and the
-    // final-response rule only recolors it.
+  it("reserves the halved 0.5px border box on every bubble so the state border never reflows the feed", () => {
+    // Arrange / Act — the shared .bubble rule lays the halved 0.5px out up
+    // front, and the final-response rule only recolors it.
     // Assert
-    expect(bubble).toMatch(/border:\s*1px\s+solid\s+transparent/);
+    expect(bubble).toMatch(/border:\s*0\.5px\s+solid\s+transparent/);
     expect(finalBubble).not.toMatch(/border:\s/);
   });
 
@@ -307,6 +307,112 @@ describe("final-response border", () => {
     const brighter = luminance(dark) > luminance(light);
     // Assert
     expect(brighter).toBe(true);
+  });
+});
+
+/** Whether a `#rrggbb` literal reads as amber: r > g > b with a hue in the
+    orange-yellow band between the working orange and the palette's yellows. */
+function isAmber(hex: string): boolean {
+  const [r, g, b] = channels(hex);
+  const h = hue(hex);
+  return h >= 28 && h <= 50 && r > g && g > b;
+}
+
+describe("async-quiescence border", () => {
+  const asyncLive = blockAfter(css, ".bubble.assistant.async-live,");
+
+  it("borders a live-async bubble with the async token", () => {
+    // Arrange / Act — the .bubble.assistant.async-live rule.
+    // Assert
+    expect(asyncLive).toMatch(/border-color:\s*var\(--async\)/);
+  });
+
+  it("takes the amber border on the user's own prompt bubble too, for a tools-only turn", () => {
+    // Arrange / Act — the selector list names the user bubble alongside the assistant one.
+    // Assert
+    expect(css).toMatch(/\.bubble\.assistant\.async-live,\s*\n\.bubble\.user\.async-live/);
+  });
+
+  it("only recolors the reserved border, so the amber flip never reflows the feed", () => {
+    // Arrange / Act — like final-response, it sets no border width of its own.
+    // Assert
+    expect(asyncLive).not.toMatch(/border:\s/);
+    expect(asyncLive).not.toMatch(/border-width/);
+  });
+
+  it("halves both state border widths to 0.5px by reserving 0.5px on the base bubble", () => {
+    // Arrange / Act — neither state border overrides the width, so both inherit
+    // the halved 0.5px the base .bubble lays out (final-response and async-live alike).
+    const bubble = blockAfter(css, ".bubble ");
+    const finalBubble = blockAfter(css, ".bubble.assistant.final-response");
+    // Assert
+    expect(bubble).toMatch(/border:\s*0\.5px\s+solid/);
+    expect(finalBubble).not.toMatch(/border-width/);
+    expect(asyncLive).not.toMatch(/border-width/);
+  });
+
+  it("defines an amber async token for the light theme", () => {
+    // Arrange / Act
+    const amber = isAmber(token(lightTheme, "--async"));
+    // Assert
+    expect(amber).toBe(true);
+  });
+
+  it("defines an amber async token for the dark theme", () => {
+    // Arrange / Act
+    const amber = isAmber(token(darkTheme, "--async"));
+    // Assert
+    expect(amber).toBe(true);
+  });
+
+  it("keeps the async amber distinct from the yellow --q-border and --turn-complete-border", () => {
+    // Arrange
+    const amber = token(lightTheme, "--async");
+    // Act / Assert — a warm hue of its own, not either existing yellow.
+    expect(amber).not.toBe(token(lightTheme, "--q-border"));
+    expect(amber).not.toBe(token(lightTheme, "--turn-complete-border"));
+  });
+});
+
+describe("monitoring indicator", () => {
+  const monitoringPending = blockAfter(css, ".monitoring-pending {");
+  const monitoringArc = blockAfter(css, ".monitoring-pending .thinking-spinner");
+
+  it("reads in the async amber rather than the working orange or retry purple", () => {
+    // Arrange / Act — the .monitoring-pending label rule.
+    // Assert
+    expect(monitoringPending).toMatch(/color:\s*var\(--async\)/);
+  });
+
+  it("tints the reused thinking arc amber rather than defining its own spinner", () => {
+    // Arrange / Act — no bespoke .monitoring-spinner exists; the row recolors
+    // the shared .thinking-spinner to the async hue.
+    // Assert
+    expect(monitoringArc).toMatch(/border-top-color:\s*var\(--async\)/);
+    expect(css).not.toContain(".monitoring-spinner");
+  });
+});
+
+describe("async catalog badges", () => {
+  const badge = blockAfter(css, ".async-badge {");
+
+  it("rings a live member badge in the async amber", () => {
+    // Arrange / Act — the .async-badge rule.
+    // Assert
+    expect(badge).toMatch(/border:\s*1px\s+solid\s+var\(--async\)/);
+    expect(badge).toMatch(/color:\s*var\(--async\)/);
+  });
+
+  it("quiets a settled member badge to the muted grey", () => {
+    // Arrange / Act — the .async-badge.settled rule.
+    // Assert
+    expect(blockAfter(css, ".async-badge.settled")).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("invites the click with a pointer cursor", () => {
+    // Arrange / Act
+    // Assert
+    expect(badge).toMatch(/cursor:\s*pointer/);
   });
 });
 
@@ -1148,12 +1254,12 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew a fifth.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the two unrelated
-    // inline-flex users (.tab-chip and the counter chip).
+    // Act / Assert — one shared ticker rule, plus the three unrelated
+    // inline-flex users (.tab-chip, the counter chip, and the .async-badge).
     expect(css).toMatch(
       /\.agent-ticker,\s*\n\.watcher-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/,
     );
-    expect(bodies.length).toBe(3);
+    expect(bodies.length).toBe(4);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
