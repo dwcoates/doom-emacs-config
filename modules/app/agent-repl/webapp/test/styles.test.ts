@@ -907,6 +907,65 @@ describe("interrupting indicator", () => {
   });
 });
 
+const workingPending = blockAfter(css, ".working-pending");
+
+describe("working indicator", () => {
+  it("reads in the working orange, the same hue the thinking indicator uses", () => {
+    // Arrange / Act — the .working-pending label rule.
+    // Assert — --thinking (orange), so "still working" reads the same everywhere.
+    expect(workingPending).toMatch(/color:\s*var\(--thinking\)/);
+  });
+
+  it("reuses the textless-thinking arc rather than defining its own spinner", () => {
+    // Arrange / Act — no bespoke .working-spinner exists; the row leans on
+    // .thinking-spinner (asserted by the workingRowHtml markup test), which the
+    // reduced-motion block already slows.
+    // Assert
+    expect(css).not.toContain(".working-spinner");
+  });
+});
+
+const retryingPending = blockAfter(css, ".retrying-pending");
+const retryingSpinner = blockAfter(css, ".retrying-spinner {");
+
+describe("retrying indicator", () => {
+  it("reads in the retry purple rather than the working orange or alarm red", () => {
+    // Arrange / Act — the .retrying-pending label rule.
+    // Assert — --retry (purple = network), distinct from --thinking and --err.
+    expect(retryingPending).toMatch(/color:\s*var\(--retry\)/);
+  });
+
+  it("spins the same thinking-spin animation the thinking indicator uses", () => {
+    // Arrange / Act — the base .retrying-spinner rule.
+    // Assert — reusing thinking-spin means only the hue differs from thinking.
+    expect(retryingSpinner).toMatch(/animation:\s*thinking-spin\s+[\d.]+s\s+linear\s+infinite/);
+  });
+
+  it("draws the spinning arc in purple", () => {
+    // Arrange / Act — the base .retrying-spinner rule.
+    // Assert — the arc's leading edge is the retry purple.
+    expect(retryingSpinner).toMatch(/border-top-color:\s*var\(--retry\)/);
+  });
+
+  it("slows the retrying arc under reduced motion alongside the thinking arc", () => {
+    // Arrange / Act — the reduced-motion block names the retrying spinner too.
+    // Assert
+    expect(reducedMotion).toContain(".retrying-spinner");
+  });
+
+  it("defines the purple token for the light theme", () => {
+    // Arrange / Act — the :root palette.
+    // Assert
+    expect(blockAfter(css, ":root")).toMatch(/--retry:\s*#[0-9a-f]{6}/i);
+  });
+
+  it("defines the purple token for the dark theme", () => {
+    // Arrange / Act — the dark-scheme palette override.
+    // Assert
+    expect(darkTheme).toMatch(/--retry:\s*#[0-9a-f]{6}/i);
+  });
+});
+
 const toolSpinner = blockAfter(css, ".tool-spinner");
 const appearKeyframes = blockAfter(css, "@keyframes tool-run-appear");
 const reducedToolSpinner = blockAfter(
