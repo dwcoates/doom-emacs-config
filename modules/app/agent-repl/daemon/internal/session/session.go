@@ -400,6 +400,11 @@ type Info struct {
 	// can respawn the CLI under the mode the session actually holds now,
 	// rather than the one it was created with.
 	PermissionMode protocol.PermissionMode
+	// LiveTaskCount is how many detached background tasks this session armed
+	// that have not yet settled (no completion notification and no successful
+	// TaskStop). Drives the "available but working" tab-bar state: idle when
+	// TurnActive is false yet this is > 0.
+	LiveTaskCount int
 }
 
 // Info returns the session's current introspection snapshot: the
@@ -410,6 +415,12 @@ type Info struct {
 func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	liveTasks := 0
+	for _, rec := range s.taskPaths {
+		if !rec.done {
+			liveTasks++
+		}
+	}
 	return Info{
 		CWD:                s.translator.CWD,
 		Model:              s.translator.Model,
@@ -424,6 +435,7 @@ func (s *Session) Info() Info {
 		Queue:              s.queue.snapshot(),
 		Hibernated:         s.hibernated,
 		PermissionMode:     s.translator.PermissionMode,
+		LiveTaskCount:      liveTasks,
 	}
 }
 
