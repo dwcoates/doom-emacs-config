@@ -454,8 +454,11 @@ pre {
   font-size: 0.85rem;
 }
 
-/* No max-width: every feed section spans the full feed width, matching
-   the tool cards, so nothing renders narrower than its neighbors. Every
+/* Each bubble caps at 3/4 of the feed width and leans toward the edge its
+   role sits on: the user's own prompt hugs the right (matching the
+   queued-card row below), the agent's response hugs the left, so the
+   feed reads as a typical two-sided text-message thread with a full
+   quarter of blank margin always open on the bubble's off side. Every
    bubble reserves its border box up front, so a turn's final response
    gaining the green border on completion recolors 1px that were already
    laid out rather than reflowing the feed under a reader mid-sentence. */
@@ -476,6 +479,7 @@ pre {
   background: var(--user);
   --pulse-to: var(--user-pulse);
   align-self: flex-end;
+  max-width: 75%;
 }
 /* The bubble's top-right corner: a flex column stacking a final response's
    stats (duration, context delta) above its timestamp. Smaller and quieter
@@ -513,6 +517,8 @@ pre {
 .bubble.assistant {
   background: var(--assistant);
   --pulse-to: var(--assistant-pulse);
+  align-self: flex-start;
+  max-width: 75%;
 }
 /* The answer the turn landed on, as against the commentary above it. */
 .bubble.assistant.final-response { border-color: var(--final-response); }

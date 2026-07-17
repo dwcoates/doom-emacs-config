@@ -361,6 +361,35 @@ describe("the bubble pulse", () => {
   });
 });
 
+describe("bubble left/right bias (two-sided text-message layout)", () => {
+  const userBubble = blockAfter(css, ".bubble.user {");
+  const assistantBubble = blockAfter(css, ".bubble.assistant {");
+
+  it("hugs the user's own prompt to the right edge of the feed", () => {
+    // Arrange / Act — the .bubble.user rule.
+    // Assert
+    expect(userBubble).toMatch(/align-self:\s*flex-end/);
+  });
+
+  it("hugs the agent's response to the left edge of the feed", () => {
+    // Arrange / Act — the .bubble.assistant rule.
+    // Assert
+    expect(assistantBubble).toMatch(/align-self:\s*flex-start/);
+  });
+
+  it("caps the prompt bubble at three quarters of the feed width", () => {
+    // Arrange / Act — leaving a quarter of blank margin on its left.
+    // Assert
+    expect(userBubble).toMatch(/max-width:\s*75%/);
+  });
+
+  it("caps the response bubble at three quarters of the feed width", () => {
+    // Arrange / Act — leaving a quarter of blank margin on its right.
+    // Assert
+    expect(assistantBubble).toMatch(/max-width:\s*75%/);
+  });
+});
+
 /**
  * Every breathing section takes the SAME breath and differs only in the wash it
  * takes it from — the working frontier from the assistant purple and the
