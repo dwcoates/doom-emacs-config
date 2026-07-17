@@ -427,6 +427,11 @@ needs them, so the shim decomposes each such block into one
 forward-compatible extension — older receivers ignore it per the
 unknown-`type` rule.)
 
+A user message marked `isReplay` is the SDK re-emitting a message already
+in its history; its `type` is a plain `"user"`, so it is indistinguishable
+by type alone. The shim skips it whole — acting on it would emit a second
+`tool-result` for a `tool_use_id` already reported.
+
 ```ts
 interface ToolResultEvt {
   type: "tool-result";
@@ -436,8 +441,30 @@ interface ToolResultEvt {
   tool_use_id: ToolUseId;
   is_error: boolean;
   content: string | Array<{ type: "text"; text: string }>;
+  /** The SDK's `tool_use_result`, verbatim; see below. Absent when omitted. */
+  structured?: unknown;
 }
 ```
+
+`content` is only the flattened text the MODEL sees. `structured` is the
+SDK's `tool_use_result` — the tool's own JSON result, which the SDK
+documents as being "provided to make it easier for applications to present
+the tool result in a formatted way". Its shape is per-tool and grows with
+the harness, so the shim forwards it verbatim rather than projecting it;
+the daemon is what classifies it (§2.6 `async-source`). It is the only
+source of every structured fact about a call:
+
+| Tool | `structured` carries |
+|---|---|
+| `Bash` | `stdout` and `stderr` **separately**, `interrupted`, `returnCodeInterpretation` |
+| `Agent` (async spawn) | `isAsync`, `agentId`, `outputFile`, `canReadOutputFile`, `status` |
+| `Agent` (settled) | `agentId`, `agentType`, `usage`, `totalTokens`, `totalDurationMs`, `toolStats` |
+| `Edit` | `structuredPatch`, `originalFile`, `userModified` |
+| `TaskUpdate` | `taskId`, `statusChange: {from, to}`, `updatedFields` |
+| `Skill` | `commandName`, `success`, `allowedTools` |
+
+Without it, every one of those facts has to be scraped back out of English
+prose, which is what the pre-`structured` daemon and webapp did.
 
 #### `system`
 
