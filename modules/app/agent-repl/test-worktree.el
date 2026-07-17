@@ -8324,9 +8324,12 @@ kill, agent session kill, and buffer cleanup all run on the main thread.  This
 is what makes `--workspace-merge-do' safe to execute from the worker
 thread spawned by `agent-repl--workspace-merge-async'.
 
-Pinned with a stub that captures the defer call — the test fixture's
-default override would otherwise invoke the thunk immediately, hiding
-whether the defer call was ever made."
+The success path now makes TWO defer calls: the parent phone-home
+\(`agent-repl--maybe-notify-parent-of-child-merge', which spawns
+`make-process' and so must run on main) and the teardown.  Pinned with a
+stub that captures the defer calls — the test fixture's default override
+would otherwise invoke each thunk immediately, hiding whether the defer
+calls were ever made."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (let ((defer-calls 0))
@@ -8342,7 +8345,7 @@ whether the defer call was ever made."
                  ((symbol-function 'agent-repl--defer-to-main-thread)
                   (lambda (_thunk) (cl-incf defer-calls))))
         (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should (= defer-calls 1))))))
+        (should (= defer-calls 2))))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-does-not-call-finish-workspace ()
   "Successful merge must NOT call `--finish-workspace' — that's reserved
@@ -12506,5 +12509,82 @@ silently lose commits and desync the index."
               ((symbol-function 'run-at-time)
                (lambda (&rest _) (error "must not schedule a create without a git root"))))
       (should-error (agent-repl--dispatch-resume-investigation "uuid-gone" nil "/w")))))
+
+;;;; ---- Tests: child-merge parent notification (phone-home) ----
+
+(ert-deftest agent-repl-test-build-child-merge-notify-prompt-with-subjects ()
+  "A populated notify prompt targets the parent and names the child plus landed subjects."
+  (let ((prompt (agent-repl--build-child-merge-notify-prompt
+                 "DWC/child-x" "DWC/parent-y" "add widget\nfix bug")))
+    (should (string-match-p "\\`/workspace-update DWC/parent-y" prompt))
+    (should (string-match-p "child-x" prompt))
+    (should (string-match-p "add widget" prompt))
+    (should (string-match-p "Commits that landed:" prompt))))
+
+(ert-deftest agent-repl-test-build-child-merge-notify-prompt-empty-subjects ()
+  "With no landed commits the prompt states nothing new was incorporated."
+  (let ((prompt (agent-repl--build-child-merge-notify-prompt
+                 "DWC/child-x" "DWC/parent-y" "")))
+    (should (string-match-p "No new commits landed" prompt))
+    (should-not (string-match-p "Commits that landed:" prompt))))
+
+(ert-deftest agent-repl-test-maybe-notify-parent-skips-main-worktree ()
+  "A merge whose parent IS the main worktree does not phone home."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-p)
+                 (lambda (_dir) t))
+                ((symbol-function 'agent-repl--notify-parent-of-child-merge)
+                 (lambda (&rest _) (setq fired t))))
+        (agent-repl--maybe-notify-parent-of-child-merge
+         "DWC/child-x" "/repo/main" "child-branch" "base-sha")
+        (should-not fired)))))
+
+(ert-deftest agent-repl-test-maybe-notify-parent-fires-for-non-main-parent ()
+  "A non-main-worktree parent resolving to a live workspace is notified with child + subjects."
+  (agent-repl-test--with-clean-state
+    (let ((captured nil))
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (_dir) "DWC/parent-y"))
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) "add widget"))
+                ((symbol-function 'agent-repl--notify-parent-of-child-merge)
+                 (lambda (child parent prompt)
+                   (setq captured (list child parent prompt)))))
+        (agent-repl--maybe-notify-parent-of-child-merge
+         "DWC/child-x" "/repo/wt-parent" "child-branch" "base-sha")
+        (should (equal (nth 0 captured) "DWC/child-x"))
+        (should (equal (nth 1 captured) "DWC/parent-y"))
+        (should (string-match-p "add widget" (nth 2 captured)))))))
+
+(ert-deftest agent-repl-test-maybe-notify-parent-skips-unregistered-dir ()
+  "A parent dir mapping to no live workspace does not phone home."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--notify-parent-of-child-merge)
+                 (lambda (&rest _) (setq fired t))))
+        (agent-repl--maybe-notify-parent-of-child-merge
+         "DWC/child-x" "/repo/wt-parent" "child-branch" "base-sha")
+        (should-not fired)))))
+
+(ert-deftest agent-repl-test-maybe-notify-parent-skips-self ()
+  "A parent dir resolving to the child workspace itself does not phone home."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (_dir) "DWC/child-x"))
+                ((symbol-function 'agent-repl--notify-parent-of-child-merge)
+                 (lambda (&rest _) (setq fired t))))
+        (agent-repl--maybe-notify-parent-of-child-merge
+         "DWC/child-x" "/repo/wt-parent" "child-branch" "base-sha")
+        (should-not fired)))))
 
 ;;; test-worktree.el ends here

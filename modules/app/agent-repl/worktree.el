@@ -4696,6 +4696,166 @@ handler of `agent-repl--workspace-merge-do'."
   (agent-repl--ws-put target-ws :repl-state :merge-conflict)
   (agent-repl--dispatch-merge-remediation target-ws err))
 
+;;; Child-workspace parent notification (post-merge phone-home)
+;;
+;; After a child workspace's commits fully cherry-pick and merge into a
+;; NON-main-worktree parent, that parent is informed automatically: a
+;; headless `claude -p' fires the pre-existing `/workspace-update'
+;; command (the `create-or-update-workspace' skill's `prompt' verb),
+;; delivering a completion notice — the merged child's name plus the
+;; subjects of the commits that landed — into the parent workspace's
+;; live session.  A merge whose destination IS the repo's main worktree
+;; does NOT phone home: the human at the main worktree sits at the top of
+;; the tree, not as a peer awaiting notification.
+
+(declare-function agent-repl--claude-headless-cmd "session")
+(declare-function agent-repl--notify-parent-of-child-merge "worktree")
+
+(defcustom agent-repl-child-merge-notify-model "sonnet"
+  "Model alias for the headless `claude -p' that notifies a parent workspace.
+Fired by `agent-repl--notify-parent-of-child-merge' after a child
+workspace merges into a non-main-worktree parent.  The notifier must
+interpret a slash command, invoke the `create-or-update-workspace'
+skill, and run its dispatch helper, so it defaults to a capable model
+rather than `haiku'."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-child-merge-notify-extra-args
+  '("--permission-mode" "auto")
+  "Extra flags for the child-merge parent-notification `claude -p' call.
+Runs the notifier under `--permission-mode auto' so it can invoke the
+`create-or-update-workspace' skill and run its dispatch helper (a `Bash'
+invocation of `run.sh') without an interactive approval it has no
+terminal to answer."
+  :type '(repeat string)
+  :group 'agent-repl)
+
+(defun agent-repl--notify-parent-of-child-merge (child-ws parent-ws prompt)
+  "Fire a fire-and-forget headless `claude -p' notifying PARENT-WS of CHILD-WS's merge.
+PROMPT is the full `/workspace-update' prompt from
+`agent-repl--build-child-merge-notify-prompt', delivered on the
+process's stdin.
+
+Non-blocking: spawns `claude -p' from a neutral cwd
+\(`temporary-file-directory') so the notifier's own session hooks are not
+attributed to any registered workspace, forces the `claude' backend (the
+skill and `claude -p' are claude-specific), and returns immediately.  A
+minimal sentinel logs the exit status; the merge teardown never waits on
+this call.
+
+This IS the external-boundary wrapper for the notification spawn
+\(registered in `agent-repl--external-boundary-functions'): tests MUST
+mock it rather than spawn a real process.  Must run on the main thread
+\(`make-process').  Returns the process, or nil on spawn failure."
+  (let ((cmd (agent-repl--claude-headless-cmd
+              agent-repl-child-merge-notify-model
+              agent-repl-child-merge-notify-extra-args))
+        (out-buf (generate-new-buffer
+                  (format " *agent-child-merge-notify-%s*" child-ws))))
+    (condition-case err
+        (let* ((default-directory temporary-file-directory)
+               (proc (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+                      :name (format "agent-child-merge-notify-%s" child-ws)
+                      :buffer out-buf
+                      :command cmd
+                      :connection-type 'pipe
+                      :noquery t
+                      :sentinel (agent-repl--child-merge-notify-sentinel
+                                 child-ws parent-ws))))
+          (agent-repl--log child-ws
+                            "notify-parent-of-child-merge: child=%s parent=%s spawned cmd=%S"
+                            child-ws parent-ws cmd)
+          (process-send-string proc prompt)
+          (process-send-eof proc)
+          proc)
+      (error
+       (agent-repl--log child-ws
+                         "notify-parent-of-child-merge: child=%s parent=%s spawn failed err=%S"
+                         child-ws parent-ws err)
+       (when (buffer-live-p out-buf) (kill-buffer out-buf))
+       nil))))
+
+(defun agent-repl--build-child-merge-notify-prompt (child-ws parent-ws subjects)
+  "Build the headless `claude -p' prompt notifying PARENT-WS of CHILD-WS's merge.
+CHILD-WS is the now-merged child workspace name; PARENT-WS is the parent
+workspace to notify; SUBJECTS is a newline-joined string of the merged
+commit subjects (may be empty when nothing new landed).
+
+Drives the pre-existing `/workspace-update' command (the
+`create-or-update-workspace' skill's `prompt' verb) to deliver a
+completion notice into PARENT-WS's live session.  The first line names
+the command and the target workspace so the skill dispatches the
+remaining text as the prompt PARENT-WS receives."
+  (let ((info (if (and subjects (not (string-empty-p (string-trim subjects))))
+                  (format "Commits that landed:\n%s" (string-trim subjects))
+                "No new commits landed - the changes were already incorporated.")))
+    (format
+     (concat
+      "/workspace-update %s\n\n"
+      "Automated notification: your child workspace `%s' has finished its work "
+      "and been successfully merged back into this workspace. %s")
+     parent-ws child-ws info)))
+
+(defun agent-repl--child-merge-notify-sentinel (child-ws parent-ws)
+  "Return a process sentinel logging the CHILD-WS -> PARENT-WS notification result.
+Logs the terminal exit status and kills the process buffer.  The
+notification is fire-and-forget, so the sentinel records the outcome for
+post-mortem but takes no corrective action on failure."
+  (lambda (proc _event)
+    (when (memq (process-status proc) '(exit signal))
+      (let ((status (process-exit-status proc)))
+        (agent-repl--log child-ws
+                          "child-merge-notify: child=%s parent=%s exit=%s"
+                          child-ws parent-ws status)
+        (when (buffer-live-p (process-buffer proc))
+          (kill-buffer (process-buffer proc)))))))
+
+(defun agent-repl--maybe-notify-parent-of-child-merge (child-ws parent-dir target-branch base)
+  "Notify the parent workspace at PARENT-DIR that CHILD-WS merged, when applicable.
+Fires the headless phone-home ONLY when PARENT-DIR is a NON-main
+worktree (`agent-repl--main-worktree-p') that resolves to a live
+workspace distinct from CHILD-WS.  A merge landing in the repo's main
+worktree, an unregistered directory, or (defensively) CHILD-WS itself is
+a no-op, each logged.
+
+TARGET-BRANCH and BASE bound the merged range `BASE..TARGET-BRANCH',
+whose commit subjects (read from PARENT-DIR) become the notification's
+supplementary information.  An empty range yields an empty subject list,
+which `agent-repl--build-child-merge-notify-prompt' renders as \"nothing
+new landed\".
+
+Must run on the main thread — it spawns via
+`agent-repl--notify-parent-of-child-merge'."
+  (cond
+   ((agent-repl--main-worktree-p parent-dir)
+    (agent-repl--log child-ws
+                      "maybe-notify-parent: child=%s parent-dir=%s is the MAIN worktree - no phone-home"
+                      child-ws parent-dir))
+   (t
+    (let ((parent-ws (agent-repl--ws-name-for-dir parent-dir)))
+      (cond
+       ((null parent-ws)
+        (agent-repl--log child-ws
+                          "maybe-notify-parent: child=%s parent-dir=%s maps to no live workspace - no phone-home"
+                          child-ws parent-dir))
+       ((equal parent-ws child-ws)
+        (agent-repl--log child-ws
+                          "maybe-notify-parent: child=%s resolves to itself - no phone-home"
+                          child-ws))
+       (t
+        (let* ((subjects (or (and base target-branch
+                                  (agent-repl--git-string-quiet
+                                   "-C" parent-dir "log" "--format=%s"
+                                   (concat base ".." target-branch)))
+                             ""))
+               (prompt (agent-repl--build-child-merge-notify-prompt
+                        child-ws parent-ws subjects)))
+          (agent-repl--log child-ws
+                            "maybe-notify-parent: child=%s parent=%s - firing headless phone-home"
+                            child-ws parent-ws)
+          (agent-repl--notify-parent-of-child-merge child-ws parent-ws prompt))))))))
+
 (defun agent-repl--workspace-merge-do (target-ws &optional project-root-override silent auto-resolve)
   "Cherry-pick TARGET-WS's branch commits onto the current branch.
 Replays each commit from the target branch (since it diverged from master)
@@ -4828,6 +4988,18 @@ off so the user resolves in magit directly."
               (agent-repl--ws-put target-ws :repl-state :merged)
               (agent-repl--ws-put target-ws :agent-state nil)
               (agent-repl--tag-merge-completion project-root target-ws)
+              ;; Phone home: when the cherry-pick landed in a NON-main
+              ;; worktree parent, notify that parent workspace this child
+              ;; is done (name + landed commit subjects).  Deferred to the
+              ;; main thread because it spawns `make-process' and this
+              ;; branch may run on the merge worker thread.  Fire-and-
+              ;; forget — the teardown below never waits on it.  `base'
+              ;; and `target-branch' bound the merged range whose subjects
+              ;; become the notification's supplementary information.
+              (agent-repl--defer-to-main-thread
+               (lambda ()
+                 (agent-repl--maybe-notify-parent-of-child-merge
+                  target-ws project-root target-branch base)))
               ;; Compose with `agent-repl--close-workspace' (the
               ;; named workspace-close primitive) for the editor-side
               ;; teardown.  `preserve-entry' keeps the hash entry
