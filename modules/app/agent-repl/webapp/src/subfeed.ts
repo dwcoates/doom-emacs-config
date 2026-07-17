@@ -116,3 +116,80 @@ export function mayNest(
 ): boolean {
   return depth < SUBFEED_DEPTH_CAP && !(seen?.has(sourceId) ?? false);
 }
+
+/**
+ * Every source id the poller should poll: the ids behind OPEN folds,
+ * collected RECURSIVELY so polling mirrors exactly what the renderer
+ * draws at every depth.
+ *
+ * Two roots, matching the two fold surfaces. A spawning card's async
+ * fold (`async:<toolUseId>`) contributes its poll source; a watcher fold
+ * (`watchers:<blockId>`) contributes every id its watchers announced,
+ * since a watcher row renders its tail inline the moment the fold opens.
+ * From either root the walk descends into a transcript source's
+ * accumulated tail — TAILTEXT, the poller's own state — because that
+ * parse is where the nested spawn cards live: opening depth N's fold
+ * polls its tail, whose parse reveals depth N+1's cards, whose folds
+ * contribute in turn once opened. The descent honors the renderer's own
+ * guards (`mayNest`, closed activity panels), so nothing polls that the
+ * feed would not draw.
+ */
+export function openSubfeedSourceIds(opts: {
+  items: readonly ConversationItem[];
+  watchers: ReadonlyMap<string, readonly ToolItem[]>;
+  isOpen: (foldId: string) => boolean;
+  tailText: (sourceId: string) => string | undefined;
+}): Set<string> {
+  const ids = new Set<string>();
+
+  const walkCard = (item: ToolItem, depth: number, seen: ReadonlySet<string>): void => {
+    const source = effectiveAsyncSource(item);
+    // A ws source's tail already arrives as task-output-delta frames;
+    // polling it would be a round trip for bytes in hand.
+    if (!source || source.stream?.transport !== "poll") return;
+    if (!mayNest(depth, seen, source.source_id)) return;
+    if (!opts.isOpen(`async:${item.toolUseId}`)) return;
+    ids.add(source.source_id);
+    descendStream(item, source, depth, seen);
+  };
+
+  const descendStream = (
+    item: ToolItem,
+    source: AsyncSource,
+    depth: number,
+    seen: ReadonlySet<string>,
+  ): void => {
+    if (source.stream?.format !== "jsonl-transcript") return;
+    const text =
+      item.taskOutput !== undefined && item.taskOutput !== ""
+        ? item.taskOutput
+        : opts.tailText(source.source_id);
+    if (text === undefined || text === "") return;
+    const feed = transcriptFeed(text);
+    const nextSeen = new Set([...seen, source.source_id]);
+    for (const t of feed.top) {
+      if (t.kind === "tool") walkCard(t, depth + 1, nextSeen);
+    }
+    for (const [parent, children] of feed.children) {
+      // A child renders inside its parent's activity panel, so a closed
+      // panel keeps its cards — and their folds — out of the walk.
+      if (!opts.isOpen(parent)) continue;
+      for (const t of children) {
+        if (t.kind === "tool") walkCard(t, depth + 1, nextSeen);
+      }
+    }
+  };
+
+  for (const item of opts.items) {
+    if (item.kind === "tool") walkCard(item, 0, new Set());
+  }
+  for (const [blockId, list] of opts.watchers) {
+    if (!opts.isOpen(`watchers:${blockId}`)) continue;
+    for (const w of list) {
+      for (const id of spawnedTaskIds(w)) ids.add(id);
+      const source = effectiveAsyncSource(w);
+      if (source) descendStream(w, source, 0, new Set([source.source_id]));
+    }
+  }
+  return ids;
+}

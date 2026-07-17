@@ -4,6 +4,7 @@ import {
   effectiveAsyncSource,
   mayNest,
   mergeChildren,
+  openSubfeedSourceIds,
   transcriptFeed,
 } from "../src/subfeed.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
@@ -192,6 +193,119 @@ describe("effectiveAsyncSource", () => {
     });
     // Act + Assert
     expect(effectiveAsyncSource(card)?.status).toBe("done");
+  });
+});
+
+describe("openSubfeedSourceIds", () => {
+  /** Collect with sensible defaults, overriding per case. */
+  function collect(over: {
+    items?: ToolItem[];
+    watchers?: ReadonlyMap<string, readonly ToolItem[]>;
+    isOpen?: (id: string) => boolean;
+    tailText?: (id: string) => string | undefined;
+  }): Set<string> {
+    return openSubfeedSourceIds({
+      items: over.items ?? [],
+      watchers: over.watchers ?? new Map(),
+      isOpen: over.isOpen ?? (() => true),
+      tailText: over.tailText ?? (() => undefined),
+    });
+  }
+
+  /** A transcript with one Agent call announcing AGENTID. */
+  function spawnTranscript(toolUseId: string, agentId: string): string {
+    return [
+      txLine({
+        type: "assistant",
+        message: {
+          id: "m1",
+          content: [{ type: "tool_use", id: toolUseId, name: "Agent", input: {} }],
+        },
+      }),
+      txLine({
+        type: "user",
+        message: {
+          id: "m2",
+          content: [{ type: "tool_result", tool_use_id: toolUseId, content: `agentId: ${agentId}` }],
+        },
+      }),
+    ].join("\n");
+  }
+
+  it("polls the source of an open async fold", () => {
+    // Arrange / Act
+    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1")] });
+    // Assert
+    expect([...ids]).toEqual(["bg1"]);
+  });
+
+  it("polls nothing while every fold is shut", () => {
+    // Arrange / Act
+    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1")], isOpen: () => false });
+    // Assert
+    expect(ids.size).toBe(0);
+  });
+
+  it("never polls a ws source, whose tail already arrives as frames", () => {
+    // Arrange
+    const shell = spawnCard("Bash", "with ID: bg1", {
+      asyncSource: {
+        source_id: "bg1",
+        kind: "shell",
+        status: "running",
+        stream: { transport: "ws", format: "text" },
+      },
+    });
+    // Act / Assert
+    expect(collect({ items: [shell] }).size).toBe(0);
+  });
+
+  it("collects an open watcher fold's announced ids", () => {
+    // Arrange
+    const watchers = new Map([["b1", [spawnCard("Bash", "with ID: bg1")]]]);
+    // Act — only b1's fold is open.
+    const ids = collect({ watchers, isOpen: (id) => id === "watchers:b1" });
+    // Assert
+    expect([...ids]).toEqual(["bg1"]);
+  });
+
+  it("reaches a grandchild through an open fold chain", () => {
+    // Arrange — the watcher agent's polled tail reveals a nested spawn.
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    const tails = new Map([["a9", spawnTranscript("ag1", "a7")]]);
+    // Act — the watcher fold AND the nested card's fold are open.
+    const ids = collect({ watchers, tailText: (id) => tails.get(id) });
+    // Assert
+    expect(ids).toEqual(new Set(["a9", "a7"]));
+  });
+
+  it("keeps a grandchild out while its own fold stays shut", () => {
+    // Arrange
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    const tails = new Map([["a9", spawnTranscript("ag1", "a7")]]);
+    // Act — everything open except the nested card's fold.
+    const ids = collect({ watchers, tailText: (id) => tails.get(id), isOpen: (id) => id !== "async:ag1" });
+    // Assert
+    expect(ids).toEqual(new Set(["a9"]));
+  });
+
+  it("terminates on a self-announcing tail instead of recursing forever", () => {
+    // Arrange — a9's tail announces a9 again: a cycle.
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    // Act
+    const ids = collect({ watchers, tailText: () => spawnTranscript("ag1", "a9") });
+    // Assert
+    expect(ids).toEqual(new Set(["a9"]));
+  });
+
+  it("stops descending at the depth cap", () => {
+    // Arrange — every level's tail announces one deeper spawn, forever.
+    const card = spawnCard("Agent", "agentId: s0", { toolUseId: "t-s0" });
+    const tailText = (id: string): string => spawnTranscript(`t-${id}x`, `${id}x`);
+    // Act
+    const ids = collect({ items: [card], tailText });
+    // Assert — one id per permitted level, then the cap cuts.
+    expect(ids.size).toBe(SUBFEED_DEPTH_CAP);
   });
 });
 
