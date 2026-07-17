@@ -3237,3 +3237,227 @@ func TestInterruptRouteRejectsAMalformedBody(t *testing.T) {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
+
+// ---- POST /sessions/{id}/permission (sidebar approve/deny) -------------------
+
+// postPermission resolves a pending permission over the HTTP route.
+func postPermission(t *testing.T, h *harness, id, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/permission", "application/json",
+		bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("POST permission: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// pushPermissionRequest plants a pending prompt for reqID and returns once
+// conn has seen it — the sync point that guarantees the session's pending
+// map holds the id before the HTTP decision races it.
+func pushPermissionRequest(t *testing.T, shim *fakeShim, conn *websocket.Conn, id, reqID string) {
+	t.Helper()
+	shim.pushEvent(t, fmt.Sprintf(
+		`{"type":"permission-request","session_id":%q,"request_id":%q,"tool_use_id":"t1","tool_name":"Bash","input":{"command":"ls"}}`,
+		id, reqID))
+	readFrameOfType(t, conn, "permission-request")
+}
+
+func TestPermissionRouteResolvesPendingPermission(t *testing.T) {
+	// Arrange — a pending prompt, observed by a WS tab.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	pushPermissionRequest(t, shim, conn, id, "p1")
+	// Act
+	resp := postPermission(t, h, id, `{"request_id":"p1","behavior":"allow"}`)
+	// Assert — 202 echoing the request id, the resolved broadcast, and the
+	// decision reaching the command layer (the shim forward).
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.RequestID != "p1" {
+		t.Errorf("request_id = %q, want p1", body.RequestID)
+	}
+	resolved := readFrameOfType(t, conn, "permission-resolved")
+	if resolved["request_id"] != "p1" || resolved["decision"] != "allow" {
+		t.Errorf("resolved = %v", resolved)
+	}
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"permission-decision"`) ||
+			!strings.Contains(string(line), `"allow"`) {
+			t.Errorf("forwarded = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("decision not forwarded to shim")
+	}
+}
+
+func TestPermissionRouteDenyCarriesASynthesizedMessage(t *testing.T) {
+	// Arrange — the wire contract requires every deny to carry a message,
+	// and this route's body has none, so the daemon supplies its own.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	pushPermissionRequest(t, shim, conn, id, "p1")
+	// Act
+	resp := postPermission(t, h, id, `{"request_id":"p1","behavior":"deny"}`)
+	// Assert
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"deny"`) ||
+			!strings.Contains(string(line), "denied from sidebar") {
+			t.Errorf("forwarded = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("decision not forwarded to shim")
+	}
+}
+
+func TestPermissionRouteRejectsBadBodies(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"missing request_id", `{"behavior":"allow"}`},
+		{"invalid behavior", `{"request_id":"p1","behavior":"shrug"}`},
+		{"malformed JSON", `{`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			resp := postPermission(t, h, id, tc.body)
+			// Assert
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestPermissionRoute404sOnUnknownSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	resp := postPermission(t, h, "nope", `{"request_id":"p1","behavior":"allow"}`)
+	// Assert
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestPermissionRouteStaleRequestIDConflicts(t *testing.T) {
+	// Arrange — a live session with no pending prompt for the id: the
+	// pipeline's own gating rejects it, exactly as the WS path would.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	// Act
+	resp := postPermission(t, h, id, `{"request_id":"ghost","behavior":"allow"}`)
+	// Assert — rejected, never forwarded.
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+	select {
+	case line := <-shim.sent:
+		t.Fatalf("unexpected forward: %s", line)
+	default:
+	}
+}
+
+// ---- GET /sessions sidebar enrichments (turn_preview / total_cost_usd) ------
+
+// sidebarEntry is the slice of a GET /sessions entry the sidebar joins on.
+type sidebarEntry struct {
+	SessionID    string  `json:"session_id"`
+	TurnPreview  string  `json:"turn_preview"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
+}
+
+// listSidebarEntries decodes GET /sessions down to the sidebar's fields.
+func listSidebarEntries(t *testing.T, h *harness) []sidebarEntry {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Sessions []sidebarEntry `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return body.Sessions
+}
+
+func TestListSessionsCarriesTurnPreviewWhileTurnActive(t *testing.T) {
+	// Arrange — a turn in flight that has produced assistant text.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	postMessage(t, h, id, "task")
+	readFrameOfType(t, conn, "user-turn")
+	<-shim.sent // forwarded turn
+	shim.pushEvent(t, `{"type":"assistant-message","session_id":"`+id+`","uuid":"a1","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"text","text":"Working on it"}]}}`)
+	readFrameOfType(t, conn, "text-end") // the text has landed
+	// Act
+	entries := listSidebarEntries(t, h)
+	// Assert
+	if len(entries) != 1 || entries[0].TurnPreview != "Working on it" {
+		t.Errorf("entries = %+v, want turn_preview %q", entries, "Working on it")
+	}
+}
+
+func TestListSessionsTurnPreviewEmptyWhenIdle(t *testing.T) {
+	// Arrange — a turn that streamed text and then completed.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	postMessage(t, h, id, "task")
+	readFrameOfType(t, conn, "user-turn")
+	<-shim.sent // forwarded turn
+	shim.pushEvent(t, `{"type":"assistant-message","session_id":"`+id+`","uuid":"a1","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"text","text":"done"}]}}`)
+	shim.pushEvent(t, `{"type":"result","session_id":"`+id+`","uuid":"r1","subtype":"success"}`)
+	readFrameOfType(t, conn, "result") // the turn has ended
+	// Act
+	entries := listSidebarEntries(t, h)
+	// Assert
+	if len(entries) != 1 || entries[0].TurnPreview != "" {
+		t.Errorf("entries = %+v, want empty turn_preview when idle", entries)
+	}
+}
+
+func TestListSessionsAccumulatesCostAcrossResults(t *testing.T) {
+	// Arrange — two completed turns, each result reporting its cost.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	shim.pushEvent(t, `{"type":"result","session_id":"`+id+`","uuid":"r1","subtype":"success","total_cost_usd":0.25}`)
+	readFrameOfType(t, conn, "result")
+	shim.pushEvent(t, `{"type":"result","session_id":"`+id+`","uuid":"r2","subtype":"success","total_cost_usd":0.5}`)
+	readFrameOfType(t, conn, "result")
+	// Act
+	entries := listSidebarEntries(t, h)
+	// Assert
+	if len(entries) != 1 || entries[0].TotalCostUSD != 0.75 {
+		t.Errorf("entries = %+v, want total_cost_usd 0.75", entries)
+	}
+}

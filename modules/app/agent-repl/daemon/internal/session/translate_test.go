@@ -1288,3 +1288,98 @@ func TestTranslatorNextTurnIsRetractableAfterAPriorRetraction(t *testing.T) {
 		t.Error("TurnRetractable() = false for the turn after a retraction, want true")
 	}
 }
+
+// --- active-turn text (GET /sessions turn_preview) ----------------------------
+
+// openTranslatorTurn opens a user turn on tr, as the session hub does for
+// an accepted user-message.
+func openTranslatorTurn(t *testing.T, tr *Translator) {
+	t.Helper()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.OnUserMessageCmd(cmd)
+}
+
+func TestTranslatorActiveTurnTextAccumulatesStreamedDeltas(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	openTranslatorTurn(t, tr)
+	startMessage(t, tr, "msg1")
+	// Act
+	runTextBlock(t, tr, 0, "Working ")
+	runTextBlock(t, tr, 1, "on it")
+	// Assert
+	if got := tr.ActiveTurnText(); got != "Working on it" {
+		t.Errorf("ActiveTurnText() = %q, want %q", got, "Working on it")
+	}
+}
+
+func TestTranslatorActiveTurnTextEmptyAfterResult(t *testing.T) {
+	// Arrange — a turn that streamed text and then completed.
+	tr := NewTranslator()
+	openTranslatorTurn(t, tr)
+	startMessage(t, tr, "msg1")
+	runTextBlock(t, tr, 0, "done")
+	// Act
+	tr.OnEvent(evt(t, `{"type":"result","session_id":"s1","uuid":"u","subtype":"success"}`))
+	// Assert
+	if got := tr.ActiveTurnText(); got != "" {
+		t.Errorf("ActiveTurnText() = %q, want empty after the turn ended", got)
+	}
+}
+
+func TestTranslatorActiveTurnTextExcludesSubagentText(t *testing.T) {
+	// Arrange — a live turn whose only text streams on a sidechain.
+	tr := NewTranslator()
+	openTranslatorTurn(t, tr)
+	// Act
+	tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"message_start","message":{"id":"sub1","role":"assistant","model":"m"}}}`))
+	tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`))
+	tr.OnEvent(evt(t, `{"type":"stream-event","session_id":"s1","uuid":"u","parent_tool_use_id":"task1","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"sidechain"}}}`))
+	// Assert
+	if got := tr.ActiveTurnText(); got != "" {
+		t.Errorf("ActiveTurnText() = %q, want subagent text excluded", got)
+	}
+}
+
+func TestTranslatorActiveTurnTextIncludesNonStreamedAssistantText(t *testing.T) {
+	// Arrange — a live turn answered by a non-streamed assistant message
+	// (includePartialMessages off: the turn's text arrives only here).
+	tr := NewTranslator()
+	openTranslatorTurn(t, tr)
+	// Act
+	tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"text","text":"whole answer"}]}}`))
+	// Assert
+	if got := tr.ActiveTurnText(); got != "whole answer" {
+		t.Errorf("ActiveTurnText() = %q, want %q", got, "whole answer")
+	}
+}
+
+func TestTranslatorActiveTurnTextIgnoresTextOutsideATurn(t *testing.T) {
+	// Arrange — replay-style translation: assistant text arrives with no
+	// live turn (transcript seeding drives OnEvent exactly like this).
+	tr := NewTranslator()
+	tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"text","text":"replayed history"}]}}`))
+	// Act — a real turn then starts.
+	openTranslatorTurn(t, tr)
+	// Assert — the replayed text never pollutes the new turn's preview.
+	if got := tr.ActiveTurnText(); got != "" {
+		t.Errorf("ActiveTurnText() = %q, want replayed text ignored", got)
+	}
+}
+
+func TestTranslatorActiveTurnTextResetsAtTurnStart(t *testing.T) {
+	// Arrange — a turn that never saw its result (shim churn mid-turn).
+	tr := NewTranslator()
+	openTranslatorTurn(t, tr)
+	startMessage(t, tr, "msg1")
+	runTextBlock(t, tr, 0, "stale")
+	// Act — the next turn opens without an intervening result.
+	openTranslatorTurn(t, tr)
+	// Assert
+	if got := tr.ActiveTurnText(); got != "" {
+		t.Errorf("ActiveTurnText() = %q, want the prior turn's text discarded", got)
+	}
+}

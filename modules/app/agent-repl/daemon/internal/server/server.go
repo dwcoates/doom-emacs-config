@@ -378,6 +378,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage)
 	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt)
+	mux.HandleFunc("POST /sessions/{id}/permission", s.handlePermissionDecision)
 	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)
 	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands)
@@ -1219,6 +1220,63 @@ func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.logf, map[string]bool{"retracted": retracted})
 }
 
+// handlePermissionDecision resolves a pending permission prompt over
+// HTTP — the send path for clients that hold no WebSocket (the sidebar's
+// one-click approve/deny buttons). The decision flows through the exact
+// same pipeline as a WS-submitted permission-decision, so connected tabs
+// still get the permission-resolved broadcast and the shim's own gating
+// still owns unknown or already-resolved request ids (surfaced as a 409,
+// like every other rejected injection).
+func (s *Server) handlePermissionDecision(w http.ResponseWriter, r *http.Request) {
+	// An ACT: permission-decision must reach a live CLI
+	// (protocol.CommandActs), so a hibernated session revives exactly as
+	// it would for the same frame arriving over the WS path.
+	sess, err := s.resolveForAct(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	var body struct {
+		RequestID string `json:"request_id"`
+		Behavior  string `json:"behavior"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if body.RequestID == "" {
+		httpError(w, http.StatusBadRequest, "request_id must be non-empty")
+		return
+	}
+	if body.Behavior != "allow" && body.Behavior != "deny" {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("behavior must be allow|deny, got %q", body.Behavior))
+		return
+	}
+	decision := map[string]any{"behavior": body.Behavior}
+	if body.Behavior == "deny" {
+		// The wire contract requires every deny to carry a message
+		// (protocol.DecodeCommand enforces it), but this route's body has
+		// none, so the daemon supplies the sidebar's — mirroring the
+		// webapp's own "denied from webapp".
+		decision["message"] = "denied from sidebar"
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       "permission-decision",
+		"request_id": body.RequestID,
+		"decision":   decision,
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]string{"request_id": body.RequestID})
+}
+
 // handleQueueRunNow escalates a queued message over HTTP (§2.13): the
 // Emacs-host equivalent of the webapp's Run-now control. Same pipeline as
 // a WS queue-run-now: the item is promoted and the running turn preempted.
@@ -1442,6 +1500,15 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		DeathReason string `json:"death_reason,omitempty"`
 		// TurnActive reports whether a user turn is in flight.
 		TurnActive bool `json:"turn_active"`
+		// TurnPreview is the tail (≤ 200 chars) of the active turn's
+		// streamed assistant text, "" when no turn is active — the
+		// sidebar roster's live-turn preview. Always present: the empty
+		// string is a real answer ("nothing to preview"), not a gap.
+		TurnPreview string `json:"turn_preview"`
+		// TotalCostUSD is the cumulative cost of the session's completed
+		// turns, accumulated from result frames. Live sessions only; a
+		// dormant record reports 0.
+		TotalCostUSD float64 `json:"total_cost_usd"`
 		// PendingPermissions lists unresolved permission request ids.
 		PendingPermissions []string `json:"pending_permissions,omitempty"`
 		// Queue is the in-flight message queue snapshot (§2.13),
@@ -1469,6 +1536,8 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			ClaudeSessionID:    info.ClaudeSessionID,
 			DeathReason:        info.DeathReason,
 			TurnActive:         info.TurnActive,
+			TurnPreview:        info.TurnPreview,
+			TotalCostUSD:       info.TotalCostUSD,
 			PendingPermissions: info.PendingPermissions,
 			Queue:              info.Queue,
 			Hibernated:         info.Hibernated,
