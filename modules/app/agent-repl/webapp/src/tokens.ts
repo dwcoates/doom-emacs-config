@@ -16,10 +16,16 @@
 import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
 import { ModelUsage, Usage } from "./protocol.js";
-import { contextTokens } from "./store.js";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {
+  /**
+   * The session's CURRENT context size — the standing `s.contextTokens`,
+   * the same figure the response bubble shows. This is the chip's headline
+   * figure; null before any request is known (or after a `/clear` or
+   * compaction leaves it unknown), which prints a dash.
+   */
+  contextSize: number | null;
   /** The top-level agent's cumulative usage; null before any is known. */
   topLevel: Usage | null;
   /**
@@ -164,14 +170,18 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
  * until the session has something to count — the chip always renders:
  * the token figure is a session-constant datapoint, and before any usage
  * is known it reads a dash rather than a lying zero.
+ *
+ * The chip's figure is the session's CURRENT context size (the standing
+ * `s.contextTokens`, the same value the response bubble shows), NOT the
+ * cumulative input-side spend. The cumulative spend still lives in the
+ * overlay's "top-level agent" section for anyone who opens the breakdown.
  */
 export function tokensMenuHtml(data: TokenMenuData, open: boolean): string {
-  const figure =
-    data.topLevel === null ? "—" : formatTokens(contextTokens(data.topLevel));
+  const figure = data.contextSize === null ? "—" : formatTokens(data.contextSize);
   return dropdownChipHtml(
     "tokens",
     `tokens: ${figure}`,
-    "top-level agent input tokens (uncached + cache read + cache write), subagents excluded — click for the full breakdown",
+    "current context size (uncached + cache read + cache write of the last request) — click for the cumulative breakdown",
     open,
     () => tokensOverlayHtml(data),
   );
