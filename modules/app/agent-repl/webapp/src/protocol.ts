@@ -287,7 +287,16 @@ export type RenderHint =
   | { kind: "task"; summary: string }
   // The launched skill's full SKILL.md body, sourced by the daemon so the
   // card can show the skill contents alongside its invocation.
-  | { kind: "skill"; content: string };
+  | { kind: "skill"; content: string }
+  // One transition of a harness task, off the SDK's structured
+  // statusChange. The TaskCreate card folds these in as its stream.
+  | {
+      kind: "task-update";
+      task_id: string;
+      status_from: string;
+      status_to: string;
+      fields?: string[];
+    };
 
 export interface ToolUseResultFrame extends WsEnvelope {
   type: "tool-use-result";
@@ -319,13 +328,13 @@ export interface ToolUseProgressFrame extends WsEnvelope {
  * does not have — a shell's spool is bytes with nothing to recover, and
  * rendering it as bubbles would mean inventing structure.
  *
- * `transport: "frames"` means the stream is ALREADY on the wire as
- * ordinary tool-use frames and this client correlates it itself, so no
- * transport is needed at all.
+ * A harness task needs no entry here at all: the partition confines its
+ * TaskUpdate calls inside the create card's activity panel, so the task's
+ * "stream" is the ordinary child feed and never an AsyncSource.
  */
 export interface StreamRef {
-  transport: "ws" | "poll" | "frames";
-  format: "jsonl-transcript" | "jsonl-journal" | "events" | "text";
+  transport: "ws" | "poll";
+  format: "jsonl-transcript" | "jsonl-journal" | "text";
 }
 
 /**
@@ -340,7 +349,7 @@ export interface StreamRef {
  */
 export interface AsyncSource {
   source_id: string;
-  kind: "agent" | "shell" | "workflow" | "task";
+  kind: "agent" | "shell" | "workflow";
   label?: string;
   /** A value outside this enum reads as `running` — see the store. */
   status: "running" | "done" | "error" | "killed";

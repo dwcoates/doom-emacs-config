@@ -121,6 +121,27 @@ func renderHint(toolName string, input, structured, content json.RawMessage, con
 	// still carry the old name, so both take the task summary hint.
 	case "Task", "Agent":
 		return &protocol.RenderHint{Kind: "task", Summary: truncate(contentText(content), taskSummaryLimit)}
+	case "TaskUpdate":
+		// A task's stream is its transitions, and the SDK reports each one
+		// structurally. The webapp used to recover the id by matching
+		// `#(\S+)` against the CREATE's prose; this is the same fact typed.
+		var u struct {
+			TaskID        string   `json:"taskId"`
+			UpdatedFields []string `json:"updatedFields"`
+			StatusChange  *struct {
+				From string `json:"from"`
+				To   string `json:"to"`
+			} `json:"statusChange"`
+		}
+		if err := json.Unmarshal(structured, &u); err == nil && u.StatusChange != nil {
+			return &protocol.RenderHint{
+				Kind:       "task-update",
+				TaskID:     u.TaskID,
+				StatusFrom: u.StatusChange.From,
+				StatusTo:   u.StatusChange.To,
+				Fields:     u.UpdatedFields,
+			}
+		}
 	case "Skill":
 		var in struct {
 			Skill string `json:"skill"`

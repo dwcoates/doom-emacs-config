@@ -18,6 +18,7 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
+  openAsyncSourceIds,
   openWatcherTaskIds,
   planToolReveal,
   pulseTarget,
@@ -28,6 +29,7 @@ import {
   navTokensForEntry,
 } from "../src/render.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
+import { AsyncSource } from "../src/protocol.js";
 import {
   ConversationItem,
   ResultItem,
@@ -3791,6 +3793,208 @@ describe("agent message composer", () => {
     const html = renderItem(bgAgent(), undefined, undefined, false, panels);
     // Assert
     expect(html).toContain(`value="status pls"`);
+  });
+});
+
+// --- async fold (on the spawning card) ----------------------------------------
+
+/** One JSONL entry of a subagent transcript. */
+function txLine(o: unknown): string {
+  return JSON.stringify(o);
+}
+
+const agentTranscript = [
+  txLine({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "scanning the repo" }] } }),
+  txLine({
+    type: "assistant",
+    message: { id: "m2", content: [{ type: "tool_use", id: "tu1", name: "Grep", input: { pattern: "foo" } }] },
+  }),
+].join("\n");
+
+/** A card that spawned a detached agent, per its §2.6 descriptor. */
+function sourcedCard(source: Partial<AsyncSource> = {}, over: Partial<ToolItem> = {}): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: "t1",
+    messageId: "m1",
+    toolName: "Agent",
+    ts: "2026-07-17T10:00:00.000Z",
+    inputJson: "{}",
+    input: { description: "find the thing" },
+    inputDone: true,
+    result: { isError: false, content: "launched" },
+    asyncSource: {
+      source_id: "a9",
+      kind: "agent",
+      label: "find the thing",
+      status: "running",
+      stream: { transport: "poll", format: "jsonl-transcript" },
+      ...source,
+    },
+    ...over,
+  };
+}
+
+/** A PanelContext with the fold open per OPEN, serving TAIL from the poller. */
+function asyncPanels(open: boolean, tail = "", extra: Partial<PanelContext> = {}): PanelContext {
+  return {
+    children: new Map(),
+    isOpen: () => open,
+    taskTail: () => ({ text: tail, offset: tail.length, done: false, elapsedMs: 1000 }),
+    ...extra,
+  };
+}
+
+describe("async fold", () => {
+  it("renders no fold on a card that spawned nothing detached", () => {
+    // Arrange
+    const card = sourcedCard();
+    delete card.asyncSource;
+    // Act
+    const html = renderItem(card, undefined, undefined, false, asyncPanels(false));
+    // Assert
+    expect(html).not.toContain("async-fold");
+  });
+
+  it("names the work and its state on the collapsed face", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false));
+    // Assert
+    expect(html).toContain("agent · find the thing · running");
+  });
+
+  it("falls back to the source id when the spawn announced no label", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard({ label: "" }), undefined, undefined, false, asyncPanels(false));
+    // Assert
+    expect(html).toContain("agent · a9 · running");
+  });
+
+  it("arcs the ticker while the work runs, since a settled card never breathes", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false));
+    // Assert
+    expect(html).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
+  });
+
+  it("drops the arc once the work is done", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard({ status: "done" }), undefined, undefined, false, asyncPanels(false));
+    // Assert
+    expect(html).not.toContain("tool-spinner");
+  });
+
+  it("costs nothing while closed, rendering none of the stream", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false, agentTranscript));
+    // Assert
+    expect(html).not.toContain("scanning the repo");
+  });
+
+  it("renders a background agent's transcript as NESTED BUBBLES when open", () => {
+    // Arrange / Act — the payoff: it was an opaque <pre> before.
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    // Assert
+    expect(html).toContain("bubble assistant");
+    expect(html).toContain("scanning the repo");
+  });
+
+  it("renders the transcript's tool calls as cards, not as text", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    // Assert
+    expect(html).toContain("tool-card tool-grep");
+  });
+
+  it("does not paint a transcript as a raw pre, which is what it used to be", () => {
+    // Arrange / Act
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    // Assert
+    expect(html).not.toContain("task-live-output");
+  });
+
+  it("keeps a shell's spool bytes as a pre, having no structure to recover", () => {
+    // Arrange
+    const shell = sourcedCard(
+      { kind: "shell", label: "", stream: { transport: "ws", format: "text" } },
+      { toolName: "Bash", taskOutput: "line one\nline two" },
+    );
+    // Act
+    const html = renderItem(shell, undefined, undefined, false, asyncPanels(true));
+    // Assert
+    expect(html).toContain("task-live-output");
+    expect(html).toContain("line one");
+  });
+
+  it("renders a workflow journal as rows rather than bubbles", () => {
+    // Arrange
+    const journal = txLine({ label: "review:bugs", result: "3 findings" });
+    const wf = sourcedCard({ kind: "workflow", stream: { transport: "poll", format: "jsonl-journal" } });
+    // Act
+    const html = renderItem(wf, undefined, undefined, false, asyncPanels(true, journal));
+    // Assert
+    expect(html).toContain("stream-row");
+    expect(html).toContain("review:bugs");
+    expect(html).not.toContain("bubble assistant");
+  });
+
+  it("says what the cap left out rather than posing as the whole stream", () => {
+    // Arrange
+    const long = Array.from({ length: 3 }, (_, i) =>
+      txLine({ type: "assistant", message: { id: `m${i}`, content: [{ type: "text", text: `t${i}` }] } }),
+    ).join("\n");
+    // Act — STREAM_ITEM_CAP is large, so drive the cap through the parser
+    // directly; here just assert the fold shows the whole short stream.
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, long));
+    // Assert
+    expect(html).not.toContain("stream-dropped");
+  });
+
+  it("does not double the tail, painting it in the fold and beneath the card", () => {
+    // Arrange
+    const shell = sourcedCard(
+      { kind: "shell", stream: { transport: "ws", format: "text" } },
+      { toolName: "Bash", taskOutput: "once" },
+    );
+    // Act
+    const html = renderItem(shell, undefined, undefined, false, asyncPanels(true));
+    // Assert
+    expect(html.match(/task-live-output/g)).toHaveLength(1);
+  });
+});
+
+describe("openAsyncSourceIds", () => {
+  it("polls the source of an open transcript fold", () => {
+    // Arrange / Act
+    const ids = openAsyncSourceIds([sourcedCard()], () => true);
+    // Assert
+    expect([...ids]).toEqual(["a9"]);
+  });
+
+  it("polls nothing while the fold is shut", () => {
+    // Arrange / Act
+    const ids = openAsyncSourceIds([sourcedCard()], () => false);
+    // Assert
+    expect([...ids]).toEqual([]);
+  });
+
+  it("never polls a ws source, whose tail already arrives as frames", () => {
+    // Arrange
+    const shell = sourcedCard({ stream: { transport: "ws", format: "text" } });
+    // Act
+    const ids = openAsyncSourceIds([shell], () => true);
+    // Assert
+    expect([...ids]).toEqual([]);
+  });
+
+  it("polls nothing for a card that spawned nothing", () => {
+    // Arrange
+    const card = sourcedCard();
+    delete card.asyncSource;
+    // Act
+    const ids = openAsyncSourceIds([card], () => true);
+    // Assert
+    expect([...ids]).toEqual([]);
   });
 });
 

@@ -1065,9 +1065,34 @@ describe("tool-card status chip", () => {
 
 describe("activity fold", () => {
   it("invites the click with a zoom cursor on the closed fold", () => {
-    // Arrange / Act — the .agent-activity rule.
+    // Arrange / Act — the shared fold rule, which .agent-activity heads.
     // Assert
-    expect(blockAfter(css, ".agent-activity {")).toMatch(/cursor:\s*zoom-in/);
+    expect(blockAfter(css, ".agent-activity,")).toMatch(/cursor:\s*zoom-in/);
+  });
+
+  it("styles the async fold off the same rule, rather than a fourth copy of it", () => {
+    // Arrange / Act — every fold is one component (the shared `Fold`), so
+    // .async-fold shares the selector list instead of duplicating the body.
+    // Assert
+    expect(css).toMatch(/\.agent-activity,\s*\n\.async-fold\s*\{/);
+  });
+
+  it("groups the watcher and gns folds, which share the roomier spacing", () => {
+    // Arrange / Act — both set off answer prose rather than card chrome.
+    // Assert
+    expect(css).toMatch(/\.watcher-fold,\s*\n\.gns-fold\s*\{/);
+  });
+
+  it("declares the ticker pill exactly once for all four folds", () => {
+    // Arrange — the ticker body was copied per fold, and every copy was
+    // byte-identical, so a new fold silently grew a fifth.
+    const bodies = css.match(/display: inline-flex;/g) ?? [];
+    // Act / Assert — one shared ticker rule, plus the two unrelated
+    // inline-flex users (.tab-chip and the counter chip).
+    expect(css).toMatch(
+      /\.agent-ticker,\s*\n\.watcher-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/,
+    );
+    expect(bodies.length).toBe(3);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
