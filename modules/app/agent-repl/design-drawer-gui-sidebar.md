@@ -1,12 +1,32 @@
 # Design: the workspace drawer as a native GUI sidebar
 
-Status: **Phase 1 implemented** (opt-in via `agent-repl-sidebar-enabled` →
-`?sidebar=1`; drawer untouched and canonical). As-built deltas from the
-proposal: marks/expanded stay owned by the singleton drawer buffer (the
-sidebar reads and mutates them there — same shared-set semantics as
-"promote to global", zero drawer.el churn); priority badges render as
-text chips (PNG serving deferred); `cmd/claude-repld/main.go` needed the
-`/workspaces/` mux mount alongside the server-side routes.
+Status: **Phases 1 AND 2 implemented, plus every §8 optional follow-up.**
+The bridge is on by default (`agent-repl-sidebar-enabled`, disable to
+opt out); the drawer remains available and canonical while open. The
+`C-S-*` chords route through `agent-repl-sidebar-global-*` wrappers: an
+open drawer keeps its exact semantics, otherwise cursor ops dispatch
+into the webview via the `window.agentReplSidebar` hook and `C-S-n`/`p`
+follow-navigate Emacs-side in view-model order. Priority badges ship as
+cached data-URI PNGs; width is the `agent-repl-sidebar-width-px` custom
+shipped as `width_px`; standalone (non-embedded) pages label themselves
+and gate Emacs-only actions. §8 landed as: one-click permission
+decisions (new `POST /sessions/{id}/permission` + roster join),
+turn-preview and cost chips from an enriched `GET /sessions`, hover
+cards, search/filter, drag-to-reprioritize (`set-priority` action),
+merge-queue commit click (`show-commit` action → magit), desktop
+notifications, and CSS-only animation with `content-visibility`
+(virtualization judged unnecessary at real fleet sizes).
+
+As-built deltas from the proposal: marks/expanded stay owned by the
+singleton drawer buffer (the sidebar reads and mutates them there —
+same shared-set semantics as "promote to global", zero drawer.el
+churn); `cmd/claude-repld/main.go` needed the `/workspaces/` mux mount
+alongside the server-side routes; the daemon's pre-existing
+`activeTurnText` held the user prompt, so turn previews ride a new
+translator-side assistant-text accumulator.
+
+The one open item left is Q4 (drawer retirement), which is the user's
+call — everything else in §5.4, §8, and §10 is resolved or shipped.
 Scope: `webapp/` (`index.html`, `styles.css`, new `sidebar.ts`), `daemon/internal/`
 (new `workspaces` package + `workspacecmd` extension), `shared/protocol.md` (new
 workspace-stream section), Emacs side (`drawer.el` view-model extraction,
