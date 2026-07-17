@@ -13,6 +13,11 @@ export interface Entry {
   ws: string;
   depth: number;
   section: "main" | "hidden" | "merging" | "merged";
+  /**
+   * The daemon session bound to this workspace, or null. The join key
+   * into the `GET /sessions` roster (queue depth, permissions, cost).
+   */
+  session_id: string | null;
   /** Render-status keyword sans colon (e.g. "thinking"), or null. */
   status: string | null;
   /** Exact drawer state glyph (⏳/⌛/✅/…). */
@@ -116,6 +121,13 @@ export interface Snapshot {
   sidebar_visible: boolean;
   /** Seconds before a merge commit's elapsed clock appears. */
   merge_slow_threshold: number;
+  /** Fixed sidebar width in px (Emacs custom); CSS default when absent. */
+  width_px?: number;
+  /**
+   * Optional priority-badge images as data URIs, keyed by priority name.
+   * Text chips are the fallback for any priority not carried here.
+   */
+  priority_images?: Record<string, string>;
   /** Always an array, never null. */
   marks: string[];
   last_action_result: LastActionResult | null;
@@ -137,12 +149,34 @@ export type SidebarActionName =
   | "toggle-hidden"
   | "priority-up"
   | "priority-down"
+  | "set-priority"
+  | "show-commit"
   | "toggle-mark"
   | "clear-marks"
   | "toggle-expand"
   | "toggle-fold"
   | "refresh"
   | "hide-sidebar";
+
+/**
+ * One `GET /sessions` listing entry, reduced to the fields the sidebar
+ * roster join reads (the endpoint carries more; unknown fields are
+ * ignored). Joined onto workspace rows via the snapshot's per-entry
+ * `session_id` — see protocol.md "Sidebar roster joins".
+ */
+export interface RosterEntry {
+  session_id: string;
+  turn_active: boolean;
+  /** Pending permission request ids, oldest first. */
+  pending_permissions: string[];
+  /** The §2.13 in-flight queue; only its depth is rendered. */
+  queue: unknown[];
+  /** Tail (≤200 chars) of the active turn's streamed text; "" when idle. */
+  turn_preview: string;
+  /** Cumulative cost of the session's completed turns. */
+  total_cost_usd: number;
+  hibernated: boolean;
+}
 
 /**
  * The `POST /workspaces/action` body. The daemon mints the action id and

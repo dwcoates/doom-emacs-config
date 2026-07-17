@@ -47,7 +47,7 @@ import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
-import { initSidebar } from "./sidebar.js";
+import { initSidebar, isStandalone } from "./sidebar.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import { ConversationStore } from "./store.js";
@@ -82,9 +82,11 @@ async function boot(): Promise<void> {
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
 
   // The workspace sidebar is opt-in (?sidebar=1). Without the param the
-  // aside stays hidden and no /workspaces/stream socket ever opens.
+  // aside stays hidden and no /workspaces/stream socket ever opens. No
+  // parent_ws param means no Emacs host drives this page — a standalone
+  // browser view, where Emacs-only actions toast instead of posting.
   if (params.get("sidebar") === "1") {
-    initSidebar({ el: must("sidebar"), httpBase, wsBase });
+    initSidebar({ el: must("sidebar"), httpBase, wsBase, standalone: isStandalone(params) });
   }
 
   let joined = params.get("session");
