@@ -797,6 +797,83 @@ describe("ShimSession SDK message mapping", () => {
     ]);
   });
 
+  it("carries the SDK's tool_use_result onto the tool-result event as structured", async () => {
+    // Arrange
+    const h = makeHarness();
+    const structured = {
+      stdout: "hi",
+      stderr: "warn",
+      interrupted: false,
+      returnCodeInterpretation: null,
+    };
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u3s",
+      parent_tool_use_id: null,
+      tool_use_result: structured,
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "hi", is_error: false }],
+      },
+    });
+    // Assert
+    expect(h.eventsOfType("tool-result")[0]).toMatchObject({ structured });
+  });
+
+  it("omits structured entirely when the SDK message carries no tool_use_result", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u3n",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "ok", is_error: false }],
+      },
+    });
+    // Assert
+    expect(h.eventsOfType("tool-result")[0]).not.toHaveProperty("structured");
+  });
+
+  it("emits no tool-result for a replayed user message, which repeats one already reported", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u3r",
+      isReplay: true,
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "ok", is_error: false }],
+      },
+    });
+    // Assert
+    expect(h.eventsOfType("tool-result")).toEqual([]);
+  });
+
+  it("emits no task_notification for a replayed user message", async () => {
+    // Arrange
+    const h = makeHarness();
+    // Act
+    await drive(h, {
+      type: "user",
+      uuid: "u3rn",
+      isReplay: true,
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "<task-notification>done</task-notification>" }],
+      },
+    });
+    // Assert
+    expect(h.eventsOfType("system")).toEqual([]);
+  });
+
   it("emits nothing for user messages with plain string content", async () => {
     // Arrange
     const h = makeHarness();

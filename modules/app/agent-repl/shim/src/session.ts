@@ -494,8 +494,18 @@ export class ShimSession {
    * payload — those forward as system/task_notification events. Every
    * OTHER text block stays host-side noise (system reminders, local
    * command echoes) and is dropped as before.
+   *
+   * The message's `tool_use_result` sibling rides along on each emitted
+   * tool-result event (see ToolResultEvt.structured) — it is the SDK's
+   * structured twin of the flattened `content`, and dropping it is what
+   * forced every downstream layer to scrape ids out of English prose.
    */
   private mapUserMessage(msg: SdkMessageLike): void {
+    // A replay is the SDK re-emitting a message already in its history,
+    // marked only by `isReplay` — the `type` is plain "user", identical to
+    // a real one. Acting on it would emit a SECOND tool-result for a
+    // tool_use_id already reported, so it is skipped whole.
+    if (msg.isReplay === true) return;
     const message = msg.message as { content?: unknown } | undefined;
     const content = message?.content;
     const blocks: ContentBlock[] =
@@ -528,6 +538,9 @@ export class ShimSession {
         tool_use_id: tr.tool_use_id,
         is_error: tr.is_error ?? false,
         content: tr.content,
+        ...(msg.tool_use_result !== undefined
+          ? { structured: msg.tool_use_result }
+          : {}),
       });
     }
   }
