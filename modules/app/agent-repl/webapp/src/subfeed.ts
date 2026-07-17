@@ -12,8 +12,9 @@
  * instead of growing a bespoke one per depth.
  */
 import { ParsedTranscript, STREAM_ITEM_CAP, parseTranscript } from "./async-stream.js";
-import { partitionFeed } from "./partition.js";
-import { ConversationItem } from "./store.js";
+import { partitionFeed, spawnedTaskIds } from "./partition.js";
+import { AsyncSource } from "./protocol.js";
+import { ConversationItem, ToolItem } from "./store.js";
 
 /** A parsed transcript, partitioned like the live feed. */
 export interface TranscriptFeed {
@@ -54,4 +55,64 @@ export function mergeChildren(
   const merged = new Map<string, readonly ConversationItem[]>(base);
   for (const [id, list] of extra) merged.set(id, list);
   return merged;
+}
+
+/** The stream shape a spawn's tool implies, mirroring the daemon's classifier. */
+function syntheticShape(toolName: string): {
+  kind: AsyncSource["kind"];
+  format: "jsonl-transcript" | "jsonl-journal" | "text";
+} {
+  switch (toolName) {
+    case "Agent":
+      return { kind: "agent", format: "jsonl-transcript" };
+    case "Workflow":
+      return { kind: "workflow", format: "jsonl-journal" };
+    default:
+      return { kind: "shell", format: "text" };
+  }
+}
+
+/**
+ * The async source ITEM effectively owns: the daemon-classified one when
+ * present, else one SYNTHESIZED from the spawn announcement in the
+ * item's own result. Live store cards always carry the classification
+ * (the async-source frame lands on them), so synthesis is the
+ * depth-two-and-deeper case — a transcript-parsed spawn card the daemon's
+ * frames never reach. Undefined when the item announced nothing
+ * detached, which is what "renders no fold at all" keys off.
+ */
+export function effectiveAsyncSource(item: ToolItem): AsyncSource | undefined {
+  if (item.asyncSource) return item.asyncSource;
+  const ids = spawnedTaskIds(item);
+  if (ids.length === 0) return undefined;
+  const { kind, format } = syntheticShape(item.toolName);
+  const description = item.input?.description;
+  return {
+    source_id: item.notification?.taskId ?? ids[0],
+    kind,
+    label: typeof description === "string" ? description : undefined,
+    status: item.notification ? "done" : "running",
+    stream: { transport: "poll", format },
+  };
+}
+
+/**
+ * Most fold levels a feed may nest below the top; past this the fold
+ * simply stops appearing. Recursion this deep is a runaway rather than
+ * information — every level is one more transcript parsed per render.
+ */
+export const SUBFEED_DEPTH_CAP = 5;
+
+/**
+ * Whether a fold for SOURCEID may nest at DEPTH given the source ids
+ * already rendering above it. A transcript that announces an ancestor's
+ * own id must not recurse into itself, and depth past the cap is cut
+ * rather than drawn.
+ */
+export function mayNest(
+  depth: number,
+  seen: ReadonlySet<string> | undefined,
+  sourceId: string,
+): boolean {
+  return depth < SUBFEED_DEPTH_CAP && !(seen?.has(sourceId) ?? false);
 }
