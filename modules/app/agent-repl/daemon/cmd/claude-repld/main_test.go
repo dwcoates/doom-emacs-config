@@ -1,10 +1,78 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/server"
 )
+
+func TestWebappHandlerEmptyDirReturnsNil(t *testing.T) {
+	if webappHandler("", func(string, ...any) {}) != nil {
+		t.Fatal("expected nil handler when -webapp is empty")
+	}
+}
+
+func TestWebappHandlerServesIndexWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>SPA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	warned := false
+	h := webappHandler(dir, func(string, ...any) { warned = true })
+	if warned {
+		t.Fatal("did not expect a warning when index.html exists")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "SPA") {
+		t.Fatalf("body %q missing index.html content", rec.Body.String())
+	}
+}
+
+func TestWebappHandlerDiagnosesMissingIndex(t *testing.T) {
+	dir := t.TempDir() // exists, but no index.html
+	warned := false
+	h := webappHandler(dir, func(string, ...any) { warned = true })
+	if !warned {
+		t.Fatal("expected a startup warning when index.html is missing")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got status %d, want 503", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "404 page not found") {
+		t.Fatal("must not serve the bare Go 404 body")
+	}
+	if !strings.Contains(rec.Body.String(), "webapp assets not found") {
+		t.Fatalf("body %q missing the diagnostic message", rec.Body.String())
+	}
+}
+
+func TestWebappHandlerSelfCorrectsWhenIndexAppears(t *testing.T) {
+	dir := t.TempDir() // starts without index.html
+	h := webappHandler(dir, func(string, ...any) {})
+	// Assets get built after the daemon started.
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>LATE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200 after index.html appeared", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "LATE") {
+		t.Fatalf("body %q missing late index.html content", rec.Body.String())
+	}
+}
 
 func TestParseAccounts(t *testing.T) {
 	tests := []struct {
