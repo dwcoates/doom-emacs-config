@@ -143,11 +143,11 @@ export interface ResultItem {
   subtype: ResultSubtype;
   durationMs: number;
   /**
-   * How long the turn ran measured from the PREVIOUS final response of the
-   * session (a `success` result), or from this turn's own start for the
-   * session's first one. This is what the final-response bubble's chip
-   * shows, as against `durationMs` (the SDK's whole-task figure) which the
-   * standalone chip still shows.
+   * How long the turn ran measured from the PREVIOUS turn boundary of the
+   * session (a `success` result, or an interrupt's `aborted` one), or from
+   * this turn's own start for the session's first one. This is what the
+   * final-response bubble's chip shows, as against `durationMs` (the SDK's
+   * whole-task figure) which the standalone chip still shows.
    *
    * Derived from the daemon stamps in the store (`ts` and the anchor), not
    * from any tab's own clock, so a tab that reconnects mid-session
@@ -340,16 +340,20 @@ export interface StoreState {
    */
   turnStartedAt: string | null;
   /**
-   * The daemon stamp of the session's most recent FINAL RESPONSE (a
-   * `success` result's envelope ts), or `null` before the first one. The
-   * anchor the final-response chip measures its elapsed time from: a chip
-   * reads "since the previous final response", and the session's first one
-   * falls back to its own turn start (`turnStartedAt`).
+   * The daemon stamp of the session's most recent turn BOUNDARY (a
+   * `success` result's envelope ts, or an interrupt's `aborted` one), or
+   * `null` before the first one. The anchor the final-response chip
+   * measures its elapsed time from: a chip reads "since the previous final
+   * response", and the session's first one falls back to its own turn start
+   * (`turnStartedAt`).
    *
-   * Advanced ONLY at a `success` result, so a queued follow-up prompt or an
-   * aborted turn between two answers never moves it. The daemon's stamp
-   * rather than this tab's clock, like `turnStartedAt`, so a reconnecting
-   * tab re-derives the same anchor from the replayed results.
+   * Advanced at a `success` result AND at an interrupt (a non-retracted
+   * `aborted` result): an interrupt is a user-made boundary the next
+   * response's clock resets from, so the interrupted turn's runtime never
+   * bleeds into the following answer's chip. A queued follow-up prompt, a
+   * retracted turn, and an errored turn all leave it untouched. The daemon's
+   * stamp rather than this tab's clock, like `turnStartedAt`, so a
+   * reconnecting tab re-derives the same anchor from the replayed results.
    */
   lastFinalResponseAt: string | null;
   /**
@@ -876,9 +880,19 @@ export class ConversationStore {
             resultText: frame.result_text,
             context: this.resultContext(),
           });
-        // Only a successful turn is a final response, so only it becomes the
-        // next chip's anchor — an aborted or errored turn produced no answer.
-        if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
+        // A success is a final response and becomes the next chip's anchor.
+        // An interrupt (an `aborted` result) produced no answer, but it IS a
+        // user-made boundary the next response's clock must measure from:
+        // leaving the anchor on the pre-interrupt answer bleeds the
+        // interrupted turn's whole runtime into the FOLLOWING answer's chip,
+        // so the clock never resets across an interrupt. A RETRACTED turn is
+        // excluded — its prompt was withdrawn, so it never happened and leaves
+        // no clock mark, exactly as it leaves no bubble. An errored turn
+        // (`error_*`) still never anchors: it is a failure, not a boundary the
+        // user chose.
+        if (frame.subtype === "success" ||
+            (frame.subtype === "aborted" && !s.turnRetracted))
+          s.lastFinalResponseAt = frame.ts;
         s.turnRetracted = false;
         s.turnInFlight = false;
         s.turnStartedAt = null;
