@@ -37,3 +37,26 @@ export function installHostTailHook(target: HostGlobal, feed: ScrollTail): void 
     parkAtTail(feed);
   };
 }
+
+/**
+ * Name of the global that closes every open topbar dropdown.
+ * `agent-repl-frontend-close-menus-hook' (frontend.el) MUST match this
+ * string.
+ */
+export const CLOSE_MENUS_HOOK = "agentReplCloseTopbarMenus";
+
+/**
+ * Plant the close-menus hook on TARGET, dismissing every open topbar
+ * overlay through CLOSE when the host fires it.
+ *
+ * The page's own outside-click handler already closes its dropdowns on a
+ * click anywhere INSIDE the document, but the composer the GUI puts focus
+ * into is a separate Emacs window the webview cannot see — so Emacs fires
+ * this hook when the user clicks that input window, closing the header and
+ * bubble dropdowns that would otherwise hang open behind it.
+ */
+export function installHostCloseMenusHook(target: HostGlobal, close: () => void): void {
+  target[CLOSE_MENUS_HOOK] = (): void => {
+    close();
+  };
+}

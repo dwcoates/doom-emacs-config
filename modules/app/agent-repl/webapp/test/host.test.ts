@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { HostGlobal, TAIL_HOOK, installHostTailHook } from "../src/host.js";
+import {
+  CLOSE_MENUS_HOOK,
+  HostGlobal,
+  TAIL_HOOK,
+  installHostCloseMenusHook,
+  installHostTailHook,
+} from "../src/host.js";
 import { ScrollTail } from "../src/scroll.js";
 
 /** A feed scrolled to the middle of its history, as a user leaves one. */
@@ -41,5 +47,37 @@ describe("installHostTailHook", () => {
     feed.scrollHeight = 2400;
     fireHook(target);
     expect(feed.scrollTop).toBe(2400);
+  });
+});
+
+/** Invoke the planted close-menus hook the way an Emacs host script does. */
+const fireCloseMenus = (target: HostGlobal): void => {
+  (target[CLOSE_MENUS_HOOK] as () => void)();
+};
+
+describe("installHostCloseMenusHook", () => {
+  it("plants the hook under the name frontend.el calls", () => {
+    const target: HostGlobal = {};
+    installHostCloseMenusHook(target, () => undefined);
+    expect(typeof target[CLOSE_MENUS_HOOK]).toBe("function");
+  });
+
+  it("closes the open menus through the callback when fired", () => {
+    const target: HostGlobal = {};
+    let closed = 0;
+    installHostCloseMenusHook(target, () => {
+      closed += 1;
+    });
+    fireCloseMenus(target);
+    expect(closed).toBe(1);
+  });
+
+  it("does not close anything until the host fires it", () => {
+    const target: HostGlobal = {};
+    let closed = 0;
+    installHostCloseMenusHook(target, () => {
+      closed += 1;
+    });
+    expect(closed).toBe(0);
   });
 });

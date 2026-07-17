@@ -331,6 +331,59 @@ own bindings."
                       (kbd "<left>") #'agent-repl-frontend-chess-back
                       (kbd "<right>") #'agent-repl-frontend-chess-forward)))
 
+;;;; ---- Closing the topbar dropdowns on an input-window click -----------------
+
+(defconst agent-repl-frontend-close-menus-hook "agentReplCloseTopbarMenus"
+  "Name of the webapp global that closes any open topbar dropdown.
+The webapp plants it on `window' at boot (`CLOSE_MENUS_HOOK' in
+webapp/src/host.ts) — the two names are one contract and MUST match.")
+
+(defun agent-repl--frontend-close-menus-script ()
+  "Return the JS that closes the webview's open topbar dropdowns.
+Guarded on the hook's existence: a webview mid-boot or mid-navigation
+has no hook yet, and that is an expected state rather than a violated
+invariant — a page that has not finished booting holds no open menus."
+  (format "window.%s && window.%s();"
+          agent-repl-frontend-close-menus-hook
+          agent-repl-frontend-close-menus-hook))
+
+(defun agent-repl--frontend-close-topbar-menus (ws)
+  "Close any open topbar dropdown in WS's webview.
+The webapp's own outside-click handler dismisses its dropdowns on a
+click anywhere INSIDE the page, but the input composer is a separate
+Emacs window the webview cannot see — so a click there leaves the header
+and bubble dropdowns open until Emacs reaches in through this script.
+
+No-op when WS has no live webview — a closed panel mounts a fresh
+webview (already free of open menus) on its next open."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (agent-repl--log ws "close-topbar-menus: buf=%s" (buffer-name buf))
+      (agent-repl--frontend-webview-execute-script
+       buf (agent-repl--frontend-close-menus-script)))))
+
+(defun agent-repl--frontend-close-menus-on-input-click (_frame)
+  "Close the current workspace's topbar dropdowns when its input window is clicked.
+Hook target is `window-selection-change-functions', so this fires during
+redisplay after a selection change.  It acts only when the mouse
+\(`mouse-event-p' on `last-input-event') selected the current workspace's
+input window: keyboard-driven and programmatic selection are exempt,
+which both honors the literal click gesture and skips the
+autoselect-on-switch path that selects the input window without a click.
+
+Every other selection change is a no-op — no current workspace, a
+non-mouse selection, or a selected window that is not this workspace's
+input panel all leave the webview untouched."
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (and ws
+               (mouse-event-p last-input-event)
+               (eq (selected-window)
+                   (agent-repl-window--panel-window :input ws)))
+      (agent-repl--frontend-close-topbar-menus ws))))
+
+(add-hook 'window-selection-change-functions
+          #'agent-repl--frontend-close-menus-on-input-click)
+
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 
 (defun agent-repl--frontend-adopt-webview-buffer (buf name)
