@@ -24,6 +24,7 @@ import {
   parseFrame,
 } from "./protocol.js";
 import { countedTurns } from "./turn-clock.js";
+import { isClearTurn } from "./turn.js";
 
 // --- conversation items -------------------------------------------------------
 
@@ -1001,7 +1002,27 @@ export class ConversationStore {
         // A `/clear` re-inits the session, dropping the context it had
         // accumulated. The init announces no size, so the figure is
         // unknown until the next request reports the fresh one.
-        if (frame.subtype === "init") s.contextTokens = null;
+        if (frame.subtype === "init") {
+          s.contextTokens = null;
+          // The same drop must zero the SESSION token tallies the topbar
+          // chip reads (`topLevelUsage`): a cleared context has spent
+          // nothing to think with, so the chip dashes until the next turn
+          // rather than keep the pre-clear figure. Gated on the init
+          // actually following a `/clear` — a RESUMED session emits an
+          // init AFTER its transcript replay too (`turn.ts`), and that
+          // init must NOT wipe the tally the replay just restored. The
+          // `/clear` turn is the most recent user-turn exactly at a
+          // clear-init; a resume whose last turn was not a clear keeps
+          // its restored tally.
+          const lastTurn = this.findLast(
+            (i): i is UserTurnItem => i.kind === "user-turn",
+          );
+          if (lastTurn && isClearTurn(lastTurn)) {
+            s.resultUsage = null;
+            s.turnUsage = new Map();
+            s.modelUsage = null;
+          }
+        }
         break;
       case "queue-added":
         // §2.13: a message parked because a turn was in flight. This never

@@ -10,7 +10,7 @@
  */
 import { stripMetaSpans } from "./meta.js";
 import { ContentBlock } from "./protocol.js";
-import { ConversationItem, UserTurnItem } from "./store.js";
+import type { ConversationItem, UserTurnItem } from "./store.js";
 
 /**
  * Prompt text of a content-block list, non-text blocks standing in as
