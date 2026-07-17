@@ -52,6 +52,17 @@ var (
 	// confinement predicate guards it (see parseAgentSpawn).
 	agentSpawnIDRe   = regexp.MustCompile(`agentId:\s*([A-Za-z0-9_-]+)`)
 	agentSpawnPathRe = regexp.MustCompile(`output_file:\s*(\S+\.output)`)
+
+	// The record-on-read twins of the announcement regexes above, shaped
+	// for a SERVED CHUNK rather than a frame: a chunk of a subagent's
+	// JSONL transcript carries many announcements, each embedded in one
+	// JSON-encoded string. Pairing the id with its path via [^"]*? keeps
+	// both inside a single JSON string (a transcript never holds an
+	// unescaped quote mid-string), and the path class stops at the
+	// backslash of an escape sequence as well as at quotes and spaces.
+	chunkShellSpawnRe    = regexp.MustCompile(`(?:with|Task) ID:\s*([A-Za-z0-9_-]+)[^"]*?Output is being written to:\s*([^\s"\\]+\.output)`)
+	chunkWorkflowSpawnRe = regexp.MustCompile(`(?:with|Task) ID:\s*([A-Za-z0-9_-]+)[^"]*?Transcript dir:\s*([^\s"\\]+)`)
+	chunkAgentSpawnRe    = regexp.MustCompile(`agentId:\s*([A-Za-z0-9_-]+)[^"]*?output_file:\s*([^\s"\\]+\.output)`)
 )
 
 // spawnAnnouncement is the (task id, output file) pair a backgrounded
@@ -140,14 +151,57 @@ func parseAgentSpawn(f protocol.L2Frame) *spawnAnnouncement {
 	return &spawnAnnouncement{TaskID: id[1], Path: filepath.Clean(path[1]), ToolUseID: r.ToolUseID}
 }
 
+// spawnScanCarryMax bounds the tail of a served chunk carried into the
+// next read's spawn scan, so an announcement split across a chunk
+// boundary still matches once its remainder arrives.
+const spawnScanCarryMax = 512
+
+// scanChunkSpawns extracts every spawn announcement in a served tail
+// chunk (record-on-read). A grandchild's announcement reaches the daemon
+// only as bytes inside its parent's transcript file — no frame ever
+// carries it — so the poll route scans what it already reads and records
+// what it finds, which is what makes the route depth-agnostic. The same
+// confinement predicates the frame path applies guard every extracted
+// path.
+func scanChunkSpawns(text, configRoot string) []spawnAnnouncement {
+	var out []spawnAnnouncement
+	for _, m := range chunkShellSpawnRe.FindAllStringSubmatch(text, -1) {
+		if allowedTaskOutputPath(m[2]) {
+			out = append(out, spawnAnnouncement{TaskID: m[1], Path: filepath.Clean(m[2])})
+		}
+	}
+	for _, m := range chunkWorkflowSpawnRe.FindAllStringSubmatch(text, -1) {
+		journal := filepath.Join(filepath.Clean(m[2]), "journal.jsonl")
+		if allowedJournalPath(journal, configRoot) {
+			out = append(out, spawnAnnouncement{TaskID: m[1], Path: journal})
+		}
+	}
+	for _, m := range chunkAgentSpawnRe.FindAllStringSubmatch(text, -1) {
+		if allowedTaskOutputPath(m[2]) {
+			out = append(out, spawnAnnouncement{TaskID: m[1], Path: filepath.Clean(m[2])})
+		}
+	}
+	return out
+}
+
+// tailBytes is S's last N bytes, or all of S when it is shorter.
+func tailBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
+}
+
 // taskPathRec is a detached task's output location plus what the poll
 // route needs beyond the bytes: when the task was armed (for a live
 // elapsed the SDK heartbeat stops feeding once the spawning call settles)
-// and whether its completion notification has landed.
+// and whether its completion notification has landed. scanCarry is the
+// unscanned tail of the last served chunk (see scanChunkSpawns).
 type taskPathRec struct {
 	path      string
 	spawnedAt time.Time
 	done      bool
+	scanCarry string
 }
 
 // recordTaskPathLocked durably records a detached task's output path (see
@@ -214,6 +268,7 @@ func (s *Session) TaskOutput(taskID string, offset int64) (text string, next int
 	s.mu.Lock()
 	rec, present := s.taskPaths[taskID]
 	now := s.now()
+	root := ClaudeConfigDir(s.configDir)
 	s.mu.Unlock()
 	if !present {
 		return "", offset, false, 0, false
@@ -222,10 +277,28 @@ func (s *Session) TaskOutput(taskID string, offset int64) (text string, next int
 	// Belt-and-suspenders on the security boundary: only validated paths
 	// are ever recorded, so a failure here is a bug, but a file served over
 	// HTTP fails closed rather than trusting the record.
-	if !allowedTaskOutputPath(rec.path) && !allowedJournalPath(rec.path, ClaudeConfigDir(s.configDir)) {
+	if !allowedTaskOutputPath(rec.path) && !allowedJournalPath(rec.path, root) {
 		return "", offset, rec.done, elapsedMs, false
 	}
 	text, next = readTailChunk(rec.path, offset)
+	if text != "" {
+		// Record-on-read: a grandchild spawn announced inside THIS task's
+		// stream gets its path recorded the moment its bytes are served,
+		// making the grandchild pollable in turn. The carry re-joins an
+		// announcement split across chunk reads; re-scanning the overlap
+		// is harmless because a recorded path is first-wins.
+		combined := rec.scanCarry + text
+		anns := scanChunkSpawns(combined, root)
+		s.mu.Lock()
+		for _, ann := range anns {
+			s.recordTaskPathLocked(ann.TaskID, ann.Path)
+		}
+		if r, live := s.taskPaths[taskID]; live {
+			r.scanCarry = tailBytes(combined, spawnScanCarryMax)
+			s.taskPaths[taskID] = r
+		}
+		s.mu.Unlock()
+	}
 	return text, next, rec.done, elapsedMs, true
 }
 
