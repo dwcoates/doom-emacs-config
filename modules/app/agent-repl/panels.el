@@ -747,9 +747,19 @@ hide-overlay that blanked the vterm's bottom rows (the TUI drew its
 own input box there, which Emacs's input panel replaced); the webview
 hides its composer declaratively instead, so there is nothing left to
 refresh."
-  (agent-repl--log-verbose (agent-repl--ws-current-name) "on-window-change")
-  (agent-repl--sync-panels)
-  (agent-repl-window--ensure-layout))
+  (if (active-minibuffer-window)
+      ;; Skip reconciliation while a minibuffer is active (e.g. the
+      ;; `SPC p p' picker).  The window configuration is transient — the
+      ;; picker's own window churn is what fired this debounced idle
+      ;; timer — so reconciling now would rearrange windows under the open
+      ;; picker (and sweep the undeletable minibuffer window).  Closing the
+      ;; minibuffer changes the window configuration again, re-firing this
+      ;; hook to reconcile the settled layout.
+      (agent-repl--log-verbose (agent-repl--ws-current-name)
+                                "on-window-change: minibuffer active — deferring reconcile")
+    (agent-repl--log-verbose (agent-repl--ws-current-name) "on-window-change")
+    (agent-repl--sync-panels)
+    (agent-repl-window--ensure-layout)))
 
 (defmacro agent-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.
