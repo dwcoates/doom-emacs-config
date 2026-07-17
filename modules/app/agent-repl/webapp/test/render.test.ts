@@ -746,37 +746,6 @@ describe("renderItem", () => {
     expect(html).toContain("step one");
   });
 
-  it("spins a live arc in a streaming texted thinking summary", () => {
-    // Arrange — a summarized thinking block still streaming: the arc beside the
-    // `(thinking…)` label marks it live, not a finished card left open.
-    const item: ConversationItem = {
-      kind: "thinking",
-      blockId: "b1",
-      messageId: "m1",
-      text: "step one",
-      done: false,
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
-  });
-
-  it("drops the arc from a texted thinking block once it is done", () => {
-    // Arrange — a settled disclosure carries no motion.
-    const item: ConversationItem = {
-      kind: "thinking",
-      blockId: "b1",
-      messageId: "m1",
-      text: "step one",
-      done: true,
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).not.toContain("thinking-spinner");
-  });
-
   it("shows a pending indicator instead of an empty card while a textless thinking block streams", () => {
     // Arrange — adaptive thinking: signature only, no thinking text.
     const item: ConversationItem = {

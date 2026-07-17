@@ -492,13 +492,7 @@ function Thinking(item: ThinkingItem): string {
   if (item.text === "") {
     return `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking</div>`;
   }
-  // While the summary still streams, the disclosure carries the same orange
-  // arc the textless indicator spins, beside the `(thinking…)` label — so a
-  // texted thinking block reads as live rather than as a finished card that
-  // merely happens to be open.
-  const state = item.done
-    ? ""
-    : ` (thinking…) <span class="thinking-spinner" aria-hidden="true"></span>`;
+  const state = item.done ? "" : " (thinking…)";
   return `
     <details class="thinking"${item.done ? "" : " open"}>
       <summary>Thinking${state}</summary>
