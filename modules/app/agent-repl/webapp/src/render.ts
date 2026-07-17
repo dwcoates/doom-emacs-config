@@ -26,7 +26,7 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
-import { mergeChildren, transcriptFeed } from "./subfeed.js";
+import { effectiveAsyncSource, mayNest, mergeChildren, transcriptFeed } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
 import {
   chessGameContainerHtml,
@@ -502,6 +502,18 @@ export interface PanelContext {
    * Absent, the card renders no strip.
    */
   agentTopbar?(agent: ToolItem): string;
+  /**
+   * How many transcript folds deep this context renders (absent = top).
+   * Ticked by `descend` each time a fold recurses into a parsed stream,
+   * and read against SUBFEED_DEPTH_CAP so recursion is cut, not runaway.
+   */
+  depth?: number;
+  /**
+   * The source ids already rendering in the fold chain above this feed —
+   * the cycle guard's memory. A nested spawn card announcing an
+   * ancestor's own id renders no fold (see `mayNest`).
+   */
+  seenSources?: ReadonlySet<string>;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -679,6 +691,10 @@ function ToolCard(
   // the session strip's renderer scoped to THIS agent (see topbar.ts).
   const agentTopbar =
     SUBAGENT_TOOLS.has(item.toolName) ? panels?.agentTopbar?.(item) ?? "" : "";
+  // The source this card's fold hangs on: daemon-classified for live
+  // cards, synthesized from the spawn announcement for transcript-parsed
+  // ones — which is what lets a nested spawn card fold at any depth.
+  const source = effectiveAsyncSource(item);
   // TABBAR, when a consecutive-run group hands one in, is the row of member
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
@@ -690,9 +706,9 @@ function ToolCard(
       ${toolInput(item)}
       ${progress}
       ${activity}
-      ${AsyncFold(item, panels)}
+      ${AsyncFold(item, source, panels)}
       ${toolResult(item)}
-      ${liveTaskOutput(item)}
+      ${liveTaskOutput(item, source)}
       ${taskControls(item)}
       ${agentComposer(item, panels)}
     </div>`;
@@ -742,10 +758,26 @@ function taskOutputPre(text: string): string {
   return `<pre class="tool-output task-live-output">${escapeHtml(text)}</pre>`;
 }
 
-function liveTaskOutput(item: ToolItem): string {
+function liveTaskOutput(item: ToolItem, source: AsyncSource | undefined): string {
   // A card with an async source renders its tail inside its own fold (see
   // AsyncFold), so painting it here too would double it.
-  return item.asyncSource ? "" : taskOutputPre(item.taskOutput ?? "");
+  return source ? "" : taskOutputPre(item.taskOutput ?? "");
+}
+
+/**
+ * The context one nesting level deeper: depth ticked and SOURCEID marked
+ * seen, so the fold recursing into that source's parsed stream carries
+ * the guards `mayNest` reads. Everything else (open state, selections,
+ * the poller) rides through unchanged — one renderer state serves every
+ * depth.
+ */
+function descend(panels: PanelContext | undefined, sourceId: string): PanelContext | undefined {
+  if (!panels) return undefined;
+  return {
+    ...panels,
+    depth: (panels.depth ?? 0) + 1,
+    seenSources: new Set([...(panels.seenSources ?? []), sourceId]),
+  };
 }
 
 /** A line naming what the cap left out, so a bounded fold never poses as whole. */
@@ -815,7 +847,9 @@ function asyncStreamHtml(item: ToolItem, source: AsyncSource, panels?: PanelCont
   const text = item.taskOutput !== undefined && item.taskOutput !== "" ? item.taskOutput : polled?.text ?? "";
   switch (source.stream?.format) {
     case "jsonl-transcript":
-      return transcriptBubbles(text, panels);
+      // Recursing into a parsed stream is the one place depth grows, so
+      // the descended context carries the guards a deeper fold reads.
+      return transcriptBubbles(text, descend(panels, source.source_id));
     case "jsonl-journal":
       return journalRows(text);
     default:
@@ -838,18 +872,25 @@ function asyncFace(source: AsyncSource): string {
  * open state in the renderer (openPanels) so it survives the card's
  * per-frame re-renders while its stream grows. Keyed `async:<toolUseId>` so
  * it never collides with the card's own activity panel — a card can have
- * both (an inline subagent that also spawned detached work).
+ * both (an inline subagent that also spawned detached work). SOURCE is the
+ * card's effective source (see effectiveAsyncSource), precomputed by
+ * ToolCard so the fold and the raw tail can never both render. The
+ * `mayNest` guard cuts the fold at the depth cap and on a cycle — a
+ * nested spawn announcing an ancestor's own id — and a polled tail that
+ * reports done settles the face a synthetic source cannot settle itself.
  */
-function AsyncFold(item: ToolItem, panels?: PanelContext): string {
-  const source = item.asyncSource;
+function AsyncFold(item: ToolItem, source: AsyncSource | undefined, panels?: PanelContext): string {
   if (!source || !panels) return "";
+  if (!mayNest(panels.depth ?? 0, panels.seenSources, source.source_id)) return "";
   const id = `async:${item.toolUseId}`;
-  const arc = source.status === "running" ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
+  const settled = source.status !== "running" || (panels.taskTail?.(source.source_id)?.done ?? false);
+  const face = settled && source.status === "running" ? { ...source, status: "done" as const } : source;
+  const arc = settled ? "" : `<span class="tool-spinner" aria-hidden="true"></span>`;
   return Fold({
     id,
     foldClass: "async-fold",
     tickerClass: "async-ticker",
-    ticker: `${arc}${escapeHtml(asyncFace(source))}`,
+    ticker: `${arc}${escapeHtml(asyncFace(face))}`,
     body: () => asyncStreamHtml(item, source, panels),
     open: panels.isOpen(id),
   });
@@ -911,7 +952,7 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   // second hand-rolled <pre>: a watcher that is a background agent renders
   // its transcript as nested bubbles here too. A watcher the daemon
   // classified no source for falls back to the raw tail it always had.
-  const source = item.asyncSource;
+  const source = effectiveAsyncSource(item);
   const tail = source
     ? asyncStreamHtml(item, source, panels)
     : taskOutputPre(item.taskOutput ?? polled?.text ?? "");
