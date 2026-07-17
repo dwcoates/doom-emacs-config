@@ -16,6 +16,7 @@
 package session
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -227,6 +228,41 @@ func (s *Session) markTaskDoneLocked(taskID string) {
 	}
 }
 
+// settleTaskLocked releases a task's tailer (if one is running) and marks it
+// done for the poll route. Idempotent — a second settle of the same task id
+// is a no-op. Callers hold s.mu.
+func (s *Session) settleTaskLocked(taskID string) {
+	if stop, ok := s.tailers[taskID]; ok {
+		delete(s.tailers, taskID)
+		close(stop)
+	}
+	s.markTaskDoneLocked(taskID)
+}
+
+// stoppedTaskIDLocked returns the task id a SUCCESSFUL TaskStop result named,
+// or "" when f is not one. A prompt-mediated stop yields no completion
+// notification, so this tool result is the only signal the daemon gets that a
+// detached task was killed; the task_id lives in the TaskStop's recorded input
+// (translator tool metadata). An errored stop settles nothing. Callers hold
+// s.mu.
+func (s *Session) stoppedTaskIDLocked(f protocol.L2Frame) string {
+	r, ok := f.(*protocol.ToolUseResultFrame)
+	if !ok || r.IsError {
+		return ""
+	}
+	meta := s.translator.tools[r.ToolUseID]
+	if meta == nil || meta.name != "TaskStop" {
+		return ""
+	}
+	var in struct {
+		TaskID string `json:"task_id"`
+	}
+	if json.Unmarshal(meta.input, &in) != nil {
+		return ""
+	}
+	return in.TaskID
+}
+
 // superviseTailersLocked reacts to a translated frame batch: a shell or
 // workflow spawn starts a tailer (once per task id) AND records its path;
 // a background-agent spawn only records its path (never tailed); and a
@@ -243,17 +279,19 @@ func (s *Session) superviseTailersLocked(frames []protocol.L2Frame) {
 			s.recordTaskPathLocked(ann.TaskID, ann.Path)
 		}
 		if n, ok := f.(*protocol.TaskNotificationFrame); ok && n.TaskID != "" {
-			if stop, ok := s.tailers[n.TaskID]; ok {
-				delete(s.tailers, n.TaskID)
-				close(stop)
-			}
 			// The completion notification is the fallback path source for a
 			// background agent whose spawn result named none, and it marks
 			// the task done for the poll route.
 			if n.OutputFile != "" && allowedTaskOutputPath(n.OutputFile) {
 				s.recordTaskPathLocked(n.TaskID, filepath.Clean(n.OutputFile))
 			}
-			s.markTaskDoneLocked(n.TaskID)
+			s.settleTaskLocked(n.TaskID)
+		}
+		// A successful TaskStop settles the task it named — the prompt-mediated
+		// stop yields no completion notification, so this is the only signal
+		// the daemon gets that a detached task was killed.
+		if id := s.stoppedTaskIDLocked(f); id != "" {
+			s.settleTaskLocked(id)
 		}
 	}
 }

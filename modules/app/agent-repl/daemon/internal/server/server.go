@@ -1568,6 +1568,10 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// next act. Frontends must keep treating it as a live session, so
 		// terminal stays false — this field is observability only.
 		Hibernated bool `json:"hibernated,omitempty"`
+		// AsyncLive counts detached background tasks still running (unsettled).
+		// The session is idle-but-working when this is > 0 while TurnActive is
+		// false — the tab-bar's "available, async in progress" signal.
+		AsyncLive int `json:"async_live,omitempty"`
 	}
 	list := make([]entry, 0, len(s.sessions)+len(s.dormant))
 	for id, sess := range s.sessions {
@@ -1585,6 +1589,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			PendingPermissions: info.PendingPermissions,
 			Queue:              info.Queue,
 			Hibernated:         info.Hibernated,
+			AsyncLive:          info.LiveTaskCount,
 		})
 	}
 	for id, rec := range s.dormant {
