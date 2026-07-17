@@ -11436,6 +11436,148 @@ to the spawned agent."
                  (regexp-quote agent-repl--oneshot-no-action-suffix)
                  captured-prefixed))))))
 
+;;;; ---- Tests: agent-repl--oneshot-history-push ----
+
+(ert-deftest agent-repl-test-oneshot-history-push-adds-text ()
+  "Pushing a non-empty prompt records it on the one-shot history."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (agent-repl--oneshot-history-push "fix the bug")
+    (should (equal agent-repl--oneshot-prompt-history '("fix the bug")))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-skips-empty ()
+  "An empty string is not recorded on the one-shot history."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (agent-repl--oneshot-history-push "")
+    (should (null agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-skips-nil ()
+  "A nil value is not recorded on the one-shot history."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (agent-repl--oneshot-history-push nil)
+    (should (null agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-skips-whitespace-only ()
+  "A whitespace-only string trims to empty and is not recorded."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (agent-repl--oneshot-history-push "   \n\t ")
+    (should (null agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-trims-text ()
+  "Surrounding whitespace is trimmed before the prompt is recorded."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (agent-repl--oneshot-history-push "  padded  ")
+    (should (equal agent-repl--oneshot-prompt-history '("padded")))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-skips-duplicate-of-most-recent ()
+  "A prompt identical to the most-recent entry is not recorded again."
+  (let ((agent-repl--oneshot-prompt-history '("same")))
+    (agent-repl--oneshot-history-push "same")
+    (should (equal agent-repl--oneshot-prompt-history '("same")))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-allows-non-consecutive-duplicate ()
+  "A prompt matching an older-but-not-most-recent entry is still recorded."
+  (let ((agent-repl--oneshot-prompt-history '("b" "a")))
+    (agent-repl--oneshot-history-push "a")
+    (should (equal agent-repl--oneshot-prompt-history '("a" "b" "a")))))
+
+(ert-deftest agent-repl-test-oneshot-history-push-prepends-most-recent-first ()
+  "New prompts prepend so the history stays most-recent-first."
+  (let ((agent-repl--oneshot-prompt-history '("old")))
+    (agent-repl--oneshot-history-push "new")
+    (should (equal agent-repl--oneshot-prompt-history '("new" "old")))))
+
+;;;; ---- Tests: agent-repl--oneshot-capture-in-progress ----
+
+(ert-deftest agent-repl-test-oneshot-capture-in-progress-records-contents ()
+  "The capture hook records the active minibuffer's contents into the
+in-progress variable."
+  (let ((agent-repl--oneshot-prompt-in-progress nil))
+    (cl-letf (((symbol-function 'minibuffer-contents)
+               (lambda () "typed so far")))
+      (agent-repl--oneshot-capture-in-progress)
+      (should (equal agent-repl--oneshot-prompt-in-progress "typed so far")))))
+
+;;;; ---- Tests: agent-repl--oneshot-read-prompt ----
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-returns-submitted-text ()
+  "A normal submit returns the typed string."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest _) "do the thing")))
+      (should (equal (agent-repl--oneshot-read-prompt "doom-oneshot")
+                     "do the thing")))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-normal-submit-no-manual-push ()
+  "A normal submit leaves the history untouched by the helper — the
+built-in HIST mechanism records the submit, so the cleanup must not
+double-push."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest _) "do the thing")))
+      (agent-repl--oneshot-read-prompt "doom-oneshot"))
+    (should (null agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-cancel-logs-partial ()
+  "Cancelling the one-shot prompt pushes the entry-thus-far onto the
+one-shot history so a later one-shot recalls it via up-arrow."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest _)
+                 (setq agent-repl--oneshot-prompt-in-progress "partial prompt")
+                 (signal 'quit nil))))
+      (condition-case nil
+          (agent-repl--oneshot-read-prompt "doom-oneshot")
+        (quit nil)))
+    (should (equal agent-repl--oneshot-prompt-history '("partial prompt")))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-cancel-reraises-quit ()
+  "Cancelling still propagates the quit so the enclosing one-shot command
+aborts exactly as before."
+  (let ((agent-repl--oneshot-prompt-history nil)
+        (propagated nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest _) (signal 'quit nil))))
+      (condition-case nil
+          (agent-repl--oneshot-read-prompt "doom-oneshot")
+        (quit (setq propagated t))))
+    (should propagated)))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-cancel-empty-no-push ()
+  "Cancelling with nothing typed records nothing on the one-shot history."
+  (let ((agent-repl--oneshot-prompt-history nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest _) (signal 'quit nil))))
+      (condition-case nil
+          (agent-repl--oneshot-read-prompt "doom-oneshot")
+        (quit nil)))
+    (should (null agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-uses-dedicated-history ()
+  "The one-shot read passes its dedicated history symbol as
+`read-from-minibuffer's HIST so up-arrow cycles only one-shot prompts."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest args) (setq captured-args args) "x")))
+      (agent-repl--oneshot-read-prompt "doom-oneshot"))
+    (should (eq (nth 4 captured-args) 'agent-repl--oneshot-prompt-history))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-uses-oneshot-keymap ()
+  "The one-shot read passes `agent-repl--oneshot-prompt-map' as the
+minibuffer keymap so `C-RET' still appends the no-action suffix."
+  (let ((captured-args nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (&rest args) (setq captured-args args) "x")))
+      (agent-repl--oneshot-read-prompt "doom-oneshot"))
+    (should (eq (nth 2 captured-args) agent-repl--oneshot-prompt-map))))
+
+(ert-deftest agent-repl-test-oneshot-read-prompt-interpolates-tag ()
+  "The minibuffer prompt interpolates TAG."
+  (let ((captured-prompt nil))
+    (cl-letf (((symbol-function 'read-from-minibuffer)
+               (lambda (prompt &rest _) (setq captured-prompt prompt) "x")))
+      (agent-repl--oneshot-read-prompt "doom-oneshot"))
+    (should (equal captured-prompt "One-shot doom-oneshot prompt: "))))
+
 ;;;; ---- Tests: eval-code-string ----
 
 (ert-deftest agent-repl-test-eval-code-string-returns-value-string ()
