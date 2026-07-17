@@ -60,13 +60,33 @@ func permissionPreview(toolName string, input json.RawMessage) *protocol.Permiss
 	}
 }
 
+// bashStructured is the part of a Bash tool_use_result the card renders.
+// The SDK keeps stdout and stderr APART here; `content` is the flattened
+// blob it hands the model, where the two are already spliced together and
+// unrecoverable.
+type bashStructured struct {
+	Stdout      string `json:"stdout"`
+	Stderr      string `json:"stderr"`
+	Interrupted bool   `json:"interrupted"`
+}
+
 // renderHint builds the optional §2.6 render payload for a
 // tool-use-result frame. Returns nil when no richer rendering applies.
-// configDir and cwd are the session's roots the Skill case resolves a
-// skill name against; the other kinds ignore them.
-func renderHint(toolName string, input, content json.RawMessage, configDir, cwd string) *protocol.RenderHint {
+// structured is the SDK's tool_use_result (§1.2), absent from a shim
+// predating it; configDir and cwd are the session's roots the Skill case
+// resolves a skill name against, and the other kinds ignore them.
+func renderHint(toolName string, input, structured, content json.RawMessage, configDir, cwd string) *protocol.RenderHint {
 	switch toolName {
 	case "Bash":
+		// RenderHint.Stderr has been on the wire, and rendered by the card,
+		// since §2.6 shipped — with no producer, because the flattened
+		// `content` is the only thing this ever read and stdout/stderr are
+		// already merged in it. The structured result is where the split
+		// actually lives, so the field finally has a source.
+		var b bashStructured
+		if len(structured) > 0 && json.Unmarshal(structured, &b) == nil {
+			return &protocol.RenderHint{Kind: "bash", Stdout: b.Stdout, Stderr: b.Stderr}
+		}
 		return &protocol.RenderHint{Kind: "bash", Stdout: contentText(content)}
 	case "Edit":
 		var in struct {

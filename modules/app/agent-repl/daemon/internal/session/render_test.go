@@ -110,22 +110,62 @@ func TestRenderHint(t *testing.T) {
 	writeSkill(t, filepath.Join(configDir, "skills", "personal-skill"), "# Personal Skill\nbody")
 
 	tests := []struct {
-		name      string
-		tool      string
-		input     string
-		content   string
-		configDir string
-		cwd       string
-		wantKind  string
-		wantNil   bool
-		check     func(t *testing.T, h map[string]any)
+		name       string
+		tool       string
+		input      string
+		structured string
+		content    string
+		configDir  string
+		cwd        string
+		wantKind   string
+		wantNil    bool
+		check      func(t *testing.T, h map[string]any)
 	}{
 		{
-			name:     "bash render carries stdout",
+			name:     "bash render falls back to flattened content without a structured result",
 			tool:     "Bash",
 			input:    `{"command":"ls"}`,
 			content:  `"a\nb"`,
 			wantKind: "bash",
+			check: func(t *testing.T, h map[string]any) {
+				if h["stdout"] != "a\nb" {
+					t.Errorf("stdout = %v", h["stdout"])
+				}
+			},
+		},
+		{
+			name:       "bash render splits stdout from stderr off the structured result",
+			tool:       "Bash",
+			input:      `{"command":"ls"}`,
+			structured: `{"stdout":"out","stderr":"boom","interrupted":false}`,
+			content:    `"out\nboom"`,
+			wantKind:   "bash",
+			check: func(t *testing.T, h map[string]any) {
+				if h["stdout"] != "out" || h["stderr"] != "boom" {
+					t.Errorf("stdout = %v, stderr = %v", h["stdout"], h["stderr"])
+				}
+			},
+		},
+		{
+			name:       "bash render keeps stderr empty when the command wrote none",
+			tool:       "Bash",
+			input:      `{"command":"ls"}`,
+			structured: `{"stdout":"out","stderr":""}`,
+			content:    `"out"`,
+			wantKind:   "bash",
+			check: func(t *testing.T, h map[string]any) {
+				if _, ok := h["stderr"]; ok {
+					t.Errorf("stderr = %v, want omitted", h["stderr"])
+				}
+			},
+		},
+		{
+			name:       "bash render falls back to content when the structured result is malformed",
+			tool:       "Bash",
+			input:      `{"command":"ls"}`,
+			structured: `"not an object"`,
+			content:    `"a\nb"`,
+			wantKind:   "bash",
 			check: func(t *testing.T, h map[string]any) {
 				if h["stdout"] != "a\nb" {
 					t.Errorf("stdout = %v", h["stdout"])
@@ -261,7 +301,11 @@ func TestRenderHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			hint := renderHint(tt.tool, json.RawMessage(tt.input), json.RawMessage(tt.content), tt.configDir, tt.cwd)
+			var structured json.RawMessage
+			if tt.structured != "" {
+				structured = json.RawMessage(tt.structured)
+			}
+			hint := renderHint(tt.tool, json.RawMessage(tt.input), structured, json.RawMessage(tt.content), tt.configDir, tt.cwd)
 			// Assert
 			if tt.wantNil {
 				if hint != nil {
