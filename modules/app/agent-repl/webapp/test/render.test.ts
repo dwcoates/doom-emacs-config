@@ -24,7 +24,10 @@ import {
   renderItem,
   rendersEmpty,
   repinsToTail,
+  retryingRowHtml,
+  tailStatusRow,
   wakeRemainingLabel,
+  workingRowHtml,
   navTokensForEntry,
 } from "../src/render.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
@@ -249,6 +252,66 @@ describe("interruptingIndicatorHtml", () => {
   it("marks the indicator as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = interruptingIndicatorHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("workingRowHtml", () => {
+  it("renders nothing when not working", () => {
+    // Arrange / Act / Assert — an empty string drops the tail node.
+    expect(workingRowHtml(false)).toBe("");
+  });
+
+  it("names the working state in progress", () => {
+    // Arrange / Act
+    const html = workingRowHtml(true);
+    // Assert
+    expect(html).toContain("working");
+  });
+
+  it("reuses the orange textless-thinking spinner rather than its own arc", () => {
+    // Arrange / Act — the standard orange arc, since the hue is the same.
+    const html = workingRowHtml(true);
+    // Assert
+    expect(html).toContain("thinking-spinner");
+  });
+
+  it("marks the row as a live status region for assistive tech", () => {
+    // Arrange / Act
+    const html = workingRowHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("retryingRowHtml", () => {
+  it("renders nothing when not retrying", () => {
+    // Arrange / Act / Assert — an empty string drops the tail node.
+    expect(retryingRowHtml(false)).toBe("");
+  });
+
+  it("names the retry in progress", () => {
+    // Arrange / Act
+    const html = retryingRowHtml(true);
+    // Assert
+    expect(html).toContain("retrying");
+  });
+
+  it("carries its own purple spinner class, distinct from the working arc", () => {
+    // Arrange / Act — the purple twin animates the same thinking-spin via its
+    // own spinner class, so the markup exposes that hook and not the orange one.
+    const html = retryingRowHtml(true);
+    // Assert
+    expect(html).toContain("retrying-spinner");
+    expect(html).not.toContain("thinking-spinner");
+  });
+
+  it("marks the row as a live status region for assistive tech", () => {
+    // Arrange / Act
+    const html = retryingRowHtml(true);
     // Assert
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-live="polite"');
@@ -624,20 +687,13 @@ describe("renderItem", () => {
     expect(html).not.toContain("pulsing");
   });
 
-  it("pulses a prompt bubble flagged as the feed's newest drawn thing", () => {
-    // Arrange
+  it("never breathes a prompt bubble, even when the pulse flag is set", () => {
+    // Arrange — the prompt breath is retired: a just-sent prompt is covered by
+    // the orange `working…` tail row now (see pulseTarget), so UserTurn ignores
+    // the flag entirely, the same way a running tool card does.
     const item = userTurnAt(9, 0);
     // Act
     const html = renderItem(item, undefined, undefined, true);
-    // Assert
-    expect(html).toContain(`class="bubble user pulsing"`);
-  });
-
-  it("withholds the pulse from a prompt the agent has already answered", () => {
-    // Arrange
-    const item = userTurnAt(9, 0);
-    // Act
-    const html = renderItem(item, undefined, undefined, false);
     // Assert
     expect(html).not.toContain("pulsing");
   });
@@ -688,6 +744,37 @@ describe("renderItem", () => {
     // Assert
     expect(html).toContain("<details");
     expect(html).toContain("step one");
+  });
+
+  it("spins a live arc in a streaming texted thinking summary", () => {
+    // Arrange — a summarized thinking block still streaming: the arc beside the
+    // `(thinking…)` label marks it live, not a finished card left open.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "step one",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
+  });
+
+  it("drops the arc from a texted thinking block once it is done", () => {
+    // Arrange — a settled disclosure carries no motion.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "step one",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("thinking-spinner");
   });
 
   it("shows a pending indicator instead of an empty card while a textless thinking block streams", () => {
@@ -2196,17 +2283,18 @@ describe("pulseTarget: a running tool card no longer breathes", () => {
   });
 });
 
-describe("pulseTarget: the prompt just sent", () => {
-  it("pulses a prompt whose turn has yet to draw anything", () => {
-    // Arrange — the send itself, with the agent not yet on the page.
+describe("pulseTarget: the working and retrying states", () => {
+  it("reports working for a prompt whose turn has yet to draw anything", () => {
+    // Arrange — the send itself, agent not yet on the page: the prompt no
+    // longer breathes, so the orange working row stands in for it.
     const items = [userTurnAt(9, 0)];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("pulses the NEWEST prompt when a second one follows the first", () => {
+  it("reports working for the NEWEST prompt when a second one follows the first", () => {
     // Arrange
     const items = [
       userTurnAt(9, 0, "first", "r1"),
@@ -2217,10 +2305,10 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toEqual({ kind: "user-turn", requestId: "r2" });
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("stills the prompt once the turn is no longer in flight", () => {
+  it("stills to null once the turn is no longer in flight", () => {
     // Arrange
     const items = [userTurnAt(9, 0)];
     // Act
@@ -2229,8 +2317,8 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt when the agent starts streaming a response", () => {
-    // Arrange — the bubble's own cursor takes the beat over.
+  it("yields null when the agent starts streaming a response", () => {
+    // Arrange — the bubble's own cursor is the live signal now.
     const items = [userTurnAt(9, 0), text("b1", false)];
     // Act
     const pulse = pulseTarget(items, true);
@@ -2238,8 +2326,8 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt when the thinking indicator renders", () => {
-    // Arrange — the thinking spinner takes the beat over.
+  it("yields null while the thinking indicator renders", () => {
+    // Arrange — the thinking spinner is the live signal.
     const items = [userTurnAt(9, 0), thinking("k1", false)];
     // Act
     const pulse = pulseTarget(items, true);
@@ -2247,7 +2335,7 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt to dead air when a running tool card takes the tail", () => {
+  it("yields null (dead air) when a running tool card takes the tail", () => {
     // Arrange — the running card's own run badge is the live signal there.
     const items = [userTurnAt(9, 0), tool()];
     // Act
@@ -2256,8 +2344,9 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt when a permission card takes the feed's tail", () => {
-    // Arrange
+  it("yields null when a pending permission card takes the feed's tail", () => {
+    // Arrange — the agent is blocked on the USER, not working, so its card is
+    // the signal and no working row breathes beneath it.
     const permission: ConversationItem = {
       kind: "permission",
       requestId: "p1",
@@ -2272,8 +2361,9 @@ describe("pulseTarget: the prompt just sent", () => {
     expect(pulse).toBeNull();
   });
 
-  it("stills the prompt when an error banner takes the feed's tail", () => {
-    // Arrange
+  it("reports working when a recoverable error banner takes the feed's tail", () => {
+    // Arrange — turnInFlight holds and the chain is about to retry or continue,
+    // so the dead air shows working rather than going still.
     const error: ConversationItem = {
       kind: "error",
       code: "overloaded",
@@ -2284,11 +2374,12 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBeNull();
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("stills the prompt when a retry badge takes the feed's tail", () => {
-    // Arrange
+  it("reports retrying when a retry badge takes the feed's tail", () => {
+    // Arrange — the SDK is auto-retrying a failed request, so the purple row
+    // supersedes the working one.
     const retry: ConversationItem = {
       kind: "retry",
       attempt: 2,
@@ -2299,10 +2390,26 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBeNull();
+    expect(pulse).toEqual({ kind: "retrying" });
   });
 
-  it("keeps breathing behind a system:init note the feed no longer draws", () => {
+  it("falls back to working once a tool runs after a retry", () => {
+    // Arrange — a tool ran after the retry, so the chain recovered and the
+    // retry no longer sits at the tail.
+    const retry: ConversationItem = {
+      kind: "retry",
+      attempt: 2,
+      reason: "overloaded",
+      fatal: false,
+    };
+    const items = [userTurnAt(9, 0), retry, tool(true)];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "working" });
+  });
+
+  it("reports working behind a system:init note the feed no longer draws", () => {
     // Arrange — the `/clear` re-init is suppressed, so the prompt is the tail.
     const items: ConversationItem[] = [
       userTurnAt(9, 0),
@@ -2311,11 +2418,11 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("stills the prompt when a non-init system note takes the tail", () => {
-    // Arrange — only init is suppressed; other notes still render and pause.
+  it("reports working when a non-init system note takes the tail", () => {
+    // Arrange — the note is settled and the chain runs on: a dead-air window.
     const items: ConversationItem[] = [
       userTurnAt(9, 0),
       { kind: "system", subtype: "task-notification" },
@@ -2323,11 +2430,12 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBeNull();
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("stills the prompt when a compaction divider takes the feed's tail", () => {
-    // Arrange
+  it("reports working when a compaction divider takes the feed's tail", () => {
+    // Arrange — the boundary closed the compaction, so the chain resumes into
+    // a dead-air window.
     const items: ConversationItem[] = [
       userTurnAt(9, 0),
       { kind: "compact-boundary", trigger: "auto", preTokens: 9, postTokens: 3 },
@@ -2335,26 +2443,26 @@ describe("pulseTarget: the prompt just sent", () => {
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toBeNull();
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("keeps breathing behind a tool call the feed draws no card for", () => {
+  it("reports working behind a tool call the feed draws no card for", () => {
     // Arrange — a suppressed tool supersedes the prompt in NOTHING the user
-    // can see, so stilling the pulse there would leave the feed dead.
+    // can see, so the working row still stands in.
     const items = [userTurnAt(9, 0), suppressedTool()];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+    expect(pulse).toEqual({ kind: "working" });
   });
 
-  it("keeps breathing behind a textless thinking block that has closed", () => {
-    // Arrange — its spinner is gone from the feed, so the beat comes back.
+  it("reports working behind a textless thinking block that has closed", () => {
+    // Arrange — its spinner is gone from the feed, so the working row returns.
     const items = [userTurnAt(9, 0), thinking("k1", true, "")];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
-    expect(pulse).toEqual({ kind: "user-turn", requestId: "r1" });
+    expect(pulse).toEqual({ kind: "working" });
   });
 });
 
@@ -2493,22 +2601,18 @@ describe("isPulsed", () => {
     expect(isPulsed(text("b2"), { kind: "text", blockId: "b1" })).toBe(false);
   });
 
-  it("marks the prompt the pulse names", () => {
-    // Arrange
-    const pulse = { kind: "user-turn", requestId: "r1" } as const;
-    // Act + Assert
-    expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(true);
+  it("breathes no bubble for the working state", () => {
+    // Arrange — the working row is a tail row, not a bubble accent.
+    expect(isPulsed(text("b1"), { kind: "working" })).toBe(false);
   });
 
-  it("spares a prompt the pulse does not name", () => {
-    // Arrange
-    const pulse = { kind: "user-turn", requestId: "r2" } as const;
-    // Act + Assert
-    expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(false);
+  it("breathes no bubble for the retrying state", () => {
+    // Arrange — the retrying row is a tail row, not a bubble accent.
+    expect(isPulsed(text("b1"), { kind: "retrying" })).toBe(false);
   });
 
-  it("spares a prompt when the pulse names a text block instead", () => {
-    // Arrange — the two targets never land on one bubble.
+  it("spares a prompt bubble outright, since the prompt breath is retired", () => {
+    // Arrange — a user-turn is named by no pulse now (see pulseTarget).
     const pulse = { kind: "text", blockId: "b1" } as const;
     // Act + Assert
     expect(isPulsed(userTurnAt(9, 0), pulse)).toBe(false);
@@ -2517,6 +2621,59 @@ describe("isPulsed", () => {
   it("spares every item when nothing pulses at all", () => {
     // Arrange + Act + Assert
     expect(isPulsed(text("b1"), null)).toBe(false);
+  });
+});
+
+describe("tailStatusRow", () => {
+  it("shows the interrupting row above every other tail state", () => {
+    // Arrange — interrupting outranks even a retry at the tail.
+    const row = tailStatusRow(true, false, { kind: "retrying" });
+    // Assert
+    expect(row?.key).toBe("interrupting");
+  });
+
+  it("shows no feed row while compacting, since the banner is the topbar's", () => {
+    // Arrange — a compaction suppresses the pulse-driven working row beneath it.
+    const row = tailStatusRow(false, true, { kind: "working" });
+    // Assert
+    expect(row).toBeNull();
+  });
+
+  it("suppresses even a retry row while compacting", () => {
+    // Arrange
+    const row = tailStatusRow(false, true, { kind: "retrying" });
+    // Assert
+    expect(row).toBeNull();
+  });
+
+  it("shows the retrying row over the working row", () => {
+    // Arrange — retrying is the more specific account of the dead air.
+    const row = tailStatusRow(false, false, { kind: "retrying" });
+    // Assert
+    expect(row?.key).toBe("retrying");
+    expect(row?.html).toContain("retrying");
+  });
+
+  it("shows the working row when the turn is in a plain dead-air gap", () => {
+    // Arrange
+    const row = tailStatusRow(false, false, { kind: "working" });
+    // Assert
+    expect(row?.key).toBe("working");
+    expect(row?.html).toContain("working");
+  });
+
+  it("shows no tail row for the frontier breath, a bubble accent not a row", () => {
+    // Arrange — the `text` pulse breathes a bubble, it is not a tail row.
+    const row = tailStatusRow(false, false, { kind: "text", blockId: "b1" });
+    // Assert
+    expect(row).toBeNull();
+  });
+
+  it("shows no tail row when nothing is live at the tail", () => {
+    // Arrange
+    const row = tailStatusRow(false, false, null);
+    // Assert
+    expect(row).toBeNull();
   });
 });
 
