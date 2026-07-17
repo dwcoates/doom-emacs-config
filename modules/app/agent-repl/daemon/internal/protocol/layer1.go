@@ -115,6 +115,13 @@ type L1Event struct {
 	// stream-event / assistant-message / tool-result
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 	Event           json.RawMessage `json:"event,omitempty"`
+	// Structured is the SDK's tool_use_result on tool-result events: the
+	// tool's own JSON result, whose shape is per-tool (§1.2). Content is
+	// only the flattened text the model saw; every structured fact about a
+	// call — a Bash's separate stderr, an Agent's agentId and outputFile, a
+	// TaskUpdate's statusChange — lives here and nowhere else. Absent when
+	// the SDK omitted it, and from any shim predating the field.
+	Structured json.RawMessage `json:"structured,omitempty"`
 	// Message is an object on assistant-message events and a plain JSON
 	// string on error events; use MessageText for the latter.
 	Message json.RawMessage `json:"message,omitempty"`
