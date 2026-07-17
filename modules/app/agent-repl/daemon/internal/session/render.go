@@ -11,10 +11,7 @@ import (
 	"claude-repld/internal/protocol"
 )
 
-const (
-	writePreviewLimit = 500
-	taskSummaryLimit  = 200
-)
+const writePreviewLimit = 500
 
 // permissionPreview builds the §2.7 preview payload for a
 // permission-request frame from the proposed tool input.
@@ -117,10 +114,11 @@ func renderHint(toolName string, input, structured, content json.RawMessage, con
 		if matches := parseGrepMatches(contentText(content)); len(matches) > 0 {
 			return &protocol.RenderHint{Kind: "grep", Matches: matches}
 		}
-	// The CLI renamed the subagent tool Task -> Agent; replayed transcripts
-	// still carry the old name, so both take the task summary hint.
-	case "Task", "Agent":
-		return &protocol.RenderHint{Kind: "task", Summary: truncate(contentText(content), taskSummaryLimit)}
+	// Task/Agent take no hint. They used to take a `task` one whose Summary
+	// was the result truncated to 200 bytes — which saved nothing, since the
+	// full result ships in Content on the same frame regardless, and cost
+	// the reader everything past the cap. Without a hint the card renders
+	// that Content whole, through the generic path.
 	case "TaskUpdate":
 		// A task's stream is its transitions, and the SDK reports each one
 		// structurally. The webapp used to recover the id by matching

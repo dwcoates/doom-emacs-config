@@ -1069,8 +1069,11 @@ function toolResult(item: ToolItem): string {
         return `<pre class="tool-output">${r.matches
           .map((m) => `${escapeHtml(m.file)}:${m.line}: ${escapeHtml(m.text)}`)
           .join("\n")}</pre>`;
-      case "task":
-        return `<pre class="tool-output">${escapeHtml(r.summary)}</pre>`;
+      case "task-update":
+        // The transition itself is the TaskCreate card's stream, folded in
+        // there; on the TaskUpdate's own card it would be noise, and that
+        // card is suppressed anyway (SUPPRESSED_TOOLS).
+        return "";
       case "skill":
         // The launched skill's full SKILL.md body, the content section
         // paired with the invocation the input renders. Capped and

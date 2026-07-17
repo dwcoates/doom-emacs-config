@@ -216,28 +216,24 @@ func TestRenderHint(t *testing.T) {
 			},
 		},
 		{
-			name:     "task render summarizes content blocks",
-			tool:     "Task",
-			input:    `{"description":"d","prompt":"p"}`,
-			content:  `[{"type":"text","text":"agent says hi"}]`,
-			wantKind: "task",
-			check: func(t *testing.T, h map[string]any) {
-				if h["summary"] != "agent says hi" {
-					t.Errorf("summary = %v", h["summary"])
-				}
-			},
+			// The card renders the result whole, through the generic path.
+			// The old `task` hint truncated it to 200 bytes, which saved
+			// nothing (Content carries the full result on the same frame)
+			// and lost everything past the cap.
+			name:    "task render is nil so the full agent result survives",
+			tool:    "Task",
+			input:   `{"description":"d","prompt":"p"}`,
+			content: `[{"type":"text","text":"agent says hi"}]`,
+			wantNil: true,
 		},
 		{
-			name:     "agent render takes the same task summary as legacy Task",
-			tool:     "Agent",
-			input:    `{"description":"d","prompt":"p"}`,
-			content:  `[{"type":"text","text":"agent says hi"}]`,
-			wantKind: "task",
-			check: func(t *testing.T, h map[string]any) {
-				if h["summary"] != "agent says hi" {
-					t.Errorf("summary = %v", h["summary"])
-				}
-			},
+			// The CLI renamed the subagent tool Task -> Agent, and a replayed
+			// transcript still carries the old name, so the two must agree.
+			name:    "agent render is nil, exactly as legacy Task is",
+			tool:    "Agent",
+			input:   `{"description":"d","prompt":"p"}`,
+			content: `[{"type":"text","text":"agent says hi"}]`,
+			wantNil: true,
 		},
 		{
 			name:     "skill render carries the local SKILL.md body",
