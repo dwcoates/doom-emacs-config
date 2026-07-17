@@ -659,17 +659,17 @@ Reports comprehensive diagnostics."
 ;; buffers (vterm, *scratch*, magit popups, etc.).  Evil state maps
 ;; only override global-map when they bind the same key, so leaving
 ;; these in global-map means they fall through correctly everywhere.
-(map! "C-S-n"        #'agent-repl-drawer-global-next)
-(map! "C-S-p"        #'agent-repl-drawer-global-prev)
-(map! "C-S-x"        #'agent-repl-drawer-global-nuke)
-(map! "C-S-d"        #'agent-repl-drawer-global-kill)
-(map! "C-S-i"        #'agent-repl-drawer-global-send-prompt)
-(map! "C-S-m"        #'agent-repl-drawer-global-merge-into-master)
-(map! "C-S-h"        #'agent-repl-drawer-global-toggle-hidden)
-(map! "C-S-t"        #'agent-repl-drawer-global-toggle-mark)
-(map! "C-S-u"        #'agent-repl-drawer-global-clear-marks)
-(map! "C-S-+"        #'agent-repl-drawer-global-priority-up)
-(map! "C-S--"        #'agent-repl-drawer-global-priority-down)
+(map! "C-S-n"        #'agent-repl-sidebar-global-next)
+(map! "C-S-p"        #'agent-repl-sidebar-global-prev)
+(map! "C-S-x"        #'agent-repl-sidebar-global-nuke)
+(map! "C-S-d"        #'agent-repl-sidebar-global-kill)
+(map! "C-S-i"        #'agent-repl-sidebar-global-send-prompt)
+(map! "C-S-m"        #'agent-repl-sidebar-global-merge-into-master)
+(map! "C-S-h"        #'agent-repl-sidebar-global-toggle-hidden)
+(map! "C-S-t"        #'agent-repl-sidebar-global-toggle-mark)
+(map! "C-S-u"        #'agent-repl-sidebar-global-clear-marks)
+(map! "C-S-+"        #'agent-repl-sidebar-global-priority-up)
+(map! "C-S--"        #'agent-repl-sidebar-global-priority-down)
 
 (defconst agent-repl--scroll-output-intercept-states
   '(normal visual insert emacs operator motion replace)
@@ -680,7 +680,7 @@ reused as-is by `agent-repl--install-drawer-visit-override' and
 `agent-repl--install-workspace-jump-overrides' below so a chord wins
 key lookup regardless of which evil state is current.")
 
-;; `C-S-<return>' -> `agent-repl-drawer-global-visit' needs the same
+;; `C-S-<return>' -> `agent-repl-sidebar-global-visit' needs the same
 ;; override treatment as the scroll chords -- a plain `(map! ... )' lands
 ;; in `global-map', which loses to Doom default's `:gi/:gn "C-S-RET"' ->
 ;; `+default/newline-above' (evil aux on global state maps) and to
@@ -688,7 +688,7 @@ key lookup regardless of which evil state is current.")
 ;; chord on `general-override-mode-map' AND its per-state aux maps so
 ;; it wins above all of them.
 (defconst agent-repl--drawer-visit-chord
-  '(("C-S-<return>" . agent-repl-drawer-global-visit))
+  '(("C-S-<return>" . agent-repl-sidebar-global-visit))
   "Alist of (KEY-STRING . COMMAND) for the global drawer-visit chord
 that must win key lookup above the Doom default's `:gi/:gn \"C-S-RET\"'
 binding and above `agent-repl-input-mode-map's `:ni \"C-S-RET\"' aux.")
