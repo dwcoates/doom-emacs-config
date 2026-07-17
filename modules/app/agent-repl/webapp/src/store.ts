@@ -265,6 +265,16 @@ export function topLevelUsage(state: StoreState): Usage | null {
   return tally;
 }
 
+/**
+ * One string field of a tool call's input, or "" when absent or not a
+ * string. A call's input is unparsed until `tool-use-input-end`, so every
+ * reader needs this guard and several grew their own byte-identical copy.
+ */
+export function stringField(item: ToolItem, key: string): string {
+  const value = item.input?.[key];
+  return typeof value === "string" ? value : "";
+}
+
 /** The closed §2.6 status enum, for narrowing a newer daemon's value. */
 const ASYNC_STATUSES: ReadonlySet<string> = new Set([
   "running",
