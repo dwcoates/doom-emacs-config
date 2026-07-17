@@ -28,6 +28,11 @@
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
+  /* The retrying tail row's arc: purple, so the SDK auto-retrying a failed API
+     request reads as "network/infrastructure" — a third status hue distinct
+     from the interrupting alarm red ("stopping") and the working orange
+     ("working"). */
+  --retry: #8b5cf6;
   /* Topbar session datapoint values (parent workspace / model / tokens):
      the same green/cyan/amber light–dark pairs as the syntax palette. */
   --info-ws: #15803d;
@@ -128,6 +133,7 @@
     --assistant: #292040;
     --assistant-pulse: #443669;
     --thinking: #fb923c;
+    --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
     --info-tokens: #fbbf24;
@@ -1208,6 +1214,41 @@ pre {
   border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
 }
+/* The working indicator: the orange dead-air row at the feed tail, shown while
+   the main chain is in flight but nothing else is live (see pulseTarget's
+   `working` state). Same geometry as the thinking/interrupting rows; it REUSES
+   the textless-thinking arc (.thinking-spinner) rather than defining its own,
+   since the hue is the same working orange. */
+.working-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  color: var(--thinking);
+  font-size: 0.85rem;
+}
+/* The retrying indicator: the purple twin of the interrupting row, shown while
+   the SDK auto-retries a failed API request. Same geometry and the SAME
+   thinking-spin animation; only the hue differs — the --retry purple
+   ("network") rather than the --err red ("stopping") or --thinking orange
+   ("working"). */
+.retrying-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  color: var(--retry);
+  font-size: 0.85rem;
+}
+.retrying-spinner {
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid color-mix(in srgb, var(--retry) 25%, transparent);
+  border-top-color: var(--retry);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then
    awaiting the result), so every card in progress reads the same. Two
@@ -1239,7 +1280,8 @@ pre {
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
   .thinking-spinner,
-  .interrupting-spinner {
+  .interrupting-spinner,
+  .retrying-spinner {
     animation-duration: 1.4s;
   }
   /* Per-animation durations, in the order the base rule declares them: the
