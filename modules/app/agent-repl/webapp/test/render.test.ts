@@ -2405,8 +2405,38 @@ describe("rendersEmpty", () => {
   });
 
   it("counts an ordinary text bubble as drawn", () => {
-    // Arrange + Act + Assert — only the exact placeholder is suppressed.
+    // Arrange + Act + Assert — a bubble with real body content is drawn.
     expect(rendersEmpty(text("b1"))).toBe(false);
+  });
+
+  it("counts a text block still empty before its first delta as undrawn", () => {
+    // Arrange — the text-start/first-text-delta gap, when the bubble would
+    // otherwise render nothing but its floating turn-ts stamp.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts a text block that closed on blank final_text as undrawn", () => {
+    // Arrange — a done bubble whose whole body is whitespace would leave a
+    // lone timestamp with no visible bubble around it.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "  \n",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
   });
 
   it("counts a bubble that merely quotes (no content) mid-sentence as drawn", () => {
