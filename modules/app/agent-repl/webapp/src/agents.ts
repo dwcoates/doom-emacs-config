@@ -18,7 +18,7 @@ import {
   CounterStatus,
   counterMenuHtml,
 } from "./counter-menu.js";
-import { ConversationItem, ToolItem } from "./store.js";
+import { ConversationItem, ToolItem, stringField } from "./store.js";
 import { itemsSinceClear } from "./turn.js";
 
 /**
@@ -44,10 +44,6 @@ function subagentStatus(item: ToolItem): CounterStatus {
   return item.result.isError ? "error" : "done";
 }
 
-function stringField(item: ToolItem, key: string): string {
-  const value = item.input?.[key];
-  return typeof value === "string" ? value : "";
-}
 
 /**
  * One subagent call as a roster row. NESTED marks the row as

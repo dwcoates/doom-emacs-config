@@ -24,7 +24,7 @@ import {
   CounterStatus,
   counterMenuHtml,
 } from "./counter-menu.js";
-import { ConversationItem, ToolItem } from "./store.js";
+import { ConversationItem, ToolItem, stringField } from "./store.js";
 import { countedTurns } from "./turn-clock.js";
 
 /** The harness task-list tools the roster is projected from. */
@@ -56,11 +56,6 @@ function mapTaskStatus(status: string): CounterStatus {
     default:
       return "starting";
   }
-}
-
-function stringField(item: ToolItem, key: string): string {
-  const value = item.input?.[key];
-  return typeof value === "string" ? value : "";
 }
 
 /** A tool result's text, flattened from string or text-block content. */

@@ -940,12 +940,33 @@ interface ToolUseResultFrame extends WsEnvelope {
     | { kind: "bash";  stdout: string; stderr: string; exit_code?: number }
     | { kind: "diff";  file_path: string; unified_diff: string }
     | { kind: "grep";  matches: Array<{ file: string; line: number; text: string }> }
-    | { kind: "task";  summary: string }
     // Launched skill's SKILL.md body, read from disk by the daemon so the
     // Skill card can show the full skill contents alongside its invocation.
-    | { kind: "skill"; content: string };
+    | { kind: "skill"; content: string }
+    // One transition of a harness task, off the SDK's structured
+    // statusChange (§1.2). The spawning TaskCreate's card folds these in as
+    // its stream (§2.6 `async-source`, kind "task").
+    | {
+        kind: "task-update";
+        task_id: string;
+        status_from: string;
+        status_to: string;
+        fields?: string[];
+      };
 }
 ```
+
+`bash`'s `stdout` and `stderr` come from §1.2 `structured`, which is the
+only place the two are kept apart — `content` is the blob the SDK hands the
+model, with both already spliced together. A shim predating `structured`
+falls back to that blob as `stdout`. `exit_code` has no producer: the SDK
+reports `interrupted` and a nullable `returnCodeInterpretation`, neither of
+which is an exit code, and inventing one would be worse than a dash.
+
+**Task and Agent take no hint.** They used to take a `task` hint whose
+`summary` was the result truncated to 200 bytes. That saved nothing — the
+full result ships in `content` on the same frame either way — and cost the
+reader everything past the cap, so the card now renders `content` whole.
 
 #### `tool-use-progress`
 
