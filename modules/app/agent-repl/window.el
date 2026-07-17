@@ -194,6 +194,10 @@ PREDICATE is called with the window as its single argument.  Returns
 the list of windows that were deleted (useful for callers wanting to
 verify the sweep took effect).
 
+The minibuffer window is ALWAYS preserved and never passed to
+PREDICATE: it is undeletable and only appears in `window-list'
+transiently while a minibuffer is active.
+
 When SKIP-SIDE-WINDOWS is non-nil (the default), windows with a
 non-nil `window-side' parameter are unconditionally preserved
 regardless of PREDICATE.  This is the side-window-aware default that
@@ -217,6 +221,16 @@ opted into specificity)."
   (let ((deleted '()))
     (dolist (win (window-list frame))
       (when (and (window-live-p win)
+                 ;; Never sweep the minibuffer window.  `window-list'
+                 ;; includes it whenever a minibuffer is active, and this
+                 ;; sweep can run mid-minibuffer — the debounced
+                 ;; `on-window-change' idle timer fires while the `SPC p p'
+                 ;; picker is open.  `delete-window' always refuses the
+                 ;; minibuffer ("Attempt to delete minibuffer or sole
+                 ;; ordinary window"), so it is never a valid layout-sweep
+                 ;; target; excluding it here protects every caller and
+                 ;; predicate rather than relying on each one to filter it.
+                 (not (window-minibuffer-p win))
                  (or (not skip-side-windows)
                      (not (agent-repl-window--side-window-p win)))
                  (funcall predicate win))

@@ -286,6 +286,21 @@ that genuinely wants a single-panel frame)."
         (when (window-live-p side) (delete-window side))
         (kill-buffer side-buf)))))
 
+(ert-deftest agent-repl-window-test-delete-where-never-deletes-minibuffer ()
+  "`--delete-where' never deletes a minibuffer window, even when PREDICATE
+matches it.  The minibuffer appears in `window-list' while a minibuffer is
+active (as during the `SPC p p' picker) and `delete-window' always refuses
+it — so the sweep must skip it categorically rather than attempt and warn."
+  (agent-repl-window-test--with-temp-frame
+    (let* ((main (selected-window))
+           (extra (split-window main)))
+      ;; Treat EXTRA as the minibuffer window; PREDICATE matches ONLY it.
+      (cl-letf (((symbol-function 'window-minibuffer-p)
+                 (lambda (&optional w) (eq w extra))))
+        (let ((deleted (agent-repl-window--delete-where (lambda (w) (eq w extra)))))
+          (should (window-live-p extra))   ; excluded, not deleted
+          (should-not deleted))))))         ; nothing swept
+
 (ert-deftest agent-repl-window-test-delete-where-returns-deleted-list ()
   "`--delete-where' returns the list of windows it actually deleted —
 caller can verify the sweep was non-empty."
