@@ -229,12 +229,20 @@ type ToolUseInputEndFrame struct {
 // RenderHint is the optional pre-rendered payload on tool-use-result
 // frames. Kind selects which of the remaining fields apply.
 type RenderHint struct {
-	Kind string `json:"kind"` // bash | diff | grep | task | skill
+	Kind string `json:"kind"` // bash | diff | grep | task | skill | task-update
 
 	// bash
 	Stdout   string `json:"stdout,omitempty"`
 	Stderr   string `json:"stderr,omitempty"`
 	ExitCode *int   `json:"exit_code,omitempty"`
+
+	// task-update — one transition of a harness task, read off the SDK's
+	// structured statusChange rather than scraped from the result prose.
+	// A TaskCreate's card folds these in as its stream (§2.6 kind "task").
+	TaskID     string   `json:"task_id,omitempty"`
+	StatusFrom string   `json:"status_from,omitempty"`
+	StatusTo   string   `json:"status_to,omitempty"`
+	Fields     []string `json:"fields,omitempty"`
 
 	// diff
 	FilePath    string `json:"file_path,omitempty"`
@@ -272,14 +280,11 @@ type ToolUseResultFrame struct {
 // one that is a record log renders as rows, and one that is bytes renders
 // as a pre. Nothing is forced into a shape its data does not have.
 type StreamRef struct {
-	// ws     — already on the wire as task-output-delta frames.
-	// poll   — GET /sessions/{id}/tasks/{taskId}/output, only while open.
-	// frames — already on the wire as ordinary tool-use frames; the client
-	//          correlates them itself and no transport is needed.
+	// ws   — already on the wire as task-output-delta frames.
+	// poll — GET /sessions/{id}/tasks/{taskId}/output, only while open.
 	Transport string `json:"transport"`
 	// jsonl-transcript — a subagent's full JSONL transcript (bubbles).
 	// jsonl-journal    — a workflow run's journal.jsonl records (rows).
-	// events           — discrete state transitions (rows).
 	// text             — unstructured bytes (pre).
 	Format string `json:"format"`
 }
@@ -300,7 +305,7 @@ type AsyncSource struct {
 	// The harness's own id for the work: an agentId, a backgroundTaskId, a
 	// workflow task id. Keys the poll route and the client's fold.
 	SourceID string `json:"source_id"`
-	// agent | shell | workflow | task
+	// agent | shell | workflow
 	Kind string `json:"kind"`
 	// Absent when the source announced no readable stream.
 	Stream *StreamRef `json:"stream,omitempty"`
