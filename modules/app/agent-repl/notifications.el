@@ -103,8 +103,8 @@ command that exits on its own leaves no pending watchdog behind.
 ON-ACTIVATE, when non-nil, is called with the command's trimmed output
 string on a zero exit, so a backend that reports a user click via its
 stdout (alerter) can act on it in-process.  An error it signals is logged
-loudly via `agent-repl--do-log' rather than propagated, keeping the
-sentinel non-signalling.
+unconditionally via `agent-repl--do-log' rather than propagated, keeping
+the sentinel non-signalling.
 
 A zero exit is logged at the gated `agent-repl--log' level; a non-zero
 exit (or signal termination, including the watchdog's kill) is logged
@@ -141,7 +141,8 @@ Emacs's process machinery, where a hard error would simply be dropped."
 WS is the workspace name (or nil) and BACKEND a symbol naming the backend
 \(both for log context).  A notification tool that is still alive after
 `agent-repl-notify-timeout-seconds' has failed to deliver its banner, so
-the hang is logged loudly via `agent-repl--do-log' and PROC is deleted.
+the hang is logged unconditionally via `agent-repl--do-log' and PROC is
+deleted.
 Deleting PROC runs `agent-repl--notify-process-sentinel', which reports the
 signal termination and kills the capture buffer, so no orphan process or
 buffer survives the hang.  No-op when PROC already terminated."

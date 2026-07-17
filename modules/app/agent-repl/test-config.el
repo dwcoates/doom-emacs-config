@@ -347,12 +347,27 @@ i.e. only when the line actually reached the echo area / modeline."
       (should (equal delegated '(nil "hello world"))))))
 
 (ert-deftest agent-repl-config-test-boot-warn/fallback-reaches-echo-area ()
-  "Pre-core, `--boot-warn' MUST still reach the echo area — a failing load
-is exactly the thing the user has to see."
+  "Pre-core (ladder undefined), `--boot-warn' MUST still reach the echo area —
+core.el failing to load breaks the whole logging system, which is exactly the
+genuine fatal condition the user has to see.  The harness loads core.el, so
+`agent-repl--warn' is unbound here to force the true fallback branch."
+  (let ((orig (symbol-function 'agent-repl--warn)))
+    (unwind-protect
+        (progn
+          (fmakunbound 'agent-repl--warn)
+          (let ((res (agent-repl-test-config--capture-emission
+                      (lambda () (agent-repl--boot-warn "core.el exploded")))))
+            (should (plist-get res :echoed))
+            (should (string-match-p "WARNING: core.el exploded" (plist-get res :text)))))
+      (fset 'agent-repl--warn orig))))
+
+(ert-deftest agent-repl-config-test-boot-warn/delegated-is-quiet ()
+  "Post-core, `--boot-warn' delegates to the now-quiet `agent-repl--warn', so a
+delegated boot-warning is recorded but must NOT reach the echo area / modeline."
   (let ((res (agent-repl-test-config--capture-emission
-              (lambda () (agent-repl--boot-warn "core.el exploded")))))
-    (should (plist-get res :echoed))
-    (should (string-match-p "WARNING: core.el exploded" (plist-get res :text)))))
+              (lambda () (agent-repl--boot-warn "recoverable %s" "hiccup")))))
+    (should-not (plist-get res :echoed))
+    (should (string-match-p "WARNING: recoverable hiccup" (plist-get res :text)))))
 
 (ert-deftest agent-repl-config-test-boot-warn/delegates-once-core-loaded ()
   "Once core.el defines the ladder, `--boot-warn' routes through it."

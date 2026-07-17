@@ -16,15 +16,19 @@
 ;; config.el is the one file that cannot lean on core.el's log-severity
 ;; ladder (`agent-repl--info' / `agent-repl--warn'): it runs BEFORE core.el
 ;; is loaded, and it is also the code that REPORTS core.el failing to load.
-;; So it carries its own bootstrap-phase stand-ins, which preserve exactly
-;; the bifurcation the ladder enforces:
+;; So it carries its own bootstrap-phase stand-ins:
 ;;
-;;   quiet notices  -> *Messages* only, never the echo area / modeline
-;;   warnings       -> *Messages* AND the echo area
+;;   `--boot-info'  quiet notice  -> *Messages* only, never the echo area
+;;   `--boot-warn'  warning       -> loud ONLY when core.el is absent (below)
 ;;
 ;; Once core.el has loaded, both helpers delegate to the real ladder, so
-;; lines emitted after that point still reach the log FILE.  Before it, they
-;; degrade to a bare `message' rather than a void-function crash.
+;; lines emitted after that point still reach the log FILE.  Post-core,
+;; `agent-repl--warn' is the QUIET sink — the modeline is reserved for
+;; genuine fatal `error's alone — so a delegated boot-warning does NOT flash
+;; in the modeline.  Before core.el exists, though, the ladder is undefined
+;; and `--boot-warn' degrades to a bare `message' that DOES reach the echo
+;; area, on purpose: a failure to load core.el breaks the whole logging
+;; system, which is exactly the genuine fatal condition the user must see.
 
 (defun agent-repl--boot-info (fmt &rest args)
   "Emit a bootstrap-phase notice for FMT and ARGS to the QUIET sink.
@@ -37,12 +41,14 @@ lands in *Messages* but never flashes in the echo area."
       (apply #'message (concat "[agent-repl] " fmt) args))))
 
 (defun agent-repl--boot-warn (fmt &rest args)
-  "Emit a bootstrap-phase WARNING for FMT and ARGS to the LOUD sink.
-Delegates to `agent-repl--warn' once core.el has defined it.  Before then,
-falls back to a bare `message', which already reaches the echo area — the
-same channel `agent-repl--warn' would have used.  The fallback matters:
-core.el is the one module whose load failure leaves the ladder undefined,
-and that failure is precisely what must still be reported."
+  "Emit a bootstrap-phase WARNING for FMT and ARGS.
+Delegates to `agent-repl--warn' once core.el has defined it — post-core
+that is the QUIET sink (log file + *Messages*, no modeline flash), so a
+delegated boot-warning does not interrupt.  Before core.el exists,
+`agent-repl--warn' is unbound and this falls back to a bare `message'
+that DOES reach the echo area: core.el is the one module whose load
+failure leaves the ladder undefined, and a broken logging system is a
+genuine fatal condition the user must see immediately."
   (if (fboundp 'agent-repl--warn)
       (apply #'agent-repl--warn nil fmt args)
     (apply #'message (concat "[agent-repl] WARNING: " fmt) args)))

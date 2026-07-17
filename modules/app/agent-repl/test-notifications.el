@@ -323,7 +323,7 @@
       (should (eq deleted 'fake-proc)))))
 
 (ert-deftest agent-repl-test-kill-hung-logs-loudly ()
-  "The watchdog should loudly log the hang via do-log, naming the backend."
+  "The watchdog should log the hang unconditionally via do-log, naming the backend."
   (let (do-log-args)
     (cl-letf (((symbol-function 'processp) (lambda (obj) (eq obj 'fake-proc)))
               ((symbol-function 'process-live-p) (lambda (_p) t))
@@ -370,7 +370,7 @@
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest agent-repl-test-sentinel-logs-failure-on-nonzero-exit ()
-  "Sentinel should loudly log via do-log when the command exits non-zero."
+  "Sentinel should log unconditionally via do-log when the command exits non-zero."
   (let ((buffer (generate-new-buffer " *sentinel-fail*"))
         do-log-args)
     (unwind-protect
@@ -504,7 +504,7 @@
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest agent-repl-test-sentinel-logs-on-activate-error-without-signalling ()
-  "An error signalled by ON-ACTIVATE is logged loudly via do-log, not propagated."
+  "An error signalled by ON-ACTIVATE is logged unconditionally via do-log, not propagated."
   (let ((buffer (generate-new-buffer " *sentinel-activate-err*"))
         do-log-args)
     (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
