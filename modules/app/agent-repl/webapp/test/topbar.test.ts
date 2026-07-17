@@ -96,6 +96,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     modelUsage: null,
     compacting: false,
     interrupting: false,
+    turnRetracted: false,
     costUsd: null,
     lastSeq: 0,
     ...over,
