@@ -5,6 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
+import { parseJournal, parseTranscript } from "./async-stream.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -33,7 +34,7 @@ import {
 } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
-import { ModelInfo, QueuedItem } from "./protocol.js";
+import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { navTokensForItem } from "./nav.js";
 import { isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
@@ -681,6 +682,7 @@ function ToolCard(
       ${toolInput(item)}
       ${progress}
       ${activity}
+      ${AsyncFold(item, panels)}
       ${toolResult(item)}
       ${liveTaskOutput(item)}
       ${taskControls(item)}
@@ -733,7 +735,111 @@ function taskOutputPre(text: string): string {
 }
 
 function liveTaskOutput(item: ToolItem): string {
-  return taskOutputPre(item.taskOutput ?? "");
+  // A card with an async source renders its tail inside its own fold (see
+  // AsyncFold), so painting it here too would double it.
+  return item.asyncSource ? "" : taskOutputPre(item.taskOutput ?? "");
+}
+
+/** A line naming what the cap left out, so a bounded fold never poses as whole. */
+function droppedNotice(dropped: number): string {
+  if (dropped === 0) return "";
+  return `<div class="stream-dropped">… ${dropped} earlier ${
+    dropped === 1 ? "entry" : "entries"
+  } not shown</div>`;
+}
+
+/**
+ * A background agent's transcript, rendered as NESTED BUBBLES through the
+ * very renderItem the top-level feed uses.
+ *
+ * This is the payoff of the whole seam. A detached agent is not merely
+ * "like" the inline Agent case — it IS that case, differing only in that
+ * its stream arrives as a file rather than as parent_tool_use_id-tagged
+ * frames. The bytes already reached the browser before this; they were
+ * painted as an opaque <pre>.
+ */
+function transcriptBubbles(text: string, panels?: PanelContext): string {
+  const { items, dropped } = parseTranscript(text);
+  if (items.length === 0) return "";
+  const body = items
+    .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
+    .join("");
+  return `${droppedNotice(dropped)}${body}`;
+}
+
+/**
+ * A workflow run's journal, rendered as ROWS rather than bubbles: it is a
+ * record log of the run's agent() calls, not a conversation, and inventing
+ * a speaker per record would be a lie about what the data is.
+ */
+function journalRows(text: string): string {
+  const { rows, dropped } = parseJournal(text);
+  if (rows.length === 0) return "";
+  const body = rows
+    .map(
+      (r) =>
+        `<div class="stream-row"><span class="agent-dot agent-${r.status}" aria-hidden="true">●</span> <span class="tool-name">${escapeHtml(
+          r.label,
+        )}</span><span class="stream-detail">${escapeHtml(r.detail)}</span></div>`,
+    )
+    .join("");
+  return `${droppedNotice(dropped)}${body}`;
+}
+
+/**
+ * One source's stream, rendered by the renderer its FORMAT names (§2.6).
+ *
+ * The single place the generalization lands: adding a newly supported async
+ * type is a `format` the daemon already classifies plus an arm here, not a
+ * bespoke card. Nothing is forced into a shape its data lacks — a shell's
+ * spool is bytes, so it stays a <pre>.
+ */
+function asyncStreamHtml(item: ToolItem, source: AsyncSource, panels?: PanelContext): string {
+  // The ws-streamed tail (shells) wins when present; otherwise the polled
+  // tail, which is a background agent's only source since the WS never
+  // carried its transcript.
+  const polled = panels?.taskTail?.(source.source_id);
+  const text = item.taskOutput !== undefined && item.taskOutput !== "" ? item.taskOutput : polled?.text ?? "";
+  switch (source.stream?.format) {
+    case "jsonl-transcript":
+      return transcriptBubbles(text, panels);
+    case "jsonl-journal":
+      return journalRows(text);
+    default:
+      return taskOutputPre(text);
+  }
+}
+
+/** The collapsed face of an async fold: what the work is and whether it runs. */
+function asyncFace(source: AsyncSource): string {
+  const label = source.label !== undefined && source.label !== "" ? source.label : source.source_id;
+  const capped = label.length > 60 ? `${label.slice(0, 59)}…` : label;
+  return `${source.kind} · ${capped} · ${source.status}`;
+}
+
+/**
+ * The fold a card carrying an async source wears: its detached work's
+ * stream, behind a click.
+ *
+ * Built on the same Fold as the activity panel and the watcher fold, with
+ * open state in the renderer (openPanels) so it survives the card's
+ * per-frame re-renders while its stream grows. Keyed `async:<toolUseId>` so
+ * it never collides with the card's own activity panel — a card can have
+ * both (an inline subagent that also spawned detached work).
+ */
+function AsyncFold(item: ToolItem, panels?: PanelContext): string {
+  const source = item.asyncSource;
+  if (!source || !panels) return "";
+  const id = `async:${item.toolUseId}`;
+  const arc = source.status === "running" ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
+  return Fold({
+    id,
+    foldClass: "async-fold",
+    tickerClass: "async-ticker",
+    ticker: `${arc}${escapeHtml(asyncFace(source))}`,
+    body: () => asyncStreamHtml(item, source, panels),
+    open: panels.isOpen(id),
+  });
 }
 
 /**
@@ -788,10 +894,14 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   const elapsed = elapsedMs !== undefined ? `<span class="watcher-elapsed">${escapeHtml(formatElapsed(elapsedMs))}</span>` : "";
   const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
   const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
-  // Store-streamed tail (backgrounded Bash) wins when present; otherwise
-  // the polled tail (a background agent's only source).
-  const streamed = item.taskOutput ?? "";
-  const tail = taskOutputPre(streamed !== "" ? streamed : polled?.text ?? "");
+  // The same format-driven renderer the card's own fold uses, rather than a
+  // second hand-rolled <pre>: a watcher that is a background agent renders
+  // its transcript as nested bubbles here too. A watcher the daemon
+  // classified no source for falls back to the raw tail it always had.
+  const source = item.asyncSource;
+  const tail = source
+    ? asyncStreamHtml(item, source, panels)
+    : taskOutputPre(item.taskOutput ?? polled?.text ?? "");
   return `<div class="watcher-row">
       <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${elapsed}</div>
       ${desc}${progress}${tail}${taskControls(item)}${agentComposer(item, panels)}
@@ -1869,6 +1979,29 @@ export function openWatcherTaskIds(
 }
 
 /**
+ * The source ids in currently-OPEN async folds that need FETCHING — the set
+ * the poller should poll, on top of the watcher folds' own ids.
+ *
+ * Only `transport: "poll"` sources contribute: a ws source's tail already
+ * arrives as task-output-delta, and a `frames` source (a task) is projected
+ * from items the store holds. Polling either would be a round trip for
+ * bytes already in hand.
+ */
+export function openAsyncSourceIds(
+  items: readonly ConversationItem[],
+  isOpen: (id: string) => boolean,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item.kind !== "tool" || !item.asyncSource) continue;
+    if (item.asyncSource.stream?.transport !== "poll") continue;
+    if (!isOpen(`async:${item.toolUseId}`)) continue;
+    ids.add(item.asyncSource.source_id);
+  }
+  return ids;
+}
+
+/**
  * Feed renderer: reconciles the item list into `container`, reusing
  * nodes by key and only rewriting nodes whose HTML changed.
  */
@@ -2182,7 +2315,15 @@ export class FeedRenderer {
    * them; a no-op when no daemon fetch was wired.
    */
   private syncWatcherPolls(watchers: ReadonlyMap<string, readonly ToolItem[]>): void {
-    this.watcherPoller?.sync(openWatcherTaskIds(watchers, (id) => this.openPanels.has(id)));
+    const isOpen = (id: string): boolean => this.openPanels.has(id);
+    // Two sources of pollable ids now: the watcher folds a final-response
+    // bubble carries, and the async fold on a spawning card itself. Both
+    // feed one poller, so an id open in both is polled once.
+    const ids = openWatcherTaskIds(watchers, isOpen);
+    for (const id of openAsyncSourceIds(this.lastState?.items ?? [], isOpen)) {
+      ids.add(id);
+    }
+    this.watcherPoller?.sync(ids);
   }
 
   /** The DOM key one grouped-feed entry reconciles under. */

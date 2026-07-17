@@ -624,20 +624,34 @@ pre {
    face, a click swaps in the confined child feed (the panel exists in the
    HTML only while open — see ActivitySection), and a second click on the
    ticker folds it back. Clicks inside the panel belong to the children. */
-.agent-activity {
+/* Every fold wears one look, because every fold IS one component (see the
+   shared `Fold` skeleton): the activity panel on a spawning card, the
+   watcher fold inside a final-response bubble, and the async fold a card
+   carrying a detached source wears. They were three near-identical rule
+   sets — the two tickers were byte-for-byte identical — so they are one
+   selector list here; only .watcher-fold's slightly roomier rule below
+   still differs, and only because it sets off answer prose rather than
+   card chrome. */
+.agent-activity,
+.async-fold {
   border-top: 1px dashed var(--border);
   margin-top: 0.35rem;
   padding-top: 0.35rem;
   cursor: zoom-in;
 }
-.agent-activity.open { cursor: default; }
-.agent-activity.open > .agent-ticker { cursor: zoom-out; }
-/* The ticker is the badge you click to reveal the child feed, rendered in
+.agent-activity.open,
+.async-fold.open { cursor: default; }
+.agent-activity.open > .agent-ticker,
+.async-fold.open > .async-ticker { cursor: zoom-out; }
+/* The ticker is the badge you click to reveal the fold's body, rendered in
    the same pill form as a consecutive-run tab chip (see .tab-chip) so the
    two read as one vocabulary — only its LOCATION differs (it sits at the
    fold's top, never in the tab bar). max-width keeps a long "N steps · …"
    line from spilling past the card. */
-.agent-ticker {
+.agent-ticker,
+.watcher-ticker,
+.async-ticker,
+.gns-ticker {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -672,50 +686,49 @@ pre {
    from the answer prose above it. The spinner in the ticker is the sole
    live signal — a final-response bubble belongs to an ended turn, which
    never breathes, so the arc is what says a watcher is still running. */
-.watcher-fold {
-  border-top: 1px dashed var(--border);
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  cursor: zoom-in;
-}
-.watcher-fold.open { cursor: default; }
-.watcher-fold.open > .watcher-ticker { cursor: zoom-out; }
-.watcher-ticker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  max-width: 100%;
-  font-size: 0.75rem;
-  padding: 0.1rem 0.6rem;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted);
-}
-/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
-   bridge upkeep that followed the answer, wearing the exact watcher-fold
-   dress — dashed rule, pill ticker, .agent-panel body — so a bubble
-   carrying both reads as one folding vocabulary. Its body is a child feed
-   (folded cards and bubbles through renderItem), not watcher rows. */
+.watcher-fold,
 .gns-fold {
   border-top: 1px dashed var(--border);
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   cursor: zoom-in;
 }
+.watcher-fold.open,
 .gns-fold.open { cursor: default; }
+.watcher-fold.open > .watcher-ticker,
 .gns-fold.open > .gns-ticker { cursor: zoom-out; }
-.gns-ticker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  max-width: 100%;
-  font-size: 0.75rem;
-  padding: 0.1rem 0.6rem;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: var(--card);
+/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
+   bridge upkeep that followed the answer, wearing the exact watcher-fold
+   dress — dashed rule, pill ticker, .agent-panel body — so a bubble
+   carrying both reads as one folding vocabulary. Its body is a child feed
+   (folded cards and bubbles through renderItem), not watcher rows. */
+/* A row-format stream's entries (§2.6 jsonl-journal / events). Rows, not
+   bubbles: a workflow journal is a record log and a task's stream is state
+   transitions, so neither has a speaker to attribute a bubble to. */
+.stream-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  padding: 0.15rem 0;
+}
+.stream-detail {
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-from { color: var(--muted); }
+.task-arrow { color: var(--muted); }
+.task-to { font-weight: 600; }
+.task-completed { color: var(--ok); }
+/* What a bounded fold left out. A cap that says nothing reads as "this is
+   the whole stream", which is the one thing it is not. */
+.stream-dropped {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-style: italic;
+  padding-bottom: 0.25rem;
 }
 .watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
 .watcher-head { display: flex; align-items: center; gap: 0.5rem; }
