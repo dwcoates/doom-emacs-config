@@ -360,9 +360,9 @@ describe("renderItem", () => {
     const item = userTurnAt(14, 32, "do the thing");
     // Act
     const html = renderItem(item);
-    // Assert — the stamp trails the prompt's body column inside the same bubble.
+    // Assert — the corner (with its stamp) trails the prompt's body column.
     expect(html).toContain(
-      `<div class="bubble user"><div class="bubble-body"><pre>do the thing</pre></div><span class="turn-ts">`,
+      `<div class="bubble user"><div class="bubble-body"><pre>do the thing</pre></div><span class="turn-meta"><span class="turn-ts">`,
     );
   });
 
@@ -385,8 +385,10 @@ describe("renderItem", () => {
     const item = textAt(14, 33, "the answer");
     // Act
     const html = renderItem(item);
-    // Assert — the stamp is the body column's sibling, so it never sits in the prose.
-    expect(html).toMatch(/<\/div><span class="turn-ts">[^<]+ ago<\/span><\/div>/);
+    // Assert — the corner is the body column's sibling, so it never sits in the prose.
+    expect(html).toMatch(
+      /<\/div><span class="turn-meta"><span class="turn-ts">[^<]+ ago<\/span><\/span><\/div>/,
+    );
   });
 
   it("keeps a streaming response's cursor inside the body column", () => {
@@ -394,8 +396,8 @@ describe("renderItem", () => {
     const item: ConversationItem = { ...(textAt(14, 33, "hel") as TextItem), done: false };
     // Act
     const html = renderItem(item);
-    // Assert — the cursor trails the text, not the stamp.
-    expect(html).toContain(`<span class="cursor">▍</span></div><span class="turn-ts">`);
+    // Assert — the cursor trails the text, not the corner.
+    expect(html).toContain(`<span class="cursor">▍</span></div><span class="turn-meta">`);
   });
 
   it("hides the host's injected spans from the user bubble", () => {
@@ -510,8 +512,10 @@ describe("renderItem", () => {
     };
     // Act
     const html = renderItem(item, undefined, finalsClosing(item));
-    // Assert — the chip's div opens before the bubble's div closes.
-    expect(html).toMatch(/<div class="bubble assistant md final-response">[\s\S]*class="result ok done"/);
+    // Assert — the corner (turn-meta with the turn's duration) rides in the bubble.
+    expect(html).toMatch(
+      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-dur">/,
+    );
   });
 
   it("seats the nested chip below the answer's own text", () => {
@@ -526,8 +530,8 @@ describe("renderItem", () => {
     };
     // Act
     const html = renderItem(item, undefined, finalsClosing(item));
-    // Assert — the chip trails the prose it closes rather than heading it.
-    expect(html.indexOf(`class="result`)).toBeGreaterThan(html.indexOf("the answer"));
+    // Assert — the corner trails the prose it closes rather than heading it.
+    expect(html.indexOf(`class="turn-meta"`)).toBeGreaterThan(html.indexOf("the answer"));
   });
 
   it("nests the chip inside a final response rendered as a metaprompt tree", () => {
@@ -543,7 +547,9 @@ describe("renderItem", () => {
     // Act
     const html = renderItem(item, undefined, finalsClosing(item));
     // Assert
-    expect(html).toMatch(/<div class="bubble assistant md final-response">[\s\S]*class="result ok done"/);
+    expect(html).toMatch(
+      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-dur">/,
+    );
   });
 
   it("withholds the chip from a bubble that is not a turn's final response", () => {
@@ -1729,18 +1735,18 @@ describe("ResultChip", () => {
     expect(html).toContain("5m 30s ·");
   });
 
-  it("renders the session's standing input tokens after the duration", () => {
+  it("withholds the standing context total from the chip, now that it stands in the topbar", () => {
     // Arrange + Act
     const html = renderItem(resultItem("success"));
-    // Assert
-    expect(html).toContain("12ms · 300,000 in · ");
+    // Assert — only the delta rides the chip; the standing figure moved to the header.
+    expect(html).not.toContain("300,000 in");
   });
 
-  it("signs a context increase with a plus", () => {
-    // Arrange + Act
+  it("signs a context increase with a plus after the duration", () => {
+    // Arrange + Act — the chip carries the turn's delta, not the standing total.
     const html = renderItem(resultItem("success"));
     // Assert
-    expect(html).toContain("300,000 in · +100,000");
+    expect(html).toContain("12ms · +100,000");
   });
 
   it("signs a context decrease with a minus", () => {
@@ -1749,7 +1755,7 @@ describe("ResultChip", () => {
     // Act
     const html = renderItem(item);
     // Assert
-    expect(html).toContain("60,000 in · -140,000");
+    expect(html).toContain("12ms · -140,000");
   });
 
   it("renders a zero increase as a signed zero", () => {
@@ -1758,7 +1764,7 @@ describe("ResultChip", () => {
     // Act
     const html = renderItem(item);
     // Assert
-    expect(html).toContain("300,000 in · +0");
+    expect(html).toContain("12ms · +0");
   });
 
   it("withholds the token figures when the turn's context size is unknown", () => {
@@ -1836,7 +1842,7 @@ describe("ResultChip", () => {
     // Act
     const html = renderItem(answer, undefined, finals);
     // Assert — 30s is sincePrevFinalMs; the 5m 30s whole-task figure never shows.
-    expect(html).toContain("30s · 300,000 in");
+    expect(html).toContain(`<span class="turn-dur">30s</span>`);
     expect(html).not.toContain("5m 30s");
   });
 
@@ -1858,14 +1864,14 @@ describe("ResultChip", () => {
     // Arrange + Act — exactly one second cleared, the floor being inclusive.
     const html = finalResponseHtml(1_000);
     // Assert
-    expect(html).toContain("1s · 300,000 in");
+    expect(html).toContain(`<span class="turn-dur">1s</span>`);
   });
 
   it("rounds the final-response chip's duration up to whole seconds", () => {
     // Arrange + Act — 5984ms, a part-second past the fifth second.
     const html = finalResponseHtml(5_984);
     // Assert — 6s, never the 5s 984ms the millisecond scale would give.
-    expect(html).toContain("6s · 300,000 in");
+    expect(html).toContain(`<span class="turn-dur">6s</span>`);
     expect(html).not.toContain("984ms");
   });
 });

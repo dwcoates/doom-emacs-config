@@ -294,17 +294,19 @@ export function formatBubbleTime(ts: string, nowMs: number = Date.now()): string
 
 /**
  * The one bubble shape, shared by the user's prompt and the agent's
- * response: a body column, then the turn's relative age stamped into the
- * top-right corner. CSS pins and shrinks the stamp (see `.turn-ts`); the
- * markup only has to hand it the same corner in both bubbles.
+ * response: a body column, then a top-right corner column (`.turn-meta`).
+ * The corner stacks META — a final response's turn duration and context
+ * delta, empty for every other bubble — above the relative-age timestamp,
+ * which CSS reveals only while the reader hovers the bubble (see
+ * `.turn-meta` / `.turn-ts`). The markup only has to hand both the corner.
  *
- * The stamp holds its own flex column rather than floating over the body,
+ * The corner holds its own flex column rather than floating over the body,
  * so a full-width response line never runs beneath it.
  */
-function Bubble(cls: string, body: string, ts: string): string {
-  return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-ts">${escapeHtml(
+function Bubble(cls: string, body: string, ts: string, meta = ""): string {
+  return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-meta">${meta}<span class="turn-ts">${escapeHtml(
     formatBubbleTime(ts),
-  )}</span></div>`;
+  )}</span></span></div>`;
 }
 
 /**
@@ -377,11 +379,11 @@ export function queuedCardKey(item: QueuedItem): string {
  * turn actually landed on, set apart from the running commentary the
  * agent emits between its tool calls.
  *
- * CHIP is the closing chip of the turn that bubble answers, and it rides
- * INSIDE the bubble, along its bottom edge — the turn's ending belongs to
- * the answer it ended on rather than to a pill floating in the feed
- * beneath it. Only a final response carries one, so CHIP is null for the
- * commentary bubbles above it (see `finalResponses`).
+ * CHIP is the closing result of the turn that bubble answers. Its stats
+ * ride in the bubble's top-right corner (`resultMeta` via `Bubble`'s META):
+ * the turn's elapsed time and the context delta it moved, rather than a
+ * pill floating in the feed beneath. Only a final response carries one, so
+ * CHIP is null for the commentary bubbles above it (see `finalResponses`).
  *
  * The working frontier gets the pulse instead (see `pulseTarget`). The
  * two never land on the same bubble: a final response only exists once the
@@ -408,15 +410,11 @@ function TextStream(
   // same gate — its host is by construction a completed turn's answer.
   const watchers = chip ? WatcherPanel(item.blockId, panels) : "";
   const gns = chip ? GnsPanel(item.blockId, panels) : "";
-  // A turn that closed in under a second reports no time worth a chip, so the
-  // final-response badge is dropped entirely below that floor rather than
-  // rounding a negligible span up to a `1s` the reader never asked for. The
-  // bubble keeps its `final-response` wash regardless, since it is the answer
-  // either way — only the timing pill is conditional.
-  const closer =
-    chip && chip.sincePrevFinalMs >= 1000
-      ? ResultChip(chip, chip.sincePrevFinalMs, true)
-      : "";
+  // A completed turn's stats ride in the bubble's top-right corner
+  // (`resultMeta`): its elapsed time and the context delta it moved. A
+  // sub-second turn reports no time worth showing and a `/clear`-ended turn
+  // no delta, so either half may be absent and the corner may render empty.
+  const meta = chip ? resultMeta(chip) : "";
   // Chess-game markers split the body FIRST: they must work inside a
   // TLDR-tree response too, and the tree renderer below never sees
   // markdown handling. Each text segment then picks its own pipeline.
@@ -432,7 +430,7 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${cursor}${watchers}${gns}${closer}`, item.ts);
+  return Bubble(cls, `${body}${cursor}${watchers}${gns}`, item.ts, meta);
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -1573,6 +1571,34 @@ function formatTokenDelta(n: number): string {
 }
 
 /**
+ * A final response's top-right corner content: the turn's elapsed time in
+ * the topbar's time color, then the context delta it moved in the topbar's
+ * token color, bullet-separated (`5s · +12,000`). The context total itself
+ * is NOT here — it stands in the header's tokens chip now, and repeating it
+ * on every bubble was the noise this move removed.
+ *
+ * Either half may be absent: a sub-second turn reports no elapsed worth a
+ * figure (the same one-second floor the old closing chip used), and a turn
+ * that ended with the context size unknown (a `/clear` or a compaction)
+ * carries no delta. An all-absent corner returns "" and the bubble shows
+ * only its hover timestamp.
+ */
+function resultMeta(chip: ResultItem): string {
+  const parts: string[] = [];
+  if (chip.sincePrevFinalMs >= 1000) {
+    parts.push(
+      `<span class="turn-dur">${escapeHtml(formatDurationCeil(chip.sincePrevFinalMs))}</span>`,
+    );
+  }
+  if (chip.context) {
+    parts.push(
+      `<span class="turn-diff">${escapeHtml(formatTokenDelta(chip.context.delta))}</span>`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+/**
  * A turn's closing chip: how long the turn took, then where the session's
  * input tokens now stand and how far this turn moved them.
  *
@@ -1617,7 +1643,6 @@ function ResultChip(
     secondResolution ? formatDurationCeil(durationMs) : formatDuration(durationMs),
   );
   if (item.context) {
-    parts.push(`${formatTokens(item.context.total)} in`);
     parts.push(formatTokenDelta(item.context.delta));
   }
   return `

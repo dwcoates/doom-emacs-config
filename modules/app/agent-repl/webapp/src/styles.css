@@ -471,26 +471,39 @@ pre {
   --pulse-to: var(--user-pulse);
   align-self: flex-end;
 }
-/* Smaller and quieter than the text it dates, and lifted clear of the
-   body's first line: a corner label rather than a word in the sentence.
-   It never shrinks the way the wrapping body does. Negative top/right
-   margins pull it in toward the bubble's top-right corner — closer than the
-   body padding alone would sit it, but each margin's magnitude stays under
-   the padding it eats into (0.6rem top, 0.9rem right), so a sliver of space
-   survives and the stamp never abuts the corner. A touch darker than plain
-   --muted (pushed toward --fg) so it reads a shade more present. */
-.turn-ts {
+/* The bubble's top-right corner: a flex column stacking a final response's
+   stats (duration, context delta) above its timestamp. Smaller and quieter
+   than the body text, lifted clear of its first line. Negative top/right
+   margins pull it toward the corner — closer than the body padding alone
+   would, but each margin's magnitude stays under the padding it eats into
+   (0.6rem top, 0.9rem right) so a sliver of space survives and nothing abuts
+   the corner. `nowrap` keeps each multi-token label (`5m 30s ago`,
+   `+100,000`) on one line rather than stacking within a row. */
+.turn-meta {
   flex: none;
-  color: color-mix(in srgb, var(--muted), var(--fg) 25%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
   font-size: 0.65rem;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  /* The relative age is multi-token (`5m 30s ago`), so its inner spaces are
-     wrap opportunities the fixed `HH:MM` never had — keep the whole label on
-     one line so it stays a single corner stamp rather than stacking. */
   white-space: nowrap;
   margin: -0.3rem -0.5rem 0 0;
 }
+/* The two corner stats in the topbar's own datapoint colors, so the turn's
+   duration and context delta read as the same figures the header shows:
+   duration in the time blue, the token delta in the token amber. */
+.turn-meta .turn-dur { color: var(--info-time); }
+.turn-meta .turn-diff { color: var(--info-tokens); }
+/* The timestamp is hover-only now: a muted grey stamp (pushed toward --fg so
+   it reads a shade more present) that drops in under the stats only while the
+   reader hovers the bubble, so a settled feed is not littered with clocks. */
+.turn-ts {
+  display: none;
+  color: color-mix(in srgb, var(--muted), var(--fg) 25%);
+}
+.bubble:hover .turn-ts { display: block; }
 .bubble.assistant {
   background: var(--assistant);
   --pulse-to: var(--assistant-pulse);
@@ -852,28 +865,10 @@ pre {
 }
 .result.err { color: var(--err); }
 .result.interrupted { color: var(--interrupted); }
-.result.done {
-  background: var(--turn-complete-bg);
-  border-color: var(--turn-complete-border);
-}
-/* A completed turn's chip rides INSIDE the answer it closes, centered along
-   the bottom of the bubble's body column: the turn's ending belongs to the
-   response it ended on, not to a pill adrift in the feed below it. The chip
-   sits in the BODY rather than in the bubble itself, since the bubble is the
-   flex row that pins the turn's time stamp to its corner — a chip parked
-   there would land in a third column beside the stamp, not under the prose.
-   - `width: fit-content` shrinks the pill back around its own text, which the
-     feed's flex column would otherwise do (`align-self`) but the body's block
-     flow will not.
-   - `auto` side margins center it, and the bottom margin sits it clear of the
-     bubble's floor rather than flush against the padding.
-   The specificity here outranks `.md .bubble-body > :last-child`, whose
-   margin-bottom: 0 would otherwise flatten that gap the moment the chip
-   became the body's last child. */
-.bubble.assistant.final-response .bubble-body > .result {
-  width: fit-content;
-  margin: 0.7rem auto 0.2rem;
-}
+/* No `.result.done` wash: a completed turn's stats now ride in the bubble's
+   top-right corner (`.turn-meta`), so the only `.result` pills left are the
+   standalone aborted/errored/no-answer ones, which stay a plain muted pill
+   rather than the amber a completed turn used to paint. */
 
 .compact-divider, .system-note, .retry-badge {
   align-self: center;
