@@ -118,6 +118,13 @@ The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-
 
 The doom-agent-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
 
+**Proactive on any state question — no prompting required.** The moment the user asks anything about the *current* state of the editor, a workspace, the daemon, or the REPL — "what's going on with X", "why is Y stuck/dead", "what state is Z in", "is the session alive" — reach for these two skills *immediately and without being asked*. A state question IS the trigger; invoking them is the first step of answering, never a follow-up you offer. Do not hand-roll ad-hoc `grep`/`cat`/`emacsclient` probes when a skill covers the evidence.
+
+- `/debug-logs` — **read state/history that already exists on disk.** Reads `~/.claude/emacs/doom-agent-repl.log` and per-workspace `memory-state.el` snapshots. Reach for it first whenever the moment of interest has already passed (a workspace that went stuck, a crash-restart loop, a recorded agent/repl state) — anything answerable from what was already logged or snapshotted.
+- `/runtime-eval-code` — **inspect or mutate *live* editor state** by sending elisp to the running Emacs, scoped to the current workspace. Reach for it when the answer is a value/predicate/buffer-state no logger captured, when you need to confirm what the editor believes *right now*, or when the log is silent because the signal lives in `*Messages*` or 3rd-party output.
+
+The two compose: `/debug-logs` establishes what happened, `/runtime-eval-code` confirms the live state now. The fuller reference for each skill (plus the profiling skills) follows.
+
 - `/debug-logs` — read history that already exists.
   - Use for any agent-repl logic/state bug whose timestamp you can pin down.
   - Reads `~/.claude/emacs/doom-agent-repl.log` and per-workspace `memory-state.el` snapshots.
