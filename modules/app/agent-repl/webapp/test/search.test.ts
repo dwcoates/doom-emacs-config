@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+//
+// The pure helpers below need no DOM and would run under either environment.
+// `FeedSearch` itself is the reason for jsdom: its whole job is to mark, to
+// reveal, and to put the feed back, and none of that is assertable against a
+// plain object. The rest of the suite stays on the node environment — this
+// docblock is per-file on purpose.
+import { afterEach, describe, expect, it } from "vitest";
 import { EXPANDED_CLASS } from "../src/expand.js";
 import {
+  CURRENT_CLASS,
   FeedSearch,
   KeyChord,
+  MARK_CLASS,
+  REVEAL_ATTR,
   REVEAL_CLASS,
   SEARCH_HOOK,
   SearchHost,
@@ -383,6 +393,308 @@ describe("statusText", () => {
     expect(statusText({ query: "cfg", total: 1, current: 0, unsearched: 2 })).toBe(
       "I-search: cfg  [1/1]  (2 unopened folds not searched)",
     );
+  });
+});
+
+// jsdom implements no layout, so it ships no `scrollIntoView` at all. The
+// search calls it to bring the current match into view; a no-op stub is the
+// jsdom gap being papered over, not any behavior of the search's.
+Element.prototype.scrollIntoView = (): void => undefined;
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+/** A feed holding one `.feed-item` per html, as FeedRenderer lays them out. */
+function feedWith(...items: string[]): HTMLElement {
+  const feed = document.createElement("main");
+  feed.id = "feed";
+  items.forEach((html, i) => {
+    const el = document.createElement("div");
+    el.className = "feed-item";
+    el.dataset.key = `item:${i}`;
+    el.innerHTML = html;
+    feed.appendChild(el);
+  });
+  document.body.appendChild(feed);
+  return feed;
+}
+
+/** A search over FEED, plus a reader for whatever it last put on the status. */
+function searchOn(feed: HTMLElement): { search: FeedSearch; status: () => string } {
+  let last = "";
+  const search = new FeedSearch(feed, (text) => {
+    last = text;
+  });
+  return { search, status: () => last };
+}
+
+/** Deliver one keystroke, answering whether the search consumed it. */
+function press(search: FeedSearch, key: string, mods: Partial<KeyChord> = {}): boolean {
+  return search.handleKey({ ...chord(key, mods), preventDefault: () => undefined });
+}
+
+/** Start a search and type QUERY into it, the way a user does. */
+function searchFor(search: FeedSearch, query: string): void {
+  press(search, "s", { ctrlKey: true });
+  for (const ch of query) press(search, ch);
+}
+
+describe("FeedSearch marking", () => {
+  it("wraps every match in a mark", () => {
+    const feed = feedWith("<p>needle and needle</p>");
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(2);
+  });
+
+  it("marks the current match distinctly from the others", () => {
+    const feed = feedWith("<p>needle and needle</p>");
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelectorAll(`.${CURRENT_CLASS}`)).toHaveLength(1);
+  });
+
+  it("wraps a match crossing an inline element once per text node it touches", () => {
+    // Markdown renders `the config file` with `config` in its own <code>.
+    const feed = feedWith("<p>the <code>config</code> file</p>");
+    searchFor(searchOn(feed).search, "the config file");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(3);
+  });
+
+  it("wraps two matches sharing one text node without stranding either", () => {
+    // Wrapping splits the node, so the second match's offsets were located
+    // against text that no longer exists unless the order is right.
+    const feed = feedWith("<pre>foo bar foo</pre>");
+    searchFor(searchOn(feed).search, "foo");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(2);
+  });
+
+  it("survives a query that self-overlaps rather than throwing mid-keystroke", () => {
+    // `--` against `---` once crashed splitText and leaked the keystroke into
+    // the composer. Reachable from any feed carrying a diff.
+    const feed = feedWith("<pre>---</pre>");
+    const { search } = searchOn(feed);
+    expect(() => searchFor(search, "--")).not.toThrow();
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(1);
+  });
+
+  it("finds text inside a display fold, which is in the DOM but not on screen", () => {
+    const feed = feedWith('<div class="tool-input agent-input"><pre class="agent-json">needle</pre></div>');
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(1);
+  });
+
+  it("leaves a mounted widget's subtree alone, since the widget owns it", () => {
+    const feed = feedWith('<div class="chess-game" data-game-file="/x.pgn">needle</div>');
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(0);
+  });
+
+  it("counts the regions it could not reach, rather than reporting only what it found", () => {
+    const feed = feedWith(
+      '<p>needle</p><div class="agent-activity" data-panel-toggle="a"><div class="ticker">x</div></div>',
+    );
+    const { search, status } = searchOn(feed);
+    searchFor(search, "needle");
+    expect(status()).toContain("1 unopened fold not searched");
+  });
+});
+
+describe("FeedSearch aborting", () => {
+  it("restores the scroll position the search started from", () => {
+    const feed = feedWith("<p>alpha</p>", "<p>needle</p>");
+    feed.scrollTop = 500;
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    feed.scrollTop = 1200; // the search took the view to its match
+    press(search, "g", { ctrlKey: true });
+    expect(feed.scrollTop).toBe(500);
+  });
+
+  it("re-closes a fold the search opened to show a match", () => {
+    const feed = feedWith('<div class="tool-input"><pre>needle</pre></div>');
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    expect(feed.querySelectorAll(`.${REVEAL_CLASS}`)).toHaveLength(1);
+    press(search, "g", { ctrlKey: true });
+    expect(feed.querySelectorAll(`.${REVEAL_CLASS}`)).toHaveLength(0);
+  });
+
+  it("leaves alone a section the user had already expanded themselves", () => {
+    const feed = feedWith(`<div class="tool-input ${EXPANDED_CLASS}"><pre>needle</pre></div>`);
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "g", { ctrlKey: true });
+    expect(feed.querySelector(".tool-input")!.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("leaves the feed's text exactly as it found it", () => {
+    const feed = feedWith("<pre>foo bar foo</pre>");
+    const before = feed.textContent;
+    const { search } = searchOn(feed);
+    searchFor(search, "foo");
+    press(search, "g", { ctrlKey: true });
+    expect(feed.textContent).toBe(before);
+  });
+
+  it("heals the text nodes it split, rather than leaving the run in pieces", () => {
+    // normalize() merges the splits back; a <pre> left in fragments would
+    // break any later search that must match across the seam.
+    const feed = feedWith("<pre>foo bar foo</pre>");
+    const { search } = searchOn(feed);
+    searchFor(search, "foo");
+    press(search, "g", { ctrlKey: true });
+    expect(feed.querySelector("pre")!.childNodes).toHaveLength(1);
+  });
+});
+
+describe("FeedSearch accepting", () => {
+  it("leaves the view on the match it accepted rather than restoring", () => {
+    const feed = feedWith("<p>needle</p>");
+    feed.scrollTop = 500;
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    feed.scrollTop = 1200;
+    press(search, "Enter");
+    expect(feed.scrollTop).toBe(1200);
+  });
+
+  it("hands the search's reveal over as the user's own expansion", () => {
+    // The renderer persists EXPANDED_CLASS across a re-render; the search's
+    // own marker it knows nothing about.
+    const feed = feedWith('<div class="tool-input"><pre>needle</pre></div>');
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "Enter");
+    const section = feed.querySelector(".tool-input")!;
+    expect(section.classList.contains(EXPANDED_CLASS)).toBe(true);
+    expect(section.classList.contains(REVEAL_CLASS)).toBe(false);
+  });
+
+  it("takes its marks back out of the feed", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "Enter");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(0);
+  });
+});
+
+describe("FeedSearch revealing", () => {
+  it("reveals a capped section under its own class, never the user's", () => {
+    const feed = feedWith('<div class="tool-input"><pre>needle</pre></div>');
+    searchFor(searchOn(feed).search, "needle");
+    const section = feed.querySelector(".tool-input")!;
+    expect(section.classList.contains(REVEAL_CLASS)).toBe(true);
+    expect(section.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("opens a collapsed details holding the match", () => {
+    const feed = feedWith("<details class=thinking><summary>Thinking</summary><pre>needle</pre></details>");
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelector("details")!.open).toBe(true);
+  });
+
+  it("marks a details it opened, so an abort knows the open was its doing", () => {
+    const feed = feedWith("<details class=thinking><summary>Thinking</summary><pre>needle</pre></details>");
+    searchFor(searchOn(feed).search, "needle");
+    expect(feed.querySelector("details")!.hasAttribute(REVEAL_ATTR)).toBe(true);
+  });
+
+  it("leaves a details the user already opened unmarked, so an abort will not close it", () => {
+    const feed = feedWith("<details open><summary>Thinking</summary><pre>needle</pre></details>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "g", { ctrlKey: true });
+    expect(feed.querySelector("details")!.open).toBe(true);
+  });
+});
+
+describe("FeedSearch under a re-render", () => {
+  /** What FeedRenderer.render does to an item whose HTML changed. */
+  const rerenderItem = (feed: HTMLElement, key: string, html: string): void => {
+    feed.querySelector<HTMLElement>(`.feed-item[data-key="${key}"]`)!.innerHTML = html;
+  };
+
+  it("re-applies the highlight a render destroyed", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    rerenderItem(feed, "item:0", "<p>needle</p><p>streamed in</p>");
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(0);
+    search.refresh(); // what Actions.onRendered calls
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(1);
+  });
+
+  it("keeps the user on the match they were on when new output arrives", () => {
+    const feed = feedWith("<p>needle one</p>", "<p>needle two</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "s", { ctrlKey: true }); // step to the second match
+    const moved = document.createElement("div");
+    moved.className = "feed-item";
+    moved.dataset.key = "item:2";
+    moved.innerHTML = "<p>a fresh needle streamed in</p>";
+    feed.appendChild(moved);
+    search.refresh();
+    expect(feed.querySelector(`.${CURRENT_CLASS}`)!.closest(".feed-item")).toHaveProperty(
+      "dataset.key",
+      "item:1",
+    );
+  });
+
+  it("re-opens a fold a render closed under the current match", () => {
+    // A done <details> rebuilds closed, which would bury the match the user
+    // is standing on.
+    const feed = feedWith("<details class=thinking><summary>T</summary><pre>needle</pre></details>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    rerenderItem(feed, "item:0", "<details class=thinking><summary>T</summary><pre>needle</pre></details>");
+    expect(feed.querySelector("details")!.open).toBe(false);
+    search.refresh();
+    expect(feed.querySelector("details")!.open).toBe(true);
+  });
+
+  it("reports the match count the new output brought with it", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search, status } = searchOn(feed);
+    searchFor(search, "needle");
+    expect(status()).toContain("[1/1]");
+    rerenderItem(feed, "item:0", "<p>needle</p><p>another needle</p>");
+    search.refresh();
+    expect(status()).toContain("[1/2]");
+  });
+});
+
+describe("FeedSearch and the composer", () => {
+  it("consumes RET, so accepting a match cannot also send the draft", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    expect(press(search, "Enter")).toBe(true);
+  });
+
+  it("leaves RET to the composer once no search is running", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    expect(press(search, "Enter")).toBe(false);
+  });
+
+  it("hands on a key it does not speak, ending the search as isearch does", () => {
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    expect(press(search, "ArrowLeft")).toBe(false);
+    expect(search.active()).toBe(false);
+  });
+
+  it("stops answering the status line once the search is over", () => {
+    // The Emacs host echoes statusLine(); a stale failing search there would
+    // be the only surface the user sees, since composer=0 hides this page's.
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    press(search, "g", { ctrlKey: true });
+    expect(search.statusLine()).toBe("");
   });
 });
 

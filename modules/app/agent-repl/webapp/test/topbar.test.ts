@@ -6,8 +6,9 @@
  *
  * The session-gone chrome is positional: the remediation notice has to read
  * as an annotation of the alarm dot, which means sitting immediately to its
- * right. jsdom is not in the dep tree, so the ordering is asserted against
- * the document source — which is where the ordering actually lives.
+ * right. The ordering is asserted against the document source, which is
+ * where the ordering actually lives — parsing it first could only tell us
+ * what the source already says.
  */
 import { describe, expect, it } from "vitest";
 
