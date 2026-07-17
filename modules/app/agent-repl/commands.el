@@ -435,6 +435,33 @@ hidden buffer's state) or when the input buffer is dead."
               (evil-insert-state)))
         (agent-repl--log ws "enter-insert-mode: input buffer is dead, skipping")))))
 
+(defun agent-repl--restore-retracted-prompt (ws)
+  "Put WS's retracted prompt back in its input buffer for revision.
+Called only once the frontend reports the daemon actually withdrew the
+turn, so the feed has already given the prompt up — this is what keeps
+the text from being lost rather than a courtesy.
+
+The RAW text is restored, never the prepared text: the metaprompt
+decoration was never the user's to revise.  A non-empty input buffer is
+left alone and the prompt is logged instead of overwriting a draft the
+user has since typed; losing the draft to save the prompt would just
+trade one loss for another.
+
+Clears `:sent-turn' either way: the turn is withdrawn, so there is
+nothing left to undo."
+  (let* ((sent (agent-repl--ws-get ws :sent-turn))
+         (raw (plist-get sent :raw))
+         (buf (agent-repl--ws-get ws :input-buffer)))
+    (agent-repl--ws-put ws :sent-turn nil)
+    (if (not (buffer-live-p buf))
+        (agent-repl--log ws "interrupt: retracted %S but the input buffer is dead" raw)
+      (with-current-buffer buf
+        (if (not (zerop (buffer-size)))
+            (agent-repl--log ws "interrupt: retracted prompt not restored over a draft: %S" raw)
+          (agent-repl--history-replace-buffer-text raw)
+          (agent-repl--history-reset)
+          (agent-repl--log ws "interrupt: restored retracted prompt (%d chars)" (length raw)))))))
+
 (defun agent-repl-interrupt (&optional ws)
   "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
 Sends Escape to stop the current operation, then automatically returns
@@ -445,6 +472,14 @@ forwarding a literal \"i\" keystroke to Claude).  Defaults to the
 current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); the drawer passes the entry-at-point so interrupts target
 the selected entry.
+
+Interrupting BEFORE the agent has answered is semantically an undo, so
+this doubles as one: the frontend asks the daemon to retract the sent
+turn, and when it does — the prompt's bubble leaving the feed — the
+prompt lands back in the input buffer to be revised and sent again
+\(`agent-repl--restore-retracted-prompt').  Once the agent has answered,
+there is a response on screen to keep, so the turn stands and this is
+an ordinary stop.  The daemon owns that judgment; Emacs only asks.
 
 After issuing the escape, marks the workspace's agent-state as
 `:done' and clears the Stop / SubagentStop tracking — interrupting
@@ -458,13 +493,17 @@ is the sole observer here."
     ;; The frontend's interrupt capability returns non-nil only when the
     ;; interrupt was actually issued (a dead/unbound session returns nil);
     ;; the done-marking must not fire for an undelivered interrupt.
-    (if (agent-repl--frontend-dispatch-interrupt ws 'escape)
-        (progn
-          (agent-repl--ws-clear-stop-tracking ws)
-          (agent-repl--mark-agent-done ws)
-          (run-at-time agent-repl-interrupt-reinsert-delay nil
-                       #'agent-repl--enter-insert-mode ws))
-      (agent-repl--log ws "interrupt: frontend reported not delivered, skipping"))))
+    (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
+      (if (not outcome)
+          (agent-repl--log ws "interrupt: frontend reported not delivered, skipping")
+        (agent-repl--ws-clear-stop-tracking ws)
+        (agent-repl--mark-agent-done ws)
+        ;; Restore before the re-insert timer so the prompt is already
+        ;; there to revise when the buffer takes insert state.
+        (when (eq outcome 'retracted)
+          (agent-repl--restore-retracted-prompt ws))
+        (run-at-time agent-repl-interrupt-reinsert-delay nil
+                     #'agent-repl--enter-insert-mode ws)))))
 
 ;;;; In-flight message queue (protocol §2.13)
 

@@ -639,10 +639,22 @@ so every attached tab renders the user-turn echo."
       (error "agent-repl: message injection returned no request_id: %S" resp))
     rid))
 
-(defun agent-repl--frontend-interrupt-session (session-id)
-  "Abort SESSION-ID's in-flight turn over HTTP."
-  (agent-repl--frontend-api "POST" (format "/sessions/%s/interrupt" session-id))
-  t)
+(defun agent-repl--frontend-interrupt-session (session-id &optional retract-request-id)
+  "Abort SESSION-ID's in-flight turn over HTTP.
+With RETRACT-REQUEST-ID, additionally ask the daemon to retract that
+turn — withdrawing its prompt bubble as though the send never happened
+\(the undo half of `C-c C-k').  The daemon retracts only when that id
+names the turn actually running AND the agent has not answered it yet,
+so naming a turn is a REQUEST, never a guarantee.
+
+Returns non-nil when the daemon reports it retracted the turn, which is
+the caller's cue that the prompt is now the caller's to restore.  A
+plain interrupt (no RETRACT-REQUEST-ID) always returns nil."
+  (let ((resp (agent-repl--frontend-api
+               "POST" (format "/sessions/%s/interrupt" session-id)
+               (when retract-request-id
+                 `(("retract_request_id" . ,retract-request-id))))))
+    (eq (alist-get 'retracted resp) t)))
 
 ;;;; ---- In-flight message queue (protocol §2.13) ---------------------------
 ;;
@@ -751,30 +763,47 @@ UserPromptSubmit hook remains the authoritative confirmation, but a
 permission request can beat a lagging hook and
 `agent-repl--on-permission-event' gates on `:thinking' — without the
 optimistic write the daemon's permission sentinel would be silently
-dropped."
+dropped.
+
+Records the sent turn's request id and RAW text under `:sent-turn',
+which is what `agent-repl-interrupt' needs to undo the send: the
+daemon names the turn it retracts by request id, and RAW (never
+INPUT) is what goes back to the input buffer, since the metaprompt
+decoration is not the user's to revise."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
   (agent-repl--mark-ws-thinking ws)
   (agent-repl--increment-prefix-counter ws)
   (agent-repl--ws-put ws :last-prompt-time (float-time))
-  (agent-repl--frontend-send-user-message ws input)
+  (agent-repl--ws-put ws :sent-turn
+                      (list :request-id (agent-repl--frontend-send-user-message ws input)
+                            :raw raw))
   (agent-repl--run-send-posthooks ws raw)
   (agent-repl--kickoff-prompt-summary ws raw)
   (when on-settle (funcall on-settle)))
 
-(defun agent-repl--gui-interrupt (ws _kind)
+(defun agent-repl--gui-interrupt (ws kind)
   "The gui frontend's interrupt capability (registry `:interrupt-fn').
-KIND is ignored: it distinguished the vterm TUI's two interrupt
-gestures (`ctrl-c' clearing the prompt line vs `escape' stopping
-generation), and with vterm gone no registered frontend still needs
-that distinction — one wire-level HTTP interrupt serves the single
-gesture the gui exposes.  The parameter itself stays (unused) so the
-registry's `:interrupt-fn' shape stays uniform for whatever frontend
-lands next.  Returns non-nil since the HTTP route either delivers or
-signals."
-  (let ((id (agent-repl--ws-get ws :frontend-session-id)))
-    (agent-repl--log ws "interrupt[gui]: session=%s" id)
-    (agent-repl--frontend-interrupt-session id)
-    t))
+KIND again distinguishes the two gestures, as it did for the vterm TUI,
+though it now splits them on intent rather than on keystroke:
+
+  `escape' (`C-c C-k') means STOP, which before the agent has answered
+    is really an undo — so it asks the daemon to retract the sent turn
+    along with interrupting it.
+  `ctrl-c' (`C-c C-c') means clear the draft, and never retracts: that
+    gesture has just discarded the input buffer, and handing a prompt
+    back into it would undo the discard the user asked for.
+
+Returns `retracted' when the daemon withdrew the turn's prompt (the
+caller now owns that text), or t when the interrupt merely landed.
+Both are non-nil: the HTTP route either delivers or signals, so a
+return here always means delivered."
+  (let* ((id (agent-repl--ws-get ws :frontend-session-id))
+         (sent (and (eq kind 'escape) (agent-repl--ws-get ws :sent-turn)))
+         (retracted (agent-repl--frontend-interrupt-session
+                     id (plist-get sent :request-id))))
+    (agent-repl--log ws "interrupt[gui]: session=%s kind=%s retracted=%s"
+                     id kind retracted)
+    (if retracted 'retracted t)))
 
 (defun agent-repl--gui-running-p (ws)
   "The gui frontend's liveness capability (registry `:running-p-fn').
