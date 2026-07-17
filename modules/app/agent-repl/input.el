@@ -303,7 +303,7 @@ a name run stops at the second slash of a path like `/Users/foo'.")
 Anchored at the very start of the string (no leading whitespace, matching
 the CLI, which only treats `/' as a command at true message start), a
 `/name' run must be followed by whitespace or the end of the string.
-That trailing boundary is what tells a command like `/workspace-open'
+That trailing boundary is what tells a command like `/create-or-update-workspace open'
 apart from a path like `/Users/foo': in the path the name run is followed
 by another `/', not whitespace or end.")
 

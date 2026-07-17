@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Tests for the JSON status export consumed by the `/workspace-status'
+;; Tests for the JSON status export consumed by the `/create-or-update-workspace status'
 ;; skill.  Covers keyword stringification, per-workspace entry shape,
 ;; snapshot collection across the registered workspaces, and the
 ;; on-disk write path.
