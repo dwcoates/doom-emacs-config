@@ -3111,3 +3111,129 @@ func TestChessGameFileIs404ForAMissingFile(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+// --- interrupt-with-retract (§2.3 user-turn-retracted) ------------------------
+
+// openTurn sends a prompt over HTTP and returns its request id, leaving the
+// session with that turn in flight and unanswered.
+func openTurn(t *testing.T, h *harness, id string, shim *fakeShim) string {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(`{"content":"draft prompt"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	<-shim.sent // the forwarded user-message
+	return body.RequestID
+}
+
+// postInterrupt interrupts over HTTP with an optional retract target, and
+// reports what the route said about the retraction.
+func postInterrupt(t *testing.T, h *harness, id, retractID string) bool {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/interrupt", "application/json",
+		bytes.NewBufferString(`{"retract_request_id":"`+retractID+`"}`))
+	if err != nil {
+		t.Fatalf("POST interrupt: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	var body struct {
+		Retracted bool `json:"retracted"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return body.Retracted
+}
+
+func TestInterruptRouteRetractsAnUnansweredTurn(t *testing.T) {
+	// Arrange — a prompt in flight that the agent never answered.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	rid := openTurn(t, h, id, shim)
+	readFrame(t, conn) // user-turn
+	// Act
+	retracted := postInterrupt(t, h, id, rid)
+	// Assert — the route reports the retraction and the feed sees it.
+	if !retracted {
+		t.Fatal(`"retracted" = false for an unanswered turn, want true`)
+	}
+	readFrame(t, conn) // interrupt
+	frame := readFrame(t, conn)
+	if frame["type"] != "user-turn-retracted" || frame["request_id"] != rid {
+		t.Errorf("frame = %v, want user-turn-retracted for %s", frame, rid)
+	}
+}
+
+func TestInterruptRouteReportsNoRetractionForAStaleRequestID(t *testing.T) {
+	// Arrange — a turn in flight under a different id than Emacs believes.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	openTurn(t, h, id, shim)
+	// Act
+	retracted := postInterrupt(t, h, id, "r_stale")
+	// Assert — Emacs must not restore a prompt the feed still shows.
+	if retracted {
+		t.Error(`"retracted" = true for a stale request id, want false`)
+	}
+}
+
+func TestInterruptRouteWithoutRetractTargetReportsNoRetraction(t *testing.T) {
+	// Arrange — a retractable turn, interrupted by the plain gesture.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	openTurn(t, h, id, shim)
+	// Act — the body names no turn, so no undo is being asked for.
+	retracted := postInterrupt(t, h, id, "")
+	// Assert — a plain interrupt never withdraws a bubble.
+	if retracted {
+		t.Error(`"retracted" = true for an untargeted interrupt, want false`)
+	}
+}
+
+func TestInterruptRouteStillForwardsWhenRetracting(t *testing.T) {
+	// Arrange — a retractable turn.
+	h := newHarness(t)
+	id, shim := h.createSession(t)
+	rid := openTurn(t, h, id, shim)
+	// Act
+	postInterrupt(t, h, id, rid)
+	// Assert — an undo stops the turn too, so the shim still hears the gesture.
+	select {
+	case line := <-shim.sent:
+		if !strings.Contains(string(line), `"interrupt"`) {
+			t.Errorf("forwarded = %s", line)
+		}
+	case <-time.After(recvTimeout):
+		t.Fatal("interrupt not forwarded to shim")
+	}
+}
+
+func TestInterruptRouteRejectsAMalformedBody(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/interrupt", "application/json",
+		bytes.NewBufferString(`{"retract_request_id":`))
+	if err != nil {
+		t.Fatalf("POST interrupt: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — a body the client mangled is the client's bug to hear.
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}

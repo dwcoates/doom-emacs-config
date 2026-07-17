@@ -137,6 +137,26 @@ type UserTurnFrame struct {
 	Content   json.RawMessage `json:"content"` // normalized ContentBlock[]
 }
 
+// UserTurnRetractedFrame withdraws the user turn named by RequestID: its
+// bubble leaves the feed as though the prompt had never been sent. Broadcast
+// only for a turn the agent never answered, when the interrupting client asked
+// to retract it by request id (the Emacs `C-c C-k' undo, which lands the
+// prompt back in its input buffer for revision).
+//
+// The retraction is a FRAME rather than a rewrite of the retained ring, so it
+// survives replay the same way every other state change does: a client
+// applying [user-turn, interrupt, user-turn-retracted] in seq order lands on
+// the same feed live or replayed.
+//
+// The turn still ends in its own `aborted` result, which the client folds into
+// the retraction rather than rendering — the turn did not "abort", it never
+// happened. That result is what clears the interrupting indicator, so the
+// frame deliberately leaves the indicator standing.
+type UserTurnRetractedFrame struct {
+	Envelope
+	RequestID string `json:"request_id"`
+}
+
 // --- §2.4 assistant text --------------------------------------------------
 
 type TextStartFrame struct {
