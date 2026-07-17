@@ -1458,6 +1458,95 @@ describe("ConversationStore task output", () => {
   });
 });
 
+describe("ConversationStore async-source", () => {
+  /** Open the spawning card an async-source attaches to. */
+  function withAgentCard(store: ConversationStore): void {
+    store.applyRaw(
+      frame("tool-use-start", { tool_use_id: "t1", tool_name: "Agent", message_id: "m1" }),
+    );
+  }
+
+  const agentSource = {
+    source_id: "a9",
+    kind: "agent",
+    label: "find the thing",
+    status: "running",
+    stream: { transport: "poll", format: "jsonl-transcript" },
+  };
+
+  it("lands the descriptor on the spawning card", () => {
+    // Arrange
+    const store = newStore();
+    withAgentCard(store);
+    // Act
+    store.applyRaw(frame("async-source", { tool_use_id: "t1", source: agentSource }));
+    // Assert
+    expect((store.state.items[0] as ToolItem).asyncSource).toMatchObject({
+      source_id: "a9",
+      kind: "agent",
+    });
+  });
+
+  it("keeps the stream ref, which is what selects the fold's renderer", () => {
+    // Arrange
+    const store = newStore();
+    withAgentCard(store);
+    // Act
+    store.applyRaw(frame("async-source", { tool_use_id: "t1", source: agentSource }));
+    // Assert
+    expect((store.state.items[0] as ToolItem).asyncSource?.stream).toEqual({
+      transport: "poll",
+      format: "jsonl-transcript",
+    });
+  });
+
+  it("leaves a card that spawned nothing without a source", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(
+      frame("tool-use-start", { tool_use_id: "t1", tool_name: "Read", message_id: "m1" }),
+    );
+    // Act — nothing arrives.
+    // Assert
+    expect((store.state.items[0] as ToolItem).asyncSource).toBeUndefined();
+  });
+
+  it("drops a source naming no card the feed holds", () => {
+    // Arrange
+    const store = newStore();
+    // Act + Assert — no crash, no item invented.
+    store.applyRaw(frame("async-source", { tool_use_id: "t9", source: agentSource }));
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("reads a status outside the closed enum as running", () => {
+    // Arrange — a newer daemon paired with this client.
+    const store = newStore();
+    withAgentCard(store);
+    // Act
+    store.applyRaw(
+      frame("async-source", {
+        tool_use_id: "t1",
+        source: { ...agentSource, status: "reticulating_splines" },
+      }),
+    );
+    // Assert — a wrong "done" hides live output; a wrong "running" only spins.
+    expect((store.state.items[0] as ToolItem).asyncSource?.status).toBe("running");
+  });
+
+  it("keeps a terminal status the enum does know", () => {
+    // Arrange
+    const store = newStore();
+    withAgentCard(store);
+    // Act
+    store.applyRaw(
+      frame("async-source", { tool_use_id: "t1", source: { ...agentSource, status: "killed" } }),
+    );
+    // Assert
+    expect((store.state.items[0] as ToolItem).asyncSource?.status).toBe("killed");
+  });
+});
+
 describe("ConversationStore interrupt gating", () => {
   /** Start a turn and a running Bash, then interrupt: the common arrange. */
   function interruptedWithBash(store: ConversationStore): void {
