@@ -232,11 +232,23 @@ func closeReplayTurns(frames []protocol.L2Frame) []protocol.L2Frame {
 		turnAnswered = false
 	}
 	for _, f := range frames {
-		if _, ok := f.(*protocol.UserTurnFrame); ok {
+		switch f.(type) {
+		case *protocol.UserTurnFrame:
 			closeTurn() // close the prior turn before the new one opens
 			turnOpen = true
-		} else if isReplayResponseFrame(f) {
-			turnAnswered = true
+		case *protocol.TaskNotificationFrame:
+			// A task notification wakes a promptless turn exactly as a
+			// prompt wakes a prompted one — the live stream closes the
+			// prior turn with a real result before the woken turn runs —
+			// so it is a turn boundary too. Without it, a replayed
+			// notification-woken turn (a gns-sockets bridge respawn, a
+			// Monitor firing) would merge into the turn above it.
+			closeTurn()
+			turnOpen = true
+		default:
+			if isReplayResponseFrame(f) {
+				turnAnswered = true
+			}
 		}
 		out = append(out, f)
 		if ts := f.Env().TS; ts != "" {
@@ -371,6 +383,9 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 	}
 	var text string
 	if err := json.Unmarshal(msg.Content, &text); err == nil {
+		if isTaskNotificationText(text) {
+			return replayTaskNotification(t, text, ts)
+		}
 		text = slashCommandText(text)
 		if text == "" {
 			return nil
@@ -396,6 +411,15 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 			frames = append(frames, replayToolResult(t, block, ts, "")...)
 			continue
 		}
+		if block.Type == "text" {
+			var tb struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &tb); err == nil && isTaskNotificationText(tb.Text) {
+				frames = append(frames, replayTaskNotification(t, tb.Text, ts)...)
+				continue
+			}
+		}
 		turnBlocks = append(turnBlocks, raw)
 	}
 	if len(turnBlocks) > 0 {
@@ -403,6 +427,33 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 		frames = append(frames, replayUserTurn(content, ts, st))
 	}
 	return frames
+}
+
+// isTaskNotificationText mirrors the shim's live detection (session.ts
+// mapUserMessage): a user text carrying a <task-notification> payload is
+// the harness's background-work completion signal, not the user's words.
+func isTaskNotificationText(text string) bool {
+	return strings.Contains(text, "<task-notification>")
+}
+
+// replayTaskNotification maps one replayed task-notification text to the
+// same §2.6 task-notification frame the live shim event produces, routed
+// through the Translator so the correlation tags parse identically. The
+// live stream never renders these as user turns — the shim drops the
+// user-role envelope — so a replayed user-turn bubble full of raw
+// notification XML was a replay/live divergence, and it also miscast the
+// promptless turn the notification wakes as a user-prompted one (which
+// the webapp's gns-sockets fold keys off; see webapp/src/gns.ts).
+func replayTaskNotification(t *Translator, text, ts string) []protocol.L2Frame {
+	data, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return nil
+	}
+	return stampReplay(t.OnEvent(&protocol.L1Event{
+		Type:    "system",
+		Subtype: "task_notification",
+		Data:    data,
+	}), ts)
 }
 
 // replayToolResult translates one transcript tool_result block through
