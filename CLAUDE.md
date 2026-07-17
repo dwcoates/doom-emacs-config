@@ -116,6 +116,7 @@ Set these environment variables for full functionality:
   ```bash
   emacs -batch -Q -l ert -l test-<module>.el -f ert-run-tests-batch-and-exit
   ```
+  For the `webapp/` (TypeScript/Vitest), run tests with `npm test` and type-check with `npm run typecheck` from `modules/app/agent-repl/webapp/`. Prefer those npm scripts over `npx vitest`/`npx tsc`: a `pretest`/`pretypecheck` hook runs `npm ci` automatically when `node_modules` is absent, so a fresh worktree self-bootstraps its webapp deps on first run.
 - **Every new addition or change must have corresponding test cases.** New functions get new tests. Changed behavior requires updated or new tests that cover the change. One test per edge case -- no test should cover more than one edge case.
 - **One test file per source module.** Tests for `status.el` go in `test-status.el`, tests for `sentinel.el` go in `test-sentinel.el`, etc.
 
