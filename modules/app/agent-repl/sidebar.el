@@ -34,13 +34,23 @@
 
 ;;;; Customization ----------------------------------------------------------
 
-(defcustom agent-repl-sidebar-enabled nil
+(defcustom agent-repl-sidebar-enabled t
   "Non-nil enables the GUI sidebar bridge.
 When enabled, workspace snapshots are pushed to the daemon on the
 drawer's refresh triggers and the webview URL gains `sidebar=1'.
-Disabled by default (Phase 1 opt-in): with the bridge off, no snapshot
-is ever POSTed and the GUI renders no sidebar."
+On by default (Phase 2); setting it nil stops every push and drops the
+URL param, so the GUI renders no sidebar.  Batch tests bind it nil at
+the `agent-repl-test--with-clean-state' choke point and opt in
+explicitly."
   :type 'boolean
+  :group 'agent-repl)
+
+(defcustom agent-repl-sidebar-width-px 340
+  "Fixed sidebar width in CSS pixels, shipped in the snapshot as `width_px'.
+The sidebar never resizes at runtime — the GUI's output column absorbs
+every horizontal resize — so editing this custom (and letting the next
+push land) is the one way the width changes."
+  :type 'integer
   :group 'agent-repl)
 
 (defcustom agent-repl-sidebar-actions-file-prefix "sidebar_action_"
@@ -106,6 +116,43 @@ Included verbatim in every snapshot as `last_action_result'.")
   "Return a json-encodable boolean for X (t / :json-false, never nil)."
   (if x t :json-false))
 
+;;;; Priority badge images --------------------------------------------------------
+
+(defconst agent-repl-sidebar--images-dir
+  (expand-file-name "images/"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The module images/ directory holding the priority badge PNGs.
+Same source `agent-repl--load-priority-images' (status.el) reads for
+the drawer's in-buffer badges.")
+
+(defvar agent-repl-sidebar--priority-image-uris 'unset
+  "Cached alist of priority name → PNG data URI, or the `unset' sentinel.
+Computed once per session by `agent-repl-sidebar--priority-images' —
+the badge files never change at runtime, and re-base64ing them on every
+snapshot push would be pure waste.")
+
+(defun agent-repl-sidebar--read-image-uri (file)
+  "Return FILE's bytes as a PNG data URI."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally file)
+    (concat "data:image/png;base64,"
+            (base64-encode-string (buffer-string) t))))
+
+(defun agent-repl-sidebar--priority-images ()
+  "Return the priority badge data-URI alist, computing it on first use.
+One entry per `agent-repl-priority-levels' name whose PNG exists; the
+browser falls back to text chips for any name absent here."
+  (when (eq agent-repl-sidebar--priority-image-uris 'unset)
+    (setq agent-repl-sidebar--priority-image-uris
+          (cl-loop for name in agent-repl-priority-levels
+                   for file = (expand-file-name
+                               (concat name ".png")
+                               agent-repl-sidebar--images-dir)
+                   when (file-exists-p file)
+                   collect (cons name (agent-repl-sidebar--read-image-uri file)))))
+  agent-repl-sidebar--priority-image-uris)
+
 ;;;; Snapshot: entries ----------------------------------------------------------
 
 (defun agent-repl-sidebar--status-name (status)
@@ -167,6 +214,7 @@ read the drawer's buffer-local sets."
     `((ws . ,ws)
       (depth . ,depth)
       (section . ,(agent-repl-sidebar--status-name section))
+      (session_id . ,(agent-repl--ws-get ws :frontend-session-id))
       (status . ,(agent-repl-sidebar--status-name status))
       (glyph . ,(agent-repl-drawer--state-glyph ws))
       (name_color . ,(agent-repl-sidebar--name-color ws))
@@ -300,8 +348,12 @@ amortize one reverse-lookup build, mirroring `--render'."
            (sidebar_visible . ,(agent-repl-sidebar--bool
                                 agent-repl-drawer--global-visible-p))
            (merge_slow_threshold . ,agent-repl-drawer-merge-slow-commit-threshold)
+           (width_px . ,agent-repl-sidebar-width-px)
            (marks . ,(agent-repl-sidebar--marks))
            (last_action_result . ,agent-repl-sidebar--last-action-result))
+         (let ((images (agent-repl-sidebar--priority-images)))
+           (when images
+             `((priority_images . ,images))))
          (when merge-queue
            `((merge_queue . ,merge-queue)))
          `((sections . ,(vconcat
@@ -523,6 +575,25 @@ failure; the caller converts the signal into `last_action_result'."
     ("priority-down"
      (agent-repl-sidebar--require-known targets)
      (dolist (ws targets) (agent-repl-drawer--cycle-priority ws +1)))
+    ("set-priority"
+     (agent-repl-sidebar--require-known targets)
+     (let ((priority (alist-get 'priority args)))
+       (unless (or (null priority) (eq priority :null) (stringp priority))
+         (user-error "set-priority: bad priority %S" priority))
+       ;; The empty string is `agent-repl-set-priority''s clear sentinel,
+       ;; standing in for the JSON null the drag-drop sends.
+       (dolist (ws targets)
+         (agent-repl-set-priority (if (stringp priority) priority "") ws))))
+    ("show-commit"
+     (agent-repl-sidebar--require-known targets)
+     (let ((sha (alist-get 'sha args)))
+       (unless (and (stringp sha) (not (string-empty-p sha)))
+         (user-error "show-commit: missing sha"))
+       (unless (fboundp 'magit-show-commit)
+         (user-error "show-commit: magit is unavailable"))
+       (agent-repl-drawer--with-temp-current-ws
+        (car targets)
+        (lambda () (magit-show-commit sha)))))
     ("toggle-mark" (agent-repl-sidebar--toggle-mark targets))
     ("clear-marks" (agent-repl-sidebar--clear-marks))
     ("toggle-expand" (agent-repl-sidebar--toggle-expand targets))
@@ -612,6 +683,164 @@ Tears down any existing watch first to avoid duplicates on re-eval."
   (agent-repl--dir-watcher-register agent-repl-sidebar--actions-watcher))
 
 (agent-repl-sidebar--register-actions-watch)
+
+;;;; Global chords -------------------------------------------------------------
+;;
+;; The C-S-* chords route here (keybindings.el).  With the drawer open,
+;; coexistence keeps its semantics untouched: the drawer-global command
+;; runs verbatim.  With no drawer buffer, the chords reach the GUI
+;; sidebar instead — cursor-targeted ops dispatch into the current
+;; workspace's webview over the execute-script channel (the xwidget
+;; cannot receive Emacs keys), and follow-navigation is computed
+;; Emacs-side against the same view-model order the sidebar renders.
+
+(defun agent-repl-sidebar--webview-dispatch (op)
+  "Run the sidebar host hook OP inside the current workspace's webview.
+Guarded page-side (`window.agentReplSidebar && …'): a webview mid-boot
+has no hook planted yet, and that is an expected state."
+  (let* ((ws (or (agent-repl--ws-current-name)
+                 (user-error "No current workspace")))
+         (buf (agent-repl--ws-get ws :frontend-buffer)))
+    (unless (buffer-live-p buf)
+      (user-error "No live webview for %s" ws))
+    (agent-repl--frontend-webview-execute-script
+     buf (format "window.agentReplSidebar && window.agentReplSidebar(%S);"
+                 op))))
+
+(defun agent-repl-sidebar--follow-candidates ()
+  "Return (WS . SECTION-ID) cells in sidebar render order.
+Extracted from the same snapshot the GUI renders, so Emacs-side follow
+navigation walks exactly the order the user sees."
+  (let (result)
+    (dolist (section (append (alist-get 'sections
+                                        (agent-repl-sidebar--snapshot))
+                             nil))
+      (dolist (group (append (alist-get 'groups section) nil))
+        (dolist (entry (append (alist-get 'entries group) nil))
+          (push (cons (alist-get 'ws entry) (alist-get 'section entry))
+                result))))
+    (nreverse result)))
+
+(defun agent-repl-sidebar--follow-step (delta)
+  "Switch to the nearest eligible workspace DELTA steps away in sidebar order.
+Skips MERGED entries (reviving one is `visit''s deliberate act, never a
+scroll side effect) and the already-current workspace, and stops at the
+list edge — the drawer's follow rules."
+  (let* ((candidates (agent-repl-sidebar--follow-candidates))
+         (names (mapcar #'car candidates))
+         (current (agent-repl--ws-current-name))
+         (idx (or (cl-position current names :test #'equal)
+                  (if (> delta 0) -1 (length names))))
+         (step (if (> delta 0) 1 -1))
+         (i (+ idx step))
+         (target nil))
+    (while (and (null target) (>= i 0) (< i (length names)))
+      (let ((candidate (nth i candidates)))
+        (unless (or (equal (cdr candidate) "merged")
+                    (equal (car candidate) current))
+          (setq target (car candidate))))
+      (setq i (+ i step)))
+    (if (null target)
+        (agent-repl--log current "sidebar-follow: no candidate (delta=%d)" delta)
+      (agent-repl--log target "sidebar-follow: switching from=%s to=%s"
+                       current target)
+      (agent-repl-drawer--leave-side-window-before-switch)
+      (agent-repl--ws-switch target))))
+
+(defun agent-repl-sidebar--global (drawer-command sidebar-thunk)
+  "Route a global chord: an open drawer wins, else the sidebar.
+DRAWER-COMMAND runs whenever the drawer buffer exists, keeping
+coexistence semantics untouched.  Otherwise SIDEBAR-THUNK runs when the
+bridge is enabled.  With neither available, DRAWER-COMMAND still runs
+so its own \"Drawer not open — `SPC o d' first\" user-error surfaces."
+  (if (or (get-buffer agent-repl-drawer-buffer-name)
+          (not agent-repl-sidebar-enabled))
+      (call-interactively drawer-command)
+    (funcall sidebar-thunk)))
+
+(defun agent-repl-sidebar-global-next ()
+  "Follow-next entry: the drawer's cursor when open, else sidebar order."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-next
+   (lambda () (agent-repl-sidebar--follow-step 1))))
+
+(defun agent-repl-sidebar-global-prev ()
+  "Follow-previous entry: the drawer's cursor when open, else sidebar order."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-prev
+   (lambda () (agent-repl-sidebar--follow-step -1))))
+
+(defun agent-repl-sidebar-global-visit ()
+  "Visit the selected entry: drawer cursor when open, else sidebar cursor."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-visit
+   (lambda () (agent-repl-sidebar--webview-dispatch "visit"))))
+
+(defun agent-repl-sidebar-global-nuke ()
+  "Nuke the selected entry: drawer cursor when open, else sidebar cursor."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-nuke
+   (lambda () (agent-repl-sidebar--webview-dispatch "nuke"))))
+
+(defun agent-repl-sidebar-global-kill ()
+  "Kill the selected entry: drawer cursor when open, else sidebar cursor."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-kill
+   (lambda () (agent-repl-sidebar--webview-dispatch "kill"))))
+
+(defun agent-repl-sidebar-global-send-prompt ()
+  "Send a prompt to the selected entry via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-send-prompt
+   (lambda () (agent-repl-sidebar--webview-dispatch "send-prompt"))))
+
+(defun agent-repl-sidebar-global-merge-into-master ()
+  "Merge the selected entry into its source via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-merge-into-master
+   (lambda () (agent-repl-sidebar--webview-dispatch "merge-into-source"))))
+
+(defun agent-repl-sidebar-global-toggle-hidden ()
+  "Toggle hidden on the selected entry via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-toggle-hidden
+   (lambda () (agent-repl-sidebar--webview-dispatch "toggle-hidden"))))
+
+(defun agent-repl-sidebar-global-toggle-mark ()
+  "Toggle the mark on the selected entry via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-toggle-mark
+   (lambda () (agent-repl-sidebar--webview-dispatch "toggle-mark"))))
+
+(defun agent-repl-sidebar-global-clear-marks ()
+  "Clear all marks via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-clear-marks
+   (lambda () (agent-repl-sidebar--webview-dispatch "clear-marks"))))
+
+(defun agent-repl-sidebar-global-priority-up ()
+  "Cycle the selected entry's priority up via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-priority-up
+   (lambda () (agent-repl-sidebar--webview-dispatch "priority-up"))))
+
+(defun agent-repl-sidebar-global-priority-down ()
+  "Cycle the selected entry's priority down via drawer or sidebar."
+  (interactive)
+  (agent-repl-sidebar--global
+   #'agent-repl-drawer-global-priority-down
+   (lambda () (agent-repl-sidebar--webview-dispatch "priority-down"))))
 
 (provide 'agent-repl-sidebar)
 ;;; sidebar.el ends here

@@ -654,6 +654,207 @@ state is otherwise unchanged."
             (delete-directory dir t))))
       (should (>= pushes 1)))))
 
+;;;; ---- Phase-2 snapshot fields ----
+
+(ert-deftest agent-repl-sidebar-test-snapshot-carries-width ()
+  "The snapshot ships the configured fixed width as width_px."
+  (agent-repl-sidebar-test--with-state
+    (let ((agent-repl-sidebar-width-px 412))
+      (should (equal 412 (alist-get 'width_px (agent-repl-sidebar--snapshot)))))))
+
+(ert-deftest agent-repl-sidebar-test-entry-carries-session-id ()
+  "An entry ships its workspace's bound daemon session id."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1" :frontend-session-id "s_abc")
+    (should (equal "s_abc"
+                   (alist-get 'session_id
+                              (agent-repl-sidebar-test--entry
+                               (agent-repl-sidebar--snapshot) "main" "ws1"))))))
+
+(ert-deftest agent-repl-sidebar-test-snapshot-priority-images-data-uris ()
+  "The snapshot ships each existing badge PNG as a data URI."
+  (agent-repl-sidebar-test--with-state
+    (let ((agent-repl-sidebar--priority-image-uris 'unset))
+      (let ((images (alist-get 'priority_images
+                               (agent-repl-sidebar--snapshot))))
+        (should (assoc "p1" images))
+        (should (string-prefix-p "data:image/png;base64,"
+                                 (cdr (assoc "p1" images))))))))
+
+(ert-deftest agent-repl-sidebar-test-priority-images-cached-after-first-build ()
+  "Badge PNGs are base64d once and cached, never re-read per snapshot."
+  (agent-repl-sidebar-test--with-state
+    (let ((agent-repl-sidebar--priority-image-uris 'unset)
+          (reads 0))
+      (cl-letf (((symbol-function 'agent-repl-sidebar--read-image-uri)
+                 (lambda (_file) (setq reads (1+ reads)) "data:image/png;base64,x")))
+        (agent-repl-sidebar--priority-images)
+        (let ((first-reads reads))
+          (agent-repl-sidebar--priority-images)
+          (should (equal first-reads reads)))))))
+
+;;;; ---- Phase-2 actions ----
+
+(ert-deftest agent-repl-sidebar-test-action-set-priority-dispatches ()
+  "set-priority forwards the priority to `agent-repl-set-priority' per target."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    (let* ((calls nil)
+           (result (agent-repl-sidebar-test--run-action
+                       '((id . "b1") (action . "set-priority")
+                         (targets . ["ws1"]) (args . ((priority . "p2"))))
+                     ((symbol-function 'agent-repl-set-priority)
+                      (lambda (priority ws) (push (cons ws priority) calls))))))
+      (should (equal '(("ws1" . "p2")) calls))
+      (should (eq t (alist-get 'ok result))))))
+
+(ert-deftest agent-repl-sidebar-test-action-set-priority-null-clears ()
+  "A JSON-null priority maps to the empty-string clear sentinel."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    (let ((calls nil))
+      ;; `(priority . nil)' JSON-encodes to {"priority": null}, which the
+      ;; executor reads back as the `:null' keyword.
+      (agent-repl-sidebar-test--run-action
+          '((id . "b2") (action . "set-priority")
+            (targets . ["ws1"]) (args . ((priority . nil))))
+        ((symbol-function 'agent-repl-set-priority)
+         (lambda (priority ws) (push (cons ws priority) calls))))
+      (should (equal '(("ws1" . "")) calls)))))
+
+(ert-deftest agent-repl-sidebar-test-action-show-commit-opens-magit ()
+  "show-commit opens the sha in magit inside the target workspace."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    (let* ((shown nil)
+           (result (agent-repl-sidebar-test--run-action
+                       '((id . "b3") (action . "show-commit")
+                         (targets . ["ws1"]) (args . ((sha . "abc1234"))))
+                     ((symbol-function 'agent-repl-drawer--with-temp-current-ws)
+                      (lambda (_ws fn) (funcall fn)))
+                     ((symbol-function 'magit-show-commit)
+                      (lambda (sha) (setq shown sha))))))
+      (should (equal "abc1234" shown))
+      (should (eq t (alist-get 'ok result))))))
+
+(ert-deftest agent-repl-sidebar-test-action-show-commit-missing-sha-refused ()
+  "show-commit without a sha is refused loudly."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    ;; An empty hash table JSON-encodes to {}, the daemon's normalized
+    ;; empty-args shape.
+    (let ((result (agent-repl-sidebar-test--run-action
+                      `((id . "b4") (action . "show-commit")
+                        (targets . ["ws1"])
+                        (args . ,(make-hash-table))))))
+      (should (eq :json-false (alist-get 'ok result)))
+      (should (string-match-p "sha" (alist-get 'error result))))))
+
+;;;; ---- Global chord routing ----
+
+(ert-deftest agent-repl-sidebar-test-global-routes-to-drawer-when-open ()
+  "With a drawer buffer live, the chord wrapper runs the drawer command."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-drawer--get-or-create-buffer)
+    (let ((agent-repl-sidebar-enabled t)
+          (drawer-calls 0)
+          (dispatches nil))
+      (cl-letf (((symbol-function 'agent-repl-drawer-global-nuke)
+                 (lambda () (interactive) (setq drawer-calls (1+ drawer-calls))))
+                ((symbol-function 'agent-repl-sidebar--webview-dispatch)
+                 (lambda (op) (push op dispatches))))
+        (agent-repl-sidebar-global-nuke))
+      (should (equal 1 drawer-calls))
+      (should-not dispatches))))
+
+(ert-deftest agent-repl-sidebar-test-global-dispatches-to-webview-when-no-drawer ()
+  "With no drawer buffer and the bridge enabled, the chord reaches the webview."
+  (agent-repl-sidebar-test--with-state
+    (let ((agent-repl-sidebar-enabled t)
+          (dispatches nil))
+      (cl-letf (((symbol-function 'agent-repl-sidebar--webview-dispatch)
+                 (lambda (op) (push op dispatches))))
+        (agent-repl-sidebar-global-nuke))
+      (should (equal '("nuke") dispatches)))))
+
+(ert-deftest agent-repl-sidebar-test-global-falls-back-to-drawer-when-disabled ()
+  "With the bridge disabled, the wrapper defers to the drawer command."
+  (agent-repl-sidebar-test--with-state
+    (let ((agent-repl-sidebar-enabled nil)
+          (drawer-calls 0))
+      (cl-letf (((symbol-function 'agent-repl-drawer-global-nuke)
+                 (lambda () (interactive) (setq drawer-calls (1+ drawer-calls)))))
+        (agent-repl-sidebar-global-nuke))
+      (should (equal 1 drawer-calls)))))
+
+(ert-deftest agent-repl-sidebar-test-webview-dispatch-script-shape ()
+  "The dispatch script guards on the hook and passes the op."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    (let ((buf (generate-new-buffer " *test-webview*"))
+          (script nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () "ws1"))
+                      ((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (_buf js) (setq script js))))
+              (agent-repl-sidebar--webview-dispatch "toggle-mark"))
+            (should (string-match-p "window\\.agentReplSidebar && window\\.agentReplSidebar(\"toggle-mark\")"
+                                    script)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-sidebar-test-webview-dispatch-errors-without-webview ()
+  "Dispatch without a live webview buffer fails loudly."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws1")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1")))
+      (should-error (agent-repl-sidebar--webview-dispatch "visit")
+                    :type 'user-error))))
+
+;;;; ---- Follow navigation ----
+
+(ert-deftest agent-repl-sidebar-test-follow-step-switches-in-order ()
+  "Follow-next switches to the next workspace in sidebar render order."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws-a" :priority "p1")
+    (agent-repl-sidebar-test--register "ws-b" :priority "p2")
+    (let ((switched nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "ws-a"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws) (push ws switched))))
+        (agent-repl-sidebar--follow-step 1))
+      (should (equal '("ws-b") switched)))))
+
+(ert-deftest agent-repl-sidebar-test-follow-step-skips-merged ()
+  "Follow navigation never lands on a MERGED entry."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws-a" :priority "p1")
+    (agent-repl-sidebar-test--register "ws-m" :repl-state :merged)
+    (let ((switched nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "ws-a"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws) (push ws switched))))
+        (agent-repl-sidebar--follow-step 1))
+      (should-not switched))))
+
+(ert-deftest agent-repl-sidebar-test-follow-step-stops-at-edge ()
+  "Follow-previous at the top of the list is a no-op."
+  (agent-repl-sidebar-test--with-state
+    (agent-repl-sidebar-test--register "ws-a" :priority "p1")
+    (agent-repl-sidebar-test--register "ws-b" :priority "p2")
+    (let ((switched nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "ws-a"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws) (push ws switched))))
+        (agent-repl-sidebar--follow-step -1))
+      (should-not switched))))
+
 ;;;; ---- Drain ----
 
 (ert-deftest agent-repl-sidebar-test-drain-processes-matching-files-only ()
