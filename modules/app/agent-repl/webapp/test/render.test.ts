@@ -4395,6 +4395,14 @@ describe("async catalog", () => {
     expect(html).not.toContain("watcher-row");
   });
 
+  it("renders each member badge as a div-toggle, not a click-through button", () => {
+    // Arrange — handlePanelToggle's click-through guard (a, button, summary)
+    // would swallow a <button> badge, so the badge must be a plain toggle div.
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).toContain(`<div class="async-badge" data-panel-toggle="member:b1:w1"`);
+  });
+
   it("expands a badge's WatcherRow detail and its live tail when open", () => {
     // Arrange
     const w = watcher("bg1", { taskOutput: "polling the queue…" });
