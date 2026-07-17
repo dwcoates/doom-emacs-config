@@ -2968,13 +2968,24 @@ Closes the editor workspace via `agent-repl--close-workspace': kills
 the agent session, workspace buffers, and Doom perspective; drops the
 hashmap entry.  Does NOT cherry-pick, tag, reload config, switch focus,
 or remove the git worktree from disk — those are the merge/finish paths
-respectively.  Skill-invoked from `/workspace-close'.
+respectively.  Skill-invoked from `/workspace-close' and the
+`/create-or-update-workspace close' verb.
+
+CMD's `workspace' may be a full branch name (e.g. \"DWC/foo\") or a
+bare workspace name (e.g. \"foo\"); the close skill emits the branch
+name, but the persp and `agent-repl--workspaces' registry are keyed by
+the bare name.  It is normalized to the bare name via
+`agent-repl--bare-workspace-name' — matching the `finish', `open', and
+`prompt' handlers — BEFORE both the GNS gating and the teardown, so a
+branch-named close still finds its session and tab.  Without the
+normalization the close silently no-ops (the raw branch name matches no
+persp/session), leaving the tab and Claude session alive.
 
 Before tearing down, sends `agent-repl-gns-sockets-close-prompt' to
 the workspace's agent session via `agent-repl--gns-sockets-close-then'
 and waits for `:done'/`:idle' so the agent can release any held GNS
 sockets before its session is killed."
-  (let ((ws (alist-get 'workspace cmd)))
+  (let ((ws (agent-repl--bare-workspace-name (alist-get 'workspace cmd))))
     (agent-repl--log ws "workspace-commands-file close: ws=%s" ws)
     (agent-repl--gns-sockets-close-then
      ws (lambda () (agent-repl--close-workspace ws)))))

@@ -1322,6 +1322,31 @@ chance to release sockets before its session dies."
       (funcall teardown-fn)
       (should (equal received "feature-one")))))
 
+(ert-deftest agent-repl-test-handle-close-command-normalizes-full-branch-for-gns ()
+  "A full-branch `workspace' (e.g. \"DWC/feature-one\") is normalized to
+its bare name before `--gns-sockets-close-then' so the gating targets
+the persp/registry key rather than the never-registered branch name."
+  (let ((gating-ws :unset))
+    (cl-letf (((symbol-function 'agent-repl--gns-sockets-close-then)
+               (lambda (ws _teardown-fn) (setq gating-ws ws))))
+      (agent-repl--handle-close-command
+       '((type . "close") (workspace . "DWC/feature-one")))
+      (should (equal gating-ws "feature-one")))))
+
+(ert-deftest agent-repl-test-handle-close-command-normalizes-full-branch-for-teardown ()
+  "A full-branch `workspace' is normalized to its bare name before the
+teardown thunk calls `--close-workspace', so the tab and session close."
+  (let ((received :unset)
+        (teardown-fn nil))
+    (cl-letf (((symbol-function 'agent-repl--gns-sockets-close-then)
+               (lambda (_ws fn) (setq teardown-fn fn)))
+              ((symbol-function 'agent-repl--close-workspace)
+               (lambda (ws &optional _preserve) (setq received ws))))
+      (agent-repl--handle-close-command
+       '((type . "close") (workspace . "DWC/feature-one")))
+      (funcall teardown-fn)
+      (should (equal received "feature-one")))))
+
 ;;;; ---- Tests: handle-open-command ----
 
 (ert-deftest agent-repl-test-handle-open-command-missing-name-skips ()
