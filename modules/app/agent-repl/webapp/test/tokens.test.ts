@@ -33,7 +33,7 @@ function modelUsage(over: Partial<ModelUsage> = {}): ModelUsage {
 }
 
 function data(over: Partial<TokenMenuData> = {}): TokenMenuData {
-  return { topLevel: null, models: null, ...over };
+  return { contextSize: null, topLevel: null, models: null, ...over };
 }
 
 /** The overlay's rows as `label|value` pairs, in document order. */
@@ -51,21 +51,24 @@ describe("formatTokens", () => {
 });
 
 describe("tokensMenuHtml chip", () => {
-  it("headlines the top-level input-side sum: uncached plus both cache dimensions", () => {
+  it("headlines the session's current context size", () => {
     // Arrange
-    const d = data({ topLevel: usage({ input_tokens: 1000, cache_read_input_tokens: 200, cache_creation_input_tokens: 34 }) });
+    const d = data({ contextSize: 1234 });
     // Act + Assert
     expect(tokensMenuHtml(d, false)).toContain("tokens: 1,234 ");
   });
 
-  it("keeps output tokens out of the chip's figure", () => {
-    // Arrange — output moves only the overlay's output row.
-    const d = data({ topLevel: usage({ input_tokens: 7, output_tokens: 9000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }) });
+  it("shows the context size, not the cumulative input-side spend", () => {
+    // Arrange — a large cumulative topLevel must NOT move the chip figure.
+    const d = data({
+      contextSize: 42,
+      topLevel: usage({ input_tokens: 999999, cache_read_input_tokens: 999999 }),
+    });
     // Act + Assert
-    expect(tokensMenuHtml(d, false)).toContain("tokens: 7 ");
+    expect(tokensMenuHtml(d, false)).toContain("tokens: 42 ");
   });
 
-  it("dashes the figure before any usage is known", () => {
+  it("dashes the figure before any context size is known", () => {
     // Arrange + Act + Assert — null is unknown, not a spent 0.
     expect(tokensMenuHtml(data(), false)).toContain("tokens: — ");
   });

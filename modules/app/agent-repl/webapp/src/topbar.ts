@@ -19,11 +19,11 @@
  *   bubble (its `tool-use-start` ts to its result, or to now while it
  *   runs — kept ticking by the same once-a-second discipline, see
  *   `agent-clock.ts`).
- * - tokens — the session renders its CUMULATIVE usage behind the tokens
- *   dropdown (`tokens.ts`: the chip is the top-level agent's input-side
- *   spend, the overlay the whole-tree resolution); an agent bubble
- *   renders its conversation's CURRENT context size as a plain figure
- *   (the attributed `usage` frames banked on its tool item).
+ * - tokens — the session renders its CURRENT context size behind the
+ *   tokens dropdown (`tokens.ts`: the chip is the standing context size,
+ *   the overlay the cumulative spend and whole-tree resolution); an agent
+ *   bubble renders its conversation's CURRENT context size as a plain
+ *   figure (the attributed `usage` frames banked on its tool item).
  * - agents / tasks — the counter rosters, session-wide or filtered to the
  *   agent's DIRECT children (see `agents.ts` / `tasks.ts`).
  */
@@ -141,12 +141,16 @@ export function sessionTopbarDatapoints(
   return {
     parentWs,
     timerLabel,
-    // The session's tokens datapoint is the dropdown, not a standing: the
-    // chip reads the top-level agent's cumulative input-side spend and
-    // the overlay the whole-tree resolution. The context standing stays
-    // in the store (`contextTokens`) for the result chips.
+    // The session's tokens datapoint is the dropdown: the chip reads the
+    // session's CURRENT context size (`state.contextTokens`, the same
+    // figure the response bubble shows) and the overlay carries the
+    // cumulative input-side spend plus the whole-tree resolution.
     contextTokens: null,
-    tokenMenu: { topLevel: topLevelUsage(state), models: state.modelUsage },
+    tokenMenu: {
+      contextSize: state.contextTokens,
+      topLevel: topLevelUsage(state),
+      models: state.modelUsage,
+    },
     agents: sessionSubagents(state.items),
     tasks: sessionTasks(state.items),
     currentTurn: countedTurns(state.items),
