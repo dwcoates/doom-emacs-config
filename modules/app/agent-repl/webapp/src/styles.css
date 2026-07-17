@@ -71,6 +71,14 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* The async-quiescence border (and the in-bubble catalog + monitoring row):
+     a warm AMBER sitting between the idle orange/yellow indicators and the
+     alarm red, DISTINCT from the yellow --q-border (#eab308) and the pale
+     --turn-complete-border (#e6d190). It reads as its own state — "main chain
+     idle, model AVAILABLE, background work continues" — neither the working
+     orange nor a settled green, so a quiescent-but-still-watching session is
+     unmistakable at a glance. */
+  --async: #f59e0b;
   /* AskUserQuestion picker. Two tokens shape the "answer me" panel:
      --q-opt-bg lifts the option bubbles (and the question badge, which shares
        their fill) clear of the plain feed background the picker sits on, so an
@@ -154,6 +162,8 @@
     --interrupted: #facc15;
     --clear-divider: #ef4444;
     --final-response: #4ade80;
+    /* Brighter amber for the dark theme, as the other state borders lift. */
+    --async: #fbbf24;
     --q-border: #facc15;
     --async-card: #0a4a42;
     --async-border: #4fc4b0;
@@ -459,9 +469,12 @@ pre {
    queued-card row below), the agent's response hugs the left, so the
    feed reads as a typical two-sided text-message thread with a full
    quarter of blank margin always open on the bubble's off side. Every
-   bubble reserves its border box up front, so a turn's final response
-   gaining the green border on completion recolors 1px that were already
-   laid out rather than reflowing the feed under a reader mid-sentence. */
+   bubble reserves its 0.5px border box up front, so a turn's final
+   response gaining the green (or amber async) state border on completion
+   recolors 0.5px that were already laid out rather than reflowing the feed
+   under a reader mid-sentence. The width is halved from 1px so the state
+   border reads as a hairline accent on the answer rather than a heavy
+   frame. */
 /* Every bubble — the user's prompt and the agent's response alike — is a
    body column plus the turn's time stamped into the top-right corner. The
    stamp holds its own column rather than overlaying the body, so a
@@ -469,7 +482,7 @@ pre {
 .bubble {
   padding: 0.6rem 0.9rem;
   border-radius: 8px;
-  border: 1px solid transparent;
+  border: 0.5px solid transparent;
   display: flex;
   align-items: flex-start;
   gap: 0.9rem;
@@ -520,8 +533,18 @@ pre {
   align-self: flex-start;
   max-width: 75%;
 }
-/* The answer the turn landed on, as against the commentary above it. */
+/* The answer the turn landed on, as against the commentary above it. Only
+   the border color changes, so the 0.5px the base reserved stays laid out. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
+/* Async quiescence: a bubble whose LIVE background work is enumerated inside
+   it (see AsyncCatalog) wears the amber async border — "the answer is landed
+   but its detached work is not". Amber outranks the green final-response (it
+   is declared after it, at higher specificity for the assistant case), and
+   flips to green once every member settles. The user's own prompt bubble
+   takes it too, for a tools-only turn that hosts its survivors there. Only
+   the color changes, so the reserved 0.5px stays put — no reflow on the flip. */
+.bubble.assistant.async-live,
+.bubble.user.async-live { border-color: var(--async); }
 /* The breath of the bubble the UI has nothing newer to show for: it rocks
    between its own wash and one shade of that same wash (--pulse-to, named by
    each role above), so a reader who has caught up sees the session still
@@ -760,6 +783,40 @@ pre {
 /* The live elapsed the poll feeds (the store's frozen heartbeat is only a
    fallback): a muted monospace figure trailing the watcher's badge. */
 .watcher-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The in-bubble async catalog (async-quiescence): the bubble's live-or-settled
+   background work, as a bottom strip of amber badges under the monitoring
+   line. Set off from the answer prose above it by a dashed top rule, like the
+   folds it replaces. */
+.async-catalog {
+  border-top: 1px dashed var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+.async-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+/* One member badge: a tab-like AMBER pill (the async color), its live/settled
+   dot leading, filled when its own detail is the one open. A settled member's
+   badge quiets to the muted grey — its work is history the reader can still
+   reopen, but no longer the live signal the amber names. */
+.async-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--async);
+  background: var(--card);
+  color: var(--async);
+  cursor: pointer;
+}
+.async-badge.active { background: color-mix(in srgb, var(--async) 18%, transparent); }
+.async-badge.settled { border-color: var(--border); color: var(--muted); }
 
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
@@ -1254,6 +1311,24 @@ pre {
   border-top-color: var(--retry);
   border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
+}
+/* The monitoring indicator: the AMBER row saying background work continues
+   while the main chain is idle (async quiescence). Same geometry as the
+   thinking/working rows; it REUSES the textless-thinking arc rather than
+   defining its own spinner, tinted amber below so the arc reads as the
+   async --async hue rather than the working orange. Serves both homes — the
+   in-bubble catalog's collapsed face and the global feed-tail fallback. */
+.monitoring-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  color: var(--async);
+  font-size: 0.85rem;
+}
+.monitoring-pending .thinking-spinner {
+  border-color: color-mix(in srgb, var(--async) 25%, transparent);
+  border-top-color: var(--async);
 }
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then
