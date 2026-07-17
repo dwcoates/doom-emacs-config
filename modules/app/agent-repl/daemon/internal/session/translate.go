@@ -795,7 +795,7 @@ func (t *Translator) onToolResult(evt *protocol.L1Event) []protocol.L2Frame {
 	if !ok {
 		return frames
 	}
-	frame.Render = renderHint(meta.name, meta.input, evt.Content, t.ConfigDir, t.CWD)
+	frame.Render = renderHint(meta.name, meta.input, evt.Structured, evt.Content, t.ConfigDir, t.CWD)
 	// The §2.6 descriptor rides AFTER its result, so a client applying the
 	// batch in order already holds the card the source attaches to.
 	if src := classifyAsyncSource(meta.name, evt.Structured, evt.IsError); src != nil {
