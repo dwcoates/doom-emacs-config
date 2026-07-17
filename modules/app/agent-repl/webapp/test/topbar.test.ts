@@ -313,9 +313,10 @@ describe("topbarInfoHtml", () => {
   });
 
   it("renders the tokens dropdown chip when the scope carries a token menu", () => {
-    // Arrange — the session scope's tokens datapoint.
+    // Arrange — the session scope's tokens datapoint; the chip figure is
+    // the current context size, not the cumulative topLevel.
     const html2 = strip({
-      tokenMenu: { topLevel: { input_tokens: 7, output_tokens: 1 }, models: null },
+      tokenMenu: { contextSize: 7, topLevel: { input_tokens: 999, output_tokens: 1 }, models: null },
     });
     // Assert — the figure is the dropdown's trigger, not a plain span.
     expect(html2).toContain("data-tokens-toggle");
@@ -325,7 +326,7 @@ describe("topbarInfoHtml", () => {
   it("drops the usage breakdown when the tokens chip is open", () => {
     // Arrange + Act
     const html2 = strip(
-      { tokenMenu: { topLevel: null, models: null } },
+      { tokenMenu: { contextSize: null, topLevel: null, models: null } },
       { tokensOpen: true },
     );
     // Assert
@@ -440,6 +441,15 @@ describe("sessionTopbarDatapoints", () => {
     const d = sessionTopbarDatapoints(state, null, IDLE_LABEL);
     // Assert
     expect(d.tokenMenu?.topLevel).toEqual({ input_tokens: 10, output_tokens: 20 });
+  });
+
+  it("projects the standing context size as the chip's figure", () => {
+    // Arrange — the store's current context size feeds the chip.
+    const state = storeState({ contextTokens: 132_576 });
+    // Act
+    const d = sessionTopbarDatapoints(state, null, IDLE_LABEL);
+    // Assert
+    expect(d.tokenMenu?.contextSize).toBe(132_576);
   });
 
   it("hands the whole-tree per-model map to the dropdown", () => {
