@@ -265,6 +265,60 @@ type ToolUseResultFrame struct {
 	Render    *RenderHint     `json:"render,omitempty"`
 }
 
+// StreamRef says where an AsyncSource's stream lives and how to read it.
+//
+// Format selects the CLIENT's renderer, and is the whole reason the fold
+// generalizes: a stream that is a conversation renders as nested bubbles,
+// one that is a record log renders as rows, and one that is bytes renders
+// as a pre. Nothing is forced into a shape its data does not have.
+type StreamRef struct {
+	// ws     — already on the wire as task-output-delta frames.
+	// poll   — GET /sessions/{id}/tasks/{taskId}/output, only while open.
+	// frames — already on the wire as ordinary tool-use frames; the client
+	//          correlates them itself and no transport is needed.
+	Transport string `json:"transport"`
+	// jsonl-transcript — a subagent's full JSONL transcript (bubbles).
+	// jsonl-journal    — a workflow run's journal.jsonl records (rows).
+	// events           — discrete state transitions (rows).
+	// text             — unstructured bytes (pre).
+	Format string `json:"format"`
+}
+
+// AsyncSource declares that one tool call OWNS A STREAM: work that
+// outlives the call and keeps producing after it settles.
+//
+// This is the seam the expanded-bubble view is built on. Before it, every
+// layer answered "does this call own a stream?" independently, by regex
+// over English prose in the result text — so a CLI wording change silently
+// disabled tailing, the poll route, and every watcher fold at once, with no
+// error. The answer is now derived ONCE, structurally, from the SDK's
+// tool_use_result (§1.2 `structured`), and every layer below consumes it.
+//
+// Adding a newly supported async type is one arm in classifyAsyncSource:
+// no new frame, no new store field, no new render path, no new regex.
+type AsyncSource struct {
+	// The harness's own id for the work: an agentId, a backgroundTaskId, a
+	// workflow task id. Keys the poll route and the client's fold.
+	SourceID string `json:"source_id"`
+	// agent | shell | workflow | task
+	Kind string `json:"kind"`
+	// Absent when the source announced no readable stream.
+	Stream *StreamRef `json:"stream,omitempty"`
+	// One line naming the work, for the fold's collapsed face.
+	Label string `json:"label,omitempty"`
+	// running | done | error | killed
+	Status string `json:"status"`
+}
+
+// AsyncSourceFrame announces that ToolUseID's call spawned detached work.
+// One frame per spawn — a descriptor, never a stream — so it costs the
+// retention ring a single frame no matter how loud the work is.
+type AsyncSourceFrame struct {
+	Envelope
+	ToolUseID string      `json:"tool_use_id"`
+	Source    AsyncSource `json:"source"`
+}
+
 type ToolUseProgressFrame struct {
 	Envelope
 	ToolUseID string `json:"tool_use_id"`

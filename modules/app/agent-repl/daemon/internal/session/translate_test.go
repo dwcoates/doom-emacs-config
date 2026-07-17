@@ -323,6 +323,62 @@ func TestTranslatorToolResultCarriesBashRenderHint(t *testing.T) {
 	}
 }
 
+// startAgentCall opens a subagent tool call the translator will remember, so
+// its result can be classified against the tool's name.
+func startAgentCall(t *testing.T, tr *Translator, id string) {
+	t.Helper()
+	tr.OnEvent(streamEvt(t, `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"`+id+`","name":"Agent","input":{}}}`))
+	tr.OnEvent(streamEvt(t, `{"type":"content_block_stop","index":0}`))
+}
+
+func TestTranslatorEmitsAnAsyncSourceAfterTheResultThatSpawnedIt(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	startMessage(t, tr, "msg1")
+	startAgentCall(t, tr, "t1")
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"tool-result","session_id":"s1","uuid":"u","tool_use_id":"t1","is_error":false,"content":"launched","structured":{"isAsync":true,"agentId":"a9","canReadOutputFile":true,"outputFile":"/tmp/claude-1/s/tasks/a9.output"}}`))
+	// Assert — order matters: the card must exist before the source attaches.
+	wantTypes(t, frames, "tool-use-result", "async-source")
+}
+
+func TestTranslatorAsyncSourceNamesTheSpawningCall(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	startMessage(t, tr, "msg1")
+	startAgentCall(t, tr, "t1")
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"tool-result","session_id":"s1","uuid":"u","tool_use_id":"t1","is_error":false,"content":"launched","structured":{"isAsync":true,"agentId":"a9"}}`))
+	// Assert
+	src := frames[1].(*protocol.AsyncSourceFrame)
+	if src.ToolUseID != "t1" || src.Source.SourceID != "a9" {
+		t.Errorf("async-source = %+v", src)
+	}
+}
+
+func TestTranslatorEmitsNoAsyncSourceForAToolThatSpawnedNothing(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	startMessage(t, tr, "msg1")
+	tr.OnEvent(streamEvt(t, `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}`))
+	tr.OnEvent(streamEvt(t, `{"type":"content_block_stop","index":0}`))
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"tool-result","session_id":"s1","uuid":"u","tool_use_id":"t1","is_error":false,"content":"ls","structured":{"stdout":"ls","stderr":""}}`))
+	// Assert
+	wantTypes(t, frames, "tool-use-result")
+}
+
+func TestTranslatorEmitsNoAsyncSourceWhenTheShimSentNoStructuredResult(t *testing.T) {
+	// Arrange — a shim predating §1.2 `structured`.
+	tr := NewTranslator()
+	startMessage(t, tr, "msg1")
+	startAgentCall(t, tr, "t1")
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"tool-result","session_id":"s1","uuid":"u","tool_use_id":"t1","is_error":false,"content":"Async agent launched successfully. agentId: a9"}`))
+	// Assert — the prose fallback still tails it; only the descriptor is absent.
+	wantTypes(t, frames, "tool-use-result")
+}
+
 func TestTranslatorToolResultWithoutKnownToolHasNoRender(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()

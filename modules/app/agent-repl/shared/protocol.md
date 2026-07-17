@@ -966,6 +966,66 @@ interface ToolUseProgressFrame extends WsEnvelope {
 }
 ```
 
+#### `async-source`
+
+Declares that ONE TOOL CALL OWNS A STREAM: work that outlives the call and
+keeps producing after it settles. Rides immediately after the
+`tool-use-result` that spawned it, so a client applying the batch in order
+already holds the card the source attaches to.
+
+This is the seam the expanded-bubble view is built on. Before it, every
+layer answered "does this call own a stream?" independently, by regex over
+the English prose in the result text — so a CLI wording change silently
+disabled tailing, the poll route, and every fold at once, with no error
+(no match is indistinguishable from no spawn). The answer is now derived
+once, structurally, from §1.2 `structured`.
+
+**One frame per spawn — a descriptor, never a stream.** Bulk content keeps
+its existing transport (`task-output-delta` for shells, the poll route for
+agent transcripts), so the retention ring pays a single frame no matter how
+loud the work is.
+
+```ts
+interface AsyncSourceFrame extends WsEnvelope {
+  type: "async-source";
+  tool_use_id: ToolUseId;             // the spawning call
+  source: {
+    source_id: string;                // agentId | backgroundTaskId | workflow task id
+    kind: "agent" | "shell" | "workflow" | "task";
+    label?: string;                   // one line naming the work
+    status: "running" | "done" | "error" | "killed";
+    stream?: {
+      transport: "ws" | "poll" | "frames";
+      format: "jsonl-transcript" | "jsonl-journal" | "events" | "text";
+    };
+  };
+}
+```
+
+`format` selects the CLIENT's renderer, and is why the fold generalizes
+without forcing every type into one mould:
+
+| `format` | Stream is | Renders as |
+|---|---|---|
+| `jsonl-transcript` | a background agent's full JSONL transcript | **nested bubbles**, identical to an inline subagent |
+| `jsonl-journal` | a workflow run's `journal.jsonl` records | structured rows |
+| `events` | discrete state transitions already on the wire | structured rows |
+| `text` | a backgrounded shell's spool bytes | a `<pre>` |
+
+A shell's spool is unstructured bytes with nothing to recover, so it stays
+a `<pre>`; rendering it as bubbles would mean inventing structure the data
+does not have. `transport: "frames"` means the stream is already on the
+wire as ordinary tool-use frames and the client correlates it itself — no
+transport is needed at all.
+
+A `status` outside the closed enum reads as `running`: a fold that wrongly
+says "done" hides live output, while one that wrongly says "running" only
+spins a beat too long.
+
+Absent whenever the shim predates §1.2 `structured`, in which case the
+daemon's prose-regex discovery still tails the work — only the descriptor
+is missing.
+
 #### `task-output-delta`
 
 Live growth of a detached task's output file. The daemon tails the

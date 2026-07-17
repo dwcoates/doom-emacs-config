@@ -790,10 +790,22 @@ func (t *Translator) onToolResult(evt *protocol.L1Event) []protocol.L2Frame {
 		IsError:   evt.IsError,
 		Content:   evt.Content,
 	}
-	if meta, ok := t.tools[evt.ToolUseID]; ok {
-		frame.Render = renderHint(meta.name, meta.input, evt.Content, t.ConfigDir, t.CWD)
+	frames := []protocol.L2Frame{frame}
+	meta, ok := t.tools[evt.ToolUseID]
+	if !ok {
+		return frames
 	}
-	return []protocol.L2Frame{frame}
+	frame.Render = renderHint(meta.name, meta.input, evt.Content, t.ConfigDir, t.CWD)
+	// The §2.6 descriptor rides AFTER its result, so a client applying the
+	// batch in order already holds the card the source attaches to.
+	if src := classifyAsyncSource(meta.name, evt.Structured, evt.IsError); src != nil {
+		frames = append(frames, &protocol.AsyncSourceFrame{
+			Envelope:  protocol.Envelope{Type: "async-source"},
+			ToolUseID: evt.ToolUseID,
+			Source:    *src,
+		})
+	}
+	return frames
 }
 
 func (t *Translator) onResult(evt *protocol.L1Event) []protocol.L2Frame {
