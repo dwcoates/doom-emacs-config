@@ -292,7 +292,7 @@ would adopt it into a workspace; the drain only deletes."
         (should-not processed)))))
 
 (ert-deftest agent-repl-test-sentinel-drain-warns-on-delete-failure ()
-  "A failed drain delete must surface loudly, not be swallowed."
+  "A failed drain delete must surface via `--warn' (log + *Messages*), not be swallowed."
   (agent-repl-test--with-clean-state
     (let ((warned nil))
       (cl-letf (((symbol-function 'delete-file)
@@ -314,7 +314,7 @@ would adopt it into a workspace; the drain only deletes."
         (should (equal deleted "/dir/stop_abc"))))))
 
 (ert-deftest agent-repl-test-delete-sentinel-file-warns-and-does-not-rethrow ()
-  "A failed delete must warn (loud surface) and NOT rethrow into the watcher."
+  "A failed delete must warn (log + *Messages* surface) and NOT rethrow into the watcher."
   (agent-repl-test--with-clean-state
     (let ((warned nil))
       (cl-letf (((symbol-function 'delete-file)
