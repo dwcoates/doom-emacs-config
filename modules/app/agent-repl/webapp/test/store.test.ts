@@ -1210,7 +1210,7 @@ describe("ConversationStore final-response chip elapsed", () => {
     expect(resultItems(store)[1].sincePrevFinalMs).toBe(40_000);
   });
 
-  it("does not let an aborted turn between two answers advance the anchor", () => {
+  it("resets the anchor to an interrupt so the next answer's clock starts fresh", () => {
     // Arrange — a first answer, then an interrupted turn, then a real answer.
     const store = newStore();
     store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
@@ -1220,8 +1220,47 @@ describe("ConversationStore final-response chip elapsed", () => {
     // Act
     store.applyRaw(userTurnAt("2026-07-13T12:01:00.000Z"));
     store.applyRaw(resultAt("2026-07-13T12:01:30.000Z"));
-    // Assert — measured from the last real answer (12:00:30), across the abort.
-    expect(resultItems(store)[2].sincePrevFinalMs).toBe(60_000);
+    // Assert — 40s from the interrupt (12:00:50), NOT 60s across it: the
+    // interrupt is a boundary the next answer's clock resets from.
+    expect(resultItems(store)[2].sincePrevFinalMs).toBe(40_000);
+  });
+
+  it("measures the interrupt's own chip from the previous answer, not itself", () => {
+    // Arrange — a first answer, then an interrupted turn.
+    const store = newStore();
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // Act — the interrupted turn ends 20s after the first answer.
+    store.applyRaw(userTurnAt("2026-07-13T12:00:40.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:50.000Z", "aborted"));
+    // Assert — the abort advances the anchor only AFTER its own chip is
+    // measured, so it reads 20s from the prior answer, not 0 from itself.
+    expect(resultItems(store)[1].sincePrevFinalMs).toBe(20_000);
+  });
+
+  it("does not let a retracted turn advance the anchor", () => {
+    // Arrange — a first answer sets the anchor.
+    const store = newStore();
+    store.applyRaw(userTurnAt("2026-07-13T12:00:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:00:30.000Z"));
+    // A follow-up prompt is withdrawn: sent, retracted, then its aborted result.
+    store.applyRaw(
+      frame("user-turn", {
+        request_id: "rr",
+        ts: "2026-07-13T12:00:40.000Z",
+        content: [{ type: "text", text: "oops" }],
+      }),
+    );
+    store.applyRaw(
+      frame("user-turn-retracted", { request_id: "rr", ts: "2026-07-13T12:00:45.000Z" }),
+    );
+    store.applyRaw(resultAt("2026-07-13T12:00:50.000Z", "aborted"));
+    // Act — a real answer follows.
+    store.applyRaw(userTurnAt("2026-07-13T12:01:00.000Z"));
+    store.applyRaw(resultAt("2026-07-13T12:01:30.000Z"));
+    // Assert — the retracted turn never happened, so it left no clock mark:
+    // 60s from the first real answer (12:00:30), across the retraction.
+    expect(resultItems(store)[1].sincePrevFinalMs).toBe(60_000);
   });
 
   it("computes the same elapsed for a tab that joins mid-session as one present all along", () => {
