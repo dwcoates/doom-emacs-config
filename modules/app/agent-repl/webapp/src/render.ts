@@ -1101,16 +1101,21 @@ function asyncBadgeLabel(item: ToolItem): string {
  * the strip), and open state lives in the RENDERER (openPanels) so a badge
  * the user opened survives the bubble's per-frame re-renders. The key never
  * collides with a spawning card's own `async:<toolUseId>` fold.
+ *
+ * A `<div>`, not a `<button>`, because `data-panel-toggle` is dispatched by
+ * `handlePanelToggle`, whose click-through guard (a, button, summary) would
+ * otherwise swallow every badge click — the same shape every other fold
+ * toggle (activity, watcher, gns, async) already wears.
  */
 function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): string {
   const id = `member:${hostId}:${item.toolUseId}`;
   const settled = watcherSettled(item, panels);
   const open = panels?.isOpen(id) ?? false;
-  return `<button type="button" class="async-badge${settled ? " settled" : ""}${
+  return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
   }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${
     settled ? "done" : "running"
-  }" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</button>`;
+  }" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</div>`;
 }
 
 /**
