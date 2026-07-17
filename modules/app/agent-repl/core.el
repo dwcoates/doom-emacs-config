@@ -846,6 +846,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-gh
     agent-repl--signal-process
     agent-repl--cee-agent-reinstall-and-bounce-exit-code
+    agent-repl--notify-parent-of-child-merge
     agent-repl--frontend-run-build-script
     agent-repl--frontend-spawn-daemon
     agent-repl--frontend-http-request
