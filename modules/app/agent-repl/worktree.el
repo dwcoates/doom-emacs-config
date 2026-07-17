@@ -1726,6 +1726,73 @@ Inherits `minibuffer-local-map' so `RET' submits the typed text
 unchanged; `C-RET' submits it with `agent-repl--oneshot-no-action-suffix'
 appended via `agent-repl--oneshot-prompt-submit-no-action'.")
 
+(defvar agent-repl--oneshot-prompt-history nil
+  "History list for the `SPC j o' / `SPC j O' one-shot preemptive prompt.
+Kept distinct from the global `minibuffer-history' so up-arrow in the
+one-shot minibuffer cycles only prior one-shot prompts.  A normal `RET'
+submit records into it via `read-from-minibuffer's HIST argument;
+cancelling the prompt (ESC / `C-g') records the entry-thus-far here too
+via `agent-repl--oneshot-history-push', so the next one-shot can recall
+the abandoned prompt with up-arrow.")
+
+(defvar agent-repl--oneshot-prompt-in-progress nil
+  "Live contents of the in-flight one-shot preemptive prompt.
+Refreshed on every command while the one-shot minibuffer is active (see
+`agent-repl--oneshot-capture-in-progress') so a cancel can recover the
+entry-thus-far.  Dynamically bound to nil for the extent of each
+`agent-repl--oneshot-read-prompt' read; the top-level nil is just its
+resting value between reads.")
+
+(defun agent-repl--oneshot-history-push (text)
+  "Push TEXT onto `agent-repl--oneshot-prompt-history'.
+Trims TEXT, skips nil/empty, and skips a duplicate of the most-recent
+entry — mirroring `agent-repl--history-push' — so a cancelled one-shot
+prompt is recallable via up-arrow without seeding the history with
+blanks or consecutive repeats."
+  (let ((trimmed (string-trim (or text ""))))
+    (cond
+     ((string-empty-p trimmed)
+      (agent-repl--log nil "oneshot-history-push: skipped empty text"))
+     ((equal trimmed (car agent-repl--oneshot-prompt-history))
+      (agent-repl--log nil "oneshot-history-push: skipped duplicate text=%s" trimmed))
+     (t
+      (agent-repl--log nil "oneshot-history-push: pushed text=%s" trimmed)
+      (push trimmed agent-repl--oneshot-prompt-history)))))
+
+(defun agent-repl--oneshot-capture-in-progress ()
+  "Record the active minibuffer's contents into
+`agent-repl--oneshot-prompt-in-progress'.
+Installed as a buffer-local `post-command-hook' while the one-shot
+prompt minibuffer is active so a later cancel can recover the
+entry-thus-far.  Runs after each editing command, so on abort the
+variable holds the text as of the last completed command."
+  (setq agent-repl--oneshot-prompt-in-progress (minibuffer-contents)))
+
+(defun agent-repl--oneshot-read-prompt (tag)
+  "Read the one-shot preemptive prompt labelled TAG and return the string.
+Navigates and records history via `agent-repl--oneshot-prompt-history'
+so up-arrow cycles prior one-shot prompts.  A cancel — ESC, `C-g', or
+any other non-local exit before submit — still pushes the
+entry-thus-far onto that history via `agent-repl--oneshot-history-push'
+before the exit propagates, so the next one-shot recalls the abandoned
+prompt.  A normal submit is recorded by the built-in HIST mechanism, so
+the cleanup only pushes when the read did not complete."
+  (let ((agent-repl--oneshot-prompt-in-progress nil)
+        (completed nil))
+    (unwind-protect
+        (prog1
+            (minibuffer-with-setup-hook
+                (lambda ()
+                  (add-hook 'post-command-hook
+                            #'agent-repl--oneshot-capture-in-progress nil t))
+              (read-from-minibuffer
+               (format "One-shot %s prompt: " tag)
+               nil agent-repl--oneshot-prompt-map nil
+               'agent-repl--oneshot-prompt-history))
+          (setq completed t))
+      (unless completed
+        (agent-repl--oneshot-history-push agent-repl--oneshot-prompt-in-progress)))))
+
 (defun agent-repl--create-pinned-oneshot-workspace (git-root base suffix tag &optional model)
   "Internal helper for one-shot workspace creators pinned to GIT-ROOT.
 Shared by every `agent-repl-create-<repo>-oneshot-workspace' command —
@@ -1763,9 +1830,7 @@ The preemptive prompt is read with `agent-repl--oneshot-prompt-map':
 `agent-repl--oneshot-no-action-suffix' appended so the spawned agent
 investigates and reports without making changes."
   (let* ((base-commit (agent-repl--resolve-worktree-base base))
-         (raw-prompt (read-from-minibuffer
-                      (format "One-shot %s prompt: " tag)
-                      nil agent-repl--oneshot-prompt-map)))
+         (raw-prompt (agent-repl--oneshot-read-prompt tag)))
     (when (string-empty-p (string-trim (or raw-prompt "")))
       (user-error "Preemptive prompt is required"))
     (let* ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt suffix)))

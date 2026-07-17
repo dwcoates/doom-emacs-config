@@ -46,6 +46,7 @@
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
+(declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -411,22 +412,31 @@ bound to SESSION-ID (`:frontend-buffer-session-id'); a session change
 kills the stale webview and mounts a fresh one, since an xwidget
 session cannot be retargeted reliably from outside.  The fresh buffer
 is handed to `agent-repl--frontend-adopt-webview-buffer', which pins its
-name, drops the browser header-line, and arms the copy chords."
-  (let ((existing (agent-repl--ws-get ws :frontend-buffer))
-        (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
-    (if (and (buffer-live-p existing) (equal bound-to session-id))
-        existing
-      (when (buffer-live-p existing)
-        (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
-                          bound-to session-id)
-        (agent-repl--frontend-kill-webview existing))
-      (let* ((buf (agent-repl--frontend-make-webview-buffer url))
-             (name (agent-repl--frontend-webview-buffer-name ws)))
-        (agent-repl--frontend-adopt-webview-buffer buf name)
-        (agent-repl--ws-put ws :frontend-buffer buf)
-        (agent-repl--ws-put ws :frontend-buffer-session-id session-id)
-        (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
-        buf))))
+name, drops the browser header-line, and arms the copy chords.
+
+Whichever buffer is returned — reused or freshly mounted — its
+`default-directory' is realigned to WS's project root via
+`agent-repl--align-buffer-to-ws-dir', so `SPC .' from the webview window
+resolves against the worktree the REPL is attached to rather than the
+foreign directory the xwidget session inherited at creation."
+  (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
+         (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id))
+         (buf (if (and (buffer-live-p existing) (equal bound-to session-id))
+                  existing
+                (progn
+                  (when (buffer-live-p existing)
+                    (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
+                                      bound-to session-id)
+                    (agent-repl--frontend-kill-webview existing))
+                  (let* ((buf (agent-repl--frontend-make-webview-buffer url))
+                         (name (agent-repl--frontend-webview-buffer-name ws)))
+                    (agent-repl--frontend-adopt-webview-buffer buf name)
+                    (agent-repl--ws-put ws :frontend-buffer buf)
+                    (agent-repl--ws-put ws :frontend-buffer-session-id session-id)
+                    (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
+                    buf)))))
+    (agent-repl--align-buffer-to-ws-dir buf ws)
+    buf))
 
 ;;;; ---- Placement ---------------------------------------------------------------
 

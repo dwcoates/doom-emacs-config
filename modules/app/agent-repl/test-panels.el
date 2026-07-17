@@ -1339,6 +1339,23 @@ recorded :input-buffer nor the canonically-named buffer is live."
       (when-let ((b (get-buffer "*agent-panel-input-test-ws*")))
         (kill-buffer b)))))
 
+(ert-deftest agent-repl-test-panels-ensure-input-buffer-aligns-default-directory ()
+  "ensure-input-buffer realigns the input buffer's `default-directory' to
+the workspace :project-dir, even when the buffer was created against a
+foreign directory."
+  (agent-repl-test--with-clean-state
+    (let ((input-buf (get-buffer-create "*agent-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+            (with-current-buffer input-buf
+              (setq default-directory "/some/foreign/repo/"))
+            (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+            (agent-repl--ws-put "test-ws" :project-dir "/home/user/project")
+            (let ((result (agent-repl--ensure-input-buffer "test-ws")))
+              (should (equal (buffer-local-value 'default-directory result)
+                             "/home/user/project/"))))
+        (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
 ;;;; ---- Tests: focus-input show-or-focus branch ----
 
 (ert-deftest agent-repl-test-panels-focus-input-selects-window ()

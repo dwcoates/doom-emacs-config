@@ -92,19 +92,29 @@ Resolution order, loud rather than silent about a missing buffer:
 - else the canonically-named `*agent-panel-input-WS*' buffer when a
   live one already exists (re-adopting it without re-running
   `agent-repl-input-mode', which would trip its already-initialized guard);
-- else a fresh buffer via `agent-repl--initialize-input-buffer'."
-  (or (let ((buf (agent-repl--ws-get ws :input-buffer)))
-        (and (buffer-live-p buf) buf))
-      (let ((named (get-buffer (agent-repl--buffer-name "-input" ws))))
-        (when (buffer-live-p named)
-          (agent-repl--log ws "ensure-input-buffer: ws=%s adopting live named buffer %s"
-                            ws (buffer-name named))
-          (agent-repl--ws-put ws :input-buffer named)
-          named))
-      (progn
-        (agent-repl--log ws "ensure-input-buffer: ws=%s input buffer dead/nil — recreating" ws)
-        (agent-repl--initialize-input-buffer ws)
-        (agent-repl--ws-get ws :input-buffer))))
+- else a fresh buffer via `agent-repl--initialize-input-buffer'.
+
+Whichever buffer is resolved, its `default-directory' is realigned to
+WS's project root via `agent-repl--align-buffer-to-ws-dir' before it is
+returned.  The input buffer inherits `default-directory' from whatever
+buffer was current when it was created, so without this realignment
+`SPC .' from the input window can open in a foreign repository.  Running
+the alignment on every resolve — not only at creation — self-heals a
+buffer that was created (or session-restored) against the wrong dir."
+  (let ((buf (or (let ((buf (agent-repl--ws-get ws :input-buffer)))
+                   (and (buffer-live-p buf) buf))
+                 (let ((named (get-buffer (agent-repl--buffer-name "-input" ws))))
+                   (when (buffer-live-p named)
+                     (agent-repl--log ws "ensure-input-buffer: ws=%s adopting live named buffer %s"
+                                       ws (buffer-name named))
+                     (agent-repl--ws-put ws :input-buffer named)
+                     named))
+                 (progn
+                   (agent-repl--log ws "ensure-input-buffer: ws=%s input buffer dead/nil — recreating" ws)
+                   (agent-repl--initialize-input-buffer ws)
+                   (agent-repl--ws-get ws :input-buffer)))))
+    (agent-repl--align-buffer-to-ws-dir buf ws)
+    buf))
 
 (defun agent-repl--drain-pending-show-panels (ws)
   "Show WS's session if a preemptive prompt queued a :pending-show-panels flag.

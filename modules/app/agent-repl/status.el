@@ -485,6 +485,28 @@ Reads :project-dir from the workspace plist.  Errors if not set."
   (or (agent-repl--ws-get ws :project-dir)
       (error "agent-repl--ws-dir: no :project-dir for workspace %s" ws)))
 
+(defun agent-repl--align-buffer-to-ws-dir (buf ws)
+  "Point BUF's buffer-local `default-directory' at WS's project root.
+A workspace's panel buffers (the input composer, the webview) are born
+via `get-buffer-create' / xwidget session creation, which both seed
+`default-directory' from whatever buffer happened to be current at
+creation time — frequently an unrelated repository or worktree.  Left
+uncorrected, `SPC .' and every other `default-directory'-relative
+command run from a panel window resolves against that foreign directory
+rather than the worktree the REPL is actually attached to.  Repointing
+BUF at WS's `:project-dir' keeps the panels anchored to their own
+workspace, mirroring the same repoint the rename path already performs.
+
+No-op when BUF is dead or WS has no `:project-dir' recorded yet — the
+latter happens early in session startup, before the dir is initialized,
+and a later panel show re-runs this alignment once the dir lands.  This
+is deliberately soft rather than an assertion: the buffer can legitimately
+exist before its workspace directory is known."
+  (when (buffer-live-p buf)
+    (when-let ((dir (agent-repl--ws-get ws :project-dir)))
+      (with-current-buffer buf
+        (setq default-directory (file-name-as-directory dir))))))
+
 ;;; Git status (async) -------------------------------------------------------
 
 (defun agent-repl--workspace-clean-p (ws)
