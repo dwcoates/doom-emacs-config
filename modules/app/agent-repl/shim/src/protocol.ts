@@ -350,6 +350,21 @@ export interface ToolResultEvt {
   tool_use_id: ToolUseId;
   is_error: boolean;
   content: string | Array<{ type: "text"; text: string }>;
+  /**
+   * The SDK's `tool_use_result`: the tool's own JSON result, whose shape
+   * is per-tool. The SDK exists to hand this to us — its doc calls it the
+   * field "provided to make it easier for applications to present the tool
+   * result in a formatted way" — and `content` is only the flattened text
+   * the MODEL sees. Everything structured lives here and nowhere else:
+   * Bash's separate stdout/stderr, an Agent's `agentId`/`outputFile`/usage,
+   * an Edit's `structuredPatch`, a TaskUpdate's `statusChange`.
+   *
+   * Forwarded verbatim rather than projected: the shape is the SDK's to
+   * define and grows per tool, so narrowing it here would re-create the
+   * very drop this field exists to end. The daemon classifies it (§2.6).
+   * Absent whenever the SDK omitted it.
+   */
+  structured?: unknown;
 }
 
 export type SystemSubtype =
