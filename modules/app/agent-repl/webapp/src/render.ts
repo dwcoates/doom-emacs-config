@@ -18,6 +18,7 @@ import { formatTokens } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
+  PANEL_CLASS,
   applyExpanded,
   expandOwnSections,
   expandedKeys,
@@ -2039,6 +2040,26 @@ export function openAsyncSourceIds(
 }
 
 /**
+ * The fold a feed click should flip, or null to leave the click alone.
+ *
+ * TOGGLE is the nearest `data-panel-toggle` wrapper above the click and
+ * PANEL the nearest `.agent-panel`. A click inside the toggle's OWN panel
+ * belongs to the children rendered there, so it never collapses the fold
+ * around them. A NESTED fold's ticker resolves to the nested wrapper as
+ * its toggle, whose own panel is never between the ticker and the click —
+ * the guard is relative to the toggle rather than absolute, which is what
+ * lets folds nest recursively.
+ */
+export function panelToggleTarget<T extends { contains(node: T): boolean }>(
+  toggle: T | null,
+  panel: T | null,
+): T | null {
+  if (toggle === null) return null;
+  if (panel !== null && toggle.contains(panel)) return null;
+  return toggle;
+}
+
+/**
  * Feed renderer: reconciles the item list into `container`, reusing
  * nodes by key and only rewriting nodes whose HTML changed.
  */
@@ -2250,16 +2271,19 @@ export class FeedRenderer {
 
   /**
    * A click on an activity fold flips its card's panel. Clicks INSIDE
-   * the panel belong to the children (their own expands, permission
-   * buttons), a click on any control belongs to that control, and a
+   * the toggle's own panel belong to the children (their own expands,
+   * permission buttons, NESTED folds — which resolve as their own
+   * toggles), a click on any control belongs to that control, and a
    * click ending a text highlight is a selection gesture — the same
    * guards expandAction applies to the capped sections.
    */
   private handlePanelToggle(target: HTMLElement): void {
-    const toggle = target.closest("[data-panel-toggle]");
+    const toggle = panelToggleTarget(
+      target.closest("[data-panel-toggle]"),
+      target.closest(`.${PANEL_CLASS}`),
+    );
     if (
       !toggle ||
-      target.closest(".agent-panel") !== null ||
       target.closest(CLICK_THROUGH_SELECTOR) !== null ||
       (window.getSelection()?.toString() ?? "").trim() !== ""
     ) {
