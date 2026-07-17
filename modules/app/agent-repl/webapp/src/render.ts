@@ -1086,6 +1086,12 @@ function toolInput(item: ToolItem): string {
   // (see ToolCard) is the sole in-progress indicator, so an in-body pulse
   // would only double up on the beat the arc already marks.
   if (!item.inputDone) return "";
+  // A subagent card carries NO input section: its description plus the
+  // folded call JSON (prompt, model, agent type) was low-level clutter the
+  // user never needed, and the agent's identity already reads from the card
+  // head and its live topbar roster (the same description, see agents.ts
+  // `summary`). The whole clickable description box is dropped here.
+  if (SUBAGENT_TOOLS.has(item.toolName)) return "";
   if (item.toolName === "Bash" && item.input && typeof item.input.command === "string") {
     // .bash-input caps the visible command at 5 lines, scrollable
     // independently of the output's own 5-line cap.
@@ -1100,19 +1106,6 @@ function toolInput(item: ToolItem): string {
   }
   if (item.toolName === "Grep" && item.input && typeof item.input.pattern === "string") {
     return `<pre class="cmd">grep: ${escapeHtml(item.input.pattern)}</pre>`;
-  }
-  // A subagent call reads as its description alone; the prompt, model and
-  // agent type stay folded into the JSON one click away. The description
-  // class is .agent-input-desc, NOT the .agent-desc the topbar roster
-  // already owns for its own rows — two different components.
-  if (
-    SUBAGENT_TOOLS.has(item.toolName) &&
-    item.input &&
-    typeof item.input.description === "string"
-  ) {
-    return `<div class="tool-input agent-input"><div class="file-path agent-input-desc">${escapeHtml(
-      item.input.description,
-    )}</div><pre class="agent-json">${escapeHtml(item.inputJson)}</pre></div>`;
   }
   // SendMessage renders summary-only: the UI-preview summary (plus the
   // recipient), never the full message body.
