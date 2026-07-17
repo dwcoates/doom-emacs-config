@@ -260,11 +260,11 @@ describe("openSubfeedSourceIds", () => {
     expect(collect({ items: [shell] }).size).toBe(0);
   });
 
-  it("collects an open watcher fold's announced ids", () => {
-    // Arrange
+  it("collects an open catalog badge's announced ids", () => {
+    // Arrange — the member's badge is keyed member:<host>:<toolUseId>.
     const watchers = new Map([["b1", [spawnCard("Bash", "with ID: bg1")]]]);
-    // Act — only b1's fold is open.
-    const ids = collect({ watchers, isOpen: (id) => id === "watchers:b1" });
+    // Act — only b1's member badge is open.
+    const ids = collect({ watchers, isOpen: (id) => id === "member:b1:t1" });
     // Assert
     expect([...ids]).toEqual(["bg1"]);
   });

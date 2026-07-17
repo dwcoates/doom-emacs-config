@@ -4,6 +4,7 @@ import {
   ToolReveal,
   activeGroupMember,
   activityTicker,
+  anyLiveAsync,
   backfillChunks,
   clearBoundary,
   compactionBannerHtml,
@@ -18,6 +19,7 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
+  monitoringRowHtml,
   panelToggleTarget,
   planToolReveal,
   pulseTarget,
@@ -25,6 +27,7 @@ import {
   rendersEmpty,
   repinsToTail,
   retryingRowHtml,
+  showsMonitoringRow,
   tailStatusRow,
   wakeRemainingLabel,
   workingRowHtml,
@@ -315,6 +318,94 @@ describe("retryingRowHtml", () => {
     // Assert
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("monitoringRowHtml", () => {
+  it("renders nothing when not monitoring", () => {
+    // Arrange / Act / Assert — an empty string drops the tail node.
+    expect(monitoringRowHtml(false)).toBe("");
+  });
+
+  it("names the background work still being monitored", () => {
+    // Arrange / Act
+    const html = monitoringRowHtml(true);
+    // Assert
+    expect(html).toContain("monitoring…");
+  });
+
+  it("reuses the textless-thinking arc, tinted amber by its own class rather than a bespoke spinner", () => {
+    // Arrange / Act — like the working row, it leans on .thinking-spinner (the
+    // .monitoring-pending rule recolors it amber), so no monitoring-spinner exists.
+    const html = monitoringRowHtml(true);
+    // Assert
+    expect(html).toContain("thinking-spinner");
+    expect(html).not.toContain("monitoring-spinner");
+  });
+
+  it("marks the row as a live status region for assistive tech", () => {
+    // Arrange / Act
+    const html = monitoringRowHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("showsMonitoringRow (global monitoring-row precedence)", () => {
+  it("shows on an idle session with live async somewhere", () => {
+    // Arrange / Act — the quiescent-but-still-watching case.
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, anyLiveAsync: true });
+    // Assert
+    expect(show).toBe(true);
+  });
+
+  it("hides while a turn is in flight, ceding the tail to the working/thinking rows", () => {
+    // Arrange / Act — the main chain is active, so a bucket-1 row speaks instead.
+    const show = showsMonitoringRow({ turnInFlight: true, interrupting: false, anyLiveAsync: true });
+    // Assert
+    expect(show).toBe(false);
+  });
+
+  it("hides while interrupting, which the alarm-red row owns", () => {
+    // Arrange / Act
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: true, anyLiveAsync: true });
+    // Assert
+    expect(show).toBe(false);
+  });
+
+  it("hides on an idle session with no live async at all", () => {
+    // Arrange / Act — nothing left to monitor.
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, anyLiveAsync: false });
+    // Assert
+    expect(show).toBe(false);
+  });
+});
+
+describe("anyLiveAsync (feed-wide liveness for the global row)", () => {
+  const noChildren: PanelContext = { children: new Map(), isOpen: () => false };
+
+  it("is true when a watcher item is still live", () => {
+    // Arrange / Act — a backgrounded Bash with no notification and no folded stop.
+    const live = anyLiveAsync([watcher("bg1")], noChildren);
+    // Assert
+    expect(live).toBe(true);
+  });
+
+  it("is false when every watcher has settled", () => {
+    // Arrange — the completion notification settles it.
+    const settled = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
+    // Act
+    const live = anyLiveAsync([settled], noChildren);
+    // Assert
+    expect(live).toBe(false);
+  });
+
+  it("is false for a feed carrying no async members at all", () => {
+    // Arrange / Act — a plain text bubble owns no background work.
+    const live = anyLiveAsync([text("b1")], noChildren);
+    // Assert
+    expect(live).toBe(false);
   });
 });
 
@@ -4286,25 +4377,25 @@ function watcherPanelsWithChildren(
   };
 }
 
-describe("watcher fold", () => {
-  it("renders no fold on a final bubble whose turn armed no watcher", () => {
-    // Arrange + Act
+describe("async catalog", () => {
+  it("renders no catalog on a bubble the projection does not host", () => {
+    // Arrange + Act — no members mapped to this bubble.
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([]));
     // Assert
-    expect(html).not.toContain("watcher-fold");
+    expect(html).not.toContain("async-catalog");
   });
 
-  it("shows a live ticker face and none of the row while closed", () => {
+  it("shows the monitoring line and a member badge while live, with no detail closed", () => {
     // Arrange + Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
     // Assert
-    expect(html).toContain("watcher-fold");
-    expect(html).toContain("1 watcher · 1 live");
-    expect(html).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
+    expect(html).toContain("async-catalog");
+    expect(html).toContain("monitoring…");
+    expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
     expect(html).not.toContain("watcher-row");
   });
 
-  it("reveals the watcher row and its live tail when open", () => {
+  it("expands a badge's WatcherRow detail and its live tail when open", () => {
     // Arrange
     const w = watcher("bg1", { taskOutput: "polling the queue…" });
     // Act
@@ -4315,52 +4406,53 @@ describe("watcher fold", () => {
     expect(html).toContain("polling the queue…");
   });
 
-  it("drops the arc for a done face once the notification lands", () => {
-    // Arrange — the completion notification settles the watcher.
+  it("drops the monitoring line once the member's notification settles it", () => {
+    // Arrange — the completion notification settles the member.
     const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
     // Assert
-    expect(html).toContain("1 watcher · done");
-    expect(html).not.toContain("tool-spinner");
+    expect(html).not.toContain("monitoring…");
+    expect(html).toContain("async-badge settled");
   });
 
-  it("settles a watcher whose folded TaskStop succeeded, dropping the live count", () => {
+  it("settles a member whose folded TaskStop succeeded, dropping the monitoring line", () => {
     // Arrange — the prompt-mediated stop yields no notification, only a settled TaskStop card.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1")]));
     // Assert
-    expect(html).toContain("1 watcher · done");
-    expect(html).not.toContain("tool-spinner");
+    expect(html).not.toContain("monitoring…");
+    expect(html).toContain("async-badge settled");
   });
 
-  it("keeps a watcher live while its TaskStop is still in flight", () => {
+  it("keeps a member live while its TaskStop is still in flight", () => {
     // Arrange — a resultless TaskStop has not confirmed the stop yet.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: undefined })]));
     // Assert
-    expect(html).toContain("1 watcher · 1 live");
+    expect(html).toContain("monitoring…");
   });
 
-  it("keeps a watcher live when its TaskStop errored", () => {
-    // Arrange — a failed stop must not settle the watcher.
+  it("keeps a member live when its TaskStop errored", () => {
+    // Arrange — a failed stop must not settle the member.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: { isError: true, content: "no such task" } })]));
     // Assert
-    expect(html).toContain("1 watcher · 1 live");
+    expect(html).toContain("monitoring…");
   });
 
-  it("never folds watchers into a non-final commentary bubble", () => {
-    // Arrange — no finals, so the bubble carries no closing chip.
+  it("catalogs a non-final host bubble too (an interrupted turn's survivors)", () => {
+    // Arrange — no finals (no chip), but the projection still hosts a live member here.
     const html = renderItem(text("b1"), undefined, undefined, false, watcherPanels([watcher()]));
     // Assert
-    expect(html).not.toContain("watcher-fold");
+    expect(html).toContain("async-catalog");
+    expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
   });
 
-  it("renders a watcher's polled tail when the store streamed none", () => {
+  it("renders a member's polled tail when the store streamed none", () => {
     // Arrange — a background agent has no store taskOutput, only the poll.
     const panels: PanelContext = {
       children: new Map(),
@@ -4389,6 +4481,48 @@ describe("watcher fold", () => {
     // Assert
     expect(html).toContain("streamed line");
     expect(html).not.toContain("polled line");
+  });
+});
+
+describe("async-quiescence border (the invariant)", () => {
+  it("amber-borders a bubble with a live async member instead of the green final-response", () => {
+    // Arrange + Act — a live member makes the bubble amber, not green.
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).toContain(`class="bubble assistant md async-live"`);
+    expect(html).not.toContain("final-response");
+  });
+
+  it("flips the border to green once every async member settles (amber → green quiescence)", () => {
+    // Arrange — the member's notification settles it.
+    const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
+    // Assert
+    expect(html).toContain("final-response");
+    expect(html).not.toContain("async-live");
+  });
+
+  it("enumerates every live member as a selectable badge — the invariant the amber border promises", () => {
+    // Arrange + Act — the live member that causes the amber border MUST appear as a badge.
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).toContain("async-live");
+    expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
+  });
+
+  it("amber-borders a prompt bubble hosting a tools-only turn's live async", () => {
+    // Arrange — the projection hosts the survivor on the user-turn's request id (r1).
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => false,
+      watchers: new Map([["r1", [watcher()]]]),
+    };
+    // Act
+    const html = renderItem(userTurnAt(9, 0), undefined, undefined, false, panels);
+    // Assert
+    expect(html).toContain("bubble user async-live");
+    expect(html).toContain(`data-panel-toggle="member:r1:w1"`);
   });
 });
 
@@ -4472,8 +4606,8 @@ describe("gns-sockets fold", () => {
     expect(html).not.toContain("gns-fold");
   });
 
-  it("keys the fold beside a watcher fold without colliding", () => {
-    // Arrange — one bubble carrying both folds, only the gns one open.
+  it("keys the catalog badge beside the gns fold without colliding", () => {
+    // Arrange — one bubble carrying both surfaces, only the gns fold open.
     const panels: PanelContext = {
       children: new Map(),
       isOpen: (id) => id === "gns:b1",
@@ -4482,8 +4616,8 @@ describe("gns-sockets fold", () => {
     };
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
-    // Assert — the watcher fold stays closed while the gns fold opens.
-    expect(html).toContain(`data-panel-toggle="watchers:b1"`);
+    // Assert — the member badge stays closed while the gns fold opens.
+    expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
     expect(html).toContain(`data-panel-toggle="gns:b1"`);
     expect(html).not.toContain("watcher-row");
     expect(html).toContain("agent-panel");
