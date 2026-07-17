@@ -5,7 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
-import { parseJournal, parseTranscript } from "./async-stream.js";
+import { parseJournal } from "./async-stream.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -26,6 +26,7 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
+import { mergeChildren, transcriptFeed } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
 import {
   chessGameContainerHtml,
@@ -609,6 +610,17 @@ function Fold(opts: {
     </div>`;
 }
 
+/**
+ * The shared body of every fold panel: children rendered through the
+ * very renderItem the top level uses, each in its .feed-child shell —
+ * the single recursion point all nesting folds share.
+ */
+function feedChildren(children: readonly ConversationItem[], panels?: PanelContext): string {
+  return children
+    .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
+    .join("");
+}
+
 function ActivitySection(
   id: string,
   children: readonly ConversationItem[],
@@ -619,10 +631,7 @@ function ActivitySection(
     foldClass: "agent-activity",
     tickerClass: "agent-ticker",
     ticker: escapeHtml(activityTicker(children)),
-    body: () =>
-      children
-        .map((c) => `<div class="feed-child">${renderItem(c, panels.selections, undefined, false, panels)}</div>`)
-        .join(""),
+    body: () => feedChildren(children, panels),
     open: panels.isOpen(id),
   });
 }
@@ -758,12 +767,17 @@ function droppedNotice(dropped: number): string {
  * painted as an opaque <pre>.
  */
 function transcriptBubbles(text: string, panels?: PanelContext): string {
-  const { items, dropped } = parseTranscript(text);
-  if (items.length === 0) return "";
-  const body = items
-    .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
-    .join("");
-  return `${droppedNotice(dropped)}${body}`;
+  const { top, children, dropped } = transcriptFeed(text);
+  if (top.length === 0) return "";
+  // The transcript's own partition rides a derived context, so a nested
+  // card resolves ITS children from the very stream that carries them —
+  // a TaskUpdate folds into its create's panel here exactly as at depth
+  // one.
+  const nested =
+    panels && children.size > 0
+      ? { ...panels, children: mergeChildren(panels.children, children) }
+      : panels;
+  return `${droppedNotice(dropped)}${feedChildren(top, nested)}`;
 }
 
 /**
@@ -964,10 +978,7 @@ function GnsPanel(blockId: string, panels?: PanelContext): string {
     foldClass: "gns-fold",
     tickerClass: "gns-ticker",
     ticker: `📡 ${escapeHtml(`gns-sockets bridge · ${activityTicker(items)}`)}`,
-    body: () =>
-      items
-        .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
-        .join(""),
+    body: () => feedChildren(items, panels),
     open: panels?.isOpen(`gns:${blockId}`) ?? false,
   });
 }

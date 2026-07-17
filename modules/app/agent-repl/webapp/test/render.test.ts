@@ -3950,6 +3950,39 @@ describe("async fold", () => {
     expect(html).not.toContain("task-live-output");
   });
 
+  it("nests a transcript's task history inside its create card's own fold", () => {
+    // Arrange — the transcript's TaskUpdate is confined under its create
+    // exactly as the live partition confines it at depth one.
+    const taskTranscript = [
+      txLine({
+        type: "assistant",
+        message: {
+          id: "m3",
+          content: [{ type: "tool_use", id: "tc1", name: "TaskCreate", input: { subject: "fix the bug" } }],
+        },
+      }),
+      txLine({
+        type: "user",
+        message: {
+          id: "m4",
+          content: [{ type: "tool_result", tool_use_id: "tc1", content: "Task #7 created successfully: fix the bug" }],
+        },
+      }),
+      txLine({
+        type: "assistant",
+        message: {
+          id: "m5",
+          content: [{ type: "tool_use", id: "tu2", name: "TaskUpdate", input: { taskId: "7", status: "completed" } }],
+        },
+      }),
+    ].join("\n");
+    // Act — asyncPanels(true) opens every fold, the nested activity one included.
+    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, taskTranscript));
+    // Assert — the create card carries an activity fold holding the update.
+    expect(html).toContain("agent-activity");
+    expect(html).toContain(">TaskUpdate<");
+  });
+
   it("keeps a shell's spool bytes as a pre, having no structure to recover", () => {
     // Arrange
     const shell = sourcedCard(
