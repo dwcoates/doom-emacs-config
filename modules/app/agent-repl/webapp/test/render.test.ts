@@ -2711,8 +2711,9 @@ describe("itemKey", () => {
 });
 
 describe("renderItem tool previews", () => {
-  it("previews an Agent spawn by its description, as it does the legacy Task", () => {
-    // Arrange — the CLI renamed Task to Agent; the card must not regress to raw JSON.
+  it("hides the input section of an Agent spawn, as it does the legacy Task", () => {
+    // Arrange — the description-and-JSON box is dropped from the card entirely
+    // (see toolInput); the CLI renamed Task to Agent.
     const item: ToolItem = {
       kind: "tool",
     ts: "2026-05-24T10:00:00.000Z",
@@ -2724,9 +2725,7 @@ describe("renderItem tool previews", () => {
       inputDone: true,
     };
     // Act + Assert
-    expect(renderItem(item)).toContain(
-      `<div class="file-path agent-input-desc">hunt the flake</div>`,
-    );
+    expect(renderItem(item)).not.toContain("agent-input");
   });
 
   it("renders nothing for a TaskUpdate whose input is still streaming", () => {
@@ -2819,42 +2818,41 @@ describe("renderItem subagent input", () => {
     };
   }
 
-  it("leads the Agent card with the description alone", () => {
+  it("drops the Agent card's description box entirely", () => {
+    // Arrange
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert — the whole clickable description box (its only marker was the
+    // agent-input class) is gone.
+    expect(html).not.toContain("agent-input");
+  });
+
+  it("keeps the Agent description text off the card", () => {
+    // Arrange
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert — with the box dropped, the description no longer prints.
+    expect(html).not.toContain("Audit the sentinel");
+  });
+
+  it("keeps the Agent prompt off the card", () => {
+    // Arrange — the prompt used to ride the folded JSON, which is now gone.
+    const item = agentCall();
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("Read every file and");
+  });
+
+  it("carries none of the low-level call JSON, so .agent-json never renders", () => {
     // Arrange
     const item = agentCall();
     // Act
     const html = renderItem(item);
     // Assert
-    expect(html).toContain(`class="file-path agent-input-desc"`);
-    expect(html).toContain("Audit the sentinel");
-  });
-
-  it("keeps the Agent prompt out of the description line", () => {
-    // Arrange — the prompt reaches the card only inside the folded JSON.
-    const item = agentCall();
-    // Act
-    const desc = renderItem(item).match(/class="file-path agent-input-desc">([^<]*)</)?.[1];
-    // Assert
-    expect(desc).toBe("Audit the sentinel");
-  });
-
-  it("carries the full input JSON in the card, folded behind .agent-json", () => {
-    // Arrange
-    const item = agentCall();
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`<pre class="agent-json">`);
-    expect(html).toContain("Read every file and");
-  });
-
-  it("makes the Agent input box a capped section, so a click unfolds the JSON", () => {
-    // Arrange — .tool-input is what expand.ts recognizes as clickable.
-    const item = agentCall();
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`class="tool-input agent-input"`);
+    expect(html).not.toContain("agent-json");
   });
 
   it("washes the Agent card teal by naming it a special tool rather than Generic", () => {
@@ -2866,17 +2864,17 @@ describe("renderItem subagent input", () => {
     expect(html).toContain(`class="tool-card tool-agent"`);
   });
 
-  it("gives the legacy Task name the same description-first card", () => {
+  it("hides the legacy Task name's input section too", () => {
     // Arrange — Task is what the CLI called the subagent tool before Agent.
     const item = agentCall("Task");
     // Act
     const html = renderItem(item);
     // Assert
-    expect(html).toContain(`class="tool-input agent-input"`);
+    expect(html).not.toContain("agent-input");
   });
 
-  it("falls back to the generic prompt-headlined fold for an Agent call carrying no description", () => {
-    // Arrange
+  it("hides the input section for an Agent call carrying no description too", () => {
+    // Arrange — even with no description, no generic JSON fold takes its place.
     const item: ToolItem = {
       kind: "tool",
     ts: "2026-05-24T10:00:00.000Z",
@@ -2889,14 +2887,12 @@ describe("renderItem subagent input", () => {
     };
     // Act
     const html = renderItem(item);
-    // Assert — the generic fold headlines the prompt; the agent-specific
-    // description form stays off.
-    expect(html).toContain("folded-headline");
-    expect(html).not.toContain("agent-input-desc");
+    // Assert — no input section of any kind renders for a subagent card.
+    expect(html).not.toContain("tool-input");
   });
 
-  it("leaves the Agent's own output rendering untouched by the input fold", () => {
-    // Arrange — only the input is description-only; the result still shows.
+  it("leaves the Agent's own output rendering untouched by the hidden input", () => {
+    // Arrange — only the input is dropped; the result still shows.
     const item: ToolItem = { ...agentCall(), result: { isError: false, content: "the findings" } };
     // Act
     const html = renderItem(item);
@@ -3166,12 +3162,12 @@ describe("agent bubble topbar", () => {
     expect(html).not.toContain("agent-topbar");
   });
 
-  it("seats the strip under the card head, above the input", () => {
-    // Arrange + Act
+  it("seats the strip under the card head", () => {
+    // Arrange + Act — the input box the strip once sat above is gone (see
+    // toolInput), so the head is the only anchor left to seat it under.
     const html = renderItem(agentTool(), undefined, undefined, false, topbarPanels());
     // Assert
     expect(html.indexOf("agent-topbar")).toBeGreaterThan(html.indexOf("tool-head"));
-    expect(html.indexOf("agent-topbar")).toBeLessThan(html.indexOf("agent-input"));
   });
 });
 
