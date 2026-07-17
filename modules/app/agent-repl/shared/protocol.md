@@ -720,6 +720,57 @@ rebuilt from a transcript collapses that envelope back to the typed form
 (`/clear`, `/model fable`), so a resumed conversation renders its commands
 exactly as the live stream did.
 
+#### `user-turn-retracted`
+
+Withdraws the turn named by `request_id`: the client drops its bubble, so
+the feed reads as though the prompt had never been sent. This is the undo
+half of Emacs's `C-c C-k` — interrupting before the agent has answered is
+semantically an undo, and the host lands the withdrawn prompt back in its
+input buffer for revision.
+
+```ts
+interface UserTurnRetractedFrame extends WsEnvelope {
+  type: "user-turn-retracted";
+  request_id: RequestId;             // the turn to withdraw
+}
+```
+
+**When the daemon broadcasts it.** Only on explicit request, and only for
+a turn that is *both* the one currently in flight *and* unanswered — no
+`text-start`, `thinking-start`, `tool-use-start`, or `tool-use-result` has
+gone out for it. Once the agent has answered there is a response on screen
+to keep, so the turn stands. Naming the turn by `request_id` is what keeps
+the retraction honest about which prompt it drops: a caller that raced a
+queue drain asks for a turn that is no longer active, and is refused rather
+than given the wrong bubble. A turn is retracted at most once.
+
+**Requesting it.** `POST /sessions/{id}/interrupt` with a body of
+`{"retract_request_id": "<id>"}`; the reply is `{"retracted": <bool>}`,
+saying whether the turn was actually withdrawn. A caller only restores a
+prompt the feed actually gave up. The body is optional — a bare interrupt
+keeps its no-body contract and never retracts. (As with §2.13's queue
+routes, the route is named here because clients key off it.)
+
+**It is a frame, not a ring rewrite.** The retained ring (§2.10) stays
+append-only, so the withdrawal survives replay the way every other state
+change does: a client applying `[user-turn, interrupt, user-turn-retracted]`
+in seq order lands on the same feed live or replayed.
+
+**The turn still ends in a `result`.** The interrupt is what stops the
+turn, so its `aborted` result arrives as usual and remains the frame that
+ends the turn and clears the interrupting indicator. A client folds that
+result into the retraction rather than rendering it — a bubble reporting
+that the turn aborted would be the one trace of the prompt left on a feed
+that just dropped the prompt itself. The retraction therefore deliberately
+leaves the interrupting state standing, so the aborting turn's tail keeps
+being kept out of new bubbles for the whole window.
+
+**Not durable across transcript seeding.** The retraction lives in the ring
+and in the CLI's transcript it does not: a session reseeded from transcript
+(§2.11) rebuilds the withdrawn prompt's `user-turn` from the CLI's own
+record, and the bubble returns. The prompt likewise stays in the agent's
+context — this withdraws the turn from the FEED, not from the conversation.
+
 ### 2.4 Assistant text — streaming
 
 The daemon accumulates `stream-event` deltas into logical "text blocks"
