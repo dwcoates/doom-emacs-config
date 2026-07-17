@@ -1,7 +1,33 @@
 # Design: generalized async/streaming response types in the expanded bubble view
 
-Status: **analysis + proposal — nothing implemented.**
+Status: **IMPLEMENTED.** The seam, the three renderers, and the fixes below
+all shipped; `shared/protocol.md` §1.2 (`structured`) and §2.6
+(`async-source`) are the live contract. This document is kept as the record
+of WHY, and of what was deliberately left out (§1.4, §2.5).
 Scope: `modules/app/agent-repl/` (`shim/`, `daemon/`, `webapp/`, `shared/protocol.md`).
+
+## Correction (post-review)
+
+**§1.4 originally listed `TaskCreate`/`TaskUpdate` among the types the
+analogy fails for. That was wrong, and the review caught it.** A
+`TaskUpdate` is a stream event addressed to the `TaskCreate` that opened the
+task: it satisfies both conjuncts of the eligibility test — it streams
+(discrete `statusChange` transitions arriving over time, two per task in
+real transcripts) and it is card-scoped (correlated by `taskId` to one
+spawning call). The error was reading "owns a stream" as "emits bytes",
+when a stream of structured events qualifies equally.
+
+`TaskCreate` therefore ships as an `AsyncSource` of kind `task`, whose fold
+renders its transitions as rows. One caveat separates it from the
+zero-plumbing cases: the SDK gives a `TaskCreate` **no** structured result
+(`toolUseResult` is `null`), so its id is prose-only and
+`taskIdFromCreateResult` stays load-bearing. Its source is the one derived
+client-side (`taskSourceFor`); every other kind comes off the daemon's
+`async-source` frame. Everything downstream of the id is structured, so the
+prose coupling stops at that one line.
+
+The types the analogy genuinely fails for are `Skill`, `auth_status`, and
+`compact_boundary` — see §1.4.
 
 All `path:line` anchors are relative to `modules/app/agent-repl/` unless absolute.
 
@@ -177,9 +203,10 @@ Legitimate findings — these should **not** get nested-bubble treatment:
 - **`status` / `compact_boundary`.** Session-global; the existing indeterminate banner
   (`render.ts:226-234`) is right. `SDKStatus` is `'compacting' | null` — there is no richer
   state to render.
-- **`TaskCreate` / `TaskUpdate`.** A harness task is a to-do row, not a process — it has no
-  stream and no output. It belongs in the topbar roster (`tasks.ts`), which is where it is. It
-  wants the structured `taskId` (dropping the regex), not a fold.
+- ~~**`TaskCreate` / `TaskUpdate`.**~~ **Retracted — see the Correction at the top.** A
+  `TaskUpdate` IS a stream event addressed to its `TaskCreate`'s card, and now folds in as one.
+  The roster in `tasks.ts` stays regardless: it is a session-wide index, and the fold is
+  per-card detail, exactly as the agent roster coexists with the Agent card's own fold.
 - **`tool_progress`.** Already handled; not a bubble, a heartbeat on an existing card.
 
 ### 1.5 Correctness defects found along the way
@@ -303,6 +330,37 @@ at render time, exactly as the task premise suspected.
 6. Separately: `hook_response`, `structured_output`, `modelUsage`.
 
 Steps 1–4 are each independently shippable and independently valuable.
+
+### 2.6 What shipped, and what did not
+
+Shipped, in order:
+
+1. `shim/src/session.ts` forwards `tool_use_result` as §1.2 `structured`, and skips replayed
+   user messages (`isReplay`) — §1.5.1.
+2. `daemon/internal/session/asyncsource.go` classifies it into the §2.6 `async-source` frame.
+3. `webapp/src/store.ts` carries `ToolItem.asyncSource`.
+4. `webapp/src/async-stream.ts` parses each `format`; `render.ts` folds it through one
+   `AsyncFold`. **Background agents render as nested bubbles.**
+5. `RenderHint.Stderr` gained a producer (§1.5.3); the 200-byte agent truncation is gone.
+
+Consolidations taken: the three near-identical fold rule sets in `styles.css` (the two tickers
+were byte-identical) share one selector list; `WatcherRow`'s hand-rolled tail `<pre>` calls the
+shared format-driven renderer; `stringField` moved out of `agents.ts` and `tasks.ts` into the
+store.
+
+**Deliberately not done:**
+
+- **`resultText` in `partition.ts` vs `tasks.ts`** looks duplicated but joins blocks differently
+  (`"\n"` vs `""`). Merging it would be a behavior change wearing an extraction's clothes.
+- **The prose regexes stay** as the fallback for a shim predating `structured` (§2.5 Q1's
+  recommendation: one release, then delete).
+- **`hook_response`, `structured_output`, `modelUsage`, `assistant.error`** (§1.2 rows 8, 12,
+  13, 15) are still dropped at the shim. Each is a separate, independently shippable change.
+- **`slash_command`** (§1.5.4) is untouched pending the git-history check.
+- **`gofmt` drift** in `internal/login/login.go` and `internal/session/session.go` predates this
+  branch (verified at the merge base with this work stashed) and nothing in the repo enforces
+  `gofmt`. The drift is godoc heading style and struct alignment in files this work never
+  touched, so reformatting them would be unsolicited churn on someone else's chosen prose.
 
 ### 2.5 Open questions (for sign-off)
 
