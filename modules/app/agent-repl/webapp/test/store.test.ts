@@ -67,6 +67,29 @@ function usageFrame(total: number): string {
   });
 }
 
+/** The user's `/clear` turn, as the daemon replays it into the feed. */
+function clearTurn(): string {
+  return frame("user-turn", {
+    request_id: "rc",
+    content: [{ type: "text", text: "/clear" }],
+  });
+}
+
+/** A one-model per-model usage map, for the token-tally reset tests. */
+function sampleModelUsage(): Record<string, unknown> {
+  return {
+    "claude-opus-4-8": {
+      input_tokens: 30,
+      output_tokens: 40,
+      cache_creation_input_tokens: 60,
+      cache_read_input_tokens: 50,
+      web_search_requests: 2,
+      cost_usd: 0.12,
+      context_window: 1_000_000,
+    },
+  };
+}
+
 /** The store's result items, in arrival order. */
 function resultItems(store: ConversationStore): ResultItem[] {
   return store.state.items.filter((i): i is ResultItem => i.kind === "result");
@@ -1804,6 +1827,60 @@ describe("ConversationStore session usage tallies", () => {
     // Assert
     expect(topLevelUsage(store.state)).toBeNull();
     expect(store.state.modelUsage).toBeNull();
+  });
+
+  it("zeroes the top-level tally when a /clear re-inits the session", () => {
+    // Arrange — a spent session, then the user's /clear turn.
+    const store = newStore();
+    store.applyRaw(resultFrame({ usage: { input_tokens: 200_000, output_tokens: 5 } }));
+    store.applyRaw(clearTurn());
+    // Act — the /clear's re-init.
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert — the chip dashes (null) rather than keeping the pre-clear figure.
+    expect(topLevelUsage(store.state)).toBeNull();
+  });
+
+  it("zeroes the per-model map when a /clear re-inits the session", () => {
+    // Arrange — a session with a model map, then the user's /clear turn.
+    const store = newStore();
+    store.applyRaw(resultFrame({ model_usage: sampleModelUsage() }));
+    store.applyRaw(clearTurn());
+    // Act
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert
+    expect(store.state.modelUsage).toBeNull();
+  });
+
+  it("keeps the top-level tally through a resume init no /clear preceded", () => {
+    // Arrange — a resumed session: a normal turn whose usage replay restored.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [{ type: "text", text: "carry on" }] }));
+    store.applyRaw(usageFrame(50_000));
+    // Act — the resume's own re-init must not wipe the restored tally.
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert
+    expect(topLevelUsage(store.state)).toMatchObject({ input_tokens: 50_000 });
+  });
+
+  it("keeps the per-model map through a resume init no /clear preceded", () => {
+    // Arrange — a resumed session whose last turn was a normal prompt.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [{ type: "text", text: "carry on" }] }));
+    store.applyRaw(resultFrame({ model_usage: sampleModelUsage() }));
+    // Act
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert
+    expect(store.state.modelUsage).toEqual(sampleModelUsage());
+  });
+
+  it("leaves the tally alone on an init with no preceding user-turn", () => {
+    // Arrange — a cold-start init: a result banked, nothing typed yet.
+    const store = newStore();
+    store.applyRaw(resultFrame({ usage: { input_tokens: 10, output_tokens: 2 } }));
+    // Act — an init arrives with no user-turn in the feed to key a /clear off.
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert — no /clear, so the tally stands.
+    expect(topLevelUsage(store.state)).toMatchObject({ input_tokens: 10 });
   });
 });
 
