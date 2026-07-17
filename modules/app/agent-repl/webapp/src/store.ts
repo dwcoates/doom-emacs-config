@@ -389,6 +389,16 @@ export interface StoreState {
    * apply, so an in-flight bubble finishes streaming.
    */
   interrupting: boolean;
+  /**
+   * Whether the turn now ending was RETRACTED — its prompt withdrawn by a
+   * `user-turn-retracted` frame rather than merely interrupted. Set by that
+   * frame and consumed by the turn's terminating `result`, which is rendered
+   * as nothing: a retracted turn never happened, so an "aborted" bubble
+   * reporting that it did would be the one trace of the prompt left on a feed
+   * that just dropped it. The result still does all its bookkeeping — it is
+   * what clears `turnInFlight` and the interrupting indicator.
+   */
+  turnRetracted: boolean;
   costUsd: number | null;
   lastSeq: number;
 }
@@ -413,6 +423,7 @@ function initialState(): StoreState {
     modelUsage: null,
     compacting: false,
     interrupting: false,
+    turnRetracted: false,
     costUsd: null,
     lastSeq: 0,
   };
@@ -592,6 +603,7 @@ export class ConversationStore {
     s.turnUsage = new Map();
     s.modelUsage = null;
     s.interrupting = false;
+    s.turnRetracted = false;
     s.costUsd = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
     if (hello.resume_from_seq > 0 && hello.seq >= hello.resume_from_seq) {
@@ -627,7 +639,24 @@ export class ConversationStore {
         // A fresh turn is starting: any interrupt of the PREVIOUS turn is over
         // (a queue-run-now preemption drains its promoted message here).
         s.interrupting = false;
+        // Likewise any retraction: this turn is its own, and answers to it are
+        // its own to render.
+        s.turnRetracted = false;
         break;
+      case "user-turn-retracted": {
+        // The prompt is withdrawn: drop its bubble so the feed reads as though
+        // it was never sent. The daemon only retracts a turn the agent never
+        // answered, so there is nothing below it to orphan.
+        const at = s.items.findIndex(
+          (i) => i.kind === "user-turn" && i.requestId === frame.request_id,
+        );
+        if (at !== -1) s.items.splice(at, 1);
+        // `interrupting` deliberately stays: the turn is still aborting, and
+        // its tail must keep being kept out of new bubbles until the result
+        // lands. That result is also what clears the indicator.
+        s.turnRetracted = true;
+        break;
+      }
       case "text-start":
         if (this.opensNewBubbleWhileInterrupting(frame.parent_tool_use_id, undefined)) break;
         s.items.push({
@@ -780,21 +809,27 @@ export class ConversationStore {
           anchor === null
             ? frame.duration_ms
             : Date.parse(frame.ts) - Date.parse(anchor);
-        s.items.push({
-          kind: "result",
-          subtype: frame.subtype,
-          durationMs: frame.duration_ms,
-          sincePrevFinalMs,
-          numTurns: frame.num_turns,
-          totalCostUsd: frame.total_cost_usd,
-          usage: frame.usage,
-          isError: frame.is_error,
-          resultText: frame.result_text,
-          context: this.resultContext(),
-        });
+        // A retracted turn never happened, so it ends in nothing: rendering
+        // its "aborted" bubble would leave a report of the prompt on a feed
+        // that just dropped the prompt itself. The frame still runs the
+        // bookkeeping below — it is what ends the turn.
+        if (!s.turnRetracted)
+          s.items.push({
+            kind: "result",
+            subtype: frame.subtype,
+            durationMs: frame.duration_ms,
+            sincePrevFinalMs,
+            numTurns: frame.num_turns,
+            totalCostUsd: frame.total_cost_usd,
+            usage: frame.usage,
+            isError: frame.is_error,
+            resultText: frame.result_text,
+            context: this.resultContext(),
+          });
         // Only a successful turn is a final response, so only it becomes the
         // next chip's anchor — an aborted or errored turn produced no answer.
         if (frame.subtype === "success") s.lastFinalResponseAt = frame.ts;
+        s.turnRetracted = false;
         s.turnInFlight = false;
         s.turnStartedAt = null;
         // The turn has ended, so an interrupt of it is over: this `result` is

@@ -1717,3 +1717,126 @@ describe("ConversationStore session usage tallies", () => {
     expect(store.state.modelUsage).toBeNull();
   });
 });
+
+describe("ConversationStore turn retraction", () => {
+  /** The store's user-turn items, in arrival order. */
+  function userTurns(store: ConversationStore): UserTurnItem[] {
+    return store.state.items.filter((i): i is UserTurnItem => i.kind === "user-turn");
+  }
+
+  /** A prompt sent, then interrupted and retracted before any answer. */
+  function retractedTurn(store: ConversationStore): void {
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    store.applyRaw(frame("interrupt"));
+    store.applyRaw(frame("user-turn-retracted", { request_id: "r1" }));
+  }
+
+  /** The `aborted` result the retracted turn still ends in. */
+  function abortedResult(): string {
+    return frame("result", {
+      subtype: "aborted",
+      duration_ms: 10,
+      duration_api_ms: 5,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 1, output_tokens: 0 },
+      is_error: false,
+    });
+  }
+
+  it("drops the retracted turn's bubble", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    retractedTurn(store);
+    // Assert — the feed reads as though the prompt was never sent.
+    expect(userTurns(store)).toHaveLength(0);
+  });
+
+  it("leaves other turns' bubbles standing", () => {
+    // Arrange — an earlier turn the agent answered and closed.
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r0", content: [] }));
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m1" }));
+    // Act — a later prompt is retracted.
+    retractedTurn(store);
+    // Assert — retraction names one turn and takes only that one.
+    expect(userTurns(store).map((t) => t.requestId)).toEqual(["r0"]);
+  });
+
+  it("ignores a retraction naming an unknown turn", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    // Act — a request id the feed never saw (an evicted or foreign turn).
+    store.applyRaw(frame("user-turn-retracted", { request_id: "ghost" }));
+    // Assert — no bubble is taken by mistake.
+    expect(userTurns(store).map((t) => t.requestId)).toEqual(["r1"]);
+  });
+
+  it("keeps suppressing the aborting turn's tail after the retraction", () => {
+    // Arrange
+    const store = newStore();
+    retractedTurn(store);
+    // Act — a stray block the SDK had already dispatched.
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m1" }));
+    // Assert — the prompt is gone, so its tail must not sprout a bubble.
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("renders no result bubble for the retracted turn", () => {
+    // Arrange
+    const store = newStore();
+    retractedTurn(store);
+    // Act — the turn still ends in its own aborted result.
+    store.applyRaw(abortedResult());
+    // Assert — a retracted turn never happened, so it ends in nothing.
+    expect(resultItems(store)).toHaveLength(0);
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("still ends the turn on the retracted turn's result", () => {
+    // Arrange
+    const store = newStore();
+    retractedTurn(store);
+    // Act
+    store.applyRaw(abortedResult());
+    // Assert — the result does its bookkeeping even though it renders nothing.
+    expect(store.state.turnInFlight).toBe(false);
+    expect(store.state.interrupting).toBe(false);
+  });
+
+  it("renders the next turn's result normally after a retraction", () => {
+    // Arrange — a retracted turn, fully settled.
+    const store = newStore();
+    retractedTurn(store);
+    store.applyRaw(abortedResult());
+    // Act — the user revises the prompt and sends it again.
+    store.applyRaw(frame("user-turn", { request_id: "r2", content: [] }));
+    store.applyRaw(abortedResult());
+    // Assert — the retraction is spent, so this turn reports itself.
+    expect(resultItems(store)).toHaveLength(1);
+  });
+
+  it("renders a result for a turn that opened after the retraction", () => {
+    // Arrange — a retraction whose turn has NOT settled yet.
+    const store = newStore();
+    retractedTurn(store);
+    // Act — a fresh prompt supersedes it (a queue drain racing the abort).
+    store.applyRaw(frame("user-turn", { request_id: "r2", content: [] }));
+    store.applyRaw(abortedResult());
+    // Assert — the new turn is its own, so its result is rendered.
+    expect(resultItems(store)).toHaveLength(1);
+  });
+
+  it("replays to the same feed the live client saw", () => {
+    // Arrange — a fresh client rebuilding history from the retained ring.
+    const store = newStore();
+    // Act — the ring's frames, in seq order.
+    retractedTurn(store);
+    store.applyRaw(abortedResult());
+    // Assert — the retraction is a frame, so replay lands on the same feed.
+    expect(store.state.items).toHaveLength(0);
+    expect(store.state.turnInFlight).toBe(false);
+  });
+});

@@ -203,6 +203,24 @@ export interface UserTurnFrame extends WsEnvelope {
   content: ContentBlock[];
 }
 
+/**
+ * The user turn named by `request_id` is withdrawn: its bubble leaves the
+ * feed as though the prompt had never been sent. Broadcast only for a turn
+ * the agent never answered, when the interrupting client asked to retract it
+ * — the Emacs `C-c C-k` undo, which lands the prompt back in its input
+ * buffer for revision.
+ *
+ * The turn still ends in its own `aborted` result. The store folds that
+ * result into the retraction rather than rendering it (the turn did not
+ * abort, it never happened) while still letting it do its bookkeeping — it
+ * is what clears the interrupting indicator, so this frame deliberately
+ * leaves the indicator standing.
+ */
+export interface UserTurnRetractedFrame extends WsEnvelope {
+  type: "user-turn-retracted";
+  request_id: string;
+}
+
 // --- §2.4 / §2.5 streaming blocks ------------------------------------------------
 
 export interface TextStartFrame extends WsEnvelope {
@@ -447,6 +465,7 @@ export type L2Frame =
   | RetryFrame
   | ErrorFrame
   | UserTurnFrame
+  | UserTurnRetractedFrame
   | TextStartFrame
   | TextDeltaFrame
   | TextEndFrame
@@ -481,6 +500,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "retry",
   "error",
   "user-turn",
+  "user-turn-retracted",
   "text-start",
   "text-delta",
   "text-end",
