@@ -7,6 +7,7 @@
  * the transport should send (if any) instead of sending it itself.
  */
 import {
+  AsyncSource,
   ContentBlock,
   HelloFrame,
   L2Frame,
@@ -93,6 +94,13 @@ export interface ToolItem {
   };
   /** Envelope ts of the result frame: when the call settled. */
   resultTs?: string;
+  /**
+   * The detached work this call spawned (§2.6), as the daemon classified
+   * it from the SDK's structured tool result. Present only on a call that
+   * actually owns a stream, which is what the async fold keys off — a card
+   * without one renders no fold at all.
+   */
+  asyncSource?: AsyncSource;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   result?: {
@@ -256,6 +264,14 @@ export function topLevelUsage(state: StoreState): Usage | null {
   }
   return tally;
 }
+
+/** The closed §2.6 status enum, for narrowing a newer daemon's value. */
+const ASYNC_STATUSES: ReadonlySet<string> = new Set([
+  "running",
+  "done",
+  "error",
+  "killed",
+]);
 
 export type ConversationItem =
   | UserTurnItem
@@ -755,6 +771,29 @@ export class ConversationStore {
         if (item) {
           item.progress = frame.text;
           item.progressElapsedS = frame.elapsed_seconds;
+        }
+        break;
+      }
+      case "async-source": {
+        // The descriptor lands on the SPAWNING card, which the frame's own
+        // ordering guarantees already exists (§2.6 rides it after the
+        // result). An orphan is dropped rather than pushed as a system
+        // note: unlike a task-notification, a source with no card names no
+        // completion the user needs told about, and the card it belongs to
+        // is what the fold would have hung on.
+        const item = this.findTool(frame.tool_use_id);
+        if (item) {
+          item.asyncSource = {
+            ...frame.source,
+            // A status outside the closed enum reads as running: a fold
+            // wrongly saying "done" hides live output, while one wrongly
+            // saying "running" only spins a beat too long. The daemon
+            // already narrows this, so the guard is against a NEWER daemon
+            // paired with this client.
+            status: ASYNC_STATUSES.has(frame.source.status)
+              ? frame.source.status
+              : "running",
+          };
         }
         break;
       }
