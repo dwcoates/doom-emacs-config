@@ -1704,11 +1704,11 @@ A future trim that drops a state would silently re-break that chord there."
 
 (ert-deftest agent-repl-test-drawer-visit-chord-binds-csret-to-global-visit ()
   "`agent-repl--drawer-visit-chord' must map `C-S-<return>' to
-`agent-repl-drawer-global-visit' -- the entry the override install
+`agent-repl-sidebar-global-visit' -- the entry the override install
 plants into `general-override-mode-map'."
   (should (assoc "C-S-<return>" agent-repl--drawer-visit-chord))
   (should (eq (cdr (assoc "C-S-<return>" agent-repl--drawer-visit-chord))
-              'agent-repl-drawer-global-visit)))
+              'agent-repl-sidebar-global-visit)))
 
 (ert-deftest agent-repl-test-install-drawer-visit-override-installs-top-level ()
   "`--install-drawer-visit-override' must populate `general-override-mode-map'
@@ -1719,7 +1719,7 @@ any other minor-mode-map binding."
                (lambda (&rest _) (make-sparse-keymap))))
       (agent-repl--install-drawer-visit-override))
     (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
-                'agent-repl-drawer-global-visit))))
+                'agent-repl-sidebar-global-visit))))
 
 (ert-deftest agent-repl-test-install-drawer-visit-override-installs-intercept-aux ()
   "`--install-drawer-visit-override' must populate the evil intercept
@@ -1740,7 +1740,7 @@ major-mode aux like `agent-repl-input-mode-map's `:ni'."
       (let ((aux (cdr (assq state aux-maps))))
         (should aux)
         (should (eq (lookup-key aux (kbd "C-S-<return>"))
-                    'agent-repl-drawer-global-visit))))))
+                    'agent-repl-sidebar-global-visit))))))
 
 (ert-deftest agent-repl-test-install-drawer-visit-override-skips-aux-without-evil ()
   "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
@@ -1751,7 +1751,7 @@ binding without erroring."
                (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
       (agent-repl--install-drawer-visit-override))
     (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
-                'agent-repl-drawer-global-visit))))
+                'agent-repl-sidebar-global-visit))))
 
 ;;;; ---- Tests: workspace-jump override install ----
 

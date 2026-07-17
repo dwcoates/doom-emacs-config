@@ -22,15 +22,20 @@
 ;;;; ---- Helpers -----------------------------------------------------------
 
 (defmacro agent-repl-test--with-frontend-ws (ws plist &rest body)
-  "Register workspace WS with PLIST for BODY, cleaning buffers after."
+  "Register workspace WS with PLIST for BODY, cleaning buffers after.
+Binds the sidebar bridge off (mirroring
+`agent-repl-test--with-clean-state') so URL-shape assertions don't
+absorb the production default's `sidebar=1'; sidebar-specific tests
+opt back in with an inner `let'."
   (declare (indent 2))
-  `(unwind-protect
-       (progn
-         (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
-         ,@body)
-     (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
-       (when (buffer-live-p buf) (kill-buffer buf)))
-     (remhash ,ws agent-repl--workspaces)))
+  `(let ((agent-repl-sidebar-enabled nil))
+     (unwind-protect
+         (progn
+           (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
+           ,@body)
+       (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
+         (when (buffer-live-p buf) (kill-buffer buf)))
+       (remhash ,ws agent-repl--workspaces))))
 
 ;; The webview boundary mock (`agent-repl-test--fake-webview-factory')
 ;; lives in test-helpers.el — the explain-config popup mounts the same

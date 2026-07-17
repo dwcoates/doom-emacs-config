@@ -628,6 +628,11 @@ re-routes their frontend resolution instead."
          (agent-repl--sync-timer nil)
          (agent-repl--hide-overlay-refcount 0)
          (agent-repl-debug nil)
+         ;; Sidebar bridge: on by default in production (Phase 2), so a
+         ;; test that drives the status poll or an action would otherwise
+         ;; reach the network POST boundary.  Bound off at this choke
+         ;; point; sidebar tests opt in explicitly.
+         (agent-repl-sidebar-enabled nil)
          (agent-repl-default-frontend agent-repl-default-frontend)
          (agent-repl-workspace-snapshot-file
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
