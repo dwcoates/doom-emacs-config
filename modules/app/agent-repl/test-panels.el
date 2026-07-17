@@ -253,6 +253,10 @@ Returns the list of window symbols `delete-window' was asked to delete."
                      (lambda (win) (and (memq win windows) t)))
                     ((symbol-function 'agent-repl-window--side-window-p)
                      (lambda (_win) nil))
+                    ;; `--delete-where' now also excludes the minibuffer
+                    ;; window; the mocked window symbols are never it.
+                    ((symbol-function 'window-minibuffer-p)
+                     (lambda (&optional _win) nil))
                     ((symbol-function 'one-window-p)
                      (lambda (&rest _) nil))
                     ((symbol-function 'get-buffer-window)
@@ -316,6 +320,23 @@ reconciles the current workspace's own layout."
                  (lambda () (push 'ensure calls))))
         (agent-repl--on-window-change))
       (should (equal (nreverse calls) '(sync ensure))))))
+
+(ert-deftest agent-repl-test-panels-on-window-change-defers-while-minibuffer-active ()
+  "on-window-change skips layout reconciliation while a minibuffer is
+active (e.g. the `SPC p p' picker): reconciling then would churn windows
+under the open picker and sweep the undeletable minibuffer window.  The
+minibuffer's eventual close re-fires the hook to reconcile the settled
+layout."
+  (agent-repl-test--with-clean-state
+    (let ((calls '()))
+      (cl-letf (((symbol-function 'active-minibuffer-window)
+                 (lambda () 'a-minibuffer-window))
+                ((symbol-function 'agent-repl--sync-panels)
+                 (lambda () (push 'sync calls)))
+                ((symbol-function 'agent-repl-window--ensure-layout)
+                 (lambda () (push 'ensure calls))))
+        (agent-repl--on-window-change))
+      (should-not calls))))
 
 ;;;; ---- Tests: Defcustom defaults ----
 
