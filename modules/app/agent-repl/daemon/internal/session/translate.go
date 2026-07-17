@@ -36,6 +36,20 @@ type Translator struct {
 	// (every turn ends in one, §2.4). Introspection-only (GET /sessions
 	// turn_active) — no frame carries it.
 	turnActive bool
+	// turnResponded records whether the in-flight turn has produced any
+	// answer yet — text, thinking, or a tool call (isResponseFrame). Set by
+	// NoteBroadcast on the way out to clients, reset when the next turn
+	// opens. This is what makes a turn retractable: an unanswered prompt can
+	// still be withdrawn as though it were never sent, while one the agent
+	// has already begun answering cannot.
+	turnResponded bool
+	// turnRetracted records that the in-flight turn's prompt has already
+	// been withdrawn, so a second retraction of the same turn is refused
+	// rather than broadcast twice. A repeat C-c C-k on a bubble that is
+	// already gone must be inert: the retraction is what hands the prompt
+	// back to the Emacs input buffer, and handing it back twice would
+	// overwrite whatever the user typed after the first one.
+	turnRetracted bool
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
 	// pending set-model request_id → requested model.
@@ -204,6 +218,8 @@ func (t *Translator) OnEvent(evt *protocol.L1Event) []protocol.L2Frame {
 // user-message command, with string-shorthand content normalized.
 func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame {
 	t.turnActive = true
+	t.turnResponded = false
+	t.turnRetracted = false
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
@@ -296,6 +312,29 @@ func (t *Translator) OnInterruptCmd() []protocol.L2Frame {
 
 // TurnActive reports whether a user turn is currently in flight.
 func (t *Translator) TurnActive() bool { return t.turnActive }
+
+// NoteBroadcast records what an outbound frame means for the turn's state.
+// The session hub calls it for every frame on the way to clients, so the
+// turn's retractability tracks what clients actually saw rather than what any
+// one producer intended to emit — including the retraction itself, which is
+// an outbound frame like any other.
+func (t *Translator) NoteBroadcast(f protocol.L2Frame) {
+	if _, ok := f.(*protocol.UserTurnRetractedFrame); ok {
+		t.turnRetracted = true
+		return
+	}
+	if isResponseFrame(f) {
+		t.turnResponded = true
+	}
+}
+
+// TurnRetractable reports whether the in-flight turn can still be withdrawn
+// as though it were never sent: a turn is running, the agent has not yet
+// answered it with anything the feed would have rendered, and the prompt has
+// not already been withdrawn.
+func (t *Translator) TurnRetractable() bool {
+	return t.turnActive && !t.turnResponded && !t.turnRetracted
+}
 
 // PendingPermissionIDs returns the request ids of unresolved permission
 // prompts, sorted for deterministic introspection output.

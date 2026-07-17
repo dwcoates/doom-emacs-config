@@ -246,7 +246,7 @@ func closeReplayTurns(frames []protocol.L2Frame) []protocol.L2Frame {
 			closeTurn()
 			turnOpen = true
 		default:
-			if isReplayResponseFrame(f) {
+			if isResponseFrame(f) {
 				turnAnswered = true
 			}
 		}
@@ -259,12 +259,16 @@ func closeReplayTurns(frames []protocol.L2Frame) []protocol.L2Frame {
 	return out
 }
 
-// isReplayResponseFrame reports whether a replayed frame is the agent
-// doing something within its turn — text, thinking, a tool call, or a
-// tool result — as against pure metadata (model-changed) or the user's
-// own turn. A turn carrying at least one of these is an answered turn,
-// which the live stream would have closed with a result.
-func isReplayResponseFrame(f protocol.L2Frame) bool {
+// isResponseFrame reports whether a frame is the agent doing something
+// within its turn — text, thinking, a tool call, or a tool result — as
+// against pure metadata (model-changed) or the user's own turn.
+//
+// Two callers share the one definition of "the agent answered", so the
+// replayed feed and the live one agree on it: closeReplayTurns treats a turn
+// carrying at least one of these as answered (the live stream would have
+// closed it with a result), and Translator.NoteBroadcast treats the first one
+// of a live turn as the point of no return for retracting that turn.
+func isResponseFrame(f protocol.L2Frame) bool {
 	switch f.(type) {
 	case *protocol.TextStartFrame,
 		*protocol.ThinkingStartFrame,

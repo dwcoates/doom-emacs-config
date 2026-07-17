@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1165,6 +1166,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // handleInterrupt aborts the in-flight turn over HTTP (the Emacs-side
 // C-c C-k path). Same pipeline as a WS interrupt: pending permission
 // prompts cancel and the turn's result arrives as "aborted".
+//
+// An optional `retract_request_id` body field asks, additionally, to withdraw
+// that turn's prompt bubble when the agent never answered it — the undo half
+// of Emacs's C-c C-k, which lands the prompt back in its input buffer. The
+// reply's `retracted` says whether that happened, so the caller only restores
+// a prompt the feed actually gave up. A body is optional entirely: a bare
+// interrupt keeps its original no-body contract.
 func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 	// An ACT: it reaches the CLI, so the CLI has to exist.
 	sess, err := s.resolveForAct(r.PathValue("id"))
@@ -1176,6 +1184,15 @@ func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
 	}
+	var body struct {
+		RetractRequestID string `json:"retract_request_id"`
+	}
+	// EOF is the no-body interrupt, which is a valid call rather than a
+	// malformed one; any other decode failure is the client's bug to hear.
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
 	if err := sess.InjectCommand(map[string]any{
 		"type":       "interrupt",
 		"request_id": newRequestID(),
@@ -1183,7 +1200,12 @@ func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusConflict, err.Error())
 		return
 	}
+	// Strictly after the interrupt: retracting a turn still streaming toward
+	// the client would drop the prompt out from under a live answer.
+	retracted := sess.RetractActiveTurn(body.RetractRequestID)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, s.logf, map[string]bool{"retracted": retracted})
 }
 
 // handleQueueRunNow escalates a queued message over HTTP (§2.13): the

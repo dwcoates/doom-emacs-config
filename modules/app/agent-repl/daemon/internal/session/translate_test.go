@@ -1166,3 +1166,125 @@ func TestTranslatorReadyRecordsPermissionMode(t *testing.T) {
 		t.Errorf("PermissionMode = %v", tr.PermissionMode)
 	}
 }
+
+// --- turn retractability (§2.3 user-turn-retracted) --------------------------
+
+// userCmd decodes a user-message command carrying reqID, the shape that opens
+// a turn.
+func userCmd(t *testing.T, reqID string) *protocol.L1Command {
+	t.Helper()
+	cmd, err := protocol.DecodeCommand([]byte(
+		`{"type":"user-message","request_id":"` + reqID + `","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
+func TestTranslatorIdleTurnIsNotRetractable(t *testing.T) {
+	// Arrange — no turn ever opened.
+	tr := NewTranslator()
+	// Act + Assert — there is no prompt to withdraw.
+	if tr.TurnRetractable() {
+		t.Error("TurnRetractable() = true with no turn in flight, want false")
+	}
+}
+
+func TestTranslatorUnansweredTurnIsRetractable(t *testing.T) {
+	// Arrange — a turn in flight that has produced nothing.
+	tr := NewTranslator()
+	// Act
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Assert
+	if !tr.TurnRetractable() {
+		t.Error("TurnRetractable() = false for an unanswered turn, want true")
+	}
+}
+
+func TestTranslatorTurnIsNotRetractableOnceTextStarts(t *testing.T) {
+	// Arrange — a turn in flight.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Act — the agent opens a text block, so the feed has an answer bubble.
+	tr.NoteBroadcast(&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}})
+	// Assert
+	if tr.TurnRetractable() {
+		t.Error("TurnRetractable() = true after text-start, want false")
+	}
+}
+
+func TestTranslatorTurnIsNotRetractableOnceThinkingStarts(t *testing.T) {
+	// Arrange — a turn in flight.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Act — thinking renders a bubble just as text does.
+	tr.NoteBroadcast(&protocol.ThinkingStartFrame{Envelope: protocol.Envelope{Type: "thinking-start"}})
+	// Assert
+	if tr.TurnRetractable() {
+		t.Error("TurnRetractable() = true after thinking-start, want false")
+	}
+}
+
+func TestTranslatorTurnIsNotRetractableOnceToolStarts(t *testing.T) {
+	// Arrange — a turn in flight.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Act — a tool card is an answer bubble too.
+	tr.NoteBroadcast(&protocol.ToolUseStartFrame{Envelope: protocol.Envelope{Type: "tool-use-start"}})
+	// Assert
+	if tr.TurnRetractable() {
+		t.Error("TurnRetractable() = true after tool-use-start, want false")
+	}
+}
+
+func TestTranslatorNonResponseFrameLeavesTurnRetractable(t *testing.T) {
+	// Arrange — a turn in flight.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Act — pure metadata, which renders no bubble of the agent's own.
+	tr.NoteBroadcast(&protocol.UsageFrame{Envelope: protocol.Envelope{Type: "usage"}})
+	// Assert
+	if !tr.TurnRetractable() {
+		t.Error("TurnRetractable() = false after a usage frame, want true")
+	}
+}
+
+func TestTranslatorNextTurnClearsThePriorTurnsAnswer(t *testing.T) {
+	// Arrange — a turn that was answered, so retraction was closed off.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	tr.NoteBroadcast(&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}})
+	// Act — a fresh prompt opens a turn of its own.
+	tr.OnUserMessageCmd(userCmd(t, "r2"))
+	// Assert — the new turn is unanswered, so it is retractable again.
+	if !tr.TurnRetractable() {
+		t.Error("TurnRetractable() = false for a fresh turn, want true")
+	}
+}
+
+func TestTranslatorRetractedTurnIsNotRetractableAgain(t *testing.T) {
+	// Arrange — a turn in flight.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	// Act — the retraction goes out to clients.
+	tr.NoteBroadcast(&protocol.UserTurnRetractedFrame{
+		Envelope: protocol.Envelope{Type: "user-turn-retracted"}, RequestID: "r1"})
+	// Assert — the bubble is already gone, so a repeat gesture withdraws nothing.
+	if tr.TurnRetractable() {
+		t.Error("TurnRetractable() = true after a retraction, want false")
+	}
+}
+
+func TestTranslatorNextTurnIsRetractableAfterAPriorRetraction(t *testing.T) {
+	// Arrange — a turn that was retracted.
+	tr := NewTranslator()
+	tr.OnUserMessageCmd(userCmd(t, "r1"))
+	tr.NoteBroadcast(&protocol.UserTurnRetractedFrame{
+		Envelope: protocol.Envelope{Type: "user-turn-retracted"}, RequestID: "r1"})
+	// Act — the user revises the prompt and sends it again.
+	tr.OnUserMessageCmd(userCmd(t, "r2"))
+	// Assert — the revised turn is retractable in its own right.
+	if !tr.TurnRetractable() {
+		t.Error("TurnRetractable() = false for the turn after a retraction, want true")
+	}
+}
