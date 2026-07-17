@@ -1095,7 +1095,15 @@ final-response border off a text block immediately followed by a
 `result`; without it the border is lost on every resumed session until
 the first live turn. A result closes the PRIOR turn, so one is emitted
 before each new user prompt and once at end-of-input; a bare prompt the
-agent never answered is an incomplete turn and gets none. Rationale: the CLI restores context
+agent never answered is an incomplete turn and gets none. A user entry
+carrying a `<task-notification>` payload (the harness's background-work
+completion, `origin.kind: "task-notification"`) is NOT a prompt: it
+replays as a §2.6 `task-notification` frame rather than a `user-turn` —
+the live shim never surfaces it as a user turn, so a replayed prompt
+bubble full of raw notification XML was a replay/live divergence — while
+still closing the prior turn and opening a new (promptless) one, exactly
+as the live stream's real results bracket a notification-woken turn.
+Rationale: the CLI restores context
 on `--resume` but re-emits no history through the stream, so without
 seeding every binding recreation (daemon restart, Emacs restart,
 vterm→gui frontend switch) attaches to a blank conversation. The seed

@@ -680,6 +680,81 @@ func TestBuildReplayFramesResultPrecedesTrailingUsage(t *testing.T) {
 		"user-turn", "text-start", "text-delta", "text-end", "result", "usage")
 }
 
+// --- task-notification entries (§2.6 frames, never user-turn bubbles) ---------
+
+// A transcript task-notification user entry's text, as the harness
+// injects it (origin kind "task-notification").
+const notificationText = `<task-notification>\n<task-id>ab79a736</task-id>\n<tool-use-id>toolu_014ahwEm</tool-use-id>\n<status>completed</status>\n<summary>Agent \"gns-sockets bridge\" finished</summary>\n</task-notification>`
+
+func TestBuildReplayFramesTaskNotificationBecomesNotificationFrame(t *testing.T) {
+	// Arrange / Act — the live shim never surfaces this entry as a user
+	// turn, so the replay must not either: raw notification XML in a
+	// prompt bubble was a replay/live divergence.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"`+notificationText+`"}}`)
+	// Assert
+	wantTypes(t, frames, "task-notification")
+}
+
+func TestBuildReplayFramesTaskNotificationParsesCorrelationTags(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"`+notificationText+`"}}`)
+	// Assert — the tags parse exactly as the live translation parses them.
+	notif, ok := frames[0].(*protocol.TaskNotificationFrame)
+	if !ok {
+		t.Fatalf("frame = %T, want *protocol.TaskNotificationFrame", frames[0])
+	}
+	if notif.ToolUseID != "toolu_014ahwEm" || notif.TaskID != "ab79a736" || notif.Status != "completed" {
+		t.Fatalf("notification = %+v, want the transcript's tag values", notif)
+	}
+}
+
+func TestBuildReplayFramesTaskNotificationTextBlockBecomesNotificationFrame(t *testing.T) {
+	// Arrange / Act — the same entry in array-form content.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"`+notificationText+`"}]}}`)
+	// Assert
+	wantTypes(t, frames, "task-notification")
+}
+
+func TestBuildReplayFramesTaskNotificationCarriesTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T12:34:56.789Z","message":{"role":"user","content":"`+notificationText+`"}}`)
+	// Assert — the notification's own arrival time, not resume time.
+	if got := frames[0].Env().TS; got != "2026-05-24T12:34:56.789Z" {
+		t.Fatalf("TS = %q, want the transcript entry's timestamp", got)
+	}
+}
+
+func TestBuildReplayFramesTaskNotificationClosesPriorTurn(t *testing.T) {
+	// Arrange / Act — a notification wakes a promptless turn, and the live
+	// stream closes the prior turn with a real result before it runs.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a1"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"`+notificationText+`"}}`,
+		`{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"woken answer"}]}}`)
+	// Assert — one result before the notification, one closing the woken turn.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result",
+		"task-notification", "text-start", "text-delta", "text-end", "result")
+}
+
+func TestBuildReplayFramesUnansweredNotificationGetsNoResult(t *testing.T) {
+	// Arrange / Act — a trailing notification the agent never answered is
+	// an incomplete turn, exactly like a dangling prompt.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a1"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"`+notificationText+`"}}`)
+	// Assert — turn 1 closes; the dangling notification turn does not.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result",
+		"task-notification")
+}
+
 // --- SeedFromTranscript -------------------------------------------------------
 
 func TestSeedFromTranscriptHelloReportsNoActiveTurn(t *testing.T) {
