@@ -401,11 +401,14 @@ environments without notification tools (terminal-notifier or osascript)."
 ;;;; ---- Tests: echo-area (modeline) severity gate ----
 ;;
 ;; The invariant under test: the log file and *Messages* are the QUIET sink
-;; and take everything; the echo area / modeline is the LOUD sink and takes
-;; only warnings and errors.  `inhibit-message' is what separates them — when
-;; it is non-nil at the moment `message' runs, the line reaches *Messages*
-;; but never the echo area.  So "did this line reach the modeline?" is
-;; exactly "was `inhibit-message' nil inside the `message' call?".
+;; and take everything; the echo area / modeline is the LOUD sink and is
+;; reserved for GENUINE FATAL errors alone — `agent-repl--error', which
+;; reaches it by SIGNALLING an `error', not through the gate below.  Every
+;; ladder level (including `agent-repl--warn') emits quietly.
+;; `inhibit-message' is what separates the quiet emits — when it is non-nil
+;; at the moment `message' runs, the line reaches *Messages* but never the
+;; echo area.  So "did this quiet line reach the modeline?" is exactly "was
+;; `inhibit-message' nil inside the `message' call?".
 
 (defun agent-repl-test--capture-emission (thunk)
   "Run THUNK with `message' stubbed and report what it emitted, and how loudly.
@@ -466,11 +469,18 @@ suppressed so the suite never touches the real logfile."
       (agent-repl--info nil "on the record")
       (should (string-match-p "on the record" written)))))
 
-(ert-deftest agent-repl-test-warn-reaches-echo-area ()
-  "`agent-repl--warn' is the loud sink: it MUST reach the echo area."
+(ert-deftest agent-repl-test-warn-never-reaches-echo-area ()
+  "`agent-repl--warn' is now quiet: a non-fatal warning must NOT reach the modeline."
   (let ((res (agent-repl-test--capture-emission
               (lambda () (agent-repl--warn nil "something broke")))))
-    (should (plist-get res :echoed))))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-warn-still-emits-to-messages ()
+  "`agent-repl--warn' still emits (into *Messages*) even though it is quiet."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--warn nil "something broke")))))
+    (should (plist-get res :called))
+    (should (string-match-p "something broke" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-warn-prepends-severity-tag ()
   "`agent-repl--warn' prepends a `WARNING: ' tag so call sites need not."
@@ -518,11 +528,22 @@ existing bug-capture path WITHOUT dropping ARGS on the floor."
     (should (plist-get res :called))
     (should-not (plist-get res :echoed))))
 
-(ert-deftest agent-repl-test-do-log-reaches-echo-area ()
-  "`agent-repl--do-log' is loud by design — it must still reach the echo area."
+(ert-deftest agent-repl-test-do-log-non-error-never-reaches-echo-area ()
+  "`agent-repl--do-log' non-error path is quiet — it must NOT reach the modeline."
   (let ((res (agent-repl-test--capture-emission
               (lambda () (agent-repl--do-log nil "invariant violated" nil)))))
-    (should (plist-get res :echoed))))
+    (should (plist-get res :called))
+    (should-not (plist-get res :echoed))))
+
+(ert-deftest agent-repl-test-do-log-error-p-bypasses-quiet-gate ()
+  "`agent-repl--do-log' with ERROR-P signals directly, never routing through the
+quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeline."
+  (let ((emitted nil))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (&rest _) (setq emitted t))))
+      (should-error (agent-repl--do-log nil "fatal boom" nil t) :type 'error)
+      (should-not emitted))))
 
 (ert-deftest agent-repl-test-log-verbose-includes-timestamp ()
   "`agent-repl--log-verbose' output should include timestamp prefix."

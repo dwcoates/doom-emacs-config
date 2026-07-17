@@ -457,23 +457,29 @@ text.  Handles the non-string-FMT bug-capture in one place."
 ;;      it unless they are debugging.
 ;;
 ;;   2. The LOUD sink — the echo area / modeline.  This is the highest-
-;;      sensitivity channel we have: it interrupts the user, it covers the
-;;      minibuffer, and it is the only place a message can be *missed* by
-;;      being drowned out.  It is reserved for things the user MUST act on
-;;      or be aware of: warnings, errors, and direct feedback from a command
-;;      they just invoked.
+;;      sensitivity channel we have: it interrupts the user and covers the
+;;      minibuffer.  It is reserved for GENUINE FATAL errors alone — the
+;;      conditions the user (or an agent watching the modeline for them)
+;;      MUST act on immediately.  In this ladder that means ONLY
+;;      `agent-repl--error', which reaches the modeline by SIGNALLING an
+;;      `error' (Emacs always displays a signalled error), NOT through the
+;;      `inhibit-message' gate below.  Warnings and every other diagnostic
+;;      are non-fatal, so they stay on the quiet sink and NEVER flash in the
+;;      modeline; they remain durable and greppable for whoever needs them.
 ;;
 ;; `agent-repl--emit-message' is the single chokepoint that decides which
 ;; sink a line reaches.  Binding `inhibit-message' suppresses the echo-area
 ;; display while STILL logging the line to *Messages' — that is exactly the
 ;; bifurcation we want, and it means quieting a line never costs us the log.
+;; Every ladder level below emits QUIETLY through it; the modeline is left
+;; to `error' signalling alone.
 ;;
 ;; Pick a level, do not reach for `message' directly:
 ;;
 ;;   `agent-repl--log-verbose'  hot-path chatter   file (verbose only), quiet
 ;;   `agent-repl--log'          debug chatter      file always, quiet
 ;;   `agent-repl--info'         background notice  file + *Messages*, quiet
-;;   `agent-repl--warn'         user must know     file + *Messages* + ECHO
+;;   `agent-repl--warn'         recorded warning   file + *Messages*, quiet
 ;;   `agent-repl--error'        signals an error   file + *Messages* + ECHO
 ;;
 ;; A bare `message' remains correct for one case only: synchronous feedback
@@ -495,17 +501,24 @@ WS is the workspace name for context (or nil).  When ERROR-P is non-nil,
 signals the formatted line via `error' instead of `message' — the
 file-write still happens first so the line is captured before unwinding.
 
+Only the ERROR-P path reaches the echo area / modeline: a signalled
+`error' is a genuine fatal condition the user must act on immediately, so
+Emacs displays it regardless of `inhibit-message'.  The non-error path is
+captured unconditionally to the log file AND *Messages* but emitted
+QUIETLY (never the echo area), so warnings and background diagnostics no
+longer flash in the modeline — they stay durable and greppable on the
+quiet channels without interrupting the user.  This reserves the modeline
+as a signal for fatal errors alone.
+
 This is the entry point for log calls that MUST be captured regardless
-of `agent-repl-debug' AND must surface in the echo area — errors,
-invariant violations, and the STUB-CREATE warnings.  Callers that want
-the line captured but NOT flashed at the user use `agent-repl--info';
-debug-gated callers (`agent-repl--log', `agent-repl--log-verbose') use
-the file-write path directly and emit quietly."
+of `agent-repl-debug'.  Debug-gated callers (`agent-repl--log',
+`agent-repl--log-verbose') use the file-write path directly and emit
+quietly; `agent-repl--info' is the equivalent ungated quiet-notice level."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
     (if error-p
         (error "%s" text)
-      (agent-repl--emit-message text t))))
+      (agent-repl--emit-message text nil))))
 
 (defun agent-repl--log (ws fmt &rest args)
   "Log a timestamped message for WS, always to file, conditionally to *Messages*.
@@ -544,20 +557,26 @@ and lifecycle chatter that is valuable to have on the record but that the
 user must not be interrupted by: module loads, worktree creation progress,
 snapshot-load steps, sentinel bookkeeping, agent start/finish notices.
 
-Use `agent-repl--warn' instead when the user genuinely needs to see it."
+Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
+severity (still quiet), or `agent-repl--error' to signal a genuine fatal
+condition loudly into the modeline."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
     (agent-repl--emit-message text nil)))
 
 (defun agent-repl--warn (ws fmt &rest args)
-  "Log a WARNING for WS to the LOUD sink: file, *Messages', and the echo area.
+  "Log a WARNING for WS to the QUIET sink: the log file and *Messages'.
 A `WARNING: ' severity tag is prepended, so call sites pass the bare
 message (no literal \"WARNING:\" prefix of their own).
 
-This is one of only two levels that may interrupt the user (the other
-being `agent-repl--error'), so reserve it for conditions the user must
-actually know about: failed writes, dropped state, broken invariants,
-degraded functionality.  Anything merely informational is `agent-repl--info'."
+A warning is NOT fatal, so it no longer reaches the echo area / modeline:
+the line is recorded on the durable, greppable channels (log file plus
+*Messages*) for the user or a watching agent to find, but it never
+interrupts.  Reserve `agent-repl--error' for the genuine fatal conditions
+that MUST surface in the modeline immediately.  This level still carries
+the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
+use it for failed writes, dropped state, broken invariants, and degraded
+functionality that are worth flagging in the log but are not fatal."
   (if (stringp fmt)
       (agent-repl--do-log ws (concat "WARNING: " fmt) args)
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather

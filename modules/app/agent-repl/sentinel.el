@@ -305,8 +305,9 @@ name and the directory."
       ;; the agent-repl log (via `--do-log') instead of being swallowed into
       ;; *Messages* by the file-notify / poll layer.  We deliberately do NOT
       ;; rethrow: this runs from a file-notify callback, where a hard error
-      ;; would kill the sentinel watcher.  Surfacing loudly is the established
-      ;; channel for this async context.
+      ;; would kill the sentinel watcher.  Surfacing on the agent-repl log
+      ;; (file + *Messages*, no modeline flash) is the established channel
+      ;; for this async context.
       (condition-case err
           (progn
             (agent-repl--update-session-id-from-sentinel ws session-id owned)
