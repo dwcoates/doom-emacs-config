@@ -1753,3 +1753,141 @@ func TestQueueSnapshotOnHelloAndInfo(t *testing.T) {
 		t.Fatalf("hello queue item = %v", item)
 	}
 }
+
+// --- turn retraction (§2.3 user-turn-retracted) ------------------------------
+
+// submitTurn opens a turn carrying reqID and drains the forwarded command,
+// leaving the session with that turn in flight and unanswered.
+func submitTurn(t *testing.T, h *harness, c *Client, reqID string) {
+	t.Helper()
+	raw := []byte(`{"type":"user-message","request_id":"` + reqID + `","content":"hi"}`)
+	if err := h.sess.HandleClientFrame(c, raw); err != nil {
+		t.Fatalf("submit %s: %v", reqID, err)
+	}
+	waitForFrameType(t, c, "user-turn")
+	recvSent(t, h.shim)
+}
+
+func TestRetractActiveTurnWithdrawsAnUnansweredTurn(t *testing.T) {
+	// Arrange — a turn in flight that the agent has not answered.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	// Act
+	got := h.sess.RetractActiveTurn("r1")
+	// Assert — the retraction happened and named the withdrawn turn.
+	if !got {
+		t.Fatal("RetractActiveTurn(r1) = false for an unanswered turn, want true")
+	}
+	frame := waitForFrameType(t, c, "user-turn-retracted")
+	if frame["request_id"] != "r1" {
+		t.Errorf("request_id = %v, want r1", frame["request_id"])
+	}
+}
+
+func TestRetractActiveTurnRefusesAnAnsweredTurn(t *testing.T) {
+	// Arrange — a turn in flight whose agent has opened a text bubble.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"s1","uuid":"u","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`)
+	waitForFrameType(t, c, "text-start")
+	// Act
+	got := h.sess.RetractActiveTurn("r1")
+	// Assert — the prompt has an answer on screen, so it stays.
+	if got {
+		t.Error("RetractActiveTurn(r1) = true after text-start, want false")
+	}
+}
+
+func TestRetractActiveTurnRefusesAStaleRequestID(t *testing.T) {
+	// Arrange — a turn in flight under a different id than the caller names.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	// Act — the caller raced: the turn it means to withdraw is not this one.
+	got := h.sess.RetractActiveTurn("r-stale")
+	// Assert
+	if got {
+		t.Error("RetractActiveTurn(r-stale) = true, want false")
+	}
+}
+
+func TestRetractActiveTurnRefusesWhenIdle(t *testing.T) {
+	// Arrange — no turn ever opened.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act
+	got := h.sess.RetractActiveTurn("r1")
+	// Assert
+	if got {
+		t.Error("RetractActiveTurn on an idle session = true, want false")
+	}
+}
+
+func TestRetractActiveTurnRefusesAnEmptyRequestID(t *testing.T) {
+	// Arrange — a retractable turn, but a caller that names no turn at all
+	// (the plain interrupt's empty field).
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	// Act
+	got := h.sess.RetractActiveTurn("")
+	// Assert — an unnamed retraction must never fall through to the active turn.
+	if got {
+		t.Error(`RetractActiveTurn("") = true, want false`)
+	}
+}
+
+func TestRetractActiveTurnIsRefusedTwiceForTheSameTurn(t *testing.T) {
+	// Arrange — a turn already withdrawn once.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	if !h.sess.RetractActiveTurn("r1") {
+		t.Fatal("first RetractActiveTurn(r1) = false, want true")
+	}
+	waitForFrameType(t, c, "user-turn-retracted")
+	// Act — a duplicate C-c C-k on a bubble that is already gone.
+	got := h.sess.RetractActiveTurn("r1")
+	// Assert — the retraction frame is broadcast once, never twice.
+	if got {
+		t.Error("second RetractActiveTurn(r1) = true, want false")
+	}
+}
+
+func TestRetractedTurnIsWithdrawnForReplayingClients(t *testing.T) {
+	// Arrange — a turn withdrawn while one client watched.
+	h := newHarness(t, 64)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	submitTurn(t, h, c, "r1")
+	h.sess.RetractActiveTurn("r1")
+	waitForFrameType(t, c, "user-turn-retracted")
+	// Act — a fresh client rebuilds the feed from the retained ring.
+	late := NewClient()
+	h.sess.Attach(late)
+	recvFrame(t, late) // hello
+	if err := h.sess.HandleClientFrame(late, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	// Assert — the retraction is retained, so the replayed feed drops the
+	// bubble exactly as the live one did.
+	frame := waitForFrameType(t, late, "user-turn-retracted")
+	if frame["request_id"] != "r1" {
+		t.Errorf("replayed request_id = %v, want r1", frame["request_id"])
+	}
+}

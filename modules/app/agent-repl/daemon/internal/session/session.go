@@ -118,10 +118,10 @@ type Session struct {
 	// Detached-task tailer poll cadence; immutable for the session's life.
 	tailInterval time.Duration
 
-	mu       sync.Mutex
-	seq      int64
-	ring     []retained
-	clients  map[*Client]struct{}
+	mu      sync.Mutex
+	seq     int64
+	ring    []retained
+	clients map[*Client]struct{}
 	// tailers holds one release channel per detached task being tailed,
 	// keyed by task id; closing a channel ends that tail (see tailer.go).
 	tailers map[string]chan struct{}
@@ -141,6 +141,11 @@ type Session struct {
 	// submit or drain). It is the running-task datum handed to the
 	// classifier for a message queued behind it. Guarded by mu.
 	activeTurnText string
+	// activeTurnRequestID is the request id of that same in-flight turn,
+	// captured alongside activeTurnText. A retraction names the turn it
+	// withdraws by this id, so a client can only ever retract the turn it
+	// believes is running (§2.3). Guarded by mu.
+	activeTurnRequestID string
 	// deathReason classifies HOW a terminal session ended: the shim's
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
@@ -788,6 +793,7 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 			return s.enqueueLocked(cmd, raw)
 		}
 		s.activeTurnText = commandText(cmd.Content)
+		s.activeTurnRequestID = cmd.RequestID
 		s.broadcastLocked([]protocol.L2Frame{s.translator.OnUserMessageCmd(cmd)})
 		return s.shim.SendRaw(ndjson(raw))
 	case "queue-run-now":
@@ -967,6 +973,7 @@ func (s *Session) drainQueueLocked() error {
 	}
 	item := s.queue.popFront()
 	s.activeTurnText = commandText(item.content)
+	s.activeTurnRequestID = item.cmd.RequestID
 	// OnUserMessageCmd broadcasts the item's user-turn and sets turnActive.
 	s.broadcastLocked([]protocol.L2Frame{s.translator.OnUserMessageCmd(item.cmd)})
 	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
@@ -1019,6 +1026,36 @@ func (s *Session) InjectCommand(cmd map[string]any) error {
 		return fmt.Errorf("session %s: marshal injected command: %w", s.ID, err)
 	}
 	return s.HandleClientFrame(nil, raw)
+}
+
+// RetractActiveTurn withdraws the in-flight turn named by requestID,
+// broadcasting a user-turn-retracted frame so every attached client drops
+// the prompt's bubble (§2.3). It reports whether the retraction happened.
+//
+// The turn is retractable only while it is the one running AND the agent has
+// not answered it yet. Both conditions are read under the hub lock, the same
+// lock broadcastLocked sets turnResponded under, so an answer that lands in
+// the moment between the interrupt and this call cannot be raced past: it
+// either precedes the check and declines the retraction, or follows the
+// retraction frame in seq order (where clients already drop the aborting
+// turn's tail).
+//
+// Naming the turn by requestID is what keeps the retraction honest about
+// WHICH prompt it drops: a caller that raced a queue drain asks to retract a
+// turn that is no longer the active one, and gets a false rather than the
+// wrong bubble. Callers interrupt first — this only withdraws the bubble; it
+// does not stop the turn.
+func (s *Session) RetractActiveTurn(requestID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if requestID == "" || requestID != s.activeTurnRequestID || !s.translator.TurnRetractable() {
+		return false
+	}
+	s.broadcastLocked([]protocol.L2Frame{&protocol.UserTurnRetractedFrame{
+		Envelope:  protocol.Envelope{Type: "user-turn-retracted"},
+		RequestID: requestID,
+	}})
+	return true
 }
 
 // Shutdown asks the shim to drain and exit (used by DELETE /sessions/{id}
@@ -1087,6 +1124,10 @@ func (s *Session) broadcastLocked(frames []protocol.L2Frame) {
 				}
 			}
 		}
+		// Every authoritative frame passes here exactly once, which makes
+		// this the one place the turn's "has it answered yet" bit can track
+		// what clients actually saw rather than what a producer intended.
+		s.translator.NoteBroadcast(frame)
 		s.seq++
 		env := frame.Env()
 		env.Seq = s.seq
