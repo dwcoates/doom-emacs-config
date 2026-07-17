@@ -16,7 +16,7 @@ describe("stripMetaSpans", () => {
       "\n\n",
       meta("Do not wait for further instructions. Here is the task:\n\n"),
       "move the metaprompt into the repo",
-      meta("\n\nWhen you have implemented it, invoke the /workspace-merge skill."),
+      meta("\n\nWhen you have implemented it, invoke the /create-or-update-workspace merge skill."),
     ].join("");
     expect(stripMetaSpans(turn)).toBe("move the metaprompt into the repo");
   });

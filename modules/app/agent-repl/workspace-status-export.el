@@ -4,7 +4,7 @@
 
 ;; Writes a JSON snapshot of every registered agent-repl workspace to a
 ;; shared file so other agent sessions can introspect peer workspace
-;; state (the `/workspace-status' skill is the documented consumer).
+;; state (the `/create-or-update-workspace status' skill is the documented consumer).
 ;;
 ;; The file lives at `agent-repl-workspace-status-file' — by default
 ;; `~/.claude-emacs/workspace-status.json' — alongside `workspaces.el'.

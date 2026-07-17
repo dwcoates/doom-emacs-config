@@ -1,8 +1,8 @@
-;;; merge-handlers.el --- Repo-routed /workspace-merge dispatch -*- lexical-binding: t; -*-
+;;; merge-handlers.el --- Repo-routed /create-or-update-workspace merge dispatch -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Pluggable post-processing for `/workspace-merge' command-file
+;; Pluggable post-processing for `/create-or-update-workspace merge' command-file
 ;; dispatch.  The skill's JSON contract is uniform — `{"type":"merge",
 ;; "workspace":"..."}` — but what the editor does on receipt is keyed
 ;; by the target workspace's repo via a small registry of named
@@ -171,7 +171,7 @@ cannot wedge merge dispatch."
 
 When ONTO-MASTER is non-nil, the repo-routed resolution is BYPASSED and
 the `onto-master' handler is used unconditionally.  This is the
-`/workspace-merge --onto-master' path: the workspace's PR has already
+`/create-or-update-workspace merge --onto-master' path: the workspace's PR has already
 merged into `origin/master', so the per-invocation intent (advance the
 local trunk, do not cherry-pick) MUST win over the repo's checked-in
 `.eld' handler.
@@ -418,7 +418,7 @@ The workspace has been revived — please investigate and retry the merge when r
     (target-ws &optional _args)
   "Poll for TARGET-WS's PR to merge, then refresh master from origin.
 
-Handler for repos whose `/workspace-merge' contract is \"the PR is in
+Handler for repos whose `/create-or-update-workspace merge' contract is \"the PR is in
 the merge queue; poll until it lands, then bring the local master
 worktree up to date with origin\" — as opposed to the cherry-pick
 default.  A repo opts into this via its repo-local
@@ -585,7 +585,7 @@ and teardown proceeds."
 (defun agent-repl--merge-handler-onto-master (target-ws &optional _args)
   "Advance local master to origin/master for an ALREADY-MERGED PR, then close.
 
-Handler for the `/workspace-merge --onto-master' contract: the
+Handler for the `/create-or-update-workspace merge --onto-master' contract: the
 workspace's PR has already merged into `origin/master', so there is
 nothing to cherry-pick or poll for — the only work is to bring the
 main worktree's local trunk up to the merged commit and tear the

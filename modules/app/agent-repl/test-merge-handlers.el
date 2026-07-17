@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Unit tests for the repo-routed `/workspace-merge' dispatch layer.
+;; Unit tests for the repo-routed `/create-or-update-workspace merge' dispatch layer.
 ;; Covers:
 ;;   - `agent-repl--read-merge-handler-config-file' (file parsing)
 ;;   - `agent-repl--lookup-merge-handler-override' (defcustom lookup)
