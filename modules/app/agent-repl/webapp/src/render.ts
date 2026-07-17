@@ -26,7 +26,13 @@ import {
 } from "./expand.js";
 import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
-import { effectiveAsyncSource, mayNest, mergeChildren, transcriptFeed } from "./subfeed.js";
+import {
+  effectiveAsyncSource,
+  mayNest,
+  mergeChildren,
+  openSubfeedSourceIds,
+  transcriptFeed,
+} from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
 import {
   chessGameContainerHtml,
@@ -2050,48 +2056,6 @@ export function backfillChunks(count: number, chunkSize: number): number[][] {
 }
 
 /**
- * The detached-task ids in currently-OPEN watcher folds — the set the
- * poller should poll. Only open folds contribute, so polling is scoped to
- * exactly the watchers the user is actively watching.
- */
-export function openWatcherTaskIds(
-  watchers: ReadonlyMap<string, readonly ToolItem[]>,
-  isOpen: (id: string) => boolean,
-): Set<string> {
-  const ids = new Set<string>();
-  for (const [blockId, list] of watchers) {
-    if (!isOpen(`watchers:${blockId}`)) continue;
-    for (const w of list) {
-      for (const id of spawnedTaskIds(w)) ids.add(id);
-    }
-  }
-  return ids;
-}
-
-/**
- * The source ids in currently-OPEN async folds that need FETCHING — the set
- * the poller should poll, on top of the watcher folds' own ids.
- *
- * Only `transport: "poll"` sources contribute: a ws source's tail already
- * arrives as task-output-delta, and a `frames` source (a task) is projected
- * from items the store holds. Polling either would be a round trip for
- * bytes already in hand.
- */
-export function openAsyncSourceIds(
-  items: readonly ConversationItem[],
-  isOpen: (id: string) => boolean,
-): Set<string> {
-  const ids = new Set<string>();
-  for (const item of items) {
-    if (item.kind !== "tool" || !item.asyncSource) continue;
-    if (item.asyncSource.stream?.transport !== "poll") continue;
-    if (!isOpen(`async:${item.toolUseId}`)) continue;
-    ids.add(item.asyncSource.source_id);
-  }
-  return ids;
-}
-
-/**
  * The fold a feed click should flip, or null to leave the click alone.
  *
  * TOGGLE is the nearest `data-panel-toggle` wrapper above the click and
@@ -2423,19 +2387,20 @@ export class FeedRenderer {
   }
 
   /**
-   * Point the poller at the watchers in currently-open folds. Called after
-   * every render so opening a fold starts its polls and closing one stops
-   * them; a no-op when no daemon fetch was wired.
+   * Point the poller at the sources in currently-open folds — at EVERY
+   * depth, via the recursive walk openSubfeedSourceIds shares with the
+   * renderer's own guards. Called after every render so opening a fold
+   * starts its polls and closing one stops them (a nested fold's tail
+   * discovered by a poll feeds the next sync); a no-op when no daemon
+   * fetch was wired.
    */
   private syncWatcherPolls(watchers: ReadonlyMap<string, readonly ToolItem[]>): void {
-    const isOpen = (id: string): boolean => this.openPanels.has(id);
-    // Two sources of pollable ids now: the watcher folds a final-response
-    // bubble carries, and the async fold on a spawning card itself. Both
-    // feed one poller, so an id open in both is polled once.
-    const ids = openWatcherTaskIds(watchers, isOpen);
-    for (const id of openAsyncSourceIds(this.lastState?.items ?? [], isOpen)) {
-      ids.add(id);
-    }
+    const ids = openSubfeedSourceIds({
+      items: this.lastState?.items ?? [],
+      watchers,
+      isOpen: (id) => this.openPanels.has(id),
+      tailText: (id) => this.watcherPoller?.tail(id)?.text,
+    });
     this.watcherPoller?.sync(ids);
   }
 

@@ -18,8 +18,6 @@ import {
   itemKey,
   lastUserTurnId,
   modelOptionsHtml,
-  openAsyncSourceIds,
-  openWatcherTaskIds,
   panelToggleTarget,
   planToolReveal,
   pulseTarget,
@@ -4079,41 +4077,6 @@ describe("async fold", () => {
   });
 });
 
-describe("openAsyncSourceIds", () => {
-  it("polls the source of an open transcript fold", () => {
-    // Arrange / Act
-    const ids = openAsyncSourceIds([sourcedCard()], () => true);
-    // Assert
-    expect([...ids]).toEqual(["a9"]);
-  });
-
-  it("polls nothing while the fold is shut", () => {
-    // Arrange / Act
-    const ids = openAsyncSourceIds([sourcedCard()], () => false);
-    // Assert
-    expect([...ids]).toEqual([]);
-  });
-
-  it("never polls a ws source, whose tail already arrives as frames", () => {
-    // Arrange
-    const shell = sourcedCard({ stream: { transport: "ws", format: "text" } });
-    // Act
-    const ids = openAsyncSourceIds([shell], () => true);
-    // Assert
-    expect([...ids]).toEqual([]);
-  });
-
-  it("polls nothing for a card that spawned nothing", () => {
-    // Arrange
-    const card = sourcedCard();
-    delete card.asyncSource;
-    // Act
-    const ids = openAsyncSourceIds([card], () => true);
-    // Assert
-    expect([...ids]).toEqual([]);
-  });
-});
-
 // --- watcher fold (in a final-response bubble) ---------------------------------
 
 /** A backgrounded-Bash watcher announcing TASKID, plus any overrides. */
@@ -4314,29 +4277,6 @@ describe("gns-sockets fold", () => {
     expect(html).toContain(`data-panel-toggle="gns:b1"`);
     expect(html).not.toContain("watcher-row");
     expect(html).toContain("agent-panel");
-  });
-});
-
-describe("openWatcherTaskIds", () => {
-  it("collects task ids only from open folds", () => {
-    // Arrange
-    const watchers = new Map<string, ToolItem[]>([
-      ["b1", [watcher("bg1")]],
-      ["b2", [watcher("bg2")]],
-    ]);
-    // Act — only b1's fold is open.
-    const ids = openWatcherTaskIds(watchers, (id) => id === "watchers:b1");
-    // Assert
-    expect([...ids]).toEqual(["bg1"]);
-  });
-
-  it("is empty when no fold is open", () => {
-    // Arrange
-    const watchers = new Map<string, ToolItem[]>([["b1", [watcher("bg1")]]]);
-    // Act
-    const ids = openWatcherTaskIds(watchers, () => false);
-    // Assert
-    expect(ids.size).toBe(0);
   });
 });
 
