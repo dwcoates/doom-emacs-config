@@ -20,6 +20,7 @@ import {
   modelOptionsHtml,
   openAsyncSourceIds,
   openWatcherTaskIds,
+  panelToggleTarget,
   planToolReveal,
   pulseTarget,
   renderItem,
@@ -4257,6 +4258,42 @@ describe("openWatcherTaskIds", () => {
     const ids = openWatcherTaskIds(watchers, () => false);
     // Assert
     expect(ids.size).toBe(0);
+  });
+});
+
+describe("panelToggleTarget", () => {
+  /** Fake element: contains() answers from an explicit descendant set. */
+  function el(name: string, descendants: string[] = []): { name: string; contains(n: { name: string }): boolean } {
+    const inside = new Set(descendants);
+    return { name, contains: (n) => inside.has(n.name) };
+  }
+
+  it("flips the fold when the click lands outside any panel", () => {
+    // Arrange
+    const toggle = el("fold");
+    // Act + Assert
+    expect(panelToggleTarget(toggle, null)).toBe(toggle);
+  });
+
+  it("leaves a click inside the toggle's own panel alone", () => {
+    // Arrange
+    const panel = el("panel");
+    const toggle = el("fold", ["panel"]);
+    // Act + Assert
+    expect(panelToggleTarget(toggle, panel)).toBeNull();
+  });
+
+  it("flips a nested fold whose ticker sits inside an ancestor's panel", () => {
+    // Arrange — the ancestor's panel contains the nested toggle, never the reverse.
+    const outerPanel = el("outer-panel", ["nested-fold"]);
+    const nested = el("nested-fold");
+    // Act + Assert
+    expect(panelToggleTarget(nested, outerPanel)).toBe(nested);
+  });
+
+  it("does nothing when no toggle is above the click", () => {
+    // Arrange + Act + Assert
+    expect(panelToggleTarget(null, el("panel"))).toBeNull();
   });
 });
 
