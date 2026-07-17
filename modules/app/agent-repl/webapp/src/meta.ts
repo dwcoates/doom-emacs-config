@@ -5,7 +5,7 @@
  * host prepends a read-directive pointing at the metaprompt file on every
  * Nth send, and a workspace-generation first send additionally carries an
  * autonomous-execution preamble and a wrap-up gate ("…invoke the
- * /workspace-merge skill…"). The agent must receive all of it; the person
+ * /create-or-update-workspace merge skill…"). The agent must receive all of it; the person
  * reading the feed wants only their own prompt back.
  *
  * The host brackets each injected span with the inert HTML-comment markers

@@ -1724,7 +1724,7 @@ operator can see both the name and the path that missed."
                          logged))))))
 
 (ert-deftest agent-repl-test-handle-merge-command-runs-silently ()
-  "Skill-invoked merges (`/workspace-merge') must pass SILENT=t to
+  "Skill-invoked merges (`/create-or-update-workspace merge') must pass SILENT=t to
 workspace-merge-into-source so the merge does not steal user focus.
 Interactive entries (`SPC TAB m'/`SPC TAB M') leave SILENT nil and
 retain the old switch-to-project + magit pop behavior."
@@ -2163,7 +2163,7 @@ override must precede the default it replaces."
 
 (ert-deftest agent-repl-test-handle-create-command-warns-when-prompt-missing ()
   "A create entry without a `prompt' field still creates but warns loudly.
-The /workspace-generation flow always supplies a prompt, so a missing
+The /create-or-update-workspace create flow always supplies a prompt, so a missing
 field there means the generation output was malformed and the workspace
 would otherwise boot silently idle."
   (let ((warned nil))
@@ -4328,7 +4328,7 @@ always reflects the most recent run."
 ;;;; ---- Tests: handle-merge-command auto-resolve gating ----
 
 (ert-deftest agent-repl-test-handle-merge-command-passes-auto-resolve ()
-  "Skill-invoked `/workspace-merge' passes AUTO-RESOLVE=t to
+  "Skill-invoked `/create-or-update-workspace merge' passes AUTO-RESOLVE=t to
 workspace-merge-into-source so cherry-pick conflicts are sent to the
 headless resolver — interactive paths leave it nil."
   (agent-repl-test--with-clean-state
@@ -4372,7 +4372,7 @@ during `accept-process-output' so the main UI keeps ticking."
 (ert-deftest agent-repl-test-workspace-merge-async-thread-runs-dispatch-handler ()
   "Inside the worker thread the wrapper invokes `--dispatch-merge-handler'
 \(the standard handler-routing entry).  This is what makes the two entry
-points (interactive `SPC TAB M' and `/workspace-merge' skill) equivalent —
+points (interactive `SPC TAB M' and `/create-or-update-workspace merge' skill) equivalent —
 both end up here via the same dispatch."
   (let ((dispatch-args nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
@@ -4391,7 +4391,7 @@ both end up here via the same dispatch."
 
 (ert-deftest agent-repl-test-workspace-merge-async-threads-onto-master ()
   "The optional ONTO-MASTER arg is forwarded verbatim to
-`--dispatch-merge-handler' so the `/workspace-merge --onto-master' intent
+`--dispatch-merge-handler' so the `/create-or-update-workspace merge --onto-master' intent
 reaches the handler-routing layer."
   (let ((dispatch-args nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
@@ -4630,7 +4630,7 @@ workspace's agent has no in-band signal that a merge failed."
         (should (stringp dispatched-prompt))
         (should (string-match-p "merge attempt for this workspace just failed"
                                 dispatched-prompt))
-        (should (string-match-p "/workspace-merge"
+        (should (string-match-p "/create-or-update-workspace merge"
                                 dispatched-prompt))
         (should (string-match-p "boom" dispatched-prompt))))))
 
@@ -6395,7 +6395,7 @@ registry once `--bare-workspace-name' is called on it downstream."
 
 (ert-deftest agent-repl-test-handle-create-command-persp-nil-name-refuses ()
   "handle-create-command with a bare `name' equal to `persp-nil-name' must
-refuse.  The headless `/workspace-generation' flow occasionally emits
+refuse.  The headless `/create-or-update-workspace create' flow occasionally emits
 \"none\" (or \"DWC/none\") when there is no slug material; without this
 guard, the downstream `+workspace-new' would collide with the
 nil-perspective sentinel and the entry would surface in the drawer and
@@ -6731,7 +6731,7 @@ emitting only the permission question."
   "The headless prompt explicitly tells the model the inner string is the
 USER PROMPT for a separate spawned agent and is NOT instructions for the
 headless model itself.  Without this, the headless model can read a
-suffix like `invoke /workspace-merge' inside the inner prompt and run it
+suffix like `invoke /create-or-update-workspace merge' inside the inner prompt and run it
 itself instead of just emitting it verbatim into the JSON."
   (let ((out (agent-repl--workspace-generation-prompt
               "raw" "prefixed" "/tmp/repo/" "HEAD" nil)))
@@ -8703,7 +8703,7 @@ timestamp) and getting an accidental MERGED bucket placement."
 
 (ert-deftest agent-repl-test-merge-current-into-source-routes-through-async-wrapper ()
   "Interactive `SPC TAB M' routes through `agent-repl--workspace-merge-async'
-\(same path `/workspace-merge' skill takes — there is no behavioral diff
+\(same path `/create-or-update-workspace merge' skill takes — there is no behavioral diff
 between the two callers), passing the current workspace name and its
 resolved merge-routing-root.  The async wrapper handles close-then-spawn-
 then-reopen-on-failure; tests of that lifecycle live near the helper."
@@ -8802,7 +8802,7 @@ the `switch-to-project' call)."
   "When SILENT is non-nil, --workspace-merge-into-source must NOT call
 `agent-repl-switch-to-project'.  This is the path used by
 `agent-repl--handle-merge-command' for skill-invoked merges so that
-background-triggered /workspace-merge does not yank the user's focus."
+background-triggered /create-or-update-workspace merge does not yank the user's focus."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-merge-silent-no-switch-" t))
           (switch-called nil)
@@ -9791,7 +9791,7 @@ edit the doom config."
 (ert-deftest agent-repl-test-create-doom-oneshot-appends-merge-suffix-to-prefixed ()
   "The merge-on-success suffix is included in the PREFIXED prompt (the
 spawned agent's first message) so the inner agent knows to invoke
-`/workspace-merge' after a successful, tested implementation."
+`/create-or-update-workspace merge' after a successful, tested implementation."
   (agent-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -9800,7 +9800,7 @@ spawned agent's first message) so the inner agent knows to invoke
                  (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace)
-        (should (string-match-p "/workspace-merge" captured-prefixed))
+        (should (string-match-p "/create-or-update-workspace merge" captured-prefixed))
         (should (string-match-p
                  (regexp-quote agent-repl--oneshot-merge-suffix)
                  captured-prefixed))))))
@@ -9808,7 +9808,7 @@ spawned agent's first message) so the inner agent knows to invoke
 (ert-deftest agent-repl-test-create-doom-oneshot-keeps-raw-prompt-clean ()
   "The merge suffix is NOT appended to the raw prompt — raw is used purely
 for slug generation and should not get polluted with skill names like
-`/workspace-merge', which would derail the workspace-name slug."
+`/create-or-update-workspace merge', which would derail the workspace-name slug."
   (agent-repl-test--with-clean-state
     (let ((captured-raw :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -9818,7 +9818,7 @@ for slug generation and should not get polluted with skill names like
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace)
         (should (equal captured-raw "tweak the modeline"))
-        (should-not (string-match-p "/workspace-merge" captured-raw))))))
+        (should-not (string-match-p "/create-or-update-workspace merge" captured-raw))))))
 
 (ert-deftest agent-repl-test-create-doom-oneshot-prefixed-includes-autonomous-prefix ()
   "The prefixed prompt still starts with the standard autonomous-prompt
@@ -9936,7 +9936,7 @@ changes from `master' to HEAD."
 (ert-deftest agent-repl-test-create-doom-oneshot-from-current-branch-appends-merge-suffix ()
   "The current-branch variant must also append the merge-on-success suffix
 to the prefixed prompt — the spawned agent still needs to know to invoke
-`/workspace-merge' after a successful implementation."
+`/create-or-update-workspace merge' after a successful implementation."
   (agent-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -9945,7 +9945,7 @@ to the prefixed prompt — the spawned agent still needs to know to invoke
                  (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
                    (setq captured-prefixed prefixed))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
-        (should (string-match-p "/workspace-merge" captured-prefixed))
+        (should (string-match-p "/create-or-update-workspace merge" captured-prefixed))
         (should (string-match-p
                  (regexp-quote agent-repl--oneshot-merge-suffix)
                  captured-prefixed))))))
@@ -9962,7 +9962,7 @@ generation — same constraint as the master variant."
                    (setq captured-raw raw))))
         (agent-repl-create-doom-oneshot-workspace-from-current-branch)
         (should (equal captured-raw "tweak the modeline"))
-        (should-not (string-match-p "/workspace-merge" captured-raw))))))
+        (should-not (string-match-p "/create-or-update-workspace merge" captured-raw))))))
 
 (ert-deftest agent-repl-test-create-doom-oneshot-from-current-branch-rejects-empty-prompt ()
   "An empty/whitespace prompt is rejected for the current-branch variant
@@ -10766,11 +10766,11 @@ AGENTS.md `No External Processes or External State in Tests')."
     (should (string-match-p "error" prompt))))
 
 (ert-deftest agent-repl-test-format-merge-failure-prompt-contains-workspace-merge-retry-directive ()
-  "Prompt directs the agent to run /workspace-merge again — the skill's
+  "Prompt directs the agent to run /create-or-update-workspace merge again — the skill's
 rebase step is more likely to resolve conflicts than a raw retry."
   (let ((prompt (agent-repl--format-merge-failure-prompt
                  '(error "boom"))))
-    (should (string-match-p "/workspace-merge" prompt))
+    (should (string-match-p "/create-or-update-workspace merge" prompt))
     (should (string-match-p "rebase directive" prompt))))
 
 (ert-deftest agent-repl-test-abort-cherry-pick-if-in-flight-noop-on-nil-dir ()
@@ -10933,7 +10933,7 @@ workspace's project, so SPC j O always dispatches into that repo."
   "The create-PR-on-success suffix is included in the PREFIXED prompt so
 the spawned agent knows to invoke
 `agent-repl--oneshot-create-pr-command' on success — this replaces the
-`/workspace-merge' instruction used by the doom one-shot."
+`/create-or-update-workspace merge' instruction used by the doom one-shot."
   (agent-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -10950,9 +10950,9 @@ the spawned agent knows to invoke
                  captured-prefixed))))))
 
 (ert-deftest agent-repl-test-explanation-engine-oneshot-chains-workspace-merge-after-create-pr ()
-  "The explanation-engine one-shot chains `/workspace-merge' AFTER
+  "The explanation-engine one-shot chains `/create-or-update-workspace merge' AFTER
 `/create-or-update-pr' as a second-stage teardown — the prefixed prompt
-must mention `/workspace-merge', and it must appear textually AFTER the
+must mention `/create-or-update-workspace merge', and it must appear textually AFTER the
 `/create-or-update-pr' reference so the chain reads chronologically
 (implement → PR → CICD → workspace-merge)."
   (agent-repl-test--with-clean-state
@@ -10966,7 +10966,7 @@ must mention `/workspace-merge', and it must appear textually AFTER the
         (let ((pr-pos (string-match
                        (regexp-quote agent-repl--oneshot-create-pr-command)
                        captured-prefixed))
-              (merge-pos (string-match "/workspace-merge" captured-prefixed)))
+              (merge-pos (string-match "/create-or-update-workspace merge" captured-prefixed)))
           (should pr-pos)
           (should merge-pos)
           (should (< pr-pos merge-pos)))))))
@@ -11092,13 +11092,13 @@ work."
 ;;;; ---- Tests: agent-repl--oneshot-create-pr-then-merge-followup ----
 
 (ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-mentions-workspace-merge ()
-  "The follow-up clause must reference `/workspace-merge' — that's the
+  "The follow-up clause must reference `/create-or-update-workspace merge' — that's the
 slash command the spawned agent invokes once CICD passes."
-  (should (string-match-p "/workspace-merge"
+  (should (string-match-p "/create-or-update-workspace merge"
                           agent-repl--oneshot-create-pr-then-merge-followup)))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-gates-on-check-cicd-pass ()
-  "The follow-up clause must explicitly gate `/workspace-merge' on
+  "The follow-up clause must explicitly gate `/create-or-update-workspace merge' on
 `/check-cicd' returning PASS — without this gate the agent could tear
 down the workspace even after a failing CI run."
   (should (string-match-p "/check-cicd"
@@ -11108,16 +11108,16 @@ down the workspace even after a failing CI run."
 
 (ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-stops-on-check-cicd-fail ()
   "On CICD FAIL the follow-up clause must tell the agent to STOP and NOT
-invoke `/workspace-merge' — otherwise a failing CI could still lead to a
+invoke `/create-or-update-workspace merge' — otherwise a failing CI could still lead to a
 workspace teardown that loses the editor state without the change landing."
   (should (string-match-p "FAIL"
                           agent-repl--oneshot-create-pr-then-merge-followup))
   (should (string-match-p "STOP"
                           agent-repl--oneshot-create-pr-then-merge-followup))
-  ;; The "do NOT invoke /workspace-merge" instruction must appear so the
+  ;; The "do NOT invoke /create-or-update-workspace merge" instruction must appear so the
   ;; agent doesn't mis-read STOP as merely "stop the implementation" and
   ;; still fire the teardown.
-  (should (string-match-p "NOT invoke `/workspace-merge`"
+  (should (string-match-p "NOT invoke `/create-or-update-workspace merge`"
                           agent-repl--oneshot-create-pr-then-merge-followup)))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-references-create-pr-command ()
