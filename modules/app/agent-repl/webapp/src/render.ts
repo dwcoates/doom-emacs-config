@@ -763,7 +763,7 @@ function ToolCard(
       ${AsyncFold(item, source, panels)}
       ${toolResult(item)}
       ${liveTaskOutput(item, source)}
-      ${taskControls(item)}
+      ${taskControls(item, panels)}
       ${agentComposer(item, panels)}
     </div>`;
 }
@@ -951,13 +951,37 @@ function AsyncFold(item: ToolItem, source: AsyncSource | undefined, panels?: Pan
 }
 
 /**
- * Stop controls for the detached work a card spawned, gone once the
- * task's completion notification lands. Prompt-mediated on purpose (see
- * Actions.sendPrompt): the button asks the agent to run TaskStop, and
- * its label owns that instead of posing as an instant kill switch.
+ * Whether a watcher has SETTLED — no longer counted live by a fold. It
+ * settles when its completion notification lands OR a successful `TaskStop`
+ * for one of its task ids has been folded under it. The prompt-mediated stop
+ * button never yields a task-notification (daemon liveness is notification-
+ * only, see `tailer.go`), so the settled TaskStop card — already parsed and
+ * folded under the spawner by `partitionFeed` — is the sole signal that a
+ * stop actually took. An in-flight or errored TaskStop does not settle.
  */
-function taskControls(item: ToolItem): string {
-  const live = item.notification ? [] : spawnedTaskIds(item);
+function watcherSettled(item: ToolItem, panels?: PanelContext): boolean {
+  if (item.notification) return true;
+  const ids = new Set(spawnedTaskIds(item));
+  return (panels?.children.get(item.toolUseId) ?? []).some(
+    (c) =>
+      c.kind === "tool" &&
+      c.toolName === "TaskStop" &&
+      c.result !== undefined &&
+      !c.result.isError &&
+      typeof c.input?.task_id === "string" &&
+      ids.has(c.input.task_id),
+  );
+}
+
+/**
+ * Stop controls for the detached work a card spawned, gone once the task
+ * has settled (its notification landed or its TaskStop took). Prompt-mediated
+ * on purpose (see Actions.sendPrompt): the button asks the agent to run
+ * TaskStop, and its label owns that instead of posing as an instant kill
+ * switch.
+ */
+function taskControls(item: ToolItem, panels?: PanelContext): string {
+  const live = watcherSettled(item, panels) ? [] : spawnedTaskIds(item);
   if (live.length === 0) return "";
   const buttons = live
     .map((id) => {
@@ -980,9 +1004,9 @@ function watcherFace(total: number, live: number): string {
  * One watcher's row inside a bubble's fold: its identity and live/settled
  * badge, then the SAME live surface its own tool card carries — the
  * daemon's file tail, the stop control, and the message composer — reused
- * wholesale rather than re-implemented. A watcher is live until its
- * completion notification lands, which is when the arc gives way to a
- * settled badge.
+ * wholesale rather than re-implemented. A watcher is live until it settles
+ * — its completion notification lands or a successful TaskStop for its task
+ * takes — which is when the arc gives way to a settled badge.
  */
 function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   const ids = spawnedTaskIds(item);
@@ -992,7 +1016,7 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   // answered — this is the ONLY tail a background agent ever has, since the
   // WS never streamed it into item.taskOutput.
   const polled = ids.map((id) => panels?.taskTail?.(id)).find(Boolean);
-  const status = item.notification
+  const status = watcherSettled(item, panels)
     ? `<span class="badge ok">done</span>`
     : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`;
   // Live elapsed comes from the poll (which the daemon computes from the
@@ -1012,7 +1036,7 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
     : taskOutputPre(item.taskOutput ?? polled?.text ?? "");
   return `<div class="watcher-row">
       <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${elapsed}</div>
-      ${desc}${progress}${tail}${taskControls(item)}${agentComposer(item, panels)}
+      ${desc}${progress}${tail}${taskControls(item, panels)}${agentComposer(item, panels)}
     </div>`;
 }
 
@@ -1032,7 +1056,7 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
 function WatcherPanel(blockId: string, panels?: PanelContext): string {
   const watchers = panels?.watchers?.get(blockId) ?? [];
   if (watchers.length === 0) return "";
-  const live = watchers.filter((w) => !w.notification).length;
+  const live = watchers.filter((w) => !watcherSettled(w, panels)).length;
   const arc = live > 0 ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
   return Fold({
     id: `watchers:${blockId}`,

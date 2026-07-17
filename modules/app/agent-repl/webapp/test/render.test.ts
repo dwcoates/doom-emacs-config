@@ -4257,6 +4257,35 @@ function watcherPanels(watchers: ToolItem[], open = false): PanelContext {
   };
 }
 
+/** A TaskStop addressing TASKID, folded under the watcher card w1. */
+function taskStop(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
+  return {
+    kind: "tool",
+    ts: "2026-05-24T10:01:00.000Z",
+    toolUseId: "ts1",
+    messageId: "m2",
+    toolName: "TaskStop",
+    inputJson: "{}",
+    input: { task_id: taskId },
+    inputDone: true,
+    result: { isError: false, content: `Stopped ${taskId}.` },
+    ...over,
+  };
+}
+
+/** watcherPanels plus CHILDREN folded under the watcher card w1. */
+function watcherPanelsWithChildren(
+  watchers: ToolItem[],
+  children: ToolItem[],
+  open = false,
+): PanelContext {
+  return {
+    children: new Map([["w1", children]]),
+    isOpen: () => open,
+    watchers: new Map([["b1", watchers]]),
+  };
+}
+
 describe("watcher fold", () => {
   it("renders no fold on a final bubble whose turn armed no watcher", () => {
     // Arrange + Act
@@ -4294,6 +4323,34 @@ describe("watcher fold", () => {
     // Assert
     expect(html).toContain("1 watcher · done");
     expect(html).not.toContain("tool-spinner");
+  });
+
+  it("settles a watcher whose folded TaskStop succeeded, dropping the live count", () => {
+    // Arrange — the prompt-mediated stop yields no notification, only a settled TaskStop card.
+    const w = watcher("bg1");
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1")]));
+    // Assert
+    expect(html).toContain("1 watcher · done");
+    expect(html).not.toContain("tool-spinner");
+  });
+
+  it("keeps a watcher live while its TaskStop is still in flight", () => {
+    // Arrange — a resultless TaskStop has not confirmed the stop yet.
+    const w = watcher("bg1");
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: undefined })]));
+    // Assert
+    expect(html).toContain("1 watcher · 1 live");
+  });
+
+  it("keeps a watcher live when its TaskStop errored", () => {
+    // Arrange — a failed stop must not settle the watcher.
+    const w = watcher("bg1");
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: { isError: true, content: "no such task" } })]));
+    // Assert
+    expect(html).toContain("1 watcher · 1 live");
   });
 
   it("never folds watchers into a non-final commentary bubble", () => {
