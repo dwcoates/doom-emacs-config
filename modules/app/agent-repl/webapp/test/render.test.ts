@@ -3899,6 +3899,104 @@ describe("watcher fold", () => {
   });
 });
 
+// --- gns-sockets fold (in a final-response bubble) ------------------------------
+
+/** A gns-sockets bridge respawn spawn card, the fold's typical content. */
+function bridgeSpawnItem(): ToolItem {
+  return {
+    kind: "tool",
+    ts: "2026-05-24T10:00:00.000Z",
+    toolUseId: "g1",
+    messageId: "m1",
+    toolName: "Agent",
+    inputJson: `{"subagent_type":"sockets-listener"}`,
+    input: { subagent_type: "sockets-listener", description: "gns-sockets bridge" },
+    inputDone: true,
+    result: { isError: false, content: "Async agent launched successfully. agentId: abc1" },
+  };
+}
+
+/** A PanelContext folding ITEMS into block b1, open per OPEN. */
+function gnsPanels(items: ConversationItem[], open = false): PanelContext {
+  return {
+    children: new Map(),
+    isOpen: () => open,
+    gnsFolds: new Map([["b1", items]]),
+  };
+}
+
+describe("gns-sockets fold", () => {
+  it("renders no fold on a final bubble no bridge upkeep attached to", () => {
+    // Arrange + Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, gnsPanels([]));
+    // Assert
+    expect(html).not.toContain("gns-fold");
+  });
+
+  it("shows the ticker face and none of the body while closed", () => {
+    // Arrange + Act
+    const html = renderItem(
+      text("b1"),
+      undefined,
+      finalsClosing(text("b1")),
+      false,
+      gnsPanels([bridgeSpawnItem()]),
+    );
+    // Assert
+    expect(html).toContain("gns-fold");
+    expect(html).toContain("gns-sockets bridge · 1 step");
+    expect(html).not.toContain("agent-panel");
+  });
+
+  it("reveals the folded child feed when open", () => {
+    // Arrange — a spawn card plus the acknowledgment bubble it folded with.
+    const ack: ConversationItem = {
+      kind: "text",
+      blockId: "ack",
+      messageId: "m2",
+      text: "Bridge respawned in the background.",
+      done: true,
+      ts: "2026-05-24T10:00:00.000Z",
+    };
+    // Act
+    const html = renderItem(
+      text("b1"),
+      undefined,
+      finalsClosing(text("b1")),
+      false,
+      gnsPanels([bridgeSpawnItem(), ack], true),
+    );
+    // Assert
+    expect(html).toContain("agent-panel");
+    expect(html).toContain("feed-child");
+    expect(html).toContain("Bridge respawned in the background.");
+  });
+
+  it("never folds bridge upkeep into a non-final commentary bubble", () => {
+    // Arrange — no finals, so the bubble carries no closing chip.
+    const html = renderItem(text("b1"), undefined, undefined, false, gnsPanels([bridgeSpawnItem()]));
+    // Assert
+    expect(html).not.toContain("gns-fold");
+  });
+
+  it("keys the fold beside a watcher fold without colliding", () => {
+    // Arrange — one bubble carrying both folds, only the gns one open.
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: (id) => id === "gns:b1",
+      watchers: new Map([["b1", [watcher()]]]),
+      gnsFolds: new Map([["b1", [bridgeSpawnItem()]]]),
+    };
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    // Assert — the watcher fold stays closed while the gns fold opens.
+    expect(html).toContain(`data-panel-toggle="watchers:b1"`);
+    expect(html).toContain(`data-panel-toggle="gns:b1"`);
+    expect(html).not.toContain("watcher-row");
+    expect(html).toContain("agent-panel");
+  });
+});
+
 describe("openWatcherTaskIds", () => {
   it("collects task ids only from open folds", () => {
     // Arrange

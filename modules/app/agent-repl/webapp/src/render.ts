@@ -37,6 +37,7 @@ import { ModelInfo, QueuedItem } from "./protocol.js";
 import { navTokensForItem } from "./nav.js";
 import { isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
+import { gnsFolds } from "./gns.js";
 import { watchersByBubble } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
@@ -402,8 +403,10 @@ function TextStream(
   }`;
   // Only a FINAL response (one carrying a chip) folds in its turn's
   // watchers: a mid-turn commentary bubble is not the answer the watcher
-  // belongs to, so it stays inert prose.
+  // belongs to, so it stays inert prose. The gns-sockets fold rides the
+  // same gate — its host is by construction a completed turn's answer.
   const watchers = chip ? WatcherPanel(item.blockId, panels) : "";
+  const gns = chip ? GnsPanel(item.blockId, panels) : "";
   // A turn that closed in under a second reports no time worth a chip, so the
   // final-response badge is dropped entirely below that floor rather than
   // rounding a negligible span up to a `1s` the reader never asked for. The
@@ -428,7 +431,7 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${cursor}${watchers}${closer}`, item.ts);
+  return Bubble(cls, `${body}${cursor}${watchers}${gns}${closer}`, item.ts);
 }
 
 function Thinking(item: ThinkingItem): string {
@@ -465,6 +468,12 @@ export interface PanelContext {
    * armed no detached work.
    */
   watchers?: ReadonlyMap<string, readonly ToolItem[]>;
+  /**
+   * gns-sockets bridge upkeep a final-response bubble folds in, keyed by
+   * the host bubble's block id (see gns.ts). Absent for a bubble no
+   * bridge segment or bridge-woken turn attached to.
+   */
+  gnsFolds?: ReadonlyMap<string, readonly ConversationItem[]>;
   /**
    * The poller's accumulated tail for a watcher's task id, when a fold is
    * open and the daemon has been polled (see watcher-poll.ts). Fills the
@@ -826,6 +835,32 @@ function WatcherPanel(blockId: string, panels?: PanelContext): string {
 function taskUpdateBadge(status: string): string {
   const tone = status === "completed" ? "ok" : status === "deleted" ? "err" : "run";
   return `<span class="badge ${tone}">${escapeHtml(status.replace("_", " "))}</span>`;
+}
+
+/**
+ * The gns-sockets fold a final-response bubble carries (see gns.ts): the
+ * bridge upkeep that followed the answer — Stop-hook respawn segments and
+ * whole bridge-woken turns — behind a click, folded exactly like the
+ * watcher panel above it. The body renders the folded items through the
+ * same renderItem the top feed uses (an ActivitySection's child-feed
+ * treatment), so a folded spawn card keeps its activity panel and a folded
+ * result keeps its chip. Keyed `gns:<blockId>` so it never collides with
+ * the bubble's watcher fold.
+ */
+function GnsPanel(blockId: string, panels?: PanelContext): string {
+  const items = panels?.gnsFolds?.get(blockId) ?? [];
+  if (items.length === 0) return "";
+  return Fold({
+    id: `gns:${blockId}`,
+    foldClass: "gns-fold",
+    tickerClass: "gns-ticker",
+    ticker: `📡 ${escapeHtml(`gns-sockets bridge · ${activityTicker(items)}`)}`,
+    body: () =>
+      items
+        .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
+        .join(""),
+    open: panels?.isOpen(`gns:${blockId}`) ?? false,
+  });
 }
 
 function toolInput(item: ToolItem): string {
@@ -2073,6 +2108,7 @@ export class FeedRenderer {
   private panelContext(
     children: ReadonlyMap<string, readonly ConversationItem[]>,
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
+    gnsFoldsByBubble?: ReadonlyMap<string, readonly ConversationItem[]>,
   ): PanelContext {
     return {
       children,
@@ -2080,6 +2116,7 @@ export class FeedRenderer {
       selections: this.questionSelections,
       drafts: this.msgDrafts,
       watchers,
+      gnsFolds: gnsFoldsByBubble,
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
@@ -2268,14 +2305,23 @@ export class FeedRenderer {
     // of pointlessly rebuilding the feed this method just built.
     const items = itemsFromLastClear(state.items);
     this.lastClearKey = clearBoundary(items);
+    // The gns-sockets fold: bridge upkeep leaves the top feed and every
+    // turn-shaped projection (finals, watchers, pulse), so the green
+    // border lands on the real answer and the folded segment renders
+    // inside its host bubble's panel instead. The partition still runs on
+    // the FULL list — a folded spawn card keeps its parented children,
+    // which its card renders inside the fold.
+    const gns = gnsFolds(items);
+    const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
-    const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const top = part.top.filter((i) => !gns.folded.has(i));
+    const watchers = watchersByBubble(visible);
+    const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers);
-    const finals = finalResponses(items);
-    const pulse = pulseTarget(items, state.turnInFlight, finals);
+    const finals = finalResponses(visible);
+    const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
-    for (const entry of groupFeed(part.top)) {
+    for (const entry of groupFeed(top)) {
       const key = this.entryKey(entry);
       const el = document.createElement("div");
       el.className = "feed-item";
@@ -2401,14 +2447,23 @@ export class FeedRenderer {
       this.nodes.clear();
     }
     this.lastClearKey = boundary;
+    // The gns-sockets fold: bridge upkeep leaves the top feed and every
+    // turn-shaped projection (finals, watchers, pulse), so the green
+    // border lands on the real answer and the folded segment renders
+    // inside its host bubble's panel instead. The partition still runs on
+    // the FULL list — a folded spawn card keeps its parented children,
+    // which its card renders inside the fold.
+    const gns = gnsFolds(items);
+    const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
-    const watchers = watchersByBubble(items);
-    const panels = this.panelContext(part.children, watchers);
+    const top = part.top.filter((i) => !gns.folded.has(i));
+    const watchers = watchersByBubble(visible);
+    const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers);
-    const finals = finalResponses(items);
-    const pulse = pulseTarget(items, state.turnInFlight, finals);
+    const finals = finalResponses(visible);
+    const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const seen = new Set<string>();
-    for (const feedEntry of groupFeed(part.top)) {
+    for (const feedEntry of groupFeed(top)) {
       const key = this.entryKey(feedEntry);
       seen.add(key);
       const html = this.entryHtml(feedEntry, finals, pulse, panels);

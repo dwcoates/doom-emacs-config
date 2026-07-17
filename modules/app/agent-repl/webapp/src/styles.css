@@ -677,6 +677,31 @@ pre {
   background: var(--card);
   color: var(--muted);
 }
+/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
+   bridge upkeep that followed the answer, wearing the exact watcher-fold
+   dress — dashed rule, pill ticker, .agent-panel body — so a bubble
+   carrying both reads as one folding vocabulary. Its body is a child feed
+   (folded cards and bubbles through renderItem), not watcher rows. */
+.gns-fold {
+  border-top: 1px dashed var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  cursor: zoom-in;
+}
+.gns-fold.open { cursor: default; }
+.gns-fold.open > .gns-ticker { cursor: zoom-out; }
+.gns-ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+}
 .watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
 .watcher-head { display: flex; align-items: center; gap: 0.5rem; }
 /* The live elapsed the poll feeds (the store's frozen heartbeat is only a
