@@ -1,13 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import type { Entry, Group, MergeCommitRow, Section, Snapshot } from "../src/sidebar-types.js";
+import type {
+  Entry,
+  Group,
+  MergeCommitRow,
+  RosterEntry,
+  Section,
+  SidebarActionName,
+  Snapshot,
+} from "../src/sidebar-types.js";
 import {
+  EMACS_ONLY_ACTIONS,
+  OpContext,
+  SIDEBAR_HOOK,
+  STANDALONE_TOAST,
   actionTargets,
+  dragPayload,
+  entryMatches,
+  filterSnapshot,
+  findEntry,
   formatDuration,
   formatMergeAgo,
   formatMergeClock,
+  hoverCardHtml,
+  indexRoster,
+  installSidebarHook,
+  isStandalone,
+  makeGatedPost,
   mergedTargets,
   navigableRefs,
+  notificationEvents,
+  rosterBadgesHtml,
+  runSidebarOp,
+  showCommitRequest,
+  sidebarHeaderHtml,
+  sidebarWidth,
   snapshotHtml,
   snapshotTicks,
   stepCursor,
@@ -22,6 +49,7 @@ function entry(over: Partial<Entry> & { ws: string }): Entry {
   return {
     depth: 0,
     section: "main",
+    session_id: null,
     status: null,
     glyph: "·",
     name_color: null,
@@ -35,6 +63,19 @@ function entry(over: Partial<Entry> & { ws: string }): Entry {
     current: false,
     help: `Workspace: ${over.ws}`,
     detail: null,
+    ...over,
+  };
+}
+
+function rosterEntry(over: Partial<RosterEntry> = {}): RosterEntry {
+  return {
+    session_id: "s_1",
+    turn_active: false,
+    pending_permissions: [],
+    queue: [],
+    turn_preview: "",
+    total_cost_usd: 0,
+    hibernated: false,
     ...over,
   };
 }
@@ -598,5 +639,892 @@ describe("snapshotTicks", () => {
     });
     // Act + Assert
     expect(snapshotTicks(snap)).toBe(false);
+  });
+});
+
+describe("sidebarWidth", () => {
+  it("turns the snapshot's width_px into a flex-basis length", () => {
+    // Arrange + Act + Assert
+    expect(sidebarWidth(snapshot({ width_px: 420 }))).toBe("420px");
+  });
+
+  it("yields the empty string when the snapshot carries no width", () => {
+    // Arrange + Act + Assert — "" hands the width back to the CSS var.
+    expect(sidebarWidth(snapshot())).toBe("");
+  });
+
+  it("treats a non-positive width as absent", () => {
+    // Arrange + Act + Assert — a 0px sidebar would be an invisible trap.
+    expect(sidebarWidth(snapshot({ width_px: 0 }))).toBe("");
+  });
+});
+
+describe("isStandalone", () => {
+  it("reads a page without parent_ws as a standalone browser view", () => {
+    // Arrange + Act + Assert
+    expect(isStandalone(new URLSearchParams("sidebar=1"))).toBe(true);
+  });
+
+  it("reads a page with parent_ws as Emacs-hosted", () => {
+    // Arrange + Act + Assert
+    expect(isStandalone(new URLSearchParams("sidebar=1&parent_ws=doom"))).toBe(false);
+  });
+
+  it("counts a present-but-empty parent_ws as hosted", () => {
+    // Arrange + Act + Assert — presence, not value, is the signal.
+    expect(isStandalone(new URLSearchParams("parent_ws="))).toBe(false);
+  });
+});
+
+describe("makeGatedPost", () => {
+  type SentCall = [SidebarActionName, string[], Record<string, unknown>, boolean];
+  const harness = (standalone: boolean) => {
+    const sent: SentCall[] = [];
+    const toasts: string[] = [];
+    const post = makeGatedPost(
+      standalone,
+      (action, targets, args = {}, confirmed = false) => {
+        sent.push([action, targets, args, confirmed]);
+      },
+      (toast) => toasts.push(toast),
+    );
+    return { post, sent, toasts };
+  };
+
+  it("refuses an Emacs-only action in a standalone view with the toast", () => {
+    // Arrange
+    const { post, sent, toasts } = harness(true);
+    // Act
+    post("visit", ["a"]);
+    // Assert
+    expect(sent).toEqual([]);
+    expect(toasts).toEqual([STANDALONE_TOAST]);
+  });
+
+  it("lets an allowed action through in a standalone view", () => {
+    // Arrange
+    const { post, sent, toasts } = harness(true);
+    // Act
+    post("send-prompt", ["a"], { prompt: "hi" });
+    // Assert
+    expect(sent).toEqual([["send-prompt", ["a"], { prompt: "hi" }, false]]);
+    expect(toasts).toEqual([]);
+  });
+
+  it("lets every action through when an Emacs host is attached", () => {
+    // Arrange
+    const { post, sent, toasts } = harness(false);
+    // Act
+    post("nuke", ["a"], {}, true);
+    // Assert
+    expect(sent).toEqual([["nuke", ["a"], {}, true]]);
+    expect(toasts).toEqual([]);
+  });
+});
+
+describe("EMACS_ONLY_ACTIONS", () => {
+  it("blocks exactly the host-bound verbs", () => {
+    // Arrange — the contract's standalone-blocked list, verbatim.
+    const blocked: SidebarActionName[] = [
+      "visit",
+      "nuke",
+      "kill",
+      "merge-into-source",
+      "merge-child",
+      "new-child",
+      "new-fork",
+      "toggle-hidden",
+      "priority-up",
+      "priority-down",
+      "set-priority",
+      "show-commit",
+      "hide-sidebar",
+    ];
+    // Act + Assert
+    for (const action of blocked) expect(EMACS_ONLY_ACTIONS.has(action)).toBe(true);
+  });
+
+  it("keeps the still-useful verbs unblocked", () => {
+    // Arrange — navigation-adjacent, marks, prompts, and interrupts work anywhere.
+    const allowed: SidebarActionName[] = [
+      "toggle-expand",
+      "toggle-fold",
+      "refresh",
+      "toggle-mark",
+      "clear-marks",
+      "send-prompt",
+      "interrupt",
+    ];
+    // Act + Assert
+    for (const action of allowed) expect(EMACS_ONLY_ACTIONS.has(action)).toBe(false);
+  });
+});
+
+describe("sidebarHeaderHtml", () => {
+  it("shows the standalone chip in a standalone view", () => {
+    // Arrange + Act + Assert
+    expect(sidebarHeaderHtml(true)).toContain("sidebar-standalone-chip");
+  });
+
+  it("omits the chip when an Emacs host is attached", () => {
+    // Arrange + Act + Assert
+    expect(sidebarHeaderHtml(false)).not.toContain("sidebar-standalone-chip");
+  });
+
+  it("always carries the search input", () => {
+    // Arrange + Act + Assert
+    expect(sidebarHeaderHtml(false)).toContain(`class="sidebar-search"`);
+    expect(sidebarHeaderHtml(true)).toContain(`class="sidebar-search"`);
+  });
+});
+
+describe("priority badges", () => {
+  const withPriority = (images?: Record<string, string>): Snapshot =>
+    snapshot({
+      priority_images: images,
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "alpha", priority: "p1" })] })],
+        }),
+      ],
+    });
+
+  it("renders the image badge when priority_images carries the priority name", () => {
+    // Arrange + Act
+    const html = snapshotHtml(withPriority({ p1: "data:image/png;base64,AA==" }), null, NOW);
+    // Assert
+    expect(html).toContain(
+      `<img class="sidebar-priority-img" src="data:image/png;base64,AA==" alt="p1">`,
+    );
+    expect(html).not.toContain(`<span class="sidebar-priority">`);
+  });
+
+  it("falls back to the text chip when the priority has no image", () => {
+    // Arrange + Act — the map exists but names a different priority.
+    const html = snapshotHtml(withPriority({ p2: "data:image/png;base64,AA==" }), null, NOW);
+    // Assert
+    expect(html).toContain(`<span class="sidebar-priority">p1</span>`);
+    expect(html).not.toContain("sidebar-priority-img");
+  });
+
+  it("attribute-escapes the data URI without rejecting it", () => {
+    // Arrange — a URI carrying quote/angle characters must not break out
+    // of the src attribute, but Emacs owns it and it is never dropped.
+    const html = snapshotHtml(withPriority({ p1: `data:image/svg+xml,<svg onload="x">` }), null, NOW);
+    // Act + Assert
+    expect(html).toContain(`src="data:image/svg+xml,&lt;svg onload=&quot;x&quot;&gt;"`);
+    expect(html).not.toContain(`<svg`);
+  });
+});
+
+describe("entryMatches", () => {
+  it("matches the workspace name case-insensitively", () => {
+    // Arrange + Act + Assert
+    expect(entryMatches(entry({ ws: "Alpha-Fix" }), "alpha")).toBe(true);
+  });
+
+  it("matches the summary text", () => {
+    // Arrange + Act + Assert
+    expect(entryMatches(entry({ ws: "a", summary: "Fixing the tests" }), "TESTS")).toBe(true);
+  });
+
+  it("rejects a row matching neither field", () => {
+    // Arrange + Act + Assert
+    expect(entryMatches(entry({ ws: "a", summary: "docs" }), "tests")).toBe(false);
+  });
+});
+
+describe("filterSnapshot", () => {
+  const twoGroups = (): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 3,
+          groups: [
+            group({ key: "/r1/.git", label: "doom", entries: [entry({ ws: "alpha" }), entry({ ws: "beta" })] }),
+            group({ key: "/r2/.git", label: "chess", entries: [entry({ ws: "gamma" })] }),
+          ],
+        }),
+      ],
+    });
+
+  it("keeps only the rows matching the query", () => {
+    // Arrange + Act
+    const filtered = filterSnapshot(twoGroups(), "alp");
+    // Assert
+    expect(navigableRefs(filtered)).toEqual(["repo:/r1/.git", "ws:alpha"]);
+  });
+
+  it("hides a group header whose rows all filtered out", () => {
+    // Arrange + Act — /r2's gamma does not match, so its header goes too.
+    const filtered = filterSnapshot(twoGroups(), "alpha");
+    // Assert
+    expect(filtered.sections[0].groups.map((g) => g.key)).toEqual(["/r1/.git"]);
+  });
+
+  it("keeps the section count as the snapshot's total, not the filtered view's", () => {
+    // Arrange + Act
+    const filtered = filterSnapshot(twoGroups(), "alpha");
+    // Assert
+    expect(filtered.sections[0].count).toBe(3);
+    expect(snapshotHtml(filtered, null, NOW)).toContain("MAIN (3)");
+  });
+
+  it("hides a folded group under any non-blank query", () => {
+    // Arrange — a folded group ships entries: [], so nothing can survive.
+    const snap = snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 1,
+          groups: [group({ key: "/r/.git", folded: true, entries: [] })],
+        }),
+      ],
+    });
+    // Act + Assert
+    expect(filterSnapshot(snap, "x").sections[0].groups).toEqual([]);
+  });
+
+  it("is the identity on a blank query", () => {
+    // Arrange
+    const snap = twoGroups();
+    // Act + Assert — the very same object, not a rebuilt copy.
+    expect(filterSnapshot(snap, "")).toBe(snap);
+  });
+
+  it("treats a whitespace-only query as blank", () => {
+    // Arrange
+    const snap = twoGroups();
+    // Act + Assert
+    expect(filterSnapshot(snap, "   ")).toBe(snap);
+  });
+
+  it("leaves the merge queue untouched", () => {
+    // Arrange — the filter is over workspace rows only.
+    const snap = snapshot({
+      merge_queue: { count: 1, rows: [commit({ sha: "82e4583", state: "pending" })] },
+      sections: [],
+    });
+    // Act + Assert
+    expect(filterSnapshot(snap, "nomatch").merge_queue).toEqual(snap.merge_queue);
+  });
+});
+
+describe("indexRoster", () => {
+  it("indexes the listing by session id", () => {
+    // Arrange
+    const a = rosterEntry({ session_id: "s_a" });
+    const b = rosterEntry({ session_id: "s_b" });
+    // Act + Assert
+    expect(indexRoster([a, b])).toEqual({ s_a: a, s_b: b });
+  });
+});
+
+describe("rosterBadgesHtml", () => {
+  it("shows the queue-depth badge when messages are queued", () => {
+    // Arrange + Act + Assert
+    expect(rosterBadgesHtml(rosterEntry({ queue: [1, 2] }))).toContain("⧉ 2");
+  });
+
+  it("keeps the queue badge off an empty queue", () => {
+    // Arrange + Act + Assert
+    expect(rosterBadgesHtml(rosterEntry())).not.toContain("sidebar-queue-badge");
+  });
+
+  it("renders one-click allow/deny buttons against the first pending permission", () => {
+    // Arrange
+    const html = rosterBadgesHtml(
+      rosterEntry({ session_id: "s_x", pending_permissions: ["req-1", "req-2"] }),
+    );
+    // Act + Assert — both buttons target req-1; the shim gates the rest.
+    expect(html).toContain(`data-perm="allow"`);
+    expect(html).toContain(`data-perm="deny"`);
+    expect(html).toContain(`data-perm-sid="s_x"`);
+    expect(html).toContain(`data-perm-rid="req-1"`);
+    expect(html).not.toContain("req-2");
+  });
+
+  it("shows the cost chip with exactly two decimals", () => {
+    // Arrange + Act + Assert
+    expect(rosterBadgesHtml(rosterEntry({ total_cost_usd: 1.239 }))).toContain("$1.24");
+  });
+
+  it("keeps the cost chip off a zero-cost session", () => {
+    // Arrange + Act + Assert
+    expect(rosterBadgesHtml(rosterEntry())).not.toContain("sidebar-cost-chip");
+  });
+
+  it("renders nothing without a roster entry to join", () => {
+    // Arrange + Act + Assert
+    expect(rosterBadgesHtml(null)).toBe("");
+  });
+});
+
+describe("snapshotHtml roster join", () => {
+  const oneJoined = (sessionId: string | null): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "alpha", session_id: sessionId })] })],
+        }),
+      ],
+    });
+
+  it("decorates a row whose session_id is in the roster", () => {
+    // Arrange
+    const roster = { s_1: rosterEntry({ session_id: "s_1", queue: [1] }) };
+    // Act
+    const html = snapshotHtml(oneJoined("s_1"), null, NOW, null, { roster });
+    // Assert
+    expect(html).toContain("sidebar-queue-badge");
+  });
+
+  it("leaves a row without a session id bare", () => {
+    // Arrange
+    const roster = { s_1: rosterEntry({ session_id: "s_1", queue: [1] }) };
+    // Act
+    const html = snapshotHtml(oneJoined(null), null, NOW, null, { roster });
+    // Assert
+    expect(html).not.toContain("sidebar-queue-badge");
+  });
+});
+
+describe("hoverCardHtml", () => {
+  const richEntry = (): Entry =>
+    entry({
+      ws: "alpha",
+      status: "thinking",
+      priority: "p1",
+      summary: "fixing the tests",
+      session_id: "s_abcdef123456",
+      detail: { branch: "DWC/x", dirty_count: 4 },
+    });
+
+  it("carries name, status, priority, and summary", () => {
+    // Arrange + Act
+    const html = hoverCardHtml(richEntry());
+    // Assert
+    expect(html).toContain("alpha");
+    expect(html).toContain("thinking");
+    expect(html).toContain("p1");
+    expect(html).toContain("fixing the tests");
+  });
+
+  it("shortens the session id", () => {
+    // Arrange + Act
+    const html = hoverCardHtml(richEntry());
+    // Assert
+    expect(html).toContain("s_abcdef12");
+    expect(html).not.toContain("s_abcdef123456");
+  });
+
+  it("adds the roster's queue depth, cost, and turn preview", () => {
+    // Arrange
+    const roster = rosterEntry({ queue: [1, 2, 3], total_cost_usd: 0.5, turn_preview: "Reading store.ts…" });
+    // Act
+    const html = hoverCardHtml(richEntry(), roster);
+    // Assert
+    expect(html).toContain("3");
+    expect(html).toContain("$0.50");
+    expect(html).toContain("Reading store.ts…");
+  });
+
+  it("omits the turn-preview row while no turn streams", () => {
+    // Arrange + Act
+    const html = hoverCardHtml(richEntry(), rosterEntry());
+    // Assert
+    expect(html).not.toContain("turn:");
+  });
+
+  it("carries the cached detail fields the snapshot shipped", () => {
+    // Arrange + Act
+    const html = hoverCardHtml(richEntry());
+    // Assert
+    expect(html).toContain("DWC/x");
+    expect(html).toContain("4 files");
+  });
+
+  it("escapes snapshot text instead of injecting markup", () => {
+    // Arrange
+    const evil = entry({ ws: "a", summary: `<img src=x onerror="alert(1)">` });
+    // Act
+    const html = hoverCardHtml(evil);
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+});
+
+describe("notificationEvents", () => {
+  const inState = (over: Partial<Entry>): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "alpha", summary: "fixing tests", ...over })] })],
+        }),
+      ],
+    });
+
+  it("fires when an entry transitions INTO the permission status", () => {
+    // Arrange
+    const prev = inState({ status: "thinking" });
+    const next = inState({ status: "permission" });
+    // Act
+    const events = notificationEvents(prev, next);
+    // Assert
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("permission");
+    expect(events[0].body).toContain("alpha");
+    expect(events[0].body).toContain("fixing tests");
+  });
+
+  it("stays quiet while the permission condition persists", () => {
+    // Arrange — deduped per workspace+kind: only the edge fires.
+    const prev = inState({ status: "permission" });
+    const next = inState({ status: "permission" });
+    // Act + Assert
+    expect(notificationEvents(prev, next)).toEqual([]);
+  });
+
+  it("fires when an entry transitions INTO the merged section", () => {
+    // Arrange
+    const prev = inState({ section: "main" });
+    const next = inState({ section: "merged" });
+    // Act
+    const events = notificationEvents(prev, next);
+    // Assert
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("merged");
+  });
+
+  it("stays quiet while the merged condition persists", () => {
+    // Arrange
+    const prev = inState({ section: "merged" });
+    const next = inState({ section: "merged" });
+    // Act + Assert
+    expect(notificationEvents(prev, next)).toEqual([]);
+  });
+
+  it("counts a row appearing already in the condition as entering it", () => {
+    // Arrange — a brand-new workspace waiting on a permission is news.
+    const prev = snapshot({ sections: [] });
+    const next = inState({ status: "permission" });
+    // Act + Assert
+    expect(notificationEvents(prev, next)).toHaveLength(1);
+  });
+});
+
+describe("dragPayload", () => {
+  const dragSnap = (): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 2,
+          groups: [
+            group({
+              key: "/r/.git",
+              entries: [entry({ ws: "a", priority: null }), entry({ ws: "b", priority: "p2" })],
+            }),
+          ],
+        }),
+        section({
+          id: "merged",
+          label: "MERGED",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "m", section: "merged" })] })],
+        }),
+      ],
+    });
+
+  it("adopts the drop target's priority", () => {
+    // Arrange + Act + Assert
+    expect(dragPayload(dragSnap(), "a", "b")).toEqual({
+      action: "set-priority",
+      targets: ["a"],
+      args: { priority: "p2" },
+    });
+  });
+
+  it("clears the priority when the target row has none", () => {
+    // Arrange + Act + Assert
+    expect(dragPayload(dragSnap(), "b", "a")).toEqual({
+      action: "set-priority",
+      targets: ["b"],
+      args: { priority: null },
+    });
+  });
+
+  it("ignores a self-drop", () => {
+    // Arrange + Act + Assert
+    expect(dragPayload(dragSnap(), "a", "a")).toBeNull();
+  });
+
+  it("ignores a drop onto a row outside the MAIN section", () => {
+    // Arrange + Act + Assert
+    expect(dragPayload(dragSnap(), "a", "m")).toBeNull();
+  });
+
+  it("ignores an unknown source row", () => {
+    // Arrange + Act + Assert
+    expect(dragPayload(dragSnap(), "gone", "b")).toBeNull();
+  });
+});
+
+describe("snapshotHtml drag affordances", () => {
+  const oneRow = (over: Partial<Entry>): string =>
+    snapshotHtml(
+      snapshot({
+        sections: [
+          section({
+            id: over.section === "merged" ? "merged" : "main",
+            label: "S",
+            count: 1,
+            groups: [group({ key: "/r/.git", entries: [entry({ ws: "alpha", ...over })] })],
+          }),
+        ],
+      }),
+      null,
+      NOW,
+    );
+
+  it("marks MAIN rows draggable", () => {
+    // Arrange + Act + Assert
+    expect(oneRow({ section: "main" })).toContain(`draggable="true"`);
+  });
+
+  it("keeps non-MAIN rows undraggable", () => {
+    // Arrange + Act + Assert — reprioritizing is a MAIN-section concept.
+    expect(oneRow({ section: "merged" })).not.toContain(`draggable="true"`);
+  });
+});
+
+describe("showCommitRequest", () => {
+  it("targets the commit's workspace with the sha argument", () => {
+    // Arrange
+    const row = commit({ sha: "82e4583", state: "pending", ws: "ws-a" });
+    // Act + Assert
+    expect(showCommitRequest(row)).toEqual({
+      action: "show-commit",
+      targets: ["ws-a"],
+      args: { sha: "82e4583" },
+    });
+  });
+});
+
+describe("snapshotHtml merge-commit click affordance", () => {
+  it("addresses a commit row by its sha for the show-commit click", () => {
+    // Arrange
+    const snap = snapshot({
+      merge_queue: { count: 1, rows: [commit({ sha: "82e4583", state: "pending" })] },
+    });
+    // Act
+    const html = snapshotHtml(snap, null, NOW);
+    // Assert
+    expect(html).toContain("data-mq-commit");
+    expect(html).toContain(`data-sha="82e4583"`);
+  });
+});
+
+describe("findEntry", () => {
+  const snap = (): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "alpha" })] })],
+        }),
+      ],
+    });
+
+  it("finds a workspace row by name", () => {
+    // Arrange + Act + Assert
+    expect(findEntry(snap(), "alpha")?.ws).toBe("alpha");
+  });
+
+  it("yields null for an unknown name", () => {
+    // Arrange + Act + Assert
+    expect(findEntry(snap(), "gone")).toBeNull();
+  });
+});
+
+describe("installSidebarHook", () => {
+  it("plants the hook under the name frontend.el calls", () => {
+    // Arrange
+    const target: Record<string, unknown> = {};
+    // Act
+    installSidebarHook(target, () => {});
+    // Assert
+    expect(typeof target[SIDEBAR_HOOK]).toBe("function");
+  });
+
+  it("routes a fired op into the shared dispatcher", () => {
+    // Arrange
+    const target: Record<string, unknown> = {};
+    const ops: string[] = [];
+    installSidebarHook(target, (op) => ops.push(op));
+    // Act — invoke exactly as an Emacs host script does.
+    (target[SIDEBAR_HOOK] as (op: string) => void)("toggle-mark");
+    // Assert
+    expect(ops).toEqual(["toggle-mark"]);
+  });
+});
+
+describe("runSidebarOp", () => {
+  type PostCall = [SidebarActionName, string[], Record<string, unknown>?, boolean?];
+
+  const opSnap = (over: Partial<Snapshot> = {}): Snapshot =>
+    snapshot({
+      sections: [
+        section({
+          id: "main",
+          label: "MAIN",
+          count: 2,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "a" }), entry({ ws: "b" })] })],
+        }),
+        section({
+          id: "merged",
+          label: "MERGED",
+          count: 1,
+          groups: [group({ key: "/r/.git", entries: [entry({ ws: "m", section: "merged" })] })],
+        }),
+      ],
+      ...over,
+    });
+
+  const harness = (over: Partial<OpContext> = {}) => {
+    const posts: PostCall[] = [];
+    const moved: Array<string | null> = [];
+    const snap = over.snap === undefined ? opSnap() : over.snap;
+    const ctx: OpContext = {
+      snap,
+      refs: snap === null ? [] : navigableRefs(snap),
+      cursor: "ws:a",
+      post: (action, targets, args, confirmed) => {
+        posts.push([action, targets, args, confirmed]);
+      },
+      moveCursor: (ref) => {
+        moved.push(ref);
+      },
+      confirmFn: () => true,
+      promptFn: () => "hello",
+      blocked: () => false,
+      ...over,
+    };
+    return { ctx, posts, moved };
+  };
+
+  it("visit posts the workspace under the cursor, exactly like Enter", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("visit", ctx);
+    // Assert
+    expect(posts).toEqual([["visit", ["a"], undefined, undefined]]);
+  });
+
+  it("visit no-ops from a group header", () => {
+    // Arrange
+    const { ctx, posts } = harness({ cursor: "repo:/r/.git" });
+    // Act
+    runSidebarOp("visit", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("nuke posts marks-or-point targets unconfirmed for non-merged rows", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("nuke", ctx);
+    // Assert
+    expect(posts).toEqual([["nuke", ["a"], {}, false]]);
+  });
+
+  it("nuke asks the merged-workspace confirm and posts confirmed on yes", () => {
+    // Arrange
+    const asked: string[] = [];
+    const { ctx, posts } = harness({
+      cursor: "ws:m",
+      confirmFn: (msg) => {
+        asked.push(msg);
+        return true;
+      },
+    });
+    // Act
+    runSidebarOp("nuke", ctx);
+    // Assert
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("m");
+    expect(posts).toEqual([["nuke", ["m"], {}, true]]);
+  });
+
+  it("nuke aborts entirely when the merged confirm is declined", () => {
+    // Arrange
+    const { ctx, posts } = harness({ cursor: "ws:m", confirmFn: () => false });
+    // Act
+    runSidebarOp("nuke", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("nuke skips the confirm when the gate would refuse anyway", () => {
+    // Arrange — confirming an action that can never post would be a lie.
+    const asked: string[] = [];
+    const { ctx, posts } = harness({
+      cursor: "ws:m",
+      blocked: () => true,
+      confirmFn: (msg) => {
+        asked.push(msg);
+        return true;
+      },
+    });
+    // Act — post still runs, so the gate can raise its refusal toast.
+    runSidebarOp("nuke", ctx);
+    // Assert
+    expect(asked).toEqual([]);
+    expect(posts).toEqual([["nuke", ["m"], {}, false]]);
+  });
+
+  it("kill prefers the marked set, exactly like d", () => {
+    // Arrange
+    const { ctx, posts } = harness({ snap: opSnap({ marks: ["m1", "m2"] }) });
+    // Act
+    runSidebarOp("kill", ctx);
+    // Assert
+    expect(posts).toEqual([["kill", ["m1", "m2"], undefined, undefined]]);
+  });
+
+  it("send-prompt sends the prompted text, exactly like i", () => {
+    // Arrange
+    const { ctx, posts } = harness({ promptFn: () => "do the thing" });
+    // Act
+    runSidebarOp("send-prompt", ctx);
+    // Assert
+    expect(posts).toEqual([["send-prompt", ["a"], { prompt: "do the thing" }, undefined]]);
+  });
+
+  it("send-prompt aborts on a cancelled dialog", () => {
+    // Arrange
+    const { ctx, posts } = harness({ promptFn: () => null });
+    // Act
+    runSidebarOp("send-prompt", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("send-prompt aborts on a blank entry", () => {
+    // Arrange
+    const { ctx, posts } = harness({ promptFn: () => "   " });
+    // Act
+    runSidebarOp("send-prompt", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("merge-into-source posts marks-or-point targets, exactly like M", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("merge-into-source", ctx);
+    // Assert
+    expect(posts).toEqual([["merge-into-source", ["a"], undefined, undefined]]);
+  });
+
+  it("toggle-hidden posts the cursor workspace, exactly like H", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("toggle-hidden", ctx);
+    // Assert
+    expect(posts).toEqual([["toggle-hidden", ["a"], undefined, undefined]]);
+  });
+
+  it("toggle-mark posts and advances the cursor, exactly like t", () => {
+    // Arrange
+    const { ctx, posts, moved } = harness();
+    // Act
+    runSidebarOp("toggle-mark", ctx);
+    // Assert
+    expect(posts).toEqual([["toggle-mark", ["a"], undefined, undefined]]);
+    expect(moved).toEqual(["ws:b"]);
+  });
+
+  it("clear-marks posts with no targets, exactly like u", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("clear-marks", ctx);
+    // Assert
+    expect(posts).toEqual([["clear-marks", [], undefined, undefined]]);
+  });
+
+  it("priority-up posts the cursor workspace, exactly like +", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("priority-up", ctx);
+    // Assert
+    expect(posts).toEqual([["priority-up", ["a"], undefined, undefined]]);
+  });
+
+  it("priority-down posts the cursor workspace, exactly like -", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("priority-down", ctx);
+    // Assert
+    expect(posts).toEqual([["priority-down", ["a"], undefined, undefined]]);
+  });
+
+  it("ignores an unknown op, like an unknown frame type", () => {
+    // Arrange
+    const { ctx, posts } = harness();
+    // Act
+    runSidebarOp("frobnicate", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("no-ops before the first snapshot arrives", () => {
+    // Arrange
+    const { ctx, posts } = harness({ snap: null });
+    // Act
+    runSidebarOp("visit", ctx);
+    // Assert
+    expect(posts).toEqual([]);
+  });
+
+  it("refuses a blocked op end to end: no wire send, one toast", () => {
+    // Arrange — the full standalone path: op → gated post → toast.
+    const sent: PostCall[] = [];
+    const toasts: string[] = [];
+    const gated = makeGatedPost(
+      true,
+      (action, targets, args = {}, confirmed = false) => {
+        sent.push([action, targets, args, confirmed]);
+      },
+      (toast) => toasts.push(toast),
+    );
+    const { ctx } = harness({ post: gated, blocked: (a) => EMACS_ONLY_ACTIONS.has(a) });
+    // Act
+    runSidebarOp("visit", ctx);
+    // Assert
+    expect(sent).toEqual([]);
+    expect(toasts).toEqual([STANDALONE_TOAST]);
   });
 });

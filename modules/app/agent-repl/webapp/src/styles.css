@@ -1378,8 +1378,12 @@ pre {
 #sidebar {
   flex: 0 0 var(--sidebar-width, 340px);
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* A column of [header, list]: the header holds still while ONLY the
+     list scrolls, so the sticky toast/stale strips pin just below the
+     search input instead of fighting it for the top edge. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-sizing: border-box;
   background: #0a0a0a;
   color: #d4d4d4;
@@ -1391,10 +1395,59 @@ pre {
   --sb-muted: #8b949e;
 }
 #sidebar[hidden] { display: none; }
+#sidebar .sidebar-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* The persistent header row: the standalone chip (standalone browser
+   views only) over the compact search input. A non-scrolling flex child
+   of the aside, so the filter stays reachable over a scrolled list;
+   built once by initSidebar, outside the per-snapshot innerHTML
+   rebuild, so typing survives every snapshot. */
+#sidebar .sidebar-header {
+  flex: 0 0 auto;
+  background: #0a0a0a;
+  padding: 0.1rem 0.4rem 0.35rem;
+  border-bottom: 1px solid #1f2937;
+}
+#sidebar .sidebar-chip-row { padding: 0.15rem 0 0.2rem; }
+#sidebar .sidebar-standalone-chip {
+  display: inline-block;
+  border: 1px solid #4b5563;
+  border-radius: 3px;
+  background: #1f2937;
+  color: #9ca3af;
+  padding: 0 0.35em;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+#sidebar .sidebar-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: #111318;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  outline: none;
+}
+#sidebar .sidebar-search:focus { border-color: var(--accent); }
 
 /* Section headers: bold title over a thin ─-rule line, both muted-framed
-   like the drawer's section-title + rule pair. */
-#sidebar .sidebar-section { display: block; }
+   like the drawer's section-title + rule pair. Sections skip rendering
+   while off screen (content-visibility) — the list can carry dozens of
+   workspaces and only the viewport's worth needs layout per frame. */
+#sidebar .sidebar-section {
+  display: block;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
 #sidebar .sidebar-section-title {
   font-weight: bold;
   padding: 0.55rem 0.5rem 0;
@@ -1460,13 +1513,53 @@ pre {
   font-size: 0.85em;
   line-height: 1.3;
 }
+/* The image form of the priority badge (snapshot priority_images). */
+#sidebar .sidebar-priority-img {
+  height: 1.1em;
+  vertical-align: text-bottom;
+}
 #sidebar .sidebar-ws-summary .sidebar-line-body {
   font-style: italic;
   color: var(--sb-muted);
 }
 
+/* Roster-join decorations: gold ⧉ queue-depth badge, springgreen cost
+   chip, and the one-click permission pair (green allow / red deny). */
+#sidebar .sidebar-queue-badge { color: gold; margin-left: 0.4em; font-size: 0.85em; }
+#sidebar .sidebar-cost-chip { color: springgreen; margin-left: 0.4em; font-size: 0.85em; }
+#sidebar .sidebar-perm-allow,
+#sidebar .sidebar-perm-deny {
+  margin-left: 0.35em;
+  background: none;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85em;
+  line-height: 1.2;
+  padding: 0 0.3em;
+}
+#sidebar .sidebar-perm-allow { color: springgreen; }
+#sidebar .sidebar-perm-deny { color: tomato; }
+
+/* The drop indicator while dragging a MAIN row over another: an accent
+   line along the target row's top edge. No optimistic reorder happens —
+   the next snapshot is the reorder. */
+#sidebar .sidebar-drop-target { box-shadow: inset 0 2px 0 0 var(--accent); }
+
 /* Expanded detail lines: muted label, value colored by field class —
-   the drawer's detail-face palette verbatim. */
+   the drawer's detail-face palette verbatim. A just-expanded block fades
+   in (subtle, CSS-only; disabled under prefers-reduced-motion below). */
+#sidebar .sidebar-detail {
+  animation: sidebar-detail-in 0.15s ease-out;
+}
+@keyframes sidebar-detail-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sidebar .sidebar-detail { animation: none; }
+}
 #sidebar .sidebar-detail-label { color: var(--sb-muted); }
 #sidebar .sidebar-detail-branch { color: deepskyblue; }
 #sidebar .sidebar-detail-merge-target { color: springgreen; }
@@ -1534,3 +1627,24 @@ pre {
   font-weight: bold;
   cursor: pointer;
 }
+
+/* The row-hover card. Appended to <body> (position: fixed) so the
+   aside's overflow cannot clip it; pointer-events: none so it never
+   steals the hover that raised it. */
+.sidebar-hovercard {
+  position: fixed;
+  z-index: 60;
+  max-width: 26rem;
+  background: #14161a;
+  color: #d4d4d4;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.75rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.sidebar-hovercard[hidden] { display: none; }
+.sidebar-hovercard .sidebar-hover-name { font-weight: bold; margin-bottom: 0.25rem; }
+.sidebar-hovercard .sidebar-hover-label { color: #8b949e; }
+.sidebar-hovercard .sidebar-hover-value { overflow-wrap: anywhere; }
