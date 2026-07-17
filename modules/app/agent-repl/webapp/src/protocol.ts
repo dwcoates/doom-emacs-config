@@ -310,6 +310,56 @@ export interface ToolUseProgressFrame extends WsEnvelope {
 }
 
 /**
+ * Where an {@link AsyncSource}'s stream lives and how to read it.
+ *
+ * `format` selects THIS CLIENT'S RENDERER, and is the whole reason the
+ * async fold generalizes: a stream that is a conversation renders as
+ * nested bubbles, one that is a record log renders as rows, and one that
+ * is bytes renders as a `<pre>`. Nothing is forced into a shape its data
+ * does not have — a shell's spool is bytes with nothing to recover, and
+ * rendering it as bubbles would mean inventing structure.
+ *
+ * `transport: "frames"` means the stream is ALREADY on the wire as
+ * ordinary tool-use frames and this client correlates it itself, so no
+ * transport is needed at all.
+ */
+export interface StreamRef {
+  transport: "ws" | "poll" | "frames";
+  format: "jsonl-transcript" | "jsonl-journal" | "events" | "text";
+}
+
+/**
+ * One tool call OWNS A STREAM: work that outlives the call and keeps
+ * producing after it settles (§2.6).
+ *
+ * The seam the expanded-bubble view is built on. Before it, every layer
+ * answered "does this call own a stream?" independently, by regex over
+ * English prose in the result text; the daemon now derives it once from
+ * the SDK's structured tool_use_result and every consumer reads the
+ * answer. A newly supported async type needs no new render path here.
+ */
+export interface AsyncSource {
+  source_id: string;
+  kind: "agent" | "shell" | "workflow" | "task";
+  label?: string;
+  /** A value outside this enum reads as `running` — see the store. */
+  status: "running" | "done" | "error" | "killed";
+  stream?: StreamRef;
+}
+
+/**
+ * Announces that `tool_use_id`'s call spawned detached work. One frame per
+ * spawn — a descriptor, never a stream — so the retention ring pays a
+ * single frame however loud the work is. Rides immediately after the
+ * `tool-use-result` that spawned it, so the card already exists.
+ */
+export interface AsyncSourceFrame extends WsEnvelope {
+  type: "async-source";
+  tool_use_id: string;
+  source: AsyncSource;
+}
+
+/**
  * Live growth of a detached task's output file: the daemon tails the
  * announced spool file and streams appended text, spawning-call-keyed.
  */
@@ -477,6 +527,7 @@ export type L2Frame =
   | ToolUseInputEndFrame
   | ToolUseResultFrame
   | ToolUseProgressFrame
+  | AsyncSourceFrame
   | TaskOutputDeltaFrame
   | TaskNotificationFrame
   | PermissionRequestFrame
@@ -512,6 +563,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "tool-use-input-end",
   "tool-use-result",
   "tool-use-progress",
+  "async-source",
   "task-output-delta",
   "task-notification",
   "permission-request",
