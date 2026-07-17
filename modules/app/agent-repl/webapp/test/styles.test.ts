@@ -1611,6 +1611,44 @@ describe("AskUserQuestion picker border", () => {
   });
 });
 
+describe("sidebar animations and rendering perf", () => {
+  // The sidebar's own stylesheet region: sliced so markers that also
+  // exist earlier in the sheet (reduced-motion media blocks) resolve to
+  // the sidebar's instances.
+  const sidebarCss = css.slice(css.indexOf("Workspace sidebar"));
+  const sectionBlock = blockAfter(sidebarCss, "#sidebar .sidebar-section {");
+  const detailBlock = blockAfter(sidebarCss, "#sidebar .sidebar-detail {");
+  const reducedDetail = blockAfter(
+    blockAfter(sidebarCss, "@media (prefers-reduced-motion: reduce)"),
+    "#sidebar .sidebar-detail",
+  );
+
+  it("skips rendering off-screen sections via content-visibility", () => {
+    // Arrange / Act — the .sidebar-section rule.
+    // Assert
+    expect(sectionBlock).toMatch(/content-visibility:\s*auto/);
+  });
+
+  it("gives lazily-rendered sections an intrinsic size hint", () => {
+    // Arrange / Act — without it, scrollbar geometry jumps as sections render in.
+    // Assert
+    expect(sectionBlock).toMatch(/contain-intrinsic-size:/);
+  });
+
+  it("fades an expanded detail block in", () => {
+    // Arrange / Act — the animation is CSS-only, keyed to node creation.
+    // Assert
+    expect(detailBlock).toMatch(/animation:\s*sidebar-detail-in/);
+    expect(sidebarCss).toContain("@keyframes sidebar-detail-in");
+  });
+
+  it("stills the detail fade under prefers-reduced-motion", () => {
+    // Arrange / Act — the sidebar's reduced-motion override.
+    // Assert
+    expect(reducedDetail).toMatch(/animation:\s*none/);
+  });
+});
+
 describe("chess-game container", () => {
   const chessGame = blockAfter(css, ".chess-game {");
   const chessError = blockAfter(css, ".chess-game-error");
