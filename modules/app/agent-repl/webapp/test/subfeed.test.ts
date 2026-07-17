@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mergeChildren, transcriptFeed } from "../src/subfeed.js";
-import { ConversationItem } from "../src/store.js";
+import {
+  SUBFEED_DEPTH_CAP,
+  effectiveAsyncSource,
+  mayNest,
+  mergeChildren,
+  transcriptFeed,
+} from "../src/subfeed.js";
+import { ConversationItem, ToolItem } from "../src/store.js";
 
 /** One JSONL entry of a subagent transcript. */
 function txLine(o: unknown): string {
@@ -102,5 +108,106 @@ describe("mergeChildren", () => {
     const merged = mergeChildren(base, new Map([["a", fresh]]));
     // Assert
     expect(merged.get("a")).toBe(fresh);
+  });
+});
+
+/** A settled tool call whose result announced the given text. */
+function spawnCard(toolName: string, resultText: string, over: Partial<ToolItem> = {}): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: "t1",
+    messageId: "m1",
+    toolName,
+    ts: "",
+    inputJson: "{}",
+    input: {},
+    inputDone: true,
+    result: { isError: false, content: resultText },
+    ...over,
+  };
+}
+
+describe("effectiveAsyncSource", () => {
+  it("passes the daemon's classification through untouched", () => {
+    // Arrange
+    const classified = spawnCard("Agent", "launched", {
+      asyncSource: { source_id: "a1", kind: "agent", status: "running" },
+    });
+    // Act + Assert
+    expect(effectiveAsyncSource(classified)).toBe(classified.asyncSource);
+  });
+
+  it("synthesizes a poll transcript source for an Agent spawn", () => {
+    // Act
+    const source = effectiveAsyncSource(spawnCard("Agent", "Async agent launched. agentId: a7"));
+    // Assert
+    expect(source).toMatchObject({
+      source_id: "a7",
+      kind: "agent",
+      status: "running",
+      stream: { transport: "poll", format: "jsonl-transcript" },
+    });
+  });
+
+  it("synthesizes a journal source for a Workflow spawn", () => {
+    // Act
+    const source = effectiveAsyncSource(spawnCard("Workflow", "Workflow started. Task ID: wf1"));
+    // Assert
+    expect(source).toMatchObject({
+      source_id: "wf1",
+      kind: "workflow",
+      stream: { transport: "poll", format: "jsonl-journal" },
+    });
+  });
+
+  it("synthesizes a raw text source for a backgrounded shell", () => {
+    // Act
+    const source = effectiveAsyncSource(
+      spawnCard("Bash", "Command running in background with ID: bg1"),
+    );
+    // Assert
+    expect(source).toMatchObject({
+      source_id: "bg1",
+      kind: "shell",
+      stream: { transport: "poll", format: "text" },
+    });
+  });
+
+  it("returns undefined for a call that spawned nothing detached", () => {
+    // Act + Assert
+    expect(effectiveAsyncSource(spawnCard("Bash", "all done"))).toBeUndefined();
+  });
+
+  it("labels the synthetic source with the call's description", () => {
+    // Arrange
+    const card = spawnCard("Agent", "agentId: a7", { input: { description: "watch the queue" } });
+    // Act + Assert
+    expect(effectiveAsyncSource(card)?.label).toBe("watch the queue");
+  });
+
+  it("settles the synthetic status once the completion notification lands", () => {
+    // Arrange
+    const card = spawnCard("Bash", "with ID: bg1", {
+      notification: { taskId: "bg1", text: "done" },
+    });
+    // Act + Assert
+    expect(effectiveAsyncSource(card)?.status).toBe("done");
+  });
+});
+
+describe("mayNest", () => {
+  it("allows a fresh source below the depth cap", () => {
+    // Act + Assert
+    expect(mayNest(1, new Set(["other"]), "a7")).toBe(true);
+  });
+
+  it("refuses at the depth cap", () => {
+    // Act + Assert
+    expect(mayNest(SUBFEED_DEPTH_CAP, undefined, "a7")).toBe(false);
+  });
+
+  it("refuses a source already rendering above, cutting the cycle", () => {
+    // Act + Assert
+    expect(mayNest(1, new Set(["a7"]), "a7")).toBe(false);
   });
 });

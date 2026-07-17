@@ -3950,6 +3950,52 @@ describe("async fold", () => {
     expect(html).not.toContain("task-live-output");
   });
 
+  /** A transcript whose Agent call announced a detached agent. */
+  function nestedSpawnTranscript(announcedId: string): string {
+    return [
+      txLine({
+        type: "assistant",
+        message: {
+          id: "m6",
+          content: [{ type: "tool_use", id: "ag1", name: "Agent", input: { description: "watch the queue" } }],
+        },
+      }),
+      txLine({
+        type: "user",
+        message: {
+          id: "m7",
+          content: [{ type: "tool_result", tool_use_id: "ag1", content: `Async agent launched. agentId: ${announcedId}` }],
+        },
+      }),
+    ].join("\n");
+  }
+
+  it("folds a nested spawn card inside a transcript — the recursion payoff", () => {
+    // Arrange / Act — the transcript's own Agent spawn wears a fold too.
+    const html = renderItem(
+      sourcedCard(),
+      undefined,
+      undefined,
+      false,
+      asyncPanels(true, nestedSpawnTranscript("a7")),
+    );
+    // Assert
+    expect(html).toContain(`data-panel-toggle="async:ag1"`);
+  });
+
+  it("cuts the fold of a nested spawn announcing an ancestor's own id", () => {
+    // Arrange / Act — the nested card names the OUTER source a9: a cycle.
+    const html = renderItem(
+      sourcedCard(),
+      undefined,
+      undefined,
+      false,
+      asyncPanels(true, nestedSpawnTranscript("a9")),
+    );
+    // Assert — only the outer fold renders.
+    expect(html.match(/async-fold/g)).toHaveLength(1);
+  });
+
   it("nests a transcript's task history inside its create card's own fold", () => {
     // Arrange — the transcript's TaskUpdate is confined under its create
     // exactly as the live partition confines it at depth one.
