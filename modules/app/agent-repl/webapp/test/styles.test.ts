@@ -32,7 +32,6 @@ const reducedSpinner = blockAfter(
   ".thinking-spinner",
 );
 
-const doneChip = blockAfter(css, ".result.done");
 const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
 const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
@@ -465,6 +464,7 @@ describe("turn stamp", () => {
   const bubble = blockAfter(css, ".bubble ");
   const body = blockAfter(css, ".bubble-body");
   const stamp = blockAfter(css, ".turn-ts");
+  const meta = blockAfter(css, ".turn-meta");
   const bodyText = blockAfter(css, "pre {");
 
   it("lays every bubble out as a body column beside its stamp", () => {
@@ -494,54 +494,79 @@ describe("turn stamp", () => {
     expect(body).toMatch(/min-width:\s*0/);
   });
 
-  it("holds the stamp at its natural width while the body wraps", () => {
-    // Arrange / Act
+  it("holds the corner at its natural width while the body wraps", () => {
+    // Arrange / Act — the corner column, not the stamp, owns the layout now.
     // Assert
-    expect(stamp).toMatch(/flex:\s*none/);
+    expect(meta).toMatch(/flex:\s*none/);
   });
 
   it("keeps the multi-token relative age on a single line", () => {
     // Arrange / Act — `5m 30s ago` carries inner spaces the fixed HH:MM never
-    // had, so the stamp must not wrap at them into a two-line corner label.
+    // had, so the corner must not wrap at them into a two-line label.
     // Assert
-    expect(stamp).toMatch(/white-space:\s*nowrap/);
+    expect(meta).toMatch(/white-space:\s*nowrap/);
   });
 
-  it("sets the stamp smaller than the text it dates", () => {
+  it("sets the corner smaller than the text it dates", () => {
     // Arrange
-    const stampSize = Number(stamp.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    const metaSize = Number(meta.match(/font-size:\s*([\d.]+)rem/)?.[1]);
     const textSize = Number(bodyText.match(/font-size:\s*([\d.]+)rem/)?.[1]);
     // Act / Assert
-    expect(stampSize).toBeLessThan(textSize);
+    expect(metaSize).toBeLessThan(textSize);
   });
 
-  it("mutes the stamp below the text it dates", () => {
+  it("hides the timestamp until the bubble is hovered", () => {
+    // Arrange / Act — a settled feed of clocks is clutter, so the stamp stays
+    // display:none by default.
+    // Assert
+    expect(stamp).toMatch(/display:\s*none/);
+  });
+
+  it("reveals the timestamp on bubble hover", () => {
+    // Arrange / Act — the hover rule flips the stamp back to visible.
+    // Assert
+    expect(css).toMatch(/\.bubble:hover \.turn-ts \{ display: block; \}/);
+  });
+
+  it("mutes the timestamp below the text it dates", () => {
     // Arrange / Act — the color is still derived from --muted, so the stamp
     // stays quieter than the --fg body text it labels.
     // Assert
     expect(stamp).toMatch(/color:[^;]*var\(--muted\)/);
   });
 
-  it("darkens the stamp a shade toward the body text", () => {
+  it("darkens the timestamp a shade toward the body text", () => {
     // Arrange / Act — mixing --muted with --fg pushes the grey a touch more
     // present than plain --muted, in both the light and dark themes.
     // Assert
     expect(stamp).toMatch(/color:\s*color-mix\([^;]*var\(--muted\)[^;]*var\(--fg\)/);
   });
 
-  it("pulls the stamp in toward the bubble's top-right corner", () => {
+  it("colors the duration in the topbar's time color", () => {
+    // Arrange / Act — the corner duration reuses the header's time datapoint color.
+    // Assert
+    expect(blockAfter(css, ".turn-meta .turn-dur")).toMatch(/color:\s*var\(--info-time\)/);
+  });
+
+  it("colors the context delta in the topbar's token color", () => {
+    // Arrange / Act — the corner delta reuses the header's token datapoint color.
+    // Assert
+    expect(blockAfter(css, ".turn-meta .turn-diff")).toMatch(/color:\s*var\(--info-tokens\)/);
+  });
+
+  it("pulls the corner in toward the bubble's top-right corner", () => {
     // Arrange
-    const [top, right] = margins(stamp);
+    const [top, right] = margins(meta);
     // Act / Assert — negative top/right margins seat it nearer the corner
     // than the body padding alone would.
     expect(parseFloat(top)).toBeLessThan(0);
     expect(parseFloat(right)).toBeLessThan(0);
   });
 
-  it("keeps a sliver of space so the stamp never abuts the corner", () => {
-    // Arrange — the bubble's own padding on the sides the stamp eats into.
+  it("keeps a sliver of space so the corner never abuts the edge", () => {
+    // Arrange — the bubble's own padding on the sides the corner eats into.
     const [padTop, padRight] = padding(bubble);
-    const [top, right] = margins(stamp);
+    const [top, right] = margins(meta);
     // Act / Assert — each pull-in stays shy of the padding it consumes, so
     // some corner gap always survives.
     expect(Math.abs(parseFloat(top))).toBeLessThan(padTop);
@@ -583,29 +608,6 @@ describe("skill-launch card", () => {
   });
 });
 
-describe("turn-complete chip", () => {
-  it("washes the completed turn's chip in the muted-yellow token", () => {
-    // Arrange / Act — the .result.done rule.
-    // Assert
-    expect(doneChip).toMatch(/background:\s*var\(--turn-complete-bg\)/);
-  });
-
-  it("defines the muted-yellow token for the light theme", () => {
-    // Arrange / Act — the :root palette.
-    // Assert
-    expect(blockAfter(css, ":root")).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
-  });
-
-  it("defines a darker muted-yellow token for the dark theme", () => {
-    // Arrange / Act — the dark-scheme palette override.
-    // Assert
-    expect(darkTheme).toMatch(/--turn-complete-bg:\s*#[0-9a-f]{6}/i);
-  });
-});
-
-/** The chip as it sits inside the final response, rather than adrift in the feed. */
-const nestedChip = blockAfter(css, ".bubble.assistant.final-response .bubble-body > .result");
-
 /** The margin shorthand's four sides, in `[top, right, bottom, left]` order. */
 function margins(rule: string): string[] {
   const shorthand = rule.match(/margin:\s*([^;]+);/);
@@ -623,35 +625,6 @@ function padding(rule: string): number[] {
   const [top, right = top, bottom = top, left = right] = sides;
   return [top, right, bottom, left].map(parseFloat);
 }
-
-describe("nested turn-complete chip", () => {
-  it("shrinks the nested chip back around its own text", () => {
-    // Arrange / Act — the bubble's block flow would stretch it to full width.
-    // Assert
-    expect(nestedChip).toMatch(/width:\s*fit-content/);
-  });
-
-  it("centers the nested chip across the bubble", () => {
-    // Arrange
-    const [, right, , left] = margins(nestedChip);
-    // Act / Assert — auto side margins are what center a fit-content box.
-    expect([right, left]).toEqual(["auto", "auto"]);
-  });
-
-  it("holds the nested chip clear of the bubble's bottom edge", () => {
-    // Arrange
-    const [, , bottom] = margins(nestedChip);
-    // Act / Assert — the kerning between the chip and the bubble's floor.
-    expect(parseFloat(bottom)).toBeGreaterThan(0);
-  });
-
-  it("parts the nested chip from the answer's last line", () => {
-    // Arrange
-    const [top] = margins(nestedChip);
-    // Act / Assert — the chip never crowds the prose it closes.
-    expect(parseFloat(top)).toBeGreaterThan(0);
-  });
-});
 
 const agentCard = blockAfter(css, ".tool-card.tool-agent");
 const agentJson = blockAfter(css, ".agent-json {");
