@@ -1563,6 +1563,10 @@ one. `sidebar_version: 1`.
   "current_ws": "doom" ,              // active workspace name, or null
   "sidebar_visible": true,            // the drawer/sidebar shared visibility flag
   "merge_slow_threshold": 3.0,        // seconds before a commit's clock appears
+  "width_px": 340,                    // fixed sidebar width (Emacs custom)
+  "priority_images": {                // optional: badge PNGs as data URIs,
+    "p1": "data:image/png;base64,…"   // keyed by priority name; text chips
+  },                                  // are the fallback when absent
   "marks": ["ws-a"],                  // always an array, never null
   "last_action_result": {             // most recent sidebar action outcome, or null
     "id": "a1b2…", "ok": false, "error": "Cannot kill a MERGED workspace…"
@@ -1596,6 +1600,9 @@ ENTRY (one workspace row, tree pre-flattened with `depth`):
 {
   "ws": "name", "depth": 0,
   "section": "main",                  // main | hidden | merging | merged
+  "session_id": "s_ab12…",            // the daemon session bound to this
+                                      // workspace, or null (lets the sidebar
+                                      // join GET /sessions roster data)
   "status": "thinking",               // render-status keyword sans colon, or null
   "glyph": "⌛",                      // exact drawer glyph
   "name_color": "#ff6b6b",            // drawer name-face foreground, or null
@@ -1650,11 +1657,46 @@ file, records `last_action_result`, and force-pushes a snapshot.
 Actions: `visit`, `nuke`, `kill`, `send-prompt` (args.prompt),
 `interrupt`, `merge-into-source`, `merge-child`, `new-child`,
 `new-fork`, `toggle-hidden`, `priority-up`, `priority-down`,
-`toggle-mark`, `clear-marks`, `toggle-expand`, `toggle-fold`,
-`refresh`, `hide-sidebar`. Emacs enforces the drawer's own gating
-(MERGED refusal rules, confirmation for finishing a MERGED workspace)
-and reports refusals through `last_action_result` rather than silently
-dropping them.
+`set-priority` (args.priority: a priority name or null to clear),
+`show-commit` (args.sha; opens the commit in Emacs's magit inside the
+target workspace), `toggle-mark`, `clear-marks`, `toggle-expand`,
+`toggle-fold`, `refresh`, `hide-sidebar`. Emacs enforces the drawer's
+own gating (MERGED refusal rules, confirmation for finishing a MERGED
+workspace) and reports refusals through `last_action_result` rather
+than silently dropping them.
+
+### Host hook (`window.agentReplSidebar`)
+
+Like `agentReplParkAtTail` and `agentReplChessStep`, the sidebar plants
+one global on `window` for the Emacs host, whose xwidget cannot deliver
+keys into the page: `window.agentReplSidebar(op)`. The Emacs `C-S-*`
+chords dispatch through it (guarded `window.agentReplSidebar &&
+window.agentReplSidebar("<op>")`) when no drawer buffer is open. Ops
+mirror the chord set and act on the sidebar's page-local cursor and the
+shared marks: `visit`, `nuke`, `kill`, `send-prompt`,
+`merge-into-source`, `toggle-hidden`, `toggle-mark`, `clear-marks`,
+`priority-up`, `priority-down`. Follow-navigation (`C-S-n`/`C-S-p`) is
+NOT a hook op: Emacs computes the next workspace from its own
+view-model order and switches persps directly; the sidebar cursor
+follows `current_ws`.
+
+### Sidebar roster joins (existing session endpoints)
+
+The sidebar polls `GET /sessions` (existing) and joins entries on the
+snapshot's per-entry `session_id` to decorate rows with queue depth,
+pending permissions, live-turn previews, and cost. Two enrichments
+support this:
+
+- `GET /sessions` entries additionally carry `turn_preview` (the tail,
+  ≤ 200 chars, of the active turn's streamed assistant text; `""` when
+  no turn is active) and `total_cost_usd` (cumulative cost of the
+  session's completed turns, accumulated from `result` frames).
+- `POST /sessions/{id}/permission` with body `{"request_id": "…",
+  "behavior": "allow" | "deny"}` resolves a pending permission exactly
+  as a webapp `permission-decision` frame would (the sidebar's
+  one-click approve/deny buttons ride it). `404` for an unknown
+  session; the shim's own gating handles an unknown or already-resolved
+  request id.
 
 ## Versioning & forward compatibility
 
