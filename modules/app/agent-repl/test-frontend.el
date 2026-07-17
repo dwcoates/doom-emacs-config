@@ -483,6 +483,150 @@ The wrapper is left guarded, so any call would fail the test loudly."
       ;; Act + Assert — the dead buffer is not reachable by a script.
       (agent-repl--frontend-snap-webview-to-tail "ws1"))))
 
+;;;; ---- Closing the topbar dropdowns on an input-window click -----------------
+
+(ert-deftest agent-repl-test-frontend-close-menus-script-shape ()
+  "The close script guards on the hook before calling it."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--frontend-close-menus-script)
+                 (concat "window.agentReplCloseTopbarMenus && "
+                         "window.agentReplCloseTopbarMenus();"))))
+
+(ert-deftest agent-repl-test-frontend-close-topbar-menus-runs-the-hook ()
+  "The close evaluates the webapp's close-menus hook inside the live webview."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+          (calls nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (b script) (push (cons b script) calls))))
+              ;; Act
+              (agent-repl--frontend-close-topbar-menus "ws1")
+              ;; Assert
+              (should (equal calls
+                             (list (cons buf
+                                         (concat "window.agentReplCloseTopbarMenus && "
+                                                 "window.agentReplCloseTopbarMenus();")))))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-hook-name-matches-webapp ()
+  "The hook name lisp calls is the one the webapp plants on `window'.
+webapp/src/host.ts exports `CLOSE_MENUS_HOOK'; a rename on either side
+silently turns the input-click dismissal into a no-op."
+  ;; Arrange
+  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
+         (source (progn
+                   (should (file-exists-p host-ts))
+                   (with-temp-buffer
+                     (insert-file-contents host-ts)
+                     (buffer-string)))))
+    ;; Act + Assert
+    (should (string-match-p
+             (regexp-quote (format "export const CLOSE_MENUS_HOOK = \"%s\";"
+                                   agent-repl-frontend-close-menus-hook))
+             source))))
+
+(ert-deftest agent-repl-test-frontend-close-topbar-menus-without-webview-is-noop ()
+  "A workspace with no webview yet (never opened, or its panel closed) is
+never asked to close menus.  The wrapper is left guarded, so any call
+would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
+    (agent-repl--frontend-close-topbar-menus "ws1")))
+
+(ert-deftest agent-repl-test-frontend-close-topbar-menus-dead-webview-is-noop ()
+  "A recorded but killed webview is never asked to close menus.
+The wrapper is left guarded, so any call would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (kill-buffer buf)
+      ;; Act + Assert — the dead buffer is not reachable by a script.
+      (agent-repl--frontend-close-topbar-menus "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-fires-on-mouse-click ()
+  "A mouse click selecting the workspace's input window closes its dropdowns."
+  ;; Arrange
+  (let ((closed nil)
+        (last-input-event '(mouse-1)))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1"))
+              ((symbol-function 'agent-repl-window--panel-window)
+               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
+              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
+               (lambda (ws) (push ws closed))))
+      ;; Act
+      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
+      ;; Assert
+      (should (equal closed '("ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-keyboard-selection ()
+  "Keyboard selection of the input window leaves the dropdowns alone.
+The gesture is a click; keyboard nav into the composer is not, and the
+autoselect-on-switch path selects the input window without one."
+  ;; Arrange
+  (let ((closed nil)
+        (last-input-event 'return))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1"))
+              ((symbol-function 'agent-repl-window--panel-window)
+               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
+              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
+               (lambda (ws) (push ws closed))))
+      ;; Act
+      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
+      ;; Assert
+      (should-not closed))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-non-input-window ()
+  "A click landing on a window other than the input panel leaves it alone."
+  ;; Arrange
+  (let ((closed nil)
+        (last-input-event '(mouse-1))
+        (other (split-window)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "ws1"))
+                  ;; The input panel is some OTHER live window, not the selected one.
+                  ((symbol-function 'agent-repl-window--panel-window)
+                   (lambda (kind &rest _) (and (eq kind :input) other)))
+                  ((symbol-function 'agent-repl--frontend-close-topbar-menus)
+                   (lambda (ws) (push ws closed))))
+          ;; Act
+          (agent-repl--frontend-close-menus-on-input-click (selected-frame))
+          ;; Assert
+          (should-not closed))
+      (delete-window other))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-on-input-click-skips-without-workspace ()
+  "Outside any workspace a click has no webview whose dropdowns to close."
+  ;; Arrange
+  (let ((closed nil)
+        (last-input-event '(mouse-1)))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () nil))
+              ((symbol-function 'agent-repl-window--panel-window)
+               (lambda (kind &rest _) (and (eq kind :input) (selected-window))))
+              ((symbol-function 'agent-repl--frontend-close-topbar-menus)
+               (lambda (ws) (push ws closed))))
+      ;; Act
+      (agent-repl--frontend-close-menus-on-input-click (selected-frame))
+      ;; Assert
+      (should-not closed))))
+
+(ert-deftest agent-repl-test-frontend-close-menus-registered-on-selection-change ()
+  "The input-click handler is wired onto `window-selection-change-functions'.
+An unwired handler is a silent regression — the composer click would
+never reach the webview and the dropdowns would hang open."
+  ;; Arrange + Act + Assert
+  (should (memq #'agent-repl--frontend-close-menus-on-input-click
+                window-selection-change-functions)))
+
 ;;;; ---- Placement ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-display-hides-panels-first ()

@@ -28,7 +28,7 @@ import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
-import { HostGlobal, installHostTailHook } from "./host.js";
+import { HostGlobal, installHostCloseMenusHook, installHostTailHook } from "./host.js";
 import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
@@ -334,6 +334,13 @@ async function boot(): Promise<void> {
       setCounterMenu(null);
       feed.closeAgentMenus();
     }
+  });
+  // The composer is a separate Emacs window the outside-click handler above
+  // cannot see, so the host fires this hook when the user clicks into it —
+  // closing the header and bubble dropdowns the same way a click-away would.
+  installHostCloseMenusHook(window as unknown as HostGlobal, () => {
+    setCounterMenu(null);
+    feed.closeAgentMenus();
   });
 
   // Keyboard cycling of the feed, driven from whichever input box this
