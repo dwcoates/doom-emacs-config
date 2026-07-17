@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,53 @@ import (
 )
 
 const daemonVersion = "0.1.0"
+
+// webappHandler builds the handler mounted at "/" for the -webapp SPA
+// directory. It returns nil when dir is empty (no webapp is served).
+//
+// When dir is set but has no index.html — the misconfiguration that
+// otherwise surfaces as Go's opaque "404 page not found", e.g. because
+// the worktree the daemon was launched from has since been deleted, or
+// the webapp was never built there — it logs a prominent one-time
+// warning via logf and serves a clear diagnostic (HTTP 503) at every
+// path instead. index.html presence is re-checked per request, so the
+// daemon self-corrects the moment the assets appear (a webapp rebuild)
+// without needing a restart.
+func webappHandler(dir string, logf func(format string, args ...any)) http.Handler {
+	if dir == "" {
+		return nil
+	}
+	index := filepath.Join(dir, "index.html")
+	if _, err := os.Stat(index); err != nil {
+		logf("claude-repld: WARNING: -webapp %q has no index.html (%v); serving a diagnostic at / instead of the SPA — rebuild the webapp (bin/build-frontend.sh webapp) or restart the daemon (M-x agent-repl-frontend-daemon-restart)", dir, err)
+	}
+	fs := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(index); err != nil {
+			http.Error(w, webappMissingMessage(dir), http.StatusServiceUnavailable)
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
+}
+
+// webappMissingMessage is the diagnostic body served at "/" when the
+// -webapp directory has no index.html, replacing the bare
+// "404 page not found" with a message that names the cause and the fix.
+func webappMissingMessage(dir string) string {
+	return fmt.Sprintf(`claude-repld: webapp assets not found
+
+The daemon's -webapp directory has no index.html:
+  %s
+
+This usually means the worktree the daemon was launched from was removed,
+or the webapp was never built there.
+
+Fix: rebuild the webapp (bin/build-frontend.sh webapp), or restart the
+daemon from a checkout whose webapp/dist exists
+(M-x agent-repl-frontend-daemon-restart).
+`, dir)
+}
 
 func main() {
 	bootedAt := time.Now()
@@ -163,8 +211,8 @@ func main() {
 	mux.Handle("/remediation", srv.Handler())
 	mux.Handle("/accounts", srv.Handler())
 	mux.Handle("/workspaces/", srv.Handler())
-	if *webappDir != "" {
-		mux.Handle("/", http.FileServer(http.Dir(*webappDir)))
+	if h := webappHandler(*webappDir, log.Printf); h != nil {
+		mux.Handle("/", h)
 	}
 	// Widget assets are served in place from wherever they were built
 	// (e.g. an explanation-engine checkout's dist), never copied into
