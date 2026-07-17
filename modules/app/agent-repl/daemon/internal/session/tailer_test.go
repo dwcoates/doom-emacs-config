@@ -445,3 +445,117 @@ func TestSessionTaskOutputUnknownIDIsNotOk(t *testing.T) {
 		t.Fatal("an unrecorded task id must not resolve")
 	}
 }
+
+// --- record-on-read (grandchild spawns in served chunks) -----------------------
+
+// jsonlLine encodes one transcript entry whose content is TEXT, matching
+// how an announcement is embedded in a real subagent transcript.
+func jsonlLine(text string) string {
+	content, _ := json.Marshal(text)
+	return `{"type":"user","message":{"content":` + string(content) + `}}` + "\n"
+}
+
+func TestScanChunkSpawnsExtractsAShellSpawnFromJSONL(t *testing.T) {
+	// Arrange — the announcement rides inside a JSON-encoded string.
+	chunk := jsonlLine("Command running in background with ID: bg7. Output is being written to: /tmp/claude-501/s/tasks/bg7.output\nMore text.")
+	// Act
+	anns := scanChunkSpawns(chunk, "/cfg")
+	// Assert
+	if len(anns) != 1 || anns[0].TaskID != "bg7" || anns[0].Path != "/tmp/claude-501/s/tasks/bg7.output" {
+		t.Fatalf("anns = %+v", anns)
+	}
+}
+
+func TestScanChunkSpawnsExtractsAnAgentSpawn(t *testing.T) {
+	// Arrange
+	chunk := jsonlLine("Launched. agentId: a7 output_file: /tmp/claude-501/s/tasks/a7.output")
+	// Act
+	anns := scanChunkSpawns(chunk, "/cfg")
+	// Assert
+	if len(anns) != 1 || anns[0].TaskID != "a7" || anns[0].Path != "/tmp/claude-501/s/tasks/a7.output" {
+		t.Fatalf("anns = %+v", anns)
+	}
+}
+
+func TestScanChunkSpawnsExtractsAWorkflowJournal(t *testing.T) {
+	// Arrange
+	chunk := jsonlLine("Workflow started. Task ID: wj7 Transcript dir: /cfg/projects/p/subagents/workflows/wf1")
+	// Act
+	anns := scanChunkSpawns(chunk, "/cfg")
+	// Assert
+	if len(anns) != 1 || anns[0].TaskID != "wj7" || anns[0].Path != "/cfg/projects/p/subagents/workflows/wf1/journal.jsonl" {
+		t.Fatalf("anns = %+v", anns)
+	}
+}
+
+func TestScanChunkSpawnsRefusesPathsOutsideTheSpool(t *testing.T) {
+	// Arrange
+	chunk := jsonlLine("with ID: bg7. Output is being written to: /etc/evil.output")
+	// Act + Assert
+	if anns := scanChunkSpawns(chunk, "/cfg"); len(anns) != 0 {
+		t.Fatalf("outside-spool path recorded: %+v", anns)
+	}
+}
+
+func TestScanChunkSpawnsNeverPairsAcrossJSONStrings(t *testing.T) {
+	// Arrange — the id and the path live in DIFFERENT transcript strings.
+	chunk := jsonlLine("with ID: bg7. And nothing else.") +
+		jsonlLine("Output is being written to: /tmp/claude-501/s/tasks/bg7.output")
+	// Act + Assert
+	if anns := scanChunkSpawns(chunk, "/cfg"); len(anns) != 0 {
+		t.Fatalf("cross-string pairing: %+v", anns)
+	}
+}
+
+func TestTaskOutputRecordsGrandchildSpawnsOnRead(t *testing.T) {
+	// Arrange — a parent transcript announcing a grandchild's spool file.
+	parent := spoolFile(t, "a9.output")
+	child := spoolFile(t, "bg7.output")
+	if err := os.WriteFile(child, []byte("child says hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	line := jsonlLine("Command running in background with ID: bg7. Output is being written to: " + child + ".")
+	if err := os.WriteFile(parent, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.mu.Lock()
+	s.recordTaskPathLocked("a9", parent)
+	s.mu.Unlock()
+	// Act — serving the parent's tail records the grandchild's path.
+	if _, _, _, _, ok := s.TaskOutput("a9", 0); !ok {
+		t.Fatal("parent tail not served")
+	}
+	// Assert — the grandchild is pollable in turn.
+	text, _, _, _, ok := s.TaskOutput("bg7", 0)
+	if !ok || text != "child says hi" {
+		t.Fatalf("grandchild tail = %q ok=%v", text, ok)
+	}
+}
+
+func TestTaskOutputJoinsAnAnnouncementSplitAcrossChunks(t *testing.T) {
+	// Arrange — the announcement straddles the 8KB chunk boundary.
+	parent := spoolFile(t, "a10.output")
+	child := spoolFile(t, "bg8.output")
+	ann := "with ID: bg8. Output is being written to: " + child + "."
+	pad := strings.Repeat("x", taskTailChunkMax-20)
+	if err := os.WriteFile(parent, []byte(pad+ann), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.mu.Lock()
+	s.recordTaskPathLocked("a10", parent)
+	s.mu.Unlock()
+	// Act — two reads: the carry re-joins the split announcement.
+	_, next, _, _, ok := s.TaskOutput("a10", 0)
+	if !ok {
+		t.Fatal("first chunk not served")
+	}
+	if _, _, _, _, ok := s.TaskOutput("a10", next); !ok {
+		t.Fatal("second chunk not served")
+	}
+	// Assert
+	if _, _, _, _, ok := s.TaskOutput("bg8", 0); !ok {
+		t.Fatal("split announcement never recorded the grandchild")
+	}
+}
