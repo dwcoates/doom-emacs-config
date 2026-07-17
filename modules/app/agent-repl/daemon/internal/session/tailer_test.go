@@ -559,3 +559,84 @@ func TestTaskOutputJoinsAnAnnouncementSplitAcrossChunks(t *testing.T) {
 		t.Fatal("split announcement never recorded the grandchild")
 	}
 }
+
+// --- TaskStop settles a task without a completion notification ------------------
+
+func toolResultFrame(toolUseID string, isErr bool) protocol.L2Frame {
+	return &protocol.ToolUseResultFrame{
+		Envelope:  protocol.Envelope{Type: "tool-use-result"},
+		ToolUseID: toolUseID,
+		IsError:   isErr,
+	}
+}
+
+func TestStoppedTaskIDReadsASuccessfulTaskStop(t *testing.T) {
+	// Arrange — the translator recorded a TaskStop naming bg1.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.translator.tools["ts1"] = &toolMeta{name: "TaskStop", input: json.RawMessage(`{"task_id":"bg1"}`)}
+	// Act + Assert
+	if id := s.stoppedTaskIDLocked(toolResultFrame("ts1", false)); id != "bg1" {
+		t.Fatalf("id = %q, want bg1", id)
+	}
+}
+
+func TestStoppedTaskIDIgnoresAnErroredStop(t *testing.T) {
+	// Arrange — a failed stop settles nothing.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.translator.tools["ts1"] = &toolMeta{name: "TaskStop", input: json.RawMessage(`{"task_id":"bg1"}`)}
+	// Act + Assert
+	if id := s.stoppedTaskIDLocked(toolResultFrame("ts1", true)); id != "" {
+		t.Fatalf("id = %q, want empty on an errored stop", id)
+	}
+}
+
+func TestStoppedTaskIDIgnoresNonTaskStopResults(t *testing.T) {
+	// Arrange — a Bash result is not a stop.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.translator.tools["t1"] = &toolMeta{name: "Bash", input: json.RawMessage(`{"command":"x"}`)}
+	// Act + Assert
+	if id := s.stoppedTaskIDLocked(toolResultFrame("t1", false)); id != "" {
+		t.Fatalf("id = %q, want empty for a non-stop tool", id)
+	}
+}
+
+func TestSuperviseSettlesATaskOnSuccessfulStop(t *testing.T) {
+	// Arrange — a recorded, tailed task the user then stops.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	stop := make(chan struct{})
+	s.tailers["bg1"] = stop
+	s.translator.tools["ts1"] = &toolMeta{name: "TaskStop", input: json.RawMessage(`{"task_id":"bg1"}`)}
+	// Act — the successful TaskStop result crosses supervision.
+	s.superviseTailersLocked([]protocol.L2Frame{toolResultFrame("ts1", false)})
+	_, stillTailed := s.tailers["bg1"]
+	rec := s.taskPaths["bg1"]
+	s.mu.Unlock()
+	// Assert — the tailer was released and the task marked done.
+	if stillTailed {
+		t.Fatal("tailer still supervised after the stop")
+	}
+	if !rec.done {
+		t.Fatal("task not marked done after the stop")
+	}
+	select {
+	case <-stop:
+	default:
+		t.Fatal("tailer stop channel was not closed")
+	}
+}
+
+func TestInfoCountsUnsettledTasks(t *testing.T) {
+	// Arrange — two armed tasks, one already settled.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	s.recordTaskPathLocked("bg2", "/tmp/claude-0/x/tasks/bg2.output")
+	s.markTaskDoneLocked("bg2")
+	s.mu.Unlock()
+	// Act + Assert — only the live task counts.
+	if n := s.Info().LiveTaskCount; n != 1 {
+		t.Fatalf("LiveTaskCount = %d, want 1", n)
+	}
+}
