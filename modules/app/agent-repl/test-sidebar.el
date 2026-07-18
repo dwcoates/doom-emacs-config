@@ -182,7 +182,7 @@ tests, and let-binds every sidebar global that pushes mutate."
     (let ((entry (agent-repl-sidebar-test--entry
                   (agent-repl-sidebar--snapshot) "main" "ws1")))
       (should (equal "thinking" (alist-get 'status entry)))
-      (should (equal (alist-get :thinking agent-repl-drawer-state-icons)
+      (should (equal (alist-get :thinking agent-repl-ws-state-icons)
                      (alist-get 'glyph entry))))))
 
 (ert-deftest agent-repl-sidebar-test-entry-name-color-for-thinking ()

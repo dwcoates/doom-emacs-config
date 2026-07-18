@@ -2457,21 +2457,18 @@ SUMMARY is a plist from `agent-repl--picker-workspace-summary'.
 
 When `:workspace-name' is non-nil, delegates to
 `agent-repl--ws-render-status' for the render-state keyword and
-looks up the glyph in `agent-repl-drawer-state-icons'.  This is the
-same path the drawer's `--state-glyph' takes, so the workspace picker
-(`SPC p p') and the drawer always agree on the emoji for a given
-workspace.  Calling render-status directly (instead of going through
-`agent-repl-drawer--state-glyph') keeps the picker free of drawer
-internals.
+looks up the glyph in `agent-repl-ws-state-icons' — the shared
+render-state palette — so the workspace picker (`SPC p p') and every
+other renderer agree on the emoji for a given workspace.
 
 For a disk-only record with no in-memory hash entry returns a neutral
 📁 — a tombstoned or merged workspace still has a hash entry and so
-still renders its (killed / merged / dormant) drawer glyph."
+still renders its (killed / merged / dormant) state glyph."
   (let ((ws (plist-get summary :workspace-name)))
     (if (and ws (agent-repl--ws-known-p ws))
         (or (alist-get (agent-repl--ws-render-status ws)
-                       agent-repl-drawer-state-icons)
-            agent-repl-drawer-state-icon-default)
+                       agent-repl-ws-state-icons)
+            agent-repl-ws-state-icon-default)
       "📁")))
 
 (defun agent-repl--picker-format-date (time width face placeholder)

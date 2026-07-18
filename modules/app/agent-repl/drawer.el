@@ -53,52 +53,6 @@ affect the drawer's window width, which is constant (see
 (setq agent-repl-drawer-width-fraction
       (eval (car (get 'agent-repl-drawer-width-fraction 'standard-value))))
 
-(defcustom agent-repl-drawer-state-icons
-  '((:init           . "⏳")
-    (:thinking       . "⌛")
-    (:done           . "✅")
-    (:idle           . "💤")
-    (:permission     . "❓")
-    (:stop-failed    . "❗")
-    (:start-failed   . "🚫")
-    (:dead           . "❌")
-    (:merged         . "🔀")
-    (:merge-failed   . "⛔")
-    (:merge-conflict . "💥")
-    (:merging        . "🔄")
-    (:merge-queued   . "🕒"))
-  "Alist mapping agent-state keyword to an indicator glyph.
-The :dead entry is used when `:repl-state' is `:dead' (overrides
-:agent-state).  The :merged entry is used when `:repl-state' is
-`:merged' and takes precedence over `:dead' (so a merged workspace
-whose session has since died still reads as merged).  The :merge-failed
-entry is used when `:repl-state' is `:merge-failed' (a workspace that
-landed in the MERGED bucket but whose cherry-pick reported failure);
-it uses the ⛔ glyph (distinct from :dead's ❌) to signal a blocked
-merge — typically the source repo is mid cherry-pick/rebase/merge.
-The :merge-queued
-entry is used when `:repl-state' is `:merge-queued' (a merge request
-parked on `agent-repl--merge-queue' waiting for a live cherry-pick
-to finish); it routes under MERGING alongside in-flight merges.
-Unrecognized values fall through to a single middot placeholder, used
-for workspaces registered but with no live session."
-  :type '(alist :key-type symbol :value-type string)
-  :group 'agent-repl)
-
-;; Force-apply the latest palette on every (re)load.  `defcustom' only
-;; initializes the value when the symbol is unbound, so palette tweaks
-;; otherwise require an Emacs restart to take effect.  Source is the
-;; canonical palette in this personal config; `M-x customize' values
-;; for this variable will be overwritten on reload.
-(setq agent-repl-drawer-state-icons
-      (eval (car (get 'agent-repl-drawer-state-icons 'standard-value))))
-
-(defcustom agent-repl-drawer-state-icon-default "·"
-  "Glyph shown when a workspace has no recognized agent-state.
-Used for registered-but-not-yet-started workspaces (agent-state nil)."
-  :type 'string
-  :group 'agent-repl)
-
 (defcustom agent-repl-drawer-section-rule-width 12
   "Number of `─' characters in section header rule lines."
   :type 'integer
@@ -894,13 +848,13 @@ CHILDREN is a list of trees.  Roots and siblings are sorted by
 Delegates render-state selection to `agent-repl--ws-render-status'
 (the single source of truth for visual state across drawer, tab-bar,
 and project picker) and maps the resulting keyword through
-`agent-repl-drawer-state-icons'.  When render-status returns nil
+`agent-repl-ws-state-icons'.  When render-status returns nil
 (tombstoned or no signals), falls back to
-`agent-repl-drawer-state-icon-default' (the middot placeholder)."
+`agent-repl-ws-state-icon-default' (the middot placeholder)."
   (let* ((status (and (agent-repl--ws-known-p ws)
                       (agent-repl--ws-render-status ws))))
-    (or (alist-get status agent-repl-drawer-state-icons)
-        agent-repl-drawer-state-icon-default)))
+    (or (alist-get status agent-repl-ws-state-icons)
+        agent-repl-ws-state-icon-default)))
 
 (defun agent-repl-drawer--priority-display (priority)
   "Return a display string for PRIORITY.

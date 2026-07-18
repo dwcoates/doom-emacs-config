@@ -701,6 +701,46 @@ than whether the agent was thinking when the merge hit it)."
         (if (agent-repl--ws-async-live-p ws) :idle-async :idle))
        (t                                 nil))))))
 
+(defcustom agent-repl-ws-state-icons
+  '((:init           . "⏳")
+    (:thinking       . "⌛")
+    (:done           . "✅")
+    (:idle           . "💤")
+    (:permission     . "❓")
+    (:stop-failed    . "❗")
+    (:start-failed   . "🚫")
+    (:dead           . "❌")
+    (:merged         . "🔀")
+    (:merge-failed   . "⛔")
+    (:merge-conflict . "💥")
+    (:merging        . "🔄")
+    (:merge-queued   . "🕒"))
+  "Alist mapping a render-state keyword to its indicator glyph.
+The glyph half of the render-state unification: renderers resolve a
+workspace's state through `agent-repl--ws-render-status' and look the
+resulting keyword up here, so every renderer shows the same emoji for
+a given workspace.  Keys are the closed set `--ws-render-status'
+returns (see its docstring for each state's meaning and precedence).
+Unrecognized values fall through to
+`agent-repl-ws-state-icon-default', used for workspaces registered
+but with no live session."
+  :type '(alist :key-type symbol :value-type string)
+  :group 'agent-repl)
+
+;; Force-apply the latest palette on every (re)load.  `defcustom' only
+;; initializes the value when the symbol is unbound, so palette tweaks
+;; otherwise require an Emacs restart to take effect.  Source is the
+;; canonical palette in this personal config; `M-x customize' values
+;; for this variable will be overwritten on reload.
+(setq agent-repl-ws-state-icons
+      (eval (car (get 'agent-repl-ws-state-icons 'standard-value))))
+
+(defcustom agent-repl-ws-state-icon-default "·"
+  "Glyph shown when a workspace has no recognized render-state.
+Used for registered-but-not-yet-started workspaces (render-status nil)."
+  :type 'string
+  :group 'agent-repl)
+
 ;;;; ---- Persp-mode integration boundary ---------------------------------
 ;;
 ;; The functions below are the ONLY place inside agent-repl that touches

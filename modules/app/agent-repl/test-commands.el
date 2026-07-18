@@ -5368,7 +5368,7 @@ per-workspace rather than collapsing every live ws to a single 🟢."
     (let ((summary '(:workspace-name "ws-live" :live-p t
                      :last-killed-at (1 2 3) :has-state t)))
       (should (equal (agent-repl--picker-status-emoji summary)
-                     (alist-get :thinking agent-repl-drawer-state-icons))))))
+                     (alist-get :thinking agent-repl-ws-state-icons))))))
 
 (ert-deftest agent-repl-cmd-test-picker-status-emoji/live-merge-conflict-wins ()
   "Picker mirrors `:merge-conflict' badge for a workspace mid-conflict.
@@ -5391,7 +5391,7 @@ non-live 📁 fallback branch."
     (let ((summary '(:workspace-name "ws-respawned"
                      :last-killed-at (1 2 3))))
       (should (equal (agent-repl--picker-status-emoji summary)
-                     (alist-get :done agent-repl-drawer-state-icons))))))
+                     (alist-get :done agent-repl-ws-state-icons))))))
 
 (ert-deftest agent-repl-cmd-test-picker-status-emoji/no-workspace-folder ()
   "Without a live workspace the picker returns the neutral 📁 — the
@@ -5629,7 +5629,7 @@ and includes the workspace name."
     (let ((display (substring-no-properties
                     (car (car (agent-repl--build-workspace-picker-candidates
                                '(("wsx" . "/tmp/wsx"))))))))
-      (should (string-prefix-p (alist-get :idle agent-repl-drawer-state-icons) display))
+      (should (string-prefix-p (alist-get :idle agent-repl-ws-state-icons) display))
       (should (string-match-p "wsx" display)))))
 
 (ert-deftest agent-repl-cmd-test-build-candidates/disk-only-gets-folder-emoji ()
