@@ -1137,6 +1137,8 @@ describe("thinking spinner", () => {
 });
 
 const animatedEllipsis = blockAfter(css, ".animated-ellipsis::after");
+const ellipsisBox = blockAfter(css, "\n.animated-ellipsis {");
+const ellipsisReserve = blockAfter(css, ".animated-ellipsis::before");
 const ellipsisKeyframes = blockAfter(css, "@keyframes ellipsis-dots");
 const reducedEllipsis = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
@@ -1196,6 +1198,45 @@ describe("animated ellipsis", () => {
     const flush = blockAfter(css, ".interrupting-pending .animated-ellipsis");
     // Assert — a negative margin the width of the gap restores "working…".
     expect(flush).toMatch(/margin-left:\s*-0\.5rem/);
+  });
+
+  it("reserves the widest three-dot width via a hidden pseudo-element", () => {
+    // Arrange / Act — the ::before that sizes the span once.
+    // Assert — a hidden "..." holds the full width so fewer dots never shrink it.
+    expect(ellipsisReserve).toMatch(/content:\s*"\.\.\."/);
+    expect(ellipsisReserve).toMatch(/visibility:\s*hidden/);
+  });
+
+  it("boxes the span so the reserved width can contain the overlaid dots", () => {
+    // Arrange / Act — the base .animated-ellipsis rule.
+    // Assert — an inline-block positioning context for the absolute ::after.
+    expect(ellipsisBox).toMatch(/display:\s*inline-block/);
+    expect(ellipsisBox).toMatch(/position:\s*relative/);
+  });
+
+  it("lifts the cycling dots out of flow so they grow in place", () => {
+    // Arrange / Act — the base .animated-ellipsis::after rule.
+    // Assert — absolute over the reserved box, so the cycle reflows nothing.
+    expect(animatedEllipsis).toMatch(/position:\s*absolute/);
+  });
+});
+
+const turnStatsLive = blockAfter(css, ".turn-stats-live {");
+const workingRowScale = blockAfter(css, ".working-pending {");
+
+describe("live turn-stats row", () => {
+  it("right-biases the running stats to the feed's right edge", () => {
+    // Arrange / Act — the .turn-stats-live rule.
+    // Assert — pinned right, where the settled bubble corner (.turn-meta) lands
+    // and clear of the indicator's far-left ellipsis, so nothing nudges it.
+    expect(turnStatsLive).toMatch(/text-align:\s*right/);
+  });
+
+  it("matches the progress indicator's font size", () => {
+    // Arrange / Act — the counter and the working row directly above it.
+    // Assert — the same 0.85rem, so the two rows read as one scale.
+    expect(turnStatsLive).toMatch(/font-size:\s*0\.85rem/);
+    expect(workingRowScale).toMatch(/font-size:\s*0\.85rem/);
   });
 });
 
