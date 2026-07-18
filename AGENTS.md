@@ -394,6 +394,10 @@ The comment must explain *why*, not *what*. "Calls foo before bar" describes the
 
 When adding or updating hooks/permissions that reference a home-relative path, use `~` rather than a hardcoded host home like `/Users/dodgecoates`, so the path resolves in both the host and the `DOOM_SANDBOX` container (whose `$HOME` is `/home/claude`).
 
+## Cross-worktree code handoff — `git stash create`, not `push`
+
+To hand uncommitted edits to another worktree of this repo (e.g. a spawned workspace), share a stash by SHA and have the receiver run `git stash apply <SHA>`. Prefer `git stash create` (`SHA=$(git stash create "msg")`): it writes neither the working tree nor the shared `refs/stash` stack, so the source keeps its edits and a concurrent worktree's `git stash pop` cannot collide with the handoff.
+
 ## Git
 
 When asked to make changes, commit your work when done. Commit freely and often. **Never** rebase, pull, merge, push, or run any other mutating git commands without explicit instruction from the user.
