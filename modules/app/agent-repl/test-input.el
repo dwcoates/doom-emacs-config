@@ -1877,7 +1877,7 @@ send whenever the prefix counter aligned with the period."
 ;;; agent-repl-input-mode: mode setup
 
 (ert-deftest agent-repl-test-agent-repl-input-mode-setup ()
-  "`agent-repl-input-mode' sets header-line, visual-line-mode, and installs hooks."
+  "`agent-repl-input-mode' sets header-line and installs hooks."
   (agent-repl-test--with-temp-buffer " *test-input-mode*"
     (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
       (agent-repl-input-mode))
@@ -1887,10 +1887,17 @@ send whenever the prefix counter aligned with the period."
     ;; so the assertion stays decoupled from the chord chosen — the structural
     ;; invariant is that the header advertises the history recall.
     (should (string-match-p "history" header-line-format))
-    ;; Visual line mode should be enabled
-    (should visual-line-mode)
     ;; after-change-functions should include history-on-change
     (should (memq #'agent-repl--history-on-change after-change-functions))))
+
+(ert-deftest agent-repl-test-agent-repl-input-mode-no-visual-line-mode ()
+  "`agent-repl-input-mode' no longer force-enables `visual-line-mode'.
+The buffer's screen-line editing tuning was removed, so the mode leaves
+`visual-line-mode' at its default (nil) rather than turning it on."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-no-vline*"
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
+      (agent-repl-input-mode))
+    (should-not visual-line-mode)))
 
 (ert-deftest agent-repl-test-agent-repl-input-mode-header-omits-direct-send ()
   "The header line no longer advertises the direct-send chords.
@@ -1902,83 +1909,23 @@ the header carries no \"direct send\" advertisement at all now."
       (agent-repl-input-mode))
     (should-not (string-match-p "direct send" header-line-format))))
 
-;;; agent-repl-input-mode: visual-line evil integration
+;;; agent-repl-input-mode: no special visual-line editing tuning
 
-(ert-deftest agent-repl-test-agent-repl-input-mode-respects-visual-line-mode ()
-  "`agent-repl-input-mode' sets `evil-respect-visual-line-mode' buffer-locally to t.
-This is the runtime flag that makes Evil's line-based operators (yy, dd,
-cc, Y, D, C) operate on screen lines rather than logical lines, which is
-what users expect when composing wrapping prose in the input buffer."
+(ert-deftest agent-repl-test-agent-repl-input-mode-does-not-force-respect-visual-line ()
+  "`agent-repl-input-mode' no longer forces `evil-respect-visual-line-mode'.
+The screen-line operator tuning was removed, so the mode leaves
+`evil-respect-visual-line-mode' at its global default rather than binding
+it buffer-locally to t."
   (agent-repl-test--with-temp-buffer " *test-input-mode-vline-var*"
     (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
       (agent-repl-input-mode))
-    (should (local-variable-p 'evil-respect-visual-line-mode))
-    (should (eq evil-respect-visual-line-mode t))))
+    (should-not (local-variable-p 'evil-respect-visual-line-mode))))
 
-;;; The bindings below are declared as data in
-;;; `agent-repl--visual-line-bindings' (an alist of `(STATE KEY COMMAND)'
-;;; triples) and then applied via `evil-define-key'.  The tests assert the
-;;; data is well-formed and contains the intended pairs, since
-;;; `evil-define-key' is a no-op stub in this test harness and cannot be
-;;; queried back through `lookup-key'.
-
-(ert-deftest agent-repl-test-visual-line-bindings-cover-three-evil-states ()
-  "Each motion key in `agent-repl--visual-line-bindings' is bound in normal,
-motion, and visual state.  This makes the visual-line behavior consistent
-across all three states the user might trigger a motion from."
-  (let ((keys '("j" "k" "0" "^" "$" "gj" "gk" "g0" "g$")))
-    (dolist (key keys)
-      (dolist (state '(normal motion visual))
-        (should
-         (cl-find-if (lambda (b)
-                       (and (eq (nth 0 b) state)
-                            (string= (nth 1 b) key)))
-                     agent-repl--visual-line-bindings))))))
-
-(ert-deftest agent-repl-test-visual-line-bindings-j-is-next-visual-line ()
-  "`j' is bound to `evil-next-visual-line' in normal state."
-  (should (member '(normal "j" evil-next-visual-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-k-is-previous-visual-line ()
-  "`k' is bound to `evil-previous-visual-line' in normal state."
-  (should (member '(normal "k" evil-previous-visual-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-0-is-beginning-of-visual-line ()
-  "`0' is bound to `evil-beginning-of-visual-line' in normal state."
-  (should (member '(normal "0" evil-beginning-of-visual-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-dollar-is-end-of-visual-line ()
-  "`$' is bound to `evil-end-of-visual-line' in normal state."
-  (should (member '(normal "$" evil-end-of-visual-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-caret-is-first-non-blank-of-visual-line ()
-  "`^' is bound to `evil-first-non-blank-of-visual-line' in normal state."
-  (should (member '(normal "^" evil-first-non-blank-of-visual-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-capital-V-is-screen-line ()
-  "`V' is bound to `evil-visual-screen-line' in normal state.
-This makes `V' select by screen line rather than logical line, matching
-the rest of the visual-line motion family."
-  (should (member '(normal "V" evil-visual-screen-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-gj-is-logical-next-line ()
-  "`gj' is bound to `evil-next-line' as the logical-line escape hatch
-counterpart to the rebound `j' (mirroring evil's standard
-`evil-respect-visual-line-mode' integration)."
-  (should (member '(normal "gj" evil-next-line)
-                  agent-repl--visual-line-bindings)))
-
-(ert-deftest agent-repl-test-visual-line-bindings-gk-is-logical-previous-line ()
-  "`gk' is bound to `evil-previous-line' as the logical-line escape hatch
-counterpart to the rebound `k'."
-  (should (member '(normal "gk" evil-previous-line)
-                  agent-repl--visual-line-bindings)))
+(ert-deftest agent-repl-test-visual-line-bindings-const-removed ()
+  "The `agent-repl--visual-line-bindings' data table no longer exists.
+The visual-line motion remaps (j/k/0/^/$/V and their g-prefixed logical
+counterparts) were removed, so the defconst that declared them is gone."
+  (should-not (boundp 'agent-repl--visual-line-bindings)))
 
 ;;; discard-input with empty buffer
 

@@ -110,16 +110,6 @@ in-repo file, not here.")
               "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history")
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
   (agent-repl--set-buffer-background agent-repl-input-background-shade)
-  (visual-line-mode 1)
-  ;; Make Evil's line-based operators (yy, dd, cc, Y, D, C) respect
-  ;; `visual-line-mode' in this buffer.  These operators dispatch through
-  ;; `evil-line-or-visual-line' / `evil-end-of-line-or-visual-line', both of
-  ;; which read `evil-respect-visual-line-mode' at runtime, so the buffer-local
-  ;; binding flips them to the screen-line variants without affecting other
-  ;; buffers.  The motion keys (j/k/0/$/V/^) are bound separately in the
-  ;; mode-map below, mirroring the bindings `evil-integration.el' would have
-  ;; installed had the variable been set globally before Evil loaded.
-  (setq-local evil-respect-visual-line-mode t)
   ;; Slash-command completion: our capf is the buffer's only completion
   ;; source, so dropping the minimum prefix to 1 makes the menu appear on a
   ;; lone `/' without affecting completion anywhere else.
@@ -190,7 +180,6 @@ marks the turn aborted."
       :ni "C-c C-c"   #'agent-repl-discard-or-send-interrupt
       :ni "C-c r"     #'agent-repl-restart
       :ni "C-c q"     #'agent-repl-kill
-      :ni "C-h"       #'evil-window-left
       :n  "<up>"        #'agent-repl--history-prev
       :n  "<down>"      #'agent-repl--history-next
       ;; Prompt-history search sits on `C-M-r', not the `C-r' its shell
@@ -219,63 +208,6 @@ marks the turn aborted."
       :ni "M-S-k"       #'agent-repl-output-prev-final
       :ni "C-M-S-j"     #'agent-repl-output-next-tool
       :ni "C-M-S-k"     #'agent-repl-output-prev-tool)
-
-;; Visual-line motion bindings for the Claude input buffer.
-;;
-;; `visual-line-mode' is always on in `agent-repl-input-mode' (the user is
-;; composing free-form prose that wraps), and `evil-respect-visual-line-mode'
-;; is flipped on buffer-locally in the mode body so that line-based operators
-;; (yy, dd, cc, Y, D, C) operate on screen lines.  Those operators read the
-;; variable at runtime, but the basic motion bindings (j/k/0/$/V/^) are
-;; installed once at Evil load time by `evil-integration.el' and so they need
-;; to be reinstalled here at the mode-map level.  The `g'-prefixed variants
-;; give the user the inverse (logical-line) motion when they want it.
-;;
-;; The bindings are declared as data in `agent-repl--visual-line-bindings'
-;; (an alist of `(STATE KEY COMMAND)' triples) and then applied with
-;; `evil-define-key' below.  Keeping the data separate lets the tests assert
-;; the intended bindings even though `evil-define-key' is a no-op stub in
-;; the test harness.
-(defconst agent-repl--visual-line-bindings
-  '(;; Screen-line motions for normal / motion / visual state.
-    (normal  "j"  evil-next-visual-line)
-    (motion  "j"  evil-next-visual-line)
-    (visual  "j"  evil-next-visual-line)
-    (normal  "k"  evil-previous-visual-line)
-    (motion  "k"  evil-previous-visual-line)
-    (visual  "k"  evil-previous-visual-line)
-    (normal  "0"  evil-beginning-of-visual-line)
-    (motion  "0"  evil-beginning-of-visual-line)
-    (visual  "0"  evil-beginning-of-visual-line)
-    (normal  "^"  evil-first-non-blank-of-visual-line)
-    (motion  "^"  evil-first-non-blank-of-visual-line)
-    (visual  "^"  evil-first-non-blank-of-visual-line)
-    (normal  "$"  evil-end-of-visual-line)
-    (motion  "$"  evil-end-of-visual-line)
-    (visual  "$"  evil-end-of-visual-line)
-    ;; Logical-line escape hatches (g-prefixed).
-    (normal  "gj" evil-next-line)
-    (motion  "gj" evil-next-line)
-    (visual  "gj" evil-next-line)
-    (normal  "gk" evil-previous-line)
-    (motion  "gk" evil-previous-line)
-    (visual  "gk" evil-previous-line)
-    (normal  "g0" evil-beginning-of-line)
-    (motion  "g0" evil-beginning-of-line)
-    (visual  "g0" evil-beginning-of-line)
-    (normal  "g$" evil-end-of-line)
-    (motion  "g$" evil-end-of-line)
-    (visual  "g$" evil-end-of-line)
-    ;; `V' selects by screen line so it composes with the rest of the family.
-    (normal  "V"  evil-visual-screen-line))
-  "Visual-line evil bindings installed in `agent-repl-input-mode-map'.
-Each entry is `(STATE KEY-STRING COMMAND)'.  Applied via `evil-define-key'
-just below.  Declared as data so tests can assert the intended binding set
-even though `evil-define-key' is a no-op stub in the test harness.")
-
-(dolist (binding agent-repl--visual-line-bindings)
-  (cl-destructuring-bind (state key cmd) binding
-    (evil-define-key state agent-repl-input-mode-map (kbd key) cmd)))
 
 ;;; Input preparation and metaprompt
 
