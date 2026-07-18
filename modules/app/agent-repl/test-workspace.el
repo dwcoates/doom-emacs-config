@@ -148,6 +148,17 @@ to the session binding, so it must not outlive the tombstone."
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-get "ws1" :queued-messages))))
 
+(ert-deftest agent-repl-test-ws-del-clears-incoming-session-id ()
+  "ws-del clears `:incoming-session-id' — a staged id belongs to the
+killed session and must never survive into a revived workspace, where
+a later activity event could promote a dead session as the resume
+target."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :incoming-session-id "staged-uuid")
+    (agent-repl--ws-del "ws1")
+    (should-not (agent-repl--ws-get "ws1" :incoming-session-id))))
+
 (ert-deftest agent-repl-test-ws-del-nonexistent ()
   "ws-del on a non-existent workspace should be a no-op."
   (agent-repl-test--with-clean-state

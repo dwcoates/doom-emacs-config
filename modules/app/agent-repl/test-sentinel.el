@@ -886,6 +886,125 @@ Inherits mark-dead's precedence guard."
     ;; Assert
     (should (equal (agent-repl--ws-durable-claude-session-id "ws1") "ours-uuid"))))
 
+;;;; ---- Tests: session-start staging vs activity promotion ----
+
+(ert-deftest agent-repl-test-update-session-id-session-start-stages-not-adopts ()
+  "A session-start sentinel STAGES the new id; the durable id is untouched.
+A freshly minted session has no transcript until its first user message,
+so adopting at session-start would clobber the last resumable id."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "old-uuid")
+    (let ((set-called nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (&rest _) (setq set-called t))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel
+         "ws1" "rotated-uuid" t "handle-session-start" "clear")
+        ;; Assert
+        (should-not set-called)
+        (should (equal (agent-repl--ws-get "ws1" :incoming-session-id)
+                       "rotated-uuid"))))))
+
+(ert-deftest agent-repl-test-update-session-id-prompt-submit-promotes-staged ()
+  "A prompt-submit sentinel promotes the staged id and clears the staging key."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "old-uuid")
+    (agent-repl--ws-put "ws1" :incoming-session-id "rotated-uuid")
+    (let ((set-args nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (ws id) (setq set-args (list ws id)))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel
+         "ws1" "rotated-uuid" t "handle-prompt-submit" nil)
+        ;; Assert
+        (should (equal set-args '("ws1" "rotated-uuid")))
+        (should-not (agent-repl--ws-get "ws1" :incoming-session-id))))))
+
+(ert-deftest agent-repl-test-update-session-id-stop-promotes-unstaged ()
+  "An owned activity event promotes a differing id even with nothing staged.
+A stop for an unknown owned id means a turn ran there — its transcript
+exists, so it is a valid resume target."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "old-uuid")
+    (let ((set-args nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (ws id) (setq set-args (list ws id)))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel
+         "ws1" "other-uuid" t "handle-stop" nil)
+        ;; Assert
+        (should (equal set-args '("ws1" "other-uuid")))))))
+
+(ert-deftest agent-repl-test-update-session-id-session-start-unowned-not-staged ()
+  "An unowned session-start sentinel stages nothing — foreign CLIs never
+get a foothold, not even in the staging key."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "ours-uuid")
+    ;; Act
+    (agent-repl--update-session-id-from-sentinel
+     "ws1" "foreign-uuid" nil "handle-session-start" "startup")
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :incoming-session-id))
+    (should (equal (agent-repl--ws-durable-claude-session-id "ws1") "ours-uuid"))))
+
+(ert-deftest agent-repl-test-update-session-id-equal-id-clears-stale-staging ()
+  "A sentinel whose id already IS the durable id clears any stale staged id."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--initialize-ws-env "ws1" "/w")
+    (agent-repl--set-session-id "ws1" "ours-uuid")
+    (agent-repl--ws-put "ws1" :incoming-session-id "stale-uuid")
+    (let ((set-called nil))
+      (cl-letf (((symbol-function 'agent-repl--set-session-id)
+                 (lambda (&rest _) (setq set-called t))))
+        ;; Act
+        (agent-repl--update-session-id-from-sentinel
+         "ws1" "ours-uuid" t "handle-stop" nil)
+        ;; Assert
+        (should-not set-called)
+        (should-not (agent-repl--ws-get "ws1" :incoming-session-id))))))
+
+(ert-deftest agent-repl-test-read-sentinel-file-parses-source-line ()
+  "Line 4 of a session-start sentinel parses as the `:source' origin."
+  (agent-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            ;; Arrange / Act
+            (write-region "/some/project/dir\nabc-123\nowned\nclear\n" nil tmp)
+            (let ((result (agent-repl--read-sentinel-file tmp)))
+              ;; Assert
+              (should (equal (plist-get result :source) "clear"))
+              (should (plist-get result :owned))))
+        (ignore-errors (delete-file tmp))))))
+
+(ert-deftest agent-repl-test-read-sentinel-file-missing-source-is-nil ()
+  "A three-line sentinel (every non-session-start writer) has a nil `:source'."
+  (agent-repl-test--with-clean-state
+    (let ((tmp (make-temp-file "sentinel-test-")))
+      (unwind-protect
+          (progn
+            ;; Arrange / Act
+            (write-region "/some/project/dir\nabc-123\nowned\n" nil tmp)
+            (let ((result (agent-repl--read-sentinel-file tmp)))
+              ;; Assert
+              (should-not (plist-get result :source))
+              (should (plist-get result :owned))))
+        (ignore-errors (delete-file tmp))))))
+
 ;;;; ---- Tests: ws-for-dir-fast ----
 
 (ert-deftest agent-repl-test-ws-for-dir-fast-hit ()

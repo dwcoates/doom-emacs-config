@@ -806,7 +806,11 @@ through an Emacs crash — without this `state-save', the SID would
 only reach the per-project state file at graceful teardown, so a crash
 mid-session would drop the resume signal and the next launch would
 not pass `--continue'."
-  (agent-repl--log ws "set-session-id: ws=%s id=%s" ws id)
+  (agent-repl--log ws "set-session-id: ws=%s id=%s (was %s)"
+                    ws id
+                    (or (agent-repl-instantiation-session-id
+                         (agent-repl--active-inst ws))
+                        "nil"))
   (setf (agent-repl-instantiation-session-id (agent-repl--active-inst ws)) id)
   (agent-repl--state-save ws))
 
