@@ -245,6 +245,14 @@ func closeReplayTurns(frames []protocol.L2Frame) []protocol.L2Frame {
 			// Monitor firing) would merge into the turn above it.
 			closeTurn()
 			turnOpen = true
+		case *protocol.ResultFrame:
+			// The only result in the pre-close stream is the aborted one
+			// replayUserFrames emits for an interrupt marker, and it IS the
+			// interrupted turn's close. Consume the pending close so the
+			// end-of-turn logic does not append a second, success result
+			// after it (which would double-close the turn).
+			turnOpen = false
+			turnAnswered = false
 		default:
 			if isResponseFrame(f) {
 				turnAnswered = true
@@ -284,14 +292,30 @@ func isResponseFrame(f protocol.L2Frame) bool {
 // It reports subtype "success" — a turn preserved in the transcript with
 // a response is one the CLI ran to completion — which is what marks the
 // turn's answer a final response the webapp draws its green border
-// around. The frame is pre-stamped with ts (the closing turn's last
-// frame time) so the hub keeps it (§2.1) and the webapp dates the turn's
-// end correctly; it carries no duration/usage/cost, none of which the
-// transcript records.
+// around.
 func replayResult(ts string) protocol.L2Frame {
+	return replayResultSubtype(ts, "success")
+}
+
+// replayInterruptResult builds the synthetic "aborted" result the webapp
+// renders as the yellow interrupt badge (ResultChip in
+// webapp/src/render.ts). It stands in for the CLI's synthetic
+// `[Request interrupted by user]` user-role marker so an interrupted turn
+// is denoted ONE way — the yellow badge — never ALSO as a prompt bubble
+// echoing that marker text. The live path already produces only the badge
+// (the shim stamps subtype "aborted" and drops the marker's user
+// envelope); this restores that single-badge behavior on replay.
+func replayInterruptResult(ts string) protocol.L2Frame {
+	return replayResultSubtype(ts, "aborted")
+}
+
+// replayResultSubtype builds a synthetic turn-closing result of the given
+// subtype, pre-stamped with ts so the hub keeps it (§2.1); it carries no
+// duration/usage/cost, none of which the transcript records.
+func replayResultSubtype(ts, subtype string) protocol.L2Frame {
 	return &protocol.ResultFrame{
 		Envelope: protocol.Envelope{Type: "result", TS: ts},
-		Subtype:  "success",
+		Subtype:  subtype,
 	}
 }
 
@@ -378,8 +402,12 @@ var agentIDRe = regexp.MustCompile(`agentId:\s*([0-9a-fA-F]+)`)
 // replayUserFrames maps one user transcript entry to frames: tool_result
 // blocks become tool-use-result frames (through the Translator, so
 // render hints fire for tools it has seen), and the remaining content
-// becomes one §2.3 user-turn frame. Subagent-spawning results also bank
-// their announced agentId so the sidechain merge can find its parent.
+// becomes one §2.3 user-turn frame. Two synthetic markers the CLI writes
+// as user text are diverted rather than rendered as prompts: a
+// task-notification becomes a §2.6 notification frame, and an interrupt
+// marker becomes the yellow "aborted" result badge (isInterruptText).
+// Subagent-spawning results also bank their announced agentId so the
+// sidechain merge can find its parent.
 func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *replayState) []protocol.L2Frame {
 	var msg transcriptUserMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
@@ -389,6 +417,9 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 	if err := json.Unmarshal(msg.Content, &text); err == nil {
 		if isTaskNotificationText(text) {
 			return replayTaskNotification(t, text, ts)
+		}
+		if isInterruptText(text) {
+			return []protocol.L2Frame{replayInterruptResult(ts)}
 		}
 		text = slashCommandText(text)
 		if text == "" {
@@ -419,9 +450,15 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 			var tb struct {
 				Text string `json:"text"`
 			}
-			if err := json.Unmarshal(raw, &tb); err == nil && isTaskNotificationText(tb.Text) {
-				frames = append(frames, replayTaskNotification(t, tb.Text, ts)...)
-				continue
+			if err := json.Unmarshal(raw, &tb); err == nil {
+				if isTaskNotificationText(tb.Text) {
+					frames = append(frames, replayTaskNotification(t, tb.Text, ts)...)
+					continue
+				}
+				if isInterruptText(tb.Text) {
+					frames = append(frames, replayInterruptResult(ts))
+					continue
+				}
 			}
 		}
 		turnBlocks = append(turnBlocks, raw)
@@ -438,6 +475,16 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 // the harness's background-work completion signal, not the user's words.
 func isTaskNotificationText(text string) bool {
 	return strings.Contains(text, "<task-notification>")
+}
+
+// isInterruptText reports whether a user text is the CLI's synthetic
+// interrupt marker — the user-role entry it writes when a turn is
+// interrupted (`[Request interrupted by user]`, and the tool-use variant
+// `[Request interrupted by user for tool use]`). It is not the user's
+// words: the interrupt is already denoted by the yellow "aborted" result
+// badge, so this marker must never ALSO surface as a prompt bubble.
+func isInterruptText(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "[Request interrupted by user")
 }
 
 // replayTaskNotification maps one replayed task-notification text to the
