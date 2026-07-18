@@ -637,13 +637,20 @@ the count of open workspaces that carried a session binding to rebind."
 
 ;;;; ---- Message / interrupt injection ------------------------------------------
 
-(defun agent-repl--frontend-send-message (session-id text)
+(defun agent-repl--frontend-send-message (session-id text &optional origin)
   "POST TEXT as a user message to SESSION-ID; return the request id.
 The daemon injects the turn through the same pipeline as a WS submit,
-so every attached tab renders the user-turn echo."
+so every attached tab renders the user-turn echo.
+
+ORIGIN, when non-nil, is sent as the message's `origin' so the daemon
+stamps the resulting user-turn frame (e.g. \"merge\"): the GUI renders
+that turn as a status card instead of a user-prompt bubble, while the
+injected TEXT still drives the agent.  An ordinary prompt passes nil and
+its command body is byte-for-byte what it was before `origin' existed."
   (let* ((resp (agent-repl--frontend-api
                 "POST" (format "/sessions/%s/message" session-id)
-                `(("content" . ,text))))
+                (append `(("content" . ,text))
+                        (when origin `(("origin" . ,origin))))))
          (rid (alist-get 'request_id resp)))
     (unless (and (stringp rid) (not (string-empty-p rid)))
       (error "agent-repl: message injection returned no request_id: %S" resp))
@@ -867,13 +874,18 @@ the subsequent open attaches to the continued conversation."
   "Send TEXT as WS's user turn via its bound daemon session.
 Ensures the session first (recreating a stale binding), so a send into
 a dead session heals instead of 404ing."
-  (let ((id (agent-repl--frontend-ensure-session ws)))
+  (let ((id (agent-repl--frontend-ensure-session ws))
+        ;; A one-shot `origin' tag parked on the ws (see
+        ;; `agent-repl--dispatch-merge-remediation'): consumed and cleared
+        ;; here so it stamps exactly this send and never a later prompt.
+        (origin (agent-repl--ws-get ws :next-send-origin)))
     ;; The ensure may have HEALED a dead binding into a fresh session —
     ;; the displayed webview must follow, or the user watches the dead
     ;; session while the turn streams into the replacement.
     (agent-repl--frontend-sync-webview ws id)
-    (agent-repl--log ws "frontend send: session=%s len=%d" id (length text))
-    (agent-repl--frontend-send-message id text)))
+    (when origin (agent-repl--ws-put ws :next-send-origin nil))
+    (agent-repl--log ws "frontend send: session=%s len=%d origin=%s" id (length text) origin)
+    (agent-repl--frontend-send-message id text origin)))
 
 (defun agent-repl--frontend-release-workspace-session (ws)
   "Best-effort DELETE of WS's daemon session (for `agent-repl-ws-del-hook').

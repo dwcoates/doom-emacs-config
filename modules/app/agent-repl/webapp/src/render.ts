@@ -455,6 +455,29 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   return `${Bubble(`bubble user${stateCls}`, body, item.ts)}${divider}`;
 }
 
+/** The fixed body of the Merge status card (see `MergeCard`). */
+export const MERGE_CARD_BODY =
+  "Workspace conflict resolution failed with merge queue agent, attempting resolution here";
+
+/**
+ * The Merge status card: a merge-failure remediation turn (`origin: "merge"`)
+ * renders here INSTEAD of as a user-prompt bubble, so the injected directive
+ * never shows as a prompt the user did not type. It borrows the tool-card
+ * shell the `Bash`/`Agent`/`Skill` cards use — a full-width, left-flushed card
+ * with a `Merge` label in the `.tool-head` slot — but its body is one fixed
+ * line with no tool input, output, or activity fold, since it is a status
+ * marker rather than a tool call. The directive it stands in for still drives
+ * the agent under the hood, and the agent's resolution streams below as
+ * ordinary bubbles.
+ */
+function MergeCard(): string {
+  return `
+    <div class="tool-card tool-merge">
+      <div class="tool-head"><span class="tool-name">Merge</span></div>
+      <div class="merge-body">${escapeHtml(MERGE_CARD_BODY)}</div>
+    </div>`;
+}
+
 /**
  * §2.13 status/verdict badge for a queued item. `classifying` is the
  * pre-verdict state; `waiting` parks the message to drain in FIFO order;
@@ -2032,7 +2055,7 @@ export function renderItem(
   if (rendersEmpty(item, finals)) return "";
   switch (item.kind) {
     case "user-turn":
-      return UserTurn(item, panels);
+      return item.origin === "merge" ? MergeCard() : UserTurn(item, panels);
     case "text":
       return TextStream(item, finals?.chips.get(item.blockId) ?? null, panels);
     case "thinking":

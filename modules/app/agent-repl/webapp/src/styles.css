@@ -103,6 +103,11 @@
      .badge) so the wash never tints it. */
   --async-card: #79bdb0;
   --async-border: #4fb8a8;
+  /* The Merge status card (a merge-failure remediation turn): an amber wash,
+     kin to --remediation, so it reads as "needs resolving" and stays distinct
+     from the teal async cards and the grey tool cards in a long feed. */
+  --merge-card: #fef3c7;
+  --merge-border: #ca8a04;
   /* Inline-code chip wash: a grey the code span SINKS INTO rather than one it
      floats on, so a `token` inside a sentence of prose reads as typeable at a
      glance. A transparent BLACK wash, never a --fg one: --fg flips light in the
@@ -167,6 +172,8 @@
     --q-border: #facc15;
     --async-card: #0a4a42;
     --async-border: #4fc4b0;
+    --merge-card: #3a2e0a;
+    --merge-border: #facc15;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 }
@@ -735,6 +742,13 @@ pre {
 .tool-card.tool-task {
   background: var(--async-card);
   border-color: var(--async-border);
+}
+/* The Merge status card borrows the tool-card shell but wears its own amber
+   wash (see --merge-card): a merge-failure remediation turn, distinct from the
+   teal async cards above and the grey tool cards. */
+.tool-card.tool-merge {
+  background: var(--merge-card);
+  border-color: var(--merge-border);
 }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }

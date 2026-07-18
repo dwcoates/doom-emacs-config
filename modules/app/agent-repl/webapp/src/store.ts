@@ -35,6 +35,13 @@ export interface UserTurnItem {
   content: ContentBlock[];
   /** Envelope ts (§2.1): when the prompt was sent, rendered on the bubble. */
   ts: string;
+  /**
+   * When set, the prompt was injected on the user's behalf and renders as a
+   * status card rather than a user-prompt bubble (see the `user-turn` render
+   * dispatch). "merge" is the merge-failure remediation turn. Absent for a
+   * user's own prompt.
+   */
+  origin?: string;
 }
 export interface TextItem {
   kind: "text";
@@ -697,6 +704,7 @@ export class ConversationStore {
           requestId: frame.request_id,
           content: frame.content,
           ts: frame.ts,
+          origin: frame.origin,
         });
         s.turnInFlight = true;
         s.turnStartedAt = frame.ts;

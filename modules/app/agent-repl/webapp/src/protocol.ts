@@ -201,6 +201,14 @@ export interface UserTurnFrame extends WsEnvelope {
   type: "user-turn";
   request_id: string;
   content: ContentBlock[];
+  /**
+   * When set, the turn's prompt was injected on the user's behalf and renders
+   * specially rather than as a user-prompt bubble. "merge" is the
+   * merge-failure remediation turn: the feed shows a Merge status card while
+   * the injected directive still drives the agent. Absent for a user's own
+   * prompt.
+   */
+  origin?: string;
 }
 
 /**

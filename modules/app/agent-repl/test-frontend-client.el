@@ -839,7 +839,7 @@ the workspace's model.  Fails against that hardcoded nil, since
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
                  (lambda (_ws) "s_fresh"))
                 ((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (id text) (setq sent (list id text)) "r_1")))
+                 (lambda (id text &optional _origin) (setq sent (list id text)) "r_1")))
         ;; Act
         (agent-repl--frontend-send-user-message "ws1" "hi")
         ;; Assert
@@ -855,7 +855,7 @@ the workspace's model.  Fails against that hardcoded nil, since
                 ((symbol-function 'agent-repl--frontend-sync-webview)
                  (lambda (ws id) (setq synced (list ws id))))
                 ((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (_id _text) "r_1")))
+                 (lambda (_id _text &optional _origin) "r_1")))
         ;; Act
         (agent-repl--frontend-send-user-message "ws1" "hi")
         ;; Assert
@@ -1404,6 +1404,60 @@ not an error."
       (lambda (&rest _) (cons 404 "no such session"))
     ;; Act / Assert
     (should-error (agent-repl--frontend-refresh-commands "s1"))))
+
+;;;; ---- origin-tagged sends (merge-remediation) -----------------------------
+
+(ert-deftest agent-repl-test-frontend-send-message-includes-origin ()
+  "A non-nil ORIGIN is JSON-encoded into the message body."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((request_id . "r1"))))
+    ;; Act
+    (agent-repl--frontend-send-message "s1" "hi" "merge")
+    ;; Assert
+    (let ((payload (nth 2 (car (last requests)))))
+      (should (string-match-p "\"origin\"" payload))
+      (should (string-match-p "merge" payload)))))
+
+(ert-deftest agent-repl-test-frontend-send-message-omits-absent-origin ()
+  "A nil ORIGIN leaves the body without an origin key."
+  ;; Arrange
+  (agent-repl-test--with-http
+      (lambda (&rest _) (agent-repl-test--json-ok '((request_id . "r1"))))
+    ;; Act
+    (agent-repl--frontend-send-message "s1" "hi")
+    ;; Assert
+    (let ((payload (nth 2 (car (last requests)))))
+      (should-not (string-match-p "origin" payload)))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-consumes-next-send-origin ()
+  "Send-user-message stamps the send with `:next-send-origin' then clears it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s1" :next-send-origin "merge")
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
+              ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
+      (agent-repl-test--with-http
+          (lambda (&rest _) (agent-repl-test--json-ok '((request_id . "r1"))))
+        ;; Act
+        (agent-repl--frontend-send-user-message "ws1" "rebase")
+        ;; Assert — the POST carried the origin, and the one-shot flag is cleared.
+        (let ((payload (nth 2 (car (last requests)))))
+          (should (string-match-p "merge" payload)))
+        (should (null (agent-repl--ws-get "ws1" :next-send-origin)))))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-untagged-carries-no-origin ()
+  "Without `:next-send-origin', send-user-message posts no origin."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
+              ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
+      (agent-repl-test--with-http
+          (lambda (&rest _) (agent-repl-test--json-ok '((request_id . "r1"))))
+        ;; Act
+        (agent-repl--frontend-send-user-message "ws1" "a normal prompt")
+        ;; Assert
+        (let ((payload (nth 2 (car (last requests)))))
+          (should-not (string-match-p "origin" payload)))))))
 
 (provide 'test-frontend-client)
 

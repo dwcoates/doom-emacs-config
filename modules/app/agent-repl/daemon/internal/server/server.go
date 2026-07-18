@@ -1194,6 +1194,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Content   string `json:"content"`
 		RequestID string `json:"request_id"`
+		// Origin, when set, marks a turn injected on the user's behalf so the
+		// GUI renders it specially rather than as a user-prompt bubble (see
+		// UserTurnFrame.Origin); "merge" is the merge-failure remediation turn.
+		Origin string `json:"origin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
@@ -1206,11 +1210,17 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if body.RequestID == "" {
 		body.RequestID = newRequestID()
 	}
-	if err := sess.InjectCommand(map[string]any{
+	cmd := map[string]any{
 		"type":       "user-message",
 		"request_id": body.RequestID,
 		"content":    body.Content,
-	}); err != nil {
+	}
+	// Only forward a non-empty origin so an ordinary prompt's command stays
+	// byte-for-byte what it was before this field existed.
+	if body.Origin != "" {
+		cmd["origin"] = body.Origin
+	}
+	if err := sess.InjectCommand(cmd); err != nil {
 		httpError(w, http.StatusConflict, err.Error())
 		return
 	}

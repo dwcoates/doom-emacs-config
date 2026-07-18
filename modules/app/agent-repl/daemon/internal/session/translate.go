@@ -232,6 +232,7 @@ func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame 
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
 		Content:   normalizeContent(cmd.Content),
+		Origin:    cmd.Origin,
 	}
 }
 
