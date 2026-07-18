@@ -863,12 +863,13 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   "On clean exit, `--capture-process-output' returns the stdout buffer's
 contents with leading/trailing whitespace trimmed."
   (let ((captured-buf nil))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (setq captured-buf buf)
-                 (with-current-buffer buf
-                   (insert "  trimmed result  \n"))
-                 (list :fake-proc buf)))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (let ((buf (plist-get args :buffer)))
+                   (setq captured-buf buf)
+                   (with-current-buffer buf
+                     (insert "  trimmed result  \n"))
+                   (list :fake-proc buf))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
@@ -885,11 +886,12 @@ contents with leading/trailing whitespace trimmed."
 This is load-bearing for the silent-failure contract of the `--quiet'
 wrappers: init-time callers that may run outside a git repository
 must not explode when git hangs or doesn't terminate in time."
-  (cl-letf (((symbol-function 'start-process)
-             (lambda (_name buf &rest _cmd)
-               (with-current-buffer buf
-                 (insert "partial output that should not be returned\n"))
-               (list :fake-proc buf)))
+  (cl-letf (((symbol-function 'make-process)
+             (lambda (&rest args)
+               (let ((buf (plist-get args :buffer)))
+                 (with-current-buffer buf
+                   (insert "partial output that should not be returned\n"))
+                 (list :fake-proc buf))))
             ((symbol-function 'set-process-query-on-exit-flag)
              (lambda (&rest _) nil))
             ((symbol-function 'set-process-sentinel)
@@ -905,8 +907,8 @@ must not explode when git hangs or doesn't terminate in time."
 stalled program and args so the otherwise-silent \"\" return leaves a
 post-mortem breadcrumb."
   (let ((logged nil))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd) (list :fake-proc buf)))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args) (list :fake-proc (plist-get args :buffer))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
@@ -926,18 +928,11 @@ post-mortem breadcrumb."
 `make-process' with `:stderr' set to a separate buffer so stderr is
 discarded — matches the `2>/dev/null' contract the quiet wrappers
 depend on."
-  (let ((make-process-called nil)
-        (start-process-called nil)
-        (stderr-buf-arg nil))
+  (let ((stderr-buf-arg :unset))
     (cl-letf (((symbol-function 'make-process)
                (lambda (&rest args)
-                 (setq make-process-called t
-                       stderr-buf-arg (plist-get args :stderr))
+                 (setq stderr-buf-arg (plist-get args :stderr))
                  (list :fake-proc (plist-get args :buffer))))
-              ((symbol-function 'start-process)
-               (lambda (&rest _)
-                 (setq start-process-called t)
-                 (list :fake-proc nil)))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
@@ -945,25 +940,18 @@ depend on."
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (agent-repl--capture-process-output "git" '("status") t))
-    (should make-process-called)
-    (should-not start-process-called)
     (should (bufferp stderr-buf-arg))))
 
-(ert-deftest agent-repl-test-capture-process-output-uses-start-process-when-no-suppress-stderr ()
-  "When SUPPRESS-STDERR is nil (default), `--capture-process-output' uses
-`start-process', which merges stderr into the same buffer as stdout
-\(matches `shell-command-to-string''s default and the existing
-`--git-string' contract that includes stderr in the returned text)."
-  (let ((make-process-called nil)
-        (start-process-called nil))
+(ert-deftest agent-repl-test-capture-process-output-merges-stderr-when-no-suppress ()
+  "When SUPPRESS-STDERR is nil (default), no separate `:stderr' buffer is
+passed, so stderr merges into the stdout buffer (matches
+`shell-command-to-string''s default and the existing `--git-string'
+contract that includes stderr in the returned text)."
+  (let ((stderr-buf-arg :unset))
     (cl-letf (((symbol-function 'make-process)
-               (lambda (&rest _)
-                 (setq make-process-called t)
-                 (list :fake-proc nil)))
-              ((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (setq start-process-called t)
-                 (list :fake-proc buf)))
+               (lambda (&rest args)
+                 (setq stderr-buf-arg (plist-get args :stderr))
+                 (list :fake-proc (plist-get args :buffer))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
@@ -971,8 +959,62 @@ depend on."
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 0)))
       (agent-repl--capture-process-output "git" '("status") nil))
-    (should start-process-called)
-    (should-not make-process-called)))
+    (should-not stderr-buf-arg)))
+
+(ert-deftest agent-repl-test-capture-process-output-spawns-on-pipe-when-no-suppress ()
+  "The merged-stderr branch spawns with `:connection-type' `pipe'.
+A pty spawn makes `git log' see a terminal and launch its pager, which
+hangs until the timeout on every call — the 2026-07-18 freeze trigger."
+  (let ((conn-type :unset))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq conn-type (plist-get args :connection-type))
+                 (list :fake-proc (plist-get args :buffer))))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (agent-repl--capture-process-output "git" '("log" "-1") nil))
+    (should (eq conn-type 'pipe))))
+
+(ert-deftest agent-repl-test-capture-process-output-spawns-on-pipe-when-suppress ()
+  "The suppress-stderr branch spawns with `:connection-type' `pipe' too."
+  (let ((conn-type :unset))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq conn-type (plist-get args :connection-type))
+                 (list :fake-proc (plist-get args :buffer))))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--wait-for-process-exit)
+               (lambda (&rest _) 0)))
+      (agent-repl--capture-process-output "git" '("log" "-1") t))
+    (should (eq conn-type 'pipe))))
+
+(ert-deftest agent-repl-test-capture-process-output-cleanup-uses-safe-buffer-kill ()
+  "Buffer cleanup routes through `agent-repl--kill-buffer-safely' when it
+is bound: on the timeout path the child can still be alive, and a bare
+`kill-buffer' on its buffer from the merge worker is the AppKit
+off-main teardown deadlock (2026-07-18)."
+  (let ((safe-killed nil))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (list :fake-proc (plist-get args :buffer))))
+              ((symbol-function 'set-process-query-on-exit-flag)
+               (lambda (&rest _) nil))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--wait-for-process-exit)
+               (lambda (&rest _) 'timeout))
+              ((symbol-function 'agent-repl--kill-buffer-safely)
+               (lambda (buf) (push (buffer-name buf) safe-killed)
+                 (kill-buffer buf) t)))
+      (agent-repl--capture-process-output "git" '("log" "-1") nil)
+      (should (= 1 (length safe-killed))))))
 
 (ert-deftest agent-repl-test-capture-process-output-kills-stderr-buffer ()
   "The temporary stderr buffer (when SUPPRESS-STDERR is non-nil) is killed
@@ -998,10 +1040,11 @@ sentinel.  This displaces Emacs's `internal-default-process-sentinel',
 whose `Process NAME finished' status insertion into the shared buffer
 would otherwise be read back as command output and corrupt the result."
   (let ((sentinel-arg 'unset))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (with-current-buffer buf (insert "clean-output\n"))
-                 (list :fake-proc buf)))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (let ((buf (plist-get args :buffer)))
+                   (with-current-buffer buf (insert "clean-output\n"))
+                   (list :fake-proc buf))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
@@ -1020,10 +1063,11 @@ path, where the default sentinel fires during the wait's
 `accept-process-output' loop."
   (let ((waited nil)
         (installed-before-wait nil))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (with-current-buffer buf (insert "out\n"))
-                 (list :fake-proc buf)))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (let ((buf (plist-get args :buffer)))
+                   (with-current-buffer buf (insert "out\n"))
+                   (list :fake-proc buf))))
               ((symbol-function 'set-process-query-on-exit-flag)
                (lambda (&rest _) nil))
               ((symbol-function 'set-process-sentinel)
