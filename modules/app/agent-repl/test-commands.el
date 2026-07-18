@@ -664,6 +664,7 @@ reports the interrupt was delivered."
     (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name)
                (lambda () "test-ws"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
               ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                (lambda (_ws _kind) t))
               ((symbol-function 'run-at-time)
@@ -699,10 +700,132 @@ state must not change."
     (agent-repl--ws-set-agent-state "test-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name)
                (lambda () "test-ws"))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
               ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                (lambda (_ws _kind) nil)))
       (agent-repl-interrupt)
       (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking)))))
+
+;;;; ---- agent-repl-interrupt: confirmation before cancelling ----
+
+(defmacro agent-repl-cmd-test--with-interrupt-confirm (state answer &rest body)
+  "Run BODY with `test-ws' in agent-state STATE and `y-or-n-p' returning ANSWER.
+Binds `dispatched' to nil; the frontend interrupt records into it and
+reports delivered.  `prompted' is bound to nil and set t when `y-or-n-p'
+is consulted, so BODY can assert whether a prompt was raised."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (let ((dispatched nil)
+           (prompted nil))
+       (agent-repl--ws-put "test-ws" :frontend 'gui)
+       (agent-repl--ws-set-agent-state "test-ws" ,state)
+       (cl-letf (((symbol-function '+workspace-current-name)
+                  (lambda () "test-ws"))
+                 ((symbol-function 'y-or-n-p)
+                  (lambda (_prompt) (setq prompted t) ,answer))
+                 ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
+                  (lambda (ws kind) (setq dispatched (list ws kind)) t))
+                 ((symbol-function 'run-at-time)
+                  (lambda (_time _repeat _fn _arg) nil)))
+         ,@body))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/prompts-and-cancels-when-confirmed ()
+  "A running agent confirmed at the prompt is interrupted."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl-interrupt)
+    (should prompted)
+    (should (equal dispatched '("test-ws" escape)))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/aborts-when-declined ()
+  "A running agent declined at the prompt is NOT interrupted."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
+    (agent-repl-interrupt)
+    (should prompted)
+    (should-not dispatched)))
+
+(ert-deftest agent-repl-cmd-test-interrupt/leaves-running-agent-alone-when-declined ()
+  "A declined confirmation leaves the agent-state at :thinking."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
+    (agent-repl-interrupt)
+    (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/no-prompt-when-agent-not-running ()
+  "An idle workspace (no running agent) is interrupted without a prompt."
+  (agent-repl-cmd-test--with-interrupt-confirm :idle t
+    (agent-repl-interrupt)
+    (should-not prompted)
+    (should (equal dispatched '("test-ws" escape)))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/no-prompt-when-confirm-disabled ()
+  "With `agent-repl-interrupt-confirm' nil, a running agent is interrupted directly."
+  (let ((agent-repl-interrupt-confirm nil))
+    (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+      (agent-repl-interrupt)
+      (should-not prompted)
+      (should (equal dispatched '("test-ws" escape))))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/no-confirm-arg-suppresses-prompt ()
+  "Passing NO-CONFIRM non-nil interrupts a running agent without prompting."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl-interrupt "test-ws" t)
+    (should-not prompted)
+    (should (equal dispatched '("test-ws" escape)))))
+
+;;;; ---- agent-repl--confirm-cancel-running / prompt ----
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel/skips-prompt-with-no-running-agent ()
+  "No running agent among the set returns t without consulting `y-or-n-p'."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "idle-ws" :idle)
+    (let ((prompted nil))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (setq prompted t) t)))
+        (should (agent-repl--confirm-cancel-running '("idle-ws")))
+        (should-not prompted)))))
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel/prompts-once-when-a-running-agent-present ()
+  "A running agent in the set consults `y-or-n-p' exactly once."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (agent-repl--ws-set-agent-state "idle-ws" :idle)
+    (let ((prompt-count 0))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (cl-incf prompt-count) t)))
+        (should (agent-repl--confirm-cancel-running '("run-ws" "idle-ws")))
+        (should (= 1 prompt-count))))))
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel/honors-disabled-flag ()
+  "A nil `agent-repl-interrupt-confirm' returns t without prompting."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (let ((agent-repl-interrupt-confirm nil)
+          (prompted nil))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (setq prompted t) t)))
+        (should (agent-repl--confirm-cancel-running '("run-ws")))
+        (should-not prompted)))))
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel-prompt/names-single-workspace ()
+  "The singular prompt names the one running workspace."
+  (should (equal (agent-repl--confirm-cancel-prompt '("alpha"))
+                 "Cancel the running agent in alpha? ")))
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel-prompt/counts-multiple-workspaces ()
+  "The plural prompt reports the count and the running workspace names."
+  (should (equal (agent-repl--confirm-cancel-prompt '("alpha" "beta"))
+                 "Cancel the running agents in 2 workspaces (alpha, beta)? ")))
+
+(ert-deftest agent-repl-cmd-test-agent-thinking-p/thinking-is-in-flight ()
+  "A `:thinking' workspace reads as having a turn in flight."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (should (agent-repl--agent-thinking-p "run-ws"))))
+
+(ert-deftest agent-repl-cmd-test-agent-thinking-p/idle-is-not-in-flight ()
+  "An `:idle' workspace does not read as having a turn in flight."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "idle-ws" :idle)
+    (should-not (agent-repl--agent-thinking-p "idle-ws"))))
 
 ;;;; ---- agent-repl-interrupt: undo of an unanswered send ----
 

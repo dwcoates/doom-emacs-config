@@ -549,7 +549,11 @@ failure; the caller converts the signal into `last_action_result'."
      (agent-repl-sidebar--send-prompt targets (alist-get 'prompt args)))
     ("interrupt"
      (agent-repl-sidebar--require-known targets)
-     (dolist (ws targets) (agent-repl-interrupt ws)))
+     ;; NO-CONFIRM: this action fires from the GUI over HTTP, where a
+     ;; blocking `y-or-n-p' would stall the action handler; the sidebar
+     ;; interrupt stays prompt-free (the `C-c C-k' keybindings own the
+     ;; confirmation).
+     (dolist (ws targets) (agent-repl-interrupt ws t)))
     ("merge-into-source"
      (agent-repl-sidebar--require-known targets)
      (dolist (ws targets)

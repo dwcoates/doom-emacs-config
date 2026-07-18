@@ -117,6 +117,18 @@ First %s is the change-spec, second %s is the prompt."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-interrupt-confirm t
+  "When non-nil, `agent-repl-interrupt' confirms before cancelling a running agent.
+The prompt appears only when the targeted workspace has a Claude agent
+actively running (its `:agent-state' is `:thinking' — a turn in flight);
+a workspace with no in-flight turn is interrupted without a prompt, since
+there is no running agent to cancel.  Detached background watchers and
+shells never count as a running agent and are never stopped by the
+interrupt, so they never raise the prompt.  The confirmation guards
+against an accidental `C-c C-k' aborting Claude mid-turn."
+  :type 'boolean
+  :group 'agent-repl)
+
 ;;;; Session helpers
 
 (defun agent-repl--send-to-agent (text)
@@ -463,7 +475,38 @@ nothing left to undo."
           (agent-repl--history-reset)
           (agent-repl--log ws "interrupt: restored retracted prompt (%d chars)" (length raw)))))))
 
-(defun agent-repl-interrupt (&optional ws)
+(defun agent-repl--agent-thinking-p (ws)
+  "Return non-nil when workspace WS has a Claude turn actively in flight.
+That is its `:agent-state' is `:thinking'.  This is narrower than
+`agent-repl--agent-running-p' (session liveness): a workspace with a live
+session but no in-flight turn is NOT thinking.  Detached background work
+\(a watcher, a backgrounded shell) does not make the agent thinking, so a
+workspace carrying only such work returns nil here."
+  (eq (agent-repl--ws-agent-state ws) :thinking))
+
+(defun agent-repl--confirm-cancel-prompt (running)
+  "Return the confirmation prompt string naming the RUNNING workspaces.
+RUNNING is a non-empty list of workspace names whose agents are in flight."
+  (if (= (length running) 1)
+      (format "Cancel the running agent in %s? " (car running))
+    (format "Cancel the running agents in %d workspaces (%s)? "
+            (length running)
+            (string-join running ", "))))
+
+(defun agent-repl--confirm-cancel-running (wss)
+  "Return non-nil if cancelling the running agents among WSS is confirmed.
+WSS is a list of workspace names.  Returns t WITHOUT prompting when
+`agent-repl-interrupt-confirm' is nil, or when none of WSS has a turn in
+flight (see `agent-repl--agent-thinking-p') — there is nothing to
+confirm, and detached watchers or shells alone never raise the prompt.
+Otherwise prompts once, naming the running workspaces, and returns the
+user's answer."
+  (let ((running (seq-filter #'agent-repl--agent-thinking-p wss)))
+    (or (not agent-repl-interrupt-confirm)
+        (null running)
+        (y-or-n-p (agent-repl--confirm-cancel-prompt running)))))
+
+(defun agent-repl-interrupt (&optional ws no-confirm)
   "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
 Sends Escape to stop the current operation, then automatically returns
 the input buffer to evil insert state after
@@ -473,6 +516,15 @@ forwarding a literal \"i\" keystroke to Claude).  Defaults to the
 current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); the drawer passes the entry-at-point so interrupts target
 the selected entry.
+
+When the targeted agent is running (`:thinking') and NO-CONFIRM is nil,
+asks for confirmation before cancelling it, unless
+`agent-repl-interrupt-confirm' is nil; declining aborts without
+interrupting.  Only the running Claude agent is stopped — detached
+watchers and shells keep running (see
+`agent-repl--confirm-cancel-running').  Batch callers that confirm once
+for the whole set pass NO-CONFIRM non-nil to suppress the per-target
+prompt.
 
 Interrupting BEFORE the agent has answered is semantically an undo, so
 this doubles as one: the frontend asks the daemon to retract the sent
@@ -491,20 +543,23 @@ is the sole observer here."
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "interrupt")
-    ;; The frontend's interrupt capability returns non-nil only when the
-    ;; interrupt was actually issued (a dead/unbound session returns nil);
-    ;; the done-marking must not fire for an undelivered interrupt.
-    (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
-      (if (not outcome)
-          (agent-repl--log ws "interrupt: frontend reported not delivered, skipping")
-        (agent-repl--ws-clear-stop-tracking ws)
-        (agent-repl--mark-agent-done ws)
-        ;; Restore before the re-insert timer so the prompt is already
-        ;; there to revise when the buffer takes insert state.
-        (when (eq outcome 'retracted)
-          (agent-repl--restore-retracted-prompt ws))
-        (run-at-time agent-repl-interrupt-reinsert-delay nil
-                     #'agent-repl--enter-insert-mode ws)))))
+    (if (and (not no-confirm)
+             (not (agent-repl--confirm-cancel-running (list ws))))
+        (agent-repl--log ws "interrupt: declined at confirmation, leaving agent running")
+      ;; The frontend's interrupt capability returns non-nil only when the
+      ;; interrupt was actually issued (a dead/unbound session returns nil);
+      ;; the done-marking must not fire for an undelivered interrupt.
+      (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
+        (if (not outcome)
+            (agent-repl--log ws "interrupt: frontend reported not delivered, skipping")
+          (agent-repl--ws-clear-stop-tracking ws)
+          (agent-repl--mark-agent-done ws)
+          ;; Restore before the re-insert timer so the prompt is already
+          ;; there to revise when the buffer takes insert state.
+          (when (eq outcome 'retracted)
+            (agent-repl--restore-retracted-prompt ws))
+          (run-at-time agent-repl-interrupt-reinsert-delay nil
+                       #'agent-repl--enter-insert-mode ws))))))
 
 ;;;; In-flight message queue (protocol §2.13)
 
