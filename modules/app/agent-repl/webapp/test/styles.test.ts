@@ -2332,3 +2332,21 @@ describe("feed search marks", () => {
     );
   });
 });
+
+describe("Merge status card", () => {
+  const mergeCard = blockAfter(css, ".tool-card.tool-merge");
+
+  it("wears its own amber merge wash rather than the async teal", () => {
+    expect(mergeCard).toContain("var(--merge-card)");
+    expect(mergeCard).toContain("var(--merge-border)");
+    expect(mergeCard).not.toContain("var(--async-card)");
+  });
+
+  it("defines the merge palette var in the light theme", () => {
+    expect(lightTheme).toContain("--merge-card");
+  });
+
+  it("defines the merge palette var in the dark theme", () => {
+    expect(darkTheme).toContain("--merge-card");
+  });
+});

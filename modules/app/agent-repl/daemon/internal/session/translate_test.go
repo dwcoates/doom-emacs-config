@@ -1003,6 +1003,36 @@ func TestTranslatorUserMessageCmdKeepsBlockContent(t *testing.T) {
 	}
 }
 
+func TestTranslatorUserMessageCmdCarriesOrigin(t *testing.T) {
+	// Arrange — a merge-remediation directive tagged origin "merge".
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"rebase","origin":"merge"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	frame := tr.OnUserMessageCmd(cmd).(*protocol.UserTurnFrame)
+	// Assert
+	if frame.Origin != "merge" {
+		t.Errorf("origin = %q, want %q", frame.Origin, "merge")
+	}
+}
+
+func TestTranslatorUserMessageCmdOmitsAbsentOrigin(t *testing.T) {
+	// Arrange — an ordinary prompt carries no origin.
+	tr := NewTranslator()
+	cmd, err := protocol.DecodeCommand([]byte(`{"type":"user-message","request_id":"r1","content":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	frame := tr.OnUserMessageCmd(cmd).(*protocol.UserTurnFrame)
+	// Assert
+	if frame.Origin != "" {
+		t.Errorf("origin = %q, want empty", frame.Origin)
+	}
+}
+
 // --- system -----------------------------------------------------------------------
 
 func TestTranslatorSystemInitUpdatesSessionInfo(t *testing.T) {

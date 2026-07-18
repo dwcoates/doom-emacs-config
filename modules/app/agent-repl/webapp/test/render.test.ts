@@ -22,6 +22,7 @@ import {
   isPulsed,
   itemKey,
   lastUserTurnId,
+  MERGE_CARD_BODY,
   modelOptionsHtml,
   monitoringRowHtml,
   panelToggleTarget,
@@ -79,6 +80,56 @@ function userTurnAt(
     ts: new Date(2026, 4, 24, hour, minute).toISOString(),
   };
 }
+
+/** A merge-failure remediation user-turn: origin "merge", carrying the hidden directive. */
+function mergeTurn(directive = "SECRET rebase directive", requestId = "m1"): ConversationItem {
+  return {
+    kind: "user-turn",
+    requestId,
+    content: [{ type: "text", text: directive }],
+    ts: new Date(2026, 4, 24, 9, 0).toISOString(),
+    origin: "merge",
+  };
+}
+
+describe("MergeCard (merge-origin user-turn renders a status card, not a prompt)", () => {
+  it("renders the Merge tool-card variant for a merge-origin turn", () => {
+    // Arrange / Act
+    const html = renderItem(mergeTurn());
+    // Assert
+    expect(html).toContain("tool-card tool-merge");
+    expect(html).toContain(`<span class="tool-name">Merge</span>`);
+  });
+
+  it("shows the fixed status body", () => {
+    // Arrange / Act
+    const html = renderItem(mergeTurn());
+    // Assert
+    expect(html).toContain(MERGE_CARD_BODY);
+  });
+
+  it("never leaks the injected directive text into the feed", () => {
+    // Arrange — the directive drives the agent under the hood, never shown.
+    const html = renderItem(mergeTurn("git rebase master and fix conflicts"));
+    // Assert
+    expect(html).not.toContain("git rebase master and fix conflicts");
+  });
+
+  it("does not render a user-prompt bubble for a merge-origin turn", () => {
+    // Arrange / Act
+    const html = renderItem(mergeTurn());
+    // Assert
+    expect(html).not.toContain("bubble user");
+  });
+
+  it("still renders a normal user-prompt bubble when origin is absent", () => {
+    // Arrange — a real user prompt is untouched by the merge path.
+    const html = renderItem(userTurnAt(9, 0, "do the thing"));
+    // Assert
+    expect(html).toContain("bubble user");
+    expect(html).not.toContain("tool-merge");
+  });
+});
 
 /** A text block item carrying the given id, finished unless DONE says otherwise. */
 function text(blockId: string, done = true): ConversationItem {

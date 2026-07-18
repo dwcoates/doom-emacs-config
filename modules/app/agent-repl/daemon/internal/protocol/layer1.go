@@ -242,6 +242,10 @@ type L1Command struct {
 	// user-message
 	Content         json.RawMessage `json:"content,omitempty"`
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
+	// Origin tags a user-message injected on the user's behalf so its turn
+	// renders specially (see UserTurnFrame.Origin); "merge" is the
+	// merge-failure remediation directive. Empty for a user's own prompt.
+	Origin string `json:"origin,omitempty"`
 
 	// permission-decision
 	Decision *PermissionDecision `json:"decision,omitempty"`

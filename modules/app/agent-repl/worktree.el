@@ -4635,19 +4635,27 @@ re-dispatch the merge."
          (branch (and src (agent-repl--git-string-quiet
                            "-C" (expand-file-name src)
                            "branch" "--show-current")))
-         (target (if (and branch (not (string-empty-p branch)))
-                     (format "`%s`" branch)
-                   "the merge target branch")))
+         (has-branch (and branch (not (string-empty-p branch))))
+         (target (if has-branch (format "`%s`" branch) "the merge target branch"))
+         ;; Name the LOCAL branch explicitly and rule out the origin remote:
+         ;; the merge-queue agent's failure was on the local cherry-pick, and
+         ;; rebasing onto `origin/<branch>' would be the wrong target.
+         (local-note (if has-branch
+                         (format " (your LOCAL `%s`, NOT `origin/%s`)" branch branch)
+                       " (your LOCAL branch, NOT the origin remote)")))
     (format (concat
-             "Your workspace's merge into %s FAILED: %S. Remediate this now: "
-             "(1) rebase this workspace onto %s, resolving any conflicts — "
+             "Your workspace's merge into %s FAILED: %S. You, the local agent that "
+             "implemented this workspace's changes, hold the full context the "
+             "merge-queue agent lacked when it attempted (and failed) this merge, "
+             "so you are best equipped to resolve it. Remediate now: "
+             "(1) rebase this workspace onto %s%s, resolving any conflicts — "
              "incorporate both sides when the commits are orthogonal, but STOP "
              "and surface the conflict when they represent competing design "
              "decisions; (2) run the test suites affected by this branch's "
              "changes and drive any failure to green; (3) once green, "
              "re-dispatch the merge by invoking the create-or-update-workspace "
              "skill with `merge %s`.")
-            target err target target-ws)))
+            target err target local-note target-ws)))
 
 (defun agent-repl--dispatch-merge-remediation (target-ws err)
   "Schedule TARGET-WS's recreation with an immediate remediation directive.
@@ -4657,6 +4665,11 @@ re-signals (and may run on a worker thread), while the recreation does
 persp and session work that belongs on the main loop after the merge
 flow has unwound."
   (let ((prompt (agent-repl--merge-remediation-prompt target-ws err)))
+    ;; Tag the next send on this ws as `merge' so its user-turn renders as the
+    ;; GUI's Merge status card instead of a user-prompt bubble (consumed and
+    ;; cleared by `agent-repl--frontend-send-user-message').  The directive
+    ;; itself still drives the agent — only its rendering changes.
+    (agent-repl--ws-put target-ws :next-send-origin "merge")
     (agent-repl--log target-ws "dispatch-merge-remediation: ws=%s scheduling" target-ws)
     (run-at-time 0 nil #'agent-repl--run-merge-remediation target-ws prompt)))
 

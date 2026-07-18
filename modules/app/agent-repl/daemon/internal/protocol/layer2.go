@@ -135,6 +135,13 @@ type UserTurnFrame struct {
 	Envelope
 	RequestID string          `json:"request_id"`
 	Content   json.RawMessage `json:"content"` // normalized ContentBlock[]
+	// Origin marks a turn whose prompt was injected on the user's behalf and
+	// should NOT render as an ordinary user-prompt bubble. "merge" is the
+	// merge-failure remediation turn: the GUI renders it as a Merge status
+	// card while the injected directive still drives the agent (see the Emacs
+	// merge-remediation path and the webapp user-turn renderer). Empty for a
+	// user's own prompt.
+	Origin string `json:"origin,omitempty"`
 }
 
 // UserTurnRetractedFrame withdraws the user turn named by RequestID: its
