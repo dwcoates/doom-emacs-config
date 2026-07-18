@@ -454,6 +454,23 @@ other magit buffers (diffs, logs) keep their normal display behavior."
       (agent-repl--magit-status-same-window "/tmp/proj")
       (should (eq magit-display-buffer-function 'global-default)))))
 
+(ert-deftest agent-repl-test-magit-status-same-window-loads-magit-before-binding ()
+  "Loads magit (noerror require) BEFORE let-binding the display function.
+Without the preload, a fresh session's first call binds
+`magit-display-buffer-function' lexically (the var is not yet special),
+and magit's own `defvar' then aborts magit's autoload mid-file —
+the first-restored-workspace splash-screen bug."
+  (let ((order nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &optional _file noerror)
+                 (push (list 'require feature noerror) order)
+                 nil))
+              ((symbol-function 'magit-status)
+               (lambda (&rest _) (push '(status) order))))
+      (agent-repl--magit-status-same-window "/tmp/proj")
+      (should (equal (nreverse order)
+                     '((require magit t) (status)))))))
+
 ;;;; ---- Tests: agent-repl-magit-show-tags-in-log (defcustom default) ----
 
 (ert-deftest agent-repl-test-magit-show-tags-in-log-defaults-to-nil ()
