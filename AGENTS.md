@@ -467,6 +467,7 @@ When facing a bug that resists immediate root-cause identification, **do not spe
 | Kill a process | `agent-repl--kill-process-safely` | bare `delete-process` |
 | Kill a (possibly process-owning) buffer | `agent-repl--kill-buffer-safely` | bare `kill-buffer` |
 | Any UI op (perspective switch, magit, window config, workspace close) | `agent-repl--defer-to-main-thread` | calling it directly |
+| Protect a main-thread-only entry point (e.g. a synchronous HTTP boundary) | `agent-repl--assert-main-thread` at its top | trusting call sites to stay on main |
 
 **Per-diff audit (mandatory when touching merge/worker paths):** grep the diff for `delete-process`, `kill-buffer`, `accept-process-output`, `message`, `magit-`, `display-buffer`, `switch-to-buffer`. For each hit, ask *"can this run on the merge worker thread?"* — the worker entry point is the `make-thread` in `agent-repl--workspace-merge-async`, so anything reachable from `agent-repl--dispatch-merge-handler` qualifies. If it can, route it through the table above.
 
@@ -541,3 +542,12 @@ Both helpers dispatch on `current-thread`:
 - ✓ Calling `accept-process-output` from the main thread (the historical default; the main-thread branch of `--wait-for-process-exit` does this).
 - ✓ Calling `call-process` from the main thread, with the understanding that it blocks the UI for the duration.
 - ✓ Async `make-process` + `:sentinel` / `:filter` from any thread — sentinels and filters fire on whichever thread is currently servicing events (usually main), not the caller of `make-process`.
+
+### Indirect chains — the trap does not require a direct call
+
+The per-diff audit greps for direct calls, but the 2026-07-18 freeze reached `[NSApp run]` through FIVE frames of indirection, none of which looked like a wait: merge worker → `load-file` (config reload) → top-level watcher re-arm (`agent-repl--dir-watcher-register`) → `file-notify-rm-watch` (synchronously fires the handler's `stopped` branch) → notification drain → frontend HTTP (`url-retrieve-synchronously` → `accept-process-output`). Symptom: ~90% of CPU samples in `-[NSApplication reportException:]` logging AppKit exceptions from the worker, main thread deadlocked in `really_call_select` — recoverable only by `kill -9`.
+
+Two standing defenses, both born from that incident:
+
+1. **`load` of module files is itself a worker-thread hazard** (top-level forms run watcher teardown/re-arm and drains). The merge success path routes its config reload through `agent-repl--merge-finalize-on-main`; never `load-file` on a worker.
+2. **Main-thread-only entry points defend themselves**: `agent-repl--frontend-http-request` opens with `agent-repl--assert-main-thread`, converting any future smuggled chain into an ordinary error instead of a deadlock. Add the same assert to any new synchronous boundary that can reach `ns_select_1`.
