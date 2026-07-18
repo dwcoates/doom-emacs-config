@@ -360,17 +360,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; workspace.el must precede it too — every one of those is loaded above.
 (agent-repl--load-module "explain-config")
 (agent-repl--load-module "merge-handlers")
-;; WHY: dir-watcher.el is the shared watched-directory intake that
-;; worktree.el (workspace commands) and sidebar.el (sidebar actions)
-;; both register against at load time.
+;; WHY: dir-watcher.el is the generic watched-directory intake that
+;; worktree.el (workspace commands) registers against at load time.
 (agent-repl--load-module "dir-watcher")
 (agent-repl--load-module "worktree")
 (agent-repl--load-module "rename")
 (agent-repl--load-module "drawer")
-;; WHY: sidebar.el projects the drawer's view-model to the GUI and shares
-;; the drawer buffer's marked/expanded sets, so drawer.el must be loaded.
-;; It also POSTs through frontend-client.el's base-url helper.
-(agent-repl--load-module "sidebar")
 (agent-repl--load-module "hide-project-dirs")
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")

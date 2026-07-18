@@ -1959,24 +1959,6 @@ counterparts) were removed, so the defconst that declared them is gone."
         (should (equal (buffer-string) ""))
         (should evil-called)))))
 
-;;; C-S-n / C-S-p must NOT be bound in the input map — the global
-;;; drawer-nav bindings need to fall through to global-map.  (The sibling
-;;; C-S-j / C-S-k "must not shadow" guards were dropped along with the
-;;; vterm output-scroll commands they used to protect — see
-;;; `agent-repl--scroll-output-intercept-states' in keybindings.el, whose
-;;; own comment now calls those chords "(now-removed)"; there is no
-;;; global C-S-j / C-S-k binding left for this map to shadow.)
-
-(ert-deftest agent-repl-test-input-map-does-not-shadow-csn ()
-  "`agent-repl-input-mode-map' must not bind `C-S-n' so the global drawer-nav
-binding falls through.  Asserts the local key is unbound in the map."
-  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-n"))))
-
-(ert-deftest agent-repl-test-input-map-does-not-shadow-csp ()
-  "`agent-repl-input-mode-map' must not bind `C-S-p' so the global drawer-nav
-binding falls through.  Asserts the local key is unbound in the map."
-  (should-not (lookup-key agent-repl-input-mode-map (kbd "C-S-p"))))
-
 ;;; skip-metaprompt-p: leading whitespace
 
 (ert-deftest agent-repl-test-skip-metaprompt-leading-whitespace ()

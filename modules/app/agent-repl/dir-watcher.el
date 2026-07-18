@@ -3,8 +3,8 @@
 ;;; Commentary:
 
 ;; One implementation of the watch-a-directory-for-request-files pattern
-;; shared by the workspace-commands channel (worktree.el) and the sidebar
-;; action channel (sidebar.el): a file-notify watch on a directory,
+;; used by the workspace-commands channel (worktree.el) — and any future
+;; channel of the same shape: a file-notify watch on a directory,
 ;; prefix-matched dispatch of created/changed/renamed files to a one-file
 ;; processor, a drain that catches files landed while the watch was down,
 ;; and a self-healing re-arm when the watched directory is deleted out

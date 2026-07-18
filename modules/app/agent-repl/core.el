@@ -916,7 +916,6 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
-    agent-repl-sidebar--post-snapshot
     agent-repl--image-call-process)
   "Symbols of every function that wraps an external process or external-state mutation.
 Each MUST be mocked by tests that reach it via production code.  The

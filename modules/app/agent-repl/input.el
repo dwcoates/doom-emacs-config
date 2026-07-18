@@ -167,13 +167,9 @@ marks the turn aborted."
       ;; Deferred-prompt enqueue lives on `SPC j RET' in the leader map
       ;; (see `keybindings.el') so it's reachable from any context with
       ;; one canonical chord, instead of a buffer-local C-S-M-RET tower.
-      ;; `C-S-RET' is intentionally NOT bound here -- the global drawer-visit
-      ;; override (`agent-repl--install-drawer-visit-override') needs the
-      ;; chord to reach `agent-repl-drawer-global-visit' from inside the
-      ;; Claude input buffer.  Prefix-send (prepending
-      ;; `agent-repl-send-prefix') stays reachable on macOS via `S-s-RET'
-      ;; (Doom's `:gn' binding) caught by the `[remap
-      ;; +default/newline-above]' entry below.
+      ;; Prefix-send (prepending `agent-repl-send-prefix') stays
+      ;; reachable on macOS via `S-s-RET' (Doom's `:gn' binding) caught
+      ;; by the `[remap +default/newline-above]' entry below.
       [remap +default/newline-below] #'agent-repl-send-with-postfix
       [remap +default/newline-above] #'agent-repl-send-with-prefix
       :ni "C-c C-k"   #'agent-repl-interrupt
