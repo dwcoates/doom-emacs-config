@@ -1508,6 +1508,157 @@ GET /sessions poll — this only renders it."
      (cl-pushnew 'tab-bar-lines frame-inhibit-implied-resize))
    (tab-bar-mode 1)))
 
+;;; Redisplay-storm circuit breaker -------------------------------------------
+;;
+;; When the tab-bar height oscillation (see the comments in the install
+;; block above and `agent-repl-workspace-tabline-formatted') does break
+;; through the preventive guards, it livelocks INSIDE `redisplay_internal':
+;; the C `retry:' loop (xdisp.c) never returns to the command loop, so
+;; timers, process filters, emacsclient, and even SIGUSR2 are all starved
+;; and the only recovery is `kill -9'.  Ordinary elisp cannot run during
+;; the storm — with one exception: `pre-redisplay-function' is invoked
+;; from `prepare_menu_bars', which sits AFTER the `retry:' label
+;; (verified against Emacs 30.2 xdisp.c: `retry:' at 16921,
+;; `prepare_menu_bars' at 16990), so it executes on EVERY iteration of
+;; the livelock.  That is the one vantage point from which a watchdog
+;; can observe the storm and break it from inside.
+;;
+;; Detection pairs two signals that only coincide during the storm:
+;;   1. the 1s heartbeat timer has not fired for
+;;      `agent-repl--storm-starvation-secs' (the timer wheel is starved),
+;;      AND
+;;   2. redisplay passes keep happening (the watchdog keeps being called).
+;; A long-running elisp command starves timers but does not redisplay;
+;; heavy interactive redisplay (smooth scrolling) redisplays but never
+;; starves timers.  Only the C retry loop does both.
+;;
+;; The corrective action is `(setq auto-resize-tab-bars nil)': the entire
+;; height-recomputation block in xdisp.c's `redisplay_tab_bar' is gated
+;; on that variable, so the next iteration stops requesting a height
+;; change, nothing re-garbages the frame, and the loop drains.  This
+;; makes a false trip cheap — the tab-bar height merely stays fixed
+;; until the cooldown re-enables auto-resizing — while a missed storm
+;; costs a hard kill of Emacs.  The breaker re-arms itself
+;; (`agent-repl--storm-reenable') up to `agent-repl--storm-max-trips'
+;; times per session, then stays tripped.
+
+(defvar agent-repl--storm-starvation-secs 5.0
+  "Seconds without a `agent-repl--storm-tick' before timers count as starved.
+The tick timer runs every second, so anything beyond a couple of
+seconds means the command loop is not being reached.")
+
+(defvar agent-repl--storm-pass-threshold 32
+  "Redisplay passes observed while starved before the breaker trips.
+Filters out the timer-lag-after-sleep case: waking from suspend can
+briefly look starved, but produces only a handful of redisplay passes
+before the timer wheel catches up.")
+
+(defvar agent-repl--storm-cooldown-secs 30
+  "Seconds after a trip before `auto-resize-tab-bars' is restored.")
+
+(defvar agent-repl--storm-max-trips 3
+  "Trips per session after which the breaker stays tripped permanently.")
+
+(defvar agent-repl--storm-last-tick nil
+  "`float-time' of the last watchdog heartbeat tick.
+nil until `agent-repl--storm-install' runs; the watchdog is inert
+until then so load-time redisplay bursts can never trip it.")
+
+(defvar agent-repl--storm-starved-passes 0
+  "Count of redisplay passes observed while the timer wheel was starved.
+Reset by every heartbeat tick and by a trip.")
+
+(defvar agent-repl--storm-trips 0
+  "Number of times the breaker has tripped this session.")
+
+(defvar agent-repl--storm-saved-auto-resize nil
+  "Value of `auto-resize-tab-bars' captured at trip time, for restore.")
+
+(defvar agent-repl--storm-reenable-timer nil
+  "Pending cooldown timer that will restore `auto-resize-tab-bars'.")
+
+(defvar agent-repl--storm-tick-timer nil
+  "The repeating 1s heartbeat timer feeding `agent-repl--storm-last-tick'.")
+
+(defun agent-repl--storm-tick ()
+  "Heartbeat: record that the timer wheel is alive and reset the pass count.
+Runs every second; its NOT running is the primary storm signal read by
+`agent-repl--redisplay-storm-watchdog'."
+  (setq agent-repl--storm-last-tick (float-time)
+        agent-repl--storm-starved-passes 0))
+
+(defun agent-repl--redisplay-storm-watchdog (_windows)
+  "Trip the tab-bar circuit breaker when redisplay storms while timers starve.
+Installed `:after' `pre-redisplay-function', so this runs once per
+redisplay pass — including every iteration of the C `retry:' livelock
+loop, which is the only elisp execution point that survives the storm
+(see the section comment above).  Inert until the first heartbeat tick
+and while `auto-resize-tab-bars' is already nil (either the breaker has
+tripped or the user disabled auto-resizing themselves — in both cases
+the oscillation cannot occur, so there is nothing to break)."
+  (when (and auto-resize-tab-bars
+             agent-repl--storm-last-tick
+             (> (- (float-time) agent-repl--storm-last-tick)
+                agent-repl--storm-starvation-secs))
+    (setq agent-repl--storm-starved-passes (1+ agent-repl--storm-starved-passes))
+    (when (>= agent-repl--storm-starved-passes agent-repl--storm-pass-threshold)
+      (agent-repl--storm-trip))))
+
+(defun agent-repl--storm-trip ()
+  "Break a redisplay storm: disable tab-bar auto-resizing, schedule re-arm.
+Saves the current `auto-resize-tab-bars' for the cooldown restore, then
+nils it so xdisp.c's `redisplay_tab_bar' stops requesting height
+changes and the retry loop drains.  Re-arms after
+`agent-repl--storm-cooldown-secs' unless `agent-repl--storm-max-trips'
+is reached, in which case auto-resizing stays off for the session.
+Runs INSIDE redisplay, so it only flips variables, schedules a timer,
+and logs — no window, frame, or buffer mutation."
+  (setq agent-repl--storm-saved-auto-resize auto-resize-tab-bars
+        auto-resize-tab-bars nil
+        agent-repl--storm-starved-passes 0
+        agent-repl--storm-trips (1+ agent-repl--storm-trips))
+  (let ((final (>= agent-repl--storm-trips agent-repl--storm-max-trips)))
+    (agent-repl--do-log nil
+                        "redisplay-storm: BREAKER TRIPPED (%d/%d) — auto-resize-tab-bars disabled%s"
+                        (list agent-repl--storm-trips
+                              agent-repl--storm-max-trips
+                              (if final
+                                  " permanently for this session"
+                                (format "; re-enabling in %ss"
+                                        agent-repl--storm-cooldown-secs))))
+    (unless final
+      (setq agent-repl--storm-reenable-timer
+            (run-with-timer agent-repl--storm-cooldown-secs nil
+                            #'agent-repl--storm-reenable)))))
+
+(defun agent-repl--storm-reenable ()
+  "Cooldown expiry: restore `auto-resize-tab-bars' and re-arm the watchdog.
+That this runs at all proves the trip worked — timers only fire once
+the retry loop has drained.  If the oscillation condition still holds,
+the storm resumes and the watchdog trips again, up to
+`agent-repl--storm-max-trips'."
+  (setq auto-resize-tab-bars agent-repl--storm-saved-auto-resize
+        agent-repl--storm-reenable-timer nil)
+  (agent-repl--do-log nil
+                      "redisplay-storm: cooldown over — auto-resize-tab-bars restored to %S"
+                      (list auto-resize-tab-bars)))
+
+(defun agent-repl--storm-install ()
+  "Install the redisplay-storm watchdog: heartbeat timer + redisplay hook.
+Idempotent for hot-reload: cancels any prior heartbeat timer, and
+`add-function' replaces an already-present member rather than
+duplicating it."
+  (when (timerp agent-repl--storm-tick-timer)
+    (cancel-timer agent-repl--storm-tick-timer))
+  (setq agent-repl--storm-last-tick (float-time)
+        agent-repl--storm-starved-passes 0
+        agent-repl--storm-tick-timer (run-with-timer 1 1 #'agent-repl--storm-tick))
+  (push agent-repl--storm-tick-timer agent-repl--timers)
+  (add-function :after pre-redisplay-function
+                #'agent-repl--redisplay-storm-watchdog))
+
+(agent-repl--storm-install)
+
 (defun agent-repl-toggle-hide-mode ()
   "Toggle `agent-repl-hide-mode-enabled'.
 When toggled ON, `:hidden' workspaces (those closed via `SPC o C')
