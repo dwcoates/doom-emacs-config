@@ -98,7 +98,7 @@ in-repo file, not here.")
   '((t :background "white" :foreground "black" :weight bold))
   "Face for the Agent Input header line.")
 
-(defcustom agent-repl-input-background-shade 37
+(defcustom agent-repl-input-background-shade 24
   "Greyscale level (0-255) for the input buffer background."
   :type 'integer
   :group 'agent-repl)
