@@ -1803,10 +1803,14 @@ those (and dispatches to `--finish-workspace')."
 (defun agent-repl-drawer-interrupt ()
   "Interrupt Claude in the target workspaces.
 Targets the marked-set when non-empty, otherwise the entry at point.
-Mirrors `C-c C-k' per target."
+Mirrors `C-c C-k' per target, confirming ONCE for the whole batch when
+any target has a running agent (see `agent-repl--confirm-cancel-running');
+the per-target prompt is then suppressed so the batch asks only once."
   (interactive)
-  (dolist (ws (agent-repl-drawer--target-workspaces))
-    (agent-repl-interrupt ws)))
+  (let ((targets (agent-repl-drawer--target-workspaces)))
+    (when (agent-repl--confirm-cancel-running targets)
+      (dolist (ws targets)
+        (agent-repl-interrupt ws t)))))
 
 (defun agent-repl-drawer-send-prompt ()
   "Read a prompt and send it to the target workspaces.

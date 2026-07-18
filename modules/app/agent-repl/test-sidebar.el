@@ -456,7 +456,7 @@ Returns `agent-repl-sidebar--last-action-result'."
            (result (agent-repl-sidebar-test--run-action
                        '((id . "a1") (action . "interrupt") (targets . ["ws1"]))
                      ((symbol-function 'agent-repl-interrupt)
-                      (lambda (ws) (push ws interrupted))))))
+                      (lambda (ws &optional _no-confirm) (push ws interrupted))))))
       (should (equal '("ws1") interrupted))
       (should (eq t (alist-get 'ok result))))))
 
