@@ -243,9 +243,9 @@ is unchanged -- other magit buffers (diffs, logs) keep normal display."
         (should (eq magit-display-buffer-function 'global-default))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-pops-out-of-side-window ()
-  "When the selected window is a side window (e.g., the workspace drawer),
-first calls `select-window' on `window-main-window' so magit replaces
-the main buffer rather than failing on the dedicated side window."
+  "When the selected window is a side window, first calls
+`select-window' on `window-main-window' so magit replaces the main
+buffer rather than failing on the dedicated side window."
   (agent-repl-test--with-clean-state
     (let ((selected-window-arg nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -292,7 +292,7 @@ hash entry has been nuked."
 
 (ert-deftest agent-repl-test-magit-status-workspace-no-stub-when-untracked ()
   "When the workspace is untracked, does NOT call `agent-repl--ws-put'
-so no STUB-CREATE entry leaks into the drawer's `(no repo)' bucket."
+so no STUB-CREATE entry leaks into the workspace state table."
   (agent-repl-test--with-clean-state
     (let ((ws-put-calls 0)
           (default-directory "/tmp/fallback-dir/"))

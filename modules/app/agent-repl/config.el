@@ -365,7 +365,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "dir-watcher")
 (agent-repl--load-module "worktree")
 (agent-repl--load-module "rename")
-(agent-repl--load-module "drawer")
 (agent-repl--load-module "hide-project-dirs")
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")

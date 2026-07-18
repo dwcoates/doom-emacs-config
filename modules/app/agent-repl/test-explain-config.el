@@ -13,7 +13,7 @@
 ;;
 ;;   - The POPUP layer (show / hide / close window placement), which is
 ;;     strictly per-workspace (no global visible-flag, no persp-switch
-;;     re-show) and stays decoupled from the drawer.
+;;     re-show) and stays decoupled from other side-window UI.
 ;;
 ;; Run with:
 ;;   emacs -batch -Q -l ert -l test-explain-config.el -f ert-run-tests-batch-and-exit
@@ -698,25 +698,6 @@ flag must not exist at all."
           (should (eq width-applied-with 'fake-win)))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
-(ert-deftest agent-repl-ecfg-test-show/does-not-call-drawer-hide ()
-  "Show must NOT call `agent-repl-drawer-hide' — popup and drawer are decoupled."
-  (let* ((agent-repl-explain-config-buffer-name " *test-explain-no-drawer-hide*")
-         (buf (get-buffer-create agent-repl-explain-config-buffer-name))
-         (agent-repl--explain-config-replaced-window nil)
-         (agent-repl-drawer--global-visible-p t)
-         (drawer-hide-called nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-current-agent-output-window)
-                   (lambda () nil))
-                  ((symbol-function 'display-buffer) (lambda (&rest _) nil))
-                  ((symbol-function 'agent-repl--explain-config-apply-width) #'ignore)
-                  ((symbol-function 'agent-repl-drawer-hide)
-                   (lambda () (setq drawer-hide-called t))))
-          (agent-repl--explain-config-show)
-          (should-not drawer-hide-called))
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
 ;;;; ---- Popup: current agent output window lookup --------------------------------
 
 (ert-deftest agent-repl-ecfg-test-current-agent-output-window/queries-the-view-panel ()
@@ -831,17 +812,6 @@ window."
         (agent-repl--explain-config-hide)
         (should-not deleted)
         (should (equal agent-repl--explain-config-session-id "s_1"))))))
-
-(ert-deftest agent-repl-ecfg-test-hide/does-not-call-drawer-show ()
-  "Hide must NOT call `agent-repl-drawer-show' — the popup never modified
-the drawer in the first place, so it has nothing to restore."
-  (let ((agent-repl--explain-config-replaced-window nil)
-        (drawer-show-called nil))
-    (cl-letf (((symbol-function 'agent-repl-window--delete-buffer-windows) #'ignore)
-              ((symbol-function 'agent-repl-drawer-show)
-               (lambda () (setq drawer-show-called t))))
-      (agent-repl--explain-config-hide)
-      (should-not drawer-show-called))))
 
 ;;;; ---- Popup: agent output window restoration on hide --------------------------------
 

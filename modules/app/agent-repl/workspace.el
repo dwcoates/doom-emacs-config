@@ -27,8 +27,8 @@
 ;;   - `agent-repl--ws-tombstoned-p'       entry exists AND tombstoned
 ;;   - `agent-repl--ws-open-p'             present in `persp-names-cache'
 ;;   - `agent-repl--ws-render-status'      single source of truth for what
-;;                                          renderers (drawer / tab-bar /
-;;                                          picker) should display
+;;                                          renderers (tab-bar / picker)
+;;                                          should display
 ;;
 ;; Important non-API details that callers should NOT depend on:
 ;;
@@ -41,8 +41,8 @@
 ;;     `:nuked-at', clears every key in `--ws-runtime-keys').  The
 ;;     identity keys (`:project-dir', `:created-at', `:ws-id',
 ;;     `:source-ws-dir', `:priority', the `:merge-completed*' family)
-;;     survive so reverse-lookups, picker sort, and the MERGED drawer
-;;     bucket keep working past nuke.
+;;     survive so reverse-lookups, picker sort, and merged-state
+;;     rendering keep working past nuke.
 
 ;;; Code:
 
@@ -153,9 +153,9 @@ Emits an unconditional log line (via `agent-repl--do-log', bypassing
 `agent-repl-debug') when this call CREATES a fresh hash entry whose
 plist will lack `:project-dir' — the non-workspace stub shape (a plain
 persp such as Doom's default \"main\" auto-vivified by a persp hook).
-The drawer filters that shape out of its render entirely
-\(`agent-repl-drawer--visible-workspace-keys'), so the log line is a
-producer diagnostic rather than a user-visible-bug warning.  Includes a
+The workspace renderers (tab-bar, picker) filter that shape out
+entirely, so the log line is a producer diagnostic rather than a
+user-visible-bug warning.  Includes a
 caller trace so the producer can be identified without first turning
 debug logging on."
   (let ((stub-create (and (null (gethash ws agent-repl--workspaces))
@@ -167,7 +167,7 @@ debug logging on."
                        "<trace-failed>")))
         (agent-repl--do-log
          ws
-         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (non-workspace stub; filtered out of the drawer render). caller-trace=%s"
+         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (non-workspace stub; filtered out of workspace renders). caller-trace=%s"
          (list ws key val trace))))))
 
 (defconst agent-repl--ws-runtime-keys
@@ -193,7 +193,7 @@ session — the failure mode that previously surfaced as
 A workspace is live when it has a hash entry AND no `:nuked-at'
 tombstone marker.  The single liveness predicate used by every hash
 iterator that previously relied on the implicit `presence == live'
-invariant (drawer, picker, periodic state updater, reverse-lookup) so
+invariant (picker, periodic state updater, reverse-lookup) so
 tombstoned entries don't surface in any UI/runtime path.
 
 Uses a sentinel default in `gethash' so a registered entry whose plist
@@ -244,7 +244,7 @@ session-bound state), and preserves identity/historical keys
 `:worktree-p', `:source-ws-dir', `:ws-id', merge metadata).  The entry
 remains in `agent-repl--workspaces' so `agent-repl--ws-dir' and
 reverse-lookups still resolve, but `agent-repl--ws-live-p' returns
-nil and every filtered iterator (drawer, picker, periodic updater)
+nil and every filtered iterator (picker, periodic updater)
 ignores the entry — preserving the prior UX of `nuke removes the
 workspace from view' without destroying the identity record.
 
@@ -310,8 +310,8 @@ the entry was nuked, layered on top of the `:nuked-at' stamp:
     for this reason specifically.
 
 The base `--ws-tombstoned-p' predicate intentionally collapses all
-reasons because every renderer treats them identically (drawer
-filters them out, `--ws-render-status' returns nil); callers that
+reasons because every renderer treats them identically
+\(`--ws-render-status' returns nil for every reason); callers that
 need to distinguish reasons use the reason-specific helper."
   (and (agent-repl--ws-known-p ws)
        (not (null (agent-repl--ws-get ws :nuked-at)))))
@@ -382,8 +382,8 @@ can legitimately diverge:
   - During snapshot-restore, hash entries exist before
     `persp-add-new' runs.
   - After a successful merge with `preserve-entry', the hash entry
-    survives `+workspace/kill' so the drawer's MERGED bucket can keep
-    rendering.
+    survives `+workspace/kill' so the workspace's merged state stays
+    visible to the surviving renderers (e.g. the picker).
 
 Errors via `--ws-require-known' on an unknown ws so the caller never
 silently asks about a name the module never heard of.  Returns nil
@@ -445,19 +445,18 @@ directly or wrapping it themselves with `fboundp'."
 ;;;; ---- Repo grouping + folding -----------------------------------------
 ;;
 ;; A "repo" here is the set of workspaces that share a git common-dir —
-;; a top-level clone plus every worktree cut from it.  The drawer groups
-;; its entries by repo, and a repo can be FOLDED: its workspaces vanish
-;; from the drawer's group body AND from the tab-bar, and the tab-bar's
+;; a top-level clone plus every worktree cut from it.  A repo can be
+;; FOLDED: its workspaces vanish from the tab-bar, and the tab-bar's
 ;; 1-based selection numbers close up over the survivors so `SPC <n>'
-;; stays contiguous.
+;; stays contiguous.  `agent-repl--toggle-repo-fold' is the model-level
+;; toggle; no interactive fold-toggling UI currently exists.
 ;;
-;; The fold set lives in workspace.el rather than drawer.el because it
-;; is read by three layers — the drawer render, the tab-bar render
-;; (status.el), and the indexed workspace switchers (commands.el) — and
-;; workspace.el is the canonical owner of "which workspaces does the UI
-;; enumerate".  It is deliberately in-memory only: folding is a view
-;; preference, not workspace state, so it does not round-trip through
-;; the workspace snapshot.
+;; The fold set lives in workspace.el because it is read by two layers
+;; — the tab-bar render (status.el) and the indexed workspace switchers
+;; (commands.el) — and workspace.el is the canonical owner of "which
+;; workspaces does the UI enumerate".  It is deliberately in-memory
+;; only: folding is a view preference, not workspace state, so it does
+;; not round-trip through the workspace snapshot.
 
 (defconst agent-repl--repo-key-unknown "(no repo)"
   "Repo key used when a workspace's git common-dir cannot be resolved.
@@ -505,9 +504,9 @@ Returns nil for a nil KEY, and KEY itself for the
 (defvar agent-repl--folded-repos (make-hash-table :test 'equal)
   "Set of repo keys (see `agent-repl--ws-repo-group') currently folded.
 Keys are repo keys, values are `t' — presence is the signal.  Global
-rather than per-drawer-buffer: a fold is a statement about the repo,
-and it must be observable by the tab-bar renderer and the indexed
-workspace switchers, neither of which has a drawer buffer to consult.")
+rather than per-buffer: a fold is a statement about the repo, and it
+must be observable by the tab-bar renderer and the indexed workspace
+switchers alike.")
 
 (defun agent-repl--repo-folded-p (group)
   "Return non-nil when repo GROUP (a repo key) is folded."
@@ -515,8 +514,8 @@ workspace switchers, neither of which has a drawer buffer to consult.")
 
 (defun agent-repl--folded-repo-keys ()
   "Return the folded repo keys, sorted, for cheap change-detection.
-Consumed by the drawer's render signature so a fold/unfold invalidates
-the cached render."
+Lets a renderer that caches its output detect that a fold/unfold
+happened by comparing successive snapshots of this list."
   (sort (hash-table-keys agent-repl--folded-repos) #'string<))
 
 (defun agent-repl--toggle-repo-fold (group)
@@ -561,12 +560,11 @@ contiguous as repos fold and unfold."
 ;;;; ---- Render-state unification ----------------------------------------
 ;;
 ;; `agent-repl--ws-render-status' is the single source of truth for
-;; what visual state every renderer (drawer state-glyph, drawer
-;; name-face, tab-bar composed-state, project picker emoji) should
-;; display for a workspace.  Renderers used to each re-derive this
-;; from `:agent-state' + `:repl-state' + the `:merging' /
-;; `:merge-completed' plist keys, and they disagreed: the drawer's
-;; precedence had merge-state dominating agent-state, the tab-bar's
+;; what visual state every renderer (tab-bar composed-state, project
+;; picker emoji) should display for a workspace.  Renderers used to
+;; each re-derive this from `:agent-state' + `:repl-state' + the
+;; `:merging' / `:merge-completed' plist keys, and they disagreed:
+;; some had merge-state dominating agent-state, the tab-bar's
 ;; precedence had agent-state dominating merge-state, and the
 ;; `:merging' (in-flight) workflow signal had no visual at all.  The
 ;; unified function below is the new canonical precedence; the
@@ -582,8 +580,8 @@ idle-but-working (its turn is done, but backgrounded tasks continue)."
 
 (defun agent-repl--ws-render-status (ws)
   "Return the closed-set render-state keyword for workspace WS.
-This is the SINGLE SOURCE OF TRUTH for what renderers (drawer,
-tab-bar, project picker, mode-line) should display for a workspace's
+This is the SINGLE SOURCE OF TRUTH for what renderers (tab-bar,
+project picker, mode-line) should display for a workspace's
 status.  Every renderer reads this — none should re-derive status
 from `:agent-state' / `:repl-state' / `:merging' / `:merge-completed'
 on its own.
@@ -608,8 +606,8 @@ Returns one of (in precedence order; first match wins):
                     (workspace's branch landed in its source; terminal
                     positive).  The setter writes both in lockstep —
                     either signal alone suffices.  Accepting
-                    `:merge-completed' as equivalent here preserves the
-                    original drawer behavior across the brief transition
+                    `:merge-completed' as equivalent here keeps merged
+                    rendering intact across the brief transition
                     window where `:merge-completed t' is set before
                     `:repl-state :merged' has been written (and where
                     `:merging' may not yet be cleared).
@@ -646,8 +644,8 @@ Returns one of (in precedence order; first match wins):
                     `:hidden-project-dir'), or no session / unborn
                     (every signal above absent).  The cases are
                     intentionally collapsed: every renderer skips them
-                    equally (the drawer's `--live-ws-names' filter
-                    already excludes tombstones before this function
+                    equally (the `--live-ws-names' filter already
+                    excludes tombstones before this function
                     is called, and callers that need to distinguish
                     nuke-tombstoned from hide-tombstoned use the
                     reason-specific predicate
@@ -748,7 +746,7 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 ;; `+workspace-exists-p', `persp-update-names-cache', etc).  See AGENTS.md
 ;; "NEVER manipulate third-party internals from a high-level layer" — the
 ;; wrappers in this section ARE the integration boundary they describe.
-;; Callers in `commands.el', `status.el', `drawer.el', etc. must route
+;; Callers in `commands.el', `status.el', etc. must route
 ;; through these, not poke persp-mode directly.
 
 (defun agent-repl--nuke-one-workspace (ws &optional preserve-entry)
@@ -764,10 +762,10 @@ workspace via `+workspace/kill'.  Designed to be reusable from
 
 When PRESERVE-ENTRY is non-nil, the `agent-repl--workspaces' hashmap
 entry is retained — every other teardown step runs as usual (agent
-session, buffers, persp), but the ws plist survives so the drawer's MERGED
-section can keep rendering the entry until the user explicitly
-`finish'es it.  This is the merge-completed teardown path; standard
-nuke/kill callers pass nil and the entry is dropped.
+session, buffers, persp), but the ws plist survives so the workspace's
+merged state stays visible to the surviving renderers until the user
+explicitly `finish'es it.  This is the merge-completed teardown path;
+standard nuke/kill callers pass nil and the entry is dropped.
 
 Persisted state (`<project>/.claude/emacs/state.el', including the
 captured per-environment session-id) is ALWAYS preserved — nuke is
@@ -966,7 +964,7 @@ silent no-op paths are observable when reproducing ordering bugs.
 Used by the snapshot loader's merge-failed restore path so a workspace
 whose cherry-pick silently failed pre-restart surfaces as the leftmost
 tab on the next session, demanding the user's attention instead of
-hiding in the drawer's MERGED bucket."
+passing for an already-merged workspace."
   (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
     (agent-repl--log ws "reorder-workspace-to-front: ENTRY ws=%s cache=%S"
                       ws cache-snapshot)
@@ -1123,7 +1121,7 @@ Returns the new persp object, or nil when `persp-add-new' is unbound.
 When PROJECT-DIR is non-nil and a real persp is created, also seeds
 `:project-dir' into `agent-repl--workspaces' so the hash entry carries
 its identity key from the moment of creation — never project-dir-less.
-This is the single root that prevents a `(no repo)' drawer stub when a
+This is the single root that prevents a `(no repo)' stub entry when a
 creation flow aborts before session-init would otherwise set it.
 
 When PROJECT-DIR is non-nil and the new persp is a real persp object
@@ -1152,7 +1150,7 @@ Callers must use this function instead of calling `persp-add-new' or
         ;; name (e.g. `:pending-magit' in `--finalize-worktree-workspace')
         ;; auto-vivifies a stub WITHOUT `:project-dir'; if the creation
         ;; flow then aborts before session-init writes `:project-dir', the
-        ;; stub persists and lands in the drawer's `(no repo)' bucket.
+        ;; stub persists under the `(no repo)' repo group.
         ;; Seeding here closes that window for every caller that routes
         ;; through this creation boundary.
         (agent-repl--ws-put ws :project-dir project-dir))

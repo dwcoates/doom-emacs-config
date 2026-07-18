@@ -117,8 +117,7 @@ of the two activity signals consulted by
 
 (defun agent-repl--caffeinate-any-merging-p ()
   "Return non-nil when any workspace has a merge in flight or queued.
-Mirrors the drawer's MERGING bucket gate
-\(`agent-repl-drawer--workspace-section'): workspaces with `:merging t'
+Workspaces with `:merging t'
 \(active cherry-pick in flight) or `:repl-state :merge-queued' (parked
 behind another in-flight cherry-pick) are considered active so macOS
 cannot idle-sleep between sentinel-driven merge detection and the

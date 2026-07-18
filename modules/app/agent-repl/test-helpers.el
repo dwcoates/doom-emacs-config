@@ -332,8 +332,8 @@ from START (default 0), or nil when NEEDLE does not occur."
 
   ;; Suppress timers at load time.  Both the periodic (`run-with-timer')
   ;; and idle (`run-with-idle-timer') registrations that fire at module
-  ;; load — e.g. the drawer's MERGED-section auto-clear idle timer — are
-  ;; overridden so no real timer leaks into the batch test process.
+  ;; load are overridden so no real timer leaks into the batch test
+  ;; process.
   (defvar agent-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
   (defvar agent-repl-test--orig-run-with-idle-timer (symbol-function 'run-with-idle-timer))
   (advice-add 'run-with-timer :override (lambda (&rest _) nil))
@@ -620,7 +620,7 @@ re-routes their frontend resolution instead."
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
-         ;; tab-bar / drawer render.
+         ;; tab-bar render.
          (agent-repl--folded-repos (make-hash-table :test 'equal))
          (agent-repl--snapshot-load-state nil)
          (agent-repl-after-ready-functions nil)
@@ -650,9 +650,8 @@ re-routes their frontend resolution instead."
 
 (defmacro agent-repl-test--with-merge-state (&rest body)
   "Execute BODY with fresh merge queue / in-flight / progress / lookahead state.
-Shared by the worktree tests (which exercise the cherry-pick progress
-filter) and the drawer tests (which render the MERGE QUEUE section from
-exactly these globals)."
+Used by the worktree tests, which exercise the cherry-pick progress
+filter against exactly these globals."
   (declare (indent 0))
   `(let ((agent-repl--merge-queue nil)
          (agent-repl--in-flight-merges nil)

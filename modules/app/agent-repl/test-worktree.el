@@ -1262,7 +1262,7 @@ entry — merge's preserve-entry behavior is opt-in only."
 (ert-deftest agent-repl-test-close-workspace-preserve-entry-passes-through ()
   "`--close-workspace' threads PRESERVE-ENTRY to the nuke primitive.
 This is the merge-completion path: the hashmap entry must survive close
-so the drawer's MERGED bucket can keep rendering until explicit finish."
+so the merged workspace stays registered until explicit finish."
   (let ((received-preserve :unset))
     (cl-letf (((symbol-function 'agent-repl--nuke-one-workspace)
                (lambda (_ws &optional preserve)
@@ -3029,7 +3029,7 @@ to auto-finish."
 
 (ert-deftest agent-repl-test-cherry-pick-commits-seeds-progress ()
   "The pick seeds its progress record with the commits git is about to apply,
-so the drawer can name the commit being cherry-picked from the first tick."
+so renderers can name the commit being cherry-picked from the first tick."
   (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
     (cl-letf (((symbol-function 'agent-repl--git-string)
                (lambda (&rest _args) "2"))
@@ -3100,8 +3100,8 @@ left to resolve)."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -4158,8 +4158,8 @@ is gone."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -4197,8 +4197,8 @@ cherry-pick and signals user-error."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -4240,8 +4240,8 @@ for existing callers."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -4287,8 +4287,8 @@ of being aborted via `--check-cherry-pick-conflict'."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -4334,8 +4334,8 @@ helper is not invoked.  Guards the interactive `SPC TAB M' path."
               ;; probe is now on the path.
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
-              ;; The pick streams (`--git-exit-code-streaming') so the drawer can
-              ;; follow it commit by commit; --abort still goes through the
+              ;; The pick streams (`--git-exit-code-streaming') so merge progress
+              ;; can follow it commit by commit; --abort still goes through the
               ;; plain, output-discarding wrapper.
               ((symbol-function 'agent-repl--git-exit-code-streaming)
                (lambda (_root _filter &rest args)
@@ -5688,7 +5688,8 @@ so it cannot escape and crash the `--async-git-sentinel' that calls this."
 
 (ert-deftest agent-repl-test-setup-worktree-session-init-error-marks-start-failed ()
   "A caught boot failure sets :agent-state :start-failed so
-the tab/drawer surface the failure instead of it vanishing silently."
+the tab-bar and picker surface the failure instead of it vanishing
+silently."
   (let ((recorded nil))
     (agent-repl-test--with-worktree-boot-stubs
         (((symbol-function 'agent-repl--gui-boot)
@@ -6596,7 +6597,7 @@ registry once `--bare-workspace-name' is called on it downstream."
 refuse.  The headless `/create-or-update-workspace create' flow occasionally emits
 \"none\" (or \"DWC/none\") when there is no slug material; without this
 guard, the downstream `+workspace-new' would collide with the
-nil-perspective sentinel and the entry would surface in the drawer and
+nil-perspective sentinel and the entry would surface in the picker and
 nuke prompts as a stray \"none\" workspace."
   (agent-repl-test--with-clean-state
     (let ((timer-scheduled nil)
@@ -6691,8 +6692,8 @@ timer callback — letting the workspace-generation flow request HEAD without fo
 (ert-deftest agent-repl-test-create-worktree-from-command-master-base-uses-master-worktree-as-source-dir ()
   "BASE-COMMIT = `master' resolves source-dir via `--master-worktree-path'.
 For `SPC TAB N', the new workspace's `:source-ws-dir' must be the master
-worktree of the repo, not the calling workspace — otherwise the drawer
-nests it under a parent that shares no commits with it."
+worktree of the repo, not the calling workspace — otherwise
+`:source-ws-dir' would record a parent that shares no commits with it."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset)
           (master-lookup-root :unset)
@@ -6713,8 +6714,8 @@ nests it under a parent that shares no commits with it."
   "BASE-COMMIT = `master' with no master worktree yields nil `:source-ws-dir'.
 When the repo has no worktree on master (e.g. main checkout itself is on
 a feature branch), the new workspace must not fall back to the calling
-workspace as its parent.  Nil leaves it parentless in the drawer — the
-correct outcome since `SPC TAB N' branches off master, not the caller."
+workspace as its parent.  Nil leaves it parentless — the correct
+outcome since `SPC TAB N' branches off master, not the caller."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset)
           (agent-repl-master-branch-name "master"))
@@ -6729,8 +6730,9 @@ correct outcome since `SPC TAB N' branches off master, not the caller."
 
 (ert-deftest agent-repl-test-create-worktree-from-command-head-base-uses-git-root-as-source-dir ()
   "BASE-COMMIT = `HEAD' yields source-dir == git-root (calling workspace).
-`SPC TAB n' is a child-of-current operation; its drawer parent must be
-the calling workspace, captured as GIT-ROOT at enqueue time."
+`SPC TAB n' is a child-of-current operation; its `:source-ws-dir'
+parent must be the calling workspace, captured as GIT-ROOT at enqueue
+time."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset)
           (master-path-called nil))
@@ -7486,7 +7488,7 @@ resolved GIT-ROOT (so a source-ws selection is honored)."
 
 (ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-head-source-dir-is-git-root ()
   "For BASE = `head' the empty-prompt path passes GIT-ROOT as the worktree's
-source-dir (drawer parent), never the master worktree."
+source-dir (the `:source-ws-dir' parent), never the master worktree."
   (agent-repl-test--with-clean-state
     (let ((captured-src :unset)
           (master-called nil))
@@ -8081,7 +8083,6 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) (lambda (f) (setq loaded-file f))))
       (agent-repl--workspace-merge-do "other-ws")
@@ -8110,7 +8111,6 @@ target IS called at the end of the merge (see
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'agent-repl--close-workspace) #'ignore)
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--refresh-magit-status-for-dir) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'magit-status) (lambda (&rest _) (setq magit-status-called t))))
@@ -8165,7 +8165,6 @@ cherry-pick, with the project-root and source workspace name."
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion)
@@ -8211,7 +8210,6 @@ the target workspace before the auto-finish tear-down runs.  Stubs
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8222,7 +8220,7 @@ the target workspace before the auto-finish tear-down runs.  Stubs
   "When `--cherry-pick-commits' returns `failed' (silent failure: exit
 non-zero, no CHERRY_PICK_HEAD), `--workspace-merge-do' flips
 `:repl-state' to `:merge-failed' and records `:merge-failed t' so the
-drawer surfaces the ❌ badge.  `:merge-completed' is NOT set —
+tab-bar and picker surface the ❌ badge.  `:merge-completed' is NOT set —
 commits did not land, so the workspace stays in its normal (alive)
 bucket rather than routing into MERGED."
   (agent-repl-test--with-clean-state
@@ -8234,7 +8232,6 @@ bucket rather than routing into MERGED."
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8261,7 +8258,6 @@ work, not auto-finish a workspace whose commits never landed."
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'agent-repl--close-workspace)
                   (lambda (&rest _) (setq close-called t)))
@@ -8286,7 +8282,6 @@ the `merge/<ws>' tag would mislabel an unrelated commit."
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
                  ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
@@ -8297,8 +8292,8 @@ the `merge/<ws>' tag would mislabel an unrelated commit."
 (ert-deftest agent-repl-test-workspace-merge-do-clears-merge-failed-on-success ()
   "A successful merge must explicitly clear `:merge-failed' (in case a
 prior attempt set it).  Without this, a re-run from a silent-failure
-state would leave `:merge-failed t' sticky and the drawer would keep
-showing ❌ despite the latest run landing cleanly."
+state would leave `:merge-failed t' sticky and the tab-bar and picker
+would keep showing ❌ despite the latest run landing cleanly."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '(:merge-failed t) agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -8307,7 +8302,6 @@ showing ❌ despite the latest run landing cleanly."
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8327,7 +8321,6 @@ otherwise mark the (now-session-less) workspace `:dead'."
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8337,9 +8330,10 @@ otherwise mark the (now-session-less) workspace `:dead'."
 (ert-deftest agent-repl-test-workspace-merge-do-already-incorporated-still-tears-down ()
   "When cherry-pick-commits returns `already-incorporated' (commits
 already on the parent), workspace-merge-do still tags and tears down
-via `--nuke-one-workspace' with `preserve-entry' so the drawer's
-MERGED bucket picks it up.  `--finish-workspace' is intentionally
-NOT called — that runs only when the user explicitly presses `x'."
+via `--nuke-one-workspace' with `preserve-entry' so the entry survives
+as a merged workspace.  `--finish-workspace' is intentionally
+NOT called — that runs only on an explicit finish (the
+workspace-commands `finish' verb)."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (let ((tagged nil)
@@ -8352,7 +8346,6 @@ NOT called — that runs only when the user explicitly presses `x'."
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits)
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'already-incorporated))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion)
                   (lambda (_root _ws) (setq tagged t)))
                  ((symbol-function 'agent-repl--nuke-one-workspace)
@@ -8387,7 +8380,6 @@ Asserts:
                  ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'agent-repl--close-workspace)
@@ -8418,7 +8410,6 @@ be a misleading nudge that something landed."
                   (lambda (_dir _ws _base _br &optional _auto _silent) 'failed))
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'agent-repl--close-workspace) #'ignore)
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'agent-repl--refresh-magit-status-for-dir)
                   (lambda (&rest _) (setq refresh-called t))))
@@ -8471,7 +8462,6 @@ forwarded to the gate must call `--close-workspace' with
                  ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'agent-repl--gns-sockets-close-then)
@@ -8491,9 +8481,10 @@ forwarded to the gate must call `--close-workspace' with
 
 (ert-deftest agent-repl-test-workspace-merge-do-tears-down-on-success ()
   "Successful merge nukes the target workspace's session/persp/buffers
-with `preserve-entry' so the hash entry survives for the drawer's
-MERGED bucket.  The git worktree on disk is left in place — only an
-explicit drawer `x' (`--finish-workspace') removes it."
+with `preserve-entry' so the hash entry survives the merge.  The git
+worktree on disk is left in place — only an explicit finish
+\(`--finish-workspace', via the workspace-commands `finish' verb)
+removes it."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (let ((nuked-ws nil)
@@ -8504,7 +8495,6 @@ explicit drawer `x' (`--finish-workspace') removes it."
                  ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'agent-repl--nuke-one-workspace)
@@ -8540,7 +8530,6 @@ the defer calls were ever made."
                  ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
                  ((symbol-function 'agent-repl--defer-to-main-thread)
@@ -8550,8 +8539,9 @@ the defer calls were ever made."
 
 (ert-deftest agent-repl-test-workspace-merge-do-does-not-call-finish-workspace ()
   "Successful merge must NOT call `--finish-workspace' — that's reserved
-for the drawer `x' path and removes the git worktree, which is exactly
-what we want to defer until the user explicitly chooses."
+for the explicit finish path (the workspace-commands `finish' verb)
+and removes the git worktree, which is exactly what we want to defer
+until the user explicitly chooses."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (let ((finish-called nil))
@@ -8561,7 +8551,6 @@ what we want to defer until the user explicitly chooses."
                  ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                  ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                  ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore)
@@ -8571,8 +8560,8 @@ what we want to defer until the user explicitly chooses."
         (should-not finish-called)))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-records-merge-completed-at ()
-  "Successful merge stamps `:merge-completed-at' on the target so the
-drawer can render an age/timestamp once that surfaces in the UI."
+  "Successful merge stamps `:merge-completed-at' on the target so an
+age/timestamp can be rendered once that surfaces in the UI."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
@@ -8581,7 +8570,6 @@ drawer can render an age/timestamp once that surfaces in the UI."
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8591,7 +8579,8 @@ drawer can render an age/timestamp once that surfaces in the UI."
 (ert-deftest agent-repl-test-workspace-merge-do-marks-dead-on-cherry-pick-error ()
   "GENERIC cherry-pick failure (non-conflict `user-error') flips the
 target workspace to `:repl-state :dead' (and clears `:agent-state')
-so the drawer shows the ❌ badge.  The error is still re-signaled.
+so the tab-bar and picker show the ❌ badge.  The error is still
+re-signaled.
 Conflict-specific errors go through a different path — see
 `agent-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error'."
   (agent-repl-test--with-clean-state
@@ -8613,7 +8602,8 @@ Conflict-specific errors go through a different path — see
 (ert-deftest agent-repl-test-workspace-merge-do-marks-merge-conflict-on-conflict-error ()
   "When the cherry-pick raises `agent-repl-merge-conflict-error', the
 target workspace flips to `:repl-state :merge-conflict' (not `:dead')
-so the drawer renders the 💥 badge.  `:agent-state' is preserved
+so the tab-bar and picker render the 💥 badge.  `:agent-state' is
+preserved
 because the agent session is still alive — the user can keep typing
 after resolving the conflict externally."
   (agent-repl-test--with-clean-state
@@ -8637,8 +8627,9 @@ after resolving the conflict externally."
 
 (ert-deftest agent-repl-test-workspace-merge-do-clears-prior-merge-conflict-on-retry ()
   "A retry of a previously-conflicted merge clears the stale 💥 badge
-before re-entering the cherry-pick so the drawer reflects in-flight
-state, not stale failure state.  Only `:merge-conflict' is cleared —
+before re-entering the cherry-pick so the render status reflects
+in-flight state, not stale failure state.  Only `:merge-conflict' is
+cleared —
 other repl-states are preserved."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '(:repl-state :merge-conflict) agent-repl--workspaces)
@@ -8649,7 +8640,6 @@ other repl-states are preserved."
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits)
                 (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--gns-sockets-close-then)
@@ -8698,97 +8688,6 @@ earlier partial success."
         (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
       (should-not (agent-repl--ws-get "other-ws" :merge-completed)))))
 
-(ert-deftest agent-repl-test-workspace-merge-do-refreshes-detail-cache-on-success ()
-  "After a successful merge, the drawer's `:detail-*' cache for the
-target workspace is refreshed.  The cache populated pre-merge (e.g.,
-`:detail-master-ahead' showing the soon-to-be-merged commit count)
-would otherwise linger in the MERGED bucket's expanded view — the
-post-merge refresh ensures the rendered values reflect current git
-state, not stale pre-merge snapshots."
-  (agent-repl-test--with-clean-state
-    (puthash "other-ws" '(:detail-master-ahead 99) agent-repl--workspaces)
-    (let ((refreshed-ws nil))
-      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-                 ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
-                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-                 ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
-                 ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-                 ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
-                 ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache)
-                  (lambda (ws) (setq refreshed-ws ws))))
-        (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should (equal refreshed-ws "other-ws"))))))
-
-(ert-deftest agent-repl-test-workspace-merge-do-refreshes-detail-cache-after-nuke ()
-  "The post-merge `:detail-*' refresh runs after `--nuke-one-workspace'
-so the cache reflects the fully settled MERGED-bucket state — the nuke
-preserves the hash entry and the worktree on disk, so the refresh's
-synchronous git calls still resolve."
-  (agent-repl-test--with-clean-state
-    (puthash "other-ws" '() agent-repl--workspaces)
-    (let ((call-order nil))
-      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-                 ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
-                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-                 ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
-                 ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-                 ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-                 ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'agent-repl--nuke-one-workspace)
-                  (lambda (&rest _) (push 'nuke call-order)))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache)
-                  (lambda (_ws) (push 'refresh call-order))))
-        (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should (equal (nreverse call-order) '(nuke refresh)))))))
-
-(ert-deftest agent-repl-test-workspace-merge-do-skips-detail-refresh-when-unbound ()
-  "The post-merge cache refresh is guarded by `fboundp' so a load-order
-oddity (drawer not yet loaded) cannot break the merge.  Verifies the
-merge completes normally when `--refresh-detail-cache' is unbound."
-  (agent-repl-test--with-clean-state
-    (puthash "other-ws" '() agent-repl--workspaces)
-    (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-               ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
-               ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-               ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
-               ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-               ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
-               ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
-               ((symbol-function 'load-file) #'ignore)
-               ((symbol-function 'fboundp)
-                (lambda (sym) (not (eq sym 'agent-repl-drawer--refresh-detail-cache)))))
-      ;; Should complete without error and still record :merge-completed.
-      (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-      (should (eq (agent-repl--ws-get "other-ws" :merge-completed) t)))))
-
-(ert-deftest agent-repl-test-workspace-merge-do-skips-detail-refresh-on-failure ()
-  "A failed cherry-pick must NOT refresh the detail cache — the merge
-didn't complete, so there's no fresh post-merge state to capture, and
-running the refresh on a workspace headed for `:dead' just wastes git
-calls."
-  (agent-repl-test--with-clean-state
-    (puthash "other-ws" '() agent-repl--workspaces)
-    (let ((refresh-called nil))
-      (cl-letf* (((symbol-function '+workspace-current-name) (lambda () "current"))
-                 ((symbol-function 'agent-repl--workspace-branch) (lambda (_ws) "branch-x"))
-                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/fake"))
-                 ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
-                 ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
-                 ((symbol-function 'agent-repl--cherry-pick-commits)
-                  (lambda (_dir _ws _base _br &optional _auto _silent) (user-error "Conflict")))
-                 ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
-                 ((symbol-function 'load-file) #'ignore)
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache)
-                  (lambda (_ws) (setq refresh-called t))))
-        (ignore-errors
-          (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t))
-        (should-not refresh-called)))))
-
 (ert-deftest agent-repl-test-workspace-merge-do-clears-merging-on-success ()
   "After a successful cherry-pick, `:merging' is cleared on the target
 workspace.  Asserts the in-flight workflow flag does not linger past
@@ -8802,7 +8701,6 @@ and enter MERGED in the same operation."
                ((symbol-function 'agent-repl--git-branch-exists-p) (lambda (_dir _br) t))
                ((symbol-function 'agent-repl--cherry-pick-base) (lambda (_dir _br) "abc123"))
                ((symbol-function 'agent-repl--cherry-pick-commits) (lambda (_dir _ws _base _br &optional _auto _silent) nil))
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                ((symbol-function 'load-file) #'ignore))
@@ -8847,7 +8745,6 @@ cherry-pick begins, not after."
                     (setq merging-mid-flight
                           (agent-repl--ws-get "other-ws" :merging))
                     nil))
-                 ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                  ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
                  ((symbol-function 'agent-repl--nuke-one-workspace) #'ignore)
                  ((symbol-function 'load-file) #'ignore))
@@ -8886,8 +8783,8 @@ unintentionally placing the workspace into MERGING."
     (should (agent-repl--ws-merge-completed-p "ws"))))
 
 (ert-deftest agent-repl-test-ws-merge-completed-p-nil-when-absent ()
-  "Returns nil on cache miss — drawer must default such workspaces away
-from MERGED."
+  "Returns nil on cache miss — callers must default such workspaces to
+not merged."
   (agent-repl-test--with-clean-state
     (puthash "ws" '() agent-repl--workspaces)
     (should-not (agent-repl--ws-merge-completed-p "ws"))))
@@ -9501,7 +9398,7 @@ were reached without the wrapper stub."
     (should-not (agent-repl--ws-merged-p "ws"))))
 
 (ert-deftest agent-repl-test-ws-merged-p-nil-when-cache-absent ()
-  "Returns nil on cache miss — drawer should treat unknown as :main."
+  "Returns nil on cache miss — callers should treat unknown as :main."
   (agent-repl-test--with-clean-state
     (puthash "ws" '() agent-repl--workspaces)
     (should-not (agent-repl--ws-merged-p "ws"))))
@@ -9588,7 +9485,6 @@ target-dir decision shows up in merge-do's args."
                ((symbol-function 'agent-repl--cherry-pick-commits)
                 (lambda (dir _ws _base _br &optional _auto _silent) (setq cherry-pick-dir dir)))
                ((symbol-function 'agent-repl--tag-merge-completion) #'ignore)
-               ((symbol-function 'agent-repl-drawer--refresh-detail-cache) #'ignore)
                ((symbol-function 'agent-repl--nuke-one-workspace) (lambda (&rest _) nil))
                ((symbol-function 'load-file) #'ignore))
       (agent-repl--workspace-merge-do "other-ws" "/explicit/target/")
@@ -10250,7 +10146,7 @@ the same destination land in the same bucket."
 
 (ert-deftest agent-repl-test-enqueue-merge-marks-repl-state ()
   "`--enqueue-merge' flips the workspace's `:repl-state' to `:merge-queued'
-so the drawer can route it under MERGING."
+so the tab-bar and picker show the queued badge."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -11046,7 +10942,7 @@ does NOT set `:halt-until-human' — auto-drain may proceed to siblings."
 
 (ert-deftest agent-repl-test-reenqueue-merge-on-failure-marks-ws-merge-queued ()
   "Re-enqueue marks the workspace with `:repl-state :merge-queued' so the
-drawer routes it under MERGING with the queued badge."
+tab-bar and picker show the queued badge again."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-empty-merge-queue
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -12607,7 +12503,7 @@ silently lose commits and desync the index."
     (should (null (agent-repl--merge-progress-get "ws")))))
 
 (ert-deftest agent-repl-test-merge-progress-put-bumps-seq ()
-  "Every progress write bumps the render counter the drawer's signature reads."
+  "Every progress write bumps the render counter that render signatures read."
   (agent-repl-test--with-merge-state
     (let ((before agent-repl--merge-progress-seq))
       (agent-repl--merge-progress-put "ws" :commit-index 1)

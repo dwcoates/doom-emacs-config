@@ -27,8 +27,8 @@
     (view-buf input-buf &rest body)
   "Bind `agent-repl-window--panel-buffer' so it resolves panels to
 VIEW-BUF (for `:view') and INPUT-BUF (for `:input').  Other kinds
-\(e.g. `:drawer') resolve to nil.  Restores the original definition on
-exit so test isolation is preserved."
+resolve to nil.  Restores the original definition on exit so test
+isolation is preserved."
   (declare (indent 2))
   `(cl-letf (((symbol-function 'agent-repl-window--panel-buffer)
               (lambda (kind &optional _ws)
@@ -85,28 +85,28 @@ is meant to drop below the work column only."
         (kill-buffer input-buf)))))
 
 (ert-deftest agent-repl-sibling-popup-test-target-excludes-side-windows ()
-  "Skips side windows (e.g. the drawer) even if they are the leftmost.
+  "Skips side windows even if they are the leftmost.
 Side windows shouldn't be split — they're frame-level UI.  Layout: a
-left-side drawer + a regular work window + agent view; target must
-be the regular work window, not the drawer."
+left side window + a regular work window + agent view; target must
+be the regular work window, not the side window."
   (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((drawer-buf (generate-new-buffer " *test-drawer*"))
-           (work-buf   (generate-new-buffer " *test-work*"))
-           (view-buf   (generate-new-buffer " *test-cv*"))
-           (input-buf  (generate-new-buffer " *test-ci*")))
+    (let* ((side-buf  (generate-new-buffer " *test-side*"))
+           (work-buf  (generate-new-buffer " *test-work*"))
+           (view-buf  (generate-new-buffer " *test-cv*"))
+           (input-buf (generate-new-buffer " *test-ci*")))
       (unwind-protect
           (let* ((work-win  (selected-window))
                  (_ (set-window-buffer work-win work-buf))
                  (view-win (split-window work-win nil 'right))
                  (_ (set-window-buffer view-win view-buf))
-                 (drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
-            (should (window-live-p drawer-win))
+                 (side-win (display-buffer-in-side-window
+                            side-buf '((side . left) (slot . 0)))))
+            (should (window-live-p side-win))
             (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
               (let ((target (agent-repl-sibling-popup--target-window)))
                 (should (eq target work-win))
                 (should-not (agent-repl-window--side-window-p target)))))
-        (kill-buffer drawer-buf)
+        (kill-buffer side-buf)
         (kill-buffer work-buf)
         (kill-buffer view-buf)
         (kill-buffer input-buf)))))

@@ -410,7 +410,7 @@ already :dead and must not leave the tab spinning :thinking forever."
 ;;;; ---- Tests: Tabline rendering ----
 
 (ert-deftest agent-repl-test-tabline-omits-folded-repo-workspaces ()
-  "The tab-bar drops the workspaces of a repo folded in the drawer."
+  "The tab-bar drops the workspaces of a folded repo."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doom-ws" :group-key "/repos/doom/.git")
     (agent-repl--ws-put "ee-ws"   :group-key "/repos/explanation-engine/.git")
@@ -2355,16 +2355,6 @@ the flag-clear invariant."
   (agent-repl-test--with-clean-state
     (setq agent-repl--update-in-flight (float-time))
     (agent-repl--update-all-workspace-states--finalize)
-    (should-not agent-repl--update-in-flight)))
-
-(ert-deftest agent-repl-test-update-all-finalize-clears-flag-when-refresh-errors ()
-  "An erroring drawer refresh cannot wedge the update chain: the
-in-flight flag still clears."
-  (agent-repl-test--with-clean-state
-    (setq agent-repl--update-in-flight (float-time))
-    (cl-letf (((symbol-function 'agent-repl-drawer--refresh-if-visible)
-               (lambda () (error "boom"))))
-      (ignore-errors (agent-repl--update-all-workspace-states--finalize)))
     (should-not agent-repl--update-in-flight)))
 
 ;;;; ---- Tests: mid-chain ws removal ----

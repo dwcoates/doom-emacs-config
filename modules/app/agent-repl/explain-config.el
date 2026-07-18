@@ -103,8 +103,8 @@ never mistake the popup for an agent panel."
 Only applies when the popup falls back to its own side window (i.e.
 when the agent output window is not visible to take over).  Width
 is inherited from the agent output window when the popup takes
-that window over — see `agent-repl--explain-config-show'.  The
-drawer is untouched in either branch."
+that window over — see `agent-repl--explain-config-show'.  Other
+side windows are untouched in either branch."
   :type 'float
   :group 'agent-repl)
 
@@ -202,15 +202,14 @@ host frame's width."
   "Fallback display action for the explain-config webview buffer.
 Used only when the agent output window is not visible to take
 over — when it is, `--show' reuses it directly via
-`set-window-buffer' and bypasses `display-buffer' entirely.  The
-drawer is never touched.")
+`set-window-buffer' and bypasses `display-buffer' entirely.  Other
+side windows are never touched.")
 
 (defun agent-repl--explain-config-apply-width (window)
   "Resize WINDOW to the configured explain-config width.
 Side-window action alists honor `window-width' only at window-creation
 time, so re-displaying the popup keeps its old width if the fraction
-changed.  This forces the resize on every show — mirrors the drawer's
-`--apply-width'."
+changed.  This forces the resize on every show."
   (let* ((target (agent-repl--explain-config-window-width window))
          (window-min-width 1))
     (with-selected-window window
@@ -283,8 +282,8 @@ Display priority:
      `--hide' can restore it.
   3. Otherwise, fall back to the right-side popup display action.
 
-The drawer is never touched in any branch — its visibility is its
-own concern.  Returns the displayed window or nil."
+Other side windows are never touched in any branch — their
+visibility is their own concern.  Returns the displayed window or nil."
   (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
     (let ((existing (get-buffer-window buf t)))
       (cond
@@ -312,7 +311,8 @@ switch.
 If `--show' took over the agent output window, restores the prior
 buffer in that window via `--restore-replaced-window'.  Any
 remaining windows still displaying the explain-config webview (e.g.
-side-window fallbacks) are deleted.  The drawer is never touched."
+side-window fallbacks) are deleted.  Other side windows are never
+touched."
   (agent-repl--explain-config-restore-replaced-window)
   (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
     (agent-repl-window--delete-buffer-windows buf)))

@@ -434,9 +434,9 @@ would both double-dispatch the mode switch (evil already owns insert
 mode) and leak a stray \"i\" character onto Claude's prompt line, which
 then prefixes the next message the user sends.
 
-No-op when WS is not the current workspace (a drawer-triggered
-interrupt on a background workspace must not steal focus or flip a
-hidden buffer's state) or when the input buffer is dead."
+No-op when WS is not the current workspace (a programmatically
+triggered interrupt on a background workspace must not steal focus or
+flip a hidden buffer's state) or when the input buffer is dead."
   (if (not (equal ws (agent-repl--ws-current-name)))
       (agent-repl--log ws "enter-insert-mode: ws not current, skipping")
     (let ((input-buf (agent-repl--ws-get ws :input-buffer)))
@@ -514,8 +514,8 @@ the input buffer to evil insert state after
 `agent-repl--enter-insert-mode', which switches evil state rather than
 forwarding a literal \"i\" keystroke to Claude).  Defaults to the
 current workspace when WS is nil (matches the interactive `SPC o x'
-behavior); the drawer passes the entry-at-point so interrupts target
-the selected entry.
+behavior); programmatic callers pass WS so interrupts target a
+specific workspace.
 
 When the targeted agent is running (`:thinking') and NO-CONFIRM is nil,
 asks for confirmation before cancelling it, unless
@@ -782,7 +782,8 @@ When called interactively without WS, prompts to select from the union
 of live agent-repl workspaces and tab-bar workspaces
 \(`agent-repl--nukeable-workspace-names'), defaulting to the current
 workspace when it appears in that candidate list.  Programmatic
-callers (e.g. the drawer) pass WS directly to skip the prompt.
+callers (e.g. the workspace-commands dispatch) pass WS directly to
+skip the prompt.
 
 If the selected workspace is NOT a live agent-repl workspace (its
 claude has already been killed but the persp/doom workspace is still
@@ -875,8 +876,8 @@ muscle-memory that bind `kill' semantics distinctly from `nuke'.
 Prompts to select from the union of live agent-repl workspaces and
 tab-bar workspaces (`agent-repl--nukeable-workspace-names'),
 defaulting to the current workspace when it appears in that candidate
-list.  Programmatic callers (e.g. the drawer) pass WS directly to
-skip the prompt.
+list.  Programmatic callers (e.g. the workspace-commands dispatch)
+pass WS directly to skip the prompt.
 
 No confirmation prompt: teardown is immediate.  Persisted state.el is
 preserved, so re-opening the workspace later resumes the Claude
@@ -1476,8 +1477,8 @@ workspace lands in priority order no matter how it was opened.
 
 Steps:
 
-- hydrates the persisted priority badge and drawer glyphs via
-  `agent-repl--load-display-state', so `:priority' is in memory
+- hydrates the persisted priority badge and workspace state glyphs
+  via `agent-repl--load-display-state', so `:priority' is in memory
   before the reseat reads it,
 - pulls WS to its priority slot in `persp-names-cache' via
   `agent-repl--reorder-workspace-by-priority', so the tab-bar order
@@ -1525,11 +1526,11 @@ Each call:
 - opens the most-recent project file via `find-file' when one exists
   in `recentf-list',
 - hydrates `:project-dir' into `agent-repl--workspaces' and
-  rehydrates persisted display state (`:priority' and the drawer
-  badges) from the per-project state file via
+  rehydrates persisted display state (`:priority' and the workspace
+  state badges) from the per-project state file via
   `agent-repl--load-display-state',
 - reorders the ws in `persp-names-cache' by its hydrated `:priority'
-  via `agent-repl--reorder-workspace-by-priority' (drawer-driven
+  via `agent-repl--reorder-workspace-by-priority' (snapshot
   restores, worktree hydration), matching what
   `agent-repl-set-priority' does for user-driven changes,
   - SKIPPED while a snapshot load is in flight
@@ -1654,7 +1655,8 @@ Filters out entries whose `:source-ws' no longer exists in
 `agent-repl--workspaces' (the workspace was removed between sessions,
 or its snapshot entry was skipped because its `:project-dir' was gone).
 Re-applies the `:repl-state :merge-queued' marker on each surviving
-source-ws so the drawer's MERGING bucket re-surfaces them.  Preserves
+source-ws so its queued-for-merge badge re-surfaces wherever
+`agent-repl--ws-render-status' renders it.  Preserves
 each entry's `:target-dir' so the per-target sub-queue partitioning
 survives the restart (a missing key falls back to lazy resolution in
 the drain).
@@ -1868,15 +1870,16 @@ the error-routing `condition-case'."
                            (1+ (plist-get agent-repl--snapshot-load-state :skipped))))
           (agent-repl--snapshot-load-step))
          ;; Merged-completed entries: register data-only and advance.
-         ;; The drawer's MERGED bucket renders these; `--finish-workspace'
-         ;; (invoked via drawer `x') is the only way out.
+         ;; They carry `:repl-state :merged' but get no tab-bar tab;
+         ;; `--finish-workspace' (reachable via the workspace-commands
+         ;; "finish" verb) is the only way out.
          ;;
          ;; Exception: when register-merged-workspace flags `:merge-failed t'
          ;; (either via on-disk state or the git-landing probe), promote the
-         ;; entry from drawer-only to a real tab-bar workspace via
+         ;; entry from data-only to a real tab-bar workspace via
          ;; `--establish-workspace' and move it to the front of
          ;; `persp-names-cache' via `--reorder-workspace-to-front'.  A failed
-         ;; cherry-pick must not hide in the MERGED bucket post-restart —
+         ;; cherry-pick must not hide as a data-only entry post-restart —
          ;; surfacing it as the leftmost tab forces the user to notice and
          ;; act (retry / investigate / dismiss).
          ((agent-repl--state-merge-completed-p dir)
@@ -2212,10 +2215,10 @@ startup."
 (defun agent-repl--register-merged-workspace (ws dir)
   "Register WS as a merged-completed workspace from on-disk state.
 Reads DIR's state.el and populates `agent-repl--workspaces' with
-just enough state for the drawer's MERGED bucket to render WS and for
+just enough state to record WS as merged-completed and for
 `--finish-workspace' to later remove the worktree.  Does NOT create a
 Doom persp and does NOT start Claude — the workspace is data-only
-until the user presses `x' on its drawer entry.
+until the user finishes it (the workspace-commands \"finish\" verb).
 
 Idempotent: a subsequent call overwrites the relevant plist fields.
 Keys populated when present in the state file:
@@ -2229,8 +2232,8 @@ silent cherry-pick failure still wrote `:merge-completed t' without a
 `:merge-failed' flag.  On load, the probe reads the parent worktree's
 HEAD log for cherry-pick -x annotations of every target-branch commit;
 any missing commit promotes the saved state to `:merge-failed t' /
-`:repl-state :merge-failed' so the drawer surfaces the ❌ badge for
-the first time.  Clean merges set `:repl-state :merged' so the 🔀
+`:repl-state :merge-failed' so the ❌ badge surfaces for the first
+time.  Clean merges set `:repl-state :merged' so the 🔀
 badge re-appears post-restart (the snapshot loader does not pass
 through `--initialize-ws-env' for merged entries)."
   (agent-repl--with-error-logging (format "register-merged-workspace[%s]" ws)
@@ -2326,8 +2329,8 @@ both the plist cache and `recentf-list' lag filesystem deletions."
 ;; - Candidates are the union of the in-memory workspace hash (live and
 ;;   tombstoned) and the on-disk roster snapshot, so workspaces killed /
 ;;   merged in a prior session still appear (`agent-repl--known-workspace-entries').
-;; - The emoji mirrors the drawer's per-workspace glyph for a known
-;;   workspace, else a neutral 📁 for a disk-only record.
+;; - The emoji is the per-workspace state glyph (`agent-repl-ws-state-icons')
+;;   for a known workspace, else a neutral 📁 for a disk-only record.
 ;; - The three date columns are read from PERSISTED state — each candidate's
 ;;   `<root>/.claude/emacs/state.el' — with fresher live in-memory values
 ;;   overlaid, so dead workspaces still show real dates.  The candidate set
@@ -2849,8 +2852,8 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
   "Cycle N workspaces (negative = left, positive = right).
 Reimplements `+workspace/cycle' but iterates the visible workspace
 list instead of the raw `+workspace-list-names': first the tab-bar list
-\(`agent-repl--ws-tabline-names', which drops the workspaces of repos
-folded in the drawer), then the hide-mode filter
+\(`agent-repl--ws-tabline-names', which drops the workspaces of
+folded repos), then the hide-mode filter
 \(`agent-repl--filter-hidden-names'), so both folded-repo workspaces and
 closed-REPL workspaces dropped from the tabline are skipped during
 s-{ / s-}.  Mirrors Doom's protected-workspace handling: when current
@@ -2914,7 +2917,7 @@ Signals `user-error' if INDEX is out of range.  Pure persp wrapper —
 does not consult `current-prefix-arg' and does not flash the tab.
 
 Indexes the TAB-BAR list (`--ws-tabline-names'), not the raw workspace
-list, so a repo folded in the drawer takes its workspaces out of the
+list, so a folded repo takes its workspaces out of the
 numbering entirely and the remaining numbers stay contiguous — `SPC 3'
 always lands on the third tab the user can actually see."
   (let* ((names (agent-repl--ws-tabline-names))

@@ -796,9 +796,9 @@ survives Emacs restart."
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-state-save-includes-merge-completed ()
-  "state-save serializes `:merge-completed' so a merged ws auto-reappears
-in the drawer's MERGED bucket after an Emacs restart, until the user
-explicitly `x's it (which routes to `--finish-workspace')."
+  "state-save serializes `:merge-completed' so a merged ws is still
+recognized as merged after an Emacs restart, until the user explicitly
+finishes it (which routes to `--finish-workspace')."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-merged-" t)))
       (unwind-protect

@@ -40,12 +40,7 @@ no-op while it is set:
   pass would run, so suppressing it loses no work.
 - `agent-repl--record-workspace-history' must NOT record the transient
   visit — otherwise `SPC b p' would treat the just-generated workspace as
-  the caller's previous workspace and stamp a phantom `:last-viewed-at'.
-
-The drawer's activation reactions are deliberately LEFT to run: they set
-the background workspace's own drawer state (cursor on its entry, drawer
-visibility) which persp-mode then saves into that workspace's window
-configuration, so its drawer is already correct on the first real switch.")
+  the caller's previous workspace and stamp a phantom `:last-viewed-at'.")
 
 (defgroup agent-repl nil
   "Claude Code REPL integration for Doom Emacs."
