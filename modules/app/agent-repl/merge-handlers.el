@@ -373,7 +373,10 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
   (agent-repl--gns-sockets-close-then
    ws
    (lambda ()
-     (agent-repl--merge-close-workspace ws 'preserve-entry)
+     ;; Bound inside the lambda: runs async after the GNS-socket close
+     ;; poll, outside the merge handler's dynamic extent.
+     (let ((agent-repl--kill-cause "pr-merged teardown (merge-handlers, auto)"))
+       (agent-repl--merge-close-workspace ws 'preserve-entry))
      (when main-dir
        (agent-repl--refresh-magit-status-for-dir main-dir ws)))))
 

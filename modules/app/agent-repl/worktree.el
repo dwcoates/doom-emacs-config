@@ -2209,8 +2209,9 @@ it is normalized to the dirname before lookup."
   (let* ((ws (agent-repl--bare-workspace-name ws))
          (worktree-p (agent-repl--ws-get ws :worktree-p))
          (project-dir (agent-repl--ws-get ws :project-dir)))
-    (agent-repl--log ws "finish-workspace ws=%s worktree-p=%s path=%s"
-                      ws worktree-p (or project-dir "nil"))
+    (agent-repl--log ws "finish-workspace ws=%s worktree-p=%s path=%s kill-cause=%s"
+                      ws worktree-p (or project-dir "nil")
+                      (agent-repl--kill-cause-str))
     ;; Kill the agent session through its frontend's registry `:kill-fn'
     ;; dispatch — NOT a direct `agent-repl--kill-vterm-process' call,
     ;; which only ever tore down a vterm process and silently left a
@@ -2422,7 +2423,8 @@ do this."
                       "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
                       ws (or repo-root "nil"))
     (agent-repl--log ws "workspace-merge-async: calling close-workspace ws=%s" ws)
-    (agent-repl--merge-close-workspace ws 'preserve-entry)
+    (let ((agent-repl--kill-cause "workspace merge teardown (workspace-merge-async)"))
+      (agent-repl--merge-close-workspace ws 'preserve-entry))
     (agent-repl--log ws "workspace-merge-async: close-workspace done elapsed=%.3fs — spawning thread"
                       (- (float-time) t0-async))
     (make-thread
@@ -2876,7 +2878,8 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
 
 (defun agent-repl--handle-finish-command (cmd)
   "Handle a \"finish\" workspace command CMD."
-  (let ((ws (alist-get 'workspace cmd)))
+  (let ((ws (alist-get 'workspace cmd))
+        (agent-repl--kill-cause "workspace-commands-file finish verb (skill dispatch)"))
     (agent-repl--log ws "workspace-commands-file finish: ws=%s" ws)
     (agent-repl--finish-workspace ws)))
 
@@ -2988,7 +2991,11 @@ sockets before its session is killed."
   (let ((ws (agent-repl--bare-workspace-name (alist-get 'workspace cmd))))
     (agent-repl--log ws "workspace-commands-file close: ws=%s" ws)
     (agent-repl--gns-sockets-close-then
-     ws (lambda () (agent-repl--close-workspace ws)))))
+     ws (lambda ()
+          ;; Bound inside the lambda: the teardown runs async after the
+          ;; GNS-socket close poll, outside the dispatcher's dynamic extent.
+          (let ((agent-repl--kill-cause "workspace-commands-file close verb (skill dispatch)"))
+            (agent-repl--close-workspace ws))))))
 
 (defun agent-repl--resolve-open-workspace-dir (name git-root)
   "Resolve the on-disk project directory for workspace NAME.
@@ -5027,7 +5034,11 @@ off so the user resolves in magit directly."
                  (agent-repl--gns-sockets-close-then
                   target-ws
                   (lambda ()
-                    (agent-repl--merge-close-workspace target-ws 'preserve-entry)
+                    ;; Bound inside the lambda: runs async after the
+                    ;; GNS-socket close poll, outside the initiator's
+                    ;; dynamic extent.
+                    (let ((agent-repl--kill-cause "merge-queue cherry-pick teardown (auto)"))
+                      (agent-repl--merge-close-workspace target-ws 'preserve-entry))
                     (agent-repl--refresh-magit-status-for-dir
                      project-root target-ws)))))))
             ;; Refresh the drawer's `:detail-*' cache so its rendering

@@ -209,7 +209,8 @@ dispatch before invoking `+workspace/kill'."
                         "kill-before-workspace-delete: target!=current, skipping (caller handles teardown)"))
      ((agent-repl--agent-running-p)
       (agent-repl--log current "kill-before-workspace-delete: agent running, killing session")
-      (agent-repl-kill))
+      (let ((agent-repl--kill-cause "persp-delete advice (+workspace/kill on current ws)"))
+        (agent-repl-kill)))
      (t
       (agent-repl--log current "kill-before-workspace-delete: agent not running, no-op")))))
 

@@ -739,7 +739,9 @@ preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
   (let* ((ws (or ws (agent-repl--read-nukeable-workspace "Nuke workspace: ")))
-         (t0 (float-time)))
+         (t0 (float-time))
+         (agent-repl--kill-cause (or agent-repl--kill-cause
+                                     "interactive nuke command (agent-repl-nuke-workspace)")))
     (agent-repl--log ws "nuke-workspace: ENTRY ws=%s" ws)
     (let ((action (agent-repl--nuke-or-kill-workspace ws)))
       (agent-repl--log ws
@@ -771,8 +773,9 @@ Prompts once with the count before proceeding."
       (user-error "Aborted"))
     (agent-repl--log (agent-repl--ws-current-name) "nuke-all-workspaces: count=%d" count)
     ;; Snapshot keys before iterating; each call mutates the hash.
-    (dolist (ws known)
-      (agent-repl--nuke-one-workspace ws))
+    (let ((agent-repl--kill-cause "interactive nuke-all command (agent-repl-nuke-all-workspaces)"))
+      (dolist (ws known)
+        (agent-repl--nuke-one-workspace ws)))
     (force-mode-line-update t)
     (message "Nuked %d workspace(s)" count)))
 
@@ -798,8 +801,9 @@ proceeding.  Same per-workspace teardown as
       (user-error "Aborted"))
     (agent-repl--log (agent-repl--ws-current-name)
                       "nuke-restored-workspaces: count=%d" count)
-    (dolist (ws restored)
-      (agent-repl--nuke-one-workspace ws))
+    (let ((agent-repl--kill-cause "interactive nuke-restored command (agent-repl-nuke-restored-workspaces)"))
+      (dolist (ws restored)
+        (agent-repl--nuke-one-workspace ws)))
     (force-mode-line-update t)
     (message "Nuked %d restored workspace(s)" count)))
 
@@ -823,6 +827,8 @@ preserved, so re-opening the workspace later resumes the Claude
 session — accidental invocations are easily recoverable."
   (interactive)
   (let* ((ws (or ws (agent-repl--read-nukeable-workspace "Kill workspace: ")))
+         (agent-repl--kill-cause (or agent-repl--kill-cause
+                                     "interactive kill command (agent-repl-kill-workspace)"))
          (action (agent-repl--nuke-or-kill-workspace ws)))
     (force-mode-line-update t)
     (message (if (eq action 'nuke)
@@ -851,12 +857,13 @@ that were actually killed (useful for tests)."
     (agent-repl--log current
                       "sweep-hidden-workspaces: except=%s candidates=%S"
                       current candidates)
-    (dolist (ws candidates)
-      (condition-case err
-          (agent-repl--nuke-one-workspace ws)
-        (error
-         (agent-repl--log ws "sweep-hidden-workspaces: kill error ws=%s err=%S"
-                           ws err))))
+    (let ((agent-repl--kill-cause "hidden-workspace sweep (auto, on workspace switch)"))
+      (dolist (ws candidates)
+        (condition-case err
+            (agent-repl--nuke-one-workspace ws)
+          (error
+           (agent-repl--log ws "sweep-hidden-workspaces: kill error ws=%s err=%S"
+                             ws err)))))
     candidates))
 
 (defun agent-repl--maybe-sweep-hidden-on-switch (&optional ws)
