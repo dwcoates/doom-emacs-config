@@ -51,7 +51,7 @@ import { initSidebar, isStandalone } from "./sidebar.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import { ConversationStore } from "./store.js";
-import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
+import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
@@ -219,20 +219,15 @@ async function boot(): Promise<void> {
   // otherwise collapse an overlay the user is reading mid-turn.
   let counterMenu: "agents" | "tasks" | "tokens" | null = null;
 
-  // The running task's timer. Its tick writes the one span it owns rather
-  // than re-rendering the topbar: a whole-strip rewrite once a second, on
-  // top of the per-frame rewrites a streaming turn already drives, would be
-  // churn in service of a single changing digit.
-  //
-  // The span is re-created by every renderChrome, so the tick looks it up
-  // each time instead of holding a node that will not survive the turn.
-  let timerLabel = IDLE_LABEL;
-  const timer = new TaskTimer(windowHost(window), (label) => {
-    timerLabel = label;
-    const slot = infoEl.querySelector(`[${TIMER_SLOT}]`);
-    if (!slot) throw new Error(`topbar has no ${TIMER_SLOT} span`);
-    slot.textContent = label;
-  });
+  // The running task's timer now paints the live feed-tail stats row, not a
+  // topbar slot: its clock moved down beside the progress indicator (see
+  // `turnStatsRowHtml`). Its tick writes just that one span rather than
+  // re-rendering the feed — a whole-feed rewrite once a second, on top of the
+  // per-frame rewrites a streaming turn already drives, would be churn in
+  // service of a single changing digit. The FeedRenderer skips the write when
+  // no row is mounted (off-turn, or a replay-only paint), and bakes the last
+  // reading into every render so a fresh row never blinks empty.
+  const timer = new TaskTimer(windowHost(window), (label) => feed.paintTurnTimer(label));
 
   // The agent bubbles' own elapsed tick, the header timer's twin (see
   // agent-clock.ts): one interval repaints every RUNNING agent's topbar
@@ -250,7 +245,7 @@ async function boot(): Promise<void> {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
     // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, timerLabel), {
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
       agentsOpen: counterMenu === "agents",
       tasksOpen: counterMenu === "tasks",
       tokensOpen: counterMenu === "tokens",

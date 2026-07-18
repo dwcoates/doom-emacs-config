@@ -29,6 +29,7 @@ import {
   retryingRowHtml,
   showsMonitoringRow,
   tailStatusRow,
+  turnStatsRowHtml,
   wakeRemainingLabel,
   workingRowHtml,
   navTokensForEntry,
@@ -38,6 +39,7 @@ import { AsyncSource } from "../src/protocol.js";
 import {
   ConversationItem,
   ResultItem,
+  StoreState,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -411,6 +413,89 @@ describe("showsMonitoringRow (global monitoring-row precedence)", () => {
     const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, anyLiveAsync: false });
     // Assert
     expect(show).toBe(false);
+  });
+});
+
+describe("turnStatsRowHtml (live turn clock + context delta)", () => {
+  /** A store state, defaulted to a running turn with a known context. */
+  function feedState(over: Partial<StoreState> = {}): StoreState {
+    return {
+      sessionId: "s1",
+      daemonVersion: "0.1.0",
+      model: "m",
+      models: [],
+      cwd: "/w",
+      claudeSessionId: "",
+      permissionMode: "default",
+      items: [],
+      queued: [],
+      turnInFlight: true,
+      turnStartedAt: "2026-05-24T10:00:00.000Z",
+      lastFinalResponseAt: null,
+      contextTokens: null,
+      resultUsage: null,
+      turnUsage: new Map(),
+      modelUsage: null,
+      compacting: false,
+      interrupting: false,
+      turnRetracted: false,
+      costUsd: null,
+      lastSeq: 0,
+      ...over,
+    };
+  }
+
+  /** A settled result whose context stood at TOTAL when it closed. */
+  function resultAt(total: number): ResultItem {
+    return { ...result(), context: { total, delta: 0 } };
+  }
+
+  it("renders nothing off-turn", () => {
+    // Arrange / Act — no turn running, so the tail carries no stats row.
+    const html = turnStatsRowHtml(feedState({ turnStartedAt: null }), "5s");
+    // Assert
+    expect(html).toBe("");
+  });
+
+  it("bakes the handed-in clock label into the time slot", () => {
+    // Arrange / Act — the tick's current reading, shown at once (see the
+    // TIMER_SLOT the same tick repaints between renders).
+    const html = turnStatsRowHtml(feedState(), "1m 30s");
+    // Assert
+    expect(html).toContain(`<span class="info-time" data-task-timer>1m 30s</span>`);
+  });
+
+  it("renders the context grown so far in the token amber", () => {
+    // Arrange — the context stands 12,000 above where the last result left it.
+    const state = feedState({
+      contextTokens: 212_000,
+      items: [resultAt(200_000)],
+    });
+    // Act
+    const html = turnStatsRowHtml(state, "5s");
+    // Assert — the signed delta, the live twin of the bubble corner's figure.
+    expect(html).toContain(`<span class="info-tokens">+12,000</span>`);
+  });
+
+  it("starts a fresh turn's delta at +0", () => {
+    // Arrange — no request has grown the context past the last result yet.
+    const state = feedState({
+      contextTokens: 200_000,
+      items: [resultAt(200_000)],
+    });
+    // Act
+    const html = turnStatsRowHtml(state, "0s");
+    // Assert
+    expect(html).toContain(`<span class="info-tokens">+0</span>`);
+  });
+
+  it("omits the delta when the context size is unknown", () => {
+    // Arrange / Act — a /clear or compaction leaves the size unknown; the
+    // corner omits the figure there too, so the live row does the same.
+    const html = turnStatsRowHtml(feedState({ contextTokens: null }), "5s");
+    // Assert
+    expect(html).not.toContain("info-tokens");
+    expect(html).toContain("info-time");
   });
 });
 

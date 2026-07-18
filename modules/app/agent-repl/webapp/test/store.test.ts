@@ -7,6 +7,7 @@ import {
   ThinkingItem,
   ToolItem,
   UserTurnItem,
+  liveContextDelta,
   topLevelUsage,
 } from "../src/store.js";
 
@@ -1741,6 +1742,71 @@ describe("ConversationStore interrupt gating", () => {
     store.applyRaw(frame("tool-use-result", { tool_use_id: "t1", is_error: false, content: "done" }));
     // Assert — the update landed within the existing bubble.
     expect(toolItems(store)[0].result).toMatchObject({ isError: false });
+  });
+});
+
+describe("liveContextDelta", () => {
+  /** A user-turn frame beginning a fresh turn (no new request yet). */
+  function userTurnFrame(): string {
+    return frame("user-turn", {
+      request_id: "r1",
+      content: [{ type: "text", text: "hi" }],
+    });
+  }
+
+  it("reads the growth from zero before any result has landed", () => {
+    // Arrange — the session's first request, no prior result to measure from.
+    const store = newStore();
+    // Act
+    store.applyRaw(usageFrame(50_000));
+    // Assert
+    expect(liveContextDelta(store.state)).toBe(50_000);
+  });
+
+  it("reads zero at a fresh turn's start, before its first request lands", () => {
+    // Arrange — a completed turn left the context standing at 200k.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(resultFrame());
+    // Act — the next turn opens; no new request has grown the context yet.
+    store.applyRaw(userTurnFrame());
+    // Assert — the running tally starts each task at zero (a pure delta).
+    expect(liveContextDelta(store.state)).toBe(0);
+  });
+
+  it("grows as the running turn's requests enlarge the context", () => {
+    // Arrange — a turn settled with the context at 200k.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(resultFrame());
+    store.applyRaw(userTurnFrame());
+    // Act — a request in the new turn pushes the context to 250k.
+    store.applyRaw(usageFrame(250_000));
+    // Assert — the tally is the growth over the last result, not the total.
+    expect(liveContextDelta(store.state)).toBe(50_000);
+  });
+
+  it("measures from zero when the last result cleared its standing", () => {
+    // Arrange — a /clear zeroed the last result's context, so a growth
+    // measures from zero (the same baseline resultContext uses).
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    store.applyRaw(resultFrame());
+    // Act — the next request declares a fresh 30k context.
+    store.applyRaw(usageFrame(30_000));
+    // Assert
+    expect(liveContextDelta(store.state)).toBe(30_000);
+  });
+
+  it("is unknown while the context size is unknown", () => {
+    // Arrange — a /clear invalidates the standing until the next request.
+    const store = newStore();
+    store.applyRaw(usageFrame(200_000));
+    // Act
+    store.applyRaw(frame("system", { subtype: "init", data: {} }));
+    // Assert — a dash, never a lying zero.
+    expect(liveContextDelta(store.state)).toBeNull();
   });
 });
 

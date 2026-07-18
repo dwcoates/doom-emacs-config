@@ -14,6 +14,7 @@ import {
   topbarClickAction,
 } from "./topbar.js";
 import { taskCreateToolUseId } from "./tasks.js";
+import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { formatTokens } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
@@ -63,6 +64,7 @@ import {
   ThinkingItem,
   ToolItem,
   UserTurnItem,
+  liveContextDelta,
 } from "./store.js";
 
 export interface Actions {
@@ -1828,6 +1830,35 @@ function formatTokenDelta(n: number): string {
 }
 
 /**
+ * The running turn's live stats row, force-appended at the feed tail right
+ * BELOW whatever progress indicator (thinking/working/retrying) currently
+ * speaks for it: the turn's elapsed clock in the topbar's time blue, then the
+ * context it has grown so far in the topbar's token amber, bullet-separated
+ * (`1m 30s · +12,000`). It is the live twin of the corner a final response
+ * settles into (`resultMeta`) — the same two figures in the same two colors,
+ * shown WHILE the turn runs rather than after it lands, which is why the
+ * session topbar no longer carries the clock (see `sessionTopbarDatapoints`).
+ *
+ * TIMER-LABEL is the elapsed clock's current reading, baked in so a fresh
+ * render shows it at once; the once-a-second tick then repaints just the
+ * `TIMER_SLOT` span between renders (see `FeedRenderer.paintTurnTimer`). The
+ * delta reads the live figure (`liveContextDelta`), so it starts each turn at
+ * `+0` and grows as requests land, and is omitted when the size is unknown (a
+ * `/clear` or a compaction) — exactly as the settled corner omits it.
+ *
+ * Returns "" off-turn, so the caller drops the node when no turn is running.
+ */
+export function turnStatsRowHtml(state: StoreState, timerLabel: string): string {
+  if (state.turnStartedAt === null) return "";
+  const parts = [`<span class="info-time" ${TIMER_SLOT}>${escapeHtml(timerLabel)}</span>`];
+  const delta = liveContextDelta(state);
+  if (delta !== null) {
+    parts.push(`<span class="info-tokens">${escapeHtml(formatTokenDelta(delta))}</span>`);
+  }
+  return `<div class="turn-stats-live" aria-hidden="true">${parts.join(" · ")}</div>`;
+}
+
+/**
  * A final response's top-right corner content: the turn's elapsed time in
  * the topbar's time color, then the context delta it moved in the topbar's
  * token color, bullet-separated (`5s · +12,000`). The context total itself
@@ -2362,6 +2393,13 @@ export class FeedRenderer {
   /** Half-typed agent messages, keyed by agent id (see agentComposer). */
   private msgDrafts = new Map<string, string>();
   private lastState: StoreState | null = null;
+  /**
+   * The running turn's elapsed-clock reading, baked into the live turn-stats
+   * tail row on every render and repainted between renders by `paintTurnTimer`
+   * (the once-a-second tick's target). Off-turn the row is absent and this
+   * holds the idle placeholder the next turn's first render starts from.
+   */
+  private turnTimerLabel = IDLE_LABEL;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
   /** Newest user turn seen by a render, so the next one spots a fresh send. */
@@ -2843,6 +2881,18 @@ export class FeedRenderer {
       this.container.appendChild(el);
       this.nodes.set(tailRow.key, { el, html: tailRow.html });
     }
+    // The live turn-stats row, so a fresh join landing mid-turn shows the
+    // running clock and grown-context figure immediately, on the same
+    // turn-in-flight terms render() shows it.
+    if (state.turnStartedAt !== null) {
+      const el = document.createElement("div");
+      el.className = "feed-item";
+      el.dataset.key = "turn-stats";
+      const html = turnStatsRowHtml(state, this.turnTimerLabel);
+      el.innerHTML = html;
+      this.container.appendChild(el);
+      this.nodes.set("turn-stats", { el, html });
+    }
     // The global `monitoring…` fallback, on the same idle-with-live-async
     // terms render() shows it (see `showsMonitoringRow`), so a fresh join
     // landing on a quiescent-but-still-watching session sees it immediately.
@@ -2945,6 +2995,20 @@ export class FeedRenderer {
     this.container.appendChild(entry.el);
   }
 
+  /**
+   * Repaint the live turn-stats row's elapsed clock between feed renders —
+   * the once-a-second tick's one write, the feed twin of the topbar timer's
+   * old slot paint. Stores the reading so the next render bakes it in, and
+   * updates the mounted span in place. The span is legitimately absent when no
+   * turn runs (no row) and during a replay-only paint (the feed is not
+   * rendered then), so a missing slot is skipped rather than treated as error.
+   */
+  paintTurnTimer(label: string): void {
+    this.turnTimerLabel = label;
+    const slot = this.container.querySelector(`.turn-stats-live [${TIMER_SLOT}]`);
+    if (slot) slot.textContent = label;
+  }
+
   render(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
@@ -3020,6 +3084,15 @@ export class FeedRenderer {
     // precedence lives in `tailStatusRow`.
     const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
     if (tailRow) this.reconcileTailNode(tailRow.key, tailRow.html, seen);
+    // The live turn-stats row rides just BELOW the progress indicator, for
+    // exactly as long as the turn runs: the elapsed clock (blue) and the
+    // context grown so far (amber), the running twin of the corner a final
+    // response settles into. Force-appended after the tail status row so it
+    // trails it; dropped the moment the turn ends (the guard fails, its key
+    // falls out of `seen`, the sweep removes it).
+    if (state.turnStartedAt !== null) {
+      this.reconcileTailNode("turn-stats", turnStatsRowHtml(state, this.turnTimerLabel), seen);
+    }
     // The global `monitoring…` row: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose
