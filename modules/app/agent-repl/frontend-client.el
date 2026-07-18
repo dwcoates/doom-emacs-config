@@ -39,6 +39,7 @@
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
+(declare-function agent-repl--frontend-snap-webview-to-tail "agent-repl-frontend" (ws))
 (declare-function agent-repl--frontend-remount-all-webviews "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
@@ -782,8 +783,17 @@ Records the sent turn's request id and RAW text under `:sent-turn',
 which is what `agent-repl-interrupt' needs to undo the send: the
 daemon names the turn it retracts by request id, and RAW (never
 INPUT) is what goes back to the input buffer, since the metaprompt
-decoration is not the user's to revise."
+decoration is not the user's to revise.
+
+Snaps the webview feed to its tail FIRST, before anything else: a
+prompt sent from a feed scrolled up in history jumps to the bottom
+immediately, rather than waiting for the daemon to echo the turn back
+and render it.  The webapp's own repin-on-render (repinsToTail in
+webapp/src/render.ts) still lands the answer at the tail, but only
+once the turn arrives — this snap closes the round-trip gap so the
+sender watches the bottom from the instant the prompt leaves."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
+  (agent-repl--frontend-snap-webview-to-tail ws)
   (agent-repl--mark-ws-thinking ws)
   (agent-repl--increment-prefix-counter ws)
   (agent-repl--ws-put ws :last-prompt-time (float-time))
