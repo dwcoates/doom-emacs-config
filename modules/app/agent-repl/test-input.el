@@ -1890,6 +1890,22 @@ send whenever the prefix counter aligned with the period."
     ;; after-change-functions should include history-on-change
     (should (memq #'agent-repl--history-on-change after-change-functions))))
 
+(ert-deftest agent-repl-test-agent-repl-input-mode-applies-configured-background ()
+  "`agent-repl-input-mode' tints the buffer with `agent-repl-input-background-shade'."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-bg*"
+    (let ((applied-shade nil))
+      (cl-letf (((symbol-function 'agent-repl--set-buffer-background)
+                 (lambda (shade) (setq applied-shade shade))))
+        (agent-repl-input-mode))
+      (should (= applied-shade agent-repl-input-background-shade)))))
+
+(ert-deftest agent-repl-test-agent-repl-input-background-shade-is-dark ()
+  "The input buffer background shade defaults dark, not merely dim.
+Pins the darkened default: a shade at or above 37 (the prior default)
+would regress the darker-input-background change back to its old,
+lighter look."
+  (should (< agent-repl-input-background-shade 37)))
+
 (ert-deftest agent-repl-test-agent-repl-input-mode-no-visual-line-mode ()
   "`agent-repl-input-mode' no longer force-enables `visual-line-mode'.
 The buffer's screen-line editing tuning was removed, so the mode leaves
