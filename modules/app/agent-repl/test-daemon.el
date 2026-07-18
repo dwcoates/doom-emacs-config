@@ -137,6 +137,27 @@ exercising the one-shot itself re-bind it nil in their own `let'."
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
+;;;; ---- poll-until helper ---------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-poll-until-returns-nil-when-condition-clears ()
+  "The poll returns nil (and stops early) once the predicate clears."
+  ;; Arrange — a predicate that flips to nil on its second call.
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'sleep-for) #'ignore))
+      ;; Act
+      (let ((result (agent-repl--frontend-poll-until
+                     (lambda () (setq calls (1+ calls)) (< calls 2))
+                     10 0.01)))
+        ;; Assert — cleared condition yields nil.
+        (should (null result))))))
+
+(ert-deftest agent-repl-test-daemon-poll-until-returns-truthy-on-timeout ()
+  "The poll returns the predicate's truthy value when the deadline passes first."
+  ;; Arrange — a predicate that never clears, and a zeroed timeout.
+  (cl-letf (((symbol-function 'sleep-for) #'ignore))
+    ;; Act / Assert
+    (should (eq t (agent-repl--frontend-poll-until (lambda () t) 0 0.01)))))
+
 ;;;; ---- staleness: on-disk binary mtime -------------------------------------
 
 (ert-deftest agent-repl-test-daemon-disk-mtime-reads-integer-seconds ()

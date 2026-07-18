@@ -180,6 +180,22 @@ No-op under batch (tests) and inside the agent sandbox, matching the
   (or noninteractive
       (agent-repl--in-sandbox-p)))
 
+(defun agent-repl--frontend-poll-until (predicate timeout interval)
+  "Block until PREDICATE clears or TIMEOUT elapses; return PREDICATE's last value.
+Calls PREDICATE (a nullary function), sleeping INTERVAL seconds between
+polls, until PREDICATE returns nil or the deadline passes.  Returns the
+LAST value of PREDICATE, so a caller branches on whether the condition
+cleared (nil) or the wait timed out (non-nil) — e.g. \"process still live
+after the grace window\" or \"port still bound after shutdown\".
+
+Uses `sleep-for', NOT `sit-for': sit-for returns immediately on pending
+input, which would collapse the wait window while the user types (the
+same rationale as the readiness poll in frontend-client.el)."
+  (let ((deadline (+ (float-time) timeout)))
+    (while (and (funcall predicate) (< (float-time) deadline))
+      (sleep-for interval))
+    (funcall predicate)))
+
 ;;;; ---- Build-if-stale ---------------------------------------------------
 
 (defun agent-repl--frontend-run-build-script (args)
@@ -375,14 +391,9 @@ restart, so a wedged foreign daemon never costs a doomed spawn."
     (error
      (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — polling the port anyway"
                        (error-message-string err))))
-  (let ((deadline (+ (float-time) agent-repl-frontend-foreign-stop-grace-seconds)))
-    (while (and (agent-repl--frontend-daemon-port-responsive-p)
-                (< (float-time) deadline))
-      ;; sleep-for, NOT sit-for: sit-for returns immediately on pending
-      ;; input, collapsing the grace window while the user types (same
-      ;; rationale as the readiness poll in frontend-client.el).
-      (sleep-for 0.1)))
-  (if (agent-repl--frontend-daemon-port-responsive-p)
+  (if (agent-repl--frontend-poll-until
+       #'agent-repl--frontend-daemon-port-responsive-p
+       agent-repl-frontend-foreign-stop-grace-seconds 0.1)
       (agent-repl--log nil "startup: adopted daemon on %s ignored shutdown within %ss — leaving it in place; run M-x agent-repl-frontend-daemon-restart"
                         agent-repl-frontend-daemon-addr
                         agent-repl-frontend-foreign-stop-grace-seconds)
@@ -499,14 +510,9 @@ inherited-pipe EOF."
                busy)))
     (let ((proc agent-repl--frontend-daemon-process))
       (signal-process proc 'TERM)
-      (let ((deadline (+ (float-time) agent-repl-frontend-stop-grace-seconds)))
-        (while (and (process-live-p proc) (< (float-time) deadline))
-          ;; sleep-for, NOT sit-for: sit-for returns immediately on
-          ;; pending input, which would collapse the grace window while
-          ;; the user types (same rationale as the readiness poll in
-          ;; frontend-client.el).
-          (sleep-for 0.05)))
-      (when (process-live-p proc)
+      (when (agent-repl--frontend-poll-until
+             (lambda () (process-live-p proc))
+             agent-repl-frontend-stop-grace-seconds 0.05)
         (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
                          agent-repl-frontend-stop-grace-seconds)
         (delete-process proc))))
