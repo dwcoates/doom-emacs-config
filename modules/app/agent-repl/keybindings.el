@@ -650,66 +650,13 @@ Reports comprehensive diagnostics."
 
 ;;; Section 4: Keybinding definitions
 
-;; C-S-<key>: drawer-equivalent operations dispatched against the drawer's
-;; selected entry.  Auto-revert keeps the drawer cursor sync'd with the
-;; active workspace by default, so these naturally target the current
-;; workspace until the user moves the drawer cursor.
-;;
-;; Bind in `global-map' (no `:nvi' state prefix) so the chord works
-;; uniformly across evil normal/visual/insert AND evil-emacs-state
-;; buffers (vterm, *scratch*, magit popups, etc.).  Evil state maps
-;; only override global-map when they bind the same key, so leaving
-;; these in global-map means they fall through correctly everywhere.
-(map! "C-S-n"        #'agent-repl-sidebar-global-next)
-(map! "C-S-p"        #'agent-repl-sidebar-global-prev)
-(map! "C-S-x"        #'agent-repl-sidebar-global-nuke)
-(map! "C-S-d"        #'agent-repl-sidebar-global-kill)
-(map! "C-S-i"        #'agent-repl-sidebar-global-send-prompt)
-(map! "C-S-m"        #'agent-repl-sidebar-global-merge-into-master)
-(map! "C-S-h"        #'agent-repl-sidebar-global-toggle-hidden)
-(map! "C-S-t"        #'agent-repl-sidebar-global-toggle-mark)
-(map! "C-S-u"        #'agent-repl-sidebar-global-clear-marks)
-(map! "C-S-+"        #'agent-repl-sidebar-global-priority-up)
-(map! "C-S--"        #'agent-repl-sidebar-global-priority-down)
-
 (defconst agent-repl--scroll-output-intercept-states
   '(normal visual insert emacs operator motion replace)
   "Canonical list of every evil state.  Originally introduced so the
 \(now-removed) scroll-output chords could install intercept aux map
 entries on `general-override-mode-map' uniformly across all of them;
-reused as-is by `agent-repl--install-drawer-visit-override' and
-`agent-repl--install-workspace-jump-overrides' below so a chord wins
-key lookup regardless of which evil state is current.")
-
-;; `C-S-<return>' -> `agent-repl-sidebar-global-visit' needs the same
-;; override treatment as the scroll chords -- a plain `(map! ... )' lands
-;; in `global-map', which loses to Doom default's `:gi/:gn "C-S-RET"' ->
-;; `+default/newline-above' (evil aux on global state maps) and to
-;; `agent-repl-input-mode-map's `:ni "C-S-RET"' major-mode aux.  Bind the
-;; chord on `general-override-mode-map' AND its per-state aux maps so
-;; it wins above all of them.
-(defconst agent-repl--drawer-visit-chord
-  '(("C-S-<return>" . agent-repl-sidebar-global-visit))
-  "Alist of (KEY-STRING . COMMAND) for the global drawer-visit chord
-that must win key lookup above the Doom default's `:gi/:gn \"C-S-RET\"'
-binding and above `agent-repl-input-mode-map's `:ni \"C-S-RET\"' aux.")
-
-(defun agent-repl--install-drawer-visit-override ()
-  "Install `agent-repl--drawer-visit-chord' into `general-override-mode-map'
-at top-level AND into its evil intercept aux maps for every state in
-`agent-repl--scroll-output-intercept-states' (reused as the canonical
-\"all evil states\" list).  Idempotent."
-  (dolist (entry agent-repl--drawer-visit-chord)
-    (let ((seq (kbd (car entry)))
-          (cmd (cdr entry)))
-      (define-key general-override-mode-map seq cmd)
-      (when (fboundp 'evil-get-auxiliary-keymap)
-        (dolist (state agent-repl--scroll-output-intercept-states)
-          (define-key (evil-get-auxiliary-keymap
-                       general-override-mode-map state t t)
-                      seq cmd))))))
-
-(agent-repl--install-drawer-visit-override)
+reused as-is by `agent-repl--install-workspace-jump-overrides' below
+so a chord wins key lookup regardless of which evil state is current.")
 
 (map! :leader :prefix "w" :n "f" #'agent-repl-fullscreen-and-focus)
 
@@ -778,10 +725,9 @@ at top-level AND into its evil intercept aux maps for every state in
 ;;     resized" when font size is already default.
 ;;
 ;; A plain `(map! :g ...)' binding lands in `global-map' and loses to
-;; the Doom `:n' entry (in `evil-normal-state-map').  Mirror the
-;; `agent-repl--install-drawer-visit-override' pattern instead:
-;; install the chord into `general-override-mode-map' at top-level AND
-;; into its evil aux maps for every evil state, so the binding wins
+;; the Doom `:n' entry (in `evil-normal-state-map').  Install the
+;; chord into `general-override-mode-map' at top-level AND into its
+;; evil aux maps for every evil state instead, so the binding wins
 ;; lookup regardless of evil state and regardless of major mode.
 ;;
 ;; Sourced from the prefix-arg-free wrappers in
