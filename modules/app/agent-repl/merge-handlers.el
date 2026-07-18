@@ -596,15 +596,19 @@ workspace down.  Selected per-invocation by the dispatcher's
 `onto-master' argument, NOT by the repo's `.eld' handler, so it
 overrides the checked-in cherry-pick prescription.
 
-Fast-forward only, so it can NEVER discard local-only trunk commits:
+Never discards local-only trunk commits:
   - SIGNALS `user-error' on a dirty main worktree (so the merge-async
     failure path revives the workspace for the user), mirroring
     `agent-repl--merge-handler-refresh-master-from-origin'.
-  - SIGNALS `user-error' when local master has diverged from
-    `origin/master' (not an ancestor), rather than resetting over the
-    divergent commits.
-  - SIGNALS `user-error' when the fetch or the fast-forward itself
-    fails.
+  - When local master is behind `origin/master' (an ancestor), advances
+    it by fast-forward.
+  - When local master has DIVERGED (carries commits not on origin),
+    rebases those commits onto `origin/master' via
+    `agent-repl--rebase-with-auto-resolve', which auto-resolves
+    orthogonal conflicts through the shared headless resolver and aborts
+    on any it cannot; a declined rebase SIGNALS `user-error' (the old
+    resolve-by-hand path), so local commits are never discarded.
+  - SIGNALS `user-error' when the fetch or the advance itself fails.
 
 Git work runs synchronously on the merge worker thread (the same
 thread context the cherry-pick handler does its git work on); only
@@ -644,31 +648,50 @@ refresh handler's same edge case).  ARGS is unused."
         (unless (= fec 0)
           (user-error "Cannot advance master: `git fetch origin %s' failed in %s (exit %d)"
                       branch main-dir fec)))
-      ;; Refuse to advance when local master carries commits not on
-      ;; origin (divergence) — fast-forward only, no data loss.
-      (unless (= 0 (agent-repl--git-exit-code
-                    main-dir "merge-base" "--is-ancestor" branch origin-ref))
-        (user-error
-         "Cannot fast-forward %s to %s: local %s has commits not in %s (diverged) — resolve manually"
-         branch origin-ref branch origin-ref))
-      ;; Whether the merged work touches `apps/cee-agent' MUST be sampled
-      ;; BEFORE the fast-forward — afterwards local trunk equals
+      ;; Whether local master has DIVERGED (carries commits not on origin)
+      ;; and whether the merged work touches `apps/cee-agent' BOTH must be
+      ;; sampled BEFORE any advance — afterwards local trunk equals
       ;; `origin-ref' and the `branch..origin-ref' diff is empty.
-      (let ((cee-touched
+      (let ((diverged
+             (not (= 0 (agent-repl--git-exit-code
+                        main-dir "merge-base" "--is-ancestor"
+                        branch origin-ref))))
+            (cee-touched
              (agent-repl--merge-delta-touches-dir-p
               main-dir branch origin-ref agent-repl--cee-agent-dir-prefix))
             (master-wt (agent-repl--master-worktree-path main-dir)))
-        ;; Advance the trunk: fast-forward the worktree that holds master
-        ;; (so its working tree advances too), else move the ref directly.
-        (if master-wt
-            (let ((mec (agent-repl--git-exit-code
-                        master-wt "merge" "--ff-only" origin-ref)))
-              (agent-repl--log target-ws
-                                "merge-handler-onto-master: ws=%s merge --ff-only %s in %s exit=%d"
-                                target-ws origin-ref master-wt mec)
-              (unless (= mec 0)
-                (user-error "Cannot fast-forward %s to %s in %s (exit %d)"
-                            branch origin-ref master-wt mec)))
+        (cond
+         ;; Diverged: rebase local master onto origin (auto-resolving
+         ;; orthogonal conflicts via the shared headless resolver) rather
+         ;; than refusing.  A conflict the resolver declines aborts the
+         ;; rebase and falls through to the manual-resolution error, so the
+         ;; worst case is exactly the old refuse-and-resolve-by-hand path.
+         (diverged
+          (unless master-wt
+            (user-error
+             "Cannot rebase %s onto %s: no worktree has %s checked out — resolve manually"
+             branch origin-ref branch))
+          (agent-repl--log target-ws
+                            "merge-handler-onto-master: ws=%s local %s diverged from %s — rebasing in %s"
+                            target-ws branch origin-ref master-wt)
+          (unless (agent-repl--rebase-with-auto-resolve
+                   target-ws master-wt origin-ref)
+            (user-error
+             "Cannot fast-forward %s to %s: local %s diverged and the rebase could not be auto-resolved — resolve manually"
+             branch origin-ref branch)))
+         ;; In sync with origin but behind: fast-forward the worktree that
+         ;; holds master (so its working tree advances too).
+         (master-wt
+          (let ((mec (agent-repl--git-exit-code
+                      master-wt "merge" "--ff-only" origin-ref)))
+            (agent-repl--log target-ws
+                              "merge-handler-onto-master: ws=%s merge --ff-only %s in %s exit=%d"
+                              target-ws origin-ref master-wt mec)
+            (unless (= mec 0)
+              (user-error "Cannot fast-forward %s to %s in %s (exit %d)"
+                          branch origin-ref master-wt mec))))
+         ;; No master worktree: move the ref directly.
+         (t
           (let ((uec (agent-repl--git-exit-code
                       main-dir "update-ref"
                       (concat "refs/heads/" branch)
@@ -678,7 +701,7 @@ refresh handler's same edge case).  ARGS is unused."
                               target-ws branch origin-ref uec)
             (unless (= uec 0)
               (user-error "Cannot advance %s to %s via update-ref in %s (exit %d)"
-                          branch origin-ref main-dir uec))))
+                          branch origin-ref main-dir uec)))))
         ;; Trunk now carries the merged work: if it touched cee-agent,
         ;; reinstall and bounce the service.  Always run from the MAIN
         ;; worktree (the original clone, e.g.

@@ -4643,6 +4643,122 @@ the `-x' annotation that the parent cherry-pick was invoked with."
                       (- (float-time) cont-started))
     continue-ec))
 
+;;;; ---- Rebase auto-resolution (onto-master divergence) ----
+;;
+;; The `onto-master' merge handler advances local master to origin/master
+;; after a PR lands.  When local master has DIVERGED (carries commits not on
+;; origin), a fast-forward is impossible, so instead of refusing the handler
+;; rebases local master onto origin and reuses the SAME headless
+;; orthogonality resolver the cherry-pick path uses.  These helpers are the
+;; rebase analogue of the cherry-pick resolver above; a conflict the resolver
+;; declines aborts the rebase, leaving the tree clean for the caller's
+;; manual-resolution error.
+
+(defconst agent-repl--rebase-auto-resolve-max-iterations 50
+  "Upper bound on auto-resolve + `rebase --continue' cycles for one rebase.
+A backstop against a resolver that keeps clearing markers without ever
+letting the rebase converge; far above any real rebase's conflict count.")
+
+(defun agent-repl--rebase-in-progress-p (root)
+  "Return non-nil when a rebase is in flight in repo at ROOT.
+Checks for git's `rebase-merge'/`rebase-apply' state dirs in the resolved
+git dir — the canonical markers left while a rebase is paused (mid-conflict
+or otherwise), mirroring `agent-repl--cherry-pick-in-progress-p'."
+  (let ((git-dir (agent-repl--git-string
+                  "-C" root "rev-parse" "--absolute-git-dir")))
+    (or (file-exists-p (expand-file-name "rebase-merge" git-dir))
+        (file-exists-p (expand-file-name "rebase-apply" git-dir)))))
+
+(defun agent-repl--auto-resolve-rebase-conflict (target-ws root)
+  "Attempt LLM-based resolution of the in-progress rebase conflict in ROOT.
+The rebase analogue of `agent-repl--auto-resolve-cherry-pick-conflict':
+enumerates the conflicted files, invokes the same headless orthogonality
+resolver (`agent-repl--build-auto-resolve-prompt' +
+`agent-repl--invoke-auto-resolve-agent'), and returns t ONLY when zero
+conflict markers remain across every conflicted file AND the optional
+verify command passes.  Declines (returns nil) on an empty conflict set,
+resolver timeout, non-zero resolver exit, residual markers, or a failed
+verification, leaving the files untouched so the caller can abort cleanly.
+
+The conflicting commit is `REBASE_HEAD' (the commit being replayed); the
+shared resolver prompt is phrased around cherry-pick but its job — resolve
+orthogonal hunks in-place, edit nothing when uncertain, never run git — is
+identical for a rebase."
+  (let ((files (agent-repl--cherry-pick-conflicted-files root)))
+    (cond
+     ((null files)
+      (agent-repl--log target-ws
+                        "auto-resolve-rebase: target-ws=%s no conflicted files — declining"
+                        target-ws)
+      nil)
+     (t
+      (let* ((conflicting-commit (agent-repl--git-string
+                                  "-C" root "rev-parse" "--short" "REBASE_HEAD"))
+             (prompt (agent-repl--build-auto-resolve-prompt
+                      target-ws conflicting-commit files)))
+        (agent-repl--log target-ws
+                          "auto-resolve-rebase: target-ws=%s commit=%s files=%S — invoking claude -p"
+                          target-ws conflicting-commit files)
+        (let ((result (agent-repl--invoke-auto-resolve-agent
+                       root prompt target-ws)))
+          (agent-repl--log target-ws
+                            "auto-resolve-rebase: target-ws=%s agent-p result=%S"
+                            target-ws result)
+          (cond
+           ((eq result 'timeout) nil)
+           ((not (and (numberp result) (zerop result))) nil)
+           ((agent-repl--all-conflicts-resolved-p root files)
+            (agent-repl--auto-resolve-verify-passes-p target-ws root))
+           (t nil))))))))
+
+(defun agent-repl--continue-rebase-after-resolve (target-ws root)
+  "Stage resolved files and run `git rebase --continue' in ROOT; return its exit code.
+`-c core.editor=true' keeps `--continue' from opening an editor for the
+replayed commit's message (there is no terminal in a headless merge),
+mirroring `agent-repl--continue-cherry-pick-after-resolve'."
+  (let ((add-ec (agent-repl--git-exit-code root "add" "-u")))
+    (agent-repl--log target-ws
+                      "continue-rebase-after-resolve: target-ws=%s git add -u exit=%d"
+                      target-ws add-ec)
+    (agent-repl--git-exit-code
+     root "-c" "core.editor=true" "rebase" "--continue")))
+
+(defun agent-repl--rebase-with-auto-resolve (target-ws root onto-ref)
+  "Rebase ROOT's current branch onto ONTO-REF, auto-resolving orthogonal conflicts.
+Returns t when the rebase completes — either cleanly or with every
+conflict resolved orthogonally and verified.  Returns nil when the
+resolver declines a conflict, the iteration cap is hit, or git fails, and
+in EVERY nil case the rebase is aborted so ROOT's working tree is left
+clean, exactly as before the rebase began.  A conceptually-conflicting
+hunk is the resolver's decline case, so it falls through to nil and the
+caller surfaces the manual-resolution path."
+  (catch 'result
+    (let ((ec (agent-repl--git-exit-code root "rebase" onto-ref))
+          (iter 0))
+      (agent-repl--log target-ws
+                        "rebase-with-auto-resolve: target-ws=%s onto=%s initial-exit=%d"
+                        target-ws onto-ref ec)
+      (when (= ec 0) (throw 'result t))
+      (while (and (agent-repl--rebase-in-progress-p root)
+                  (< iter agent-repl--rebase-auto-resolve-max-iterations))
+        (setq iter (1+ iter))
+        (unless (agent-repl--auto-resolve-rebase-conflict target-ws root)
+          (agent-repl--log target-ws
+                            "rebase-with-auto-resolve: target-ws=%s iter=%d resolver declined — aborting"
+                            target-ws iter)
+          (agent-repl--git-exit-code root "rebase" "--abort")
+          (throw 'result nil))
+        (setq ec (agent-repl--continue-rebase-after-resolve target-ws root))
+        (agent-repl--log target-ws
+                          "rebase-with-auto-resolve: target-ws=%s iter=%d continue-exit=%d"
+                          target-ws iter ec)
+        (when (= ec 0) (throw 'result t)))
+      ;; Fell out without a clean finish (iteration cap or an unexpected
+      ;; state): abort so the tree is clean, then decline.
+      (when (agent-repl--rebase-in-progress-p root)
+        (agent-repl--git-exit-code root "rebase" "--abort"))
+      nil)))
+
 (defun agent-repl--tag-merge-completion (project-root source-ws)
   "Tag HEAD in PROJECT-ROOT as `merge/SOURCE-WS' after a successful merge.
 The tag marks the final cherry-picked commit so the merged workspace's

@@ -805,25 +805,83 @@ repo's `.eld' prescribes a different handler (cherry-pick)."
                       :type 'user-error)
         (should-not finalized)))))
 
-(ert-deftest agent-repl-test-onto-master-errors-on-divergence ()
-  "Local master diverged from origin/master signals `user-error' (ff-only,
-no reset over divergent commits) and never finalizes."
+(ert-deftest agent-repl-test-onto-master-rebases-diverged-and-finalizes ()
+  "Divergence rebases local master onto origin/master, then finalizes."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+          (rebased nil)
+          (finalized nil))
+      (agent-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'agent-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'agent-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--git-exit-code)
+                 ;; fetch -> 0; is-ancestor -> 1 (diverged).
+                 (lambda (&rest args) (if (member "merge-base" args) 1 0)))
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) ""))
+                ((symbol-function 'agent-repl--rebase-with-auto-resolve)
+                 (lambda (_ws wt onto) (setq rebased (list wt onto)) t))
+                ((symbol-function 'agent-repl--finalize-merged-workspace)
+                 (lambda (ws main-dir) (setq finalized (list ws main-dir)))))
+        (agent-repl--merge-handler-onto-master "foo")
+        ;; The rebase targeted origin/master in the master worktree.
+        (should (equal rebased '("/repo/main" "origin/master")))
+        (should (equal finalized '("foo" "/repo/main")))))))
+
+(ert-deftest agent-repl-test-onto-master-errors-when-rebase-declines ()
+  "A diverged rebase the resolver declines signals `user-error' and never finalizes."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspaces (make-hash-table :test 'equal))
           (finalized nil))
       (agent-repl--ws-put "foo" :project-dir "/repo/wt-foo")
       (cl-letf (((symbol-function 'agent-repl--main-worktree-path)
                  (lambda (_dir) "/repo/main"))
+                ((symbol-function 'agent-repl--master-worktree-path)
+                 (lambda (_dir) "/repo/main"))
                 ((symbol-function 'agent-repl--worktree-dirty-p)
                  (lambda (_dir) nil))
                 ((symbol-function 'agent-repl--git-exit-code)
-                 (lambda (&rest args)
-                   ;; fetch -> 0; is-ancestor -> 1 (diverged).
-                   (if (member "merge-base" args) 1 0)))
+                 (lambda (&rest args) (if (member "merge-base" args) 1 0)))
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) ""))
+                ;; Resolver declines the rebase (conceptual conflict).
+                ((symbol-function 'agent-repl--rebase-with-auto-resolve)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--finalize-merged-workspace)
                  (lambda (&rest _) (setq finalized t))))
         (should-error (agent-repl--merge-handler-onto-master "foo")
                       :type 'user-error)
+        (should-not finalized)))))
+
+(ert-deftest agent-repl-test-onto-master-errors-on-divergence-without-master-worktree ()
+  "Divergence with no master worktree cannot be rebased, so it signals `user-error'."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+          (rebased nil)
+          (finalized nil))
+      (agent-repl--ws-put "foo" :project-dir "/repo/wt-foo")
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-path)
+                 (lambda (_dir) "/repo/main"))
+                ((symbol-function 'agent-repl--master-worktree-path)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--worktree-dirty-p)
+                 (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--git-exit-code)
+                 (lambda (&rest args) (if (member "merge-base" args) 1 0)))
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) ""))
+                ((symbol-function 'agent-repl--rebase-with-auto-resolve)
+                 (lambda (&rest _) (setq rebased t) t))
+                ((symbol-function 'agent-repl--finalize-merged-workspace)
+                 (lambda (&rest _) (setq finalized t))))
+        (should-error (agent-repl--merge-handler-onto-master "foo")
+                      :type 'user-error)
+        ;; No worktree holds master, so no rebase is even attempted.
+        (should-not rebased)
         (should-not finalized)))))
 
 (ert-deftest agent-repl-test-onto-master-ff-and-finalizes ()

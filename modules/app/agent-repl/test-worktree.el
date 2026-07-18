@@ -3198,6 +3198,78 @@ user-error is signaled, then the on-disk state is cleared."
              (lambda (p) (equal p "/tmp/repo/.git/CHERRY_PICK_HEAD"))))
     (should (agent-repl--cherry-pick-in-progress-p "/tmp/repo"))))
 
+;;;; ---- Tests: rebase-in-progress-p ----
+
+(ert-deftest agent-repl-test-rebase-in-progress-p-false-on-clean-tree ()
+  "No rebase state dir → returns nil."
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'file-exists-p)
+             (lambda (p)
+               (cond ((equal p "/tmp/repo/.git/rebase-merge") nil)
+                     ((equal p "/tmp/repo/.git/rebase-apply") nil)
+                     (t (error "unexpected file-exists-p arg: %S" p))))))
+    (should-not (agent-repl--rebase-in-progress-p "/tmp/repo"))))
+
+(ert-deftest agent-repl-test-rebase-in-progress-p-true-during-rebase ()
+  "A `rebase-merge' state dir → returns t."
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-parse" "--absolute-git-dir") "/tmp/repo/.git")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'file-exists-p)
+             (lambda (p) (equal p "/tmp/repo/.git/rebase-merge"))))
+    (should (agent-repl--rebase-in-progress-p "/tmp/repo"))))
+
+;;;; ---- Tests: rebase-with-auto-resolve ----
+
+(ert-deftest agent-repl-test-rebase-with-auto-resolve-clean ()
+  "A conflict-free rebase returns t and never aborts."
+  (let ((git-calls nil))
+    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+               (lambda (&rest args) (push args git-calls) 0)))
+      (should (eq t (agent-repl--rebase-with-auto-resolve
+                     "ws" "/repo" "origin/master")))
+      (should (cl-some (lambda (a) (equal a '("/repo" "rebase" "origin/master")))
+                       git-calls))
+      (should-not (cl-some (lambda (a) (member "--abort" a)) git-calls)))))
+
+(ert-deftest agent-repl-test-rebase-with-auto-resolve-resolves-conflict ()
+  "A conflict the resolver clears is continued to a clean finish (t)."
+  (let ((resolved nil) (continued nil))
+    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+               ;; The initial rebase conflicts (exit 1).
+               (lambda (&rest args) (if (member "rebase" args) 1 0)))
+              ((symbol-function 'agent-repl--rebase-in-progress-p)
+               (lambda (_root) t))
+              ((symbol-function 'agent-repl--auto-resolve-rebase-conflict)
+               (lambda (&rest _) (setq resolved t) t))
+              ((symbol-function 'agent-repl--continue-rebase-after-resolve)
+               (lambda (&rest _) (setq continued t) 0)))
+      (should (eq t (agent-repl--rebase-with-auto-resolve
+                     "ws" "/repo" "origin/master")))
+      (should resolved)
+      (should continued))))
+
+(ert-deftest agent-repl-test-rebase-with-auto-resolve-declines-and-aborts ()
+  "A conflict the resolver declines aborts the rebase and returns nil."
+  (let ((aborted nil))
+    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+               (lambda (&rest args)
+                 (when (member "--abort" args) (setq aborted t))
+                 (if (member "rebase" args) 1 0)))
+              ((symbol-function 'agent-repl--rebase-in-progress-p)
+               (lambda (_root) t))
+              ((symbol-function 'agent-repl--auto-resolve-rebase-conflict)
+               (lambda (&rest _) nil)))
+      (should-not (agent-repl--rebase-with-auto-resolve
+                   "ws" "/repo" "origin/master"))
+      (should aborted))))
+
 ;;;; ---- Tests: cherry-pick-conflicted-files ----
 
 (ert-deftest agent-repl-test-cherry-pick-conflicted-files-empty ()
