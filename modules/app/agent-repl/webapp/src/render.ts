@@ -24,7 +24,7 @@ import {
   expandedKeys,
   sectionsIn,
 } from "./expand.js";
-import { escapeHtml, highlightCode, languageForPath } from "./highlight.js";
+import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
 import {
   effectiveAsyncSource,
@@ -232,7 +232,7 @@ export function interruptingIndicatorHtml(interrupting: boolean): string {
   if (!interrupting) return "";
   return (
     `<div class="interrupting-pending" role="status" aria-live="polite">` +
-    `<span class="interrupting-spinner" aria-hidden="true"></span> interrupting…` +
+    `<span class="interrupting-spinner" aria-hidden="true"></span> interrupting${animatedEllipsis()}` +
     `</div>`
   );
 }
@@ -254,7 +254,7 @@ export function workingRowHtml(working: boolean): string {
   if (!working) return "";
   return (
     `<div class="working-pending" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> working…` +
+    `<span class="thinking-spinner" aria-hidden="true"></span> working${animatedEllipsis()}` +
     `</div>`
   );
 }
@@ -275,7 +275,7 @@ export function retryingRowHtml(retrying: boolean): string {
   if (!retrying) return "";
   return (
     `<div class="retrying-pending" role="status" aria-live="polite">` +
-    `<span class="retrying-spinner" aria-hidden="true"></span> retrying…` +
+    `<span class="retrying-spinner" aria-hidden="true"></span> retrying${animatedEllipsis()}` +
     `</div>`
   );
 }
@@ -298,7 +298,7 @@ export function monitoringRowHtml(monitoring: boolean): string {
   if (!monitoring) return "";
   return (
     `<div class="monitoring-pending" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> monitoring…` +
+    `<span class="thinking-spinner" aria-hidden="true"></span> monitoring${animatedEllipsis()}` +
     `</div>`
   );
 }
@@ -547,7 +547,7 @@ function Thinking(item: ThinkingItem): string {
   // textless block gets a spinner while it is open and, once it closes,
   // disappears entirely (`rendersEmpty`).
   if (item.text === "") {
-    return `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking</div>`;
+    return `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking${animatedEllipsis()}</div>`;
   }
   // While the summary still streams, the disclosure carries the same orange
   // arc the textless indicator spins, beside the `(thinking…)` label — so a
@@ -555,7 +555,7 @@ function Thinking(item: ThinkingItem): string {
   // merely happens to be open.
   const state = item.done
     ? ""
-    : ` (thinking…) <span class="thinking-spinner" aria-hidden="true"></span>`;
+    : ` (thinking${animatedEllipsis()}) <span class="thinking-spinner" aria-hidden="true"></span>`;
   return `
     <details class="thinking"${item.done ? "" : " open"}>
       <summary>Thinking${state}</summary>

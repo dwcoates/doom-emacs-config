@@ -57,6 +57,13 @@ describe("chessGameContainerHtml", () => {
     expect(html).toContain("processing");
   });
 
+  it("trails the processing word with the animated ellipsis rather than a static one", () => {
+    // Arrange + Act — the dots cycle beside the arc, so the row reads live.
+    const html = chessGameContainerHtml("/tmp/chess-game-x.pgn");
+    // Assert — the animated span sits after the processing word.
+    expect(html).toContain("animated-ellipsis");
+  });
+
   it("escapes markup in the path", () => {
     // Arrange + Act + Assert
     expect(chessGameContainerHtml(`/tmp/<img>"x.pgn`)).not.toContain("<img>");
