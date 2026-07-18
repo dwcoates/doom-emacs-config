@@ -461,6 +461,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  /* The agent column's width cap, the single source both the centered
+     response/tool rule and the prompt's right-edge alignment derive from:
+     the prompt's right margin is half the leftover so its right edge lands
+     flush with the centered response's, and follows automatically if this
+     cap is retuned. */
+  --agent-bubble-cap: 75%;
 }
 
 pre {
@@ -471,17 +477,27 @@ pre {
   font-size: 0.85rem;
 }
 
-/* Each bubble caps at 3/4 of the feed width and leans toward the edge its
-   role sits on: the user's own prompt hugs the right (matching the
-   queued-card row below), the agent's response hugs the left, so the
-   feed reads as a typical two-sided text-message thread with a full
-   quarter of blank margin always open on the bubble's off side. Every
-   bubble reserves its 0.5px border box up front, so a turn's final
-   response gaining the green (or amber async) state border on completion
-   recolors 0.5px that were already laid out rather than reflowing the feed
-   under a reader mid-sentence. The width is halved from 1px so the state
-   border reads as a hairline accent on the answer rather than a heavy
-   frame. */
+/* The feed is a single centered column, not a two-sided thread: every
+   bubble the AGENT emits — its response, and further down each top-level
+   async tool card (Agent, Bash, Read, …) — centers in the feed capped at
+   the `--agent-bubble-cap` width, so an equal eighth of blank margin sits
+   on each side. The user's own PROMPT is treated differently: it shrinks
+   to fit its own text (a short `hello` is a small bubble, a long prompt
+   grows leftward to its own narrower cap under the agent's), and it is
+   pushed as far right as it may go WITHOUT passing the response's right
+   edge. Its right margin is exactly half the agent column's leftover, so a
+   prompt's right edge lands flush with the centered response above and
+   below it rather than jutting past. Placement is done with auto margins
+   rather than `align-self`, because a bubble is a child of its
+   `.feed-item` wrapper — a plain block, not the feed's flex row — so an
+   `align-self` on it is inert; a max-width'd block with auto margins is
+   what actually centers. The parked queued cards below are the one
+   exception, left at their existing width and edge. Every bubble reserves
+   its 0.5px border box up front, so a turn's final response gaining the
+   green (or amber async) state border on completion recolors 0.5px that
+   were already laid out rather than reflowing the feed under a reader
+   mid-sentence. The width is halved from 1px so the state border reads as
+   a hairline accent on the answer rather than a heavy frame. */
 /* Every bubble — the user's prompt and the agent's response alike — is a
    body column plus the turn's time stamped into the top-right corner. The
    stamp holds its own column rather than overlaying the body, so a
@@ -498,8 +514,16 @@ pre {
 .bubble.user {
   background: var(--user);
   --pulse-to: var(--user-pulse);
-  align-self: flex-end;
-  max-width: 75%;
+  width: fit-content;
+  max-width: 60%;
+  margin-left: auto;
+  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
+  /* Body and hover stamp share ONE grid cell instead of the assistant's
+     side-by-side flex columns, so the bubble's width is the WIDER of the
+     two, never their sum: a roomy prompt's stamp overlays its own corner
+     and never widens the bubble, while a bubble too small to hold the stamp
+     (a bare `hello`) grows only just enough to contain the stamp. */
+  display: grid;
 }
 /* A markdown fenced code block the user typed into their prompt renders as
    the same card the agent's markdown fences get (.md pre.md-code), but the
@@ -550,11 +574,43 @@ pre {
   color: color-mix(in srgb, var(--muted), var(--fg) 25%);
 }
 .turn-meta:hover .turn-ts { display: block; }
+/* The prompt bubble alone stacks its body and hover stamp in one grid cell
+   (see `.bubble.user`), so these scope the stamp into that shared cell so
+   the bubble's width is the WIDER of body and stamp rather than their sum:
+   pinned to the top-right corner, drawn on the bubble's own fill so it masks
+   any prompt text it overlaps, with the assistant corner's negative margins
+   dropped since grid alignment places it now. */
+.bubble.user > .bubble-body,
+.bubble.user > .turn-meta {
+  grid-area: 1 / 1;
+}
+.bubble.user > .bubble-body { min-width: 0; }
+.bubble.user > .turn-meta {
+  justify-self: end;
+  align-self: start;
+  margin: 0;
+}
+.bubble.user .turn-ts {
+  background: var(--user);
+  padding: 0 0.2rem;
+  border-radius: 4px;
+}
+/* Agent-side feed content centers: the assistant's response bubble and
+   every top-level async tool card — a lone `.tool-card`, or a
+   consecutive-run `.feed-group` wrapping one — alike, each capped at 75%
+   of the feed and pushed to the middle by equal auto margins. Scoped to
+   direct `.feed-item` children, so a tool card NESTED inside a bubble's
+   activity panel keeps its full width. */
+.bubble.assistant,
+.feed-item > .tool-card,
+.feed-item > .feed-group {
+  max-width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+}
 .bubble.assistant {
   background: var(--assistant);
   --pulse-to: var(--assistant-pulse);
-  align-self: flex-start;
-  max-width: 75%;
 }
 /* The answer the turn landed on, as against the commentary above it. Only
    the border color changes, so the 0.5px the base reserved stays laid out. */

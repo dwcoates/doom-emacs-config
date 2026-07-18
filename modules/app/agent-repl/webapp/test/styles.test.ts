@@ -482,32 +482,96 @@ describe("the bubble pulse", () => {
   });
 });
 
-describe("bubble left/right bias (two-sided text-message layout)", () => {
+describe("centered column: agent centers, prompt fits its text and right-flushes", () => {
+  const feed = blockAfter(css, "#feed {");
   const userBubble = blockAfter(css, ".bubble.user {");
-  const assistantBubble = blockAfter(css, ".bubble.assistant {");
+  // The shared agent-side centering rule groups the assistant response bubble
+  // with the top-level async tool cards.
+  const agentCentered = blockAfter(css, ".bubble.assistant,");
+  const agentSelector = css.slice(
+    css.indexOf(".bubble.assistant,"),
+    css.indexOf("{", css.indexOf(".bubble.assistant,")),
+  );
+  /** The `NN` of the first `max-width: NN%` in a rule block, as a number. */
+  const maxWidthPct = (block: string): number =>
+    Number(block.match(/max-width:\s*(\d+)%/)?.[1]);
 
-  it("hugs the user's own prompt to the right edge of the feed", () => {
-    // Arrange / Act — the .bubble.user rule.
+  it("centers the agent's response bubble with equal auto margins", () => {
+    // Arrange / Act — the shared agent-side rule.
     // Assert
-    expect(userBubble).toMatch(/align-self:\s*flex-end/);
+    expect(agentCentered).toMatch(/margin-left:\s*auto/);
+    expect(agentCentered).toMatch(/margin-right:\s*auto/);
   });
 
-  it("hugs the agent's response to the left edge of the feed", () => {
-    // Arrange / Act — the .bubble.assistant rule.
+  it("caps the agent column at the shared --agent-bubble-cap token", () => {
+    // Arrange / Act — the single width source both rules derive from.
     // Assert
-    expect(assistantBubble).toMatch(/align-self:\s*flex-start/);
+    expect(agentCentered).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
   });
 
-  it("caps the prompt bubble at three quarters of the feed width", () => {
-    // Arrange / Act — leaving a quarter of blank margin on its left.
+  it("sets the agent bubble cap to 75% on the feed", () => {
+    // Arrange / Act — an eighth of blank margin on each side once centered.
     // Assert
-    expect(userBubble).toMatch(/max-width:\s*75%/);
+    expect(feed).toMatch(/--agent-bubble-cap:\s*75%/);
   });
 
-  it("caps the response bubble at three quarters of the feed width", () => {
-    // Arrange / Act — leaving a quarter of blank margin on its right.
+  it("folds lone top-level async tool cards into the agent center", () => {
+    // Arrange / Act — the grouped selector opening the centered block.
     // Assert
-    expect(assistantBubble).toMatch(/max-width:\s*75%/);
+    expect(agentSelector).toContain(".feed-item > .tool-card");
+  });
+
+  it("folds consecutive-run tool groups into the agent center", () => {
+    // Arrange / Act — a `.feed-group` wraps a grouped card.
+    // Assert
+    expect(agentSelector).toContain(".feed-item > .feed-group");
+  });
+
+  it("shrinks the prompt bubble to fit its own text", () => {
+    // Arrange / Act — a short `hello` renders a small bubble, not a full line.
+    // Assert
+    expect(userBubble).toMatch(/width:\s*fit-content/);
+  });
+
+  it("caps the prompt bubble narrower than the agent column", () => {
+    // Arrange — the prompt's own ceiling against the agent cap token.
+    const agentCapPct = Number(feed.match(/--agent-bubble-cap:\s*(\d+)%/)?.[1]);
+    // Act / Assert — the prompt's ceiling sits under the response's.
+    expect(maxWidthPct(userBubble)).toBeLessThan(agentCapPct);
+  });
+
+  it("pushes the prompt as far right as the auto left margin allows", () => {
+    // Arrange / Act — the whole left leftover collapses into one auto margin.
+    // Assert
+    expect(userBubble).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("flushes the prompt's right edge with the response, never past it", () => {
+    // Arrange / Act — a right margin equal to the agent column's centered side gap.
+    // Assert
+    expect(userBubble).toMatch(
+      /margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
+  });
+
+  it("lays the prompt bubble out as a grid so body and stamp can overlap", () => {
+    // Arrange / Act — grid, not the assistant's side-by-side flex.
+    // Assert
+    expect(userBubble).toMatch(/display:\s*grid/);
+  });
+
+  it("stacks the prompt body and its stamp in one cell so width is the wider", () => {
+    // Arrange — the shared grid cell both are placed in.
+    const stampCell = blockAfter(css, ".bubble.user > .bubble-body,");
+    // Act / Assert — a hover stamp never sums onto the body's width.
+    expect(stampCell).toMatch(/grid-area:\s*1\s*\/\s*1/);
+  });
+
+  it("masks prompt text under the stamp with the bubble's own fill", () => {
+    // Arrange — the stamp overlays the body, so it needs an opaque backing.
+    const userStamp = blockAfter(css, ".bubble.user .turn-ts {");
+    // Act / Assert — the stamp is drawn on the bubble fill it sits over.
+    expect(userStamp).toMatch(/background:\s*var\(--user\)/);
   });
 });
 
