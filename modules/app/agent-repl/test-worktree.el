@@ -5664,7 +5664,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
       (should (string-match-p "the merge target branch" prompt)))))
 
 (ert-deftest agent-repl-test-dispatch-merge-remediation-schedules ()
-  "Dispatch schedules the run via a 0-second timer carrying the prompt."
+  "Dispatch schedules the run via a 0-second timer carrying the prompt and origin."
   (agent-repl-test--with-clean-state
     (let ((scheduled nil))
       (cl-letf (((symbol-function 'run-at-time)
@@ -5673,7 +5673,7 @@ the workspace under a parent-dir-prefixed name (the bug under test)."
                  (lambda (_ws _err) "the directive")))
         (agent-repl--dispatch-merge-remediation "ws1" "boom")
         (should (eq (car scheduled) #'agent-repl--run-merge-remediation))
-        (should (equal (cdr scheduled) '("ws1" "the directive")))))))
+        (should (equal (cdr scheduled) '("ws1" "the directive" "merge")))))))
 
 (ert-deftest agent-repl-test-run-merge-remediation-live-delivers-directly ()
   "A live agent gets the directive over the delivery path with no recreation."
@@ -12679,14 +12679,40 @@ into the anaphoric variable `calls', oldest first."
         (should (string-match-p "best equipped" prompt))
         (should (string-match-p "context" prompt))))))
 
-(ert-deftest agent-repl-test-dispatch-merge-remediation-tags-next-send-origin ()
-  "Dispatching remediation parks a one-shot `merge' origin on the ws."
+(ert-deftest agent-repl-test-dispatch-merge-remediation-delivers-with-merge-origin ()
+  "Dispatching remediation delivers the directive tagged `merge'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :source-ws-dir "/src")
-    (cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "master"))
-              ((symbol-function 'run-at-time) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--run-merge-remediation) (lambda (&rest _) nil)))
-      (agent-repl--dispatch-merge-remediation "ws1" "boom")
-      (should (equal (agent-repl--ws-get "ws1" :next-send-origin) "merge")))))
+    (let ((seen 'unset))
+      (cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "master"))
+                ((symbol-function 'run-at-time)
+                 (lambda (_secs _rep fn &rest args) (apply fn args)))
+                ((symbol-function 'agent-repl--run-merge-remediation)
+                 (lambda (_ws _prompt &optional origin) (setq seen origin))))
+        (agent-repl--dispatch-merge-remediation "ws1" "boom")
+        (should (equal seen "merge"))))))
+
+(ert-deftest agent-repl-test-run-merge-remediation-live-tags-delivery ()
+  "The live path delivers a pending entry carrying the `merge' origin."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (let ((delivered nil))
+      (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--deliver-pending-prompts)
+                 (lambda (pending _ws &rest _) (setq delivered pending))))
+        (agent-repl--run-merge-remediation "ws1" "rebase" "merge")
+        (should (equal (agent-repl--pending-prompt-origin (car delivered)) "merge"))
+        (should (equal (agent-repl--pending-prompt-text (car delivered)) "rebase"))))))
+
+(ert-deftest agent-repl-test-run-merge-remediation-dead-parks-tagged-entry ()
+  "The dead path parks a pending entry carrying the `merge' origin."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--establish-workspace) (lambda (&rest _) nil)))
+      (agent-repl--run-merge-remediation "ws1" "rebase" "merge")
+      (let ((parked (car (agent-repl--ws-get "ws1" :pending-prompts))))
+        (should (equal (agent-repl--pending-prompt-origin parked) "merge"))
+        (should (equal (agent-repl--pending-prompt-text parked) "rebase"))))))
 
 ;;; test-worktree.el ends here
