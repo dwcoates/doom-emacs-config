@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -216,9 +217,19 @@ func main() {
 	})
 	defer logins.CloseAll()
 
+	// A single graceful-shutdown path serves BOTH SIGTERM and the
+	// POST /shutdown route: Emacs uses the latter to bounce a stale daemon
+	// it adopted from another Emacs (no local process handle to signal). The
+	// closure only closes the channel, so it is safe to hand to the server
+	// before the http.Server exists; sync.Once guards concurrent requests.
+	shutdownReq := make(chan struct{})
+	var shutdownOnce sync.Once
+	requestShutdown := func() { shutdownOnce.Do(func() { close(shutdownReq) }) }
+
 	srv := server.New(server.Config{
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
+		RequestShutdown: requestShutdown,
 		Retention:       *retention,
 		ForceFake:       *fake,
 		Spawn:           spawn,
@@ -238,6 +249,7 @@ func main() {
 	mux.Handle("/remediation", srv.Handler())
 	mux.Handle("/accounts", srv.Handler())
 	mux.Handle("/workspaces/", srv.Handler())
+	mux.Handle("/shutdown", srv.Handler())
 	if h := webappHandler(*webappDir, log.Printf); h != nil {
 		mux.Handle("/", h)
 	}
@@ -254,8 +266,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		sig := <-sigCh
-		log.Printf("claude-repld: %v received, shutting down sessions", sig)
+		select {
+		case sig := <-sigCh:
+			log.Printf("claude-repld: %v received, shutting down sessions", sig)
+		case <-shutdownReq:
+			log.Printf("claude-repld: POST /shutdown received, shutting down sessions")
+		}
 		srv.ShutdownAll()
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty

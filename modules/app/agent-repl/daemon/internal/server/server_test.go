@@ -1119,6 +1119,51 @@ func TestListSessionsEnvelopeReportsZeroBinaryMTimeWhenUnknown(t *testing.T) {
 	}
 }
 
+// --- graceful shutdown over HTTP --------------------------------------------
+
+func TestShutdownEndpointTriggersRequestShutdown(t *testing.T) {
+	// Arrange — a server whose shutdown hook signals a channel.
+	fired := make(chan struct{}, 1)
+	srv := New(Config{
+		DaemonVersion:   "0.1.0-test",
+		Retention:       64,
+		Logf:            func(string, ...any) {},
+		RequestShutdown: func() { fired <- struct{}{} },
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	// Act
+	resp, err := http.Post(ts.URL+"/shutdown", "", nil)
+	if err != nil {
+		t.Fatalf("POST /shutdown: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — 202 acknowledged, and the teardown hook fires.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RequestShutdown was never invoked")
+	}
+}
+
+func TestShutdownEndpointReportsUnconfiguredWhenNoHook(t *testing.T) {
+	// Arrange — the default harness wires no RequestShutdown.
+	h := newHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/shutdown", "", nil)
+	if err != nil {
+		t.Fatalf("POST /shutdown: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — the capability is reported unconfigured, never half-acted.
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", resp.StatusCode)
+	}
+}
+
 func TestHelloCarriesServerBootID(t *testing.T) {
 	// Arrange: two sessions in one server share the boot id.
 	h := newHarness(t)
