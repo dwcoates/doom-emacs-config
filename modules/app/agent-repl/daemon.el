@@ -326,6 +326,63 @@ nothing is ever bounced on a guess."
         (running (agent-repl--frontend-running-daemon-binary-mtime)))
     (and disk running (> disk running))))
 
+(defvar agent-repl--frontend-startup-staleness-checked nil
+  "Non-nil once this Emacs session ran its one-shot startup staleness bounce.
+The bounce is folded into the FIRST non-force
+`agent-repl--ensure-frontend-daemon' — the point the daemon is first
+needed (Emacs open, when a restored or opened panel ensures it).  Keeping
+it a per-session one-shot preserves the cheap live-process hot path every
+later ensure relies on, and keeps the module LAZY: a user who never opens
+a panel never ensures, so the check (and its build) never runs for them.")
+
+(defun agent-repl--frontend-bounce-if-stale ()
+  "Rebuild-if-stale, then bounce a stale daemon THIS Emacs owns.
+Runs a build-if-stale pass FIRST so changed Go source is compiled onto
+disk before the comparison, then bounces (graceful stop + fresh start)
+when the on-disk binary is newer than the running daemon's launched
+binary (`agent-repl--frontend-daemon-stale-p').
+
+Acts only when a daemon is already up to compare against: with none
+running, the launch branch of `agent-repl--ensure-frontend-daemon'
+builds-if-stale before starting, so freshness is already guaranteed there
+without a redundant build here.
+
+Three cases refuse the bounce rather than force it, so it is always safe:
+- an ADOPTED foreign daemon (answering on the port but not tracked by this
+  Emacs) has no local process handle, and spawning next to it would only
+  bind-fail and die — so a stale one is LEFT in place with a note to run
+  the manual restart, which is the same limitation the restart command has;
+- an in-flight turn DEFERS the bounce rather than killing a live
+  conversation mid-generation — the same refusal
+  `agent-repl--frontend-stop-daemon' enforces, checked up front so the
+  stop is never even attempted mid-turn;
+- a fresh daemon is left exactly as adopt/reuse would leave it (no
+  restart), which is the whole point of gating the bounce on staleness."
+  (when (or (agent-repl--frontend-daemon-live-p)
+            (agent-repl--frontend-daemon-port-responsive-p))
+    (agent-repl--frontend-build-if-stale nil)
+    (when (agent-repl--frontend-daemon-stale-p)
+      (cond
+       ((not (agent-repl--frontend-daemon-live-p))
+        (agent-repl--log nil "startup: adopted daemon on %s is stale but not owned by this Emacs — run M-x agent-repl-frontend-daemon-restart to bounce it"
+                          agent-repl-frontend-daemon-addr))
+       ((agent-repl--frontend-turn-active-sessions)
+        (agent-repl--log nil "startup: daemon binary stale but a turn is in flight — deferring bounce (will not kill mid-turn)"))
+       (t
+        (agent-repl--log nil "startup: daemon binary stale — bouncing to pick up the new build")
+        (agent-repl--frontend-stop-daemon)
+        (agent-repl--frontend-start-daemon))))))
+
+(defun agent-repl--frontend-maybe-bounce-stale-daemon-once ()
+  "Run `agent-repl--frontend-bounce-if-stale' at most once per Emacs session.
+The guard is set BEFORE the bounce runs, so even a build error leaves the
+check a genuine one-shot rather than re-firing (and re-building) on every
+subsequent panel open; the error itself still propagates to the caller,
+never swallowed."
+  (unless agent-repl--frontend-startup-staleness-checked
+    (setq agent-repl--frontend-startup-staleness-checked t)
+    (agent-repl--frontend-bounce-if-stale)))
+
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
 Idempotent: returns the live process immediately when one exists (unless
@@ -336,21 +393,34 @@ any stale artifact and launches `claude-repld'.  FORCE skips adoption:
 an explicit restart wants a fresh process (a foreign daemon cannot be
 stopped from here — only its owner can).  Returns nil without acting
 when `agent-repl-frontend-auto-start' is nil or automatic init is
-inhibited (batch/sandbox)."
+inhibited (batch/sandbox).
+
+On the FIRST non-force call per Emacs session (the daemon first being
+needed on Emacs open), a one-shot staleness bounce runs before the
+adopt/reuse decision: it rebuilds any stale artifact and, when the
+running daemon launched from an older binary than the one now on disk,
+restarts it so the session picks up the new build.  A fresh daemon is
+left untouched (today's adopt/reuse), an in-flight turn defers the
+bounce, and a foreign daemon this Emacs does not own is left in place
+\(see `agent-repl--frontend-bounce-if-stale')."
   (cond
    ((not agent-repl-frontend-auto-start) nil)
    ((agent-repl--frontend-init-inhibited-p) nil)
-   ((and (not force) (agent-repl--frontend-daemon-live-p))
-    agent-repl--frontend-daemon-process)
-   ((and (not force) (agent-repl--frontend-daemon-port-responsive-p))
-    (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
-                      agent-repl-frontend-daemon-addr)
-    t)
    (t
-    (when (and force (agent-repl--frontend-daemon-live-p))
-      (agent-repl--frontend-stop-daemon))
-    (agent-repl--frontend-build-if-stale force)
-    (agent-repl--frontend-start-daemon))))
+    (unless force
+      (agent-repl--frontend-maybe-bounce-stale-daemon-once))
+    (cond
+     ((and (not force) (agent-repl--frontend-daemon-live-p))
+      agent-repl--frontend-daemon-process)
+     ((and (not force) (agent-repl--frontend-daemon-port-responsive-p))
+      (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
+                        agent-repl-frontend-daemon-addr)
+      t)
+     (t
+      (when (and force (agent-repl--frontend-daemon-live-p))
+        (agent-repl--frontend-stop-daemon))
+      (agent-repl--frontend-build-if-stale force)
+      (agent-repl--frontend-start-daemon))))))
 
 (defun agent-repl--frontend-stop-daemon (&optional force)
   "Stop the tracked `claude-repld' process, gracefully first.
