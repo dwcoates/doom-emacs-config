@@ -394,6 +394,32 @@ dead shadow never counts as the owner."
       (user-error
        (should (string-match-p "render-status" (error-message-string err)))))))
 
+;;;; ---- Tests: --ws-render-status :idle-async ----
+
+(ert-deftest agent-repl-test-render-status-idle-async-when-tasks-live ()
+  "An :idle workspace with live async tasks renders :idle-async."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-set-agent-state "ws1" :idle)
+    (agent-repl--ws-put "ws1" :async-live 2)
+    (should (eq :idle-async (agent-repl--ws-render-status "ws1")))))
+
+(ert-deftest agent-repl-test-render-status-idle-when-no-async ()
+  "An :idle workspace with a zero async count renders plain :idle."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-set-agent-state "ws1" :idle)
+    (agent-repl--ws-put "ws1" :async-live 0)
+    (should (eq :idle (agent-repl--ws-render-status "ws1")))))
+
+(ert-deftest agent-repl-test-render-status-thinking-beats-async-live ()
+  "A :thinking workspace stays :thinking even with live async tasks."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-put "ws1" :async-live 3)
+    (should (eq :thinking (agent-repl--ws-render-status "ws1")))))
+
 ;;;; ---- Tests: --ws-tombstoned-p ----
 
 (ert-deftest agent-repl-test-ws-tombstoned-p-returns-t-after-ws-del ()

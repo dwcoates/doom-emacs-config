@@ -727,13 +727,17 @@ each live workspace bound to a listed session, the parsed queue snapshot
 \(`agent-repl--frontend-session-queue') is stored under
 `:queued-messages'; a bound workspace whose session is absent from
 SESSIONS has its queue cleared.  Forces a mode-line repaint so the
-queued-count segment reflects the new snapshot."
+queued-count segment reflects the new snapshot.  Also captures the
+entry's `async_live' count into `:async-live', the tab-bar's
+idle-but-working signal (see `agent-repl--ws-async-live-p')."
   (dolist (ws (agent-repl--live-ws-names))
     (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
       (let ((entry (seq-find (lambda (s) (equal (alist-get 'session_id s) bound))
                              sessions)))
         (agent-repl--ws-put ws :queued-messages
-                            (and entry (agent-repl--frontend-session-queue entry))))))
+                            (and entry (agent-repl--frontend-session-queue entry)))
+        (agent-repl--ws-put ws :async-live
+                            (and entry (alist-get 'async_live entry))))))
   (force-mode-line-update t))
 
 (defun agent-repl--ws-queued-messages (ws)
