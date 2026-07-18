@@ -204,7 +204,24 @@ create via `agent-repl--drain-pending-magit', plain new workspace via
 window already shows a DIFFERENT repo's `magit-status' buffer — so a
 workspace opening its magit while the prior workspace's magit is still
 current lands TWO status windows side by side, the double-magit-windows
-bug."
+bug.
+
+Magit MUST be loaded before the `let' below.  When magit has not
+loaded yet, `magit-display-buffer-function' is not yet special, so the
+`let' binds it LEXICALLY — and the `magit-status' call inside then
+autoloads magit, whose own `defvar' of the variable signals
+\(\"Defining as dynamic an already lexical var\") and aborts magit's
+load halfway.  That was the first-restored-workspace bug: every fresh
+session's first workspace came up with no magit (Doom splash instead)
+and its snapshot-load await burned the full ready-watchdog timeout.
+
+The `require' is NOERROR on purpose: when magit is genuinely
+unavailable the `magit-status' call below is the canonical entry point
+and still signals loudly, so no failure is swallowed — the quiet
+require only exists to get magit's `defvar' evaluated before the
+`let'.  (In the batch test harness magit is not installable at all;
+test-helpers.el declares the variable special instead.)"
+  (require 'magit nil t)
   (let ((magit-display-buffer-function
          #'agent-repl--magit-display-buffer-same-window))
     (magit-status dir)))
