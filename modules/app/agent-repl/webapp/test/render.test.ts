@@ -252,6 +252,14 @@ describe("interruptingIndicatorHtml", () => {
     expect(html).toContain("interrupting-spinner");
   });
 
+  it("trails the status word with the animated ellipsis rather than a static one", () => {
+    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
+    const html = interruptingIndicatorHtml(true);
+    // Assert — the animated span replaced the literal "…" glyph.
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("interrupting…");
+  });
+
   it("marks the indicator as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = interruptingIndicatorHtml(true);
@@ -279,6 +287,14 @@ describe("workingRowHtml", () => {
     const html = workingRowHtml(true);
     // Assert
     expect(html).toContain("thinking-spinner");
+  });
+
+  it("trails the status word with the animated ellipsis rather than a static one", () => {
+    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
+    const html = workingRowHtml(true);
+    // Assert — the animated span replaced the literal "…" glyph.
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("working…");
   });
 
   it("marks the row as a live status region for assistive tech", () => {
@@ -312,6 +328,14 @@ describe("retryingRowHtml", () => {
     expect(html).not.toContain("thinking-spinner");
   });
 
+  it("trails the status word with the animated ellipsis rather than a static one", () => {
+    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
+    const html = retryingRowHtml(true);
+    // Assert — the animated span replaced the literal "…" glyph.
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("retrying…");
+  });
+
   it("marks the row as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = retryingRowHtml(true);
@@ -331,7 +355,15 @@ describe("monitoringRowHtml", () => {
     // Arrange / Act
     const html = monitoringRowHtml(true);
     // Assert
-    expect(html).toContain("monitoring…");
+    expect(html).toContain("monitoring");
+  });
+
+  it("trails the status word with the animated ellipsis rather than a static one", () => {
+    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
+    const html = monitoringRowHtml(true);
+    // Assert — the animated span replaced the literal "…" glyph.
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("monitoring…");
   });
 
   it("reuses the textless-thinking arc, tinted amber by its own class rather than a bespoke spinner", () => {
@@ -864,6 +896,22 @@ describe("renderItem", () => {
     expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
   });
 
+  it("trails the streaming texted summary's (thinking) label with the animated ellipsis", () => {
+    // Arrange — a summarized thinking block still streaming.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "step one",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the animated span replaced the literal "…" inside "(thinking…)".
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("(thinking…)");
+  });
+
   it("drops the arc from a texted thinking block once it is done", () => {
     // Arrange — a settled disclosure carries no motion.
     const item: ConversationItem = {
@@ -908,6 +956,21 @@ describe("renderItem", () => {
     const html = renderItem(item);
     // Assert
     expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
+  });
+
+  it("trails the textless thinking indicator's word with the animated ellipsis", () => {
+    // Arrange — adaptive thinking: signature only, no thinking text.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the pending row cycles dots beside the arc, so it reads live.
+    expect(html).toContain("animated-ellipsis");
   });
 
   it("drops the ••• pulse from the streaming textless thinking indicator", () => {

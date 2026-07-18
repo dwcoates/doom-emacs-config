@@ -16,7 +16,7 @@
  * marker syntax cannot drift apart.
  */
 
-import { escapeHtml } from "./highlight.js";
+import { animatedEllipsis, escapeHtml } from "./highlight.js";
 
 /** Line prefix the skill emits; everything after it is the file path. */
 export const CHESS_GAME_MARKER = "---> agent-repl-chess-game-file: ";
@@ -52,7 +52,7 @@ export function isPartialChessGameMarker(line: string): boolean {
 export function chessGameContainerHtml(path: string): string {
   return (
     `<div class="chess-game" data-game-file="${escapeHtml(path)}">` +
-    `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> processing</div>` +
+    `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> processing${animatedEllipsis()}</div>` +
     `</div>`
   );
 }

@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, highlightCode, languageForPath } from "../src/highlight.js";
+import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "../src/highlight.js";
 
 describe("escapeHtml", () => {
   it("escapes markup-significant characters", () => {
     // Arrange + Act + Assert
     expect(escapeHtml(`<b a="x">&`)).toBe("&lt;b a=&quot;x&quot;&gt;&amp;");
+  });
+});
+
+describe("animatedEllipsis", () => {
+  it("emits the CSS-driven ellipsis span the stylesheet animates", () => {
+    // Arrange + Act + Assert — the class is the hook .animated-ellipsis styles.
+    expect(animatedEllipsis()).toContain(`class="animated-ellipsis"`);
+  });
+
+  it("hides the dots from assistive tech so only the status word is read", () => {
+    // Arrange + Act + Assert — the cycling dots are decorative beside the word.
+    expect(animatedEllipsis()).toContain(`aria-hidden="true"`);
   });
 });
 

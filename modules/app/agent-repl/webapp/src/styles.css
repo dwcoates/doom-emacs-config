@@ -1281,6 +1281,27 @@ pre {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+/* An animated ellipsis: the dots trailing a live status word (thinking,
+   working, retrying, monitoring, interrupting, processing) cycle
+   ""→"."→".."→"..." so the label reads as live beside the spinner arc. The
+   cycle is deliberately NOT the arc's own period: it runs 4/3 of a revolution
+   (calc below), so the FULL ellipsis ("...") lands exactly on each completed
+   turn of the circle — 0.75 of the 4/3-turn cycle is one 0.8s revolution — and
+   then resets. The two motions thus share a downbeat once per revolution
+   without marching in lockstep. `content` is a discrete (non-interpolable)
+   property, so step-end holds each dot count until the next keyframe rather
+   than smearing between them; the static "…" in the base rule is the fallback
+   for engines that cannot animate `content`. */
+.animated-ellipsis::after {
+  content: "…";
+  animation: ellipsis-dots calc(0.8s * 4 / 3) step-end infinite;
+}
+@keyframes ellipsis-dots {
+  0%, 100% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+}
 /* The interrupting indicator: the red twin of the textless-thinking spinner,
    shown at the feed tail while a turn is being aborted. Same geometry and
    the SAME thinking-spin animation; only the hue differs — the --err alarm red
@@ -1397,6 +1418,14 @@ pre {
      in the shorthand, survives this override). */
   .tool-spinner {
     animation-duration: 1.4s, 0.2s;
+  }
+  /* The dots are a hint the arc already carries, not the progress signal
+     itself, so under reduced motion they rest at a static ellipsis rather
+     than cycling — the same treatment the bubble breath and compaction sweep
+     get below. */
+  .animated-ellipsis::after {
+    animation: none;
+    content: "…";
   }
   /* The roster's in-flight dot has no rotation to slow, only a pulse — which
      is exactly the motion this query exists to drop. */
