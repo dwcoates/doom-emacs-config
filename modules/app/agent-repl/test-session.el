@@ -2018,4 +2018,47 @@ disk read must be skipped rather than re-read."
             (should-not (agent-repl--ws-get "ws1" :priority)))
         (delete-directory tmpdir t)))))
 
+;;;; ---- per-prompt origin (merge remediation) -------------------------------
+
+(ert-deftest agent-repl-test-make-pending-prompt-plain-string-without-origin ()
+  "Without ORIGIN the entry stays a bare string."
+  (should (equal (agent-repl--make-pending-prompt "hi") "hi")))
+
+(ert-deftest agent-repl-test-make-pending-prompt-plist-with-origin ()
+  "With ORIGIN the entry carries the text and origin."
+  (let ((e (agent-repl--make-pending-prompt "hi" "merge")))
+    (should (equal (agent-repl--pending-prompt-text e) "hi"))
+    (should (equal (agent-repl--pending-prompt-origin e) "merge"))))
+
+(ert-deftest agent-repl-test-pending-prompt-accessors-on-bare-string ()
+  "A bare-string entry reads as text with a nil origin."
+  (should (equal (agent-repl--pending-prompt-text "hi") "hi"))
+  (should (null (agent-repl--pending-prompt-origin "hi"))))
+
+(ert-deftest agent-repl-test-deliver-arms-next-send-origin-from-entry ()
+  "Delivery arms `:next-send-origin' from the head entry before sending."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (let ((seen 'unset))
+      (cl-letf (((symbol-function 'agent-repl--pending-delivery-alive-p) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--ensure-input-buffer) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--send)
+                 (lambda (_text ws &rest _) (setq seen (agent-repl--ws-get ws :next-send-origin)))))
+        (agent-repl--deliver-pending-prompts
+         (list (agent-repl--make-pending-prompt "rebase" "merge")) "ws1")
+        (should (equal seen "merge"))))))
+
+(ert-deftest agent-repl-test-deliver-clears-next-send-origin-for-plain-string ()
+  "A bare-string entry arms nil, clearing any stale tag before sending."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (agent-repl--ws-put "ws1" :next-send-origin "stale")
+    (let ((seen 'unset))
+      (cl-letf (((symbol-function 'agent-repl--pending-delivery-alive-p) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--ensure-input-buffer) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--send)
+                 (lambda (_text ws &rest _) (setq seen (agent-repl--ws-get ws :next-send-origin)))))
+        (agent-repl--deliver-pending-prompts (list "an ordinary prompt") "ws1")
+        (should (null seen))))))
+
 ;;; test-session.el ends here

@@ -1192,15 +1192,20 @@ asynchronously."
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
-(defun agent-repl--enqueue-preemptive-prompt (ws prompt)
+(defun agent-repl--enqueue-preemptive-prompt (ws prompt &optional origin)
   "Enqueue PROMPT on workspace WS for delivery once the agent is ready.
 Sets :pending-show-panels so panels open after switching to WS.  The
 panels always open filling the frame (fullscreen is the sole display
-format), so no separate maximize flag is needed."
+format), so no separate maximize flag is needed.
+
+ORIGIN, when non-nil, rides WITH the parked prompt (see
+`agent-repl--make-pending-prompt') so the delivery stamps the send even
+after a dead-workspace recreation, and every verify retry re-stamps it."
   (if (and prompt (not (string-empty-p prompt)))
       (progn
-        (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt" ws)
-        (agent-repl--ws-put ws :pending-prompts (list prompt))
+        (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt origin=%s" ws origin)
+        (agent-repl--ws-put ws :pending-prompts
+                            (list (agent-repl--make-pending-prompt prompt origin)))
         (agent-repl--ws-put ws :pending-show-panels t))
     (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
@@ -4622,6 +4627,7 @@ cherry-pick already succeeded; a tag-write failure shouldn't undo that."
 
 (declare-function agent-repl--establish-workspace "commands")
 (declare-function agent-repl--deliver-pending-prompts "session")
+(declare-function agent-repl--make-pending-prompt "session")
 (declare-function agent-repl--agent-running-p "session")
 
 (defun agent-repl--merge-remediation-prompt (target-ws err)
@@ -4665,34 +4671,40 @@ re-signals (and may run on a worker thread), while the recreation does
 persp and session work that belongs on the main loop after the merge
 flow has unwound."
   (let ((prompt (agent-repl--merge-remediation-prompt target-ws err)))
-    ;; Tag the next send on this ws as `merge' so its user-turn renders as the
-    ;; GUI's Merge status card instead of a user-prompt bubble (consumed and
-    ;; cleared by `agent-repl--frontend-send-user-message').  The directive
-    ;; itself still drives the agent — only its rendering changes.
-    (agent-repl--ws-put target-ws :next-send-origin "merge")
     (agent-repl--log target-ws "dispatch-merge-remediation: ws=%s scheduling" target-ws)
-    (run-at-time 0 nil #'agent-repl--run-merge-remediation target-ws prompt)))
+    ;; Deliver the directive tagged `merge' so its user-turn renders as the
+    ;; GUI's Merge status card instead of a user-prompt bubble.  The origin
+    ;; rides WITH the prompt (see `agent-repl--make-pending-prompt') so every
+    ;; delivery attempt — including a verify retry and a post-recreation drain
+    ;; — re-stamps it.  The directive itself still drives the agent; only its
+    ;; rendering changes.
+    (run-at-time 0 nil #'agent-repl--run-merge-remediation target-ws prompt "merge")))
 
-(defun agent-repl--run-merge-remediation (target-ws prompt)
+(defun agent-repl--run-merge-remediation (target-ws prompt &optional origin)
   "Deliver PROMPT to TARGET-WS, recreating its session when needed.
 A live agent gets the directive immediately over the standard delivery
 path.  A dead one is recreated first: the directive is parked on
 `:pending-prompts' and `agent-repl--establish-workspace' re-establishes
 the persp and boots a fresh session, whose startup drain delivers it.
 A dead workspace with no `:project-dir' cannot be recreated, which is
-surfaced as a warning rather than silently dropping the remediation."
+surfaced as a warning rather than silently dropping the remediation.
+
+ORIGIN (e.g. \"merge\") rides WITH the prompt on both paths so the
+delivered turn is tagged for the GUI even across a recreation, and every
+verify retry re-stamps it (see `agent-repl--deliver-pending-prompts')."
   (let ((dir (agent-repl--ws-get target-ws :project-dir)))
     (cond
      ((agent-repl--agent-running-p target-ws)
       (agent-repl--log target-ws "run-merge-remediation: ws=%s live — delivering directly" target-ws)
-      (agent-repl--deliver-pending-prompts (list prompt) target-ws))
+      (agent-repl--deliver-pending-prompts
+       (list (agent-repl--make-pending-prompt prompt origin)) target-ws))
      ((null dir)
       (agent-repl--warn target-ws
                         "merge-remediation: ws=%s has no :project-dir — cannot recreate for remediation"
                         target-ws))
      (t
       (agent-repl--log target-ws "run-merge-remediation: ws=%s dead — recreating" target-ws)
-      (agent-repl--enqueue-preemptive-prompt target-ws prompt)
+      (agent-repl--enqueue-preemptive-prompt target-ws prompt origin)
       (agent-repl--establish-workspace target-ws dir)))))
 
 (defun agent-repl--mark-merge-silent-failure (target-ws)
