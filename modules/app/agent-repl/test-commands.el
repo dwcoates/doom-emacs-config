@@ -5661,20 +5661,121 @@ the decision must key on `agent-repl--ws-open-p', not PAYLOAD's `:live-p'."
         (delete-directory source t)))))
 
 (ert-deftest agent-repl-cmd-test-recreate-directory/worktree-add-failure-errors ()
-  "A failed `git worktree add' signals a loud error rather than reviving
-onto a phantom directory."
+  "A failed `git worktree add' signals a loud error CARRYING git's own
+output rather than reviving onto a phantom directory."
   (agent-repl-test--with-clean-state
     (let ((source (make-temp-file "picker-src-fail-" t)))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--git-exit-code)
-                     (lambda (_root &rest args) (if (member "add" args) 1 0)))
+                     (lambda (_root &rest args) (if (member "add" args) 128 0)))
+                    ((symbol-function 'agent-repl--git-string)
+                     (lambda (&rest _) "fatal: 'b' is already used by worktree at '/tmp/elsewhere'"))
                     ((symbol-function 'agent-repl--picker-worktree-branch)
                      (lambda (&rest _) "b")))
             (agent-repl--ws-put "w" :project-dir "/tmp/wt-fail")
             (agent-repl--ws-put "w" :worktree-p t)
             (agent-repl--ws-put "w" :source-ws-dir source)
-            (should-error (agent-repl--picker-recreate-directory "w" "/tmp/wt-fail")))
+            (let ((err (should-error (agent-repl--picker-recreate-directory "w" "/tmp/wt-fail"))))
+              (should (string-match-p "git said: fatal: 'b' is already used"
+                                      (error-message-string err)))))
         (delete-directory source t)))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/deregistered-reattaches-basename-branch ()
+  "With no registered worktree, a surviving prefixed branch whose basename
+matches the workspace name is reattached (the finished-workspace case)."
+  (agent-repl-test--with-clean-state
+    (let ((source (make-temp-file "picker-src-dereg-" t)) git-calls)
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (root &rest args) (push (cons root args) git-calls) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--git-string-quiet)
+                     (lambda (&rest _) "DWC/foo\nDWC/other\nmaster")))
+            (agent-repl--ws-put "foo" :project-dir "/tmp/wt-dereg")
+            (agent-repl--ws-put "foo" :worktree-p t)
+            (agent-repl--ws-put "foo" :source-ws-dir source)
+            (agent-repl--picker-recreate-directory "foo" "/tmp/wt-dereg")
+            (should (member (list source "worktree" "add" "/tmp/wt-dereg" "DWC/foo")
+                            git-calls)))
+        (delete-directory source t)))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/exact-branch-beats-prefixed ()
+  "An exact NAME branch is preferred over a prefixed basename match."
+  (agent-repl-test--with-clean-state
+    (let ((source (make-temp-file "picker-src-exact-" t)) git-calls)
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (root &rest args) (push (cons root args) git-calls) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--git-string-quiet)
+                     (lambda (&rest _) "DWC/foo\nfoo")))
+            (agent-repl--ws-put "foo" :project-dir "/tmp/wt-exact")
+            (agent-repl--ws-put "foo" :worktree-p t)
+            (agent-repl--ws-put "foo" :source-ws-dir source)
+            (agent-repl--picker-recreate-directory "foo" "/tmp/wt-exact")
+            (should (member (list source "worktree" "add" "/tmp/wt-exact" "foo")
+                            git-calls)))
+        (delete-directory source t)))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/no-branch-cuts-fresh-from-master ()
+  "With no surviving branch at all, a fresh NAME branch is cut from the
+master branch and the fresh start is surfaced via a warn."
+  (agent-repl-test--with-clean-state
+    (let ((source (make-temp-file "picker-src-fresh-" t))
+          (agent-repl-master-branch-name "master")
+          git-calls warned)
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (root &rest args) (push (cons root args) git-calls) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--git-string-quiet)
+                     (lambda (&rest _) "master\nunrelated"))
+                    ((symbol-function 'agent-repl--warn)
+                     (lambda (&rest args) (setq warned args))))
+            (agent-repl--ws-put "foo" :project-dir "/tmp/wt-fresh")
+            (agent-repl--ws-put "foo" :worktree-p t)
+            (agent-repl--ws-put "foo" :source-ws-dir source)
+            (agent-repl--picker-recreate-directory "foo" "/tmp/wt-fresh")
+            (should (member (list source "worktree" "add" "-b" "foo" "/tmp/wt-fresh" "master")
+                            git-calls))
+            (should warned))
+        (delete-directory source t)))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/ambiguous-branches-error ()
+  "Several prefixed basename matches with no exact match error with the
+candidates named instead of guessing one."
+  (agent-repl-test--with-clean-state
+    (let ((source (make-temp-file "picker-src-ambig-" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (&rest _) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--git-string-quiet)
+                     (lambda (&rest _) "DWC/foo\nJB/foo")))
+            (agent-repl--ws-put "foo" :project-dir "/tmp/wt-ambig")
+            (agent-repl--ws-put "foo" :worktree-p t)
+            (agent-repl--ws-put "foo" :source-ws-dir source)
+            (let ((err (should-error (agent-repl--picker-recreate-directory "foo" "/tmp/wt-ambig"))))
+              (should (string-match-p "DWC/foo, JB/foo"
+                                      (error-message-string err)))))
+        (delete-directory source t)))))
+
+(ert-deftest agent-repl-cmd-test-picker-branches-for/filters-by-basename ()
+  "Only branches whose basename equals NAME are returned."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "DWC/foo\nfoo\nDWC/foobar\nbar/baz")))
+    (should (equal (agent-repl--picker-branches-for "/src" "foo")
+                   '("DWC/foo" "foo")))))
+
+(ert-deftest agent-repl-cmd-test-picker-branches-for/empty-when-none-match ()
+  "No basename match returns nil."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "master\nDWC/other")))
+    (should-not (agent-repl--picker-branches-for "/src" "foo"))))
 
 (ert-deftest agent-repl-cmd-test-recreate-directory/no-source-errors ()
   "A worktree with no recorded source repo errors rather than guessing."
