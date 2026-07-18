@@ -1941,6 +1941,21 @@ The master kill-switch overrides the always-on file-write decoupling."
   (should (string-prefix-p "<!--" agent-repl--meta-close))
   (should (string-suffix-p "-->" agent-repl--meta-close)))
 
+;;;; ---- Tests: kill-cause attribution ----
+
+(ert-deftest agent-repl-test-kill-cause-str-unbound-is-loud-bug-marker ()
+  "An unbound kill-cause renders as a self-documenting BUG marker, so an
+unattributed teardown is visible in the log rather than silently blank."
+  (let ((agent-repl--kill-cause nil))
+    (should (equal (agent-repl--kill-cause-str)
+                   "unattributed(BUG: bind agent-repl--kill-cause)"))))
+
+(ert-deftest agent-repl-test-kill-cause-str-returns-bound-cause ()
+  "A let-bound kill-cause is returned verbatim for the log line."
+  (let ((agent-repl--kill-cause "interactive nuke command (test)"))
+    (should (equal (agent-repl--kill-cause-str)
+                   "interactive nuke command (test)"))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

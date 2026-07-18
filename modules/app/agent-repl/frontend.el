@@ -702,6 +702,7 @@ this kill immediately followed by `agent-repl--gui-open', and a
 leftover dedicated input window aborts that reopen mid-initialize (the
 observed \"webview buffer is null/dead\" cascade).  The input buffer
 itself survives — it is workspace furniture, not session state."
+  (agent-repl--log ws "gui-kill: ws=%s kill-cause=%s" ws (agent-repl--kill-cause-str))
   (agent-repl--gui-hide ws)
   (agent-repl--frontend-release-workspace-session ws)
   (agent-repl--frontend-release-workspace-webview ws)

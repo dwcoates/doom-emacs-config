@@ -251,6 +251,25 @@ so names are generated without any leading slash."
         ""
       (concat prefix "/"))))
 
+;;; Kill-cause attribution
+
+(defvar agent-repl--kill-cause nil
+  "Why the current teardown is happening, for log attribution.
+Every entry point that kills an agent session or tears down a
+workspace let-binds this to a short human-readable cause string
+\(e.g. \"interactive nuke command\", \"merged-clear idle timer (auto)\")
+for the dynamic extent of the teardown.  The shared chokepoints
+\(`agent-repl--nuke-one-workspace', `agent-repl--finish-workspace',
+`agent-repl--ws-del', the frontend kill dispatch) read it into their
+log lines so the log always answers HOW a session was killed.  A nil
+value logs as \"unattributed(BUG: bind agent-repl--kill-cause)\" —
+treat that as a missing binding at the initiator, not an acceptable
+state.")
+
+(defun agent-repl--kill-cause-str ()
+  "Return `agent-repl--kill-cause' rendered for a log line."
+  (or agent-repl--kill-cause "unattributed(BUG: bind agent-repl--kill-cause)"))
+
 ;;; Logging
 
 (defun agent-repl--ws-id-cached (ws)

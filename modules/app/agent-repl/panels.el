@@ -970,8 +970,10 @@ would wipe that workspace's running session."
 Frontend-blind: dispatches the workspace's registered frontend's
 `:kill-fn' (daemon session + webview)."
   (interactive)
-  (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "kill")
+  (let ((ws (agent-repl--ws-current-name))
+        (agent-repl--kill-cause (or agent-repl--kill-cause
+                                    "interactive agent-repl-kill command")))
+    (agent-repl--log ws "kill: ws=%s kill-cause=%s" ws (agent-repl--kill-cause-str))
     (unless ws (error "agent-repl-kill: no active workspace"))
     (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)))
 

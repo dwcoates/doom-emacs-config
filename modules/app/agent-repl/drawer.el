@@ -1778,13 +1778,14 @@ of the MERGED bucket — removes the git worktree and the hash entry).
 Non-MERGED entries take the standard `agent-repl-nuke-workspace'
 path (preserves the worktree)."
   (interactive)
-  (dolist (ws (agent-repl-drawer--target-workspaces))
-    (if (eq (agent-repl-drawer--workspace-section ws) :merged)
-        (when (y-or-n-p
-               (format "Finish merged workspace '%s'? This removes the worktree directory and the hash entry. "
-                       ws))
-          (agent-repl--finish-workspace ws))
-      (agent-repl-nuke-workspace ws))))
+  (let ((agent-repl--kill-cause "drawer per-entry kill/finish action (interactive, confirmed)"))
+    (dolist (ws (agent-repl-drawer--target-workspaces))
+      (if (eq (agent-repl-drawer--workspace-section ws) :merged)
+          (when (y-or-n-p
+                 (format "Finish merged workspace '%s'? This removes the worktree directory and the hash entry. "
+                         ws))
+            (agent-repl--finish-workspace ws))
+        (agent-repl-nuke-workspace ws)))))
 
 (defun agent-repl-drawer-kill ()
   "Kill the target workspaces.
@@ -2008,7 +2009,11 @@ workspaces' commits have already landed in their source branches, so
 removing the now-redundant worktrees is safe.  A no-op when the MERGED
 section is empty.  Also callable interactively."
   (interactive)
-  (let ((merged (agent-repl-drawer--merged-workspace-keys)))
+  (let ((merged (agent-repl-drawer--merged-workspace-keys))
+        (agent-repl--kill-cause
+         (if (called-interactively-p 'interactive)
+             "clear-merged-section (interactive)"
+           "clear-merged-section (merged-clear idle timer, auto)")))
     (when merged
       (agent-repl--log nil "clear-merged-section: finishing %d merged workspace(s): %S"
                         (length merged) merged)

@@ -255,8 +255,8 @@ so the picker's sort-by-last-killed sees this tombstone immediately.
 No-op (beyond the log line) when WS has no hash entry — the bare ws-del
 log line preserves the pre-existing diagnostic shape."
   (let ((had-entry (not (null (gethash ws agent-repl--workspaces)))))
-    (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone)"
-                      ws (if had-entry "t" "nil"))
+    (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
+                      ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))
     (maphash (lambda (peer plist)
                (when (equal (plist-get plist :source-ws-name) ws)
                  (agent-repl--ws-put peer :source-ws-name nil)))
@@ -749,8 +749,9 @@ This function is part of the persp-mode integration boundary owned
 by `workspace.el' (see file Commentary and AGENTS.md).  It is the
 only `+workspace/kill' call site inside agent-repl outside the
 finish-workspace path."
-  (agent-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s cache=%S"
+  (agent-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
                     ws (if preserve-entry "t" "nil")
+                    (agent-repl--kill-cause-str)
                     (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
   ;; Stamp the kill timestamp before the pre-teardown state-save so the
   ;; on-disk state.el reflects this kill.  The project picker

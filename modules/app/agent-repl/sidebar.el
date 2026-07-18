@@ -449,12 +449,13 @@ Mirrors `agent-repl-drawer-visit' minus the point lookup."
   "Nuke TARGETS.  A MERGED target requires CONFIRMED (the browser's
 confirm dialog stands in for the drawer's `y-or-n-p') and dispatches to
 `agent-repl--finish-workspace'; others take `agent-repl-nuke-workspace'."
-  (dolist (ws targets)
-    (if (eq (agent-repl-drawer--workspace-section ws) :merged)
-        (if confirmed
-            (agent-repl--finish-workspace ws)
-          (user-error "Finishing MERGED workspace %s requires confirmation" ws))
-      (agent-repl-nuke-workspace ws))))
+  (let ((agent-repl--kill-cause "gui sidebar nuke/finish action (browser confirm)"))
+    (dolist (ws targets)
+      (if (eq (agent-repl-drawer--workspace-section ws) :merged)
+          (if confirmed
+              (agent-repl--finish-workspace ws)
+            (user-error "Finishing MERGED workspace %s requires confirmation" ws))
+        (agent-repl-nuke-workspace ws)))))
 
 (defun agent-repl-sidebar--send-prompt (targets prompt)
   "Send PROMPT to each of TARGETS via the drawer's send path."
