@@ -497,11 +497,12 @@ pre {
    margin and one auto margin is what actually flushes it to a rail. The
    parked queued cards below are the one exception, left at their existing
    width and edge. Every bubble reserves
-   its 0.5px border box up front, so a turn's final response gaining the
-   green (or amber async) state border on completion recolors 0.5px that
+   its 0.4px border box up front, so a turn's final response gaining the
+   green (or amber async) state border on completion recolors 0.4px that
    were already laid out rather than reflowing the feed under a reader
-   mid-sentence. The width is halved from 1px so the state border reads as
-   a hairline accent on the answer rather than a heavy frame. */
+   mid-sentence. The width is thinned from an original 1px, then thinned
+   again to 0.4px, so the state border reads as a hairline accent on the
+   answer rather than a heavy frame. */
 /* Every bubble — the user's prompt and the agent's response alike — is a
    body column plus the turn's time stamped into the top-right corner. The
    stamp holds its own column rather than overlaying the body, so a
@@ -509,7 +510,7 @@ pre {
 .bubble {
   padding: 0.6rem 0.9rem;
   border-radius: 8px;
-  border: 0.5px solid transparent;
+  border: 0.4px solid transparent;
   display: flex;
   align-items: flex-start;
   gap: 0.9rem;
@@ -626,7 +627,7 @@ pre {
   margin-right: auto;
 }
 /* The answer the turn landed on, as against the commentary above it. Only
-   the border color changes, so the 0.5px the base reserved stays laid out. */
+   the border color changes, so the 0.4px the base reserved stays laid out. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
 /* Async quiescence: a bubble whose LIVE background work is enumerated inside
    it (see AsyncCatalog) wears the amber async border — "the answer is landed
@@ -634,7 +635,7 @@ pre {
    is declared after it, at higher specificity for the assistant case), and
    flips to green once every member settles. The user's own prompt bubble
    takes it too, for a tools-only turn that hosts its survivors there. Only
-   the color changes, so the reserved 0.5px stays put — no reflow on the flip. */
+   the color changes, so the reserved 0.4px stays put — no reflow on the flip. */
 .bubble.assistant.async-live,
 .bubble.user.async-live { border-color: var(--async); }
 /* The breath of the bubble the UI has nothing newer to show for: it rocks
