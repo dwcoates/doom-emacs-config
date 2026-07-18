@@ -518,7 +518,10 @@ pre {
    would, but each margin's magnitude stays under the padding it eats into
    (0.6rem top, 0.9rem right) so a sliver of space survives and nothing abuts
    the corner. `nowrap` keeps each multi-token label (`5m 30s ago`,
-   `+100,000`) on one line rather than stacking within a row. */
+   `+100,000`) on one line rather than stacking within a row. The min size is
+   a hover target: it keeps the corner a stable region to reveal the timestamp
+   over even on a bubble whose stats row is empty (a prompt or non-final turn),
+   where the column would otherwise collapse to the hidden stamp's zero box. */
 .turn-meta {
   flex: none;
   display: flex;
@@ -530,6 +533,8 @@ pre {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   margin: -0.3rem -0.5rem 0 0;
+  min-width: 1.75rem;
+  min-height: 1.1rem;
 }
 /* The two corner stats in the topbar's own datapoint colors, so the turn's
    duration and context delta read as the same figures the header shows:
@@ -538,12 +543,13 @@ pre {
 .turn-meta .turn-diff { color: var(--info-tokens); }
 /* The timestamp is hover-only now: a muted grey stamp (pushed toward --fg so
    it reads a shade more present) that drops in under the stats only while the
-   reader hovers the bubble, so a settled feed is not littered with clocks. */
+   reader hovers that top-right corner, so a settled feed is not littered with
+   clocks and a stray hover anywhere on the bubble no longer surfaces one. */
 .turn-ts {
   display: none;
   color: color-mix(in srgb, var(--muted), var(--fg) 25%);
 }
-.bubble:hover .turn-ts { display: block; }
+.turn-meta:hover .turn-ts { display: block; }
 .bubble.assistant {
   background: var(--assistant);
   --pulse-to: var(--assistant-pulse);
