@@ -1674,10 +1674,9 @@ user can spot the slot whose priority just shifted."
 ;;; `agent-repl--scroll-output-intercept-states' was introduced for the
 ;;; now-removed `C-S-j' / `C-S-k' scroll-output chords (and their vterm
 ;;; shadow-key stripping); both are gone along with vterm.  The list
-;;; survives because `agent-repl--install-drawer-visit-override' and
-;;; `agent-repl--install-workspace-jump-overrides' reuse it as-is, so a
-;;; chord installed by either still needs to win lookup across every
-;;; evil state.
+;;; survives because `agent-repl--install-workspace-jump-overrides'
+;;; reuses it as-is, so a chord installed through it still needs to
+;;; win lookup across every evil state.
 
 (ert-deftest agent-repl-test-scroll-intercept-states-covers-normal-visual ()
   "`agent-repl--scroll-output-intercept-states' must include `normal'
@@ -1693,65 +1692,6 @@ chord installed through it works regardless of which state is current.
 A future trim that drops a state would silently re-break that chord there."
   (dolist (state '(normal visual insert emacs operator motion replace))
     (should (memq state agent-repl--scroll-output-intercept-states))))
-
-;;;; ---- Tests: drawer-visit override install ----
-
-;;; `C-S-<return>' must win lookup above Doom default's `:gi/:gn
-;;; "C-S-RET"' -> `+default/newline-above' (evil global aux maps) and
-;;; above `agent-repl-input-mode-map's `:ni "C-S-RET"' major-mode aux that
-;;; previously routed the chord to `agent-repl-send-with-metaprompt'.
-;;; A plain `(map! ... )' global-map entry loses to both.
-
-(ert-deftest agent-repl-test-drawer-visit-chord-binds-csret-to-global-visit ()
-  "`agent-repl--drawer-visit-chord' must map `C-S-<return>' to
-`agent-repl-sidebar-global-visit' -- the entry the override install
-plants into `general-override-mode-map'."
-  (should (assoc "C-S-<return>" agent-repl--drawer-visit-chord))
-  (should (eq (cdr (assoc "C-S-<return>" agent-repl--drawer-visit-chord))
-              'agent-repl-sidebar-global-visit)))
-
-(ert-deftest agent-repl-test-install-drawer-visit-override-installs-top-level ()
-  "`--install-drawer-visit-override' must populate `general-override-mode-map'
-at top level so the chord works in non-evil contexts and wins above
-any other minor-mode-map binding."
-  (let ((general-override-mode-map (make-sparse-keymap)))
-    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
-               (lambda (&rest _) (make-sparse-keymap))))
-      (agent-repl--install-drawer-visit-override))
-    (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
-                'agent-repl-sidebar-global-visit))))
-
-(ert-deftest agent-repl-test-install-drawer-visit-override-installs-intercept-aux ()
-  "`--install-drawer-visit-override' must populate the evil intercept
-aux map of `general-override-mode-map' for every state in
-`agent-repl--scroll-output-intercept-states' -- this is what beats
-both Doom default's evil-state aux binding for `C-S-RET' and any
-major-mode aux like `agent-repl-input-mode-map's `:ni'."
-  (let* ((general-override-mode-map (make-sparse-keymap))
-         (aux-maps nil))
-    (cl-letf (((symbol-function 'evil-get-auxiliary-keymap)
-               (lambda (_keymap state &rest _)
-                 (or (cdr (assq state aux-maps))
-                     (let ((m (make-sparse-keymap)))
-                       (push (cons state m) aux-maps)
-                       m)))))
-      (agent-repl--install-drawer-visit-override))
-    (dolist (state agent-repl--scroll-output-intercept-states)
-      (let ((aux (cdr (assq state aux-maps))))
-        (should aux)
-        (should (eq (lookup-key aux (kbd "C-S-<return>"))
-                    'agent-repl-sidebar-global-visit))))))
-
-(ert-deftest agent-repl-test-install-drawer-visit-override-skips-aux-without-evil ()
-  "When `evil-get-auxiliary-keymap' is unbound (evil not loaded),
-`--install-drawer-visit-override' must still install the top-level
-binding without erroring."
-  (let ((general-override-mode-map (make-sparse-keymap)))
-    (cl-letf (((symbol-function 'fboundp)
-               (lambda (sym) (not (eq sym 'evil-get-auxiliary-keymap)))))
-      (agent-repl--install-drawer-visit-override))
-    (should (eq (lookup-key general-override-mode-map (kbd "C-S-<return>"))
-                'agent-repl-sidebar-global-visit))))
 
 ;;;; ---- Tests: workspace-jump override install ----
 

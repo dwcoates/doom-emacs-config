@@ -565,13 +565,9 @@ hydrated the environment with them, and the gui reads WS's
 composer=0: Emacs owns input (the panel below), so the webview hides
 its own composer and stays output-only.  parent_ws: the recorded
 parent worktree's basename — the webapp's status bar shows it in its
-topbar.  Omitted when the workspace has no recorded parent.
-sidebar=1: appended when `agent-repl-sidebar-enabled', so the webview
-renders the workspace sidebar fed by sidebar.el's snapshot pushes."
+topbar.  Omitted when the workspace has no recorded parent."
   (concat (agent-repl--frontend-session-url session-id)
           "&composer=0"
-          (when (bound-and-true-p agent-repl-sidebar-enabled)
-            "&sidebar=1")
           (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
             (concat "&parent_ws=" (url-hexify-string parent)))))
 
