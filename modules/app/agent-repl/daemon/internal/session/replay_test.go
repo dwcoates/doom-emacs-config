@@ -755,6 +755,130 @@ func TestBuildReplayFramesUnansweredNotificationGetsNoResult(t *testing.T) {
 		"task-notification")
 }
 
+// --- interrupt markers (yellow "aborted" badge, never a prompt bubble) --------
+
+// firstResult returns the first result frame in frames, failing if none.
+func firstResult(t *testing.T, frames []protocol.L2Frame) *protocol.ResultFrame {
+	t.Helper()
+	for _, f := range frames {
+		if r, ok := f.(*protocol.ResultFrame); ok {
+			return r
+		}
+	}
+	t.Fatalf("no *protocol.ResultFrame in %v", frameTypes(frames))
+	return nil
+}
+
+func TestBuildReplayFramesInterruptStringBecomesAbortedResult(t *testing.T) {
+	// Arrange / Act — the CLI's interrupt marker is denoted by the yellow
+	// badge, so it becomes an aborted result rather than a prompt bubble.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`)
+	// Assert — one result closes the interrupted turn; no second user-turn.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result")
+}
+
+func TestBuildReplayFramesInterruptResultSubtypeIsAborted(t *testing.T) {
+	// Arrange / Act
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`)
+	// Assert — the "aborted" subtype is what the webapp paints yellow.
+	if got := firstResult(t, frames).Subtype; got != "aborted" {
+		t.Fatalf("result subtype = %q, want aborted", got)
+	}
+}
+
+func TestBuildReplayFramesInterruptTextBlockBecomesAbortedResult(t *testing.T) {
+	// Arrange / Act — the same marker in array-form content.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`)
+	// Assert
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result")
+	if got := firstResult(t, frames).Subtype; got != "aborted" {
+		t.Fatalf("result subtype = %q, want aborted", got)
+	}
+}
+
+func TestBuildReplayFramesInterruptToolUseVariantBecomesAbortedResult(t *testing.T) {
+	// Arrange / Act — the tool-use interrupt variant is the same marker.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}`)
+	// Assert
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result")
+	if got := firstResult(t, frames).Subtype; got != "aborted" {
+		t.Fatalf("result subtype = %q, want aborted", got)
+	}
+}
+
+func TestBuildReplayFramesInterruptCarriesTranscriptTimestamp(t *testing.T) {
+	// Arrange / Act — the badge is dated at the moment the turn was cut off.
+	frames, _ := buildFrames(t,
+		`{"type":"user","timestamp":"2026-05-24T12:00:00.000Z","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","timestamp":"2026-05-24T12:00:05.000Z","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","timestamp":"2026-05-24T12:00:09.000Z","message":{"role":"user","content":"[Request interrupted by user]"}}`)
+	// Assert — the interrupt entry's own time, not resume time.
+	if got := firstResult(t, frames).Env().TS; got != "2026-05-24T12:00:09.000Z" {
+		t.Fatalf("result TS = %q, want the interrupt entry's timestamp", got)
+	}
+}
+
+func TestBuildReplayFramesInterruptDoesNotDoubleCloseTurn(t *testing.T) {
+	// Arrange / Act — an interrupted answered turn must close exactly once:
+	// the aborted result IS the close, so end-of-input adds no second one.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`)
+	// Assert — a single result, and it is the aborted one (no trailing success).
+	var results []*protocol.ResultFrame
+	for _, f := range frames {
+		if r, ok := f.(*protocol.ResultFrame); ok {
+			results = append(results, r)
+		}
+	}
+	if len(results) != 1 {
+		t.Fatalf("result count = %d, want 1", len(results))
+	}
+	if results[0].Subtype != "aborted" {
+		t.Fatalf("result subtype = %q, want aborted", results[0].Subtype)
+	}
+}
+
+func TestBuildReplayFramesPromptAfterInterruptOpensFreshTurn(t *testing.T) {
+	// Arrange / Act — the interrupt already closed turn 1, so a following
+	// prompt opens a clean turn 2 with no spurious result between them.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"q1"}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"partial"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`,
+		`{"type":"user","message":{"role":"user","content":"q2"}}`,
+		`{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"a2"}]}}`)
+	// Assert — turn 1 closes aborted, turn 2 opens and closes success.
+	wantTypes(t, frames,
+		"user-turn", "text-start", "text-delta", "text-end", "result",
+		"user-turn", "text-start", "text-delta", "text-end", "result")
+}
+
+func TestBuildReplayFramesQuotedInterruptMarkerStaysUserTurn(t *testing.T) {
+	// Arrange / Act — a real prompt that merely quotes the marker mid-text
+	// is the user's words, not the CLI's synthetic marker.
+	frames, _ := buildFrames(t,
+		`{"type":"user","message":{"role":"user","content":"why does [Request interrupted by user] show up twice?"}}`)
+	// Assert — it renders as an ordinary prompt bubble, not a badge.
+	wantTypes(t, frames, "user-turn")
+}
+
 // --- SeedFromTranscript -------------------------------------------------------
 
 func TestSeedFromTranscriptHelloReportsNoActiveTurn(t *testing.T) {
