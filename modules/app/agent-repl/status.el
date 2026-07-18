@@ -612,6 +612,13 @@ A no-op if a check is already in progress for WS."
 explicit palette entry (not a fallback) so idle workspaces are
 visually distinct from states that have no palette mapping.")
 
+(defconst agent-repl--color-idle-async-amber "#f59e0b"
+  "Amber used for the :idle-async agent-state tab background.
+:idle-async means \"session idle/available, but detached background work
+is still running\" — mirrors the webapp's amber async bubble border
+\(--async #f59e0b).  Distinct from :idle orange (available, nothing
+running) and :thinking red (a turn actively in flight).")
+
 (defconst agent-repl--color-stop-failed-magenta "#8b1f8b"
   "Magenta used for the :stop-failed agent-state tab background.
 :stop-failed means the StopFailure hook fired — the agent's turn ended
@@ -766,6 +773,17 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
                   :bracket-bg ,agent-repl--color-idle-orange
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
+    (:idle-async
+     :face       agent-repl-tab-idle-async
+     :unselected (:bg ,agent-repl--color-idle-async-amber
+                  :fg ,agent-repl--color-dark
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-idle-async-amber
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
     (:stop-failed
      :face       agent-repl-tab-stop-failed
      :label      ,agent-repl--label-stop-failed
@@ -864,6 +882,12 @@ falls back to the default appearance."
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs where the agent is idle (orange).")
+
+(defface agent-repl-tab-idle-async
+  `((t :background ,agent-repl--color-idle-async-amber
+       :foreground ,agent-repl--color-dark
+       :weight ,agent-repl--tab-weight))
+  "Face for workspace tabs that are idle but have background work running (amber).")
 
 (defface agent-repl-tab-stop-failed
   `((t :background ,agent-repl--color-stop-failed-magenta

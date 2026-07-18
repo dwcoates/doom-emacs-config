@@ -166,6 +166,12 @@ dead session."
                   :label)
                  "⛔")))
 
+(ert-deftest agent-repl-test-tab-spec-idle-async-is-amber ()
+  ":idle-async resolves to the amber background so an idle-but-working tab
+reads distinctly from :idle orange and :thinking red."
+  (should (equal agent-repl--color-idle-async-amber
+                 (plist-get (agent-repl--tab-spec :idle-async nil) :bg))))
+
 ;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
 
 (ert-deftest agent-repl-test-display-state-done-panels-closed-renders-nil ()
