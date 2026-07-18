@@ -1956,6 +1956,28 @@ unattributed teardown is visible in the log rather than silently blank."
     (should (equal (agent-repl--kill-cause-str)
                    "interactive nuke command (test)"))))
 
+;;;; ---- Tests: assert-main-thread ----
+
+(ert-deftest agent-repl-test-assert-main-thread-passes-on-main ()
+  "assert-main-thread is a nil-returning no-op on the main thread."
+  (should-not (agent-repl--assert-main-thread "op-x")))
+
+(ert-deftest agent-repl-test-assert-main-thread-signals-off-main ()
+  "assert-main-thread signals on a worker thread, naming the operation."
+  ;; Arrange — capture the outcome of a genuine non-main-thread call.
+  (let ((outcome nil))
+    ;; Act.
+    (thread-join
+     (make-thread
+      (lambda ()
+        (setq outcome
+              (condition-case err
+                  (agent-repl--assert-main-thread "op-x")
+                (error (error-message-string err)))))))
+    ;; Assert — the guard fired and the message names the operation.
+    (should (stringp outcome))
+    (should (string-match-p "REFUSING op-x off the main thread" outcome))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here

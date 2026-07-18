@@ -95,7 +95,16 @@ from a queued item's content blocks, so the status segment and the
 PAYLOAD, when non-nil, is a JSON string sent as the request body.
 Returns (STATUS . BODY-STRING).  Body does nothing but perform the
 external call so tests mock it via `cl-letf'; registered in
-`agent-repl--external-boundary-functions'."
+`agent-repl--external-boundary-functions'.
+
+MAIN THREAD ONLY.  `url-retrieve-synchronously' routes through
+`accept-process-output' -> `ns_select_1' -> `[NSApp run]', and running
+the AppKit event loop on a worker thread deadlocks Emacs (the
+AGENTS.md `ns_select_1' worker-thread trap; it froze Emacs on
+2026-07-18 via the merge worker's config reload -> watcher re-arm ->
+drain chain).  Any indirect chain can smuggle this call onto a worker,
+so the boundary itself refuses via `agent-repl--assert-main-thread'."
+  (agent-repl--assert-main-thread (format "frontend-http %s %s" method url))
   (let* ((url-request-method method)
          (url-request-extra-headers
           (when payload '(("Content-Type" . "application/json"))))
