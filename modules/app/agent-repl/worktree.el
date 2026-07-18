@@ -3787,6 +3787,31 @@ Resolves via :project-dir stored in `agent-repl--workspaces'."
           sha)
       branch)))
 
+(defun agent-repl--range-already-incorporated-p (root base-branch target-branch)
+  "Return non-nil when every commit in BASE-BRANCH..TARGET-BRANCH is already
+present on ROOT's checked-out branch by PATCH-ID.
+
+A merge cherry-picks with `-x', rewriting the workspace's commits under
+fresh SHAs on the destination.  Re-merging an already-merged workspace
+therefore still sees a non-empty SHA range — its own commits are not
+literal ancestors of the destination — so the empty-range probe in
+`--cherry-pick-commits--impl' (rev-list --count) does not catch it, the
+pick runs, and git finds every patch already applied and stops empty.
+`git cherry' compares by patch-id rather than SHA: it prints one line
+per range commit, marked `-' when an equivalent already exists on the
+destination HEAD and `+' when it is genuinely new.  A range that is all
+`-' has fully landed, so the merge is a no-op; a single `+' is real
+un-applied work, so the caller must keep treating the empty pick as a
+failure.  A blank or error output (bad refs) yields nil, so a probe
+failure never masquerades as an already-merged success."
+  (let ((cherry (agent-repl--git-string
+                 "-C" root "cherry" "HEAD" target-branch base-branch)))
+    (and cherry
+         (not (string-empty-p (string-trim cherry)))
+         (cl-every (lambda (line)
+                     (string-prefix-p "-" (string-trim-left line)))
+                   (split-string cherry "\n" t)))))
+
 (defun agent-repl--cherry-pick-commits--impl (root target-ws base-branch target-branch
                                                    &optional auto-resolve silent)
   "Cherry-pick commits BASE-BRANCH..TARGET-BRANCH in repo at ROOT.
@@ -3870,12 +3895,25 @@ surface depends on SILENT:
                                 "cherry-pick-commits iter=%d branch=check-conflict-abort"
                                 cpc-iter)
               (agent-repl--check-cherry-pick-conflict target-ws root target-ws)))))
-        ;; No CHERRY_PICK_HEAD remains.  Non-zero exit without conflict
-        ;; means git aborted before producing a conflict file (dirty
-        ;; tree, empty-after-empty commits, -x rejection) — surface a
-        ;; `failed' sentinel for the caller to flip the workspace into
-        ;; the :merge-failed bucket.
-        (if (= 0 exit-code) nil 'failed))))))
+        ;; No CHERRY_PICK_HEAD remains.  A clean exit is a real merge; a
+        ;; non-zero exit means git aborted before producing a conflict
+        ;; file (dirty tree, empty-after-empty commits, -x rejection).
+        ;; Before flipping the workspace into :merge-failed, distinguish
+        ;; the ALREADY-MERGED case: when the whole range is already on
+        ;; the destination by patch-id, a prior `cherry-pick -x' rewrote
+        ;; our commits under new SHAs, so the SHA-keyed empty-range probe
+        ;; above (rev-list --count) missed them and the pick ran only to
+        ;; go empty — the contribution IS on the parent, a no-op merge
+        ;; rather than a failure.  Only a genuinely not-yet-applied range
+        ;; stays `failed'.
+        (cond
+         ((= 0 exit-code) nil)
+         ((agent-repl--range-already-incorporated-p root base-branch target-branch)
+          (agent-repl--log target-ws
+                            "cherry-pick-commits target-ws=%s range=%s already-incorporated-by-patch-id"
+                            target-ws range)
+          'already-incorporated)
+         (t 'failed)))))))
 
 (defun agent-repl--cherry-pick-commits (root target-ws base-branch target-branch
                                               &optional auto-resolve silent)

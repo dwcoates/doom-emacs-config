@@ -2639,6 +2639,127 @@ existing worktree."
 ;; real git output, so the dispatch logic is exercised end-to-end without
 ;; touching git.
 
+;;; --- already-merged reclassification (patch-id probe) ----------------------
+;; A workspace whose commits already landed under NEW SHAs (a prior
+;; `cherry-pick -x') leaves a non-empty SHA range, so the SHA-keyed empty-range
+;; probe misses it and the pick runs empty.  `--range-already-incorporated-p'
+;; catches it by patch-id, so re-merging an already-merged workspace no-ops and
+;; closes instead of surfacing a silent failure.
+
+(ert-deftest agent-repl-test-range-already-incorporated-all-dash ()
+  "Every `git cherry' line marked `-' means the whole range is on the
+destination by patch-id, so the predicate reports already-incorporated."
+  ;; Arrange — two range commits, both patch-id-equivalent upstream.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "cherry" "HEAD" "target" "base")
+                  (concat "- 1111111111111111111111111111111111111111\n"
+                          "- 2222222222222222222222222222222222222222"))
+                 (_ (error "unmocked git-string args: %S" args))))))
+    ;; Act / Assert
+    (should (agent-repl--range-already-incorporated-p "/tmp/repo" "base" "target"))))
+
+(ert-deftest agent-repl-test-range-already-incorporated-plus-not-fully ()
+  "A single `+' line is genuinely un-applied work, so the predicate reports
+NOT fully incorporated — the caller must keep the empty pick a failure."
+  ;; Arrange — one applied (`-'), one new (`+').
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "cherry" "HEAD" "target" "base")
+                  (concat "- 1111111111111111111111111111111111111111\n"
+                          "+ 2222222222222222222222222222222222222222"))
+                 (_ (error "unmocked git-string args: %S" args))))))
+    ;; Act / Assert
+    (should-not (agent-repl--range-already-incorporated-p "/tmp/repo" "base" "target"))))
+
+(ert-deftest agent-repl-test-range-already-incorporated-blank-is-nil ()
+  "Blank `git cherry' output is not treated as already-incorporated, so an
+empty probe result never masquerades as a merged range."
+  ;; Arrange — no output.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "cherry" "HEAD" "target" "base") "")
+                 (_ (error "unmocked git-string args: %S" args))))))
+    ;; Act / Assert
+    (should-not (agent-repl--range-already-incorporated-p "/tmp/repo" "base" "target"))))
+
+(ert-deftest agent-repl-test-range-already-incorporated-error-is-nil ()
+  "A `fatal:' error from bad refs yields nil, so a probe failure never
+masquerades as an already-merged success."
+  ;; Arrange — git-string surfaces stderr for a bad ref.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "cherry" "HEAD" "target" "base")
+                  "fatal: bad revision 'target'")
+                 (_ (error "unmocked git-string args: %S" args))))))
+    ;; Act / Assert
+    (should-not (agent-repl--range-already-incorporated-p "/tmp/repo" "base" "target"))))
+
+(ert-deftest agent-repl-test-cherry-pick-commits-already-merged-classifies-incorporated ()
+  "A non-empty SHA range whose commits are all present by patch-id classifies
+as `already-incorporated' (the merge no-ops + closes), not `failed'."
+  ;; Arrange — non-empty range, empty pick (exit 1, no conflict), all patch-ids
+  ;; already upstream.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-list" "--count" "base..target") "1")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'agent-repl--merge-progress-begin) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-commits) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--make-cherry-pick-filter) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--git-exit-code-streaming) (lambda (&rest _) 1))
+            ((symbol-function 'agent-repl--cherry-pick-in-progress-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-already-incorporated-p) (lambda (&rest _) t))
+            ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (eq (agent-repl--cherry-pick-commits--impl "/tmp/repo" "ws" "base" "target")
+                'already-incorporated))))
+
+(ert-deftest agent-repl-test-cherry-pick-commits-not-incorporated-stays-failed ()
+  "A non-empty range NOT fully present by patch-id keeps the empty pick a
+`failed' sentinel, so a genuine failure is never swallowed."
+  ;; Arrange — non-empty range, empty pick, probe reports not-fully-incorporated.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-list" "--count" "base..target") "1")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'agent-repl--merge-progress-begin) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-commits) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--make-cherry-pick-filter) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--git-exit-code-streaming) (lambda (&rest _) 1))
+            ((symbol-function 'agent-repl--cherry-pick-in-progress-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-already-incorporated-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (eq (agent-repl--cherry-pick-commits--impl "/tmp/repo" "ws" "base" "target")
+                'failed))))
+
+(ert-deftest agent-repl-test-cherry-pick-commits-clean-exit-skips-probe ()
+  "A clean (zero) exit is a real merge returning nil, and never consults the
+patch-id probe."
+  ;; Arrange — the probe errors if reached, pinning the cond short-circuit.
+  (cl-letf (((symbol-function 'agent-repl--git-string)
+             (lambda (&rest args)
+               (pcase args
+                 (`("-C" "/tmp/repo" "rev-list" "--count" "base..target") "1")
+                 (_ (error "unmocked git-string args: %S" args)))))
+            ((symbol-function 'agent-repl--merge-progress-begin) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-commits) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--make-cherry-pick-filter) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--git-exit-code-streaming) (lambda (&rest _) 0))
+            ((symbol-function 'agent-repl--cherry-pick-in-progress-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--range-already-incorporated-p)
+             (lambda (&rest _) (error "probe must not run on a clean exit")))
+            ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--cherry-pick-commits--impl "/tmp/repo" "ws" "base" "target"))))
+
 (ert-deftest agent-repl-test-merge-fork-no-annotations-fallback ()
   "When HEAD has no -x annotations, fork falls back to merge-base HEAD TARGET."
   (let ((sha-m "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -2935,6 +3056,11 @@ is in flight), `--cherry-pick-commits' returns `failed'."
                (lambda (&rest args)
                  (pcase args
                    (`("-C" "/tmp/repo" "rev-list" "--count" ,_) "1")
+                   ;; The already-merged probe consulted on the failed path: a
+                   ;; `+' line means the commit is genuinely un-applied, so the
+                   ;; empty pick stays a real failure rather than a no-op merge.
+                   (`("-C" "/tmp/repo" "cherry" "HEAD" "feature" ,_)
+                    "+ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
                    (_ (error "unmocked git-string args: %S" args)))))
               ((symbol-function 'agent-repl--git-string-quiet)
                (lambda (&rest _args) "abc1234\tfeat: one"))
