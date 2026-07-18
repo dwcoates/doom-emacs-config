@@ -488,9 +488,15 @@ export function queuedCardKey(item: QueuedItem): string {
  * pill floating in the feed beneath. Only a final response carries one, so
  * CHIP is null for the commentary bubbles above it (see `finalResponses`).
  *
- * The working frontier gets the pulse instead (see `pulseTarget`). The
- * two never land on the same bubble: a final response only exists once the
- * turn has ended, and the pulse only runs while it has not.
+ * The working frontier takes the breath instead (see `pulseTarget`), but
+ * this function never renders it: the breath is a live-view accent the
+ * reconcile toggles as a class on the mounted bubble (`applyPulse`), NOT
+ * part of an item's intrinsic HTML. Baking it into the string would change
+ * the HTML every time the pulse moved, forcing an `innerHTML` rewrite that
+ * recreates the `.bubble` node and restarts its animation (the reset a
+ * reader sees as a jerk). The two never land on the same bubble anyway: a
+ * final response only exists once the turn has ended, and the breath only
+ * runs while it has not.
  *
  * The bubble is stamped with the time the agent OPENED the block (the
  * `text-start` envelope), not the time it closed it: the stamp then dates
@@ -500,7 +506,6 @@ export function queuedCardKey(item: QueuedItem): string {
 function TextStream(
   item: TextItem,
   chip: ResultItem | null,
-  isPulsing = false,
   panels?: PanelContext,
 ): string {
   const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
@@ -512,7 +517,7 @@ function TextStream(
   // not host carries no members, so it never goes amber.
   const liveAsync = hasLiveAsync(item.blockId, panels);
   const stateCls = liveAsync ? " async-live" : chip ? " final-response" : "";
-  const cls = `bubble assistant md${stateCls}${isPulsing ? " pulsing" : ""}`;
+  const cls = `bubble assistant md${stateCls}`;
   // The catalog rides EVERY host bubble, not just a final one: an interrupted
   // or tools-only turn hosts its survivors too (asyncByBubble), so a bubble
   // with no chip can still own live async that must be enumerated in it. The
@@ -742,7 +747,7 @@ function Fold(opts: {
  */
 function feedChildren(children: readonly ConversationItem[], panels?: PanelContext): string {
   return children
-    .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, false, panels)}</div>`)
+    .map((c) => `<div class="feed-child">${renderItem(c, panels?.selections, undefined, panels)}</div>`)
     .join("");
 }
 
@@ -761,11 +766,11 @@ function ActivitySection(
   });
 }
 
-// IS-PULSING breathes the card while it is the running frontier (see
-// `pulseTarget`): a slow wash under the head's fast arc, so a call in flight
-// is never a wholly still card during the second the arc stays hidden. The
-// two motions live on different channels — the arc in the badge, the breath
-// on the card background — so they read as one signal, not two competing ones.
+// A running tool card carries a slow wash under the head's fast arc (its own
+// CSS, not the bubble breath), so a call in flight is never a wholly still
+// card during the second the arc stays hidden. The two motions live on
+// different channels — the arc in the badge, the wash on the card background
+// — so they read as one signal, not two competing ones.
 function ToolCard(
   item: ToolItem,
   panels?: PanelContext,
@@ -1968,17 +1973,17 @@ function SystemNote(item: SystemItem): string {
  * carrying its chip, and the paired result renders as nothing, since the
  * bubble above it has already drawn it.
  *
- * IS-PULSING marks the one section that breathes (`pulseTarget`), which is
- * the prompt or a finished response. PANELS carries
- * the feed partition's child lists, letting a spawning card fold its
- * confined children into an activity panel (and letting those children
- * recurse through this same function).
+ * The breath (`pulseTarget`) is NOT rendered here: it is a live-view accent
+ * the reconcile toggles as a class on the mounted bubble (`applyPulse`), so
+ * a moving pulse never rewrites an item's HTML. PANELS carries the feed
+ * partition's child lists, letting a spawning card fold its confined children
+ * into an activity panel (and letting those children recurse through this
+ * same function).
  */
 export function renderItem(
   item: ConversationItem,
   selections?: QuestionSelections,
   finals?: FinalResponses,
-  isPulsing = false,
   panels?: PanelContext,
 ): string {
   if (rendersEmpty(item, finals)) return "";
@@ -1986,7 +1991,7 @@ export function renderItem(
     case "user-turn":
       return UserTurn(item, panels);
     case "text":
-      return TextStream(item, finals?.chips.get(item.blockId) ?? null, isPulsing, panels);
+      return TextStream(item, finals?.chips.get(item.blockId) ?? null, panels);
     case "thinking":
       return Thinking(item);
     case "tool":
@@ -2749,14 +2754,33 @@ export class FeedRenderer {
   private entryHtml(
     entry: FeedEntry,
     finals: FinalResponses,
-    pulse: PulseTarget,
     panels: PanelContext,
   ): string {
     if (entry.kind === "group") {
       const active = activeGroupMember(entry.members, this.activeTabs.get(this.entryKey(entry)));
       return groupHtml(entry.members, active, panels);
     }
-    return this.itemHtml(entry.item, finals, pulse, panels);
+    return this.itemHtml(entry.item, finals, panels);
+  }
+
+  /**
+   * Toggle the working-frontier breath on ENTRY's bubble IN PLACE, via a
+   * class flip on the mounted node rather than a rewrite of its HTML. The
+   * breath is a live-view accent (`pulseTarget`), not part of an item's
+   * intrinsic HTML, and deliberately kept OUT of `entryHtml`: were it baked
+   * into the string, the HTML would change every time the pulse moved, and
+   * the reconcile would then rewrite the whole `.feed-item` — destroying and
+   * recreating the `.bubble` child, restarting its CSS `bubble-breathe` from
+   * frame 0 (the reset the reader sees as a jerk). As a class toggle,
+   * re-applying the breath to a bubble already breathing is a no-op the
+   * animation never notices, so a burst of unrelated renders can no longer
+   * stutter it. Only a `text` item ever breathes (`isPulsed`), so a group
+   * entry and every other kind toggle it off.
+   */
+  private applyPulse(el: HTMLElement, entry: FeedEntry, pulse: PulseTarget): void {
+    const on = entry.kind !== "group" && isPulsed(entry.item, pulse);
+    const bubble = el.querySelector(":scope > .bubble");
+    bubble?.classList.toggle("pulsing", on);
   }
 
   private pendingQuestionItem(requestId: string): { item: PermissionItem; questions: AskQuestion[] } | null {
@@ -2790,16 +2814,16 @@ export class FeedRenderer {
 
   /**
    * One item's HTML: green-bordered and chip-bearing when FINALS marks it a
-   * turn's answer, breathing when PULSE names it, and carrying its
-   * activity panel when PANELS holds children for it.
+   * turn's answer, and carrying its activity panel when PANELS holds children
+   * for it. The breath is NOT part of the HTML — the reconcile toggles it as
+   * a class after mounting (see `applyPulse`).
    */
   private itemHtml(
     item: ConversationItem,
     finals: FinalResponses,
-    pulse: PulseTarget,
     panels: PanelContext,
   ): string {
-    return renderItem(item, this.questionSelections, finals, isPulsed(item, pulse), panels);
+    return renderItem(item, this.questionSelections, finals, panels);
   }
 
   private submitQuestionAnswers(requestId: string): void {
@@ -2927,9 +2951,10 @@ export class FeedRenderer {
       const before = this.container.scrollHeight;
       for (const i of indexes) {
         const { el, entry } = shells[i];
-        const html = this.entryHtml(entry, finals, pulse, panels);
+        const html = this.entryHtml(entry, finals, panels);
         el.innerHTML = html;
         this.stampNav(el, entry, finals, html);
+        this.applyPulse(el, entry, pulse);
         hydrateChessGames(el);
         const node = this.nodes.get(el.dataset.key ?? "");
         if (node) node.html = html;
@@ -3053,7 +3078,7 @@ export class FeedRenderer {
     for (const feedEntry of groupFeed(top)) {
       const key = this.entryKey(feedEntry);
       seen.add(key);
-      const html = this.entryHtml(feedEntry, finals, pulse, panels);
+      const html = this.entryHtml(feedEntry, finals, panels);
       let entry = this.nodes.get(key);
       if (!entry) {
         const el = document.createElement("div");
@@ -3076,6 +3101,12 @@ export class FeedRenderer {
         hydrateChessGames(entry.el);
         entry.html = html;
       }
+      // Runs every render, whether or not the HTML changed: the breath is a
+      // class on the mounted bubble, so a pulse that moved onto or off this
+      // item since last frame is reflected without a body rewrite (see
+      // `applyPulse`), and an unchanged pulse toggle is a no-op the running
+      // animation never notices.
+      this.applyPulse(entry.el, feedEntry, pulse);
     }
     // The tail status row rides at the tail of the live turn's content, above
     // the parked queue. Force-appended (like the queue cards below) so a live
