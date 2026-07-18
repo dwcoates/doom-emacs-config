@@ -555,16 +555,22 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(toolCentered).toMatch(/margin-right:\s*auto/);
   });
 
-  it("caps the tool-card column at the shared --agent-bubble-cap token", () => {
-    // Arrange / Act — the single width source the flush margins derive from.
+  it("caps the tool-card column at the narrower --tool-card-cap token", () => {
+    // Arrange / Act — the grey cards inset within the agent column, not filling it.
     // Assert
-    expect(toolCentered).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+    expect(toolCentered).toMatch(/max-width:\s*var\(--tool-card-cap\)/);
   });
 
   it("sets the agent bubble cap to 75% on the feed", () => {
     // Arrange / Act — an eighth of blank margin on each side once centered.
     // Assert
     expect(feed).toMatch(/--agent-bubble-cap:\s*75%/);
+  });
+
+  it("derives the tool-card cap as 0.75 of the agent column on the feed", () => {
+    // Arrange / Act — grey cards centered between the response and prompt rails.
+    // Assert
+    expect(feed).toMatch(/--tool-card-cap:\s*calc\(var\(--agent-bubble-cap\)\s*\*\s*0\.75\)/);
   });
 
   it("folds lone top-level async tool cards into the agent center", () => {
