@@ -7,12 +7,12 @@ description: Close an existing editor workspace without merging it. Use when the
 
 The user will name one or more existing workspaces to close. Your job is to write a JSON file dispatching a close for each named workspace. A downstream text editor will pick up the file and tear down the editor workspace — kill the Claude vterm session, kill the workspace's buffers, kill the Doom perspective, and drop the workspace from the in-memory registry. The git worktree on disk is intentionally left alone.
 
-This skill is the editor-state-only counterpart to `/workspace-merge`:
+This skill is the editor-state-only counterpart to `/create-or-update-workspace merge`:
 
-- `/workspace-merge` cherry-picks the workspace's commits into its source and *then* closes the editor workspace.
+- `/create-or-update-workspace merge` cherry-picks the workspace's commits into its source and *then* closes the editor workspace.
 - `/workspace-close` does ONLY the close half — no cherry-pick, no tag, no config reload, no focus switch, no worktree removal from disk.
 
-Use `/workspace-close` when the user wants to abandon a workspace's editor state without merging it (e.g. it's no longer needed, or its commits have already been delivered some other way). Use `/workspace-merge` when the workspace's commits still need to land in its source. Use `/workspace-finish` (the `finish` command type, dispatched by Emacs internals) when the on-disk git worktree should also be removed.
+Use `/workspace-close` when the user wants to abandon a workspace's editor state without merging it (e.g. it's no longer needed, or its commits have already been delivered some other way). Use `/create-or-update-workspace merge` when the workspace's commits still need to land in its source. Use `/workspace-finish` (the `finish` command type, dispatched by Emacs internals) when the on-disk git worktree should also be removed.
 
 Do NOT attempt to close the workspace yourself in any way. Under NO circumstances. The handling of the close is EXCLUSIVELY the responsibility and right of downstream consumers. Your EXCLUSIVE job is to generate the aforementioned JSON file, and NOTHING else. To that end, no code, git operations, or any other files or mutating effects should be done, either.
 
