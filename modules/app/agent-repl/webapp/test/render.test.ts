@@ -4396,14 +4396,22 @@ describe("async catalog", () => {
     expect(html).not.toContain("async-catalog");
   });
 
-  it("shows the monitoring line and a member badge while live, with no detail closed", () => {
+  it("shows a member badge while live, with no detail closed", () => {
     // Arrange + Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
     // Assert
     expect(html).toContain("async-catalog");
-    expect(html).toContain("monitoring…");
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
     expect(html).not.toContain("watcher-row");
+  });
+
+  it("never repeats the monitoring line inside the bubble catalog while a member is live", () => {
+    // Arrange + Act — a live member drives the catalog, but the animated
+    // monitoring row lives ONLY at the global feed tail, never in the bubble.
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    // Assert
+    expect(html).toContain("async-catalog");
+    expect(html).not.toContain("monitoring…");
   });
 
   it("renders each member badge as a div-toggle, not a click-through button", () => {
@@ -4425,42 +4433,42 @@ describe("async catalog", () => {
     expect(html).toContain("polling the queue…");
   });
 
-  it("drops the monitoring line once the member's notification settles it", () => {
+  it("settles a member's badge once its notification lands", () => {
     // Arrange — the completion notification settles the member.
     const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
     // Assert
-    expect(html).not.toContain("monitoring…");
     expect(html).toContain("async-badge settled");
   });
 
-  it("settles a member whose folded TaskStop succeeded, dropping the monitoring line", () => {
+  it("settles a member's badge when its folded TaskStop succeeded", () => {
     // Arrange — the prompt-mediated stop yields no notification, only a settled TaskStop card.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1")]));
     // Assert
-    expect(html).not.toContain("monitoring…");
     expect(html).toContain("async-badge settled");
   });
 
-  it("keeps a member live while its TaskStop is still in flight", () => {
+  it("keeps a member's badge live while its TaskStop is still in flight", () => {
     // Arrange — a resultless TaskStop has not confirmed the stop yet.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: undefined })]));
-    // Assert
-    expect(html).toContain("monitoring…");
+    // Assert — the live dot, not a monitoring line, carries the in-bubble signal.
+    expect(html).toContain("agent-running");
+    expect(html).not.toContain("async-badge settled");
   });
 
-  it("keeps a member live when its TaskStop errored", () => {
+  it("keeps a member's badge live when its TaskStop errored", () => {
     // Arrange — a failed stop must not settle the member.
     const w = watcher("bg1");
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: { isError: true, content: "no such task" } })]));
     // Assert
-    expect(html).toContain("monitoring…");
+    expect(html).toContain("agent-running");
+    expect(html).not.toContain("async-badge settled");
   });
 
   it("catalogs a non-final host bubble too (an interrupted turn's survivors)", () => {
