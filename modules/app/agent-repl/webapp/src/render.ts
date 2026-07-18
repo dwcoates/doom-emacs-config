@@ -45,7 +45,7 @@ import { renderPromptBody } from "./prompt-body.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { navTokensForItem } from "./nav.js";
-import { isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
+import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { gnsFolds } from "./gns.js";
 import { asyncByBubble, isWatcher } from "./watchers.js";
@@ -2212,13 +2212,20 @@ export function groupHtml(
  * ever. The addition: a user turn the previous render had not seen means
  * a prompt was JUST sent, and a sender wants to watch the answer — so the
  * feed jumps to the tail even from a scrolled-up position.
+ *
+ * A freeze (the user reading a nested view they opened, see `freezeOnToggle`)
+ * suppresses tail-following even from a pinned position, so streaming output
+ * cannot yank the view off what they are reading. A fresh prompt still wins
+ * over the freeze: sending it is an explicit ask to watch the answer.
  */
 export function repinsToTail(opts: {
   prevTurnId: string | null;
   nextTurnId: string | null;
   pinned: boolean;
+  frozen: boolean;
 }): boolean {
   if (opts.nextTurnId !== null && opts.nextTurnId !== opts.prevTurnId) return true;
+  if (opts.frozen) return false;
   return opts.pinned;
 }
 
@@ -2343,6 +2350,13 @@ export class FeedRenderer {
   private questionSelections = new Map<string, Set<string>>();
   /** Cards whose activity panel the user has open (renderer-owned too). */
   private openPanels = new Set<string>();
+  /**
+   * Tail-following frozen because the user opened a nested view to read it
+   * (see `freezeOnToggle`). While set, a render never parks the feed at its
+   * tail, so streaming output cannot yank the view off the opened content;
+   * scrolling back to the tail (or sending a fresh prompt) lifts it.
+   */
+  private tailFrozen = false;
   /** Tab pins per group key; an unpinned group auto-follows the newest runner. */
   private activeTabs = new Map<string, string>();
   /** Half-typed agent messages, keyed by agent id (see agentComposer). */
@@ -2428,6 +2442,14 @@ export class FeedRenderer {
       if (forId !== null) {
         this.msgDrafts.set(forId, (target as HTMLInputElement).value);
       }
+    });
+    // A frozen feed (a nested view is open, §freezeOnToggle) resumes
+    // tail-following the moment the user scrolls it back to the tail. The
+    // renders that DON'T freeze park at the tail themselves, firing this too,
+    // but clearing an already-clear freeze is a no-op — so the guard only
+    // ever fires on a user scroll that reaches the bottom.
+    container.addEventListener("scroll", () => {
+      this.tailFrozen = freezeOnScroll(this.tailFrozen, isPinnedToBottom(this.container));
     });
   }
 
@@ -2562,11 +2584,15 @@ export class FeedRenderer {
       return;
     }
     const id = toggle.getAttribute("data-panel-toggle") ?? "";
-    if (this.openPanels.has(id)) {
-      this.openPanels.delete(id);
-    } else {
+    const opened = !this.openPanels.has(id);
+    if (opened) {
       this.openPanels.add(id);
+    } else {
+      this.openPanels.delete(id);
     }
+    // Opening a nested view is the user asking to read it, so freeze the feed
+    // off its tail until they scroll back down (see `freezeOnToggle`).
+    this.tailFrozen = freezeOnToggle(this.tailFrozen, opened);
     if (this.lastState) this.render(this.lastState);
   }
 
@@ -2923,10 +2949,14 @@ export class FeedRenderer {
     this.flushBackfill();
     this.lastState = state;
     const turnId = lastUserTurnId(state.items);
+    // A fresh prompt re-follows the tail: it lifts any nested-view freeze so
+    // the sender watches the answer (repinsToTail lets the fresh turn win too).
+    if (turnId !== null && turnId !== this.lastUserTurn) this.tailFrozen = false;
     const toTail = repinsToTail({
       prevTurnId: this.lastUserTurn,
       nextTurnId: turnId,
       pinned: isPinnedToBottom(this.container),
+      frozen: this.tailFrozen,
     });
     this.lastUserTurn = turnId;
     // A /clear clears the screen: only the /clear bubble and what follows
