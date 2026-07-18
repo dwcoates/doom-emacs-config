@@ -1484,6 +1484,22 @@ pre {
 .interrupting-pending .animated-ellipsis {
   margin-left: -0.5rem;
 }
+/* Flush every tail-status row's left edge with the response column's left rail
+   rather than the feed's far-left gutter. The bubbles and tool cards above hug
+   a column inset half the agent cap's leftover from each side (the same
+   `calc((100% - var(--agent-bubble-cap)) / 2)` the assistant response's
+   `margin-left` and the centered `.feed-item > .tool-card` derive from), so
+   the identical left margin lands a running "thinking…"/"working…"/"retrying…"
+   row's spinner directly beneath where the last response bubble's own left edge
+   sits. One grouped rule for all five rows, the twin of their shared
+   ellipsis-gap rule above. */
+.thinking-pending,
+.working-pending,
+.retrying-pending,
+.monitoring-pending,
+.interrupting-pending {
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+}
 /* The live turn-stats row: the running turn's elapsed clock and the context
    it has grown so far, shown at the feed tail right below the progress
    indicator for as long as the turn runs (see turnStatsRowHtml). It is the
@@ -1493,16 +1509,19 @@ pre {
    pending rows above, minus the spinner: the indicator directly above already
    carries the arc.
 
-   Right-biased so the stats settle where the response bubble's own top-right
-   corner (.turn-meta) will land once the turn ends — the running figures grow
-   toward the exact spot their settled twins appear. Pinning them to the right
-   edge also decouples them from the indicator above: its animated ellipsis
-   cycles on the far-left rail, so nothing it does can nudge the counters. */
+   Right-biased to the response column's right rail rather than the feed's far
+   edge: a `margin-right` of the same half-leftover the prompt bubble hugs (see
+   `.bubble.user`) insets the block so `text-align: right` lands the figures at
+   the column's right-most limit — where a capped tool card and the prompt's
+   own right edge sit — rather than out at the window gutter. The counters thus
+   grow toward the right of the same center stream the response bubbles occupy,
+   the mirror of the indicator above flushing to that stream's left rail. */
 .turn-stats-live {
   padding: 0.25rem 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
 .turn-stats-live .info-time { color: var(--info-time); }
 .turn-stats-live .info-tokens { color: var(--info-tokens); }
