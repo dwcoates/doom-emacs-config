@@ -1225,11 +1225,30 @@ const turnStatsLive = blockAfter(css, ".turn-stats-live {");
 const workingRowScale = blockAfter(css, ".working-pending {");
 
 describe("live turn-stats row", () => {
-  it("right-biases the running stats to the feed's right edge", () => {
+  it("right-aligns the running stats within their box", () => {
     // Arrange / Act — the .turn-stats-live rule.
-    // Assert — pinned right, where the settled bubble corner (.turn-meta) lands
-    // and clear of the indicator's far-left ellipsis, so nothing nudges it.
+    // Assert — text-align right lands the figures at the box's right edge,
+    // which the margin-right below insets to the response column's right rail.
     expect(turnStatsLive).toMatch(/text-align:\s*right/);
+  });
+
+  it("insets the box to the response column's right rail rather than the feed edge", () => {
+    // Arrange / Act — the .turn-stats-live rule.
+    // Assert — a right margin of the same half-leftover gutter the column hugs,
+    // so text-align:right lands the figures at the column's right-most limit.
+    expect(turnStatsLive).toMatch(
+      /margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
+  });
+
+  it("lands the stats' right edge flush with the prompt bubble's right edge", () => {
+    // Arrange — the prompt bubble hugs the same column right rail (see .bubble.user).
+    const userBubble = blockAfter(css, ".bubble.user {");
+    // Act — the right margin each box carries.
+    const statsRight = turnStatsLive.match(/margin-right:\s*([^;]+);/)?.[1]?.trim();
+    const promptRight = userBubble.match(/margin-right:\s*([^;]+);/)?.[1]?.trim();
+    // Assert — identical insets, so the counters end where the prompt's right edge does.
+    expect(statsRight).toBe(promptRight);
   });
 
   it("matches the progress indicator's font size", () => {
@@ -1238,6 +1257,42 @@ describe("live turn-stats row", () => {
     expect(turnStatsLive).toMatch(/font-size:\s*0\.85rem/);
     expect(workingRowScale).toMatch(/font-size:\s*0\.85rem/);
   });
+});
+
+const tailFlush = blockAfter(css, ".thinking-pending,");
+/** Selector list of the rule that flushes the tail-status rows to the left rail. */
+const tailFlushSelector = css.slice(
+  css.indexOf(".thinking-pending,"),
+  css.indexOf("{", css.indexOf(".thinking-pending,")),
+);
+
+describe("tail status rows flush the response column's left rail", () => {
+  it("insets the tail-status rows to the column's left rail rather than the feed gutter", () => {
+    // Arrange / Act — the grouped flush rule over all five pending rows.
+    // Assert — a left margin of the half-leftover gutter the response column hugs.
+    expect(tailFlush).toMatch(
+      /margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
+  });
+
+  it("lands the indicator's left edge flush with the response bubble's left edge", () => {
+    // Arrange — the assistant response hugs the same column left rail (see .bubble.assistant).
+    const assistantBubble = blockAfter(css, ".bubble.assistant {");
+    // Act — the left margin each box carries.
+    const rowLeft = tailFlush.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
+    const bubbleLeft = assistantBubble.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
+    // Assert — identical insets, so the spinner starts where the response's left edge does.
+    expect(rowLeft).toBe(bubbleLeft);
+  });
+
+  it.each(["thinking", "working", "retrying", "monitoring", "interrupting"])(
+    "flushes the %s-pending row, leaving no variant stranded at the feed gutter",
+    (variant) => {
+      // Arrange / Act — the grouped flush selector must name every tail-status variant.
+      // Assert
+      expect(tailFlushSelector).toContain(`.${variant}-pending`);
+    },
+  );
 });
 
 const interruptingPending = blockAfter(css, ".interrupting-pending");
