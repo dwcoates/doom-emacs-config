@@ -45,8 +45,13 @@ import { countedTurns } from "./turn-clock.js";
 export interface TopbarDatapoints {
   /** Session-only chrome; null renders no entry (agents always pass null). */
   parentWs: string | null;
-  /** The scope's elapsed clock, pre-formatted (`5m 30s`, or `--` idle). */
-  timerLabel: string;
+  /**
+   * The scope's elapsed clock, pre-formatted (`5m 30s`, or `--` idle), or
+   * null to render NO time datapoint at all. The session passes null — its
+   * turn clock moved to the live feed-tail row beside the progress indicator
+   * (see `turnStatsRowHtml`) — while an agent bubble passes its own span.
+   */
+  timerLabel: string | null;
   /**
    * The scope's plain tokens figure — its conversation's CURRENT context
    * size — rendered only when `tokenMenu` is null; null is unknown and
@@ -93,10 +98,11 @@ export interface TopbarDisclosure {
  * caller's (only one overlay is ever open at a time), and CURRENT-TURN is
  * the counted-turn clock their recency windows age against.
  *
- * TIMER-LABEL's span is marked (`TIMER_SLOT`) so the caller's
- * once-a-second tick can repaint that one value without rewriting the
- * whole strip — the two paint paths agree because the tick writes exactly
- * what this would have.
+ * TIMER-LABEL renders the `time:` datapoint only when non-null — an agent
+ * bubble's own span, marked (`TIMER_SLOT`) so the bubble tick can repaint
+ * that one value without rewriting the whole strip. The session passes null
+ * (its turn clock moved to the live feed-tail row, see `turnStatsRowHtml`),
+ * so the header strip omits `time:` entirely.
  *
  * The tokens datapoint splits by scope. With TOKEN-MENU set (the session)
  * it is the tokens dropdown chip: the figure is that scope's CUMULATIVE
@@ -111,9 +117,11 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
   if (d.parentWs) {
     parts.push(`parent workspace: <span class="info-ws">${escapeHtml(d.parentWs)}</span>`);
   }
-  parts.push(
-    `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(d.timerLabel)}</span>`,
-  );
+  if (d.timerLabel !== null) {
+    parts.push(
+      `time: <span class="info-time" ${TIMER_SLOT}>${escapeHtml(d.timerLabel)}</span>`,
+    );
+  }
   if (d.tokenMenu !== null) {
     parts.push(tokensMenuHtml(d.tokenMenu, open.tokensOpen));
   } else {
@@ -128,19 +136,18 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
 }
 
 /**
- * The session's datapoints, as the header strip has always shown them.
- * TIMER-LABEL is handed in rather than derived: the header's clock is the
- * `TaskTimer`'s, and rendering exactly what its last tick painted keeps
- * the two paint paths from ever disagreeing.
+ * The session's datapoints for the header strip. The turn clock is NOT among
+ * them: it moved to the live feed-tail row beside the progress indicator (see
+ * `turnStatsRowHtml`), so the session passes `timerLabel: null` and the strip
+ * omits the `time:` datapoint entirely.
  */
 export function sessionTopbarDatapoints(
   state: StoreState,
   parentWs: string | null,
-  timerLabel: string,
 ): TopbarDatapoints {
   return {
     parentWs,
-    timerLabel,
+    timerLabel: null,
     // The session's tokens datapoint is the dropdown: the chip reads the
     // session's CURRENT context size (`state.contextTokens`, the same
     // figure the response bubble shows) and the overlay carries the

@@ -410,6 +410,14 @@ describe("topbarInfoHtml", () => {
     );
   });
 
+  it("omits the time datapoint when the scope has no clock", () => {
+    // Arrange + Act — the session passes null, its turn clock having moved to
+    // the live feed-tail row (see turnStatsRowHtml).
+    const html = strip({ timerLabel: null });
+    // Assert
+    expect(html).not.toContain("time:");
+  });
+
   it("reads the idle label when the scope's clock is idle", () => {
     // Arrange + Act + Assert — the fixture default, since the store starts idle.
     expect(strip()).toContain(
@@ -438,7 +446,7 @@ describe("sessionTopbarDatapoints", () => {
     // Arrange — the last result's session-cumulative snapshot.
     const state = storeState({ resultUsage: { input_tokens: 10, output_tokens: 20 } });
     // Act
-    const d = sessionTopbarDatapoints(state, null, IDLE_LABEL);
+    const d = sessionTopbarDatapoints(state, null);
     // Assert
     expect(d.tokenMenu?.topLevel).toEqual({ input_tokens: 10, output_tokens: 20 });
   });
@@ -447,7 +455,7 @@ describe("sessionTopbarDatapoints", () => {
     // Arrange — the store's current context size feeds the chip.
     const state = storeState({ contextTokens: 132_576 });
     // Act
-    const d = sessionTopbarDatapoints(state, null, IDLE_LABEL);
+    const d = sessionTopbarDatapoints(state, null);
     // Assert
     expect(d.tokenMenu?.contextSize).toBe(132_576);
   });
@@ -466,7 +474,7 @@ describe("sessionTopbarDatapoints", () => {
       },
     };
     // Act
-    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null, IDLE_LABEL);
+    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null);
     // Assert
     expect(d.tokenMenu?.models).toEqual(modelUsage);
   });
@@ -474,41 +482,42 @@ describe("sessionTopbarDatapoints", () => {
   it("projects no plain standing, which stays in the store for the result chips", () => {
     // Arrange + Act — the strip's session tokens datapoint is the
     // dropdown; a standing here would render nothing anyway.
-    const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null, IDLE_LABEL);
+    const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null);
     // Assert
     expect(d.contextTokens).toBeNull();
   });
 
   it("passes the parent workspace through", () => {
     // Arrange + Act + Assert
-    expect(sessionTopbarDatapoints(storeState(), "ws", IDLE_LABEL).parentWs).toBe("ws");
+    expect(sessionTopbarDatapoints(storeState(), "ws").parentWs).toBe("ws");
   });
 
-  it("renders exactly what the TaskTimer's last tick painted", () => {
-    // Arrange + Act — the label is handed in, never re-derived, so the two
-    // paint paths cannot disagree.
-    expect(sessionTopbarDatapoints(storeState(), null, "5m 30s").timerLabel).toBe("5m 30s");
+  it("carries no timer, its turn clock having moved to the feed-tail row", () => {
+    // Arrange + Act + Assert — a null timerLabel makes the strip omit the
+    // `time:` datapoint; the running clock lives beside the progress
+    // indicator now (see turnStatsRowHtml).
+    expect(sessionTopbarDatapoints(storeState(), null).timerLabel).toBeNull();
   });
 
   it("projects the session-wide subagent roster", () => {
     // Arrange
     const state = storeState({ items: [agentItem()] });
     // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, IDLE_LABEL).agents.map((a) => a.id)).toEqual(["a1"]);
+    expect(sessionTopbarDatapoints(state, null).agents.map((a) => a.id)).toEqual(["a1"]);
   });
 
   it("projects the session-wide task roster", () => {
     // Arrange
     const state = storeState({ items: [taskCreate()] });
     // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, IDLE_LABEL).tasks.map((t) => t.id)).toEqual(["1"]);
+    expect(sessionTopbarDatapoints(state, null).tasks.map((t) => t.id)).toEqual(["1"]);
   });
 
   it("reads the counted-turn clock off the session's items", () => {
     // Arrange
     const state = storeState({ items: [userTurn(), userTurn("more", "r2")] });
     // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, IDLE_LABEL).currentTurn).toBe(2);
+    expect(sessionTopbarDatapoints(state, null).currentTurn).toBe(2);
   });
 });
 
