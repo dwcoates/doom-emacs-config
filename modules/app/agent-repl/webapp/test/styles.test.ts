@@ -1043,6 +1043,61 @@ describe("thinking spinner", () => {
   });
 });
 
+const animatedEllipsis = blockAfter(css, ".animated-ellipsis::after");
+const ellipsisKeyframes = blockAfter(css, "@keyframes ellipsis-dots");
+const reducedEllipsis = blockAfter(
+  blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+  ".animated-ellipsis::after",
+);
+
+describe("animated ellipsis", () => {
+  it("cycles the dot count through no dots, one, two and three", () => {
+    // Arrange / Act — the ellipsis-dots keyframes.
+    // Assert — the four discrete states of a trailing ellipsis.
+    expect(ellipsisKeyframes).toContain(`content: "";`);
+    expect(ellipsisKeyframes).toContain(`content: ".";`);
+    expect(ellipsisKeyframes).toContain(`content: "..";`);
+    expect(ellipsisKeyframes).toContain(`content: "...";`);
+  });
+
+  it("reaches the full ellipsis three-quarters through the cycle", () => {
+    // Arrange / Act — the ellipsis-dots keyframes.
+    // Assert — "..." lands at 75%; with the 4/3-revolution duration below, 75%
+    // of the cycle is exactly one 0.8s spinner turn, so a full ellipsis lands
+    // on each completed revolution.
+    expect(ellipsisKeyframes).toMatch(/75%\s*{\s*content:\s*"\.\.\."/);
+  });
+
+  it("runs the ellipsis on a cycle distinct from the spinner's revolution", () => {
+    // Arrange / Act — the base .animated-ellipsis::after rule.
+    // Assert — the cycle is 4/3 of the 0.8s revolution, NOT the bare 0.8s the
+    // spinner spins at, so the dots and the arc never march in lockstep.
+    expect(animatedEllipsis).toMatch(
+      /animation:\s*ellipsis-dots\s+calc\(0\.8s\s*\*\s*4\s*\/\s*3\)\s+step-end\s+infinite/,
+    );
+    expect(animatedEllipsis).not.toMatch(/ellipsis-dots\s+0\.8s/);
+  });
+
+  it("snaps between dot counts rather than smearing between them", () => {
+    // Arrange / Act — the base .animated-ellipsis::after rule.
+    // Assert — step-end holds each discrete content value until the next frame.
+    expect(animatedEllipsis).toContain("step-end");
+  });
+
+  it("bakes a static ellipsis fallback into the pseudo-element", () => {
+    // Arrange / Act — the base .animated-ellipsis::after rule.
+    // Assert — engines that cannot animate `content` show a plain "…".
+    expect(animatedEllipsis).toMatch(/content:\s*"…"/);
+  });
+
+  it("rests at a static ellipsis under reduced motion instead of cycling", () => {
+    // Arrange / Act — the reduced-motion .animated-ellipsis::after override.
+    // Assert — the dots are a hint the arc already carries, so they stop.
+    expect(reducedEllipsis).toMatch(/animation:\s*none/);
+    expect(reducedEllipsis).toMatch(/content:\s*"…"/);
+  });
+});
+
 const interruptingPending = blockAfter(css, ".interrupting-pending");
 const interruptingSpinner = blockAfter(css, ".interrupting-spinner {");
 const reducedMotion = blockAfter(css, "@media (prefers-reduced-motion: reduce)");

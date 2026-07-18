@@ -55,6 +55,20 @@ export function escapeHtml(s: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/**
+ * The trailing dots beside a live status word (thinking, working, retrying,
+ * monitoring, interrupting, processing) that cycle ""→"."→".."→"..." via CSS
+ * (`.animated-ellipsis`), so the label reads as live alongside the spinner
+ * arc without marching in lockstep with it (see styles.css). A static "…" is
+ * baked into the pseudo-element as the fallback for engines that cannot
+ * animate `content`, so the dots degrade to a plain ellipsis rather than
+ * vanishing. Marked aria-hidden so assistive tech reads the bare status word,
+ * not a stream of dots.
+ */
+export function animatedEllipsis(): string {
+  return `<span class="animated-ellipsis" aria-hidden="true"></span>`;
+}
+
 /** File extension (lowercased, no dot) → registered hljs language. */
 const EXT_LANGUAGES: Record<string, string> = {
   bash: "bash",
