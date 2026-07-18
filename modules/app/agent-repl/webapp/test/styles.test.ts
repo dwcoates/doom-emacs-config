@@ -150,6 +150,31 @@ describe("composer input", () => {
   });
 });
 
+describe("tool card grey", () => {
+  it("darkens the light-theme card a notch below the old near-white grey", () => {
+    // Arrange — #f9fafb is the old card grey, pinned so the darkening cannot
+    // silently regress back to near-invisible against the white feed.
+    const card = token(lightTheme, "--card");
+    // Act / Assert
+    expect(luminance(card)).toBeLessThan(luminance("#f9fafb"));
+  });
+
+  it("darkens the dark-theme card a notch below the old grey", () => {
+    // Arrange — #1a1d24 is the old dark card grey.
+    const card = token(darkTheme, "--card");
+    // Act / Assert
+    expect(luminance(card)).toBeLessThan(luminance("#1a1d24"));
+  });
+
+  it("keeps the dark-theme card lifted above the feed background", () => {
+    // Arrange — darker, but never as dark as the bg: a card must stay a surface
+    // the feed lifts it off of.
+    const [card, bg] = [token(darkTheme, "--card"), token(darkTheme, "--bg")];
+    // Act / Assert
+    expect(luminance(card)).toBeGreaterThan(luminance(bg));
+  });
+});
+
 const topbarPicker = blockAfter(css, "#topbar select");
 
 describe("topbar pickers", () => {
@@ -1010,6 +1035,21 @@ describe("subagent card", () => {
     const wash = token(darkTheme, "--async-card");
     // Act / Assert
     expect(luminance(wash)).toBeLessThan(luminance("#0b5048"));
+  });
+
+  it("darkens the light-theme wash a fourth notch below the third-unification teal", () => {
+    // Arrange — #79bdb0 is the third-unification light card, pinned here so the
+    // requested fourth darkening cannot silently regress back to it.
+    const wash = token(lightTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#79bdb0"));
+  });
+
+  it("darkens the dark-theme wash a fourth notch below the third-unification teal", () => {
+    // Arrange — #0a4a42 is the third-unification dark card.
+    const wash = token(darkTheme, "--async-card");
+    // Act / Assert
+    expect(luminance(wash)).toBeLessThan(luminance("#0a4a42"));
   });
 
   it("keeps the darkened light-theme wash inside the turquoise band", () => {

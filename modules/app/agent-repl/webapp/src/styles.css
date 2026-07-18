@@ -4,7 +4,11 @@
   --fg: #1a1a1a;
   --muted: #6b7280;
   --border: #e5e7eb;
-  --card: #f9fafb;
+  /* Tool-card grey: the fill under every full-width response card (Bash, Read,
+     etc.) and the badges/tickers riding on them. A notch darker than the old
+     near-white #f9fafb, so a card lifts off the feed instead of melting into
+     it, while staying above the composer well (--composer-bg) below it. */
+  --card: #eef1f4;
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -96,12 +100,13 @@
      process of its own rather than one more file read: a skill handoff, a
      spawned subagent, and any detached background work to come. ONE hue at
      ONE depth — a tad darker than the old subagent teal, then darkened a
-     second notch, then a third notch on request (styles.test.ts pins the
-     wash below the pre-unification hex, the first-unification hex, AND the
-     second-unification hex so none of the three darkenings can silently
+     second notch, then a third notch, then a fourth notch on request
+     (styles.test.ts pins the wash below the pre-unification hex, the
+     first-unification hex, the second-unification hex, AND the
+     third-unification hex so none of the four darkenings can silently
      regress), with the status chip backed by the card grey (.tool-card
      .badge) so the wash never tints it. */
-  --async-card: #79bdb0;
+  --async-card: #72b2a5;
   --async-border: #4fb8a8;
   /* The Merge status card (a merge-failure remediation turn): an amber wash,
      kin to --remediation, so it reads as "needs resolving" and stays distinct
@@ -140,7 +145,7 @@
     --fg: #e5e7eb;
     --muted: #9ca3af;
     --border: #2a2e37;
-    --card: #1a1d24;
+    --card: #16191f;
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -170,7 +175,7 @@
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     --q-border: #facc15;
-    --async-card: #0a4a42;
+    --async-card: #09433b;
     --async-border: #4fc4b0;
     --merge-card: #3a2e0a;
     --merge-border: #facc15;
