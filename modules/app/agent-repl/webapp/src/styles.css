@@ -1366,8 +1366,24 @@ pre {
    flex gap ahead of THIS span (see `.animated-ellipsis` there): the span is
    its own flex item, so the row's inter-item gap would otherwise read as a
    stray space between the word and the dots ("working …"). */
+/* Reserve the widest dot state's width so the cycling never reflows whatever
+   trails the dots — the live stats counters right-biased below the row, the
+   ")" closing a "(thinking…)" label. The hidden ::before sizes the span to the
+   full three-dot width once, and the animated ::after is lifted out of flow on
+   top of it, so the dots grow and shrink IN PLACE rather than shoving what
+   follows them left and right through the cycle. */
+.animated-ellipsis {
+  position: relative;
+  display: inline-block;
+}
+.animated-ellipsis::before {
+  content: "...";
+  visibility: hidden;
+}
 .animated-ellipsis::after {
   content: "…";
+  position: absolute;
+  left: 0;
   animation: ellipsis-dots calc(0.8s * 4 / 3) step-end infinite;
 }
 @keyframes ellipsis-dots {
@@ -1474,11 +1490,18 @@ pre {
    reuses the SAME two topbar hues — the clock's --info-time blue and the
    delta's --info-tokens amber — bullet-separated. Same tail geometry as the
    pending rows above, minus the spinner: the indicator directly above already
-   carries the arc. */
+   carries the arc.
+
+   Right-biased so the stats settle where the response bubble's own top-right
+   corner (.turn-meta) will land once the turn ends — the running figures grow
+   toward the exact spot their settled twins appear. Pinning them to the right
+   edge also decouples them from the indicator above: its animated ellipsis
+   cycles on the far-left rail, so nothing it does can nudge the counters. */
 .turn-stats-live {
   padding: 0.25rem 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .turn-stats-live .info-time { color: var(--info-time); }
 .turn-stats-live .info-tokens { color: var(--info-tokens); }
