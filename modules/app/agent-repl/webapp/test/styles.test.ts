@@ -1160,6 +1160,14 @@ describe("animated ellipsis", () => {
     expect(reducedEllipsis).toMatch(/animation:\s*none/);
     expect(reducedEllipsis).toMatch(/content:\s*"…"/);
   });
+
+  it("pulls the ellipsis flush against its word, cancelling the row's flex gap", () => {
+    // Arrange — the pending rows are flex with a 0.5rem gap, and the ellipsis
+    // span is its own flex item, so the gap would otherwise read as "working …".
+    const flush = blockAfter(css, ".interrupting-pending .animated-ellipsis");
+    // Assert — a negative margin the width of the gap restores "working…".
+    expect(flush).toMatch(/margin-left:\s*-0\.5rem/);
+  });
 });
 
 const interruptingPending = blockAfter(css, ".interrupting-pending");
