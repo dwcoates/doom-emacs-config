@@ -32,12 +32,12 @@ import { HostGlobal, installHostCloseMenusHook, installHostTailHook } from "./ho
 import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
-  type RosterEntry,
+  type AccountMenuEntry,
   accountIsLoggedOut,
   accountLabel,
   accountMenuEntries,
   fetchAccount,
-  fetchAccounts,
+  fetchAccountMenuEntries,
   switchAccount,
 } from "./account.js";
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
@@ -660,21 +660,34 @@ async function boot(): Promise<void> {
       });
   };
 
-  // The chip's dropdown. Rebuilt on every open from the daemon's live
-  // roster, so the identities shown are current rather than boot-time
-  // stale; a daemon without -accounts degrades to the re-auth entry alone.
+  // The chip's dropdown. Rebuilt on every open from a live read of BOTH the
+  // roster AND the account this session runs as, so the switch entry the menu
+  // filters out is decided by the CURRENT root rather than a cached one — a
+  // just-completed switch the chip's `account` has not caught up to would
+  // otherwise re-offer the very root the session moved to. A daemon without
+  // -accounts (or an unreachable one) degrades to the re-auth entry alone,
+  // built from the last account known.
   const hideMenu = (): void => {
     accountMenuEl.hidden = true;
   };
   const openMenu = async (): Promise<void> => {
-    let roster: RosterEntry[] = [];
+    let entries: AccountMenuEntry[];
     try {
-      roster = await fetchAccounts(httpBase);
+      const menu = await fetchAccountMenuEntries(httpBase, activeSessionId);
+      // The fresh read the menu was filtered against is also the truest value
+      // for the chip, so adopt it rather than leave the two out of step.
+      account = menu.current;
+      accountEl.textContent = accountLabel(account);
+      accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
+      entries = menu.entries;
     } catch (err: unknown) {
-      console.error("account roster lookup failed", err);
+      // A failed live read must still leave re-auth reachable: fall back to
+      // the last account known and a roster-less menu rather than an empty one.
+      console.error("account menu lookup failed", err);
+      entries = accountMenuEntries(account, []);
     }
     accountMenuEl.replaceChildren(
-      ...accountMenuEntries(account, roster).map((entry) => {
+      ...entries.map((entry) => {
         const item = document.createElement("button");
         item.textContent = entry.text;
         item.addEventListener("click", () => {

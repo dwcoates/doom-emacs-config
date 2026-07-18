@@ -12,6 +12,7 @@ import {
   accountLabel,
   accountMenuEntries,
   fetchAccount,
+  fetchAccountMenuEntries,
   fetchAccounts,
   switchAccount,
   type RosterEntry,
@@ -264,5 +265,104 @@ describe("accountMenuEntries", () => {
     const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [broken]);
     // Assert
     expect(entries[1]).toMatchObject({ text: "switch to work (unreadable)" });
+  });
+});
+
+describe("fetchAccountMenuEntries", () => {
+  const personal: RosterEntry = { label: "personal", config_dir: "", email: "a@b.c" };
+  const work: RosterEntry = { label: "work", config_dir: "/w", email: "d@e.f" };
+
+  /** A fetch routing /account and /accounts to distinct bodies. */
+  function router(
+    current: unknown,
+    roster: unknown,
+  ): { fetchFn: typeof fetch; calls: string[] } {
+    const calls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      calls.push(url);
+      const body = url.endsWith("/accounts") ? { accounts: roster } : current;
+      return { ok: true, status: 200, json: async () => body, text: async () => "" };
+    }) as unknown as typeof fetch;
+    return { fetchFn, calls };
+  }
+
+  it("offers switch-to-personal once the live account reads as work", async () => {
+    // Arrange — the regression: a session that just moved to work must be
+    // offered personal, never re-offered the work it already runs as.
+    const { fetchFn } = router({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Act
+    const { entries } = await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    const switches = entries.filter((e) => e.kind === "switch");
+    expect(switches).toHaveLength(1);
+    expect(switches[0]).toMatchObject({ configDir: "" });
+  });
+
+  it("offers switch-to-work when the live account reads as personal", async () => {
+    // Arrange
+    const { fetchFn } = router({ config_dir: "", email: "a@b.c" }, [personal, work]);
+    // Act
+    const { entries } = await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    const switches = entries.filter((e) => e.kind === "switch");
+    expect(switches).toHaveLength(1);
+    expect(switches[0]).toMatchObject({ configDir: "/w" });
+  });
+
+  it("reads the current account live rather than trusting a cached one", async () => {
+    // Arrange — it must hit the per-session account route, not the roster alone.
+    const { fetchFn, calls } = router({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Act
+    await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    expect(calls).toContain("http://d/sessions/s_1/account");
+  });
+
+  it("also reads the roster live", async () => {
+    // Arrange
+    const { fetchFn, calls } = router({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Act
+    await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    expect(calls).toContain("http://d/accounts");
+  });
+
+  it("hands back the freshly-read current account", async () => {
+    // Arrange
+    const { fetchFn } = router({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Act
+    const { current } = await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    expect(current).toEqual({ config_dir: "/w", email: "d@e.f" });
+  });
+
+  it("rejects when the account read fails", async () => {
+    // Arrange — a menu on a half-stale read is worse than a caller fallback.
+    const fetchFn = (async (url: string) => {
+      const isAccount = url.endsWith("/sessions/s_1/account");
+      return {
+        ok: !isAccount,
+        status: isAccount ? 404 : 200,
+        json: async () => ({ accounts: [] }),
+        text: async () => "boom",
+      };
+    }) as unknown as typeof fetch;
+    // Act / Assert
+    await expect(fetchAccountMenuEntries("http://d", "s_1", fetchFn)).rejects.toThrow(/404/);
+  });
+
+  it("rejects when the roster read fails", async () => {
+    // Arrange
+    const fetchFn = (async (url: string) => {
+      const isRoster = url.endsWith("/accounts");
+      return {
+        ok: !isRoster,
+        status: isRoster ? 503 : 200,
+        json: async () => ({ config_dir: "", email: "a@b.c" }),
+        text: async () => "boom",
+      };
+    }) as unknown as typeof fetch;
+    // Act / Assert
+    await expect(fetchAccountMenuEntries("http://d", "s_1", fetchFn)).rejects.toThrow(/503/);
   });
 });
