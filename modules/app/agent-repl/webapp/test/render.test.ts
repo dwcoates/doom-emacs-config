@@ -2818,6 +2818,63 @@ describe("rendersEmpty", () => {
     expect(rendersEmpty(item)).toBe(false);
   });
 
+  it("counts the interrupt sentinel bubble as undrawn", () => {
+    // Arrange — the sentinel Claude Code injects for a plain user interrupt;
+    // the yellow aborted chip is the only denotation the feed keeps.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "[Request interrupted by user]",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts the tool-use interrupt sentinel bubble as undrawn", () => {
+    // Arrange — the variant emitted when a tool call was in flight.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "[Request interrupted by user for tool use]",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts an interrupt sentinel padded with whitespace as undrawn", () => {
+    // Arrange — a trailing newline must not smuggle the sentinel past.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "  [Request interrupted by user]\n",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(true);
+  });
+
+  it("counts a bubble that merely quotes the interrupt sentinel mid-sentence as drawn", () => {
+    // Arrange — a real answer discussing the sentinel is not the sentinel.
+    const item: ConversationItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "the CLI prints [Request interrupted by user] on abort",
+      done: true,
+      ts: TEXT_TS,
+    };
+    // Act + Assert
+    expect(rendersEmpty(item)).toBe(false);
+  });
+
   it("counts a result whose chip a response bubble swallowed as undrawn", () => {
     // Arrange
     const closer = result();
