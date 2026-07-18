@@ -802,9 +802,10 @@ pre {
 .watcher-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* The in-bubble async catalog (async-quiescence): the bubble's live-or-settled
-   background work, as a bottom strip of amber badges under the monitoring
-   line. Set off from the answer prose above it by a dashed top rule, like the
-   folds it replaces. */
+   background work, as a bottom strip of amber badges. Set off from the answer
+   prose above it by a dashed top rule, like the folds it replaces. The
+   animated monitoring row is NOT repeated here — it lives only at the global
+   feed tail; the amber border and badge dots carry the in-bubble signal. */
 .async-catalog {
   border-top: 1px dashed var(--border);
   margin-top: 0.5rem;
@@ -1335,8 +1336,9 @@ pre {
    while the main chain is idle (async quiescence). Same geometry as the
    thinking/working rows; it REUSES the textless-thinking arc rather than
    defining its own spinner, tinted amber below so the arc reads as the
-   async --async hue rather than the working orange. Serves both homes — the
-   in-bubble catalog's collapsed face and the global feed-tail fallback. */
+   async --async hue rather than the working orange. Its one home is the
+   global feed-tail fallback — the in-bubble catalog carries no monitoring
+   row, letting its amber border and badge dots signal liveness instead. */
 .monitoring-pending {
   display: flex;
   align-items: center;
