@@ -1839,8 +1839,8 @@ puts the view away."
         (should (eq (agent-repl--ws-get "ws1" :repl-state) :hidden))))))
 
 (ert-deftest agent-repl-test-panels-on-close-never-kills ()
-  "on-close itself must NOT kill: send-and-hide and the drawer close
-hide sessions that keep running."
+  "on-close itself must NOT kill: send-and-hide hides sessions that
+keep running."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-put "ws1" :frontend 'vterm)
@@ -2142,7 +2142,7 @@ state axes."
 ;;;; ---- Tests: redirect-from-agent-before-save side/dedicated windows ----
 
 (ert-deftest agent-repl-test-panels-redirect-from-side-window ()
-  "Redirect fires when selected window is a side window (e.g. the drawer).
+  "Redirect fires when selected window is a side window.
 
 Regression: a side window selected at persp save time would otherwise be
 restored as the selected window, causing `+workspace/kill's fallback
@@ -2201,9 +2201,9 @@ window after a nuke."
   "Redirect target must skip side windows even when selected is an agent panel.
 
 Regression: the previous predicate `non-agent-panel-window-p' returned
-t for the drawer (a non-agent side window), so `cl-find-if' could
-pick the drawer as the redirect destination — defeating the purpose
-of the redirect."
+t for a non-agent side window, so `cl-find-if' could pick the side
+window as the redirect destination — defeating the purpose of the
+redirect."
   (agent-repl-test--with-clean-state
     (delete-other-windows)
     (let* ((agent-buf (get-buffer-create "*agent-frontend-abcd1234*"))
@@ -2426,58 +2426,58 @@ windows."
         (setq agent-repl--window-fullscreen-config nil)
         (when (get-buffer "*other*") (kill-buffer "*other*"))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-preserves-drawer ()
-  "fullscreen-and-focus does NOT delete side windows (e.g. the drawer) when maximizing a non-agent buffer."
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-preserves-side-window ()
+  "fullscreen-and-focus does NOT delete side windows when maximizing a non-agent buffer."
   (agent-repl-test--with-clean-state
     (let* ((other-buf (get-buffer-create "*other-fs*"))
-           (drawer-buf (get-buffer-create "*agent-drawer-fs*"))
+           (side-buf (get-buffer-create "*agent-side-fs*"))
            (agent-repl--window-fullscreen-config nil)
            (predicate-captured nil)
            (skip-captured nil))
       (switch-to-buffer other-buf)
       (unwind-protect
-          (let ((fake-drawer-win (split-window-right)))
-            (set-window-buffer fake-drawer-win drawer-buf)
-            (set-window-parameter fake-drawer-win 'window-side 'left)
+          (let ((fake-side-win (split-window-right)))
+            (set-window-buffer fake-side-win side-buf)
+            (set-window-parameter fake-side-win 'window-side 'left)
             (cl-letf (((symbol-function 'agent-repl-window--delete-where)
                        (lambda (pred &rest args)
                          (setq predicate-captured pred
                                skip-captured (plist-get args :skip-side-windows))
                          nil)))
               (agent-repl-fullscreen-and-focus)
-              ;; The sweep must skip side windows by default (drawer survives).
+              ;; The sweep must skip side windows by default (side window survives).
               (should (or (null skip-captured) (eq skip-captured t)))
-              ;; Predicate keeps the selected (non-drawer) window and would
-              ;; target the drawer window if side-windows were not skipped.
+              ;; Predicate keeps the selected (non-side) window and would
+              ;; target the side window if side-windows were not skipped.
               (should (functionp predicate-captured))
               (should-not (funcall predicate-captured (selected-window)))
-              (should (funcall predicate-captured fake-drawer-win))))
+              (should (funcall predicate-captured fake-side-win))))
         (setq agent-repl--window-fullscreen-config nil)
-        (when (buffer-live-p drawer-buf) (kill-buffer drawer-buf))
+        (when (buffer-live-p side-buf) (kill-buffer side-buf))
         (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-real-drawer-survives ()
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-real-side-window-survives ()
   "End-to-end: maximizing a non-agent buffer leaves a real side window alive."
   (agent-repl-test--with-clean-state
     (let* ((other-buf (get-buffer-create "*other-fs-real*"))
            (extra-buf (get-buffer-create "*extra-fs-real*"))
-           (drawer-buf (get-buffer-create "*agent-drawer-fs-real*"))
+           (side-buf (get-buffer-create "*agent-side-fs-real*"))
            (agent-repl--window-fullscreen-config nil))
       (switch-to-buffer other-buf)
       (unwind-protect
           (let* ((extra-win (split-window-below))
-                 (drawer-win (display-buffer-in-side-window
-                              drawer-buf
-                              '((side . left) (slot . 0)))))
+                 (side-win (display-buffer-in-side-window
+                            side-buf
+                            '((side . left) (slot . 0)))))
             (set-window-buffer extra-win extra-buf)
-            (should (window-live-p drawer-win))
+            (should (window-live-p side-win))
             (agent-repl-fullscreen-and-focus)
-            ;; Drawer (side window) is still alive after fullscreen.
-            (should (window-live-p drawer-win))
+            ;; The side window is still alive after fullscreen.
+            (should (window-live-p side-win))
             ;; Extra non-side window was swept.
             (should-not (window-live-p extra-win)))
         (setq agent-repl--window-fullscreen-config nil)
-        (dolist (buf (list drawer-buf extra-buf other-buf))
+        (dolist (buf (list side-buf extra-buf other-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 (ert-deftest agent-repl-test-panels-fullscreen-and-focus-non-agent-restores ()
@@ -2515,20 +2515,20 @@ an internal container when the main area has been split."
   (agent-repl-test--with-clean-state
     (let ((main-buf (get-buffer-create "*fs-leaf-main*"))
           (extra-buf (get-buffer-create "*fs-leaf-extra*"))
-          (drawer-buf (get-buffer-create "*fs-leaf-drawer*")))
+          (side-buf (get-buffer-create "*fs-leaf-side*")))
       (unwind-protect
           (progn
             (switch-to-buffer main-buf)
             (let* ((main-win (selected-window))
                    (extra-win (split-window-below)))
               (set-window-buffer extra-win extra-buf)
-              (display-buffer-in-side-window drawer-buf '((side . left) (slot . 0)))
+              (display-buffer-in-side-window side-buf '((side . left) (slot . 0)))
               (let* ((root (window-main-window))
                      (leaf (agent-repl--first-live-leaf root)))
                 (should-not (window-live-p root))
                 (should (window-live-p leaf))
                 (should (memq leaf (list main-win extra-win))))))
-        (dolist (buf (list drawer-buf extra-buf main-buf))
+        (dolist (buf (list side-buf extra-buf main-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 ;;;; ---- Tests: --fullscreen-leave-side-window ----
@@ -2546,39 +2546,39 @@ when the selected window is already a non-side main-area window."
               (should (eq (selected-window) orig))))
         (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-leave-side-window-from-drawer ()
+(ert-deftest agent-repl-test-panels-fullscreen-leave-side-window-from-side-window ()
   "`agent-repl--fullscreen-leave-side-window' selects the frame's main
 window when invoked from a side window."
   (agent-repl-test--with-clean-state
     (let ((main-buf (get-buffer-create "*fs-leave-side-main*"))
-          (drawer-buf (get-buffer-create "*fs-leave-side-drawer*")))
+          (side-buf (get-buffer-create "*fs-leave-side-buf*")))
       (unwind-protect
           (progn
             (switch-to-buffer main-buf)
             (let* ((main-win (selected-window))
-                   (drawer-win (display-buffer-in-side-window
-                                drawer-buf
-                                '((side . left) (slot . 0)))))
-              (select-window drawer-win)
+                   (side-win (display-buffer-in-side-window
+                              side-buf
+                              '((side . left) (slot . 0)))))
+              (select-window side-win)
               (should (agent-repl-window--side-window-p (selected-window)))
               (agent-repl--fullscreen-leave-side-window)
               (should-not (agent-repl-window--side-window-p (selected-window)))
               (should (eq (selected-window) main-win))))
-        (dolist (buf (list drawer-buf main-buf))
+        (dolist (buf (list side-buf main-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 ;;;; ---- Tests: fullscreen-and-focus side-window redirect ----
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-drawer-preserves-main ()
-  "When invoked from inside the drawer side window with several main
-windows visible, `agent-repl-fullscreen-and-focus' leaves the
-originally-focused main window's siblings swept and the drawer alive —
-crucially, the originating main window survives instead of being
-sacrificed because the drawer was the `keep' anchor."
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-side-window-preserves-main ()
+  "When invoked from inside a side window with several main windows
+visible, `agent-repl-fullscreen-and-focus' leaves the
+originally-focused main window's siblings swept and the side window
+alive — crucially, the originating main window survives instead of
+being sacrificed because the side window was the `keep' anchor."
   (agent-repl-test--with-clean-state
-    (let ((main-buf (get-buffer-create "*fs-from-drawer-main*"))
-          (extra-buf (get-buffer-create "*fs-from-drawer-extra*"))
-          (drawer-buf (get-buffer-create "*fs-from-drawer-drawer*"))
+    (let ((main-buf (get-buffer-create "*fs-from-side-main*"))
+          (extra-buf (get-buffer-create "*fs-from-side-extra*"))
+          (side-buf (get-buffer-create "*fs-from-side-window*"))
           (agent-repl--window-fullscreen-config nil))
       (unwind-protect
           (progn
@@ -2586,39 +2586,39 @@ sacrificed because the drawer was the `keep' anchor."
             (let* ((main-win (selected-window))
                    (extra-win (split-window-below)))
               (set-window-buffer extra-win extra-buf)
-              (let ((drawer-win (display-buffer-in-side-window
-                                 drawer-buf
-                                 '((side . left) (slot . 0)))))
-                (select-window drawer-win)
+              (let ((side-win (display-buffer-in-side-window
+                               side-buf
+                               '((side . left) (slot . 0)))))
+                (select-window side-win)
                 (agent-repl-fullscreen-and-focus)
-                ;; Drawer (side window) survives.
-                (should (window-live-p drawer-win))
+                ;; The side window survives.
+                (should (window-live-p side-win))
                 ;; The originating main window survives — without the
                 ;; side-window redirect it would be deleted because the
-                ;; drawer was `keep' and the predicate matches it.
+                ;; side window was `keep' and the predicate matches it.
                 (should (window-live-p main-win))
                 ;; The other main-area window is swept.
                 (should-not (window-live-p extra-win)))))
         (setq agent-repl--window-fullscreen-config nil)
-        (dolist (buf (list drawer-buf extra-buf main-buf))
+        (dolist (buf (list side-buf extra-buf main-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
-(ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-drawer-routes-to-claude-branch ()
-  "When the drawer is selected but the main window contains an agent
+(ert-deftest agent-repl-test-panels-fullscreen-and-focus-from-side-window-routes-to-claude-branch ()
+  "When a side window is selected but the main window contains an agent
 panel buffer, the side-window redirect lands on the agent buffer and
 the function takes the agent branch (focus input, no non-agent maximize)."
   (agent-repl-test--with-clean-state
     (let ((vterm-buf (get-buffer-create "*agent-frontend-fs-redir*"))
-          (drawer-buf (get-buffer-create "*fs-redir-drawer*"))
+          (side-buf (get-buffer-create "*fs-redir-side*"))
           (agent-repl--window-fullscreen-config nil))
       (unwind-protect
           (progn
             (switch-to-buffer vterm-buf)
             (let* ((vterm-win (selected-window))
-                   (drawer-win (display-buffer-in-side-window
-                                drawer-buf
-                                '((side . left) (slot . 0)))))
-              (select-window drawer-win)
+                   (side-win (display-buffer-in-side-window
+                              side-buf
+                              '((side . left) (slot . 0)))))
+              (select-window side-win)
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () "test-ws")))
                 (agent-repl-fullscreen-and-focus))
@@ -2627,7 +2627,7 @@ the function takes the agent branch (focus input, no non-agent maximize)."
               ;; (which would save a window config) never ran.
               (should-not agent-repl--window-fullscreen-config)
               (should (window-live-p vterm-win))))
-        (dolist (buf (list drawer-buf vterm-buf))
+        (dolist (buf (list side-buf vterm-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
 
 ;;;; ---- Tests: unhide-workspace ----
@@ -2651,36 +2651,36 @@ the function takes the agent branch (focus input, no non-agent maximize)."
   (agent-repl-test--with-clean-state
     (agent-repl--unhide-workspace nil)))
 
-;;;; ---- Tests: clear-main-area-for-panels (drawer preservation) ----
+;;;; ---- Tests: clear-main-area-for-panels (side-window preservation) ----
 
 (ert-deftest agent-repl-test-panels-clear-main-area-preserves-side-windows ()
-  "`--clear-main-area-for-panels' must NOT delete side windows (drawer).
+  "`--clear-main-area-for-panels' must NOT delete side windows.
 Opening the agent routes through `--show-existing-panels' which clears
-the main area; the drawer side window must survive unconditionally,
-even when its `no-delete-other-windows' parameter is absent (regression:
-opening the agent used to destroy the drawer)."
+the main area; a side window must survive unconditionally, even when
+its `no-delete-other-windows' parameter is absent (regression: opening
+the agent used to destroy side windows)."
   (agent-repl-test--with-clean-state
-    (let ((drawer-buf (get-buffer-create "*clear-main-drawer*"))
-          (work-buf   (get-buffer-create "*clear-main-work*"))
-          (other-buf  (get-buffer-create "*clear-main-other*")))
+    (let ((side-buf  (get-buffer-create "*clear-main-side*"))
+          (work-buf  (get-buffer-create "*clear-main-work*"))
+          (other-buf (get-buffer-create "*clear-main-other*")))
       (unwind-protect
           (progn
             (delete-other-windows)
             (set-window-buffer (selected-window) work-buf)
             (let ((other-win (split-window-right)))
               (set-window-buffer other-win other-buf))
-            ;; Drawer is a side window with NO `no-delete-other-windows' —
+            ;; The side window has NO `no-delete-other-windows' —
             ;; the side-window-aware sweep must still preserve it.
-            (let ((drawer-win (display-buffer-in-side-window
-                              drawer-buf '((side . left) (slot . 0)))))
+            (let ((side-win (display-buffer-in-side-window
+                             side-buf '((side . left) (slot . 0)))))
               (select-window (get-buffer-window work-buf))
               (agent-repl--clear-main-area-for-panels)
-              (should (window-live-p drawer-win))
-              (should (get-buffer-window drawer-buf))
+              (should (window-live-p side-win))
+              (should (get-buffer-window side-buf))
               ;; The "other" main-area window should have been deleted.
               (should-not (get-buffer-window other-buf))))
         (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b)))
-              (list drawer-buf work-buf other-buf))))))
+              (list side-buf work-buf other-buf))))))
 
 ;;;; ---- Tests: stale-panel-windows ----
 

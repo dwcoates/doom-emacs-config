@@ -209,8 +209,8 @@ workspace snapshot so a session restore reconstructs the hidden set.
 Refuses to run while a snapshot load is in progress — hiding mutates
 the persp roster the loader is still rebuilding.
 
-Forces a tab-bar repaint and a drawer refresh so the change is
-visible immediately rather than waiting for the next 1Hz poll."
+Forces a tab-bar repaint so the change is visible immediately rather
+than waiting for the next 1Hz poll."
   (interactive)
   (when (bound-and-true-p agent-repl--snapshot-load-state)
     (user-error "agent-repl: a snapshot load is in progress — retry when it finishes"))
@@ -222,8 +222,6 @@ visible immediately rather than waiting for the next 1Hz poll."
     (agent-repl--hide-project-dirs--persist)
     (when (fboundp 'agent-repl--force-tab-bar-redraw)
       (agent-repl--force-tab-bar-redraw))
-    (when (fboundp 'agent-repl-drawer--refresh-if-visible)
-      (agent-repl-drawer--refresh-if-visible))
     (message "agent-repl hide-project-dirs %s (%s %d workspace(s))"
              (if agent-repl-hide-project-dirs-enabled "enabled" "disabled")
              (if agent-repl-hide-project-dirs-enabled "hid" "restored")

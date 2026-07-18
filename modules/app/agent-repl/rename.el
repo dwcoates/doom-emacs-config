@@ -166,11 +166,11 @@ Any workspace recorded as having OLD-PATH as its source (i.e., it was
 forked off the workspace being renamed) is rewritten to point at
 NEW-PATH so `SPC TAB M' continues to route the merge correctly.
 
-Also clears each peer's `:source-ws-name' cache (populated by the
-drawer's `agent-repl-drawer--source-ws-name' fast-path).  The renamed
-workspace is rehashed under a new name elsewhere in the rename flow,
-so any cached name pointing at the old identity is stale — the next
-drawer render re-resolves and repopulates against the new name."
+Also clears each peer's `:source-ws-name' cache (the resolved
+source-workspace name).  The renamed workspace is rehashed under a
+new name elsewhere in the rename flow, so any cached name pointing at
+the old identity is stale — the next resolution repopulates against
+the new name."
   (let ((canonical-old (agent-repl--path-canonical old-path))
         (canonical-new (agent-repl--path-canonical new-path)))
     (maphash

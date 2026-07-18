@@ -612,7 +612,7 @@ send now funnels through, vterm or otherwise."
 
 (ert-deftest agent-repl-cmd-test-enter-insert-mode/noop-when-ws-not-current ()
   "enter-insert-mode is a no-op when WS is not the current workspace.
-A drawer-triggered interrupt on a background workspace must not steal
+An interrupt triggered on a background workspace must not steal
 focus or flip a hidden buffer's evil state."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-buffer " *test-input-bg*"
@@ -1423,7 +1423,7 @@ tab-bar ws are available — the picker has no candidates to offer."
   "nuke-workspace kills session, kills persp workspace, and tombstones hashmap entry.
 Post-tombstone-refactor, the hash entry survives with `:nuked-at' stamped
 rather than being removed; `--ws-live-p' is the predicate that filters
-tombstones out of the drawer/picker."
+tombstones out of the tab-bar/picker."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (agent-repl--ws-put "doomed" :status :done)
@@ -1565,7 +1565,7 @@ returns nil for a missing workspace."
 kill dispatch errors.
 The teardown error must not prevent the tombstone — otherwise the entry
 would stay `live' from `--ws-live-p''s perspective while its runtime
-state is corrupted, leaving the drawer/picker showing a half-dead row."
+state is corrupted, leaving the picker showing a half-dead entry."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (cl-letf (((symbol-function 'completing-read)
@@ -1846,8 +1846,9 @@ the live hash (e.g., by individual nuke) but stayed on the list."
 
 (ert-deftest agent-repl-cmd-test-nuke-one/preserve-entry-keeps-hash ()
   "Calling `--nuke-one-workspace' with PRESERVE-ENTRY non-nil retains
-the hash entry so the drawer's MERGED bucket can render it.  Every
-other teardown step still runs."
+the hash entry so a merged workspace stays registered until
+`--finish-workspace' removes it.  Every other teardown step still
+runs."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "merged-ws" :project-dir "/tmp/merged-ws")
     (agent-repl--ws-put "merged-ws" :merge-completed t)
@@ -1920,7 +1921,8 @@ post-restart MERGED entry shows the same metadata it had before quit."
   "When the on-disk state has `:merge-completed t' but no `:merge-failed'
 \(or `:merge-failed nil') AND the backward-compat probe reports the
 merge as landed, `--register-merged-workspace' sets `:repl-state' to
-`:merged' and leaves `:merge-failed' clear so the drawer shows 🔀."
+`:merged' and leaves `:merge-failed' clear so the tab-bar and picker
+show 🔀."
   (agent-repl-test--with-clean-state
     (let ((tmp (make-temp-file "agent-repl-state-" nil ".el")))
       (unwind-protect
@@ -1966,7 +1968,7 @@ and should not be overwritten by an opportunistic post-restart probe."
 `:merge-failed' (legacy snapshot from before the flag existed) AND the
 backward-compat probe reports the merge as NOT landed, the registered
 workspace is promoted to `:repl-state :merge-failed' / `:merge-failed t'
-so the drawer ❌ badge appears on first load even though no prior run
+so the ❌ badge appears on first load even though no prior run
 recorded the failure."
   (agent-repl-test--with-clean-state
     (let ((tmp (make-temp-file "agent-repl-state-" nil ".el")))
@@ -2002,7 +2004,7 @@ Extra plist entries are merged into the file's plist."
 (ert-deftest agent-repl-cmd-test-snapshot-load/merge-failed-establishes-and-fronts ()
   "When a snapshot entry's state.el is `:merge-completed t' AND the
 register-merged probe flips `:merge-failed t', the loader promotes the
-entry from drawer-only to a real tab-bar workspace via
+entry from data-only to a real tab-bar workspace via
 `--establish-workspace' and moves it to the front of `persp-names-cache'
 via `--reorder-workspace-to-front'."
   (agent-repl-test--with-clean-state
@@ -2034,8 +2036,8 @@ via `--reorder-workspace-to-front'."
 (ert-deftest agent-repl-cmd-test-snapshot-load/clean-merge-stays-data-only ()
   "When a snapshot entry's state.el is `:merge-completed t' AND the
 probe confirms the merge landed (no `:merge-failed'), the loader does
-NOT call establish-workspace or reorder-to-front — clean merges stay in
-the drawer-only MERGED bucket."
+NOT call establish-workspace or reorder-to-front — clean merges stay
+data-only."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (clean-dir (make-temp-file "agent-proj-clean-" t))
@@ -2828,7 +2830,7 @@ encodes on save."
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/applies-priority-reorder-outside-snapshot-load ()
   "Outside a snapshot load (`agent-repl--snapshot-load-state' nil),
-`--establish-workspace' still applies the priority reorder — drawer-driven
+`--establish-workspace' still applies the priority reorder — picker-driven
 restores and worktree hydration paths depend on the priority-slot
 behavior for ad-hoc creations."
   (agent-repl-test--with-clean-state
@@ -3602,7 +3604,7 @@ partitioning survives the restart."
 
 (ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/remarks-queued-state ()
   "Restore re-applies `:repl-state :merge-queued' on each surviving ws so
-the drawer's MERGING bucket shows them again post-restart."
+the tab-bar and picker show the queued badge again post-restart."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--merge-queue nil))
       (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
@@ -5359,10 +5361,10 @@ even if downstream teardown errors before the redundant save fires."
 
 ;;;; ---- Project picker (SPC p p) helpers ----
 
-(ert-deftest agent-repl-cmd-test-picker-status-emoji/live-mirrors-drawer-glyph ()
-  "When the project has a workspace, picker mirrors the drawer's glyph
-for that workspace — keeps `SPC p p' and the drawer visually consistent
-per-workspace rather than collapsing every live ws to a single 🟢."
+(ert-deftest agent-repl-cmd-test-picker-status-emoji/live-mirrors-state-glyph ()
+  "When the project has a workspace, picker mirrors the state glyph
+for that workspace — pins the shared render-status precedence through
+`SPC p p' rather than collapsing every live ws to a single 🟢."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws-live" :agent-state :thinking)
     (let ((summary '(:workspace-name "ws-live" :live-p t
@@ -5372,7 +5374,7 @@ per-workspace rather than collapsing every live ws to a single 🟢."
 
 (ert-deftest agent-repl-cmd-test-picker-status-emoji/live-merge-conflict-wins ()
   "Picker mirrors `:merge-conflict' badge for a workspace mid-conflict.
-Pins the drawer's repl-state precedence (💥 wins over :agent-state)
+Pins the shared repl-state precedence (💥 wins over :agent-state)
 through the picker's mirror path."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws-conflict" :agent-state :thinking)
@@ -5382,9 +5384,9 @@ through the picker's mirror path."
       (should (equal (agent-repl--picker-status-emoji summary) "💥")))))
 
 (ert-deftest agent-repl-cmd-test-picker-status-emoji/live-dominates-killed-at ()
-  "A live workspace's drawer glyph wins regardless of `:last-killed-at'
+  "A live workspace's state glyph wins regardless of `:last-killed-at'
 data on the summary — when `:workspace-name' is set the picker reads
-the drawer glyph from the cached ws plist and never consults the
+the state glyph from the cached ws plist and never consults the
 non-live 📁 fallback branch."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws-respawned" :agent-state :done)
@@ -5573,7 +5575,7 @@ on-disk state file so dead workspaces still show real dates."
 
 (ert-deftest agent-repl-cmd-test-picker-workspace-summary/tombstoned-known ()
   "A tombstoned workspace is still a known entry, so :workspace-name is set
-\(drives the drawer glyph) while :live-p is nil."
+\(drives the state glyph) while :live-p is nil."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (file-name-as-directory (make-temp-file "picker-sum-tomb-" t))))
       (unwind-protect
@@ -5620,8 +5622,8 @@ on-disk state file so dead workspaces still show real dates."
       (should (equal (plist-get payload :project-dir) "/tmp/w"))
       (should (plist-get payload :live-p)))))
 
-(ert-deftest agent-repl-cmd-test-build-candidates/live-display-mirrors-drawer-glyph ()
-  "A live workspace's display opens with the drawer's per-workspace glyph
+(ert-deftest agent-repl-cmd-test-build-candidates/live-display-mirrors-state-glyph ()
+  "A live workspace's display opens with its per-workspace state glyph
 and includes the workspace name."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "wsx" :project-dir "/tmp/wsx")
@@ -6179,9 +6181,9 @@ with the \"The font hasn't been resized\" message."
 
 ;;;; ---- Tests: indexed switchers vs. folded repos ----
 ;;
-;; A repo folded in the drawer takes its workspaces out of the tab-bar,
-;; and the indexed switchers index the SAME list — so the visible tab
-;; numbers stay contiguous.  These pin that contract.
+;; A folded repo takes its workspaces out of the tab-bar, and the
+;; indexed switchers index the SAME list — so the visible tab numbers
+;; stay contiguous.  These pin that contract.
 
 (ert-deftest agent-repl-cmd-test-switch-by-index/skips-folded-repo ()
   "switch-by-index numbers the VISIBLE tabs: a folded repo's workspaces

@@ -84,7 +84,7 @@ that view buffer until the input buffer is set into it.  If WS's
 `:input-buffer' is dead or nil at that moment, `set-window-buffer'
 errors and leaves the view buffer stranded in the adjacent window —
 the duplicated-output corruption seen when switching to a freshly
-generated workspace with the drawer open.  Guaranteeing a live input
+generated workspace with a side window open.  Guaranteeing a live input
 buffer here keeps that reassignment from ever failing.
 
 Resolution order, loud rather than silent about a missing buffer:
@@ -301,9 +301,8 @@ After purging stale panels, restores this workspace's own panels if
 they were visible when this workspace was last deactivated
 \(`:panels-were-visible' flag set by `--before-persp-deactivate').
 
-Mirrors the drawer's `ensure-visible-on-persp-switch' approach:
-the drawer uses a global visibility flag; panels use a per-workspace
-flag because each workspace has its own panel buffers."
+The visibility flag is per-workspace rather than global because each
+workspace has its own panel buffers."
   (let* ((stale (agent-repl--stale-panel-windows))
          (foreign-bufs (agent-repl--stale-window-buffers stale)))
     (agent-repl--log ws "ensure-own-panels: ws=%s stale=%d panels-visible=%s windows=%d"
@@ -433,15 +432,16 @@ windows, and the minibuffer."
   "Select a redirect-safe window before persp saves window state.
 
 Redirects when the selected window is unsuitable as a future
-`switch-to-buffer' target: a agent panel buffer, a side window
-(e.g. the drawer), or a dedicated window.  Persp saves the selected
+`switch-to-buffer' target: a agent panel buffer, a side window, or a
+dedicated window.  Persp saves the selected
 window into the workspace's restored layout; if that window is a
 side/dedicated/panel window, Doom's `+workspace/kill' fallback
 `(switch-to-buffer (doom-fallback-buffer))' cannot repurpose it and
 instead splits a new window showing the doom splash buffer.
 
 Picks the first window that satisfies `agent-repl--save-target-window-p'.
-No-op when no safe target exists (fullscreen-agent or drawer-only)."
+No-op when no safe target exists (fullscreen-agent or a
+side-window-only frame)."
   (let ((sel (selected-window)))
     (when (or (agent-repl--agent-panel-buffer-p (window-buffer sel))
               (window-parameter sel 'window-side)
@@ -718,7 +718,7 @@ The current workspace's own panels are never swept (see
 `agent-repl--sweepable-panel-p') — only panels belonging to other,
 switched-away workspaces are reaped.
 
-Side windows (e.g. the drawer) can never be agent panels by
+Side windows can never be agent panels by
 predicate construction, so the default `--delete-where' side-skip
 costs nothing and remains defense-in-depth.
 
@@ -806,11 +806,11 @@ Errors if the buffer is already initialized (already in `agent-repl-input-mode')
 (defun agent-repl--clear-main-area-for-panels ()
   "Delete every non-side window other than the selected one.
 Side-window-aware replacement for `delete-other-windows' on the
-panel-show path: the workspace drawer (a left-side window) must
-survive panel reopen.  `delete-other-windows' relies on each side
-window carrying `no-delete-other-windows', which is fragile —
-window-parameter loss anywhere upstream (e.g. a buffer redisplayed
-without the original action alist) leaves the drawer vulnerable.
+panel-show path: side windows must survive panel reopen.
+`delete-other-windows' relies on each side window carrying
+`no-delete-other-windows', which is fragile — window-parameter loss
+anywhere upstream (e.g. a buffer redisplayed without the original
+action alist) leaves a side window vulnerable.
 Routing through `agent-repl-window--delete-where' makes the
 side-window skip explicit and parameter-independent."
   (agent-repl-window--delete-where
@@ -826,8 +826,8 @@ marker is re-asserted after the kill so hide-mode's sweep semantics
 survive even if a frontend's kill capability resets the state axes.
 
 Deliberately NOT folded into `agent-repl--on-close': its other callers
-(`agent-repl-send-and-hide', the drawer close) hide a session that
-must keep running."
+(e.g. `agent-repl-send-and-hide') hide a session that must keep
+running."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--hide-and-preserve-status: no active workspace"))
     (agent-repl--on-close ws)
@@ -1033,17 +1033,17 @@ cleared on restore.")
   "Move out of a side window before fullscreening.
 
 When `agent-repl-fullscreen-and-focus' is invoked from inside a side
-window (e.g. the workspace drawer), `selected-window' is the side
-window itself.  The non-agent branch would then treat the drawer as
-the window to KEEP and sweep every main-area window — leaving the
+window, `selected-window' is the side
+window itself.  The non-agent branch would then treat the side window
+as the window to KEEP and sweep every main-area window — leaving the
 user's actual work window (or agent panels) destroyed and only the
-drawer alongside an arbitrary survivor from `delete-window's benign
-sole-main-window error.
+side window alongside an arbitrary survivor from `delete-window's
+benign sole-main-window error.
 
 Pre-selecting a real main-area leaf window sidesteps the path: the
 subsequent branch dispatch reads the buffer of a real main-area
-window and the delete sweep keeps that window instead of the
-drawer.
+window and the delete sweep keeps that window instead of the side
+window.
 
 `window-main-window' returns an internal container window when the
 main area has been split, so we descend the tree to a live leaf
@@ -1071,9 +1071,9 @@ When in a agent panel buffer, moves point to the input buffer — the
 agent panels already fill the frame (fullscreen is the sole display
 format), so there is nothing to maximize.
 When not in a agent panel buffer, maximizes the current window within
-the non-side area (preserving the workspace drawer) and saves the
+the non-side area (preserving side windows) and saves the
 layout; calling again restores it.
-When invoked from a side window (e.g. the workspace drawer), first
+When invoked from a side window, first
 moves point to the frame's main window so the maximize target is a
 real main-area window — see
 `agent-repl--fullscreen-leave-side-window'."

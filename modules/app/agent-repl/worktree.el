@@ -193,8 +193,8 @@ function discards the child's output entirely (nil destination) and
 keeps only the exit code, whereas this one hands every chunk to FILTER
 as git emits it.  Git flushes incrementally, so a caller watching a
 long-running subcommand observes its progress live rather than only
-after it exits — this is what lets the drawer render per-commit
-cherry-pick progress.
+after it exits — this is what lets the merge-progress bookkeeping
+track per-commit cherry-pick progress.
 
 `call-process' cannot stream, so the child runs asynchronously on BOTH
 threads; `agent-repl--wait-for-process-exit' then picks the correct wait
@@ -525,8 +525,8 @@ root is recorded by `agent-repl--initialize-ws-env', not here."
 
 (defun agent-repl--mark-start-failed (ws err)
   "Surface a failed agent start for WS loudly instead of letting ERR escape.
-Logs ERR, sets WS's `:agent-state' to `:start-failed' so the tab and
-drawer render the 🚫 badge (the failure stays visible after the echo-area
+Logs ERR, sets WS's `:agent-state' to `:start-failed' so the tab
+renders the 🚫 badge (the failure stays visible after the echo-area
 message scrolls away), and echoes an actionable message.  Used by paths
 that run inside a process sentinel — e.g. `agent-repl--setup-worktree-session'
 via `agent-repl--async-git-sentinel' — where an uncaught signal would
@@ -1633,8 +1633,8 @@ BASE selects the git ref the new branch is created from.  It is a
 symbol key in `agent-repl--worktree-base-commits':
   `head'   — branch off the current worktree's HEAD (default; edits
              in-flight here carry over).  The new workspace's
-             `:source-ws-dir' is the calling workspace, so the drawer
-             nests it as a child.
+             `:source-ws-dir' is the calling workspace, recording it
+             as that workspace's child.
   `master' — branch off LOCAL `master'.  A `git fetch origin master'
              still runs first so `origin/master' stays current; if
              local `master' is strictly an ancestor of `origin/master'
@@ -1646,8 +1646,8 @@ symbol key in `agent-repl--worktree-base-commits':
              `:source-ws-dir' is the master worktree path, resolved at
              receive time in `agent-repl--create-worktree-from-command'
              from BASE-COMMIT.  When no worktree is on master, the new
-             workspace has no `:source-ws-dir' (drawer root) — never
-             the calling workspace.
+             workspace has no `:source-ws-dir' (no recorded parent) —
+             never the calling workspace.
 
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in (instead of the ambient workspace).  Interactively,
@@ -2213,8 +2213,8 @@ is intentionally left in place; full teardown including the worktree
 is `agent-repl--finish-workspace's job.
 
 When PRESERVE-ENTRY is non-nil, the hashmap entry survives close so
-callers that need to keep rendering WS afterwards (e.g. the merge-
-completed bucket in the drawer) can continue to do so until an
+callers that need to keep rendering WS afterwards (e.g. renderers
+showing its merge-completed state) can continue to do so until an
 explicit `finish' fires.
 
 Thin wrapper over `agent-repl--nuke-one-workspace' — the same teardown
@@ -2353,8 +2353,8 @@ re-enqueued entry rejoins its own target+repo bucket — BACK/FRONT here
 mean back/front of THAT bucket (a bucket front is the queue's first
 entry for the target), so the halt/sibling semantics apply per target.
 
-Marks WS with `:repl-state :merge-queued' so the drawer surfaces the
-entry under MERGING with the queued-state badge, and clears
+Marks WS with `:repl-state :merge-queued' so renderers surface the
+entry with the queued-state badge, and clears
 `:agent-state' for the same reason `--mark-merge-failed' does (state
 glyph precedence reads `:repl-state' first, but a stale agent-state
 would still color the name)."
@@ -2579,10 +2579,10 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
 - When BASE-COMMIT equals `agent-repl-master-branch-name', the parent
   is the master worktree of the repo containing GIT-ROOT, resolved via
   `agent-repl--master-worktree-path'.  Returns nil when no worktree is
-  on master, leaving the new workspace parentless in the drawer rather
-  than nesting it under the calling workspace.  This is the `SPC TAB N'
+  on master, leaving the new workspace parentless rather
+  than nested under the calling workspace.  This is the `SPC TAB N'
   contract: a worktree branched off local master shares no commits with
-  the calling workspace, so the drawer parent must be master (or
+  the calling workspace, so the recorded parent must be master (or
   nothing) — never the calling workspace.
 - Otherwise (HEAD, forks, custom refs) the parent is GIT-ROOT, which
   represents the originating workspace's repo dir.  This is the
@@ -2829,8 +2829,8 @@ CMD MUST also contain a non-empty string \"name\" field whose bare form
 \(after `agent-repl--bare-workspace-name') is not `persp-nil-name'
 \(default \"none\").  A missing/`null'/empty name — or one that resolves
 to the nil-perspective sentinel — would otherwise leak a phantom
-\"none\" entry into `agent-repl--workspaces' and surface in the drawer
-and nuke prompts.  Headless `/create-or-update-workspace create' occasionally emits
+\"none\" entry into `agent-repl--workspaces' and surface in workspace
+listings and nuke prompts.  Headless `/create-or-update-workspace create' occasionally emits
 such payloads when the model has no slug material to work with.
 
 CMD may contain an optional \"base_commit\" field naming the git ref the
@@ -2876,8 +2876,8 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
      ;; to `persp-nil-name'.  Without this guard a malformed
      ;; workspace-generation payload (missing name, JSON `null', empty
      ;; string, or literal "none") would leak a phantom entry into
-     ;; `agent-repl--workspaces' that surfaces in the drawer / nuke
-     ;; prompts as a stray "none" workspace.
+     ;; `agent-repl--workspaces' that surfaces in workspace listings /
+     ;; nuke prompts as a stray "none" workspace.
      ((or (not (stringp name)) (string-empty-p name))
       (agent-repl--log nil "handle-create-command: SKIPPED workspace (missing/empty/non-string name=%S)" name)
       (agent-repl--warn nil "cannot create workspace — `name' is required and must be a non-empty string (got %S)"
@@ -3975,7 +3975,7 @@ signals — invisibly — leaving the user with no actionable surface.
 This function flips that: it switches to ROOT (so the user lands on
 the repo where the conflict lives), pops `magit-status' there so the
 unresolved files are visible, then signals `user-error' so the upstream
-error handler still marks TARGET-WS merge-failed and the drawer's ❌
+error handler still marks TARGET-WS merge-failed and its ❌
 badge appears.
 
 Does NOT run `git cherry-pick --abort'.  The whole point is to leave
@@ -4610,7 +4610,7 @@ the `-x' annotation that the parent cherry-pick was invoked with."
                     target-ws root)
   ;; The conflict is resolved and the pick is resuming, so retire the conflict
   ;; state before git starts emitting boundaries again.  Left in place, the
-  ;; drawer would keep showing 💥 on a commit that is no longer stuck.
+  ;; progress entry would keep reporting 💥 on a commit that is no longer stuck.
   (agent-repl--merge-progress-put target-ws :conflict-sha nil)
   (agent-repl--merge-progress-put target-ws :conflict-subject nil)
   (agent-repl--merge-progress-put target-ws :conflict-files nil)
@@ -4877,10 +4877,10 @@ recreated with the recovery directive as its first prompt."
 (defun agent-repl--mark-merge-failed (target-ws err)
   "Mark TARGET-WS as dead because its merge attempt failed with ERR.
 Sets `:repl-state :dead' and clears `:agent-state' — the same state
-shape used by agent-death detection — so the drawer surfaces the ❌
-badge.  Also marks `:merge-completed' nil so the workspace cannot land
-in the MERGED bucket on the strength of a partial earlier success, and
-clears `:merging' so it exits the MERGING bucket too.
+shape used by agent-death detection — so renderers surface the ❌
+badge.  Also marks `:merge-completed' nil so the workspace cannot
+render as merged on the strength of a partial earlier success, and
+clears `:merging' so it stops reading as merge-in-flight too.
 
 A failed merge is the only path that flips a workspace dead via the
 merge flow; the success path uses `:merge-completed' instead.
@@ -4888,7 +4888,7 @@ merge flow; the success path uses `:merge-completed' instead.
 Reserved for non-conflict failures: branch resolution errors, the
 silent `'failed' cherry-pick sentinel, or anything else not raised by
 `agent-repl-merge-conflict-error'.  Real cherry-pick conflicts route
-through `agent-repl--mark-merge-conflict' instead so the drawer can
+through `agent-repl--mark-merge-conflict' instead so renderers can
 distinguish 💥 (conflict awaiting human resolution) from ❌ (process
 died / generic failure)."
   (agent-repl--log target-ws
@@ -4904,16 +4904,16 @@ died / generic failure)."
   "Mark TARGET-WS as `:merge-conflict' because the cherry-pick conflicted.
 Distinct from `agent-repl--mark-merge-failed': set only on real
 cherry-pick conflicts (CHERRY_PICK_HEAD existed, auto-resolver
-declined OR interactive `--check-cherry-pick-conflict' aborted).  The
-drawer surfaces the 💥 badge so the user can tell a conflict failure
+declined OR interactive `--check-cherry-pick-conflict' aborted).
+Renderers surface the 💥 badge so the user can tell a conflict failure
 from an agent-death or silent git failure.
 
 Clears `:merging' and `:merge-completed' so the workspace's
 render-status resolves to `:merge-conflict'.  This is NOT re-enqueued
 onto `agent-repl--merge-queue' (the merge attempt has ended and now
 awaits human resolution), so the workspace is no longer a merge-queue
-member and the drawer buckets it under MERGED — never MERGING, which
-holds queue members only — distinguished there by the 💥 glyph.  Keeps
+member and never reads as merging or queued — the 💥 glyph marks the
+conflict instead.  Keeps
 `:agent-state' untouched (unlike `--mark-merge-failed') because the
 workspace's agent session is still alive — the user can keep typing
 into it after they resolve the conflict outside.
@@ -5157,8 +5157,8 @@ off so the user resolves in magit directly."
                           "workspace-merge-do: clearing prior :merge-conflict on ws=%s for retry"
                           target-ws)
         (agent-repl--ws-put target-ws :repl-state nil))
-      ;; Flip the workflow flag before the cherry-pick so the drawer's
-      ;; MERGING bucket reflects "merge in flight" for the duration of
+      ;; Flip the workflow flag before the cherry-pick so render-status
+      ;; reflects "merge in flight" for the duration of
       ;; the attempt.  Cleared on either branch below.
       (agent-repl--ws-put target-ws :merging t)
       (agent-repl--log target-ws "workspace-merge-do: ws=%s -> :merging t"
@@ -5211,8 +5211,8 @@ off so the user resolves in magit directly."
                                    (float-time))
               (agent-repl--ws-put target-ws :merge-failed nil)
               ;; Record TARGET-WS on the receiving workspace's
-              ;; merged-in list so the drawer's expanded detail can
-              ;; list every workspace merged into it.  PROJECT-ROOT is
+              ;; merged-in list, the historical record of every
+              ;; workspace merged into it.  PROJECT-ROOT is
               ;; the cherry-pick destination worktree (parent or master).
               (agent-repl--record-merged-in-workspace project-root target-ws)
               ;; Flip the repl-state so the 🔀 badge survives the
@@ -5236,8 +5236,8 @@ off so the user resolves in magit directly."
               ;; Compose with `agent-repl--close-workspace' (the
               ;; named workspace-close primitive) for the editor-side
               ;; teardown.  `preserve-entry' keeps the hash entry
-              ;; alive so the drawer's MERGED bucket renders until
-              ;; the user explicitly `x' (which runs
+              ;; alive so the merged state stays visible until the
+              ;; user explicitly finishes the workspace (which runs
               ;; `--finish-workspace' and removes the worktree).
               ;; Gate the close on `/gns-sockets close' so the agent can
               ;; release any held GNS sockets before its session dies.
@@ -5282,12 +5282,6 @@ off so the user resolves in magit directly."
                       (agent-repl--merge-close-workspace target-ws 'preserve-entry))
                     (agent-repl--refresh-magit-status-for-dir
                      project-root target-ws)))))))
-            ;; Refresh the drawer's `:detail-*' cache so its rendering
-            ;; reflects post-cherry-pick git state.  The worktree dir
-            ;; survives on either branch, so the synchronous git calls
-            ;; in `--refresh-detail-cache' still resolve.
-            (when (fboundp 'agent-repl-drawer--refresh-detail-cache)
-              (agent-repl-drawer--refresh-detail-cache target-ws))
             (cond
              (failed
               (agent-repl--warn target-ws
@@ -5311,7 +5305,7 @@ off so the user resolves in magit directly."
             (agent-repl--merge-finalize-on-main current-ws target-ws t0-do))
         (agent-repl-merge-conflict-error
          ;; Real cherry-pick conflict — distinguish from generic merge
-         ;; failure so the drawer can render 💥 (conflict awaiting
+         ;; failure so renderers can show 💥 (conflict awaiting
          ;; resolution) instead of ❌ (process died).  Branch matched
          ;; before the generic `error' handler so the more specific
          ;; signal takes precedence (per Emacs's condition-case rules).
@@ -5472,11 +5466,10 @@ Reads the cached `:branch-merged' value populated asynchronously by
 `:merge-parent-dir' (recorded `:source-ws-dir' or the master worktree
 fallback).  Returns nil on cache miss — the next poll fills it in.
 
-This is the git-ancestry signal, now reserved for tree-topology
-flattening via `agent-repl-drawer--ws-flattenable-ancestor-p'.  It no
-longer drives bucket placement — for the in-flight merge bucket see
-`agent-repl--ws-merge-in-progress-p' (MERGING), and for the
-completed bucket see `agent-repl--ws-merge-completed-p' (MERGED)."
+This is the git-ancestry signal.  It does not drive merge-state
+rendering — for the in-flight signal see
+`agent-repl--ws-merge-in-progress-p', and for the
+completed signal see `agent-repl--ws-merge-completed-p'."
   (eq (agent-repl--ws-get ws :branch-merged) 'merged))
 
 (defun agent-repl--ws-merge-in-progress-p (ws)
@@ -5485,9 +5478,9 @@ Reads the `:merging' plist key, set by `agent-repl--workspace-merge-do'
 at the start of the merge attempt and cleared on success (alongside
 `:merge-completed t') or failure (alongside `--mark-merge-failed').
 
-This is the workflow-state signal that feeds the drawer's MERGING
-section — distinct from `agent-repl--ws-merged-p', which is the
-git-ancestry signal reserved for tree flattening.  The lifecycle is
+This is the workflow-state signal behind the `:merging'
+render-status — distinct from `agent-repl--ws-merged-p', which is the
+git-ancestry signal.  The lifecycle is
 explicit: nil → t (on merge start) → nil (on success/failure)."
   (eq (agent-repl--ws-get ws :merging) t))
 
@@ -5495,8 +5488,8 @@ explicit: nil → t (on merge start) → nil (on success/failure)."
   "Return non-nil when WS's explicit merge command completed successfully.
 Reads the `:merge-completed' plist key, set by
 `agent-repl--workspace-merge-do' only after a successful cherry-pick.
-This is the source of truth for the drawer's MERGED section — a
-workspace lands there exclusively because a `SPC TAB M' /
+This is the source of truth for merged-state rendering — a
+workspace reads as merged exclusively because a `SPC TAB M' /
 `/create-or-update-workspace merge' invocation completed successfully, never as a
 side-effect of asynchronous ancestry polling."
   (eq (agent-repl--ws-get ws :merge-completed) t))
@@ -5530,9 +5523,9 @@ side-effect of asynchronous ancestry polling."
 
 ;;;; Merge progress ----------------------------------------------------------
 ;;
-;; Git-action-level observability for an in-flight cherry-pick, so the drawer's
-;; MERGE QUEUE section can render WHICH commit git is applying, for HOW LONG,
-;; and WHAT IS BEHIND IT — rather than just "this workspace is merging".
+;; Git-action-level observability for an in-flight cherry-pick: WHICH
+;; commit git is applying, for HOW LONG, and WHAT IS BEHIND IT — rather
+;; than just "this workspace is merging".
 ;;
 ;; The data comes from git itself.  `git cherry-pick -x BASE..BRANCH' emits one
 ;; `[branch SHA] subject' line per commit it applies and FLUSHES it as it goes,
@@ -5566,15 +5559,14 @@ in-flight set.")
 (defvar agent-repl--merge-progress-seq 0
   "Monotonic counter, incremented on every write to `agent-repl--merge-progress'.
 
-The drawer folds this into `agent-repl-drawer--render-signature'.  That
-signature short-circuits the render when unchanged, so without a counter
-here every new progress field would have to be enumerated in the
-signature or silently fail to redraw.  One counter covers all of them.")
+Cheap change-detection for consumers that cache derived output:
+comparing this counter across reads detects any progress-field write
+without enumerating every field.  One counter covers all of them.")
 
 (defvar agent-repl--merge-lookahead (make-hash-table :test 'equal)
   "Workspace name -> plist (:target-head SHA :commits ((SHA . SUBJECT) ...)).
 
-The commits a QUEUED (not yet started) merge will pick, so the drawer can
+The commits a QUEUED (not yet started) merge will pick, so a renderer can
 show what is behind the commit currently being applied — including commits
 belonging to a different project than the one in flight.
 
@@ -5697,8 +5689,8 @@ independently via `agent-repl--drain-merge-queue'.")
 (defun agent-repl--ws-merge-queued-p (ws)
   "Return non-nil when WS is parked in `agent-repl--merge-queue'.
 Reads the `:repl-state' marker set by `agent-repl--enqueue-merge'.
-This is the workflow-state signal that surfaces queued workspaces in
-the drawer's MERGING bucket alongside in-flight merges."
+This is the workflow-state signal behind the `:merge-queued'
+render-status, surfacing queued workspaces alongside in-flight merges."
   (eq (agent-repl--ws-get ws :repl-state) :merge-queued))
 
 (defun agent-repl--ws-in-merge-queue-p (ws)
@@ -5749,8 +5741,8 @@ freezing every other thread including the UI.  That is the same hazard
 
 (defun agent-repl--enqueue-merge (source-ws silent auto-resolve target-dir)
   "Park a merge request for SOURCE-WS onto `agent-repl--merge-queue'.
-Marks SOURCE-WS with `:repl-state :merge-queued' so the drawer
-surfaces it under MERGING with the queued-state badge.  Clears
+Marks SOURCE-WS with `:repl-state :merge-queued' so renderers
+surface it with the queued-state badge.  Clears
 `:agent-state' for the same reason `--mark-merge-failed' does:
 state-glyph precedence reads `:repl-state' first, but a stale
 agent-state would still color the name.
@@ -5893,7 +5885,7 @@ state even after the no-op case.
 
 Also drops SOURCE-WS's `agent-repl--merge-progress' entry, which is what
 keeps that hash from outliving the in-flight set: the two are created and
-destroyed together, so the drawer can never render commit progress for a
+destroyed together, so no consumer can ever read commit progress for a
 merge that is no longer running."
   (when source-ws
     (agent-repl--merge-progress-clear source-ws)
@@ -6152,7 +6144,7 @@ Synchronous dir-pair primitive used by the merge-target resolve walk
 arbitrary `:source-ws-dir' chains where the candidate may not be a
 tracked workspace.  Workspace-level callers should use
 `agent-repl--ws-merged-p' instead, which reads the async-populated
-cache and matches the drawer's view.
+cache rather than shelling out to git.
 
 Preconditions delegated to `agent-repl--merge-base-ancestor-args';
 returns nil when those fail.  Otherwise runs `git merge-base
@@ -6190,8 +6182,8 @@ that subsequently registers at the same canonical path."
   "Record MERGED-WS as successfully merged into the workspace at TARGET-DIR.
 Resolves the receiving workspace by canonical `:project-dir' match
 \(`agent-repl--ws-name-for-dir') and appends MERGED-WS to that
-workspace's `:merged-in-workspaces' list, which the drawer surfaces in
-its expanded detail view.  Insertion order is preserved and duplicates
+workspace's `:merged-in-workspaces' list, the historical record of
+what has merged into it.  Insertion order is preserved and duplicates
 are skipped so repeated merges of the same source are recorded once.
 No-op when TARGET-DIR is nil, maps to no live workspace, or names the
 receiver itself (a merge is never recorded as merged into itself).
@@ -6344,8 +6336,8 @@ cherry-pick for that target clears."
       ;; handler in `--workspace-merge-async' (and the drain loop-guard) can
       ;; find the cherry-pick destination without re-running resolution.
       (agent-repl--ws-put source-ws :resolved-target-dir target-dir)
-      ;; Record the destination branch so the drawer's MERGED-section
-      ;; folded detail can show what this workspace merged into.  Falls
+      ;; Record the destination branch as `:merge-target-name' so the
+      ;; workspace remembers what it merged into.  Falls
       ;; back to the target dir's basename when the branch can't be read
       ;; (detached HEAD, transient git error).
       (agent-repl--ws-put source-ws :merge-target-name
