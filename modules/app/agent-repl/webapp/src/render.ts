@@ -285,11 +285,12 @@ export function retryingRowHtml(retrying: boolean): string {
  * work continues while the main chain is IDLE. Distinct from the bucket-1 tail
  * rows (thinking/working/retrying/interrupting), which all mean the main chain
  * is ACTIVE — amber async-quiescence means "model available, background work
- * still running". One markup, two homes: the collapsed face of a bubble's
- * in-bubble catalog (AsyncCatalog), and the global feed-tail fallback shown
- * when the owning bubble is scrolled off (see `showsMonitoringRow`). Reuses
+ * still running". Its ONE home is the global feed tail (see
+ * `showsMonitoringRow`) — the amber signal for live async when its owning
+ * bubble is scrolled off or absent; the bubble itself never repeats it, since
+ * its amber border and live badge dots already say "still watching". Reuses
  * the textless-thinking arc (`.thinking-spinner`), tinted amber by
- * `.monitoring-pending`, so "still watching" reads the same wherever it shows.
+ * `.monitoring-pending`.
  *
  * Returns "" when not monitoring, so a caller can drop the node.
  */
@@ -1124,29 +1125,30 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
 
 /**
  * The in-bubble async catalog (async-quiescence UX): the bubble's live
- * background work, enumerated as selectable amber badges at its BOTTOM, under
- * a prominent bucket-1 `monitoring…` line while any member is live. This is
- * the OTHER half of the invariant the amber border keys off — border and
+ * background work, enumerated as selectable amber badges at its BOTTOM. This
+ * is the OTHER half of the invariant the amber border keys off — border and
  * catalog read the SAME projection (`panels.watchers`), so a bubble is amber
- * exactly when it lists live selectable work.
+ * exactly when it lists live selectable work. The bubble's own liveness reads
+ * from the amber border and each badge's live/settled dot; the animated
+ * `monitoring…` row lives ONLY at the global feed tail (see
+ * `monitoringRowHtml`), never duplicated inside the bubble.
  *
  * Every host bubble carries it — a final response, an interrupted turn's last
  * text, a tools-only turn's prompt — not just a completed answer. A quiesced
- * catalog (all members settled) keeps its badges as history but drops the
- * monitoring line, exactly as the border flips amber → green. Clicking a
- * badge expands that member's `WatcherRow` — its live tail as nested bubbles
+ * catalog (all members settled) keeps its badges as history, its dots going
+ * done, exactly as the border flips amber → green. Clicking a badge expands
+ * that member's `WatcherRow` — its live tail as nested bubbles
  * (asyncStreamHtml), its stop control, its composer — below the strip.
  */
 function AsyncCatalog(hostId: string, panels?: PanelContext): string {
   const members = panels?.watchers?.get(hostId) ?? [];
   if (members.length === 0) return "";
-  const live = members.some((m) => !watcherSettled(m, panels));
   const badges = members.map((m) => AsyncBadge(hostId, m, panels)).join("");
   const details = members
     .filter((m) => panels?.isOpen(`member:${hostId}:${m.toolUseId}`) ?? false)
     .map((m) => WatcherRow(m, panels))
     .join("");
-  return `<div class="async-catalog">${monitoringRowHtml(live)}<div class="async-badges">${badges}</div>${details}</div>`;
+  return `<div class="async-catalog"><div class="async-badges">${badges}</div>${details}</div>`;
 }
 
 /**
