@@ -44,6 +44,7 @@ import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
+import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
@@ -103,6 +104,11 @@ async function boot(): Promise<void> {
   // The claude_session_id already persisted for activeSessionId, so the
   // per-frame hook below only touches localStorage on actual change.
   let rememberedClaudeId = "";
+  // The last mid-task marker value written for the live session, so the
+  // per-frame sync below only touches localStorage when a turn actually
+  // starts or ends rather than on every streaming delta. Reset by swapTo
+  // alongside rememberedClaudeId when the view rebinds to a successor.
+  let midTaskActive: boolean | null = null;
   let ws: WsClient;
 
   const store = new ConversationStore();
@@ -381,6 +387,7 @@ async function boot(): Promise<void> {
     ws.close();
     activeSessionId = next;
     rememberedClaudeId = "";
+    midTaskActive = null;
     // A paint scheduled against the dead session would render the
     // just-reset (empty) store; the successor's hello drives the next one.
     frames.cancel();
@@ -432,6 +439,18 @@ async function boot(): Promise<void> {
           });
         }
         if (result.restored) {
+          // A session stopped mid-task auto-resumes here: the mid-task
+          // marker outlived the killed turn, and the rehydrated turn is not
+          // live, so nudge the agent to continue without drawing a bubble
+          // (the nudge is meta-wrapped). Checked before the sync below so it
+          // reads the pre-boot marker, not the one this frame would write.
+          if (shouldAutoContinue(localStorage, store.state.claudeSessionId, store.state.turnInFlight)) {
+            ws.send({
+              type: "user-message",
+              request_id: crypto.randomUUID(),
+              content: hiddenContinueMessage(),
+            });
+          }
           // Fresh-join replay complete: tail-first backfill render, so
           // the newest message is on screen immediately with no scroll.
           // Supersedes any coalesced paint — left pending, its rAF would
@@ -445,6 +464,21 @@ async function boot(): Promise<void> {
           // before it. During a replay the paint keeps the chrome live
           // and leaves the feed to the completion render.
           frames.schedule();
+        }
+        // Track whether a turn is running so a kill mid-task leaves the
+        // marker set for the next boot's auto-resume above. The restored
+        // frame is skipped so its reconciled turnInFlight cannot clear the
+        // marker the auto-resume just consulted; replay frames are skipped
+        // so a transcript's turn toggles never thrash it. The guard writes
+        // localStorage only at a turn boundary, not on every delta.
+        if (
+          !result.restored &&
+          !store.replaying &&
+          store.state.claudeSessionId !== "" &&
+          store.state.turnInFlight !== midTaskActive
+        ) {
+          midTaskActive = store.state.turnInFlight;
+          rememberMidTask(localStorage, store.state.claudeSessionId, store.state.turnInFlight);
         }
         return result.send;
       },
