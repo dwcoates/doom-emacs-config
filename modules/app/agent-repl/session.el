@@ -843,6 +843,23 @@ time, pinning the delivery to that specific session) is live."
       (agent-repl--gui-running-p ws)
     (buffer-live-p vterm-buf)))
 
+(defun agent-repl--make-pending-prompt (text &optional origin)
+  "Return a pending-prompt entry carrying TEXT and an optional ORIGIN.
+A bare string when ORIGIN is nil (the ordinary entry shape, unchanged),
+else a plist `(:text TEXT :origin ORIGIN)'.  ORIGIN rides WITH the prompt
+so every delivery attempt re-stamps the send (see
+`agent-repl--deliver-pending-prompts'); a one-shot ws flag would instead
+be dropped by a verify retry, leaving the resent turn untagged."
+  (if origin (list :text text :origin origin) text))
+
+(defun agent-repl--pending-prompt-text (entry)
+  "Return the prompt text of a pending-prompt ENTRY (a string or a plist)."
+  (if (stringp entry) entry (plist-get entry :text)))
+
+(defun agent-repl--pending-prompt-origin (entry)
+  "Return the origin of a pending-prompt ENTRY, or nil for a bare string."
+  (if (stringp entry) nil (plist-get entry :origin)))
+
 (defun agent-repl--deliver-pending-prompts (pending ws &optional retries)
   "Deliver PENDING prompts to WS if its frontend can still receive them.
 Sends the first prompt via `agent-repl--send' with an ON-SETTLE that
@@ -871,9 +888,15 @@ buffer the panel-show path later adopts."
            ws (length pending)))
   (when pending
     (agent-repl--ensure-input-buffer ws)
-    (let ((retries (or retries 0)))
+    (let* ((retries (or retries 0))
+           (head (car pending)))
+      ;; Re-stamp the per-prompt origin on EVERY attempt: the initial send and
+      ;; each verify retry both route through here, so a retry re-arms the tag
+      ;; a one-shot consumed flag would have dropped.  A bare-string entry arms
+      ;; nil, clearing any stale tag so an ordinary prompt is never tagged.
+      (agent-repl--ws-put ws :next-send-origin (agent-repl--pending-prompt-origin head))
       (agent-repl--send
-       (car pending) ws nil
+       (agent-repl--pending-prompt-text head) ws nil
        (lambda ()
          (run-at-time
           agent-repl-prompt-delivery-verify-seconds nil
