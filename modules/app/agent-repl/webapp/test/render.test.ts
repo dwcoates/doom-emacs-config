@@ -678,7 +678,7 @@ describe("renderItem", () => {
     const html = renderItem(item, undefined, finalsClosing(item));
     // Assert — the corner (turn-meta with the turn's duration) rides in the bubble.
     expect(html).toMatch(
-      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-dur">/,
+      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-stats"><span class="turn-dur">/,
     );
   });
 
@@ -712,7 +712,7 @@ describe("renderItem", () => {
     const html = renderItem(item, undefined, finalsClosing(item));
     // Assert
     expect(html).toMatch(
-      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-dur">/,
+      /<div class="bubble assistant md final-response">[\s\S]*<span class="turn-meta"><span class="turn-stats"><span class="turn-dur">/,
     );
   });
 
@@ -2061,6 +2061,17 @@ describe("ResultChip", () => {
     // Assert — 6s, never the 5s 984ms the millisecond scale would give.
     expect(html).toContain(`<span class="turn-dur">6s</span>`);
     expect(html).not.toContain("984ms");
+  });
+
+  it("groups the duration and delta under one stats span so the bullet stays inline", () => {
+    // Arrange + Act — the wrapping .turn-stats item keeps the `·` between the
+    // two figures on one line rather than dropping it onto its own row in the
+    // .turn-meta column.
+    const html = finalResponseHtml(1_000);
+    // Assert
+    expect(html).toContain(
+      `<span class="turn-stats"><span class="turn-dur">1s</span> · <span class="turn-diff">+100,000</span></span>`,
+    );
   });
 });
 

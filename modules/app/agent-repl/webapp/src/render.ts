@@ -389,7 +389,7 @@ export function formatBubbleTime(ts: string, nowMs: number = Date.now()): string
  * response: a body column, then a top-right corner column (`.turn-meta`).
  * The corner stacks META — a final response's turn duration and context
  * delta, empty for every other bubble — above the relative-age timestamp,
- * which CSS reveals only while the reader hovers the bubble (see
+ * which CSS reveals only while the reader hovers that corner (see
  * `.turn-meta` / `.turn-ts`). The markup only has to hand both the corner.
  *
  * The corner holds its own flex column rather than floating over the body,
@@ -1852,7 +1852,11 @@ function resultMeta(chip: ResultItem): string {
       `<span class="turn-diff">${escapeHtml(formatTokenDelta(chip.context.delta))}</span>`,
     );
   }
-  return parts.join(" · ");
+  if (parts.length === 0) return "";
+  // Group both stats under one flex item so the `·` separator sits inline
+  // between them: the `.turn-meta` column would otherwise stack the duration,
+  // the bare bullet text node, and the delta onto three separate lines.
+  return `<span class="turn-stats">${parts.join(" · ")}</span>`;
 }
 
 /**

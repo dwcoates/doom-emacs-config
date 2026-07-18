@@ -672,10 +672,26 @@ describe("turn stamp", () => {
     expect(stamp).toMatch(/display:\s*none/);
   });
 
-  it("reveals the timestamp on bubble hover", () => {
-    // Arrange / Act — the hover rule flips the stamp back to visible.
+  it("reveals the timestamp only on the corner's own hover", () => {
+    // Arrange / Act — the hover rule flips the stamp back to visible, scoped to
+    // the .turn-meta corner so a stray hover elsewhere on the bubble stays quiet.
     // Assert
-    expect(css).toMatch(/\.bubble:hover \.turn-ts \{ display: block; \}/);
+    expect(css).toMatch(/\.turn-meta:hover \.turn-ts \{ display: block; \}/);
+  });
+
+  it("does not reveal the timestamp on a whole-bubble hover", () => {
+    // Arrange / Act — the old bubble-wide trigger is gone, so the reveal never
+    // fires from anywhere but the corner region near the stats.
+    // Assert
+    expect(css).not.toMatch(/\.bubble:hover \.turn-ts/);
+  });
+
+  it("keeps the corner a hoverable target even with no stats", () => {
+    // Arrange / Act — an empty stats row would collapse the column to the
+    // hidden stamp's zero box, so a min size preserves the hover region.
+    // Assert
+    expect(meta).toMatch(/min-width:\s*[\d.]+rem/);
+    expect(meta).toMatch(/min-height:\s*[\d.]+rem/);
   });
 
   it("mutes the timestamp below the text it dates", () => {
