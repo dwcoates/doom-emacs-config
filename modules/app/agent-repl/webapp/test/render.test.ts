@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import {
+  Actions,
+  FeedRenderer,
   PanelContext,
   ToolReveal,
   activeGroupMember,
@@ -38,6 +41,7 @@ import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { AsyncSource } from "../src/protocol.js";
 import {
   ConversationItem,
+  ConversationStore,
   ResultItem,
   StoreState,
   TextItem,
@@ -849,8 +853,10 @@ describe("renderItem", () => {
     expect(html).not.toContain(`class="result`);
   });
 
-  it("pulses a text block flagged as the working frontier", () => {
-    // Arrange
+  it("bakes no breath into a working-frontier text's HTML", () => {
+    // Arrange — the breath is a live-view accent the reconcile toggles as a
+    // class after mounting (see applyPulse), never part of an item's HTML, so
+    // a moving pulse never rewrites the bubble and restarts its animation.
     const item: ConversationItem = {
       kind: "text",
       ts: TEXT_TS,
@@ -860,13 +866,14 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, undefined, true);
+    const html = renderItem(item);
     // Assert
-    expect(html).toContain(`class="bubble assistant md pulsing"`);
+    expect(html).not.toContain("pulsing");
   });
 
-  it("pulses a working-frontier response rendered as a metaprompt tree", () => {
-    // Arrange — the tree path builds its own bubble, so it needs the class too.
+  it("bakes no breath into a frontier rendered as a metaprompt tree", () => {
+    // Arrange — the tree path builds its own bubble, which must stay just as
+    // pulse-free as the markdown path so both breathe by class alone.
     const item: ConversationItem = {
       kind: "text",
       ts: TEXT_TS,
@@ -876,43 +883,27 @@ describe("renderItem", () => {
       done: true,
     };
     // Act
-    const html = renderItem(item, undefined, undefined, true);
-    // Assert
-    expect(html).toContain(`class="bubble assistant md pulsing"`);
-  });
-
-  it("withholds the pulse from a text block that is not the working frontier", () => {
-    // Arrange
-    const item: ConversationItem = {
-      kind: "text",
-      ts: TEXT_TS,
-      blockId: "b1",
-      messageId: "m1",
-      text: "on it",
-      done: true,
-    };
-    // Act
-    const html = renderItem(item, undefined, undefined, false);
+    const html = renderItem(item);
     // Assert
     expect(html).not.toContain("pulsing");
   });
 
-  it("never breathes a tool card, even when the pulse flag is set", () => {
+  it("bakes no breath into a tool card's HTML", () => {
     // Arrange — a running tool leans on its own run badge, never a breath.
     const item = tool();
-    // Act — the flag is on, but ToolCard ignores it entirely now.
-    const html = renderItem(item, undefined, undefined, true);
+    // Act
+    const html = renderItem(item);
     // Assert
     expect(html).not.toContain("pulsing");
   });
 
-  it("never breathes a prompt bubble, even when the pulse flag is set", () => {
+  it("bakes no breath into a prompt bubble's HTML", () => {
     // Arrange — the prompt breath is retired: a just-sent prompt is covered by
-    // the orange `working…` tail row now (see pulseTarget), so UserTurn ignores
-    // the flag entirely, the same way a running tool card does.
+    // the orange `working…` tail row now (see pulseTarget), so UserTurn never
+    // breathes, the same way a running tool card never does.
     const item = userTurnAt(9, 0);
     // Act
-    const html = renderItem(item, undefined, undefined, true);
+    const html = renderItem(item);
     // Assert
     expect(html).not.toContain("pulsing");
   });
@@ -3414,21 +3405,21 @@ describe("agent bubble topbar", () => {
 
   it("folds the agent-scoped strip into a subagent card through the panels hook", () => {
     // Arrange + Act
-    const html = renderItem(agentTool(), undefined, undefined, false, topbarPanels());
+    const html = renderItem(agentTool(), undefined, undefined, topbarPanels());
     // Assert — the hook was called with THIS agent's item.
     expect(html).toContain("strip:a1");
   });
 
   it("keeps the strip out of a non-subagent card", () => {
     // Arrange + Act — a Bash card with the same hook wired.
-    const html = renderItem(tool(), undefined, undefined, false, topbarPanels());
+    const html = renderItem(tool(), undefined, undefined, topbarPanels());
     // Assert
     expect(html).not.toContain("strip:");
   });
 
   it("renders no strip when the hook is not wired", () => {
     // Arrange + Act — a PanelContext without agentTopbar (older callers).
-    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([]));
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([]));
     // Assert
     expect(html).not.toContain("agent-topbar");
   });
@@ -3436,7 +3427,7 @@ describe("agent bubble topbar", () => {
   it("seats the strip under the card head", () => {
     // Arrange + Act — the input box the strip once sat above is gone (see
     // toolInput), so the head is the only anchor left to seat it under.
-    const html = renderItem(agentTool(), undefined, undefined, false, topbarPanels());
+    const html = renderItem(agentTool(), undefined, undefined, topbarPanels());
     // Assert
     expect(html.indexOf("agent-topbar")).toBeGreaterThan(html.indexOf("tool-head"));
   });
@@ -3445,14 +3436,14 @@ describe("agent bubble topbar", () => {
 describe("activity panel", () => {
   it("renders no activity fold on a card without children", () => {
     // Arrange + Act
-    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([]));
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([]));
     // Assert
     expect(html).not.toContain("agent-activity");
   });
 
   it("shows the ticker face while closed and none of the child feed", () => {
     // Arrange + Act
-    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([childBash()]));
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()]));
     // Assert
     expect(html).toContain("agent-ticker");
     expect(html).toContain("1 step · Bash: ls -la");
@@ -3461,7 +3452,7 @@ describe("activity panel", () => {
 
   it("renders the child feed inside the open panel", () => {
     // Arrange + Act
-    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([childBash()], true));
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()], true));
     // Assert
     expect(html).toContain("agent-panel");
     expect(html).toContain("tool-bash");
@@ -3474,7 +3465,6 @@ describe("activity panel", () => {
       agentTool(),
       undefined,
       undefined,
-      false,
       panelCtx([childBash(), childPermission("t2")]),
     );
     // Assert — a closed card must never silently block the turn.
@@ -3487,7 +3477,6 @@ describe("activity panel", () => {
       agentTool(),
       undefined,
       undefined,
-      false,
       panelCtx([childBash(), childPermission("t2", true)]),
     );
     // Assert
@@ -3498,7 +3487,7 @@ describe("activity panel", () => {
     // Arrange — ToolSearch renders as nothing everywhere.
     const suppressed: ToolItem = { ...childBash(), toolName: "ToolSearch" };
     // Act
-    const html = renderItem(agentTool(), undefined, undefined, false, panelCtx([suppressed]));
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([suppressed]));
     // Assert
     expect(html).not.toContain("agent-activity");
   });
@@ -3507,7 +3496,7 @@ describe("activity panel", () => {
     // Arrange — a Workflow's children confine like an Agent's.
     const wf: ToolItem = { ...agentTool(), toolName: "Workflow" };
     // Act
-    const html = renderItem(wf, undefined, undefined, false, panelCtx([childBash()]));
+    const html = renderItem(wf, undefined, undefined, panelCtx([childBash()]));
     // Assert
     expect(html).toContain("agent-activity");
   });
@@ -3665,7 +3654,6 @@ describe("task update card", () => {
       taskCreateTool(),
       undefined,
       undefined,
-      false,
       taskChildrenCtx([taskUpdateTool()], true),
     );
     // Assert
@@ -3679,7 +3667,6 @@ describe("task update card", () => {
       taskCreateTool(),
       undefined,
       undefined,
-      false,
       taskChildrenCtx([taskUpdateTool()]),
     );
     // Assert
@@ -4249,7 +4236,7 @@ describe("agent message composer", () => {
       drafts: new Map([["abc9", "status pls"]]),
     };
     // Act
-    const html = renderItem(bgAgent(), undefined, undefined, false, panels);
+    const html = renderItem(bgAgent(), undefined, undefined, panels);
     // Assert
     expect(html).toContain(`value="status pls"`);
   });
@@ -4310,49 +4297,49 @@ describe("async fold", () => {
     const card = sourcedCard();
     delete card.asyncSource;
     // Act
-    const html = renderItem(card, undefined, undefined, false, asyncPanels(false));
+    const html = renderItem(card, undefined, undefined, asyncPanels(false));
     // Assert
     expect(html).not.toContain("async-fold");
   });
 
   it("names the work and its state on the collapsed face", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(false));
     // Assert
     expect(html).toContain("agent · find the thing · running");
   });
 
   it("falls back to the source id when the spawn announced no label", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard({ label: "" }), undefined, undefined, false, asyncPanels(false));
+    const html = renderItem(sourcedCard({ label: "" }), undefined, undefined, asyncPanels(false));
     // Assert
     expect(html).toContain("agent · a9 · running");
   });
 
   it("arcs the ticker while the work runs, since a settled card never breathes", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(false));
     // Assert
     expect(html).toContain(`<span class="tool-spinner" aria-hidden="true"></span>`);
   });
 
   it("drops the arc once the work is done", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard({ status: "done" }), undefined, undefined, false, asyncPanels(false));
+    const html = renderItem(sourcedCard({ status: "done" }), undefined, undefined, asyncPanels(false));
     // Assert
     expect(html).not.toContain("tool-spinner");
   });
 
   it("costs nothing while closed, rendering none of the stream", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(false, agentTranscript));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(false, agentTranscript));
     // Assert
     expect(html).not.toContain("scanning the repo");
   });
 
   it("renders a background agent's transcript as NESTED BUBBLES when open", () => {
     // Arrange / Act — the payoff: it was an opaque <pre> before.
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(true, agentTranscript));
     // Assert
     expect(html).toContain("bubble assistant");
     expect(html).toContain("scanning the repo");
@@ -4360,14 +4347,14 @@ describe("async fold", () => {
 
   it("renders the transcript's tool calls as cards, not as text", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(true, agentTranscript));
     // Assert
     expect(html).toContain("tool-card tool-grep");
   });
 
   it("does not paint a transcript as a raw pre, which is what it used to be", () => {
     // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, agentTranscript));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(true, agentTranscript));
     // Assert
     expect(html).not.toContain("task-live-output");
   });
@@ -4398,7 +4385,6 @@ describe("async fold", () => {
       sourcedCard(),
       undefined,
       undefined,
-      false,
       asyncPanels(true, nestedSpawnTranscript("a7")),
     );
     // Assert
@@ -4411,7 +4397,6 @@ describe("async fold", () => {
       sourcedCard(),
       undefined,
       undefined,
-      false,
       asyncPanels(true, nestedSpawnTranscript("a9")),
     );
     // Assert — only the outer fold renders.
@@ -4445,7 +4430,7 @@ describe("async fold", () => {
       }),
     ].join("\n");
     // Act — asyncPanels(true) opens every fold, the nested activity one included.
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, taskTranscript));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(true, taskTranscript));
     // Assert — the create card carries an activity fold holding the update.
     expect(html).toContain("agent-activity");
     expect(html).toContain(">TaskUpdate<");
@@ -4458,7 +4443,7 @@ describe("async fold", () => {
       { toolName: "Bash", taskOutput: "line one\nline two" },
     );
     // Act
-    const html = renderItem(shell, undefined, undefined, false, asyncPanels(true));
+    const html = renderItem(shell, undefined, undefined, asyncPanels(true));
     // Assert
     expect(html).toContain("task-live-output");
     expect(html).toContain("line one");
@@ -4469,7 +4454,7 @@ describe("async fold", () => {
     const journal = txLine({ label: "review:bugs", result: "3 findings" });
     const wf = sourcedCard({ kind: "workflow", stream: { transport: "poll", format: "jsonl-journal" } });
     // Act
-    const html = renderItem(wf, undefined, undefined, false, asyncPanels(true, journal));
+    const html = renderItem(wf, undefined, undefined, asyncPanels(true, journal));
     // Assert
     expect(html).toContain("stream-row");
     expect(html).toContain("review:bugs");
@@ -4483,7 +4468,7 @@ describe("async fold", () => {
     ).join("\n");
     // Act — STREAM_ITEM_CAP is large, so drive the cap through the parser
     // directly; here just assert the fold shows the whole short stream.
-    const html = renderItem(sourcedCard(), undefined, undefined, false, asyncPanels(true, long));
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(true, long));
     // Assert
     expect(html).not.toContain("stream-dropped");
   });
@@ -4495,7 +4480,7 @@ describe("async fold", () => {
       { toolName: "Bash", taskOutput: "once" },
     );
     // Act
-    const html = renderItem(shell, undefined, undefined, false, asyncPanels(true));
+    const html = renderItem(shell, undefined, undefined, asyncPanels(true));
     // Assert
     expect(html.match(/task-live-output/g)).toHaveLength(1);
   });
@@ -4560,14 +4545,14 @@ function watcherPanelsWithChildren(
 describe("async catalog", () => {
   it("renders no catalog on a bubble the projection does not host", () => {
     // Arrange + Act — no members mapped to this bubble.
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([]));
     // Assert
     expect(html).not.toContain("async-catalog");
   });
 
   it("shows a member badge while live, with no detail closed", () => {
     // Arrange + Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([watcher()]));
     // Assert
     expect(html).toContain("async-catalog");
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
@@ -4577,7 +4562,7 @@ describe("async catalog", () => {
   it("never repeats the monitoring line inside the bubble catalog while a member is live", () => {
     // Arrange + Act — a live member drives the catalog, but the animated
     // monitoring row lives ONLY at the global feed tail, never in the bubble.
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([watcher()]));
     // Assert
     expect(html).toContain("async-catalog");
     expect(html).not.toContain("monitoring…");
@@ -4586,7 +4571,7 @@ describe("async catalog", () => {
   it("renders each member badge as a div-toggle, not a click-through button", () => {
     // Arrange — handlePanelToggle's click-through guard (a, button, summary)
     // would swallow a <button> badge, so the badge must be a plain toggle div.
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([watcher()]));
     // Assert
     expect(html).toContain(`<div class="async-badge" data-panel-toggle="member:b1:w1"`);
   });
@@ -4595,7 +4580,7 @@ describe("async catalog", () => {
     // Arrange
     const w = watcher("bg1", { taskOutput: "polling the queue…" });
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w], true));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([w], true));
     // Assert
     expect(html).toContain("watcher-row");
     expect(html).toContain("task-live-output");
@@ -4606,7 +4591,7 @@ describe("async catalog", () => {
     // Arrange — the completion notification settles the member.
     const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([w]));
     // Assert
     expect(html).toContain("async-badge settled");
   });
@@ -4615,7 +4600,7 @@ describe("async catalog", () => {
     // Arrange — the prompt-mediated stop yields no notification, only a settled TaskStop card.
     const w = watcher("bg1");
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1")]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanelsWithChildren([w], [taskStop("bg1")]));
     // Assert
     expect(html).toContain("async-badge settled");
   });
@@ -4624,7 +4609,7 @@ describe("async catalog", () => {
     // Arrange — a resultless TaskStop has not confirmed the stop yet.
     const w = watcher("bg1");
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: undefined })]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanelsWithChildren([w], [taskStop("bg1", { result: undefined })]));
     // Assert — the live dot, not a monitoring line, carries the in-bubble signal.
     expect(html).toContain("agent-running");
     expect(html).not.toContain("async-badge settled");
@@ -4634,7 +4619,7 @@ describe("async catalog", () => {
     // Arrange — a failed stop must not settle the member.
     const w = watcher("bg1");
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanelsWithChildren([w], [taskStop("bg1", { result: { isError: true, content: "no such task" } })]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanelsWithChildren([w], [taskStop("bg1", { result: { isError: true, content: "no such task" } })]));
     // Assert
     expect(html).toContain("agent-running");
     expect(html).not.toContain("async-badge settled");
@@ -4642,7 +4627,7 @@ describe("async catalog", () => {
 
   it("catalogs a non-final host bubble too (an interrupted turn's survivors)", () => {
     // Arrange — no finals (no chip), but the projection still hosts a live member here.
-    const html = renderItem(text("b1"), undefined, undefined, false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, undefined, watcherPanels([watcher()]));
     // Assert
     expect(html).toContain("async-catalog");
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
@@ -4658,7 +4643,7 @@ describe("async catalog", () => {
         id === "bg1" ? { text: "polled line", offset: 11, done: false, elapsedMs: 3000 } : undefined,
     };
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
     // Assert
     expect(html).toContain("polled line");
     expect(html).toContain("watcher-elapsed");
@@ -4673,7 +4658,7 @@ describe("async catalog", () => {
       taskTail: () => ({ text: "polled line", offset: 11, done: false, elapsedMs: 0 }),
     };
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
     // Assert
     expect(html).toContain("streamed line");
     expect(html).not.toContain("polled line");
@@ -4683,7 +4668,7 @@ describe("async catalog", () => {
 describe("async-quiescence border (the invariant)", () => {
   it("amber-borders a bubble with a live async member instead of the green final-response", () => {
     // Arrange + Act — a live member makes the bubble amber, not green.
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([watcher()]));
     // Assert
     expect(html).toContain(`class="bubble assistant md async-live"`);
     expect(html).not.toContain("final-response");
@@ -4693,7 +4678,7 @@ describe("async-quiescence border (the invariant)", () => {
     // Arrange — the member's notification settles it.
     const w = watcher("bg1", { notification: { taskId: "bg1", text: "<task-notification/>" } });
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([w]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([w]));
     // Assert
     expect(html).toContain("final-response");
     expect(html).not.toContain("async-live");
@@ -4701,7 +4686,7 @@ describe("async-quiescence border (the invariant)", () => {
 
   it("enumerates every live member as a selectable badge — the invariant the amber border promises", () => {
     // Arrange + Act — the live member that causes the amber border MUST appear as a badge.
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, watcherPanels([watcher()]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([watcher()]));
     // Assert
     expect(html).toContain("async-live");
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
@@ -4715,7 +4700,7 @@ describe("async-quiescence border (the invariant)", () => {
       watchers: new Map([["r1", [watcher()]]]),
     };
     // Act
-    const html = renderItem(userTurnAt(9, 0), undefined, undefined, false, panels);
+    const html = renderItem(userTurnAt(9, 0), undefined, undefined, panels);
     // Assert
     expect(html).toContain("bubble user async-live");
     expect(html).toContain(`data-panel-toggle="member:r1:w1"`);
@@ -4751,7 +4736,7 @@ function gnsPanels(items: ConversationItem[], open = false): PanelContext {
 describe("gns-sockets fold", () => {
   it("renders no fold on a final bubble no bridge upkeep attached to", () => {
     // Arrange + Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, gnsPanels([]));
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), gnsPanels([]));
     // Assert
     expect(html).not.toContain("gns-fold");
   });
@@ -4762,7 +4747,6 @@ describe("gns-sockets fold", () => {
       text("b1"),
       undefined,
       finalsClosing(text("b1")),
-      false,
       gnsPanels([bridgeSpawnItem()]),
     );
     // Assert
@@ -4786,7 +4770,6 @@ describe("gns-sockets fold", () => {
       text("b1"),
       undefined,
       finalsClosing(text("b1")),
-      false,
       gnsPanels([bridgeSpawnItem(), ack], true),
     );
     // Assert
@@ -4797,7 +4780,7 @@ describe("gns-sockets fold", () => {
 
   it("never folds bridge upkeep into a non-final commentary bubble", () => {
     // Arrange — no finals, so the bubble carries no closing chip.
-    const html = renderItem(text("b1"), undefined, undefined, false, gnsPanels([bridgeSpawnItem()]));
+    const html = renderItem(text("b1"), undefined, undefined, gnsPanels([bridgeSpawnItem()]));
     // Assert
     expect(html).not.toContain("gns-fold");
   });
@@ -4811,7 +4794,7 @@ describe("gns-sockets fold", () => {
       gnsFolds: new Map([["b1", [bridgeSpawnItem()]]]),
     };
     // Act
-    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), false, panels);
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
     // Assert — the member badge stays closed while the gns fold opens.
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
     expect(html).toContain(`data-panel-toggle="gns:b1"`);
@@ -4888,7 +4871,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx(),
     );
     // Assert
@@ -4902,7 +4884,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx(),
     );
     // Assert
@@ -4912,7 +4893,7 @@ describe("unsupported slash-command card", () => {
 
   it("still renders the ordinary chip for a turn that answered normally", () => {
     // Arrange + Act
-    const html = renderItem(refusal("all done"), undefined, undefined, false, ctx());
+    const html = renderItem(refusal("all done"), undefined, undefined, ctx());
     // Assert
     expect(html).toContain(`class="result`);
     expect(html).not.toContain("data-add-support");
@@ -4920,7 +4901,7 @@ describe("unsupported slash-command card", () => {
 
   it("still renders the ordinary chip for a turn with no result text", () => {
     // Arrange + Act
-    const html = renderItem(refusal(undefined), undefined, undefined, false, ctx());
+    const html = renderItem(refusal(undefined), undefined, undefined, ctx());
     // Assert
     expect(html).toContain(`class="result`);
   });
@@ -4931,7 +4912,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx({ canAddSupport: false }),
     );
     // Assert
@@ -4945,7 +4925,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx({ supportPhases: new Map([["status", { kind: "asking" }]]) }),
     );
     // Assert
@@ -4959,7 +4938,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx({ supportPhases: new Map([["status", { kind: "asked", workspace: "add-support-status" }]]) }),
     );
     // Assert
@@ -4973,7 +4951,6 @@ describe("unsupported slash-command card", () => {
       refusal("/status isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx({ supportPhases: new Map([["status", { kind: "failed", error: "404 nope" }]]) }),
     );
     // Assert
@@ -4988,7 +4965,7 @@ describe("unsupported slash-command card", () => {
       typeof finalResponses
     >;
     // Act
-    const html = renderItem(closer, undefined, finals, false, ctx());
+    const html = renderItem(closer, undefined, finals, ctx());
     // Assert
     expect(html).toContain("data-add-support");
   });
@@ -4999,7 +4976,6 @@ describe("unsupported slash-command card", () => {
       refusal("/plugin:cmd isn't available in this environment."),
       undefined,
       undefined,
-      false,
       ctx(),
     );
     // Assert
@@ -5086,5 +5062,110 @@ describe("navTokensForEntry", () => {
     const tokens = navTokensForEntry(entry, finals);
     // Assert
     expect(tokens).toBe("");
+  });
+});
+
+/**
+ * The reconcile toggles the working-frontier breath as a CLASS on the mounted
+ * bubble (`applyPulse`), never as part of an item's HTML. The point is a
+ * continuous animation: a pulse that moves onto or off a bubble whose body did
+ * not change must not rewrite that body, because rewriting `innerHTML` would
+ * recreate the `.bubble` node and restart its CSS `bubble-breathe` from frame
+ * 0 — the reset the reader sees as a jerk.
+ */
+describe("FeedRenderer: the working-frontier breath is a class, not HTML", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+  };
+
+  function mountFeed(): { container: HTMLElement; feed: FeedRenderer } {
+    const container = document.createElement("div");
+    return { container, feed: new FeedRenderer(container, NOOP_ACTIONS) };
+  }
+
+  /** A running turn whose frontier is done text `b1`, plus any trailing items. */
+  function frontierState(tail: ConversationItem[] = []): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1"), ...tail];
+    state.turnInFlight = true;
+    return state;
+  }
+
+  const frontierBubble = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector('[data-key="text:b1"] > .bubble');
+
+  it("breathes the working frontier by adding the class to its mounted bubble", () => {
+    // Arrange — a running turn whose last word is the frontier.
+    const { container, feed } = mountFeed();
+    // Act
+    feed.render(frontierState());
+    // Assert
+    expect(frontierBubble(container)?.classList.contains("pulsing")).toBe(true);
+  });
+
+  it("keeps the SAME bubble node across a pulse drop, so the breath never restarts", () => {
+    // Arrange — the frontier is breathing.
+    const { container, feed } = mountFeed();
+    feed.render(frontierState());
+    const first = frontierBubble(container);
+    expect(first?.classList.contains("pulsing")).toBe(true);
+    // Act — a running tool arrives at the tail: its arc takes the beat, so the
+    // frontier's pulse drops (pulseTarget). The frontier's own body is unchanged.
+    feed.render(frontierState([tool()]));
+    // Assert — the reconcile reused the node rather than rewriting its HTML, so
+    // the breath was toggled off in place, not destroyed and recreated.
+    expect(frontierBubble(container)).toBe(first);
+    expect(first?.classList.contains("pulsing")).toBe(false);
+  });
+
+  it("keeps the SAME bubble node when the pulse returns, so it resumes in place", () => {
+    // Arrange — the frontier breathed, then a running tool dropped its pulse.
+    const { container, feed } = mountFeed();
+    feed.render(frontierState());
+    const first = frontierBubble(container);
+    feed.render(frontierState([tool()]));
+    // Act — the tool settles: the arc is gone, so the frontier breathes again.
+    feed.render(frontierState([tool(true)]));
+    // Assert — still the very same node, now breathing once more.
+    expect(frontierBubble(container)).toBe(first);
+    expect(first?.classList.contains("pulsing")).toBe(true);
+  });
+
+  it("stills the breath in place once the turn is no longer in flight", () => {
+    // Arrange — a breathing frontier.
+    const { container, feed } = mountFeed();
+    feed.render(frontierState());
+    // Act — the turn ends: nothing breathes anymore.
+    const ended = frontierState();
+    ended.turnInFlight = false;
+    feed.render(ended);
+    // Assert — the class is gone.
+    expect(frontierBubble(container)?.classList.contains("pulsing")).toBe(false);
+  });
+
+  it("breathes a frontier rendered as a metaprompt tree, whose bubble a different pipeline builds", () => {
+    // Arrange — the tree path builds the `.bubble` a different way, so this
+    // guards that applyPulse still finds it as the item's direct-child bubble.
+    const { container, feed } = mountFeed();
+    const state = new ConversationStore().state;
+    state.items = [
+      userTurnAt(9, 0),
+      {
+        kind: "text",
+        blockId: "b1",
+        messageId: "m1",
+        text: "Response (👀 no changes made)\n\n1 👀 Answer\n└── 1.1 Only",
+        done: true,
+        ts: TEXT_TS,
+      },
+    ];
+    state.turnInFlight = true;
+    // Act
+    feed.render(state);
+    // Assert
+    expect(frontierBubble(container)?.classList.contains("pulsing")).toBe(true);
   });
 });
