@@ -33,6 +33,12 @@
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "agent-repl-frontend-client" ())
 
+;; Forward declaration: this defcustom lives in session.el, which loads
+;; AFTER this file.  Declared here so byte-compilation doesn't warn about a
+;; free variable in `agent-repl--frontend-accounts-flag'; it is always bound
+;; by the time that function runs (daemon launch).  Mirrors install.el.
+(defvar agent-repl-multi-repo-config-dir)
+
 ;;;; ---- Paths ------------------------------------------------------------
 
 (defconst agent-repl--frontend-root
@@ -102,6 +108,16 @@ cleanly."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-foreign-stop-grace-seconds 5.0
+  "Seconds to wait for an ADOPTED daemon to exit after POST /shutdown.
+The staleness bounce uses this only for a daemon this Emacs does not
+track (no local process handle): it asks the daemon to shut down over
+HTTP, then polls the port until it frees before spawning a fresh one, so
+the replacement never bind-fails next to a still-listening daemon.  A
+daemon that outlives this window is left in place (manual restart)."
+  :type 'number
+  :group 'agent-repl)
+
 (defcustom agent-repl-frontend-remediate-lost-sessions t
   "When non-nil, `claude-repld' remediates a session it has lost.
 A frontend whose session has vanished from the daemon shows \"session
@@ -163,6 +179,22 @@ No-op under batch (tests) and inside the agent sandbox, matching the
 `install.el' auto-install guard."
   (or noninteractive
       (agent-repl--in-sandbox-p)))
+
+(defun agent-repl--frontend-poll-until (predicate timeout interval)
+  "Block until PREDICATE clears or TIMEOUT elapses; return PREDICATE's last value.
+Calls PREDICATE (a nullary function), sleeping INTERVAL seconds between
+polls, until PREDICATE returns nil or the deadline passes.  Returns the
+LAST value of PREDICATE, so a caller branches on whether the condition
+cleared (nil) or the wait timed out (non-nil) — e.g. \"process still live
+after the grace window\" or \"port still bound after shutdown\".
+
+Uses `sleep-for', NOT `sit-for': sit-for returns immediately on pending
+input, which would collapse the wait window while the user types (the
+same rationale as the readiness poll in frontend-client.el)."
+  (let ((deadline (+ (float-time) timeout)))
+    (while (and (funcall predicate) (< (float-time) deadline))
+      (sleep-for interval))
+    (funcall predicate)))
 
 ;;;; ---- Build-if-stale ---------------------------------------------------
 
@@ -287,6 +319,135 @@ daemons count as absent."
       (progn (agent-repl--frontend-api "GET" "/sessions") t)
     (error nil)))
 
+;;;; ---- Staleness detection ----------------------------------------------
+
+(defun agent-repl--frontend-daemon-binary-disk-mtime ()
+  "Return the on-disk `claude-repld' binary's mtime as integer Unix seconds.
+Nil when the binary is absent (nothing built yet).  Integer seconds match
+the resolution the daemon reports (`daemon_binary_mtime') and the build
+script's own mtime-based staleness rule."
+  (when (file-exists-p agent-repl--frontend-daemon-bin)
+    (time-convert (file-attribute-modification-time
+                   (file-attributes agent-repl--frontend-daemon-bin))
+                  'integer)))
+
+(defun agent-repl--frontend-running-daemon-binary-mtime ()
+  "Return the launched-binary mtime the running daemon reports, or nil.
+Reads `daemon_binary_mtime' from GET /sessions, so it resolves for a
+daemon this Emacs tracks AND one adopted from another Emacs — both answer
+on the same addr, and neither exposes a local process-start-time this
+Emacs could otherwise inspect.  Nil when the daemon is unreachable or
+reports a non-positive value (a daemon that predates the field, or whose
+boot-time self-stat failed), so a daemon that cannot name its own binary
+is never judged stale on a guess."
+  (condition-case nil
+      (let ((v (alist-get 'daemon_binary_mtime
+                          (agent-repl--frontend-api "GET" "/sessions"))))
+        (and (numberp v) (> v 0) (floor v)))
+    (error nil)))
+
+(defun agent-repl--frontend-daemon-stale-p ()
+  "Return non-nil when the on-disk binary is newer than the running daemon's.
+Compares the on-disk binary's mtime against the launched-binary mtime the
+running/adopted daemon reports.  A STRICT `>' is deliberate: the common
+no-rebuild case has the two equal (the daemon launched from the very file
+still on disk), and a `>=' comparison would then flag every daemon stale
+and bounce it in a loop.  Nil (fresh) whenever either mtime is unknown, so
+nothing is ever bounced on a guess."
+  (let ((disk (agent-repl--frontend-daemon-binary-disk-mtime))
+        (running (agent-repl--frontend-running-daemon-binary-mtime)))
+    (and disk running (> disk running))))
+
+(defvar agent-repl--frontend-startup-staleness-checked nil
+  "Non-nil once this Emacs session ran its one-shot startup staleness bounce.
+The bounce is folded into the FIRST non-force
+`agent-repl--ensure-frontend-daemon' — the point the daemon is first
+needed (Emacs open, when a restored or opened panel ensures it).  Keeping
+it a per-session one-shot preserves the cheap live-process hot path every
+later ensure relies on, and keeps the module LAZY: a user who never opens
+a panel never ensures, so the check (and its build) never runs for them.")
+
+(defun agent-repl--frontend-request-foreign-shutdown ()
+  "Ask the daemon on the configured addr to shut down (POST /shutdown).
+Returns normally on the daemon's 202; signals on a non-2xx or transport
+error like any other `agent-repl--frontend-api' call.  Its own boundary
+function so tests can shadow it without a real HTTP round-trip."
+  (agent-repl--frontend-api "POST" "/shutdown"))
+
+(defun agent-repl--frontend-bounce-foreign-daemon ()
+  "Bounce an ADOPTED daemon this Emacs does not track, via POST /shutdown.
+Asks the foreign daemon to exit gracefully (it runs the same shutdown path
+SIGTERM triggers), waits for its listener to free the port, then starts a
+fresh daemon from the already-rebuilt on-disk binary.
+
+The shutdown request errors benignly if the daemon drops the connection as
+it tears down, so a transport error on the request is logged and ignored —
+the port poll is the real exit signal.  A daemon that never frees the port
+within `agent-repl-frontend-foreign-stop-grace-seconds' is LEFT in place
+\(spawning next to it would only bind-fail), with a note to run the manual
+restart, so a wedged foreign daemon never costs a doomed spawn."
+  (condition-case err
+      (agent-repl--frontend-request-foreign-shutdown)
+    (error
+     (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — polling the port anyway"
+                       (error-message-string err))))
+  (if (agent-repl--frontend-poll-until
+       #'agent-repl--frontend-daemon-port-responsive-p
+       agent-repl-frontend-foreign-stop-grace-seconds 0.1)
+      (agent-repl--log nil "startup: adopted daemon on %s ignored shutdown within %ss — leaving it in place; run M-x agent-repl-frontend-daemon-restart"
+                        agent-repl-frontend-daemon-addr
+                        agent-repl-frontend-foreign-stop-grace-seconds)
+    (agent-repl--frontend-start-daemon)))
+
+(defun agent-repl--frontend-bounce-if-stale ()
+  "Rebuild-if-stale, then bounce the running daemon when the binary is stale.
+Runs a build-if-stale pass FIRST so changed Go source is compiled onto
+disk before the comparison, then bounces (fresh restart) when the on-disk
+binary is newer than the running daemon's launched binary
+\(`agent-repl--frontend-daemon-stale-p').
+
+Acts only when a daemon is already up to compare against: with none
+running, the launch branch of `agent-repl--ensure-frontend-daemon'
+builds-if-stale before starting, so freshness is already guaranteed there
+without a redundant build here.
+
+Once stale, the branch taken keeps the bounce safe:
+- an in-flight turn DEFERS the bounce rather than killing a live
+  conversation mid-generation — the same refusal
+  `agent-repl--frontend-stop-daemon' enforces, checked up front so a stop
+  is never even attempted mid-turn, and it gates the foreign path too;
+- a daemon THIS Emacs tracks is stopped (graceful SIGTERM) and respawned;
+- an ADOPTED foreign daemon, which has no local handle to signal, is asked
+  to exit over HTTP and replaced once it frees the port
+  (`agent-repl--frontend-bounce-foreign-daemon');
+- a fresh daemon is left exactly as adopt/reuse would leave it (no
+  restart), which is the whole point of gating the bounce on staleness."
+  (when (or (agent-repl--frontend-daemon-live-p)
+            (agent-repl--frontend-daemon-port-responsive-p))
+    (agent-repl--frontend-build-if-stale nil)
+    (when (agent-repl--frontend-daemon-stale-p)
+      (cond
+       ((agent-repl--frontend-turn-active-sessions)
+        (agent-repl--log nil "startup: daemon binary stale but a turn is in flight — deferring bounce (will not kill mid-turn)"))
+       ((agent-repl--frontend-daemon-live-p)
+        (agent-repl--log nil "startup: daemon binary stale — bouncing tracked daemon to pick up the new build")
+        (agent-repl--frontend-stop-daemon)
+        (agent-repl--frontend-start-daemon))
+       (t
+        (agent-repl--log nil "startup: adopted daemon on %s is stale — bouncing it via POST /shutdown"
+                          agent-repl-frontend-daemon-addr)
+        (agent-repl--frontend-bounce-foreign-daemon))))))
+
+(defun agent-repl--frontend-maybe-bounce-stale-daemon-once ()
+  "Run `agent-repl--frontend-bounce-if-stale' at most once per Emacs session.
+The guard is set BEFORE the bounce runs, so even a build error leaves the
+check a genuine one-shot rather than re-firing (and re-building) on every
+subsequent panel open; the error itself still propagates to the caller,
+never swallowed."
+  (unless agent-repl--frontend-startup-staleness-checked
+    (setq agent-repl--frontend-startup-staleness-checked t)
+    (agent-repl--frontend-bounce-if-stale)))
+
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
 Idempotent: returns the live process immediately when one exists (unless
@@ -297,21 +458,34 @@ any stale artifact and launches `claude-repld'.  FORCE skips adoption:
 an explicit restart wants a fresh process (a foreign daemon cannot be
 stopped from here — only its owner can).  Returns nil without acting
 when `agent-repl-frontend-auto-start' is nil or automatic init is
-inhibited (batch/sandbox)."
+inhibited (batch/sandbox).
+
+On the FIRST non-force call per Emacs session (the daemon first being
+needed on Emacs open), a one-shot staleness bounce runs before the
+adopt/reuse decision: it rebuilds any stale artifact and, when the
+running daemon launched from an older binary than the one now on disk,
+restarts it so the session picks up the new build.  A fresh daemon is
+left untouched (today's adopt/reuse), an in-flight turn defers the
+bounce, and an adopted daemon this Emacs does not track is asked to exit
+over HTTP and replaced (see `agent-repl--frontend-bounce-if-stale')."
   (cond
    ((not agent-repl-frontend-auto-start) nil)
    ((agent-repl--frontend-init-inhibited-p) nil)
-   ((and (not force) (agent-repl--frontend-daemon-live-p))
-    agent-repl--frontend-daemon-process)
-   ((and (not force) (agent-repl--frontend-daemon-port-responsive-p))
-    (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
-                      agent-repl-frontend-daemon-addr)
-    t)
    (t
-    (when (and force (agent-repl--frontend-daemon-live-p))
-      (agent-repl--frontend-stop-daemon))
-    (agent-repl--frontend-build-if-stale force)
-    (agent-repl--frontend-start-daemon))))
+    (unless force
+      (agent-repl--frontend-maybe-bounce-stale-daemon-once))
+    (cond
+     ((and (not force) (agent-repl--frontend-daemon-live-p))
+      agent-repl--frontend-daemon-process)
+     ((and (not force) (agent-repl--frontend-daemon-port-responsive-p))
+      (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
+                        agent-repl-frontend-daemon-addr)
+      t)
+     (t
+      (when (and force (agent-repl--frontend-daemon-live-p))
+        (agent-repl--frontend-stop-daemon))
+      (agent-repl--frontend-build-if-stale force)
+      (agent-repl--frontend-start-daemon))))))
 
 (defun agent-repl--frontend-stop-daemon (&optional force)
   "Stop the tracked `claude-repld' process, gracefully first.
@@ -336,14 +510,9 @@ inherited-pipe EOF."
                busy)))
     (let ((proc agent-repl--frontend-daemon-process))
       (signal-process proc 'TERM)
-      (let ((deadline (+ (float-time) agent-repl-frontend-stop-grace-seconds)))
-        (while (and (process-live-p proc) (< (float-time) deadline))
-          ;; sleep-for, NOT sit-for: sit-for returns immediately on
-          ;; pending input, which would collapse the grace window while
-          ;; the user types (same rationale as the readiness poll in
-          ;; frontend-client.el).
-          (sleep-for 0.05)))
-      (when (process-live-p proc)
+      (when (agent-repl--frontend-poll-until
+             (lambda () (process-live-p proc))
+             agent-repl-frontend-stop-grace-seconds 0.05)
         (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
                          agent-repl-frontend-stop-grace-seconds)
         (delete-process proc))))

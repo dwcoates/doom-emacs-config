@@ -52,9 +52,15 @@ this env hermetic: the real probe HTTP-GETs whatever `claude-repld' is
 running on the developer's machine, so an unstubbed daemon test silently
 keys on the developer's own live sessions and fails whenever one of them
 happens to be mid-turn.  Tests wanting a busy probe re-stub it with their
-own `cl-letf', which shadows this one for the extent of that form."
+own `cl-letf', which shadows this one for the extent of that form.
+
+The startup staleness one-shot is bound ALREADY-RUN
+\(`agent-repl--frontend-startup-staleness-checked' t), so this env models
+the STEADY-STATE ensure (the cheap live-process hot path).  Tests
+exercising the one-shot itself re-bind it nil in their own `let'."
   `(let ((agent-repl-frontend-auto-start t)
-         (agent-repl--frontend-daemon-process nil))
+         (agent-repl--frontend-daemon-process nil)
+         (agent-repl--frontend-startup-staleness-checked t))
      (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-turn-active-sessions)
@@ -130,6 +136,126 @@ own `cl-letf', which shadows this one for the extent of that form."
              (lambda (_args) 0)))
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
+
+;;;; ---- poll-until helper ---------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-poll-until-returns-nil-when-condition-clears ()
+  "The poll returns nil (and stops early) once the predicate clears."
+  ;; Arrange — a predicate that flips to nil on its second call.
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'sleep-for) #'ignore))
+      ;; Act
+      (let ((result (agent-repl--frontend-poll-until
+                     (lambda () (setq calls (1+ calls)) (< calls 2))
+                     10 0.01)))
+        ;; Assert — cleared condition yields nil.
+        (should (null result))))))
+
+(ert-deftest agent-repl-test-daemon-poll-until-returns-truthy-on-timeout ()
+  "The poll returns the predicate's truthy value when the deadline passes first."
+  ;; Arrange — a predicate that never clears, and a zeroed timeout.
+  (cl-letf (((symbol-function 'sleep-for) #'ignore))
+    ;; Act / Assert
+    (should (eq t (agent-repl--frontend-poll-until (lambda () t) 0 0.01)))))
+
+;;;; ---- staleness: on-disk binary mtime -------------------------------------
+
+(ert-deftest agent-repl-test-daemon-disk-mtime-reads-integer-seconds ()
+  "The on-disk mtime reader returns the binary's mtime as integer seconds."
+  ;; Arrange — a temp file stamped to a known Unix second.
+  (let ((tmp (make-temp-file "agent-repl-daemon-bin")))
+    (unwind-protect
+        (progn
+          (set-file-times tmp 1700000000)
+          (let ((agent-repl--frontend-daemon-bin tmp))
+            ;; Act / Assert
+            (should (equal 1700000000
+                           (agent-repl--frontend-daemon-binary-disk-mtime)))))
+      (delete-file tmp))))
+
+(ert-deftest agent-repl-test-daemon-disk-mtime-nil-when-binary-absent ()
+  "The on-disk mtime reader is nil when the binary does not exist."
+  ;; Arrange — an absent path (no `file-exists-p' shadow).
+  (let ((agent-repl--frontend-daemon-bin "/agent-repl-nonexistent/claude-repld"))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-binary-disk-mtime)))))
+
+;;;; ---- staleness: running daemon reported mtime ----------------------------
+
+(ert-deftest agent-repl-test-daemon-running-mtime-reads-reported-field ()
+  "The running-mtime reader returns the daemon's `daemon_binary_mtime'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((daemon_binary_mtime . 1700000000)))))
+    ;; Act / Assert
+    (should (equal 1700000000
+                   (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-unreachable ()
+  "An unreachable daemon (the GET errors) yields nil, never a guess."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) (error "connection refused"))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-field-absent ()
+  "A daemon predating the field (no `daemon_binary_mtime') yields nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((boot_id . "b_abc")))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-nonpositive ()
+  "A zero mtime (the daemon's boot-time self-stat failed) yields nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((daemon_binary_mtime . 0)))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+;;;; ---- staleness: the comparison predicate ---------------------------------
+
+(ert-deftest agent-repl-test-daemon-stale-p-true-when-disk-newer ()
+  "STALE when the on-disk binary's mtime exceeds the running daemon's."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 200))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-equal ()
+  "NOT stale when the mtimes are equal — the no-rebuild steady state."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 100))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-disk-older ()
+  "NOT stale when the on-disk binary predates the running daemon's."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 50))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-running-unknown ()
+  "NOT stale when the running daemon reports no mtime — never bounce on a guess."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 200))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
 
 ;;;; ---- ensure: gating ------------------------------------------------------
 
@@ -212,6 +338,163 @@ own `cl-letf', which shadows this one for the extent of that form."
          ;; Assert
          (should (eq result new))
          (should-not (agent-repl-test--fake-daemon-live old)))))))
+
+;;;; ---- startup staleness bounce (one-shot) ---------------------------------
+
+(ert-deftest agent-repl-test-daemon-startup-bounces-stale-tracked-daemon ()
+  "On Emacs open, a stale daemon THIS Emacs tracks is stopped and respawned."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((old (agent-repl-test--make-live-daemon 1))
+         (new (agent-repl-test--make-live-daemon 2))
+         (built nil)
+         (agent-repl--frontend-startup-staleness-checked nil)
+         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (setq agent-repl--frontend-daemon-process old)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () new)))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert — rebuilt, old stopped, fresh process tracked and returned.
+         (should built)
+         (should-not (agent-repl-test--fake-daemon-live old))
+         (should (eq new agent-repl--frontend-daemon-process))
+         (should (eq new result)))))))
+
+(ert-deftest agent-repl-test-daemon-startup-leaves-fresh-tracked-daemon ()
+  "A daemon that is not stale is reused with no restart on Emacs open."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((old (agent-repl-test--make-live-daemon 1))
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil))
+     (setq agent-repl--frontend-daemon-process old)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert — same process, still live, nothing spawned.
+         (should (eq old result))
+         (should (agent-repl-test--fake-daemon-live old))
+         (should-not spawned))))))
+
+(ert-deftest agent-repl-test-daemon-startup-defers-bounce-during-turn ()
+  "A stale daemon is NOT bounced while a turn is in flight on Emacs open."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((old (agent-repl-test--make-live-daemon 1))
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil))
+     (setq agent-repl--frontend-daemon-process old)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () '("s_busy")))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert — the live conversation survives untouched, no SIGTERM sent.
+         (should (eq old result))
+         (should (agent-repl-test--fake-daemon-live old))
+         (should-not spawned)
+         (should-not (agent-repl-test--fake-daemon-signals old)))))))
+
+(ert-deftest agent-repl-test-daemon-startup-bounces-stale-foreign-daemon ()
+  "A stale ADOPTED daemon is shut down over HTTP, then replaced once the port frees."
+  ;; Arrange — no tracked process, so any running daemon is foreign/adopted.
+  (agent-repl-test--with-daemon-env
+   (let ((foreign-alive t)
+         (shutdown-called nil)
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil)
+         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () foreign-alive))
+               ((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
+                ;; The daemon exits: the port stops responding after the ask.
+                (lambda () (setq shutdown-called t foreign-alive nil)))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert — asked to shut down, then a fresh daemon spawned in its place.
+       (should shutdown-called)
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-startup-leaves-wedged-foreign-daemon ()
+  "A foreign daemon that ignores POST /shutdown is left in place, never spawned over."
+  ;; Arrange — the port stays responsive past the (zeroed) grace window.
+  (agent-repl-test--with-daemon-env
+   (let ((shutdown-called nil)
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil)
+         (agent-repl-frontend-foreign-stop-grace-seconds 0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
+                (lambda () (setq shutdown-called t)))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert — asked to exit, but never spawned next to the wedged daemon.
+         (should shutdown-called)
+         (should-not spawned)
+         ;; It stays adopted for this session.
+         (should (eq t result)))))))
+
+(ert-deftest agent-repl-test-daemon-startup-bounce-noop-when-inhibited ()
+  "The staleness bounce never runs under the batch/sandbox inhibit guard."
+  ;; Arrange
+  (let ((agent-repl-frontend-auto-start t)
+        (agent-repl--frontend-daemon-process nil)
+        (agent-repl--frontend-startup-staleness-checked nil)
+        (checked nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-bounce-if-stale)
+               (lambda () (setq checked t))))
+      ;; Act
+      (let ((result (agent-repl--ensure-frontend-daemon)))
+        ;; Assert — inhibit short-circuits before the one-shot even fires.
+        (should (null result))
+        (should-not checked)
+        (should-not agent-repl--frontend-startup-staleness-checked)))))
+
+(ert-deftest agent-repl-test-daemon-startup-staleness-check-runs-once ()
+  "The staleness bounce fires on the first ensure only, not on later ones."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((old (agent-repl-test--make-live-daemon 1))
+         (bounce-calls 0)
+         (agent-repl--frontend-startup-staleness-checked nil))
+     (setq agent-repl--frontend-daemon-process old)
+     (cl-letf (((symbol-function 'agent-repl--frontend-bounce-if-stale)
+                (lambda () (cl-incf bounce-calls))))
+       ;; Act — two ensures in one session.
+       (agent-repl--ensure-frontend-daemon)
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert — the one-shot fired exactly once.
+       (should (= 1 bounce-calls))))))
 
 ;;;; ---- Foreign-daemon adoption + stop guard ---------------------------------
 

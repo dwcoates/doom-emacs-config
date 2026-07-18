@@ -110,7 +110,13 @@ type Remediator interface {
 type Server struct {
 	daemonVersion string
 	bootID        string
-	retention     int
+	// binaryMTime is the Unix mtime (seconds) of the executable this daemon
+	// was LAUNCHED from, captured at boot and served on GET /sessions. Emacs
+	// compares it against the on-disk binary's mtime to tell a running daemon
+	// apart from a freshly rebuilt binary and bounce only when genuinely
+	// stale. Zero means the boot-time stat failed (staleness never asserted).
+	binaryMTime int64
+	retention   int
 	forceFake     bool
 	spawn         SpawnFunc
 	logf          func(format string, args ...any)
@@ -123,7 +129,11 @@ type Server struct {
 
 	sentinel   session.SentinelSink
 	remediator Remediator
-	registry   *registry.Registry
+	// requestShutdown asks the process to begin its graceful teardown, the
+	// same path SIGTERM triggers. Wired by main; nil makes POST /shutdown
+	// report the capability as unconfigured (501) rather than half-acting.
+	requestShutdown func()
+	registry        *registry.Registry
 	// workspaces relays the Emacs drawer's sidebar snapshot stream
 	// (shared/protocol.md, "Workspace sidebar stream"): Emacs POSTs the
 	// latest view-model and connected sidebars receive it verbatim.
@@ -170,7 +180,12 @@ type Server struct {
 // Config assembles a Server.
 type Config struct {
 	DaemonVersion string
-	Retention     int
+	// BinaryMTime is the Unix mtime (seconds) of the executable the daemon
+	// was launched from, stat'd once at boot (see main.launchedBinaryMTime).
+	// Zero disables staleness reporting: GET /sessions still carries the
+	// field, and a zero value tells Emacs not to assert staleness on a guess.
+	BinaryMTime int64
+	Retention   int
 	Spawn         SpawnFunc
 	Logf          func(format string, args ...any)
 	// Now is the clock used to stamp registry records (defaults to
@@ -186,6 +201,11 @@ type Config struct {
 	// Remediator dispatches the "session gone" analyst; nil makes
 	// POST /remediation report the capability as unconfigured.
 	Remediator Remediator
+	// RequestShutdown begins the process's graceful teardown (the SIGTERM
+	// path), letting Emacs bounce an adopted daemon it has no local handle
+	// to signal. Nil makes POST /shutdown report the capability as
+	// unconfigured (501).
+	RequestShutdown func()
 	// Registry persists session records across daemon restarts; nil
 	// disables persistence (tests, embedded use).
 	Registry *registry.Registry
@@ -244,6 +264,7 @@ func New(cfg Config) *Server {
 	s := &Server{
 		daemonVersion:   cfg.DaemonVersion,
 		bootID:          newBootID(),
+		binaryMTime:     cfg.BinaryMTime,
 		retention:       cfg.Retention,
 		forceFake:       cfg.ForceFake,
 		spawn:           cfg.Spawn,
@@ -255,6 +276,7 @@ func New(cfg Config) *Server {
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
+		requestShutdown: cfg.RequestShutdown,
 		registry:        cfg.Registry,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
@@ -397,7 +419,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /workspaces/status", s.handleWorkspaceStatus)
 	mux.HandleFunc("GET /workspaces/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("POST /workspaces/action", s.handleWorkspaceAction)
+	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 	return mux
+}
+
+// handleShutdown asks the daemon to exit gracefully — the same teardown
+// SIGTERM runs (sessions drained, registry flushed, listener closed). Emacs
+// drives this to bounce a daemon it ADOPTED from another Emacs, which it has
+// no local process handle to signal.
+//
+// The 202 is written BEFORE the shutdown fires (via a goroutine that runs
+// after this handler returns), so the client reliably reads the acknowledgment
+// before the listener closes. A daemon wired without RequestShutdown reports
+// the capability as unconfigured rather than pretending to act.
+func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	if s.requestShutdown == nil {
+		httpError(w, http.StatusNotImplemented, "shutdown not supported by this daemon")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("shutting down\n")); err != nil {
+		s.logf("shutdown: writing acknowledgment failed: %v", err)
+	}
+	go s.requestShutdown()
 }
 
 // chessGameDirParts is the fixed worktree-relative directory the
@@ -1560,6 +1604,10 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// detect a daemon bounce and protocol_version to detect skew.
 		"boot_id":          s.bootID,
 		"protocol_version": protocol.Layer2Version,
+		// Launched-binary mtime: Emacs compares it against the on-disk
+		// binary to bounce the daemon only when the build genuinely moved
+		// ahead of the running process (staleness bounce on Emacs open).
+		"daemon_binary_mtime": s.binaryMTime,
 	})
 }
 
