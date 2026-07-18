@@ -167,12 +167,18 @@ directory — whose session id must never be adopted onto the workspace
 \(see `agent-repl--update-session-id-from-sentinel').")
 
 (defun agent-repl--read-sentinel-file (file)
-  "Read sentinel FILE and return a plist (:dir DIR :session-id SID :owned BOOL), or nil.
+  "Read sentinel FILE and return a plist (:dir DIR :session-id SID :owned BOOL :source SRC), or nil.
 The file format is three lines: CWD, session_id, then the ownership
 marker (`agent-repl--sentinel-owned-marker' or empty).  Older
 two-line files (and single-line CWD-only files) parse as unowned with a
 nil session-id respectively — the conservative reading, since an
-unmarked writer cannot be proven to be ours."
+unmarked writer cannot be proven to be ours.
+
+Line 4, written only by the session-start hook, is the SessionStart
+`source' field (\"startup\" / \"resume\" / \"clear\" / \"compact\") —
+the origin of the new session id.  Absent or empty parses as a nil
+`:source' (every non-session-start sentinel, plus files from older
+hook scripts)."
   (let ((fname (file-name-nondirectory file)))
     (agent-repl--log-verbose nil "read-sentinel-file: ENTER file=%s exists=%s readable=%s"
                       fname (file-exists-p file) (file-readable-p file))
@@ -190,15 +196,18 @@ unmarked writer cannot be proven to be ours."
                              (let ((s (string-trim (nth 1 lines))))
                                (unless (string-empty-p s) s))))
                (owned (equal (string-trim (or (nth 2 lines) ""))
-                             agent-repl--sentinel-owned-marker)))
-          (agent-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S owned=%s"
-                            fname dir session-id owned)
+                             agent-repl--sentinel-owned-marker))
+               (source (when (nth 3 lines)
+                         (let ((s (string-trim (nth 3 lines))))
+                           (unless (string-empty-p s) s)))))
+          (agent-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S owned=%s source=%S"
+                            fname dir session-id owned source)
           (if (or (string= dir "null") (string= dir ""))
               (progn
                 (agent-repl--log nil "read-sentinel-file: REJECTING file=%s with bogus dir=%S (hook may not have received cwd)"
                                   fname dir)
                 nil)
-            (list :dir dir :session-id session-id :owned owned)))
+            (list :dir dir :session-id session-id :owned owned :source source)))
       (file-missing
        (agent-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
        nil)
@@ -209,7 +218,7 @@ unmarked writer cannot be proven to be ours."
 
 ;;; Event handlers
 
-(defun agent-repl--update-session-id-from-sentinel (ws session-id &optional owned)
+(defun agent-repl--update-session-id-from-sentinel (ws session-id &optional owned event source)
   "Update the session ID for workspace WS from sentinel data if non-nil.
 Only updates when WS is already registered in `agent-repl--workspaces',
 SESSION-ID is a non-empty string that differs from the stored value, and
@@ -229,19 +238,52 @@ is the resume target for both frontends, so the hijack silently made
 `SPC o c' (and every daemon-bounce reattach) resume the wrong
 conversation.  An unowned sentinel still drives STATE transitions
 \(thinking/done/permission — the user does want to see that an agent is
-running in that directory); only the identity write is refused."
+running in that directory); only the identity write is refused.
+
+EVENT is the dispatching handler's `:name' (e.g. \"handle-stop\") and
+SOURCE is the SessionStart hook's `source' field (\"startup\" /
+\"resume\" / \"clear\" / \"compact\", session-start sentinels only).
+Together they gate WHEN an owned id becomes the durable resume target:
+
+  * A `handle-session-start' sentinel only STAGES the id under
+    `:incoming-session-id'.  A freshly started (or /clear-rotated, or
+    resume-forked) session has NO transcript until its first user
+    message, so adopting it immediately would clobber the last
+    resumable id with one that resolves to nothing if the session is
+    killed before a message is sent — the exact loss behind the
+    \"resume target has no transcript\" hard-fail.
+
+  * Every other owned event (prompt-submit, stop, permission,
+    subagent traffic) is evidence that a user message reached the
+    session — its transcript exists — so the id is promoted to the
+    durable stash via `agent-repl--set-session-id' and any staged
+    `:incoming-session-id' is cleared."
   (when (and session-id
              (not (string-empty-p session-id))
              (gethash ws agent-repl--workspaces))
     (let* ((inst (agent-repl--active-inst ws))
-           (current (agent-repl-instantiation-session-id inst)))
+           (current (agent-repl-instantiation-session-id inst))
+           (staged (agent-repl--ws-get ws :incoming-session-id)))
       (cond
-       ((equal current session-id) nil)
+       ((equal current session-id)
+        ;; Already durable; a staged id (from a rotation that never got
+        ;; a message before something re-adopted CURRENT) is stale.
+        (when staged
+          (agent-repl--log ws "update-session-id-from-sentinel: ws=%s clearing stale staged id %s (durable already %s)"
+                            ws staged current)
+          (agent-repl--ws-put ws :incoming-session-id nil)))
        ((not owned)
-        (agent-repl--log ws "update-session-id-from-sentinel: REFUSING unowned session %s for ws=%s (foreign CLI in this cwd; keeping %s)"
-                          session-id ws current))
+        (agent-repl--log ws "update-session-id-from-sentinel: REFUSING unowned session %s for ws=%s (foreign CLI in this cwd; keeping %s) event=%s source=%s"
+                          session-id ws current (or event "?") (or source "-")))
+       ((equal event "handle-session-start")
+        (agent-repl--log ws "update-session-id-from-sentinel: ws=%s STAGING incoming session %s (origin=%s; durable stays %s until a user message is seen in the new session)"
+                          ws session-id (or source "unknown-origin") current)
+        (agent-repl--ws-put ws :incoming-session-id session-id))
        (t
-        (agent-repl--log ws "update-session-id-from-sentinel: ws=%s old=%s new=%s" ws current session-id)
+        (agent-repl--log ws "update-session-id-from-sentinel: ws=%s PROMOTING %s -> %s (event=%s is message/turn evidence%s)"
+                          ws current session-id (or event "?")
+                          (if (equal staged session-id) "; was staged" ""))
+        (agent-repl--ws-put ws :incoming-session-id nil)
         (agent-repl--set-session-id ws session-id))))))
 
 (defun agent-repl--delete-sentinel-file (file ws)
@@ -274,12 +316,13 @@ name and the directory."
          (dir (plist-get sentinel-data :dir))
          (session-id (plist-get sentinel-data :session-id))
          (owned (plist-get sentinel-data :owned))
+         (source (plist-get sentinel-data :source))
          (ws  (when dir (agent-repl--ws-for-dir dir))))
     ;; Delete the file immediately after reading so the poll fallback can't
     ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
     (agent-repl--delete-sentinel-file file ws)
-    (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S owned=%s ws=%s"
-                      (plist-get handler :name) (file-name-nondirectory file) dir session-id owned ws)
+    (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S owned=%s source=%S ws=%s"
+                      (plist-get handler :name) (file-name-nondirectory file) dir session-id owned source ws)
     (cond
      ((null dir)
       (agent-repl--log nil "process-sentinel-file: dir is nil (read failed) for %s"
@@ -310,7 +353,8 @@ name and the directory."
       ;; for this async context.
       (condition-case err
           (progn
-            (agent-repl--update-session-id-from-sentinel ws session-id owned)
+            (agent-repl--update-session-id-from-sentinel
+             ws session-id owned (plist-get handler :name) source)
             (agent-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
                               (plist-get handler :name)
                               (file-name-nondirectory file) dir ws
