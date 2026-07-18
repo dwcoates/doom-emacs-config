@@ -35,6 +35,7 @@ const reducedSpinner = blockAfter(
 const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
 const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
+const body = blockAfter(css, "\nbody {");
 const clearDivider = blockAfter(css, ".clear-divider");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
@@ -108,6 +109,20 @@ function token(block: string, name: string): string {
   if (!hit) throw new Error(`palette block has no ${name}`);
   return hit[1];
 }
+
+describe("pointer ownership", () => {
+  it("shows the arrow over inert content instead of the UA's text I-beam", () => {
+    // Arrange / Act — the body rule every element inherits cursor from.
+    // Assert
+    expect(body).toMatch(/cursor:\s*default/);
+  });
+
+  it("restores the editable-field I-beam over the composer", () => {
+    // Arrange / Act — the #composer-input rule.
+    // Assert
+    expect(composerInput).toMatch(/cursor:\s*text/);
+  });
+});
 
 describe("composer input", () => {
   it("fills the composer well with its own token rather than the card grey", () => {
