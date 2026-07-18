@@ -708,6 +708,14 @@ explode."
                         (format " *agent-repl-capture-%s-stderr*"
                                 program)))))
     (unwind-protect
+        ;; Both branches MUST spawn on a PIPE, never a pty.  The
+        ;; merged-stderr branch used `start-process' with the default
+        ;; `process-connection-type' (a pty), so children that behave
+        ;; differently on a terminal misbehaved here — `git log' saw a
+        ;; tty, spawned its pager, and hung until TIMEOUT on every
+        ;; call.  Those 60s stalls froze the UI whenever the caller was
+        ;; a main-thread timer, and their timeout path fed the
+        ;; worker-thread `kill-buffer' deadlock (2026-07-18 freezes).
         (let ((proc (if suppress-stderr
                         (make-process ;; ALLOW-EXTERNAL-BOUNDARY
                          :name (format "agent-repl-capture-%s" program)
@@ -716,10 +724,12 @@ explode."
                          :stderr stderr-buf
                          :connection-type 'pipe
                          :noquery t)
-                      (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
-                             (format "agent-repl-capture-%s" program)
-                             stdout-buf
-                             program args))))
+                      (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+                       :name (format "agent-repl-capture-%s" program)
+                       :command (cons program args)
+                       :buffer stdout-buf
+                       :connection-type 'pipe
+                       :noquery t))))
           (set-process-query-on-exit-flag proc nil)
           ;; Install a no-op sentinel BEFORE waiting.  Left alone, the
           ;; process keeps Emacs's `internal-default-process-sentinel',
@@ -750,9 +760,21 @@ explode."
                 (string-trim
                  (buffer-substring-no-properties
                   (point-min) (point-max))))))))
-      (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
-      (when (and stderr-buf (buffer-live-p stderr-buf))
-        (kill-buffer stderr-buf)))))
+      ;; Buffer cleanup MUST be thread-safe: on the timeout path the
+      ;; child can still be alive (its `delete-process' was deferred to
+      ;; the main thread by `agent-repl--kill-process-safely'), and a
+      ;; bare `kill-buffer' on a process-owning buffer from the merge
+      ;; worker implicitly `delete-process'es -> redisplays -> AppKit
+      ;; `setTitle' off-main -> abort with the global Lisp lock held —
+      ;; the 2026-07-18 hard deadlock.  The `fboundp' fallback only
+      ;; fires during module load (worktree.el, which owns the safe
+      ;; wrapper, loads after core.el) — always on the main thread,
+      ;; where a bare kill is legal.
+      (dolist (buf (list stdout-buf stderr-buf))
+        (when (buffer-live-p buf)
+          (if (fboundp 'agent-repl--kill-buffer-safely)
+              (agent-repl--kill-buffer-safely buf)
+            (kill-buffer buf)))))))
 
 (defun agent-repl--git-string (&rest args)
   "Run a synchronous git command and return its trimmed output.
@@ -812,7 +834,9 @@ gh (see AGENTS.md \"No External Processes or External State in Tests\")."
                            (buffer-substring-no-properties
                             (point-min) (point-max))))))
            (when (buffer-live-p (process-buffer p))
-             (kill-buffer (process-buffer p)))
+             (if (fboundp 'agent-repl--kill-buffer-safely)
+                 (agent-repl--kill-buffer-safely (process-buffer p))
+               (kill-buffer (process-buffer p))))
            (funcall callback (zerop (process-exit-status p)) (or output ""))))))))
 
 (defun agent-repl--signal-process (pid sig)
