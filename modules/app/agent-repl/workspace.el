@@ -571,6 +571,14 @@ contiguous as repos fold and unfold."
 ;; unified function below is the new canonical precedence; the
 ;; rendering convergence is intentional.
 
+(defun agent-repl--ws-async-live-p (ws)
+  "Return non-nil when WS has detached background tasks still running.
+Read from `:async-live', the count the reattach sweep captures off
+GET /sessions' `async_live': a positive count means the session is
+idle-but-working (its turn is done, but backgrounded tasks continue)."
+  (let ((n (agent-repl--ws-get ws :async-live)))
+    (and (integerp n) (> n 0))))
+
 (defun agent-repl--ws-render-status (ws)
   "Return the closed-set render-state keyword for workspace WS.
 This is the SINGLE SOURCE OF TRUTH for what renderers (drawer,
@@ -684,7 +692,12 @@ than whether the agent was thinking when the merge hit it)."
        ((eq claude :init)                 :init)
        ((eq claude :done)                 :done)
        ((eq claude :stop-failed)          :stop-failed)
-       ((eq claude :idle)                 :idle)
+       ;; An idle (available) workspace whose session still has detached
+       ;; background work running surfaces the amber :idle-async state,
+       ;; mirroring the webapp's amber async bubble border. Only reached
+       ;; when no merge/dead/thinking/etc. signal above wins.
+       ((eq claude :idle)
+        (if (agent-repl--ws-async-live-p ws) :idle-async :idle))
        (t                                 nil))))))
 
 ;;;; ---- Persp-mode integration boundary ---------------------------------
