@@ -389,25 +389,57 @@ exercising the one-shot itself re-bind it nil in their own `let'."
          (should-not spawned)
          (should-not (agent-repl-test--fake-daemon-signals old)))))))
 
-(ert-deftest agent-repl-test-daemon-startup-skips-stale-foreign-daemon ()
-  "A stale ADOPTED daemon this Emacs does not own is left in place, then adopted."
+(ert-deftest agent-repl-test-daemon-startup-bounces-stale-foreign-daemon ()
+  "A stale ADOPTED daemon is shut down over HTTP, then replaced once the port frees."
   ;; Arrange — no tracked process, so any running daemon is foreign/adopted.
   (agent-repl-test--with-daemon-env
-   (let ((spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
+   (let ((foreign-alive t)
+         (shutdown-called nil)
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil)
+         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+                (lambda () foreign-alive))
+               ((symbol-function 'agent-repl--frontend-daemon-stale-p)
+                (lambda () t))
+               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
+                ;; The daemon exits: the port stops responding after the ask.
+                (lambda () (setq shutdown-called t foreign-alive nil)))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert — asked to shut down, then a fresh daemon spawned in its place.
+       (should shutdown-called)
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-startup-leaves-wedged-foreign-daemon ()
+  "A foreign daemon that ignores POST /shutdown is left in place, never spawned over."
+  ;; Arrange — the port stays responsive past the (zeroed) grace window.
+  (agent-repl-test--with-daemon-env
+   (let ((shutdown-called nil)
+         (spawned nil)
+         (agent-repl--frontend-startup-staleness-checked nil)
+         (agent-repl-frontend-foreign-stop-grace-seconds 0))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-daemon-stale-p)
                 (lambda () t))
+               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
+                (lambda () (setq shutdown-called t)))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
        ;; Act
        (let ((result (agent-repl--ensure-frontend-daemon)))
-         ;; Assert — adopted (t), never spawned next to the foreign daemon.
-         (should (eq t result))
-         (should-not spawned))))))
+         ;; Assert — asked to exit, but never spawned next to the wedged daemon.
+         (should shutdown-called)
+         (should-not spawned)
+         ;; It stays adopted for this session.
+         (should (eq t result)))))))
 
 (ert-deftest agent-repl-test-daemon-startup-bounce-noop-when-inhibited ()
   "The staleness bounce never runs under the batch/sandbox inhibit guard."
