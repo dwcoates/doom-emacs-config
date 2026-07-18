@@ -1065,6 +1065,105 @@ func TestListSessionsEnvelopeCarriesBootIdentity(t *testing.T) {
 	}
 }
 
+func TestListSessionsEnvelopeCarriesBinaryMTime(t *testing.T) {
+	// Arrange — a server launched from a binary with a known mtime.
+	const wantMTime int64 = 1_700_000_000
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		BinaryMTime:   wantMTime,
+		Retention:     64,
+		Logf:          func(string, ...any) {},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	// Act
+	resp, err := http.Get(ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		BinaryMTime int64 `json:"daemon_binary_mtime"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Assert
+	if body.BinaryMTime != wantMTime {
+		t.Fatalf("daemon_binary_mtime = %d, want %d", body.BinaryMTime, wantMTime)
+	}
+}
+
+func TestListSessionsEnvelopeReportsZeroBinaryMTimeWhenUnknown(t *testing.T) {
+	// Arrange — a server whose boot-time stat failed leaves BinaryMTime unset.
+	// The field must still be present and zero so Emacs never treats a daemon
+	// that cannot report its mtime as stale on a guess.
+	h := newHarness(t)
+	// Act
+	resp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Assert — the key is present (not omitted) and decodes to 0.
+	field, ok := raw["daemon_binary_mtime"]
+	if !ok {
+		t.Fatalf("daemon_binary_mtime absent from envelope; want present and zero")
+	}
+	if got := strings.TrimSpace(string(field)); got != "0" {
+		t.Fatalf("daemon_binary_mtime = %s, want 0", got)
+	}
+}
+
+// --- graceful shutdown over HTTP --------------------------------------------
+
+func TestShutdownEndpointTriggersRequestShutdown(t *testing.T) {
+	// Arrange — a server whose shutdown hook signals a channel.
+	fired := make(chan struct{}, 1)
+	srv := New(Config{
+		DaemonVersion:   "0.1.0-test",
+		Retention:       64,
+		Logf:            func(string, ...any) {},
+		RequestShutdown: func() { fired <- struct{}{} },
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	// Act
+	resp, err := http.Post(ts.URL+"/shutdown", "", nil)
+	if err != nil {
+		t.Fatalf("POST /shutdown: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — 202 acknowledged, and the teardown hook fires.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RequestShutdown was never invoked")
+	}
+}
+
+func TestShutdownEndpointReportsUnconfiguredWhenNoHook(t *testing.T) {
+	// Arrange — the default harness wires no RequestShutdown.
+	h := newHarness(t)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/shutdown", "", nil)
+	if err != nil {
+		t.Fatalf("POST /shutdown: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — the capability is reported unconfigured, never half-acted.
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", resp.StatusCode)
+	}
+}
+
 func TestHelloCarriesServerBootID(t *testing.T) {
 	// Arrange: two sessions in one server share the boot id.
 	h := newHarness(t)
