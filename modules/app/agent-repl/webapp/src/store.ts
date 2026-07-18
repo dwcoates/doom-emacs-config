@@ -267,6 +267,29 @@ export function topLevelUsage(state: StoreState): Usage | null {
 }
 
 /**
+ * The running turn's context growth SO FAR: how far the session's CURRENT
+ * input-side size (`contextTokens`) has moved past where the PREVIOUS result
+ * left it. This is the live twin of the settled `delta` a result stamps
+ * (see `resultContext`), measured from the SAME baseline — the last result's
+ * `context.total` — so the figure a turn ends on equals the delta its
+ * final-response bubble then shows. At a turn's start no new request has
+ * landed yet, so the size still stands where the last result left it and the
+ * delta reads 0.
+ *
+ * `null` when the size is unknown (a `/clear` or a compaction), the same
+ * condition under which a result carries no standing.
+ */
+export function liveContextDelta(state: StoreState): number | null {
+  const total = state.contextTokens;
+  if (total === null) return null;
+  for (let i = state.items.length - 1; i >= 0; i--) {
+    const item = state.items[i];
+    if (item.kind === "result") return total - (item.context?.total ?? 0);
+  }
+  return total;
+}
+
+/**
  * One string field of a tool call's input, or "" when absent or not a
  * string. A call's input is unparsed until `tool-use-input-end`, so every
  * reader needs this guard and several grew their own byte-identical copy.
