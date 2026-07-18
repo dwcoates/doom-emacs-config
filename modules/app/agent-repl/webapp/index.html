@@ -6,13 +6,7 @@
     <title>claude-repl</title>
   </head>
   <body>
-    <!-- The workspace sidebar (the Emacs drawer, ported). First body child
-         so it spans the full viewport height beside the main column; hidden
-         until ?sidebar=1 opts in AND the Emacs-owned visibility flag says
-         show. tabindex=-1: never a tab stop, focusable only by click. -->
-    <aside id="sidebar" hidden tabindex="-1"></aside>
-    <!-- The main column: absorbs ALL horizontal resize while the sidebar
-         stays at its fixed width. -->
+    <!-- The main column: topbar over feed over composer. -->
     <div id="main-col">
       <header id="topbar">
         <span id="conn-status">connecting…</span>
