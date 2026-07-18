@@ -287,6 +287,45 @@ daemons count as absent."
       (progn (agent-repl--frontend-api "GET" "/sessions") t)
     (error nil)))
 
+;;;; ---- Staleness detection ----------------------------------------------
+
+(defun agent-repl--frontend-daemon-binary-disk-mtime ()
+  "Return the on-disk `claude-repld' binary's mtime as integer Unix seconds.
+Nil when the binary is absent (nothing built yet).  Integer seconds match
+the resolution the daemon reports (`daemon_binary_mtime') and the build
+script's own mtime-based staleness rule."
+  (when (file-exists-p agent-repl--frontend-daemon-bin)
+    (time-convert (file-attribute-modification-time
+                   (file-attributes agent-repl--frontend-daemon-bin))
+                  'integer)))
+
+(defun agent-repl--frontend-running-daemon-binary-mtime ()
+  "Return the launched-binary mtime the running daemon reports, or nil.
+Reads `daemon_binary_mtime' from GET /sessions, so it resolves for a
+daemon this Emacs tracks AND one adopted from another Emacs — both answer
+on the same addr, and neither exposes a local process-start-time this
+Emacs could otherwise inspect.  Nil when the daemon is unreachable or
+reports a non-positive value (a daemon that predates the field, or whose
+boot-time self-stat failed), so a daemon that cannot name its own binary
+is never judged stale on a guess."
+  (condition-case nil
+      (let ((v (alist-get 'daemon_binary_mtime
+                          (agent-repl--frontend-api "GET" "/sessions"))))
+        (and (numberp v) (> v 0) (floor v)))
+    (error nil)))
+
+(defun agent-repl--frontend-daemon-stale-p ()
+  "Return non-nil when the on-disk binary is newer than the running daemon's.
+Compares the on-disk binary's mtime against the launched-binary mtime the
+running/adopted daemon reports.  A STRICT `>' is deliberate: the common
+no-rebuild case has the two equal (the daemon launched from the very file
+still on disk), and a `>=' comparison would then flag every daemon stale
+and bounce it in a loop.  Nil (fresh) whenever either mtime is unknown, so
+nothing is ever bounced on a guess."
+  (let ((disk (agent-repl--frontend-daemon-binary-disk-mtime))
+        (running (agent-repl--frontend-running-daemon-binary-mtime)))
+    (and disk running (> disk running))))
+
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
 Idempotent: returns the live process immediately when one exists (unless
