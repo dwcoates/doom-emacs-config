@@ -50,13 +50,6 @@ type Translator struct {
 	// back to the Emacs input buffer, and handing it back twice would
 	// overwrite whatever the user typed after the first one.
 	turnRetracted bool
-	// turnText accumulates the active turn's streamed main-chain assistant
-	// text, for the GET /sessions turn_preview enrichment (sidebar roster
-	// joins). Reset when a turn starts and cleared when it ends; it only
-	// accumulates WHILE a turn is active, so transcript replay — which
-	// translates history through OnEvent with no live turn — never bloats
-	// it with the whole conversation.
-	turnText strings.Builder
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
 	// pending set-model request_id → requested model.
@@ -227,7 +220,6 @@ func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame 
 	t.turnActive = true
 	t.turnResponded = false
 	t.turnRetracted = false
-	t.turnText.Reset()
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
@@ -343,16 +335,6 @@ func (t *Translator) NoteBroadcast(f protocol.L2Frame) {
 // not already been withdrawn.
 func (t *Translator) TurnRetractable() bool {
 	return t.turnActive && !t.turnResponded && !t.turnRetracted
-}
-
-// ActiveTurnText returns the main-chain assistant text the active turn
-// has streamed so far, or "" when no turn is in flight. "" is a real
-// answer (nothing to preview), not a failure.
-func (t *Translator) ActiveTurnText() string {
-	if !t.turnActive {
-		return ""
-	}
-	return t.turnText.String()
 }
 
 // PendingPermissionIDs returns the request ids of unresolved permission
@@ -566,12 +548,6 @@ func (t *Translator) onStreamEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		switch se.Delta.Type {
 		case "text_delta":
 			blk.text.WriteString(se.Delta.Text)
-			// Main-chain only, mirroring the usage filter above: a
-			// subagent's text is not the turn's own answer, so it must not
-			// wash the sidebar preview over with sidechain output.
-			if parent == "" && t.turnActive {
-				t.turnText.WriteString(se.Delta.Text)
-			}
 			return []protocol.L2Frame{&protocol.TextDeltaFrame{
 				Envelope: protocol.Envelope{Type: "text-delta"},
 				BlockID:  blk.id,
@@ -758,12 +734,6 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
-			// The non-streamed counterpart of the text_delta accumulation:
-			// with includePartialMessages off the turn's text arrives only
-			// here, and the preview would otherwise stay blank all turn.
-			if evt.ParentToolUseID == "" && t.turnActive {
-				t.turnText.WriteString(block.Text)
-			}
 			id := t.nextBlockID()
 			frames = append(frames,
 				&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}, BlockID: id, MessageID: msg.ID, ParentToolUseID: evt.ParentToolUseID},
@@ -836,10 +806,6 @@ func (t *Translator) onResult(evt *protocol.L1Event) []protocol.L2Frame {
 	// §2.4 block-closure invariant: every open block closes before the
 	// result frame, including interrupted or failed turns.
 	t.turnActive = false
-	// The turn is over, so there is nothing left to preview; freeing the
-	// buffer now (rather than at the next turn's start) keeps a finished
-	// turn's full text from lingering in memory indefinitely.
-	t.turnText.Reset()
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("turn ended")...)
 	usage := protocol.Usage{}
@@ -1042,7 +1008,6 @@ func (t *Translator) onClosed(evt *protocol.L1Event) []protocol.L2Frame {
 	// session NON-terminal, so nothing else resets it, and the daemon-stop
 	// guard would read the dead flag as a live turn forever.
 	t.turnActive = false
-	t.turnText.Reset()
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("session closed")...)
 	if evt.Reason == "fatal_error" {
