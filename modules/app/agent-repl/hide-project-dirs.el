@@ -139,7 +139,8 @@ buffers, and persp.  The teardown tombstones the hash entry; the
 marker is not a runtime key so it survives the tombstone.
 
 Returns the list of workspace names that were hidden."
-  (let ((targets (agent-repl--hide-project-dirs--matching-live-workspaces)))
+  (let ((targets (agent-repl--hide-project-dirs--matching-live-workspaces))
+        (agent-repl--kill-cause "hide-project-dirs sweep (hide toggle)"))
     (dolist (ws targets)
       (agent-repl--log ws "hide-project-dirs: hiding ws=%s" ws)
       (agent-repl--ws-put ws :hidden-project-dir t)
