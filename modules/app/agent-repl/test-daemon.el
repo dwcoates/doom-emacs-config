@@ -131,6 +131,105 @@ own `cl-letf', which shadows this one for the extent of that form."
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
+;;;; ---- staleness: on-disk binary mtime -------------------------------------
+
+(ert-deftest agent-repl-test-daemon-disk-mtime-reads-integer-seconds ()
+  "The on-disk mtime reader returns the binary's mtime as integer seconds."
+  ;; Arrange — a temp file stamped to a known Unix second.
+  (let ((tmp (make-temp-file "agent-repl-daemon-bin")))
+    (unwind-protect
+        (progn
+          (set-file-times tmp 1700000000)
+          (let ((agent-repl--frontend-daemon-bin tmp))
+            ;; Act / Assert
+            (should (equal 1700000000
+                           (agent-repl--frontend-daemon-binary-disk-mtime)))))
+      (delete-file tmp))))
+
+(ert-deftest agent-repl-test-daemon-disk-mtime-nil-when-binary-absent ()
+  "The on-disk mtime reader is nil when the binary does not exist."
+  ;; Arrange — an absent path (no `file-exists-p' shadow).
+  (let ((agent-repl--frontend-daemon-bin "/agent-repl-nonexistent/claude-repld"))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-binary-disk-mtime)))))
+
+;;;; ---- staleness: running daemon reported mtime ----------------------------
+
+(ert-deftest agent-repl-test-daemon-running-mtime-reads-reported-field ()
+  "The running-mtime reader returns the daemon's `daemon_binary_mtime'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((daemon_binary_mtime . 1700000000)))))
+    ;; Act / Assert
+    (should (equal 1700000000
+                   (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-unreachable ()
+  "An unreachable daemon (the GET errors) yields nil, never a guess."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) (error "connection refused"))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-field-absent ()
+  "A daemon predating the field (no `daemon_binary_mtime') yields nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((boot_id . "b_abc")))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-nonpositive ()
+  "A zero mtime (the daemon's boot-time self-stat failed) yields nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-api)
+             (lambda (&rest _) '((daemon_binary_mtime . 0)))))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+;;;; ---- staleness: the comparison predicate ---------------------------------
+
+(ert-deftest agent-repl-test-daemon-stale-p-true-when-disk-newer ()
+  "STALE when the on-disk binary's mtime exceeds the running daemon's."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 200))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-equal ()
+  "NOT stale when the mtimes are equal — the no-rebuild steady state."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 100))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-disk-older ()
+  "NOT stale when the on-disk binary predates the running daemon's."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 50))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () 100)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
+
+(ert-deftest agent-repl-test-daemon-stale-p-nil-when-running-unknown ()
+  "NOT stale when the running daemon reports no mtime — never bounce on a guess."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-binary-disk-mtime)
+             (lambda () 200))
+            ((symbol-function 'agent-repl--frontend-running-daemon-binary-mtime)
+             (lambda () nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-stale-p))))
+
 ;;;; ---- ensure: gating ------------------------------------------------------
 
 (ert-deftest agent-repl-test-daemon-ensure-nil-when-auto-start-disabled ()
