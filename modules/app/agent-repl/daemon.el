@@ -33,6 +33,12 @@
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "agent-repl-frontend-client" ())
 
+;; Forward declaration: this defcustom lives in session.el, which loads
+;; AFTER this file.  Declared here so byte-compilation doesn't warn about a
+;; free variable in `agent-repl--frontend-accounts-flag'; it is always bound
+;; by the time that function runs (daemon launch).  Mirrors install.el.
+(defvar agent-repl-multi-repo-config-dir)
+
 ;;;; ---- Paths ------------------------------------------------------------
 
 (defconst agent-repl--frontend-root
