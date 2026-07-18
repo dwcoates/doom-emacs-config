@@ -5101,8 +5101,23 @@ off so the user resolves in magit directly."
               ;; refresh, magit's own auto-revert may have last fired
               ;; mid-cherry-pick — leaving the buffer stuck on the
               ;; intermediate state until the user manually presses `g'.
+              ;; Instrumentation (self-merge teardown never fired: a merged
+              ;; workspace was left session-alive with zero
+              ;; `gns-sockets-close-then' logs, so the deferred teardown below
+              ;; never ran).  These two log lines bracket the defer so a
+              ;; future merge tells us WHICH half drops: if SCHEDULING logs
+              ;; but FIRED does not, the `run-at-time 0' timer was scheduled
+              ;; yet never ran (candidate: the finalize `load-file' reload
+              ;; clobbering it); if FIRED logs but no `gns-sockets-close-then'
+              ;; line follows, the stall is downstream in the idle-gate.
+              (agent-repl--log target-ws
+                                "workspace-merge-do: ws=%s SCHEDULING teardown defer (post-cherry-pick)"
+                                target-ws)
               (agent-repl--defer-to-main-thread
                (lambda ()
+                 (agent-repl--log target-ws
+                                   "workspace-merge-do: ws=%s teardown defer FIRED (main thread) — entering gns-sockets-close-then"
+                                   target-ws)
                  (agent-repl--gns-sockets-close-then
                   target-ws
                   (lambda ()
