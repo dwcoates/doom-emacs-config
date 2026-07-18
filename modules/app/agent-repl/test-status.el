@@ -3230,6 +3230,124 @@ called and verifies the advice runs cleanly."
     (let ((result (agent-repl--workspace-message-body-advice "ok" 'success)))
       (should (equal (substring-no-properties result) "ok")))))
 
+;;;; ---- Tests: Redisplay-storm circuit breaker ----
+
+(defmacro agent-repl-test--with-storm-state (&rest body)
+  "Run BODY with all storm-breaker state let-bound to a clean baseline.
+Baseline: watchdog armed (`auto-resize-tab-bars' t, heartbeat tick just
+fired), zero starved passes, zero trips, and `run-with-timer' stubbed to
+record its args in the anaphoric variable `scheduled' instead of
+creating a real timer."
+  (declare (indent 0))
+  `(let ((auto-resize-tab-bars t)
+         (agent-repl--storm-last-tick (float-time))
+         (agent-repl--storm-starved-passes 0)
+         (agent-repl--storm-trips 0)
+         (agent-repl--storm-saved-auto-resize nil)
+         (agent-repl--storm-reenable-timer nil)
+         (scheduled nil))
+     (ignore scheduled)
+     (cl-letf (((symbol-function 'run-with-timer)
+                (lambda (&rest args) (setq scheduled args) 'fake-timer)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-storm-watchdog-not-starved-no-count ()
+  "Watchdog does not count passes while the heartbeat tick is recent."
+  (agent-repl-test--with-storm-state
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should (= agent-repl--storm-starved-passes 0))))
+
+(ert-deftest agent-repl-test-storm-watchdog-starved-counts ()
+  "Watchdog counts a pass when the heartbeat tick is starved."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-last-tick
+          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should (= agent-repl--storm-starved-passes 1))))
+
+(ert-deftest agent-repl-test-storm-watchdog-below-threshold-no-trip ()
+  "Watchdog does not trip while the starved-pass count is below threshold."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-last-tick
+          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should auto-resize-tab-bars)))
+
+(ert-deftest agent-repl-test-storm-watchdog-trips-at-threshold ()
+  "Watchdog trips the breaker on the pass that reaches the threshold."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-last-tick
+          (- (float-time) (1+ agent-repl--storm-starvation-secs))
+          agent-repl--storm-starved-passes
+          (1- agent-repl--storm-pass-threshold))
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should-not auto-resize-tab-bars)))
+
+(ert-deftest agent-repl-test-storm-watchdog-inert-when-auto-resize-nil ()
+  "Watchdog is inert while `auto-resize-tab-bars' is already nil."
+  (agent-repl-test--with-storm-state
+    (setq auto-resize-tab-bars nil
+          agent-repl--storm-last-tick
+          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should (= agent-repl--storm-starved-passes 0))))
+
+(ert-deftest agent-repl-test-storm-watchdog-inert-before-first-tick ()
+  "Watchdog is inert until the first heartbeat tick has fired."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-last-tick nil)
+    (agent-repl--redisplay-storm-watchdog nil)
+    (should (= agent-repl--storm-starved-passes 0))))
+
+(ert-deftest agent-repl-test-storm-trip-disables-auto-resize ()
+  "Trip nils `auto-resize-tab-bars' and saves the prior value."
+  (agent-repl-test--with-storm-state
+    (setq auto-resize-tab-bars 'grow-only)
+    (agent-repl--storm-trip)
+    (should-not auto-resize-tab-bars)
+    (should (eq agent-repl--storm-saved-auto-resize 'grow-only))))
+
+(ert-deftest agent-repl-test-storm-trip-resets-pass-count ()
+  "Trip resets the starved-pass counter."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-starved-passes agent-repl--storm-pass-threshold)
+    (agent-repl--storm-trip)
+    (should (= agent-repl--storm-starved-passes 0))))
+
+(ert-deftest agent-repl-test-storm-trip-schedules-reenable-below-max ()
+  "Trip below the max-trips limit schedules the cooldown re-enable timer."
+  (agent-repl-test--with-storm-state
+    (agent-repl--storm-trip)
+    (should (equal scheduled
+                   (list agent-repl--storm-cooldown-secs nil
+                         #'agent-repl--storm-reenable)))))
+
+(ert-deftest agent-repl-test-storm-trip-final-no-reenable ()
+  "Trip that reaches max-trips does not schedule a re-enable timer."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-trips (1- agent-repl--storm-max-trips))
+    (agent-repl--storm-trip)
+    (should-not scheduled)))
+
+(ert-deftest agent-repl-test-storm-reenable-restores-saved ()
+  "Re-enable restores `auto-resize-tab-bars' to the value saved at trip."
+  (agent-repl-test--with-storm-state
+    (setq auto-resize-tab-bars nil
+          agent-repl--storm-saved-auto-resize 'grow-only
+          agent-repl--storm-reenable-timer 'fake-timer)
+    (agent-repl--storm-reenable)
+    (should (eq auto-resize-tab-bars 'grow-only))
+    (should-not agent-repl--storm-reenable-timer)))
+
+(ert-deftest agent-repl-test-storm-tick-resets ()
+  "Heartbeat tick refreshes the liveness stamp and resets the pass count."
+  (agent-repl-test--with-storm-state
+    (setq agent-repl--storm-last-tick 0.0
+          agent-repl--storm-starved-passes 7)
+    (agent-repl--storm-tick)
+    (should (> agent-repl--storm-last-tick 0.0))
+    (should (= agent-repl--storm-starved-passes 0))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
