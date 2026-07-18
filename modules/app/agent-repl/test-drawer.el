@@ -1186,9 +1186,40 @@ session has been torn down."
       (agent-repl-drawer--goto-first-workspace)
       (let ((arg :unset))
         (cl-letf (((symbol-function 'agent-repl-interrupt)
-                   (lambda (&optional ws) (setq arg ws))))
+                   (lambda (&optional ws _no-confirm) (setq arg ws))))
           (agent-repl-drawer-interrupt))
         (should (equal arg "target"))))))
+
+(ert-deftest agent-repl-drawer-test-interrupt-confirms-a-running-target ()
+  "A running target makes `agent-repl-drawer-interrupt' confirm once, then dispatch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "target" :priority "p1" :agent-state :thinking)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-first-workspace)
+      (let ((prompt-count 0)
+            (interrupted nil))
+        (cl-letf (((symbol-function 'y-or-n-p)
+                   (lambda (_prompt) (cl-incf prompt-count) t))
+                  ((symbol-function 'agent-repl-interrupt)
+                   (lambda (&optional ws _no-confirm) (push ws interrupted))))
+          (agent-repl-drawer-interrupt))
+        (should (= 1 prompt-count))
+        (should (equal '("target") interrupted))))))
+
+(ert-deftest agent-repl-drawer-test-interrupt-declined-suppresses-dispatch ()
+  "Declining the batch confirmation interrupts no target."
+  (agent-repl-test--with-clean-state
+    (agent-repl-drawer-test--register "target" :priority "p1" :agent-state :thinking)
+    (agent-repl-drawer-test--with-buffer
+      (agent-repl-drawer--render)
+      (agent-repl-drawer--goto-first-workspace)
+      (let ((interrupted nil))
+        (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) nil))
+                  ((symbol-function 'agent-repl-interrupt)
+                   (lambda (&optional ws _no-confirm) (push ws interrupted))))
+          (agent-repl-drawer-interrupt))
+        (should-not interrupted)))))
 
 (ert-deftest agent-repl-drawer-test-send-prompt-dispatches-to-entry ()
   "`agent-repl-drawer-send-prompt' calls `agent-repl--send' with prompt and entry."
