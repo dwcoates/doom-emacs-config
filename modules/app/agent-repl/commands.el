@@ -8,6 +8,7 @@
 ;; compile/load time.
 (defvar agent-repl--merge-queue)
 (defvar agent-repl--in-flight-merges)
+(defvar agent-repl-master-branch-name)
 (declare-function agent-repl--drain-merge-queue "worktree")
 (declare-function agent-repl--merge-queue-target-dirs "worktree")
 (declare-function agent-repl--merge-queue-front-for-target "worktree")
@@ -2585,16 +2586,48 @@ Used only when recreating a missing worktree at selection time."
                           "\\`refs/heads/" "" (substring line 7)))))))
       result)))
 
+(defun agent-repl--picker-branches-for (source-repo name)
+  "Return existing branches in SOURCE-REPO whose basename equals NAME.
+A finished workspace's `git worktree remove' drops the path
+registration but keeps the branch, usually under a launcher prefix
+\(e.g. a legacy \"DWC/NAME\"), so the registered-branch lookup in
+`agent-repl--picker-worktree-branch' comes back empty even though the
+branch is sitting right there.  These are the reattach candidates for
+`agent-repl--picker-recreate-directory'."
+  (when (and source-repo name)
+    (let ((out (ignore-errors
+                 (agent-repl--git-string-quiet "-C" source-repo
+                                               "for-each-ref"
+                                               "--format=%(refname:short)"
+                                               "refs/heads"))))
+      (cl-remove-if-not
+       (lambda (b) (equal (file-name-nondirectory b) name))
+       (and out (split-string out "\n" t))))))
+
 (defun agent-repl--picker-recreate-directory (name dir)
   "Recreate the missing DIR for workspace NAME before revival.
 For a git-worktree workspace, resolves the source repo (`:source-ws-dir'
-on the live plist or in the persisted state file) and the branch git
-still has registered, prunes stale worktree admin entries (safe — prune
-only drops records for already-missing worktrees), then runs
-`git worktree add'.  For a plain (non-worktree) project dir, recreates
-the directory with `make-directory'.  Signals a loud error when a
-worktree cannot be recreated safely, so revival never proceeds onto a
-phantom directory (no destructive git operations are attempted)."
+on the live plist or in the persisted state file), prunes stale
+worktree admin entries (safe — prune only drops records for
+already-missing worktrees), then reattaches DIR by trying, in order:
+
+  1. the branch git still has REGISTERED for DIR (crash /
+     manually-deleted-dir case — `agent-repl--picker-worktree-branch');
+  2. an existing branch whose basename is NAME (finished workspace:
+     `git worktree remove' deregistered the path but kept the branch,
+     possibly prefixed, e.g. \"DWC/NAME\") — an exact NAME match wins,
+     a single prefixed match is used, several prefixed matches error
+     with the candidates named (picking one blind would be a guess);
+  3. a FRESH NAME branch cut from `agent-repl-master-branch-name' —
+     no branch survived at all; a merged workspace's commits are
+     already in the main branch and the conversation resumes from the
+     durable claude session either way.  Surfaced via
+     `agent-repl--warn' so the fresh start is never silent.
+
+For a plain (non-worktree) project dir, recreates the directory with
+`make-directory'.  When git itself refuses, signals with git's OWN
+output (re-captured via `agent-repl--git-string'), never a bare exit
+code, so revival failures are diagnosable from the error alone."
   (let* ((known (agent-repl--ws-known-p name))
          (saved (let ((f (agent-repl--state-file-for-read dir)))
                   (and f (ignore-errors
@@ -2603,18 +2636,48 @@ phantom directory (no destructive git operations are attempted)."
                          (plist-get saved :worktree-p)))
          (source (or (and known (agent-repl--ws-get name :source-ws-dir))
                      (plist-get saved :source-ws-dir))))
+    (agent-repl--log name "picker-recreate-directory: ws=%s dir=%s worktree-p=%s source=%s"
+                      name dir (if worktree-p "t" "nil") (or source "nil"))
     (cond
      ((not worktree-p)
       (make-directory dir t))
      ((and source (file-directory-p source))
-      (let ((branch (or (agent-repl--picker-worktree-branch source dir) name)))
-        (agent-repl--git-exit-code source "worktree" "prune")
-        (let ((ec (agent-repl--git-exit-code source "worktree" "add" dir branch)))
+      (agent-repl--git-exit-code source "worktree" "prune")
+      (let* ((registered (agent-repl--picker-worktree-branch source dir))
+             (matches (unless registered
+                        (agent-repl--picker-branches-for source name)))
+             (branch (or registered
+                         (car (member name matches))
+                         (and (= (length matches) 1) (car matches)))))
+        (agent-repl--log name "picker-recreate-directory: ws=%s registered-branch=%s basename-matches=%S -> %s"
+                          name (or registered "nil") matches
+                          (if branch (format "reattach to '%s'" branch)
+                            (format "fresh '%s' from '%s'" name agent-repl-master-branch-name)))
+        (when (and (not branch) (> (length matches) 1))
+          (error "agent-repl: cannot revive '%s': several branches match it (%s) and none exactly; delete or rename the stale ones and retry"
+                 name (string-join matches ", ")))
+        (let* ((add-args (if branch
+                             (list "worktree" "add" dir branch)
+                           (list "worktree" "add" "-b" name dir
+                                 agent-repl-master-branch-name)))
+               (ec (apply #'agent-repl--git-exit-code source add-args)))
           (unless (zerop ec)
-            (error "agent-repl: could not recreate worktree for '%s' at %s (git worktree add exit %d); recreate it manually and retry"
-                   name dir ec)))))
+            ;; Re-run the identical (failed, side-effect-free) add via
+            ;; the output-capturing runner purely to recover git's error
+            ;; text for the signal.
+            (let ((out (string-trim
+                        (or (ignore-errors
+                              (apply #'agent-repl--git-string "-C" source add-args))
+                            ""))))
+              (error "agent-repl: could not recreate worktree for '%s' at %s (exit %d) — git said: %s"
+                     name dir ec (if (string-empty-p out) "(no output)" out))))
+          (unless branch
+            (agent-repl--warn name
+                              "revived workspace '%s' on a FRESH '%s' branch cut from %s — no prior branch survived (a merged workspace's commits are already in %s)"
+                              name name agent-repl-master-branch-name
+                              agent-repl-master-branch-name)))))
      (t
-      (error "agent-repl: cannot recreate missing worktree for '%s' at %s: no source repo recorded; recreate it manually and retry"
+      (error "agent-repl: cannot recreate missing worktree for '%s' at %s: no source repo recorded, so there is no repo to recreate it from"
              name dir)))))
 
 (defun agent-repl--picker-ensure-directory (name dir)
