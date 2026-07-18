@@ -241,6 +241,32 @@ export interface TextEndFrame extends WsEnvelope {
   final_text: string;
 }
 
+/**
+ * The SDK's structured assistant-message error discriminator — set when a
+ * message IS an API-level failure rather than model output.
+ */
+export type AssistantMessageError =
+  | "authentication_failed"
+  | "billing_error"
+  | "rate_limit"
+  | "invalid_request"
+  | "server_error"
+  | "unknown";
+
+/**
+ * Marks the assistant message named by `message_id` as an API-level error (a
+ * session/usage limit, a billing or auth failure, ...): its text bubble is a
+ * failure notice, not an answer, so the client reddens it rather than
+ * greening it. Keyed by message id — the error scopes the whole message and
+ * lands only once the message completes, AFTER any of its text blocks — so
+ * this frame arrives after those blocks and colors them retroactively.
+ */
+export interface AssistantErrorFrame extends WsEnvelope {
+  type: "assistant-error";
+  message_id: string;
+  error: AssistantMessageError;
+}
+
 export interface ThinkingStartFrame extends WsEnvelope {
   type: "thinking-start";
   block_id: string;
@@ -527,6 +553,7 @@ export type L2Frame =
   | TextStartFrame
   | TextDeltaFrame
   | TextEndFrame
+  | AssistantErrorFrame
   | ThinkingStartFrame
   | ThinkingDeltaFrame
   | ThinkingEndFrame
@@ -563,6 +590,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "text-start",
   "text-delta",
   "text-end",
+  "assistant-error",
   "thinking-start",
   "thinking-delta",
   "thinking-end",

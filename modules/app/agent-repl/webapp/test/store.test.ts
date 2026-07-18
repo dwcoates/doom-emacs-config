@@ -207,6 +207,29 @@ describe("ConversationStore text blocks", () => {
     expect(item).toMatchObject({ kind: "text", text: "hello", done: true });
   });
 
+  it("flags a text block as an error when its message's assistant-error frame lands", () => {
+    // Arrange — the error frame arrives AFTER the block closes, as it does on
+    // the wire (the SDK's verdict comes with the completed message).
+    const store = newStore();
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m1" }));
+    store.applyRaw(frame("text-end", { block_id: "b1", final_text: "You've hit your session limit" }));
+    // Act
+    store.applyRaw(frame("assistant-error", { message_id: "m1", error: "rate_limit" }));
+    // Assert
+    expect((store.state.items[0] as TextItem).error).toBe("rate_limit");
+  });
+
+  it("leaves a different message's text block unflagged by an assistant-error frame", () => {
+    // Arrange
+    const store = newStore();
+    store.applyRaw(frame("text-start", { block_id: "b1", message_id: "m1" }));
+    store.applyRaw(frame("text-end", { block_id: "b1", final_text: "ok" }));
+    // Act — the error names a different message.
+    store.applyRaw(frame("assistant-error", { message_id: "m2", error: "rate_limit" }));
+    // Assert
+    expect((store.state.items[0] as TextItem).error).toBeUndefined();
+  });
+
   it("keeps a subagent text block's owning call from its start frame", () => {
     // Arrange
     const store = newStore();
