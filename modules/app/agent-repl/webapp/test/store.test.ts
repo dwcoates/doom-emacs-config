@@ -2134,3 +2134,25 @@ describe("ConversationStore turn retraction", () => {
     expect(store.state.turnInFlight).toBe(false);
   });
 });
+
+describe("user-turn origin propagation", () => {
+  it("carries a frame's origin onto the user-turn item", () => {
+    // Arrange
+    const store = newStore();
+    // Act — the merge-remediation turn arrives tagged.
+    store.applyRaw(frame("user-turn", { request_id: "m1", content: [], origin: "merge" }));
+    // Assert
+    const item = store.state.items.find((i) => i.kind === "user-turn");
+    expect(item?.kind === "user-turn" && item.origin).toBe("merge");
+  });
+
+  it("leaves origin undefined for an ordinary user-turn", () => {
+    // Arrange
+    const store = newStore();
+    // Act — a user's own prompt carries no origin.
+    store.applyRaw(frame("user-turn", { request_id: "r1", content: [] }));
+    // Assert
+    const item = store.state.items.find((i) => i.kind === "user-turn");
+    expect(item?.kind === "user-turn" && item.origin).toBeUndefined();
+  });
+});

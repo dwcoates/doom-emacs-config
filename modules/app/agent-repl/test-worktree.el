@@ -12659,4 +12659,34 @@ into the anaphoric variable `calls', oldest first."
       (should (member (list 'clear "ws-target") calls))
       (should (member (list 'drain) calls)))))
 
+;;;; ---- merge-remediation directive + origin tagging ------------------------
+
+(ert-deftest agent-repl-test-merge-remediation-prompt-names-local-branch ()
+  "The remediation directive names the LOCAL branch and rules out origin."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :source-ws-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "master")))
+      (let ((prompt (agent-repl--merge-remediation-prompt "ws1" "boom")))
+        (should (string-match-p "LOCAL" prompt))
+        (should (string-match-p "origin/master" prompt))))))
+
+(ert-deftest agent-repl-test-merge-remediation-prompt-cites-local-agent-context ()
+  "The remediation directive states the local agent holds the most context."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :source-ws-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "master")))
+      (let ((prompt (agent-repl--merge-remediation-prompt "ws1" "boom")))
+        (should (string-match-p "best equipped" prompt))
+        (should (string-match-p "context" prompt))))))
+
+(ert-deftest agent-repl-test-dispatch-merge-remediation-tags-next-send-origin ()
+  "Dispatching remediation parks a one-shot `merge' origin on the ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :source-ws-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) "master"))
+              ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--run-merge-remediation) (lambda (&rest _) nil)))
+      (agent-repl--dispatch-merge-remediation "ws1" "boom")
+      (should (equal (agent-repl--ws-get "ws1" :next-send-origin) "merge")))))
+
 ;;; test-worktree.el ends here

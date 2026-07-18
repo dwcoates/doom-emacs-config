@@ -611,6 +611,55 @@ func TestSendMessageRouteBroadcastsUserTurnAndForwards(t *testing.T) {
 	}
 }
 
+func TestSendMessageRouteCarriesOriginOntoUserTurn(t *testing.T) {
+	// Arrange — a merge-remediation POST tagged origin "merge".
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(`{"content":"rebase onto local master","origin":"merge"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	// Assert — the broadcast user-turn carries the origin.
+	turn := readFrame(t, conn)
+	if turn["type"] != "user-turn" {
+		t.Fatalf("turn = %v", turn)
+	}
+	if turn["origin"] != "merge" {
+		t.Errorf("origin = %v, want merge", turn["origin"])
+	}
+}
+
+func TestSendMessageRouteOmitsOriginWhenAbsent(t *testing.T) {
+	// Arrange — an ordinary prompt carries no origin.
+	h := newHarness(t)
+	id, _ := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/message", "application/json",
+		bytes.NewBufferString(`{"content":"a normal prompt"}`))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer resp.Body.Close()
+	// Assert — omitempty drops origin from the user-turn frame.
+	turn := readFrame(t, conn)
+	if turn["type"] != "user-turn" {
+		t.Fatalf("turn = %v", turn)
+	}
+	if _, present := turn["origin"]; present {
+		t.Errorf("origin present on an untagged turn: %v", turn["origin"])
+	}
+}
+
 func TestSendMessageRouteRejectsEmptyContent(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
