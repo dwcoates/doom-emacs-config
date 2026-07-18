@@ -77,8 +77,34 @@ daemon from a checkout whose webapp/dist exists
 `, dir)
 }
 
+// launchedBinaryMTime returns the Unix mtime (seconds) of the executable
+// this process was launched from, or 0 when it cannot be resolved.
+//
+// Captured ONCE at boot, never per request: `go build -o` replaces the
+// on-disk binary in place, so stat-ing os.Executable() after a rebuild
+// would report the NEW binary's mtime and mask the very staleness the
+// value exists to expose. The daemon serves this boot-time snapshot on
+// GET /sessions so Emacs can compare it against the current on-disk
+// binary and bounce only when the build has moved ahead of this process.
+// A resolution or stat failure is logged and reported as 0 (staleness
+// never asserted) rather than aborting boot over a diagnostic field.
+func launchedBinaryMTime() int64 {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("claude-repld: cannot resolve own executable for staleness reporting: %v", err)
+		return 0
+	}
+	info, err := os.Stat(exe)
+	if err != nil {
+		log.Printf("claude-repld: cannot stat own executable %q for staleness reporting: %v", exe, err)
+		return 0
+	}
+	return info.ModTime().Unix()
+}
+
 func main() {
 	bootedAt := time.Now()
+	binaryMTime := launchedBinaryMTime()
 
 	var (
 		addr           = flag.String("addr", "127.0.0.1:8787", "listen address")
@@ -192,6 +218,7 @@ func main() {
 
 	srv := server.New(server.Config{
 		DaemonVersion:   daemonVersion,
+		BinaryMTime:     binaryMTime,
 		Retention:       *retention,
 		ForceFake:       *fake,
 		Spawn:           spawn,

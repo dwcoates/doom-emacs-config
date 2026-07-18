@@ -110,7 +110,13 @@ type Remediator interface {
 type Server struct {
 	daemonVersion string
 	bootID        string
-	retention     int
+	// binaryMTime is the Unix mtime (seconds) of the executable this daemon
+	// was LAUNCHED from, captured at boot and served on GET /sessions. Emacs
+	// compares it against the on-disk binary's mtime to tell a running daemon
+	// apart from a freshly rebuilt binary and bounce only when genuinely
+	// stale. Zero means the boot-time stat failed (staleness never asserted).
+	binaryMTime int64
+	retention   int
 	forceFake     bool
 	spawn         SpawnFunc
 	logf          func(format string, args ...any)
@@ -170,7 +176,12 @@ type Server struct {
 // Config assembles a Server.
 type Config struct {
 	DaemonVersion string
-	Retention     int
+	// BinaryMTime is the Unix mtime (seconds) of the executable the daemon
+	// was launched from, stat'd once at boot (see main.launchedBinaryMTime).
+	// Zero disables staleness reporting: GET /sessions still carries the
+	// field, and a zero value tells Emacs not to assert staleness on a guess.
+	BinaryMTime int64
+	Retention   int
 	Spawn         SpawnFunc
 	Logf          func(format string, args ...any)
 	// Now is the clock used to stamp registry records (defaults to
@@ -244,6 +255,7 @@ func New(cfg Config) *Server {
 	s := &Server{
 		daemonVersion:   cfg.DaemonVersion,
 		bootID:          newBootID(),
+		binaryMTime:     cfg.BinaryMTime,
 		retention:       cfg.Retention,
 		forceFake:       cfg.ForceFake,
 		spawn:           cfg.Spawn,
@@ -1560,6 +1572,10 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// detect a daemon bounce and protocol_version to detect skew.
 		"boot_id":          s.bootID,
 		"protocol_version": protocol.Layer2Version,
+		// Launched-binary mtime: Emacs compares it against the on-disk
+		// binary to bounce the daemon only when the build genuinely moved
+		// ahead of the running process (staleness bounce on Emacs open).
+		"daemon_binary_mtime": s.binaryMTime,
 	})
 }
 
