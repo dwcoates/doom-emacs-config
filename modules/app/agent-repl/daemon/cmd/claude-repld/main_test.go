@@ -74,6 +74,28 @@ func TestWebappHandlerSelfCorrectsWhenIndexAppears(t *testing.T) {
 	}
 }
 
+func TestLaunchedBinaryMTimeMatchesExecutableStat(t *testing.T) {
+	// Arrange — the running test binary IS an executable on disk, so
+	// launchedBinaryMTime must report exactly its stat mtime.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skipf("os.Executable unavailable in this environment: %v", err)
+	}
+	info, err := os.Stat(exe)
+	if err != nil {
+		t.Fatalf("stat %q: %v", exe, err)
+	}
+	// Act
+	got := launchedBinaryMTime()
+	// Assert
+	if want := info.ModTime().Unix(); got != want {
+		t.Fatalf("launchedBinaryMTime() = %d, want %d (mtime of %q)", got, want, exe)
+	}
+	if got <= 0 {
+		t.Fatalf("launchedBinaryMTime() = %d, want a positive Unix mtime", got)
+	}
+}
+
 func TestParseAccounts(t *testing.T) {
 	tests := []struct {
 		name    string
