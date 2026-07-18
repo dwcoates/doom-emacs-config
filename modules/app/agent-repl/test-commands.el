@@ -2128,6 +2128,86 @@ swallows the signal so subsequent queue entries still get processed."
         (delete-directory failed-dir t)
         (delete-directory later-dir t)))))
 
+;;;; ---- snapshot-load: main workspace nuked first ----
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-runs-before-first-establish ()
+  "Doom's startup `main' workspace is nuked at load BEGIN, before the
+first entry is established — not at end-of-load as it used to be."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (proj-dir (make-temp-file "agent-proj-" t))
+          (order nil))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,proj-dir)))
+            (cl-letf (((symbol-function 'agent-repl--snapshot-load-close-main)
+                       (lambda () (push 'close-main order)))
+                      ((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (ws _dir) (push (list 'establish ws) order)))
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (agent-repl-load-workspace-snapshot)
+              (should (equal (nreverse order)
+                             '(close-main (establish "ws-a"))))))
+        (delete-file snapshot-file)
+        (delete-directory proj-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-not-called-at-finish ()
+  "Close-main fires exactly once per load (at BEGIN) — finish must not
+call it a second time."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (proj-dir (make-temp-file "agent-proj-" t))
+          (close-calls 0))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,proj-dir)))
+            (cl-letf (((symbol-function 'agent-repl--snapshot-load-close-main)
+                       (lambda () (cl-incf close-calls)))
+                      ((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (_ws _dir) nil))
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (agent-repl-load-workspace-snapshot)
+              (should (= close-calls 1))))
+        (delete-file snapshot-file)
+        (delete-directory proj-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/origin-main-not-switched-back-to ()
+  "When the load began FROM `main' (the startup restore path), finish
+must not switch back to the just-killed main workspace."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (proj-dir (make-temp-file "agent-proj-" t))
+          (switches nil))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,proj-dir)))
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () "main"))
+                      ((symbol-function 'agent-repl--ws-main-name)
+                       (lambda () "main"))
+                      ((symbol-function 'agent-repl--snapshot-load-close-main)
+                       #'ignore)
+                      ((symbol-function 'agent-repl--ws-exists-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'agent-repl--ws-frame-switch)
+                       (lambda (ws) (push ws switches)))
+                      ((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (_ws _dir) nil))
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (agent-repl-load-workspace-snapshot)
+              (should-not (member "main" switches))))
+        (delete-file snapshot-file)
+        (delete-directory proj-dir t)))))
+
 (ert-deftest agent-repl-cmd-test-state-merge-completed-p/detects-flag ()
   "`--state-merge-completed-p' returns t when state.el carries
 `:merge-completed' t and nil otherwise.  Powers the snapshot loader's
@@ -4396,34 +4476,13 @@ sees nil state and short-circuits without printing bogus counters."
 
 ;;;; ---- agent-repl--snapshot-load-close-main ----
 
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/closes-main-when-exists ()
-  "After finish, the leftover `main' workspace artifact is nuked: the
-persp is killed via `+workspace/kill' when it still exists."
-  (agent-repl-test--with-clean-state
-    (let ((killed nil))
-      (setq agent-repl--snapshot-load-state
-            (list :queue nil :origin nil :awaiting nil
-                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
-      (cl-letf (((symbol-function '+workspace-exists-p)
-                 (lambda (name) (equal name "main")))
-                ((symbol-function 'agent-repl--kill-workspace-buffers)
-                 (lambda (_ws) nil))
-                ((symbol-function '+workspace/kill)
-                 (lambda (name) (setq killed name)))
-                (+workspaces-main "main"))
-        (agent-repl--snapshot-load-finish)
-        (should (equal killed "main"))))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/nuke-main-sweeps-persp-buffers ()
+(ert-deftest agent-repl-cmd-test-snapshot-load-close-main/sweeps-persp-buffers ()
   "Nuking `main' invokes `agent-repl--kill-workspace-buffers' on the
 persp so dashboard/scratch/file buffers don't survive the kill, AND
 the sweep happens before the persp itself is killed (since
 `+workspace/kill' would otherwise drop the persp's buffer list)."
   (agent-repl-test--with-clean-state
     (let ((call-order nil))
-      (setq agent-repl--snapshot-load-state
-            (list :queue nil :origin nil :awaiting nil
-                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p)
                  (lambda (name) (equal name "main")))
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
@@ -4431,35 +4490,29 @@ the sweep happens before the persp itself is killed (since
                 ((symbol-function '+workspace/kill)
                  (lambda (ws) (push (cons 'persp-kill ws) call-order)))
                 (+workspaces-main "main"))
-        (agent-repl--snapshot-load-finish)
+        (agent-repl--snapshot-load-close-main)
         (should (equal (nreverse call-order)
                        '((sweep . "main") (persp-kill . "main"))))))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/main-missing-is-noop ()
-  "Finish is a no-op for the nuke-main step when `main' doesn't exist:
-neither the buffer sweep nor the persp kill fires."
+(ert-deftest agent-repl-cmd-test-snapshot-load-close-main/main-missing-is-noop ()
+  "Close-main is a no-op when `main' doesn't exist: neither the buffer
+sweep nor the persp kill fires."
   (agent-repl-test--with-clean-state
     (let ((sweep-calls 0)
           (kill-calls 0))
-      (setq agent-repl--snapshot-load-state
-            (list :queue nil :origin nil :awaiting nil
-                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p) (lambda (_n) nil))
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
                  (lambda (_ws) (cl-incf sweep-calls)))
                 ((symbol-function '+workspace/kill)
                  (lambda (_n) (cl-incf kill-calls)))
                 (+workspaces-main "main"))
-        (agent-repl--snapshot-load-finish)
+        (agent-repl--snapshot-load-close-main)
         (should (= 0 sweep-calls))
         (should (= 0 kill-calls))))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/close-main-error-swallowed ()
+(ert-deftest agent-repl-cmd-test-snapshot-load-close-main/kill-error-swallowed ()
   "An error from `+workspace/kill' on main is logged but never propagated."
   (agent-repl-test--with-clean-state
-    (setq agent-repl--snapshot-load-state
-          (list :queue nil :origin nil :awaiting nil
-                :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
     (cl-letf (((symbol-function '+workspace-exists-p)
                (lambda (name) (equal name "main")))
               ((symbol-function 'agent-repl--kill-workspace-buffers)
@@ -4468,18 +4521,14 @@ neither the buffer sweep nor the persp kill fires."
                (lambda (_n) (error "boom")))
               (+workspaces-main "main"))
       ;; Must not signal.
-      (agent-repl--snapshot-load-finish)
-      (should-not agent-repl--snapshot-load-state))))
+      (agent-repl--snapshot-load-close-main))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/nuke-main-sweep-error-does-not-block-persp-kill ()
+(ert-deftest agent-repl-cmd-test-snapshot-load-close-main/sweep-error-does-not-block-persp-kill ()
   "An error from the buffer sweep on main is swallowed AND does not block
 the subsequent `+workspace/kill' — each step has its own condition-case
 so a failing sweep can't strand the persp in the tabline."
   (agent-repl-test--with-clean-state
     (let ((killed nil))
-      (setq agent-repl--snapshot-load-state
-            (list :queue nil :origin nil :awaiting nil
-                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
       (cl-letf (((symbol-function '+workspace-exists-p)
                  (lambda (name) (equal name "main")))
                 ((symbol-function 'agent-repl--kill-workspace-buffers)
@@ -4488,31 +4537,8 @@ so a failing sweep can't strand the persp in the tabline."
                  (lambda (ws) (setq killed ws)))
                 (+workspaces-main "main"))
         ;; Must not signal.
-        (agent-repl--snapshot-load-finish)
+        (agent-repl--snapshot-load-close-main)
         (should (equal killed "main"))))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-load-finish/idempotent-skips-second-close-main ()
-  "A second `--snapshot-load-finish' call (state already nil) must not
-re-invoke the nuke-main step — close-main is part of the per-load
-finalization, not a standalone teardown."
-  (agent-repl-test--with-clean-state
-    (let ((kill-calls 0))
-      (setq agent-repl--snapshot-load-state
-            (list :queue nil :origin nil :awaiting nil
-                  :loaded 0 :skipped 0 :total 0 :timeout-timer nil))
-      (cl-letf (((symbol-function '+workspace-exists-p)
-                 (lambda (name) (equal name "main")))
-                ((symbol-function 'agent-repl--kill-workspace-buffers)
-                 (lambda (_ws) nil))
-                ((symbol-function '+workspace/kill)
-                 (lambda (_n) (cl-incf kill-calls)))
-                (+workspaces-main "main"))
-        (agent-repl--snapshot-load-finish)
-        (should (= 1 kill-calls))
-        ;; Second call: state is nil, the early `when' short-circuits before
-        ;; the close-main call, so no extra kill fires.
-        (agent-repl--snapshot-load-finish)
-        (should (= 1 kill-calls))))))
 
 ;;;; ---- agent-repl-switch-to-project ----
 

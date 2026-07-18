@@ -1743,15 +1743,19 @@ can call finish without worrying whether a normal finish already ran."
                           (if (and mq-restored (> mq-restored 0))
                               (format ", merge-queue=%d" mq-restored)
                             ""))))
-    (setq agent-repl--snapshot-load-state nil)
-    (agent-repl--snapshot-load-close-main)))
+    ;; `main' is nuked at load BEGIN (see the close-main call before the
+    ;; first `--snapshot-load-step'), not here — by end-of-load it is
+    ;; already gone.
+    (setq agent-repl--snapshot-load-state nil)))
 
 (defun agent-repl--snapshot-load-close-main ()
   "Nuke the `main' workspace left over from Doom's startup, if it still exists.
 Doom always creates `+workspaces-main' (typically \"main\") at startup;
-once the snapshot load has populated the real workspace set, this
-artifact is no longer useful and we tear it down to keep the tabline
-clean.  Absent main, the function is a no-op.
+the snapshot loader replaces it with the real workspace set, so this
+artifact is never useful and we tear it down to keep the tabline
+clean.  Called at load BEGIN — before the first entry is established —
+so main never occupies a tab-bar slot during the load.  Absent main,
+the function is a no-op.
 
 NUKE semantics (vs. a plain `+workspace/kill'): we first sweep every
 buffer that belongs to the persp via
@@ -2030,6 +2034,18 @@ Returns to the workspace that was active when the load began."
           (agent-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s hidden=%s"
                             ws (plist-get plist :project-dir)
                             (if (plist-get plist :hidden-project-dir) "t" "nil"))))
+      ;; Nuke Doom's startup `main' workspace BEFORE establishing any
+      ;; entry (not at end-of-load, where it used to happen): the user
+      ;; never wants it, and killing it first keeps it from occupying a
+      ;; tab-bar slot for the whole load.  When the loader was started
+      ;; FROM main (the startup restore path), main is also the origin —
+      ;; clear `:origin' so finish doesn't try to switch back to the
+      ;; workspace we just killed and instead stays on the last-loaded
+      ;; one.
+      (let ((main (agent-repl--ws-main-name)))
+        (when (and main (equal origin-ws main))
+          (setq origin-ws nil))
+        (agent-repl--snapshot-load-close-main))
       (setq agent-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
