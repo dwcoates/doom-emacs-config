@@ -3,6 +3,8 @@ import {
   EDGE_PX,
   PIN_PX,
   SECTION_CLASSES,
+  freezeOnScroll,
+  freezeOnToggle,
   inEdgeZone,
   innerScrollerAt,
   isPinnedToBottom,
@@ -352,6 +354,50 @@ describe("isPinnedToBottom", () => {
     const pos = { scrollHeight: 900, scrollTop: 600 - (PIN_PX - 1), clientHeight: 300 };
     // Act + Assert
     expect(isPinnedToBottom(pos)).toBe(isPinnedToBottom(pos, PIN_PX));
+  });
+});
+
+describe("freezeOnToggle", () => {
+  it("freezes tail-following when the user opens a nested view", () => {
+    // Arrange + Act + Assert
+    expect(freezeOnToggle(false, true)).toBe(true);
+  });
+
+  it("keeps an existing freeze when the user closes a nested view", () => {
+    // Arrange — already frozen, now closing a fold: only a scroll-to-tail lifts it.
+    expect(freezeOnToggle(true, false)).toBe(true);
+  });
+
+  it("does not freeze on a close from an unfrozen feed", () => {
+    // Arrange + Act + Assert
+    expect(freezeOnToggle(false, false)).toBe(false);
+  });
+
+  it("stays frozen when the user opens a second nested view", () => {
+    // Arrange + Act + Assert
+    expect(freezeOnToggle(true, true)).toBe(true);
+  });
+});
+
+describe("freezeOnScroll", () => {
+  it("lifts the freeze when the user scrolls back to the tail", () => {
+    // Arrange — frozen, now pinned to the bottom again.
+    expect(freezeOnScroll(true, true)).toBe(false);
+  });
+
+  it("keeps the freeze while the user scrolls short of the tail", () => {
+    // Arrange — frozen, still scrolled up above the bottom.
+    expect(freezeOnScroll(true, false)).toBe(true);
+  });
+
+  it("stays unfrozen when an unfrozen feed reaches its tail", () => {
+    // Arrange + Act + Assert
+    expect(freezeOnScroll(false, true)).toBe(false);
+  });
+
+  it("stays unfrozen when an unfrozen feed is scrolled up", () => {
+    // Arrange + Act + Assert
+    expect(freezeOnScroll(false, false)).toBe(false);
   });
 });
 

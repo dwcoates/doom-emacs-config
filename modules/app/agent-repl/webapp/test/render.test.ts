@@ -3233,27 +3233,37 @@ describe("lastUserTurnId", () => {
 describe("repinsToTail", () => {
   it("jumps a scrolled-up feed to the tail when a prompt was just sent", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false })).toBe(true);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false, frozen: false })).toBe(true);
   });
 
   it("jumps to the tail on the feed's very first prompt", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: null, nextTurnId: "r1", pinned: false })).toBe(true);
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: "r1", pinned: false, frozen: false })).toBe(true);
   });
 
   it("leaves a scrolled-up feed alone while the same turn streams its answer", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: false })).toBe(false);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: false, frozen: false })).toBe(false);
   });
 
   it("leaves a scrolled-up feed alone when no prompt was ever sent", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: null, nextTurnId: null, pinned: false })).toBe(false);
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: null, pinned: false, frozen: false })).toBe(false);
   });
 
   it("keeps a pinned feed following its tail", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true })).toBe(true);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true, frozen: false })).toBe(true);
+  });
+
+  it("holds a frozen feed off its tail even when it is pinned to the bottom", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true, frozen: true })).toBe(false);
+  });
+
+  it("lets a fresh prompt override the freeze and jump to the tail", () => {
+    // Arrange + Act + Assert
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false, frozen: true })).toBe(true);
   });
 });
 
