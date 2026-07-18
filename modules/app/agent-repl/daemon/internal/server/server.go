@@ -129,7 +129,11 @@ type Server struct {
 
 	sentinel   session.SentinelSink
 	remediator Remediator
-	registry   *registry.Registry
+	// requestShutdown asks the process to begin its graceful teardown, the
+	// same path SIGTERM triggers. Wired by main; nil makes POST /shutdown
+	// report the capability as unconfigured (501) rather than half-acting.
+	requestShutdown func()
+	registry        *registry.Registry
 	// workspaces relays the Emacs drawer's sidebar snapshot stream
 	// (shared/protocol.md, "Workspace sidebar stream"): Emacs POSTs the
 	// latest view-model and connected sidebars receive it verbatim.
@@ -197,6 +201,11 @@ type Config struct {
 	// Remediator dispatches the "session gone" analyst; nil makes
 	// POST /remediation report the capability as unconfigured.
 	Remediator Remediator
+	// RequestShutdown begins the process's graceful teardown (the SIGTERM
+	// path), letting Emacs bounce an adopted daemon it has no local handle
+	// to signal. Nil makes POST /shutdown report the capability as
+	// unconfigured (501).
+	RequestShutdown func()
 	// Registry persists session records across daemon restarts; nil
 	// disables persistence (tests, embedded use).
 	Registry *registry.Registry
@@ -267,6 +276,7 @@ func New(cfg Config) *Server {
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
+		requestShutdown: cfg.RequestShutdown,
 		registry:        cfg.Registry,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
@@ -409,7 +419,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /workspaces/status", s.handleWorkspaceStatus)
 	mux.HandleFunc("GET /workspaces/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("POST /workspaces/action", s.handleWorkspaceAction)
+	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 	return mux
+}
+
+// handleShutdown asks the daemon to exit gracefully — the same teardown
+// SIGTERM runs (sessions drained, registry flushed, listener closed). Emacs
+// drives this to bounce a daemon it ADOPTED from another Emacs, which it has
+// no local process handle to signal.
+//
+// The 202 is written BEFORE the shutdown fires (via a goroutine that runs
+// after this handler returns), so the client reliably reads the acknowledgment
+// before the listener closes. A daemon wired without RequestShutdown reports
+// the capability as unconfigured rather than pretending to act.
+func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	if s.requestShutdown == nil {
+		httpError(w, http.StatusNotImplemented, "shutdown not supported by this daemon")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("shutting down\n")); err != nil {
+		s.logf("shutdown: writing acknowledgment failed: %v", err)
+	}
+	go s.requestShutdown()
 }
 
 // chessGameDirParts is the fixed worktree-relative directory the
