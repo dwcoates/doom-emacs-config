@@ -1,6 +1,6 @@
 ---
 name: debug-logs
-description: Read and interpret (a) the agent-repl debug log at ~/.claude-emacs/doom-agent-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, drawer, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
+description: Read and interpret (a) the agent-repl debug log at ~/.claude-emacs/doom-agent-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
 ---
 
 # Debug Logs (agent-repl)
