@@ -1309,6 +1309,27 @@ gates on :thinking, so the optimistic write must precede the wire."
         ;; Assert
         (should (eq state-at-send :thinking))))))
 
+(ert-deftest agent-repl-test-gui-send-turn-snaps-webview-to-tail-before-send ()
+  "gui-send-turn snaps the webview to its tail BEFORE the HTTP send.
+A prompt sent from a scrolled-up feed must jump to the bottom the instant
+it leaves, not wait for the daemon to echo the turn back, so the snap
+precedes the wire."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (let ((events '()))
+      (cl-letf (((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
+                 (lambda (_ws) (push 'snap events)))
+                ((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (&rest _) (push 'send events) "r_1"))
+                ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        ;; Act
+        (agent-repl--gui-send-turn "ws1" "prepared input" "raw input")
+        ;; Assert -- snap was recorded, and it landed before the send.
+        (should (equal (reverse events) '(snap send)))))))
+
 (ert-deftest agent-repl-test-gui-send-turn-keeps-meta-markers ()
   "gui-send-turn posts the marked text VERBATIM to the daemon.
 The webapp hides the bracketed spans at render time, so stripping them on
