@@ -172,3 +172,28 @@ export function accountMenuEntries(
   }
   return entries;
 }
+
+/**
+ * Build the account menu from a LIVE read of BOTH the current account and
+ * the roster.
+ *
+ * The menu filters the roster against WHICH root the session runs as, so the
+ * "current" it filters against must be as fresh as the roster it filters —
+ * else a switch the caller's cached account has not caught up to re-offers
+ * the very root the session just moved to (personal->work leaves "switch to
+ * work" showing instead of "switch to personal"). Reading both together at
+ * open time is what keeps the two sides in step. Rejects when either fetch
+ * fails, so the caller renders its own fallback rather than a menu built on
+ * one stale half.
+ */
+export async function fetchAccountMenuEntries(
+  httpBase: string,
+  sessionId: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<{ current: Account; entries: AccountMenuEntry[] }> {
+  const [current, roster] = await Promise.all([
+    fetchAccount(httpBase, sessionId, fetchFn),
+    fetchAccounts(httpBase, fetchFn),
+  ]);
+  return { current, entries: accountMenuEntries(current, roster) };
+}
