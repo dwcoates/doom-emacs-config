@@ -1,7 +1,7 @@
 // Package login runs the interactive Claude login under a daemon-owned
 // pty and fans its terminal out to attached viewers.
 //
-// WHY THE DAEMON, AND NOT EMACS
+// # WHY THE DAEMON, AND NOT EMACS
 //
 // The login is a full-screen TUI gated behind stateful prompts (theme
 // onboarding on a fresh config root, folder trust on an untrusted cwd)
@@ -11,7 +11,7 @@
 // the loop and moves the terminal instead: the daemon owns the pty, the
 // webapp renders it, and no code anywhere parses the TUI.
 //
-// WHY ONE LOGIN PER ACCOUNT
+// # WHY ONE LOGIN PER ACCOUNT
 //
 // A login is scoped to the account it logs INTO, never to the caller
 // that asked for it. Two workspaces on the same account must land on the
