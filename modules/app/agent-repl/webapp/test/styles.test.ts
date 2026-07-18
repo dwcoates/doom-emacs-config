@@ -1320,6 +1320,81 @@ describe("tail status rows flush the response column's left rail", () => {
   );
 });
 
+const statusBadges = blockAfter(css, ".result,");
+/** Selector list of the rule that fits the standalone status badges to their text and flushes them to the left rail. */
+const statusBadgesSelector = css.slice(
+  css.indexOf(".result,"),
+  css.indexOf("{", css.indexOf(".result,")),
+);
+
+describe("standalone status badges hug the response column and fit their text", () => {
+  it("shrinks each status badge to fit its own text rather than a full line", () => {
+    // Arrange / Act — the grouped badge rule (result chip, retry/system notes, error banner).
+    // Assert — a short `interrupted` chip is a small pill, not a full-width block.
+    expect(statusBadges).toMatch(/width:\s*fit-content/);
+  });
+
+  it("caps a status badge at the agent column so a long one still wraps", () => {
+    // Arrange / Act — the grouped badge rule.
+    // Assert — the same cap the response bubble and tool cards derive from.
+    expect(statusBadges).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  it("flushes a status badge's left edge with the response column's left rail", () => {
+    // Arrange / Act — the grouped badge rule.
+    // Assert — a left margin of the half-leftover gutter the response column hugs.
+    expect(statusBadges).toMatch(
+      /margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
+  });
+
+  it("grows a status badge rightward only through an auto right margin", () => {
+    // Arrange / Act — the grouped badge rule.
+    // Assert — the whole right leftover collapses into one auto margin.
+    expect(statusBadges).toMatch(/margin-right:\s*auto/);
+  });
+
+  it("lands a status badge's left edge flush with the response bubble's own left edge", () => {
+    // Arrange — the assistant response hugs the same column left rail (see .bubble.assistant).
+    const assistantBubble = blockAfter(css, ".bubble.assistant {");
+    // Act — the left margin each box carries.
+    const badgeLeft = statusBadges.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
+    const bubbleLeft = assistantBubble.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
+    // Assert — identical insets, so the pill starts where the response's left edge does.
+    expect(badgeLeft).toBe(bubbleLeft);
+  });
+
+  it.each(["result", "retry-badge", "system-note", "error-banner"])(
+    "brings the %s badge into the fit-to-text column, leaving none full-width",
+    (badge) => {
+      // Arrange / Act — the grouped selector must name every standalone status badge.
+      // Assert
+      expect(statusBadgesSelector).toContain(`.${badge}`);
+    },
+  );
+
+  it("leaves the compaction divider spanning the column rather than shrinking it to a badge", () => {
+    // Arrange / Act — a divider is a separator like .clear-divider, not a badge, so it
+    // stays out of the fit-to-text rule and pins no width of its own.
+    // Assert
+    expect(statusBadgesSelector).not.toContain(".compact-divider");
+    expect(blockAfter(css, ".compact-divider,")).not.toMatch(/fit-content/);
+  });
+
+  it("drops the inert align-self from the result chip now that margins place it", () => {
+    // Arrange / Act — align-self is a no-op on the plain-block feed-item wrapper, so the
+    // dead declaration is gone and the margins above do the placement.
+    // Assert
+    expect(blockAfter(css, ".result {")).not.toMatch(/align-self/);
+  });
+
+  it("drops the inert align-self from the shared note rule too", () => {
+    // Arrange / Act — the same no-op removed from the compact-divider/system-note/retry-badge base rule.
+    // Assert
+    expect(blockAfter(css, ".compact-divider,")).not.toMatch(/align-self/);
+  });
+});
+
 const interruptingPending = blockAfter(css, ".interrupting-pending");
 const interruptingSpinner = blockAfter(css, ".interrupting-spinner {");
 const reducedMotion = blockAfter(css, "@media (prefers-reduced-motion: reduce)");

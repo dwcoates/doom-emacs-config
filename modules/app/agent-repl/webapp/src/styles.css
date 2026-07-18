@@ -1040,7 +1040,6 @@ pre {
 .perm-actions button { cursor: pointer; }
 
 .result {
-  align-self: center;
   font-size: 0.75rem;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -1054,8 +1053,29 @@ pre {
    standalone aborted/errored/no-answer ones, which stay a plain muted pill
    rather than the amber a completed turn used to paint. */
 
+/* Standalone status badges shrink to fit their own text and hug the response
+   column's LEFT rail, exactly as the assistant response bubble does (see
+   `.bubble.assistant`): the interrupt/aborted/errored result chip, the retry
+   and system notes, and the error banner. A short `interrupted` chip is a
+   small pill flush with the centered tool cards' left edge rather than a
+   full-width block, so its width tracks its label — a `hello` badge is
+   narrower than a `mississippi` one — capped at the agent column. `align-self`
+   would be inert here: the `.feed-item` wrapper is a plain block, not a flex
+   row (see the framed-column note above `.bubble`), so the same fixed-left /
+   auto-right margins the bubble uses do the flushing. The compaction divider
+   is deliberately NOT here — like the clear-context boundary rule it spans the
+   column as a separator rather than reading as a badge. */
+.result,
+.retry-badge,
+.system-note,
+.error-banner {
+  width: fit-content;
+  max-width: var(--agent-bubble-cap);
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
+}
+
 .compact-divider, .system-note, .retry-badge {
-  align-self: center;
   color: var(--muted);
   font-size: 0.75rem;
 }
