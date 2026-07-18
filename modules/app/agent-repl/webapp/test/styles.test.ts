@@ -482,31 +482,33 @@ describe("the bubble pulse", () => {
   });
 });
 
-describe("centered column: agent centers, prompt fits its text and right-flushes", () => {
+describe("framed column: tool cards center, prompt right-flushes, response left-flushes", () => {
   const feed = blockAfter(css, "#feed {");
   const userBubble = blockAfter(css, ".bubble.user {");
-  // The shared agent-side centering rule groups the assistant response bubble
-  // with the top-level async tool cards.
-  const agentCentered = blockAfter(css, ".bubble.assistant,");
-  const agentSelector = css.slice(
-    css.indexOf(".bubble.assistant,"),
-    css.indexOf("{", css.indexOf(".bubble.assistant,")),
+  const assistantBubble = blockAfter(css, ".bubble.assistant {");
+  // The top-level async tool cards keep the centering rule; the response
+  // bubble was pulled out of it to fit its text and hug the left rail, the
+  // mirror of the prompt hugging the right.
+  const toolCentered = blockAfter(css, ".feed-item > .tool-card,");
+  const toolSelector = css.slice(
+    css.indexOf(".feed-item > .tool-card,"),
+    css.indexOf("{", css.indexOf(".feed-item > .tool-card,")),
   );
   /** The `NN` of the first `max-width: NN%` in a rule block, as a number. */
   const maxWidthPct = (block: string): number =>
     Number(block.match(/max-width:\s*(\d+)%/)?.[1]);
 
-  it("centers the agent's response bubble with equal auto margins", () => {
-    // Arrange / Act — the shared agent-side rule.
+  it("centers the top-level async tool cards with equal auto margins", () => {
+    // Arrange / Act — the tool-card rule the response no longer shares.
     // Assert
-    expect(agentCentered).toMatch(/margin-left:\s*auto/);
-    expect(agentCentered).toMatch(/margin-right:\s*auto/);
+    expect(toolCentered).toMatch(/margin-left:\s*auto/);
+    expect(toolCentered).toMatch(/margin-right:\s*auto/);
   });
 
-  it("caps the agent column at the shared --agent-bubble-cap token", () => {
-    // Arrange / Act — the single width source both rules derive from.
+  it("caps the tool-card column at the shared --agent-bubble-cap token", () => {
+    // Arrange / Act — the single width source the flush margins derive from.
     // Assert
-    expect(agentCentered).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+    expect(toolCentered).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
   });
 
   it("sets the agent bubble cap to 75% on the feed", () => {
@@ -518,13 +520,39 @@ describe("centered column: agent centers, prompt fits its text and right-flushes
   it("folds lone top-level async tool cards into the agent center", () => {
     // Arrange / Act — the grouped selector opening the centered block.
     // Assert
-    expect(agentSelector).toContain(".feed-item > .tool-card");
+    expect(toolSelector).toContain(".feed-item > .tool-card");
   });
 
   it("folds consecutive-run tool groups into the agent center", () => {
     // Arrange / Act — a `.feed-group` wraps a grouped card.
     // Assert
-    expect(agentSelector).toContain(".feed-item > .feed-group");
+    expect(toolSelector).toContain(".feed-item > .feed-group");
+  });
+
+  it("shrinks the response bubble to fit its own text", () => {
+    // Arrange / Act — a short answer renders a small bubble, not a full line.
+    // Assert
+    expect(assistantBubble).toMatch(/width:\s*fit-content/);
+  });
+
+  it("caps the response bubble at the agent column", () => {
+    // Arrange / Act — a long response grows rightward only to the agent cap.
+    // Assert
+    expect(assistantBubble).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  it("pushes the response as far left as the auto right margin allows", () => {
+    // Arrange / Act — the whole right leftover collapses into one auto margin.
+    // Assert
+    expect(assistantBubble).toMatch(/margin-right:\s*auto/);
+  });
+
+  it("flushes the response's left edge with the tool cards, never before it", () => {
+    // Arrange / Act — a left margin equal to the agent column's centered side gap.
+    // Assert
+    expect(assistantBubble).toMatch(
+      /margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
   });
 
   it("shrinks the prompt bubble to fit its own text", () => {
@@ -546,8 +574,9 @@ describe("centered column: agent centers, prompt fits its text and right-flushes
     expect(userBubble).toMatch(/margin-left:\s*auto/);
   });
 
-  it("flushes the prompt's right edge with the response, never past it", () => {
-    // Arrange / Act — a right margin equal to the agent column's centered side gap.
+  it("flushes the prompt's right edge with the tool cards, never past it", () => {
+    // Arrange / Act — a right margin equal to the agent column's centered side gap,
+    // the exact mirror of the response's left flush margin.
     // Assert
     expect(userBubble).toMatch(
       /margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
