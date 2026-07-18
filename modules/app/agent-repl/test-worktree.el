@@ -8324,12 +8324,15 @@ kill, agent session kill, and buffer cleanup all run on the main thread.  This
 is what makes `--workspace-merge-do' safe to execute from the worker
 thread spawned by `agent-repl--workspace-merge-async'.
 
-The success path now makes TWO defer calls: the parent phone-home
+The success path now makes THREE defer calls: the parent phone-home
 \(`agent-repl--maybe-notify-parent-of-child-merge', which spawns
-`make-process' and so must run on main) and the teardown.  Pinned with a
-stub that captures the defer calls — the test fixture's default override
-would otherwise invoke each thunk immediately, hiding whether the defer
-calls were ever made."
+`make-process' and so must run on main), the teardown, and the
+finalization (`agent-repl--merge-finalize-on-main': config reload +
+in-flight clear + queue drain — the reload's watcher re-arm path can
+reach the frontend HTTP boundary, which is main-thread-only).  Pinned
+with a stub that captures the defer calls — the test fixture's default
+override would otherwise invoke each thunk immediately, hiding whether
+the defer calls were ever made."
   (agent-repl-test--with-clean-state
     (puthash "other-ws" '() agent-repl--workspaces)
     (let ((defer-calls 0))
@@ -8345,7 +8348,7 @@ calls were ever made."
                  ((symbol-function 'agent-repl--defer-to-main-thread)
                   (lambda (_thunk) (cl-incf defer-calls))))
         (agent-repl--workspace-merge-do "other-ws" "/tmp/fake" t)
-        (should (= defer-calls 2))))))
+        (should (= defer-calls 3))))))
 
 (ert-deftest agent-repl-test-workspace-merge-do-does-not-call-finish-workspace ()
   "Successful merge must NOT call `--finish-workspace' — that's reserved
@@ -12586,5 +12589,74 @@ silently lose commits and desync the index."
         (agent-repl--maybe-notify-parent-of-child-merge
          "DWC/child-x" "/repo/wt-parent" "child-branch" "base-sha")
         (should-not fired)))))
+
+;;;; ---- Tests: merge-finalize-on-main ----
+
+(defmacro agent-repl-test--with-finalize-stubs (&rest body)
+  "Run BODY with the merge-finalize collaborators stubbed.
+`agent-repl--defer-to-main-thread' captures its thunk into the
+anaphoric variable `deferred' WITHOUT running it; `load-file',
+`agent-repl--clear-in-flight-merge', `agent-repl--drain-merge-queue',
+and `agent-repl--warn' record their invocation (with key arguments)
+into the anaphoric variable `calls', oldest first."
+  (declare (indent 0))
+  `(let ((deferred nil)
+         (calls '()))
+     (ignore deferred calls)
+     (cl-letf (((symbol-function 'agent-repl--defer-to-main-thread)
+                (lambda (thunk) (setq deferred thunk)))
+               ((symbol-function 'load-file)
+                (lambda (file) (push (list 'load-file file) calls)))
+               ((symbol-function 'agent-repl--clear-in-flight-merge)
+                (lambda (ws) (push (list 'clear ws) calls)))
+               ((symbol-function 'agent-repl--drain-merge-queue)
+                (lambda () (push (list 'drain) calls)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (_ws fmt &rest args)
+                  (push (list 'warn (apply #'format fmt args)) calls))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-merge-finalize-defers-not-runs ()
+  "finalize-on-main only schedules the thunk — no step runs synchronously."
+  (agent-repl-test--with-finalize-stubs
+    (agent-repl--merge-finalize-on-main "ws-cur" "ws-target" (float-time))
+    (should (functionp deferred))
+    (should-not calls)))
+
+(ert-deftest agent-repl-test-merge-finalize-thunk-loads-config ()
+  "The deferred thunk reloads `agent-repl--config-file'."
+  (agent-repl-test--with-finalize-stubs
+    (agent-repl--merge-finalize-on-main "ws-cur" "ws-target" (float-time))
+    (funcall deferred)
+    (should (member (list 'load-file agent-repl--config-file) calls))))
+
+(ert-deftest agent-repl-test-merge-finalize-thunk-order ()
+  "The deferred thunk runs load -> clear -> drain in that order."
+  (agent-repl-test--with-finalize-stubs
+    (agent-repl--merge-finalize-on-main "ws-cur" "ws-target" (float-time))
+    (funcall deferred)
+    (should (equal (nreverse calls)
+                   (list (list 'load-file agent-repl--config-file)
+                         (list 'clear "ws-target")
+                         (list 'drain))))))
+
+(ert-deftest agent-repl-test-merge-finalize-load-failure-warns ()
+  "A reload failure inside the thunk surfaces via `agent-repl--warn'."
+  (agent-repl-test--with-finalize-stubs
+    (cl-letf (((symbol-function 'load-file)
+               (lambda (_file) (error "boom"))))
+      (agent-repl--merge-finalize-on-main "ws-cur" "ws-target" (float-time))
+      (funcall deferred)
+      (should (cl-find 'warn calls :key #'car)))))
+
+(ert-deftest agent-repl-test-merge-finalize-load-failure-still-clears-and-drains ()
+  "A reload failure does not stop the in-flight clear or the queue drain."
+  (agent-repl-test--with-finalize-stubs
+    (cl-letf (((symbol-function 'load-file)
+               (lambda (_file) (error "boom"))))
+      (agent-repl--merge-finalize-on-main "ws-cur" "ws-target" (float-time))
+      (funcall deferred)
+      (should (member (list 'clear "ws-target") calls))
+      (should (member (list 'drain) calls)))))
 
 ;;; test-worktree.el ends here
