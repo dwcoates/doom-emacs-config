@@ -182,6 +182,26 @@ const SUPPRESSED_TOOLS = new Set(["AskUserQuestion", "ToolSearch"]);
  */
 const EMPTY_CONTENT_PLACEHOLDER = "(no content)";
 
+/**
+ * The CLI's sentinel for a turn the user aborted. Claude Code injects it as a
+ * standalone assistant text block when a request is interrupted, in one of two
+ * forms depending on whether a tool call was in flight. The yellow aborted
+ * `ResultChip` (`item.subtype === "aborted"`) is already the single, canonical
+ * way this feed marks an interrupt, so the sentinel bubble beside it is a
+ * duplicate denotation and draws nothing (`rendersEmpty`). Matching is on the
+ * TRIMMED body being nothing but the sentinel, so a real partial answer that
+ * merely ends near an interrupt is untouched.
+ */
+const INTERRUPT_SENTINELS = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+/** Whether a text block's trimmed body is nothing but an interrupt sentinel. */
+function isInterruptSentinel(body: string): boolean {
+  return INTERRUPT_SENTINELS.has(body);
+}
+
 function contentToText(
   content: string | Array<{ type: string; text?: string }>,
 ): string {
@@ -1669,7 +1689,11 @@ export function rendersEmpty(
     // bubble around it.
     case "text": {
       const body = item.text.trim();
-      return body === "" || body === EMPTY_CONTENT_PLACEHOLDER;
+      return (
+        body === "" ||
+        body === EMPTY_CONTENT_PLACEHOLDER ||
+        isInterruptSentinel(body)
+      );
     }
     // AskUserQuestion's UI IS the permission picker card — the generic tool
     // card would just dump the questions JSON (input) and the "User has
