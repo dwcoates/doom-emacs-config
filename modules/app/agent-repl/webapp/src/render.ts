@@ -332,13 +332,22 @@ export function monitoringRowHtml(monitoring: boolean): string {
  * always-visible amber signal for when the owning bubble is scrolled off or
  * absent — the quiescent twin of the working row, and mutually exclusive with
  * the whole bucket-1 tail, which only runs while a turn is in flight.
+ *
+ * A live `thinking…` indicator ALSO suppresses it, even with no main-chain
+ * turn in flight: a background subagent that is mid-thought renders its own
+ * `thinking…` spinner (see `Thinking`), and that more-specific live signal
+ * wins the shared tail slot so the two never stack. The agent can be thinking
+ * (a subagent block open) and monitoring (async still live) at once, but the
+ * amber row is only the fallback for when nothing more specific speaks, so a
+ * visible `thinking…` takes precedence over it (`anyLiveThinking`).
  */
 export function showsMonitoringRow(opts: {
   turnInFlight: boolean;
   interrupting: boolean;
+  thinking: boolean;
   anyLiveAsync: boolean;
 }): boolean {
-  if (opts.turnInFlight || opts.interrupting) return false;
+  if (opts.turnInFlight || opts.interrupting || opts.thinking) return false;
   return opts.anyLiveAsync;
 }
 
@@ -2409,6 +2418,21 @@ export function anyLiveAsync(
 }
 
 /**
+ * Whether ANY thinking block in the feed is still live (open, not yet done) —
+ * the `monitoring…` row's secondary gate (see `showsMonitoringRow`). A live
+ * thinking block renders its own `thinking…` spinner (`Thinking`), whether it
+ * is a main-chain block or a background subagent's parented one, so the amber
+ * monitoring fallback stands down while one is present rather than stacking a
+ * second progress row beneath it. Pass the VISIBLE items (not the raw list):
+ * a thinking block folded away behind a gns panel draws no on-screen
+ * `thinking…`, so it must NOT suppress the very fallback the fold hid the work
+ * behind — an invisible `thinking…` is not a `thinking…` the user can see.
+ */
+export function anyLiveThinking(items: readonly ConversationItem[]): boolean {
+  return items.some((i) => i.kind === "thinking" && !i.done);
+}
+
+/**
  * Feed renderer: reconciles the item list into `container`, reusing
  * nodes by key and only rewriting nodes whose HTML changed.
  */
@@ -2954,10 +2978,13 @@ export class FeedRenderer {
     // The global `monitoring…` fallback, on the same idle-with-live-async
     // terms render() shows it (see `showsMonitoringRow`), so a fresh join
     // landing on a quiescent-but-still-watching session sees it immediately.
+    // A visible `thinking…` spinner suppresses it here too, so the two never
+    // stack on the restored feed's tail.
     if (
       showsMonitoringRow({
         turnInFlight: state.turnInFlight,
         interrupting: state.interrupting,
+        thinking: anyLiveThinking(visible),
         anyLiveAsync: anyLiveAsync(items, panels),
       })
     ) {
@@ -3161,11 +3188,14 @@ export class FeedRenderer {
     // The global `monitoring…` row: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose
-    // rows all mean the main chain is active).
+    // rows all mean the main chain is active). A visible `thinking…` spinner —
+    // a subagent mid-thought while the main chain idles — also suppresses it,
+    // so the more-specific live signal owns the shared tail slot alone.
     if (
       showsMonitoringRow({
         turnInFlight: state.turnInFlight,
         interrupting: state.interrupting,
+        thinking: anyLiveThinking(visible),
         anyLiveAsync: anyLiveAsync(items, panels),
       })
     ) {
