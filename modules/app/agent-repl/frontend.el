@@ -463,8 +463,9 @@ would (a) leave the input panel orphaned for the sync-panels sweep to
 reap and (b) break the next display against the still-dedicated
 window.  The webview then takes a live main-area window, and — since
 fullscreen is the sole display format — every OTHER main-area window is
-cleared \(`agent-repl--clear-main-area-for-panels', drawer excluded),
-so the webview + input panels end up the only main-area windows.
+cleared \(`agent-repl--clear-main-area-for-panels', side windows
+excluded), so the webview + input panels end up the only main-area
+windows.
 Without the clear, whatever the frame carried before the mount (magit,
 the dashboard, a previous workspace's leftovers) stayed up beside the
 panels — the extra-windows-on-first-switch bug."
@@ -549,7 +550,7 @@ Writes `:agent-state :init' before the session exists — there is a
 brief window between \"the session is being created\" and the daemon's
 own `session_start' event firing where Emacs is the only observer of
 the workspace's existence.  Without this write a generated gui
-workspace would render NO state in the tab and drawer until its agent
+workspace would render NO state in the tab until its agent
 answered; the gui branch of `agent-repl--on-session-start-event' flips
 `:init' to `:idle' once that event lands.
 

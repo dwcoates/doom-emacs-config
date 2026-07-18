@@ -300,7 +300,7 @@ intact (just with `:nuked-at' stamped)."
 
 (ert-deftest agent-repl-test-ws-live-p-returns-nil-for-tombstone ()
   "ws-live-p returns nil for a tombstoned entry — the predicate that
-keeps drawer/picker/state-updater from surfacing nuked workspaces."
+keeps tab-bar/picker/state-updater from surfacing nuked workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (agent-repl--ws-del "ws1")
@@ -714,7 +714,7 @@ even if bound — a nil cache is not a usable tab-bar signal."
     (should-error (agent-repl--ws-render-status "missing") :type 'user-error)))
 
 (ert-deftest agent-repl-test-ws-render-status-nil-for-tombstoned ()
-  "Tombstoned ws returns nil — renderers skip these (drawer filters them anyway)."
+  "Tombstoned ws returns nil — renderers skip these (the picker filters them anyway)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :agent-state :thinking)
@@ -836,8 +836,8 @@ somehow co-exist, the renderer must report the more actionable one."
 
 (ert-deftest agent-repl-test-ws-render-status-merged-beats-dead ()
   "A merged workspace whose vterm has since died still reads as merged.
-This was the existing drawer behavior and is preserved by the
-unification."
+This precedence predates the render-status unification and is
+preserved by it."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     ;; :repl-state is set to :merged on success — that already excludes
@@ -894,8 +894,8 @@ transition-window case does not hide live work."
   "An in-flight cherry-pick (`:merging t') outranks a dead vterm.
 This is the motivating bug class: pre-merge `--close-workspace
 preserve-entry' tears down the vterm, then the worker thread starts
-cherry-picking.  The drawer must surface the merge, not the dead
-vterm."
+cherry-picking.  The tab-bar and picker must surface the merge, not
+the dead vterm."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :merging t)
@@ -905,7 +905,7 @@ vterm."
 (ert-deftest agent-repl-test-ws-render-status-merging-beats-agent-state ()
   "An in-flight merge outranks agent-state.
 A workspace that was :thinking when the merge command fired should
-read as :merging in the drawer until cherry-pick resolves."
+read as :merging in the tab-bar and picker until cherry-pick resolves."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
     (agent-repl--ws-put "ws1" :merging t)

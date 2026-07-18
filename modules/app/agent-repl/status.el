@@ -15,8 +15,9 @@
 (defcustom agent-repl-repo-default-priorities '(("explanation-engine" . "p1"))
   "Alist mapping repository names to default `:priority' values for new workspaces.
 The repository name is the basename of the parent of `git rev-parse
---git-common-dir' for a path, matching how the drawer groups workspaces
-by repo.  Used by workspace-creation paths as a final fallback when no
+--git-common-dir' for a path, matching how agent-repl groups workspaces
+by repo (the fold set, tab-bar grouping).  Used by
+workspace-creation paths as a final fallback when no
 explicit priority was supplied and none was inherited from a source
 workspace.  An entry whose value is nil disables the default for that
 repo."
@@ -27,8 +28,9 @@ repo."
 (defun agent-repl--repo-name-for-path (path)
   "Return the repository name for PATH, or nil.
 Resolved as the basename of the parent of `git rev-parse --git-common-dir',
-matching the drawer's repo-group-label logic.  Returns nil when PATH is
-nil, does not exist, is not inside a git repository, or git fails."
+the key agent-repl uses to group workspaces by repo.  Returns nil
+when PATH is nil, does not exist, is not inside a git repository, or
+git fails."
   (when (and path
              (stringp path)
              (file-directory-p (expand-file-name path)))
@@ -1053,7 +1055,7 @@ face so selection dims the state color."
 (defun agent-repl--ws-display-state (ws)
   "Return the palette display key for WS.
 Delegates to `agent-repl--ws-render-status' (the single source of
-truth for visual state across the drawer, tab-bar, and project
+truth for visual state across the tab-bar and project
 picker), then layers panel-visibility suppression on top: when the
 render-state is non-nil AND no agent panel is present in WS's
 live-or-saved window layout, returns nil regardless of state — this
@@ -1165,7 +1167,7 @@ so the raw persp list this renders is already the visible set and the
 
 When NAMES is not supplied, defaults to `agent-repl--ws-tabline-names'
 (the persp-mode integration wrapper in `workspace.el', minus the
-workspaces of repos folded in the drawer) rather than
+workspaces of folded repos) rather than
 `+workspace-list-names' directly — the tab-bar reflects agent-repl's
 own notion of which workspaces it owns, not persp-mode's raw cache.
 Folded repos drop out here, and since the index is a 1-based position
@@ -1382,8 +1384,8 @@ visible glyph is still the faced one.  Size and center rows to
 The tab-bar reflects every workspace in NAMES (defaulting to
 `agent-repl--ws-tabline-names' — the persp-mode integration wrapper
 in `workspace.el', which intersects `persp-names-cache' with
-agent-repl's own registration, then drops the workspaces of repos
-folded in the drawer); no hide-mode filtering is applied here.
+agent-repl's own registration, then drops the workspaces of
+folded repos); no hide-mode filtering is applied here.
 Hide-mode operates at the persp level — `:hidden' workspaces
 get persp-killed by `agent-repl--sweep-hidden-workspaces' on the
 next workspace switch and disappear from `persp-names-cache' (and
@@ -1437,7 +1439,7 @@ width.  Without the cache-buster, face-only status transitions
 \(e.g. :thinking -> :done) stay invisible until a workspace switch.
 
 Enumerates `agent-repl--ws-tabline-names', so workspaces belonging to
-a repo folded in the drawer are absent from the rendered rows and the
+a folded repo are absent from the rendered rows and the
 remaining tabs carry contiguous 1-based numbers."
   (let* ((width (frame-width))
          (line-width (max 1 (1- width)))
@@ -1865,8 +1867,8 @@ runs the frontend-agnostic decay + git refresh for it."
     ;; No live agent session → clear non-thinking state.
     (agent-repl--mark-dead ws))
   ;; Merged-ness is independent of agent liveness — refresh for every
-  ;; workspace so the drawer's flatten-through-merged rendering has
-  ;; fresh `:branch-merged' values.  Gated on DO-GIT-P because the
+  ;; workspace so `agent-repl--ws-merged-p' always reads a
+  ;; fresh `:branch-merged' value.  Gated on DO-GIT-P because the
   ;; refresh's preconditions and process spawn are comparable in cost
   ;; to the diff refresh above.
   (when (and do-git-p
@@ -1910,14 +1912,8 @@ recurses directly instead of via `run-at-time'."
 
 (defun agent-repl--update-all-workspace-states--finalize ()
   "Terminal step of the workspace-state update chain.
-Refreshes the drawer (only one renderer call per pass — internal
-signature short-circuit covers the no-change case) and clears the
-in-flight flag.  Wrapped in `unwind-protect' so the flag clears even
-if the drawer refresh errors, preventing permanent timer wedging."
-  (unwind-protect
-      (when (fboundp 'agent-repl-drawer--refresh-if-visible)
-        (agent-repl-drawer--refresh-if-visible))
-    (setq agent-repl--update-in-flight nil)))
+Clears the in-flight flag so the next timer tick can run."
+  (setq agent-repl--update-in-flight nil))
 
 (defun agent-repl--update-all-workspace-states-now ()
   "Unguarded entrypoint for the workspace-state update chain.

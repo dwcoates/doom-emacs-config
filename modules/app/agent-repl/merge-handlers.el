@@ -22,7 +22,7 @@
 ;; Each handler function has signature `(TARGET-WS &optional ARGS)' and
 ;; is responsible for performing the post-merge work and recording
 ;; terminal state via the shared helpers in worktree.el
-;; (`--mark-merge-failed', `--close-workspace', drawer refresh, etc.).
+;; (`--mark-merge-failed', `--close-workspace', etc.).
 ;;
 ;; PR polling (`refresh-master-from-origin' handler):
 ;;   When the handler is invoked for a repo whose PR is still in the
@@ -361,8 +361,9 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
   (agent-repl--ws-put ws :merge-completed-at (float-time))
   (agent-repl--ws-put ws :merge-failed nil)
   ;; Record WS on the receiving (main/master) workspace's merged-in
-  ;; list so the drawer's expanded detail lists it.  MAIN-DIR is the
-  ;; main worktree the trunk work landed on; nil when git was skipped.
+  ;; list (`:merged-in-workspaces', the historical record of merges it
+  ;; received).  MAIN-DIR is the main worktree the trunk work landed
+  ;; on; nil when git was skipped.
   (agent-repl--record-merged-in-workspace main-dir ws)
   (agent-repl--ws-put ws :merge-target-name
                        (or (and main-dir

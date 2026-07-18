@@ -206,10 +206,10 @@ new path back even when the input is the raw path."
 
 (ert-deftest agent-repl-test-rename-source-back-refs-clears-source-ws-name-cache ()
   "Peers whose `:source-ws-dir' is rewritten must have their
-`:source-ws-name' cache (populated by the drawer's fast-path)
-cleared.  The renamed workspace is rehashed under a new name elsewhere
-in the rename flow, so any cached name pointing at the old identity
-is stale and must be re-resolved on next read."
+`:source-ws-name' cache cleared.  The renamed workspace is rehashed
+under a new name elsewhere in the rename flow, so any cached name
+pointing at the old identity is stale and must be re-resolved on next
+read."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--path-canonical)
                (lambda (p) (concat "CANON:" p))))

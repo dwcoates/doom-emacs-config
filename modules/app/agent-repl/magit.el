@@ -234,9 +234,9 @@ agent-repl panel state.  Forces same-window display by let-binding
 `magit-display-buffer-function' for this call only, so other magit
 buffers (diffs, logs, etc.) keep their normal display behavior.
 
-If the selected window is a side window (e.g., the workspace
-drawer), first pops to the frame's main window so magit replaces the
-main buffer rather than failing on the dedicated side window.
+If the selected window is a side window, first pops to the frame's
+main window so magit replaces the main buffer rather than failing on
+the dedicated side window.
 
 When the current workspace is tracked by agent-repl, uses the
 workspace's `:project-dir' and clears any saved `:fullscreen-config'

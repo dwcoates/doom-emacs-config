@@ -81,19 +81,6 @@ in WS's workspace plist."
             (should (eq (agent-repl-window--panel-buffer :input "ws") buf)))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-window-test-panel-buffer-drawer-returns-singleton ()
-  "`--panel-buffer :drawer' returns the drawer buffer (frame-scoped
-singleton, WS arg ignored).  Returns nil when the drawer buffer has
-not been created."
-  (let ((agent-repl-drawer-buffer-name "*agent-test-drawer*"))
-    (let ((buf (get-buffer-create agent-repl-drawer-buffer-name)))
-      (unwind-protect
-          (progn
-            (should (eq (agent-repl-window--panel-buffer :drawer) buf))
-            ;; WS arg is ignored for :drawer.
-            (should (eq (agent-repl-window--panel-buffer :drawer "anything") buf)))
-        (kill-buffer buf)))))
-
 (ert-deftest agent-repl-window-test-panel-buffer-unknown-kind-errors ()
   "`--panel-buffer' on an unknown KIND signals an error — typos surface
 at call time."
@@ -239,7 +226,7 @@ who race against a teardown."
 (ert-deftest agent-repl-window-test-delete-where-skips-side-windows-by-default ()
   "`--delete-where' preserves side windows by default — this is the
 side-window-aware default that stops layout-clearing commands from
-trampling frame-level UI elements like the workspace drawer.
+trampling frame-level side-window UI elements.
 
 Uses explicit `split-window' (not `display-buffer-pop-up-window'),
 which is unreliable under `emacs -batch -Q' where window-sizing
@@ -343,8 +330,8 @@ and returns an empty list."
 
 (ert-deftest agent-repl-window-test-delete-buffer-windows-deletes-side-window ()
   "`--delete-buffer-windows' deletes a side window targeting BUF —
-specifically, the workspace drawer hide path needs this to work
-even though `--delete-where' would skip side windows by default."
+targeting a specific buffer bypasses the side-window skip that
+`--delete-where' applies by default."
   (agent-repl-window-test--with-temp-frame
     (let* ((buf  (generate-new-buffer " *test-side-target*"))
            (side (display-buffer-in-side-window
@@ -471,7 +458,7 @@ the view buffer when SHOW-VIEW and the input buffer when SHOW-INPUT
 binds the eager-open / repair-in-progress guards to EAGER /
 IN-PROGRESS, reports CURRENT-WS as the active workspace, and stubs the
 frontend show dispatch.  SETUP, when non-nil, is a thunk run after the
-layout is built (for fixtures like a drawer side window or another
+layout is built (for fixtures like a side window or another
 workspace's panel); AFTER, when non-nil, is a thunk run after the
 reconcile while the layout is still live (for window-liveness
 assertions the temp-frame restore would otherwise destroy).  Returns
@@ -528,23 +515,23 @@ repair is dispatched."
 a deliberately hidden workspace is never resurrected."
   (should-not (agent-repl-window-test--run-ensure-layout)))
 
-(ert-deftest agent-repl-window-test-ensure-layout-leaves-drawer-untouched ()
-  "A drawer side window beside a view-only drift is not disturbed: the
-repair dispatches and the drawer window survives the reconcile."
-  (let ((drawer-buf (generate-new-buffer " *elt-drawer*"))
-        (drawer-win nil))
+(ert-deftest agent-repl-window-test-ensure-layout-leaves-side-window-untouched ()
+  "A side window beside a view-only drift is not disturbed: the
+repair dispatches and the side window survives the reconcile."
+  (let ((side-buf (generate-new-buffer " *elt-side*"))
+        (side-win nil))
     (unwind-protect
         (should (equal
                  (agent-repl-window-test--run-ensure-layout
                   :show-view t
                   :setup (lambda ()
-                           (setq drawer-win
+                           (setq side-win
                                  (display-buffer-in-side-window
-                                  drawer-buf '((side . left) (slot . 0)))))
+                                  side-buf '((side . left) (slot . 0)))))
                   :after (lambda ()
-                           (should (window-live-p drawer-win))))
+                           (should (window-live-p side-win))))
                  '("cur")))
-      (kill-buffer drawer-buf))))
+      (kill-buffer side-buf))))
 
 (ert-deftest agent-repl-window-test-ensure-layout-ignores-other-workspace-panels ()
   "Another workspace's half-present panel never triggers a repair —
@@ -590,10 +577,10 @@ code dumped that into *Messages* via `message'.  After the fix, the
 sweep swallows the structural error and produces no `[agent-repl]
 window--delete-where: could not delete' message."
   (agent-repl-window-test--with-temp-frame
-    (let* ((drawer-buf (generate-new-buffer " *test-drawer*"))
-           (main-buf   (generate-new-buffer " *test-main*"))
-           (drawer-win (display-buffer-in-side-window
-                        drawer-buf '((side . left) (slot . 0)))))
+    (let* ((side-buf (generate-new-buffer " *test-side*"))
+           (main-buf (generate-new-buffer " *test-main*"))
+           (side-win (display-buffer-in-side-window
+                      side-buf '((side . left) (slot . 0)))))
       (set-window-buffer (selected-window) main-buf)
       (unwind-protect
           (let* ((captured nil)
@@ -605,14 +592,14 @@ window--delete-where: could not delete' message."
                              (push s captured))
                            (apply orig-message fmt args)))))
               ;; Sweep targets `main-buf' — it's the only main-area window
-              ;; with the drawer present, so `delete-window' refuses it
-              ;; as the frame's main window.  We want the sweep to
+              ;; with the side window present, so `delete-window' refuses
+              ;; it as the frame's main window.  We want the sweep to
               ;; recognize that and stay silent.
               (agent-repl-window--delete-where
                (lambda (win) (eq (window-buffer win) main-buf)))
               (should-not captured)))
-        (when (window-live-p drawer-win) (delete-window drawer-win))
-        (kill-buffer drawer-buf)
+        (when (window-live-p side-win) (delete-window side-win))
+        (kill-buffer side-buf)
         (kill-buffer main-buf)))))
 
 (ert-deftest agent-repl-window-test-delete-where-still-logs-unrelated-errors ()

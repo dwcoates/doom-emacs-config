@@ -143,7 +143,8 @@ rather than looping forever."
 (defun agent-repl--apply-display-state (ws saved)
   "Apply persisted display/metadata state from SAVED plist onto workspace WS.
 SAVED is a parsed state-file plist (or nil).  Hydrates the
-non-env-struct keys that drive the tabline badge and drawer glyphs:
+non-env-struct keys that drive the tabline badge and workspace state
+glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
 `:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
 `:backend-session-stash', `:config-dir-override', `:frontend' (only
@@ -217,9 +218,9 @@ remaining keys are written only when SAVED carries them."
                          (or (plist-get saved :frontend)
                              (agent-repl--ws-get ws :frontend))))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
-  ;; already in the plist.  Used by the drawer's detail view to show
-  ;; "duration since last user message"; survives Emacs restarts so
-  ;; the duration reflects real elapsed wall-clock, not session age.
+  ;; already in the plist.  Records when the last user prompt was
+  ;; sent; survives Emacs restarts so duration-since-last-prompt
+  ;; displays reflect real elapsed wall-clock, not session age.
   (agent-repl--ws-put ws :last-prompt-time
                        (or (and saved (plist-get saved :last-prompt-time))
                            (agent-repl--ws-get ws :last-prompt-time)))
@@ -268,10 +269,11 @@ remaining keys are written only when SAVED carries them."
   ;; not the post-restart re-init moment.
   (when-let ((at (and saved (plist-get saved :last-prompt-summary-at))))
     (agent-repl--ws-put ws :last-prompt-summary-at at))
-  ;; Worktree-flag + merge-completed: survive restart so the drawer's
-  ;; MERGED bucket reappears and `--finish-workspace' can still remove
-  ;; the worktree when the user presses `x' on a post-restart MERGED
-  ;; entry.  `:merge-completed-at' rides alongside for display only.
+  ;; Worktree-flag + merge-completed: survive restart so the
+  ;; merged-completed state reappears and `--finish-workspace' can
+  ;; still remove the worktree when the user finishes a post-restart
+  ;; merged entry.  `:merge-completed-at' rides alongside for display
+  ;; only.
   (when (and saved (eq (plist-get saved :worktree-p) t))
     (agent-repl--ws-put ws :worktree-p t))
   (when (and saved (eq (plist-get saved :merge-completed) t))
@@ -280,7 +282,7 @@ remaining keys are written only when SAVED carries them."
     ;; so the badge re-appears post-restart instead of falling
     ;; through to `:dead' (or whatever the poll resolves).  A
     ;; persisted `:merge-failed t' wins over the success path: the
-    ;; workspace stays in MERGED but surfaces the ❌ badge via
+    ;; workspace stays merged-completed but surfaces the ❌ badge via
     ;; `:repl-state :merge-failed' so the prior silent-failure
     ;; signal isn't lost across restart.
     (let ((mf (eq (plist-get saved :merge-failed) t)))
@@ -292,10 +294,10 @@ remaining keys are written only when SAVED carries them."
 (defun agent-repl--load-display-state (ws project-root)
   "Hydrate WS's persisted display state from PROJECT-ROOT's state file.
 Reads PROJECT-ROOT's state file once and applies the persisted
-display/metadata keys (`:priority' and the drawer-badge / merge /
+display/metadata keys (`:priority' and the state-badge / merge /
 last-prompt fields) to WS via `agent-repl--apply-display-state', so
-the tabline badge and drawer glyphs render the moment a workspace is
-switched to (`SPC p p') or created — without waiting for
+the tabline badge and workspace glyphs render the moment a workspace
+is switched to (`SPC p p') or created — without waiting for
 `agent-repl--initialize-ws-env', which only runs when the agent starts.
 
 No-op when WS or PROJECT-ROOT is nil, or when WS has already been
