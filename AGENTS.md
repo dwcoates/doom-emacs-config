@@ -404,6 +404,10 @@ Keep entries minimal — one short sentence or a brief code block per rule.
 
 # Agent Guidelines for agent-repl Development
 
+## GUI nomenclature: tail status rows
+
+The animated `thinking…`/`working…`/`retrying…`/`interrupting…`/`monitoring…` indicators at the bottom of the webapp feed are **tail status rows** (`webapp/src/render.ts`); the in-flight precedence set (interrupting > compacting > retrying > working) is the **bucket-1 tail** (`tailStatusRow`), `monitoring…` is its idle-but-async-live fallback, and each animates via `animatedEllipsis()`.
+
 ## Debugging Vexing / Non-Obvious Bugs
 
 When facing a bug that resists immediate root-cause identification, **do not speculate indefinitely**. Instead, shift to an instrumentation-first approach:
