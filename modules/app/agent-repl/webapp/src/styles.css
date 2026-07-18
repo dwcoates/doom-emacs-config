@@ -1347,7 +1347,12 @@ pre {
    without marching in lockstep. `content` is a discrete (non-interpolable)
    property, so step-end holds each dot count until the next keyframe rather
    than smearing between them; the static "…" in the base rule is the fallback
-   for engines that cannot animate `content`. */
+   for engines that cannot animate `content`.
+
+   The dots sit flush against the word because the pending rows below zero the
+   flex gap ahead of THIS span (see `.animated-ellipsis` there): the span is
+   its own flex item, so the row's inter-item gap would otherwise read as a
+   stray space between the word and the dots ("working …"). */
 .animated-ellipsis::after {
   content: "…";
   animation: ellipsis-dots calc(0.8s * 4 / 3) step-end infinite;
@@ -1434,6 +1439,36 @@ pre {
   border-color: color-mix(in srgb, var(--async) 25%, transparent);
   border-top-color: var(--async);
 }
+/* Pull the ellipsis flush against its status word. The pending rows above are
+   flex with a 0.5rem inter-item gap (so the spinner clears the word), but the
+   ellipsis span is its OWN flex item too, so that same gap lands between the
+   word and its dots and reads as a stray space ("working …"). A negative
+   margin the width of the gap cancels it for this one item, leaving the dots
+   flush ("working…") and the spinner's gap intact. Scoped to these flex rows,
+   so the non-flex `(thinking…)` summary label — which has no gap to cancel —
+   is left alone. */
+.thinking-pending .animated-ellipsis,
+.working-pending .animated-ellipsis,
+.retrying-pending .animated-ellipsis,
+.monitoring-pending .animated-ellipsis,
+.interrupting-pending .animated-ellipsis {
+  margin-left: -0.5rem;
+}
+/* The live turn-stats row: the running turn's elapsed clock and the context
+   it has grown so far, shown at the feed tail right below the progress
+   indicator for as long as the turn runs (see turnStatsRowHtml). It is the
+   running twin of the corner a final response settles into (.turn-meta), so it
+   reuses the SAME two topbar hues — the clock's --info-time blue and the
+   delta's --info-tokens amber — bullet-separated. Same tail geometry as the
+   pending rows above, minus the spinner: the indicator directly above already
+   carries the arc. */
+.turn-stats-live {
+  padding: 0.25rem 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.turn-stats-live .info-time { color: var(--info-time); }
+.turn-stats-live .info-tokens { color: var(--info-tokens); }
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then
    awaiting the result), so every card in progress reads the same. Two
