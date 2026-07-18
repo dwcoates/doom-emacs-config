@@ -183,6 +183,13 @@ body {
   display: flex;
   flex-direction: row;
   height: 100vh;
+  /* The xwidget host cedes the pointer to the page (Emacs's
+     resetCursorRects abstains over child views), so the UA's `auto`
+     would I-beam every run of text in a GUI that is mostly text.
+     Inherit `default` everywhere; interactive elements declare their
+     own (pointer, zoom-in, ns-resize), and the composer restores the
+     editable-field I-beam. */
+  cursor: default;
 }
 
 /* The main column keeps the old body layout: topbar over feed over
@@ -1079,6 +1086,8 @@ pre {
 #composer-input {
   flex: 1;
   resize: none;
+  /* body's inherited `default` would strip the editable-field I-beam. */
+  cursor: text;
   background: var(--composer-bg);
   color: var(--fg);
   border: 1px solid var(--border);
