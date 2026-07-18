@@ -477,22 +477,26 @@ pre {
   font-size: 0.85rem;
 }
 
-/* The feed is a single centered column, not a two-sided thread: every
-   bubble the AGENT emits — its response, and further down each top-level
-   async tool card (Agent, Bash, Read, …) — centers in the feed capped at
-   the `--agent-bubble-cap` width, so an equal eighth of blank margin sits
-   on each side. The user's own PROMPT is treated differently: it shrinks
-   to fit its own text (a short `hello` is a small bubble, a long prompt
-   grows leftward to its own narrower cap under the agent's), and it is
-   pushed as far right as it may go WITHOUT passing the response's right
-   edge. Its right margin is exactly half the agent column's leftover, so a
-   prompt's right edge lands flush with the centered response above and
-   below it rather than jutting past. Placement is done with auto margins
-   rather than `align-self`, because a bubble is a child of its
-   `.feed-item` wrapper — a plain block, not the feed's flex row — so an
-   `align-self` on it is inert; a max-width'd block with auto margins is
-   what actually centers. The parked queued cards below are the one
-   exception, left at their existing width and edge. Every bubble reserves
+/* The feed is framed by ONE centered column, the `--agent-bubble-cap`
+   width, so an equal eighth of blank margin sits on each side. Each
+   top-level async tool card (Agent, Bash, Read, …) centers in it. The two
+   speakers' bubbles do NOT center — each shrinks to fit its own text (a
+   short `hello` is a small bubble) and hugs one rail of that column, a
+   mirror image of the other. The user's own PROMPT hugs the RIGHT rail: a
+   long prompt grows leftward to its own narrower cap under the agent's, and
+   it is pushed as far right as it may go WITHOUT passing the column's right
+   edge — its right margin is exactly half the column's leftover, so a
+   prompt's right edge lands flush with the centered tool cards' right edge
+   above and below it rather than jutting past. The agent's RESPONSE hugs the
+   LEFT rail the same way, only flipped: a long response grows rightward to
+   the agent cap from a left margin of that same half-leftover, so its left
+   edge lands flush with the centered tool cards' left edge. Placement is
+   done with auto margins rather than `align-self`, because a bubble is a
+   child of its `.feed-item` wrapper — a plain block, not the feed's flex row
+   — so an `align-self` on it is inert; a fit-content block with one fixed
+   margin and one auto margin is what actually flushes it to a rail. The
+   parked queued cards below are the one exception, left at their existing
+   width and edge. Every bubble reserves
    its 0.5px border box up front, so a turn's final response gaining the
    green (or amber async) state border on completion recolors 0.5px that
    were already laid out rather than reflowing the feed under a reader
@@ -595,22 +599,31 @@ pre {
   padding: 0 0.2rem;
   border-radius: 4px;
 }
-/* Agent-side feed content centers: the assistant's response bubble and
-   every top-level async tool card — a lone `.tool-card`, or a
-   consecutive-run `.feed-group` wrapping one — alike, each capped at 75%
-   of the feed and pushed to the middle by equal auto margins. Scoped to
-   direct `.feed-item` children, so a tool card NESTED inside a bubble's
-   activity panel keeps its full width. */
-.bubble.assistant,
+/* Agent-side tool cards center: every top-level async tool card — a lone
+   `.tool-card`, or a consecutive-run `.feed-group` wrapping one — is capped
+   at 75% of the feed and pushed to the middle by equal auto margins. Scoped
+   to direct `.feed-item` children, so a tool card NESTED inside a bubble's
+   activity panel keeps its full width. The assistant's own response bubble
+   is NOT centered — it fits its text and hugs the left rail (see below). */
 .feed-item > .tool-card,
 .feed-item > .feed-group {
   max-width: var(--agent-bubble-cap);
   margin-left: auto;
   margin-right: auto;
 }
+/* The assistant's response bubble shrinks to fit its own text and hugs the
+   LEFT rail, the mirror of the prompt's right-flush (see `.bubble.user` and
+   the column comment above `.bubble`). Its left margin is exactly half the
+   agent column's leftover, so a short response sits with its left edge flush
+   against the centered tool cards' left edge, and an auto right margin lets a
+   long one grow rightward only to the agent cap. */
 .bubble.assistant {
   background: var(--assistant);
   --pulse-to: var(--assistant-pulse);
+  width: fit-content;
+  max-width: var(--agent-bubble-cap);
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
 }
 /* The answer the turn landed on, as against the commentary above it. Only
    the border color changes, so the 0.5px the base reserved stays laid out. */
