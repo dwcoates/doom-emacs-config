@@ -84,6 +84,11 @@ type transcriptEntry struct {
 	IsMeta      bool            `json:"isMeta"`
 	Timestamp   string          `json:"timestamp"`
 	Message     json.RawMessage `json:"message"`
+	// Error is the SDK's assistant-message error verdict, recorded beside
+	// Message on an assistant entry that was an API-level failure; empty
+	// otherwise. Carried through so a rehydrated session reddens the same
+	// error bubbles a live one does.
+	Error string `json:"error,omitempty"`
 }
 
 // transcriptUserMessage decodes a user entry's message envelope.
@@ -335,7 +340,7 @@ func replayEntryFrames(t *Translator, line []byte, st *replayState) ([]protocol.
 		if err := json.Unmarshal(entry.Message, &meta); err == nil {
 			st.lastMeta = meta
 		}
-		frames := t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message})
+		frames := t.OnEvent(&protocol.L1Event{Type: "assistant-message", Message: entry.Message, Error: entry.Error})
 		return stampReplay(frames, entry.Timestamp), entry.Timestamp
 	case "user":
 		return replayUserFrames(t, entry.Message, entry.Timestamp, st), entry.Timestamp

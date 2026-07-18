@@ -279,11 +279,31 @@ export interface StreamEventEvt {
   event: RawMessageStreamEvent;
 }
 
+/**
+ * The SDK's structured verdict that an assistant message IS an API-level
+ * failure (a session/usage limit, a billing or auth failure, ...) rather
+ * than model output — mirrored verbatim from `SDKAssistantMessage.error`.
+ * Absent on an ordinary assistant message.
+ */
+export type AssistantMessageError =
+  | "authentication_failed"
+  | "billing_error"
+  | "rate_limit"
+  | "invalid_request"
+  | "server_error"
+  | "unknown";
+
 export interface AssistantMessageEvt {
   type: "assistant-message";
   session_id: SessionId;
   uuid: string;
   parent_tool_use_id?: ToolUseId;
+  /**
+   * Set only when this assistant message is an API-level error. It rides at
+   * the event's top level because the SDK carries it as a SIBLING of
+   * `message` (not inside the API message body).
+   */
+  error?: AssistantMessageError;
   message: {
     id: string;
     role: "assistant";

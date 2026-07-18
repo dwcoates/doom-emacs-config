@@ -304,6 +304,74 @@ func TestTranslatorParentToolUseIDPropagatesToSynthesizedTextStart(t *testing.T)
 	t.Fatalf("no text-start frame in %v", frames)
 }
 
+// --- assistant errors ----------------------------------------------------------
+
+func TestTranslatorSynthesizedAssistantErrorTrailsTheMessageText(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a non-streamed session-limit message: text plus the SDK's error verdict beside it.
+	frames := tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","error":"rate_limit","message":{"id":"msgE","role":"assistant","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"You've hit your session limit"}],"usage":{"input_tokens":1,"output_tokens":1}}}`))
+	// Assert — the error frame names the message and trails its text block, so
+	// the block exists to be reddened when the client applies the frame.
+	errIdx, textIdx := -1, -1
+	for i, f := range frames {
+		switch fr := f.(type) {
+		case *protocol.AssistantErrorFrame:
+			errIdx = i
+			if fr.MessageID != "msgE" || fr.Error != "rate_limit" {
+				t.Errorf("assistant-error = %+v", fr)
+			}
+		case *protocol.TextStartFrame:
+			textIdx = i
+		}
+	}
+	if errIdx == -1 {
+		t.Fatalf("no assistant-error frame in %v", frameTypes(frames))
+	}
+	if textIdx == -1 || errIdx < textIdx {
+		t.Errorf("assistant-error must trail the text block: errIdx=%d textIdx=%d", errIdx, textIdx)
+	}
+}
+
+func TestTranslatorStreamedAssistantErrorMarksTheMessageWithoutResynthesis(t *testing.T) {
+	// Arrange — the message's text streams first, so its blocks already exist.
+	tr := NewTranslator()
+	startMessage(t, tr, "msgE")
+	runTextBlock(t, tr, 0, "You've hit your session limit")
+	// Act — the completed message carries the SDK's error verdict.
+	frames := tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","error":"rate_limit","message":{"id":"msgE","role":"assistant","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"You've hit your session limit"}],"usage":{"input_tokens":1,"output_tokens":1}}}`))
+	// Assert — an assistant-error frame is emitted keyed by the message id, and
+	// no text frames are re-synthesized for the already-streamed blocks.
+	var got *protocol.AssistantErrorFrame
+	for _, f := range frames {
+		if fr, ok := f.(*protocol.AssistantErrorFrame); ok {
+			got = fr
+		}
+		if _, ok := f.(*protocol.TextStartFrame); ok {
+			t.Errorf("streamed message re-synthesized a text-start: %v", frameTypes(frames))
+		}
+	}
+	if got == nil {
+		t.Fatalf("no assistant-error frame in %v", frameTypes(frames))
+	}
+	if got.MessageID != "msgE" || got.Error != "rate_limit" {
+		t.Errorf("assistant-error = %+v", got)
+	}
+}
+
+func TestTranslatorOrdinaryAssistantMessageEmitsNoError(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act — a message with no error verdict beside it.
+	frames := tr.OnEvent(evt(t, `{"type":"assistant-message","session_id":"s1","uuid":"u","message":{"id":"msgO","role":"assistant","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}}`))
+	// Assert
+	for _, f := range frames {
+		if _, ok := f.(*protocol.AssistantErrorFrame); ok {
+			t.Fatalf("ordinary message emitted an assistant-error frame: %v", frameTypes(frames))
+		}
+	}
+}
+
 // --- tool results --------------------------------------------------------------
 
 func TestTranslatorToolResultCarriesBashRenderHint(t *testing.T) {

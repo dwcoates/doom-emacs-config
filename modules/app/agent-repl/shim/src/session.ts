@@ -8,6 +8,7 @@
  */
 import { AsyncQueue } from "./input-queue.js";
 import {
+  AssistantMessageError,
   ContentBlock,
   ContentBlockToolResult,
   ModelInfo,
@@ -446,11 +447,18 @@ export class ShimSession {
           content: ContentBlock[];
           usage: ResultEvt["usage"];
         };
+        // The SDK flags an API-level failure (a session/usage limit, a
+        // billing or auth error) with `error` ALONGSIDE `message`; forward it
+        // so downstream layers can render the message as an error rather than
+        // mistake its text for an ordinary answer. Absent on normal messages.
+        const error =
+          typeof msg.error === "string" ? (msg.error as AssistantMessageError) : undefined;
         this.deps.emit({
           type: "assistant-message",
           session_id: this.deps.sessionId,
           uuid: msg.uuid ?? "",
           ...parentField(msg),
+          ...(error !== undefined ? { error } : {}),
           message: {
             id: m.id,
             role: "assistant",

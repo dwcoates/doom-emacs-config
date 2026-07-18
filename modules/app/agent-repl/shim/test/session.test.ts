@@ -759,6 +759,36 @@ describe("ShimSession SDK message mapping", () => {
     ]);
   });
 
+  it("forwards the SDK's assistant-message error verdict at the event's top level", async () => {
+    // Arrange
+    const h = makeHarness();
+    const message = {
+      id: "msg_1",
+      model: "m",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "You've hit your session limit" }],
+      usage: { input_tokens: 1, output_tokens: 2 },
+    };
+    // Act — the SDK stamps `error` beside `message` on a session/usage limit.
+    await drive(h, {
+      type: "assistant",
+      uuid: "u2",
+      parent_tool_use_id: null,
+      message,
+      error: "rate_limit",
+    });
+    // Assert
+    expect(h.eventsOfType("assistant-message")).toEqual([
+      {
+        type: "assistant-message",
+        session_id: "sess-1",
+        uuid: "u2",
+        error: "rate_limit",
+        message: { ...message, role: "assistant" },
+      },
+    ]);
+  });
+
   it("decomposes user messages into one tool-result event per tool_result block", async () => {
     // Arrange
     const h = makeHarness();

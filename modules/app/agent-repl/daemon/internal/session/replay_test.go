@@ -249,6 +249,19 @@ func TestBuildReplayFramesAssistantTextBlock(t *testing.T) {
 	}
 }
 
+func TestBuildReplayFramesAssistantErrorMarksTheMessage(t *testing.T) {
+	// Arrange / Act — a rehydrated session-limit message carries the SDK's
+	// error verdict beside its message, exactly as the live path does.
+	frames, _ := buildFrames(t,
+		`{"type":"assistant","error":"rate_limit","message":{"id":"msg_1","content":[{"type":"text","text":"You've hit your session limit"}]}}`)
+	// Assert — the error frame trails the text block it reddens.
+	wantTypes(t, frames, "text-start", "text-delta", "text-end", "assistant-error")
+	last := frames[len(frames)-1].(*protocol.AssistantErrorFrame)
+	if last.MessageID != "msg_1" || last.Error != "rate_limit" {
+		t.Fatalf("assistant-error = %+v", last)
+	}
+}
+
 func TestBuildReplayFramesAssistantTextCarriesTranscriptTimestamp(t *testing.T) {
 	// Arrange / Act
 	frames, _ := buildFrames(t,

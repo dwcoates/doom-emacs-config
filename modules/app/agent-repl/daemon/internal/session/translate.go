@@ -733,7 +733,25 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 			frames = append(frames, frame)
 		}
 	}
+	// An API-level failure (a session/usage limit, a billing or auth error)
+	// arrives as an assistant message the SDK stamps with `error`. Mark it by
+	// message id so the client reddens its text bubble instead of greening it
+	// as an answer. The verdict lands only with the complete message, so a
+	// streamed message's blocks already exist by the time this frame closes
+	// the message — and a synthesized message's blocks are appended below,
+	// BEFORE this frame, so the id resolves in both paths.
+	var errFrame protocol.L2Frame
+	if evt.Error != "" {
+		errFrame = &protocol.AssistantErrorFrame{
+			Envelope:  protocol.Envelope{Type: "assistant-error"},
+			MessageID: msg.ID,
+			Error:     evt.Error,
+		}
+	}
 	if t.streamed[msg.ID] {
+		if errFrame != nil {
+			frames = append(frames, errFrame)
+		}
 		return frames
 	}
 	for _, block := range msg.Content {
@@ -779,6 +797,11 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 				},
 			)
 		}
+	}
+	// After the message's blocks, so its text bubble already exists when the
+	// client applies this frame and reddens it.
+	if errFrame != nil {
+		frames = append(frames, errFrame)
 	}
 	return frames
 }

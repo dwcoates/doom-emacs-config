@@ -125,6 +125,11 @@ type L1Event struct {
 	// Message is an object on assistant-message events and a plain JSON
 	// string on error events; use MessageText for the latter.
 	Message json.RawMessage `json:"message,omitempty"`
+	// Error is the SDK's structured verdict that an assistant-message IS an
+	// API-level failure (a session/usage limit, a billing or auth error);
+	// empty on an ordinary assistant message. It rides beside Message, not
+	// inside it, mirroring the SDK shape.
+	Error string `json:"error,omitempty"`
 
 	// result
 	Subtype           string                `json:"subtype,omitempty"`

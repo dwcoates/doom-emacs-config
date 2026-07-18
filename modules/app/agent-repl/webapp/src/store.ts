@@ -7,6 +7,7 @@
  * the transport should send (if any) instead of sending it itself.
  */
 import {
+  AssistantMessageError,
   AsyncSource,
   ContentBlock,
   HelloFrame,
@@ -43,6 +44,15 @@ export interface TextItem {
   parentToolUseId?: string;
   text: string;
   done: boolean;
+  /**
+   * Set when the owning assistant message was an API-level failure (a
+   * session/usage limit, a billing or auth error): the bubble is a failure
+   * notice, not an answer, so it renders red instead of the green
+   * final-response border. Filled by the `assistant-error` frame, which
+   * arrives after the block, keyed by message id. Undefined on a normal
+   * block.
+   */
+  error?: AssistantMessageError;
   /**
    * Envelope ts (§2.1) of the `text-start` frame: when the agent OPENED
    * the block, rendered on the bubble. Taken at the start rather than the
@@ -733,6 +743,18 @@ export class ConversationStore {
         if (item) {
           item.text = frame.final_text;
           item.done = true;
+        }
+        break;
+      }
+      case "assistant-error": {
+        // The error scopes the whole message, so every text block it opened
+        // is a failure notice. The frame lands after those blocks (the SDK's
+        // verdict arrives only with the completed message), so they already
+        // exist and are colored retroactively.
+        for (const item of s.items) {
+          if (item.kind === "text" && item.messageId === frame.message_id) {
+            item.error = frame.error;
+          }
         }
         break;
       }

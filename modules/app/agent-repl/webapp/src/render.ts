@@ -536,7 +536,17 @@ function TextStream(
   // member settles (amber → green quiescence). A bubble the projection does
   // not host carries no members, so it never goes amber.
   const liveAsync = hasLiveAsync(item.blockId, panels);
-  const stateCls = liveAsync ? " async-live" : chip ? " final-response" : "";
+  // An API-level error (a session/usage limit, a billing or auth failure)
+  // outranks every other state: the bubble is a failure notice, not an
+  // answer, so it wears the red border whether or not the turn otherwise
+  // landed a green final-response or is still breathing amber async.
+  const stateCls = item.error
+    ? " error-response"
+    : liveAsync
+      ? " async-live"
+      : chip
+        ? " final-response"
+        : "";
   const cls = `bubble assistant md${stateCls}`;
   // The catalog rides EVERY host bubble, not just a final one: an interrupted
   // or tools-only turn hosts its survivors too (asyncByBubble), so a bubble

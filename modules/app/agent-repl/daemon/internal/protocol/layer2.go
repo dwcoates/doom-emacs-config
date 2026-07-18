@@ -181,6 +181,21 @@ type TextEndFrame struct {
 	FinalText string `json:"final_text"`
 }
 
+// AssistantErrorFrame marks an assistant message as an API-level error (a
+// session/usage limit, a billing or auth failure, ...) rather than model
+// output, so a client can render its text bubble as a failure instead of an
+// answer. Keyed by message id — not block id — because the SDK's error
+// verdict scopes the whole message and arrives only with the complete
+// message, AFTER any of its blocks streamed. Emitted for a streamed and a
+// synthesized message alike.
+type AssistantErrorFrame struct {
+	Envelope
+	MessageID string `json:"message_id"`
+	// Error mirrors the SDK's SDKAssistantMessageError discriminator
+	// (rate_limit, billing_error, authentication_failed, ...).
+	Error string `json:"error"`
+}
+
 // --- §2.5 thinking --------------------------------------------------------
 
 type ThinkingStartFrame struct {
