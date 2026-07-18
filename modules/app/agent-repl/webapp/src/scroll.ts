@@ -73,6 +73,35 @@ export function isPinnedToBottom(pos: ScrollPosition, pinPx: number = PIN_PX): b
   return pos.scrollHeight - pos.scrollTop - pos.clientHeight < pinPx;
 }
 
+/**
+ * Tail-following is FROZEN while the user reads content they deliberately
+ * opened — a nested view inside a bubble (an agent's stream in a monitoring
+ * bubble). A frozen feed stops chasing its tail, so streaming output can no
+ * longer yank the view off what the user is reading. The freeze is the same
+ * question isPinnedToBottom answers — who owns the scroll position, the user
+ * or the feed — so its two transitions live here beside it.
+ */
+
+/**
+ * The freeze after a fold toggle: opening a nested view BEGINS the freeze,
+ * and closing one holds whatever state was already in force (only a return
+ * to the tail lifts it, see freezeOnScroll). So a user who opens one view,
+ * closes it, and opens another stays frozen throughout.
+ */
+export function freezeOnToggle(frozen: boolean, opened: boolean): boolean {
+  return opened || frozen;
+}
+
+/**
+ * The freeze after a user scroll: it ENDS the moment the feed is back at its
+ * tail, which is the user asking to follow new content again. Anywhere short
+ * of the tail keeps the freeze, so a scroll that merely reads more of the
+ * opened content does not resume tail-following.
+ */
+export function freezeOnScroll(frozen: boolean, pinned: boolean): boolean {
+  return frozen && !pinned;
+}
+
 /** The one mutable field parking a box at its tail touches. */
 export interface ScrollTail {
   scrollTop: number;
