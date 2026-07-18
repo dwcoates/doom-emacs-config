@@ -547,6 +547,14 @@ Both helpers dispatch on `current-thread`:
 - ✓ Calling `call-process` from the main thread, with the understanding that it blocks the UI for the duration.
 - ✓ Async `make-process` + `:sentinel` / `:filter` from any thread — sentinels and filters fire on whichever thread is currently servicing events (usually main), not the caller of `make-process`.
 
+### Subprocess spawns: PIPE, never pty — the git-pager stall
+
+**Every synchronous subprocess the module spawns MUST use a pipe (`make-process :connection-type 'pipe`), never a pty.** `start-process` and `make-process` default to `process-connection-type` = t (a pty), and children change behavior on a terminal: `git log` (and any paginating git subcommand) launches its pager, `less` waits forever for a keypress nobody will send, and the call burns its full 60s `--capture-process-output` timeout. This was the trigger for every 2026-07-18 freeze: 60s-per-call merge stalls, main-thread UI freezes when the caller was a timer, and the timeout path feeding the worker-thread `kill-buffer` deadlock below. `agent-repl--capture-process-output` now spawns both branches on pipes; keep it that way, and spawn any NEW synchronous capture through it rather than hand-rolling.
+
+### Buffer teardown can BE process teardown — the timeout-path deadlock
+
+`kill-buffer` on a buffer that still owns a live process implicitly runs `delete-process` on the calling thread. On the merge worker that means redisplay → `-[NSThemeFrame setTitle:]` → ObjC exception → `abort`, and the worker dies in the fatal-signal handler **still holding the global Lisp lock** — the main thread then deadlocks on its next select (0% CPU, only `kill -9` recovers; observed 2026-07-12 and again 2026-07-18). The subtle case is CLEANUP code: `--capture-process-output`'s unwind-protect kills its stdout buffer, and on the timeout path the child is often still alive because `--kill-process-safely` deferred the real `delete-process` to the main thread. Route every buffer kill that can run on a worker through `agent-repl--kill-buffer-safely` — including `unwind-protect` cleanup forms and process sentinels, not just the obvious teardown paths.
+
 ### Indirect chains — the trap does not require a direct call
 
 The per-diff audit greps for direct calls, but the 2026-07-18 freeze reached `[NSApp run]` through FIVE frames of indirection, none of which looked like a wait: merge worker → `load-file` (config reload) → top-level watcher re-arm (`agent-repl--dir-watcher-register`) → `file-notify-rm-watch` (synchronously fires the handler's `stopped` branch) → notification drain → frontend HTTP (`url-retrieve-synchronously` → `accept-process-output`). Symptom: ~90% of CPU samples in `-[NSApplication reportException:]` logging AppKit exceptions from the worker, main thread deadlocked in `really_call_select` — recoverable only by `kill -9`.
