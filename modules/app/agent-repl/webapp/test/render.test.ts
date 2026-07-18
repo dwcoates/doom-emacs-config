@@ -8,6 +8,7 @@ import {
   activeGroupMember,
   activityTicker,
   anyLiveAsync,
+  anyLiveThinking,
   backfillChunks,
   clearBoundary,
   compactionBannerHtml,
@@ -393,28 +394,35 @@ describe("monitoringRowHtml", () => {
 describe("showsMonitoringRow (global monitoring-row precedence)", () => {
   it("shows on an idle session with live async somewhere", () => {
     // Arrange / Act — the quiescent-but-still-watching case.
-    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, anyLiveAsync: true });
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, thinking: false, anyLiveAsync: true });
     // Assert
     expect(show).toBe(true);
   });
 
   it("hides while a turn is in flight, ceding the tail to the working/thinking rows", () => {
     // Arrange / Act — the main chain is active, so a bucket-1 row speaks instead.
-    const show = showsMonitoringRow({ turnInFlight: true, interrupting: false, anyLiveAsync: true });
+    const show = showsMonitoringRow({ turnInFlight: true, interrupting: false, thinking: false, anyLiveAsync: true });
     // Assert
     expect(show).toBe(false);
   });
 
   it("hides while interrupting, which the alarm-red row owns", () => {
     // Arrange / Act
-    const show = showsMonitoringRow({ turnInFlight: false, interrupting: true, anyLiveAsync: true });
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: true, thinking: false, anyLiveAsync: true });
+    // Assert
+    expect(show).toBe(false);
+  });
+
+  it("hides while a thinking indicator is present, ceding the shared tail slot to it", () => {
+    // Arrange / Act — main chain idle, but a subagent's `thinking…` spinner is live.
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, thinking: true, anyLiveAsync: true });
     // Assert
     expect(show).toBe(false);
   });
 
   it("hides on an idle session with no live async at all", () => {
     // Arrange / Act — nothing left to monitor.
-    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, anyLiveAsync: false });
+    const show = showsMonitoringRow({ turnInFlight: false, interrupting: false, thinking: false, anyLiveAsync: false });
     // Assert
     expect(show).toBe(false);
   });
@@ -525,6 +533,36 @@ describe("anyLiveAsync (feed-wide liveness for the global row)", () => {
   it("is false for a feed carrying no async members at all", () => {
     // Arrange / Act — a plain text bubble owns no background work.
     const live = anyLiveAsync([text("b1")], noChildren);
+    // Assert
+    expect(live).toBe(false);
+  });
+});
+
+describe("anyLiveThinking (thinking-indicator liveness for the monitoring gate)", () => {
+  it("is true when a thinking block is still live (not done)", () => {
+    // Arrange / Act — an open block still spins its `thinking…` indicator.
+    const live = anyLiveThinking([thinking("t1", false)]);
+    // Assert
+    expect(live).toBe(true);
+  });
+
+  it("is false when the only thinking block has finished", () => {
+    // Arrange / Act — a done block renders no live spinner.
+    const live = anyLiveThinking([thinking("t1", true)]);
+    // Assert
+    expect(live).toBe(false);
+  });
+
+  it("is true for a live parented (subagent) thinking block", () => {
+    // Arrange / Act — the overlap case: main chain idle, a subagent mid-thought.
+    const live = anyLiveThinking([subagentThinking("t1", false)]);
+    // Assert
+    expect(live).toBe(true);
+  });
+
+  it("is false for a feed carrying no thinking blocks at all", () => {
+    // Arrange / Act — a plain text bubble spins nothing.
+    const live = anyLiveThinking([text("b1")]);
     // Assert
     expect(live).toBe(false);
   });
