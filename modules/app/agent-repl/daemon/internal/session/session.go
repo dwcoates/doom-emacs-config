@@ -146,12 +146,6 @@ type Session struct {
 	// withdraws by this id, so a client can only ever retract the turn it
 	// believes is running (§2.3). Guarded by mu.
 	activeTurnRequestID string
-	// totalCostUSD accumulates every result frame's total_cost_usd (the
-	// sidebar roster's cost readout). In-memory only, deliberately never
-	// persisted to the registry: a rehydrated session restarts at zero.
-	// It survives hibernation, which frees the shim but not the session.
-	// Guarded by mu.
-	totalCostUSD float64
 	// deathReason classifies HOW a terminal session ended: the shim's
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
@@ -380,14 +374,6 @@ type Info struct {
 	DeathReason string
 	// TurnActive reports whether a user turn is in flight.
 	TurnActive bool
-	// TurnPreview is the tail (≤ turnPreviewRunes runes) of the active
-	// turn's streamed assistant text, "" when no turn is in flight — the
-	// sidebar roster's live-turn preview.
-	TurnPreview string
-	// TotalCostUSD is the cumulative cost of the session's completed
-	// turns, accumulated from result frames. In-memory only: a session
-	// rehydrated after a daemon restart reports 0.
-	TotalCostUSD float64
 	// PendingPermissions lists unresolved permission request ids, sorted.
 	PendingPermissions []string
 	// Queue is the in-flight message queue snapshot (§2.13), front-to-back.
@@ -429,33 +415,12 @@ func (s *Session) Info() Info {
 		Terminal:           s.terminal,
 		DeathReason:        s.deathReason,
 		TurnActive:         s.translator.TurnActive(),
-		TurnPreview:        tailRunes(s.translator.ActiveTurnText(), turnPreviewRunes),
-		TotalCostUSD:       s.totalCostUSD,
 		PendingPermissions: s.translator.PendingPermissionIDs(),
 		Queue:              s.queue.snapshot(),
 		Hibernated:         s.hibernated,
 		PermissionMode:     s.translator.PermissionMode,
 		LiveTaskCount:      liveTasks,
 	}
-}
-
-// turnPreviewRunes caps Info.TurnPreview (and so GET /sessions'
-// turn_preview): the sidebar wants a glimpse of the live turn, not the
-// turn itself.
-const turnPreviewRunes = 200
-
-// tailRunes returns the last max runes of s, rune-safe: a multibyte
-// character on the cut is kept whole or dropped whole, never split.
-func tailRunes(s string, max int) string {
-	if len(s) <= max {
-		// Byte length bounds rune count, so s already fits.
-		return s
-	}
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[len(runes)-max:])
 }
 
 // Run consumes the shim event stream until it closes. Blocks; run it on
@@ -501,13 +466,6 @@ func (s *Session) Run() {
 		if evt.Type == "closed" {
 			s.terminal = true
 			s.deathReason = evt.Reason
-		}
-		// Cost enrichment (sidebar roster joins): every completed turn's
-		// result carries its cost, and this loop is the one seam every
-		// LIVE result passes through exactly once — transcript seeding
-		// never runs here, so replayed history cannot double-count.
-		if evt.Type == "result" {
-			s.totalCostUSD += evt.TotalCostUSD
 		}
 		// Drain hook (§2.13): every turn end (any result, including an
 		// aborted one) is where the front queued item, if any, becomes the
