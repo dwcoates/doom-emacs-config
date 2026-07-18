@@ -41,6 +41,7 @@ import {
   splitChessGameSegments,
 } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
+import { renderPromptBody } from "./prompt-body.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { navTokensForItem } from "./nav.js";
@@ -415,7 +416,10 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // projection keys the prompt by the user-turn's request id.
   const stateCls = hasLiveAsync(item.requestId, panels) ? " async-live" : "";
   const catalog = AsyncCatalog(item.requestId, panels);
-  const body = `<pre>${escapeHtml(userTurnText(item))}</pre>${catalog}`;
+  // The prompt is shown verbatim, EXCEPT for markdown fenced code blocks,
+  // which render as the same highlighted card the agent's own fences get
+  // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.
+  const body = `${renderPromptBody(userTurnText(item))}${catalog}`;
   return `${Bubble(`bubble user${stateCls}`, body, item.ts)}${divider}`;
 }
 
