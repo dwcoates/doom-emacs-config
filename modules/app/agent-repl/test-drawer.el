@@ -3433,7 +3433,7 @@ a scale of 1.0."
       (agent-repl-drawer--render)
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p (concat (regexp-quote
-                                         agent-repl-drawer-state-icon-default)
+                                         agent-repl-ws-state-icon-default)
                                         "  lonely")
                                 text))))))
 
@@ -3446,7 +3446,7 @@ a scale of 1.0."
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p
                  (concat (regexp-quote
-                          (alist-get :idle agent-repl-drawer-state-icons))
+                          (alist-get :idle agent-repl-ws-state-icons))
                          "  p1")
                  text))))))
 
@@ -3469,15 +3469,15 @@ a scale of 1.0."
   "Reload-after-defcustom-change forces the latest palette to apply.
 Without the explicit force-reset, defcustom would keep prior values for
 already-bound symbols and palette tweaks would require an Emacs restart."
-  (should (equal (alist-get :done       agent-repl-drawer-state-icons) "✅"))
-  (should (equal (alist-get :thinking   agent-repl-drawer-state-icons) "⌛"))
-  (should (equal (alist-get :idle       agent-repl-drawer-state-icons) "💤"))
-  (should (equal (alist-get :init       agent-repl-drawer-state-icons) "⏳"))
-  (should (equal (alist-get :stop-failed agent-repl-drawer-state-icons) "❗"))
-  (should (equal (alist-get :dead       agent-repl-drawer-state-icons) "❌"))
-  (should (equal (alist-get :merged     agent-repl-drawer-state-icons) "🔀"))
-  (should (equal (alist-get :merge-conflict agent-repl-drawer-state-icons) "💥"))
-  (should (equal (alist-get :merge-failed agent-repl-drawer-state-icons) "⛔")))
+  (should (equal (alist-get :done       agent-repl-ws-state-icons) "✅"))
+  (should (equal (alist-get :thinking   agent-repl-ws-state-icons) "⌛"))
+  (should (equal (alist-get :idle       agent-repl-ws-state-icons) "💤"))
+  (should (equal (alist-get :init       agent-repl-ws-state-icons) "⏳"))
+  (should (equal (alist-get :stop-failed agent-repl-ws-state-icons) "❗"))
+  (should (equal (alist-get :dead       agent-repl-ws-state-icons) "❌"))
+  (should (equal (alist-get :merged     agent-repl-ws-state-icons) "🔀"))
+  (should (equal (alist-get :merge-conflict agent-repl-ws-state-icons) "💥"))
+  (should (equal (alist-get :merge-failed agent-repl-ws-state-icons) "⛔")))
 
 ;;;; ---- State glyph ----
 
@@ -3488,14 +3488,14 @@ already-bound symbols and palette tweaks would require an Emacs restart."
                                        :agent-state :thinking
                                        :repl-state :dead)
     (should (equal (agent-repl-drawer--state-glyph "zombie")
-                   (alist-get :dead agent-repl-drawer-state-icons)))))
+                   (alist-get :dead agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-from-agent-state ()
   "Glyph reflects :agent-state when :repl-state is not :dead."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "busy" :agent-state :thinking)
     (should (equal (agent-repl-drawer--state-glyph "busy")
-                   (alist-get :thinking agent-repl-drawer-state-icons)))))
+                   (alist-get :thinking agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-merged-shows-merged-when-no-agent-state ()
   ":repl-state :merged shows the 🔀 glyph when :agent-state is nil."
@@ -3503,7 +3503,7 @@ already-bound symbols and palette tweaks would require an Emacs restart."
     (agent-repl-drawer-test--register "merged-ws"
                                        :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "merged-ws")
-                   (alist-get :merged agent-repl-drawer-state-icons)))))
+                   (alist-get :merged agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-active-agent-state-beats-merged ()
   "An active :agent-state wins over :repl-state :merged — a merged workspace
@@ -3513,7 +3513,7 @@ that resumes work shows its live activity badge rather than the static 🔀."
                                        :agent-state :thinking
                                        :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "merged-ws")
-                   (alist-get :thinking agent-repl-drawer-state-icons)))))
+                   (alist-get :thinking agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-merge-conflict-surfaces-collision ()
   ":repl-state :merge-conflict renders the 💥 glyph — a real cherry-pick
@@ -3557,7 +3557,7 @@ a dead vterm at a glance."
     (agent-repl-drawer-test--register "broken-merge"
                                        :repl-state :merge-failed)
     (should (equal (agent-repl-drawer--state-glyph "broken-merge")
-                   (alist-get :merge-failed agent-repl-drawer-state-icons)))))
+                   (alist-get :merge-failed agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-merge-failed-overrides-agent-state ()
   ":repl-state :merge-failed takes precedence over :agent-state for
@@ -3569,13 +3569,13 @@ mood."
                                        :agent-state :thinking
                                        :repl-state :merge-failed)
     (should (equal (agent-repl-drawer--state-glyph "ws")
-                   (alist-get :merge-failed agent-repl-drawer-state-icons)))))
+                   (alist-get :merge-failed agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-icons-include-merge-failed ()
-  "`agent-repl-drawer-state-icons' includes a :merge-failed entry
+  "`agent-repl-ws-state-icons' includes a :merge-failed entry
 using ⛔ — distinct from :dead's ❌ so a stuck merge does not look
 like a dead vterm."
-  (should (equal (alist-get :merge-failed agent-repl-drawer-state-icons) "⛔")))
+  (should (equal (alist-get :merge-failed agent-repl-ws-state-icons) "⛔")))
 
 (ert-deftest agent-repl-drawer-test-workspace-section-merge-failed-routes-to-merged ()
   "A workspace flagged with :merge-completed t still lands in the
@@ -3600,9 +3600,9 @@ isn't masked by a post-nuke dead reading."
     (agent-repl-drawer-test--register "merged-not-dead"
                                        :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "merged-not-dead")
-                   (alist-get :merged agent-repl-drawer-state-icons)))
+                   (alist-get :merged agent-repl-ws-state-icons)))
     (should-not (equal (agent-repl-drawer--state-glyph "merged-not-dead")
-                       (alist-get :dead agent-repl-drawer-state-icons)))))
+                       (alist-get :dead agent-repl-ws-state-icons)))))
 
 ;;;; ---- Tests: keyboard-inaccessibility bounce ----
 
@@ -3764,7 +3764,7 @@ underlying agent-state glyph) and :merged (🔀)."
     (agent-repl-drawer-test--register "ws" :repl-state :merge-queued)
     (should (equal (agent-repl-drawer--state-glyph "ws")
                    (alist-get :merge-queued
-                              agent-repl-drawer-state-icons)))))
+                              agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-merge-queued-overrides-agent-state ()
   "`:merge-queued' on repl-state outranks a stale `:agent-state' —
@@ -3776,14 +3776,14 @@ thinking/done glyph."
                                        :agent-state :thinking)
     (should (equal (agent-repl-drawer--state-glyph "ws")
                    (alist-get :merge-queued
-                              agent-repl-drawer-state-icons)))))
+                              agent-repl-ws-state-icons)))))
 
 (ert-deftest agent-repl-drawer-test-state-glyph-merged-still-wins-over-queued ()
   "Precedence guard: `:merged' beats `:merge-queued' on the glyph too."
   (agent-repl-test--with-clean-state
     (agent-repl-drawer-test--register "ws" :repl-state :merged)
     (should (equal (agent-repl-drawer--state-glyph "ws")
-                   (alist-get :merged agent-repl-drawer-state-icons)))))
+                   (alist-get :merged agent-repl-ws-state-icons)))))
 
 ;;;; ---- Tests: center-selection ----
 
