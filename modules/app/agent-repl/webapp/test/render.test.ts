@@ -519,6 +519,17 @@ describe("renderItem", () => {
     );
   });
 
+  it("renders a fenced code block in the prompt bubble as a highlighted card", () => {
+    // Arrange — a prompt carrying a language-tagged markdown code block.
+    const item = userTurnAt(14, 32, "fix this:\n```python\ndef foo():\n    pass\n```");
+    // Act
+    const html = renderItem(item);
+    // Assert — the code renders as the md-code card, not literal backticks.
+    expect(html).toContain(`<pre class="md-code"><code class="hljs lang-python">`);
+    expect(html).toContain(`<span class="hljs-keyword">def</span>`);
+    expect(html).not.toContain("```");
+  });
+
   it("stamps an agent response bubble with a relative age", () => {
     // Arrange
     const item = textAt(14, 33);

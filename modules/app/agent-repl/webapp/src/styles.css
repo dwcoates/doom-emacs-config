@@ -494,6 +494,16 @@ pre {
   align-self: flex-end;
   max-width: 75%;
 }
+/* A markdown fenced code block the user typed into their prompt renders as
+   the same card the agent's markdown fences get (.md pre.md-code), but the
+   prompt bubble is not .md, so it carries its own rule. The .hljs token
+   colors above are unscoped, so they already reach in. The first/last
+   child margin resets keep a leading or trailing code card flush with the
+   bubble edge, matching the .md bubble-body rules. */
+.bubble.user pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
+.bubble.user pre.md-code code { background: none; padding: 0; font-size: 0.85rem; }
+.bubble.user .bubble-body > :first-child { margin-top: 0; }
+.bubble.user .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
    stats (duration, context delta) above its timestamp. Smaller and quieter
    than the body text, lifted clear of its first line. Negative top/right
