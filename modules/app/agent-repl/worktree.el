@@ -582,7 +582,7 @@ and invokes the callback stored as a process property."
           (callback (process-get proc 'agent-repl-callback)))
       (agent-repl--log nil "async-git-sentinel: proc=%s status=%s exit-code=%s"
                         (process-name proc) (process-status proc) (process-exit-status proc))
-      (kill-buffer (process-buffer proc))
+      (agent-repl--kill-buffer-safely (process-buffer proc))
       (funcall callback ok output))))
 
 (defun agent-repl--async-git (label git-root args callback)
@@ -4863,8 +4863,7 @@ post-mortem but takes no corrective action on failure."
         (agent-repl--log child-ws
                           "child-merge-notify: child=%s parent=%s exit=%s"
                           child-ws parent-ws status)
-        (when (buffer-live-p (process-buffer proc))
-          (kill-buffer (process-buffer proc)))))))
+        (agent-repl--kill-buffer-safely (process-buffer proc))))))
 
 (defun agent-repl--maybe-notify-parent-of-child-merge (child-ws parent-dir target-branch base)
   "Notify the parent workspace at PARENT-DIR that CHILD-WS merged, when applicable.
