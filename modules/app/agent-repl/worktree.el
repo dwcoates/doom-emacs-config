@@ -2099,6 +2099,54 @@ fails on worker\".  The cost is negligible — the timer queue drains
 on the very next event-loop tick."
   (run-at-time 0 nil thunk))
 
+(defun agent-repl--merge-finalize-on-main (current-ws target-ws t0-do)
+  "Defer the post-cherry-pick finalization steps to the MAIN thread.
+Reloads the config (`load-file'), clears TARGET-WS's in-flight merge
+bookkeeping, and drains the merge queue — in that order, as one
+main-thread thunk.  CURRENT-WS labels the log lines; T0-DO is the
+merge body's start time for the elapsed fields.
+
+The reload MUST NOT run on the merge worker thread: loading module
+files re-arms file-notify watchers (`agent-repl--dir-watcher-register'
+tears down the old watch first, and `file-notify-rm-watch'
+synchronously fires the handler's `stopped' branch), whose pending-file
+drain can reach the frontend HTTP boundary — and
+`url-retrieve-synchronously' off the main thread lands in the
+`ns_select_1'/`[NSApp run]' worker-thread trap (AGENTS.md), which
+froze Emacs on 2026-07-18.  The clear + drain ride in the same thunk
+to preserve the load -> clear -> drain ordering the inline version
+had: the drain gate must not open before the in-flight flag clears,
+and the next dispatched merge should see the reloaded code.
+
+A reload failure is handled HERE (loud `agent-repl--warn') rather than
+left to the worker's condition-case: by the time this runs the
+cherry-pick already reached its terminal state, so the worker's
+failure path would re-enqueue an ALREADY-LANDED merge.  Only the
+reload is degraded — the clear + drain still run so the queue does not
+stall behind a stale in-flight gate."
+  (agent-repl--defer-to-main-thread
+   (lambda ()
+     (agent-repl--log current-ws
+                       "merge-finalize: load-file config STARTING (main thread) elapsed=%.3fs"
+                       (- (float-time) t0-do))
+     (condition-case err
+         (load-file agent-repl--config-file)
+       (error
+        (agent-repl--warn current-ws
+                          "config reload failed after merge of %s: %S — finalization continues"
+                          target-ws err)))
+     (agent-repl--log current-ws
+                       "merge-finalize: load-file config DONE elapsed=%.3fs"
+                       (- (float-time) t0-do))
+     (agent-repl--clear-in-flight-merge target-ws)
+     (agent-repl--log current-ws
+                       "merge-finalize: clear-in-flight done elapsed=%.3fs"
+                       (- (float-time) t0-do))
+     (agent-repl--drain-merge-queue)
+     (agent-repl--log current-ws
+                       "merge-finalize: drain-merge-queue DONE elapsed=%.3fs"
+                       (- (float-time) t0-do)))))
+
 ;;;; ---- Thread-safe process teardown ----
 ;;
 ;; `delete-process' — and `kill-buffer' on a buffer that still owns a
@@ -5057,30 +5105,17 @@ off so the user resolves in magit directly."
                        target-ws current-ws))
              (t
               (message "Merged workspace '%s' -> '%s'." target-ws current-ws)))
-            (agent-repl--log current-ws
-                              "workspace-merge-do: load-file config STARTING thread=%s elapsed=%.3fs"
-                              thread-label (- (float-time) t0-do))
-            (load-file agent-repl--config-file)
-            (agent-repl--log current-ws
-                              "workspace-merge-do: load-file config DONE thread=%s elapsed=%.3fs"
-                              thread-label (- (float-time) t0-do))
             ;; Cherry-pick reached a terminal state (success / already /
-            ;; silent-fail) — clear the in-flight bookkeeping so the
-            ;; next-start recovery doesn't see a stale orphan.
-            (agent-repl--clear-in-flight-merge target-ws)
+            ;; silent-fail).  Finalization (config reload + in-flight
+            ;; clear + queue drain) is deferred to the MAIN thread: the
+            ;; reload's watcher re-arm path can reach the frontend HTTP
+            ;; boundary, which must never run on the merge worker (the
+            ;; ns_select_1 trap — froze Emacs 2026-07-18).  See
+            ;; `agent-repl--merge-finalize-on-main'.
             (agent-repl--log current-ws
-                              "workspace-merge-do: clear-in-flight done elapsed=%.3fs"
-                              (- (float-time) t0-do))
-            ;; Cherry-pick complete (success/already/silent-fail) — the
-            ;; in-flight gate is now clear from this merge's perspective,
-            ;; so attempt to drain any merges parked behind this one.
-            (agent-repl--log current-ws
-                              "workspace-merge-do: drain-merge-queue STARTING elapsed=%.3fs"
-                              (- (float-time) t0-do))
-            (agent-repl--drain-merge-queue)
-            (agent-repl--log current-ws
-                              "workspace-merge-do: drain-merge-queue DONE elapsed=%.3fs"
-                              (- (float-time) t0-do)))
+                              "workspace-merge-do: deferring finalize-on-main thread=%s elapsed=%.3fs"
+                              thread-label (- (float-time) t0-do))
+            (agent-repl--merge-finalize-on-main current-ws target-ws t0-do))
         (agent-repl-merge-conflict-error
          ;; Real cherry-pick conflict — distinguish from generic merge
          ;; failure so the drawer can render 💥 (conflict awaiting
