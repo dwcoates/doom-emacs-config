@@ -616,6 +616,26 @@ Unlike `agent-repl--log', this fires regardless of `agent-repl-debug' —
 errors are not gated on the debug flag."
   (agent-repl--do-log ws fmt args t))
 
+(defun agent-repl--assert-main-thread (what)
+  "Signal an error when called off the main thread; no-op (nil) on main.
+WHAT names the guarded operation in the log line and error text.
+
+Guards main-thread-only operations against the AGENTS.md `ns_select_1'
+worker-thread trap: anything that reaches `accept-process-output' /
+`[NSApp run]' (e.g. the synchronous frontend HTTP boundary) deadlocks
+Emacs when run on a worker thread, and an indirect call chain can
+smuggle such an operation onto a worker without any call site noticing
+\(the 2026-07-18 freeze arrived via merge worker -> config reload ->
+watcher re-arm -> notification drain -> HTTP).  Signaling here converts
+the would-be hard deadlock into an ordinary error that the caller's
+failure handling surfaces."
+  (unless (eq (current-thread) main-thread)
+    (agent-repl--do-log
+     nil
+     "assert-main-thread: REFUSING %s off the main thread (thread=%s) — ns_select_1 worker-thread trap, see AGENTS.md"
+     (list what (thread-name (current-thread)))
+     t)))
+
 (defun agent-repl--rotate-log-on-startup ()
   "Rename an existing log file to `<path>.prev', preserving one prior session.
 Idempotent: clobbers any existing `.prev'.  No-op when the current log
