@@ -33,11 +33,14 @@ import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
   type AccountMenuEntry,
+  type RosterEntry,
   accountIsLoggedOut,
   accountLabel,
   accountMenuEntries,
+  accountModeLabel,
   fetchAccount,
   fetchAccountMenuEntries,
+  fetchAccounts,
   switchAccount,
 } from "./account.js";
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
@@ -565,27 +568,55 @@ async function boot(): Promise<void> {
     });
   });
 
-  // Which account this session runs as. Refreshed after every login and
-  // switch, since those are the two things that change the answer. The
-  // last-fetched value seeds the menu's re-auth entry.
+  // Which account this session runs as, plus the roster that names its root.
+  // Refreshed after every login and switch, since those are the two things
+  // that change the answer. The last-fetched pair seeds both the chip and the
+  // menu's re-auth entry.
   let account: Account | null = null;
-  const refreshAccount = (): void => {
-    void fetchAccount(httpBase, activeSessionId)
-      .then((fetched) => {
+  let roster: RosterEntry[] = [];
+  // Paint the chip as "email (mode)": the email is WHO, the parenthesized
+  // roster label is WHICH root. With two roots logged into the same email the
+  // mode is the only disambiguator, so it rides on the chip itself rather than
+  // hiding in the menu. The mode is a dimmed, italic annotation (see the
+  // `.account-mode` rule) and is dropped entirely when the roster does not
+  // name the current root, leaving the bare email.
+  const renderAccountChip = (): void => {
+    accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
+    const email = accountLabel(account);
+    const mode = accountModeLabel(account, roster);
+    if (mode === "") {
+      accountEl.textContent = email;
+      return;
+    }
+    const modeEl = document.createElement("span");
+    modeEl.className = "account-mode";
+    modeEl.textContent = `(${mode})`;
+    accountEl.replaceChildren(document.createTextNode(`${email} `), modeEl);
+  };
+  const refreshAccount = (): Promise<void> =>
+    Promise.all([
+      fetchAccount(httpBase, activeSessionId),
+      // The roster only annotates the chip with a mode label; a failure drops
+      // that annotation but must not blank the account, so it degrades to the
+      // last-known roster rather than rejecting the pair.
+      fetchAccounts(httpBase).catch((err: unknown) => {
+        console.error("account roster lookup failed", err);
+        return roster;
+      }),
+    ])
+      .then(([fetched, fetchedRoster]) => {
         account = fetched;
-        accountEl.textContent = accountLabel(account);
-        accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
+        roster = fetchedRoster;
+        renderAccountChip();
       })
       .catch((err: unknown) => {
         // Not fatal: the session may still be perfectly usable. Leave the slot
         // blank rather than assert an account we failed to read.
         account = null;
-        accountEl.textContent = "";
-        accountEl.classList.remove("logged-out");
+        renderAccountChip();
         console.error("account lookup failed", err);
       });
-  };
-  refreshAccount();
+  void refreshAccount();
 
   // Re-auth is the one account verb that does not talk to the SDK session.
   // The daemon runs the login on a pty it owns and streams it here, where it
@@ -604,7 +635,7 @@ async function boot(): Promise<void> {
     remediationEl.textContent = "";
     // A finished login may have changed the account, so this is where the
     // topbar learns the user's answer to it.
-    refreshAccount();
+    void refreshAccount();
   };
 
   const openLoginTerminal = (): void => {
@@ -647,7 +678,7 @@ async function boot(): Promise<void> {
         remediationEl.textContent = outcome.switched
           ? `switched to ${outcome.account.email === "" ? outcome.account.label : outcome.account.email}`
           : "";
-        refreshAccount();
+        void refreshAccount();
       })
       .catch((err: unknown) => {
         // A switch that did not happen must say so: the user is about to
@@ -675,10 +706,11 @@ async function boot(): Promise<void> {
     try {
       const menu = await fetchAccountMenuEntries(httpBase, activeSessionId);
       // The fresh read the menu was filtered against is also the truest value
-      // for the chip, so adopt it rather than leave the two out of step.
+      // for the chip, so adopt it (account AND roster) and repaint rather than
+      // leave the two out of step.
       account = menu.current;
-      accountEl.textContent = accountLabel(account);
-      accountEl.classList.toggle("logged-out", accountIsLoggedOut(account));
+      roster = menu.roster;
+      renderAccountChip();
       entries = menu.entries;
     } catch (err: unknown) {
       // A failed live read must still leave re-auth reachable: fall back to
