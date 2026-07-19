@@ -174,6 +174,23 @@ describe("decodeCommandLine", () => {
     // Act + Assert
     expect(() => decodeCommandLine(line)).toThrow(/missing request_id/);
   });
+
+  it("decodes a refresh-status command", () => {
+    // Arrange — like refresh-commands, it carries nothing but its request_id.
+    const line = JSON.stringify({ type: "refresh-status", request_id: "r1" });
+    // Act
+    const cmd = decodeCommandLine(line);
+    // Assert
+    expect(cmd).toEqual({ type: "refresh-status", request_id: "r1" });
+  });
+
+  it("throws ProtocolError on refresh-status with no request_id", () => {
+    // Arrange — the ack is correlated by request_id, so a refresh without one
+    // could never be acknowledged.
+    const line = JSON.stringify({ type: "refresh-status" });
+    // Act + Assert
+    expect(() => decodeCommandLine(line)).toThrow(/missing request_id/);
+  });
 });
 
 describe("encodeEvent", () => {
@@ -197,6 +214,19 @@ describe("encodeEvent", () => {
       type: "commands",
       session_id: "s1",
       commands: [{ name: "compact", description: "summarize", argumentHint: "<how>" }],
+    };
+    // Act
+    const line = encodeEvent(evt);
+    // Assert
+    expect(JSON.parse(line)).toEqual(evt);
+  });
+
+  it("encodes a status event with its opaque snapshot intact", () => {
+    // Arrange — the snapshot is the SDK's init verbatim, forwarded whole.
+    const evt: ShimEvent = {
+      type: "status",
+      session_id: "s1",
+      status: { subtype: "init", model: "claude-opus-4-5", fast_mode_state: "on" },
     };
     // Act
     const line = encodeEvent(evt);

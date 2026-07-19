@@ -19,7 +19,7 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
+import { FAKE_COMMANDS, FAKE_STATUS, createFakeQuery } from "./fake-query.js";
 import {
   ModelInfo,
   PermissionMode,
@@ -210,6 +210,42 @@ async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
   }
 }
 
+/**
+ * Re-resolve the `/status` snapshot by standing up a throwaway query and
+ * reading its init handshake off the stream.
+ *
+ * Mirrors {@link realProbeCommands}: the idle prompt never yields, so the
+ * CLI completes the init handshake — the one carrying every field a
+ * `/status` panel reports — and then idles, costing one process spawn and
+ * zero model tokens. Unlike the command probe there is no memoized accessor
+ * to call: the whole snapshot IS the `system:init` message, so this reads it
+ * straight off the probe's stream and returns it.
+ */
+async function realProbeStatus(args: CliArgs): Promise<unknown> {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  const idle = (async function* (): AsyncGenerator<SdkUserMessageLike> {
+    await new Promise<never>(() => {});
+  })();
+  const abortController = new AbortController();
+  const probe = sdk.query({
+    prompt: idle as never,
+    options: probeQueryOptions(args, abortController) as never,
+  });
+  try {
+    for await (const msg of probe as AsyncIterable<{ type?: string; subtype?: string }>) {
+      if (msg.type === "system" && msg.subtype === "init") {
+        return msg;
+      }
+    }
+    // The stream ended before an init arrived. A probe that cannot answer is
+    // surfaced as a rejection (the caller reports it as a command-scoped
+    // sdk_throw), never as a silently empty status.
+    throw new Error("status probe stream ended before system:init");
+  } finally {
+    abortController.abort();
+  }
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -239,6 +275,8 @@ export async function main(): Promise<void> {
     },
     probeCommands: (): Promise<SlashCommand[]> =>
       args.fake ? Promise.resolve(FAKE_COMMANDS) : realProbeCommands(args),
+    probeStatus: (): Promise<unknown> =>
+      args.fake ? Promise.resolve(FAKE_STATUS) : realProbeStatus(args),
     emit: (evt: ShimEvent): void => {
       process.stdout.write(encodeEvent(evt));
     },
