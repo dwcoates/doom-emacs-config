@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-// emittedCreates reads every workspace-commands file under root's output
-// dir and returns the create entries found, so a test asserts on what
-// Emacs would actually drain rather than on the handler's return value.
-func emittedCreates(t *testing.T, root string) []map[string]any {
+// emittedCommands reads every workspace-commands file under root's output
+// dir and returns the entries found, so a test asserts on what Emacs
+// would actually drain rather than on the handler's return value.
+func emittedCommands(t *testing.T, root string) []map[string]any {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(root, "output"))
 	if os.IsNotExist(err) {
@@ -65,7 +65,7 @@ func TestAddSupportEmitsACreateForEmacs(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", resp.StatusCode)
 	}
-	got := emittedCreates(t, root)
+	got := emittedCommands(t, root)
 	if len(got) != 1 {
 		t.Fatalf("emitted %d creates, want 1", len(got))
 	}
@@ -88,7 +88,7 @@ func TestAddSupportUsesTheSessionCwdAsGitRoot(t *testing.T) {
 	postAddSupport(t, h, id, `{"command":"status"}`)
 
 	// Assert.
-	got := emittedCreates(t, root)
+	got := emittedCommands(t, root)
 	if len(got) != 1 {
 		t.Fatalf("emitted %d creates, want 1", len(got))
 	}
@@ -108,7 +108,7 @@ func TestAddSupportPromptNamesTheSessionConfigDir(t *testing.T) {
 	postAddSupport(t, h, id, `{"command":"status"}`)
 
 	// Assert.
-	got := emittedCreates(t, root)
+	got := emittedCommands(t, root)
 	if len(got) != 1 {
 		t.Fatalf("emitted %d creates, want 1", len(got))
 	}
@@ -131,7 +131,7 @@ func TestAddSupportRefusesAnUnknownSession(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
-	if got := emittedCreates(t, root); len(got) != 0 {
+	if got := emittedCommands(t, root); len(got) != 0 {
 		t.Errorf("emitted %d creates for an unknown session, want 0", len(got))
 	}
 }
@@ -150,7 +150,7 @@ func TestAddSupportRefusesAnInvalidCommand(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	if got := emittedCreates(t, root); len(got) != 0 {
+	if got := emittedCommands(t, root); len(got) != 0 {
 		t.Errorf("emitted %d creates for an invalid command, want 0", len(got))
 	}
 }
@@ -203,7 +203,7 @@ func TestAddSupportRefusesASessionWithNoWorkingDirectory(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
-	if got := emittedCreates(t, root); len(got) != 0 {
+	if got := emittedCommands(t, root); len(got) != 0 {
 		t.Errorf("emitted %d creates for a cwd-less session, want 0", len(got))
 	}
 }

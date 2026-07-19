@@ -422,6 +422,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}/chess-game", s.handleChessGameFile)
 	mux.HandleFunc("POST /sessions/{id}/add-support", s.handleAddSupport)
 	mux.HandleFunc("POST /remediation", s.handleRemediate)
+	mux.HandleFunc("POST /workspace-command", s.handleWorkspaceCommand)
 	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 	return mux
 }
@@ -527,7 +528,7 @@ func (s *Server) handleAddSupport(w http.ResponseWriter, r *http.Request) {
 		cwd,
 		addsupport.Prompt(body.Command, configDir),
 	)
-	path, err := workspacecmd.Emit(dir, []workspacecmd.Create{cmd})
+	path, err := workspacecmd.Emit(dir, []workspacecmd.Entry{cmd})
 	if err != nil {
 		s.logf("session %s: emit add-support workspace command for /%s: %v", id, body.Command, err)
 		httpError(w, http.StatusInternalServerError, "emitting the workspace command failed")
@@ -538,6 +539,88 @@ func (s *Server) handleAddSupport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, s.logf, map[string]string{"workspace": cmd.Name})
+}
+
+// handleWorkspaceCommand drops webapp sidebar actions — switch to a
+// workspace, fold or unfold a repo section — onto the workspace-commands
+// channel Emacs watches. The sidebar is global, so the route carries no
+// session id. As with add-support, writing the file is the entire
+// request: the daemon never learns what Emacs did with it, so the ack
+// means "asked", never "done".
+//
+// The body is a JSON array honored whole or not at all: the first invalid
+// entry refuses the batch with its index named, because emitting the rest
+// would silently drop that entry.
+func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) {
+	var raw []json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if len(raw) == 0 {
+		httpError(w, http.StatusBadRequest, "body must be a non-empty JSON array of entries")
+		return
+	}
+	entries := make([]workspacecmd.Entry, len(raw))
+	for i, msg := range raw {
+		entry, err := decodeWorkspaceCommand(msg)
+		if err != nil {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: %v", i, err))
+			return
+		}
+		entries[i] = entry
+	}
+	dir, err := workspacecmd.Dir()
+	if err != nil {
+		s.logf("workspace-command: resolve workspace-commands dir: %v", err)
+		httpError(w, http.StatusInternalServerError,
+			fmt.Sprintf("resolving the workspace-commands directory failed: %v", err))
+		return
+	}
+	path, err := workspacecmd.Emit(dir, entries)
+	if err != nil {
+		s.logf("workspace-command: emit %d entries: %v", len(entries), err)
+		httpError(w, http.StatusInternalServerError,
+			fmt.Sprintf("emitting the workspace commands failed: %v", err))
+		return
+	}
+	s.logf("workspace-command: asked Emacs to apply %d entries (%s)", len(entries), path)
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string]int{"emitted": len(entries)})
+}
+
+// decodeWorkspaceCommand decodes one POST /workspace-command array entry
+// by its "type" tag. Only the sidebar's entry kinds are accepted:
+// "create" stays on its purpose-built routes (add-support), which own
+// the composition of what gets created.
+func decodeWorkspaceCommand(raw json.RawMessage) (workspacecmd.Entry, error) {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, fmt.Errorf("invalid entry: %v", err)
+	}
+	var entry workspacecmd.Entry
+	switch head.Type {
+	case "switch":
+		var e workspacecmd.Switch
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid switch entry: %v", err)
+		}
+		entry = e
+	case "fold":
+		var e workspacecmd.Fold
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid fold entry: %v", err)
+		}
+		entry = e
+	default:
+		return nil, fmt.Errorf("unsupported type %q (want %q or %q)", head.Type, "switch", "fold")
+	}
+	if err := entry.Validate(); err != nil {
+		return nil, err
+	}
+	return entry, nil
 }
 
 // handleChessGameFile serves a chess-game payload file that the session's
