@@ -4724,7 +4724,7 @@ identical for a rebase."
            (t nil))))))))
 
 (defun agent-repl--continue-rebase-after-resolve (target-ws root)
-  "Stage resolved files and run `git rebase --continue' in ROOT; return its exit code.
+  "Stage resolved files and `git rebase --continue' in ROOT; return the exit code.
 `-c core.editor=true' keeps `--continue' from opening an editor for the
 replayed commit's message (there is no terminal in a headless merge),
 mirroring `agent-repl--continue-cherry-pick-after-resolve'."
