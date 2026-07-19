@@ -39,6 +39,8 @@
 (declare-function agent-repl--frontend-webview-execute-script "frontend" (buf script))
 (declare-function agent-repl--picker-open-selection "commands" (payload))
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
+(declare-function agent-repl--frontend-boot-session "frontends"
+                  (ws &optional project-dir-hint active-env-hint))
 
 ;;;; ---- The host-hook contract ------------------------------------------
 
@@ -398,13 +400,23 @@ expects to land on."
                 (agent-repl--sidebar-entries))))
 
 (defun agent-repl--sidebar-open-dir (dir)
-  "Switch Emacs to the live workspace whose project dir is DIR.
+  "Switch Emacs to the live workspace whose project dir is DIR, and start it.
 Routes through `agent-repl--picker-open-selection', the canonical
 switch-or-revive: an open perspective switches in place, a
 perspective-less or closed-REPL one is re-established.  Signals when
 DIR matches no live entry — an unknown dir means the click/cursor and
 the roster disagree, which is a contract violation to surface, not a
-row to silently ignore."
+row to silently ignore.
+
+Then boots the agent via `agent-repl--frontend-boot-session'.  Opening
+from the sidebar means \"open the workspace AND start agent-repl in
+it\", but `--picker-open-selection' boots a session only on its revive
+branch: a workspace whose perspective is still open while its REPL was
+torn down (`:repl-state' `:inactive' / `:hidden', the greyed rows
+`agent-repl--sidebar-closed-p' marks) takes the switch branch and would
+otherwise land the user in a dead REPL.  The boot door no-ops when a
+live session already exists, so the revive branch's own boot is never
+doubled."
   (let ((entry (agent-repl--sidebar-entry-for-dir dir)))
     (unless entry
       (error "agent-repl sidebar: no live workspace for dir %s" dir))
@@ -417,6 +429,7 @@ row to silently ignore."
        (list :name name
              :project-dir (cdr entry)
              :live-p (agent-repl--ws-live-p name)))
+      (agent-repl--frontend-boot-session name (cdr entry))
       (agent-repl--sidebar-push))))
 
 ;;;; ---- Workspace-command handlers (webview clicks, via the daemon) -------

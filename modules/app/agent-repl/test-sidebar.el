@@ -406,11 +406,26 @@ PLIST key/value pairs are applied after it and may override it."
     (let (payload)
       (cl-letf (((symbol-function 'agent-repl--picker-open-selection)
                  (lambda (p) (setq payload p)))
-                ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+                ((symbol-function 'agent-repl--sidebar-push) (lambda ()))
+                ((symbol-function 'agent-repl--frontend-boot-session)
+                 (lambda (&rest _))))
         (agent-repl--sidebar-open-dir "/tmp/ws"))
       (should (equal (plist-get payload :name) "ws"))
       (should (equal (plist-get payload :project-dir) "/tmp/ws"))
       (should (eq (plist-get payload :live-p) t)))))
+
+(ert-deftest agent-repl-test-sidebar-open-dir-boots-agent-session ()
+  "Opening starts agent-repl in the workspace, not just the workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let (booted)
+      (cl-letf (((symbol-function 'agent-repl--picker-open-selection)
+                 (lambda (_payload)))
+                ((symbol-function 'agent-repl--sidebar-push) (lambda ()))
+                ((symbol-function 'agent-repl--frontend-boot-session)
+                 (lambda (ws &optional dir &rest _) (setq booted (cons ws dir)))))
+        (agent-repl--sidebar-open-dir "/tmp/ws"))
+      (should (equal booted '("ws" . "/tmp/ws"))))))
 
 (ert-deftest agent-repl-test-sidebar-entry-for-dir-canonicalizes ()
   "Dir matching survives trailing-slash variance via canonicalization."
