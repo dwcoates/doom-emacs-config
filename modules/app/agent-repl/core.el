@@ -1173,15 +1173,19 @@ BUFFERS may be buffer objects or name strings."
 ;; These two survive because `agent-repl-input-mode' (input.el) calls
 ;; `agent-repl--set-buffer-background' to tint the input composer.
 
+(defun agent-repl--rgb-hex (r g b)
+  "Return a #rrggbb hex color string for channel values R, G, B (0-255 each)."
+  (format "#%02x%02x%02x" r g b))
+
 (defun agent-repl--grey-hex (n)
   "Return a hex color string for greyscale value N (0=black, 255=white)."
-  (format "#%02x%02x%02x" n n n))
+  (agent-repl--rgb-hex n n n))
 
-(defun agent-repl--set-buffer-background (grey-level)
-  "Set default and fringe background to greyscale GREY-LEVEL in current buffer."
-  (let ((hex (agent-repl--grey-hex grey-level)))
-    (face-remap-add-relative 'default :background hex)
-    (face-remap-add-relative 'fringe :background hex)))
+(defun agent-repl--set-buffer-background (color)
+  "Set default and fringe background to COLOR in the current buffer.
+COLOR is any Emacs color spec, e.g. a #rrggbb hex string."
+  (face-remap-add-relative 'default :background color)
+  (face-remap-add-relative 'fringe :background color))
 
 ;;; Harness-injected (meta) prompt spans
 ;;
