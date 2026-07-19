@@ -133,6 +133,9 @@ slightly blue by `agent-repl-input-background-blue-boost'."
   ;; lone `/' without affecting completion anywhere else.
   (add-hook 'completion-at-point-functions #'agent-repl--skill-capf nil t)
   (setq-local company-minimum-prefix-length 1)
+  ;; Widen the fill column in the composer so wrapped prose and `fill-paragraph'
+  ;; reflow to 150 columns rather than the 70-column default.
+  (setq-local fill-column 150)
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t))
 
 (defun agent-repl-discard-input ()
