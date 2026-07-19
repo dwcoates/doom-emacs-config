@@ -818,6 +818,18 @@ func (s *Session) Commands() []protocol.SlashCommand {
 	return s.translator.Commands
 }
 
+// Status returns the session's cached /status snapshot (the SDK's
+// system:init payload), or nil before the first init has landed. Like
+// Commands, a nil result means "not resolved yet", not a failure: the webapp
+// panel that reads this triggers a refresh-status re-probe on open, so an
+// early read simply shows what the live init warmed until the fresh snapshot
+// arrives.
+func (s *Session) Status() json.RawMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.translator.Status
+}
+
 func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	cmd, err := protocol.DecodeCommand(raw)
 	if err != nil {
@@ -900,6 +912,11 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 	case "refresh-commands":
 		// No frame is broadcast here: the answer arrives asynchronously as
 		// the shim's `commands` event, which onCommands lands on the cache.
+		return s.shim.SendRaw(ndjson(raw))
+	case "refresh-status":
+		// Like refresh-commands, no frame is broadcast here: the answer
+		// arrives asynchronously as the shim's `status` event, which
+		// onStatus lands on the cache and pushes on as a StatusFrame.
 		return s.shim.SendRaw(ndjson(raw))
 	}
 	// `shutdown` is deliberately NOT forwarded: the §2 preamble limits

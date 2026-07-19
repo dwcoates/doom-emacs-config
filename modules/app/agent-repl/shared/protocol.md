@@ -1260,6 +1260,24 @@ interface SystemFrame extends WsEnvelope {
 }
 ```
 
+### 2.9a Status snapshot
+
+The `/status` snapshot the GUI's status panel renders: the SDK's
+`system:init` payload. The live init warms the daemon's cache for free
+(read back over `GET /sessions/{id}/status`), so this frame is pushed ONLY
+by a `refresh-status` re-probe — a mid-session change (a `/fast` toggle, a
+config edit) the frozen init would miss. An open panel re-renders on it
+without re-fetching; `model` and permission mode are NOT folded in, since
+the webapp already tracks those live from their own frames and overlays the
+fresher ones it holds.
+
+```ts
+interface StatusFrame extends WsEnvelope {
+  type: "status";
+  snapshot: unknown;                  // pass-through from Layer-1 StatusEvt.status
+}
+```
+
 ### 2.10 Resume / replay
 
 The one webapp→daemon frame that is not a shared Layer-1 command shape.

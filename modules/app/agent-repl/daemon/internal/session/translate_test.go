@@ -1041,7 +1041,8 @@ func TestTranslatorSystemInitUpdatesSessionInfo(t *testing.T) {
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"model":"opus-x","cwd":"/work","permissionMode":"plan"}}`))
 	// Assert — init's model is ANNOUNCED, not merely recorded, so a client
-	// that attached before it does not sit on the hello's empty model.
+	// that attached before it does not sit on the hello's empty model. The
+	// init also warms the /status cache, but cache-only: no extra frame.
 	wantTypes(t, frames, "model-changed", "system")
 	if tr.Model != "opus-x" || tr.CWD != "/work" || tr.PermissionMode != protocol.PermissionModePlan {
 		t.Errorf("info = %q %q %q", tr.Model, tr.CWD, tr.PermissionMode)
@@ -1055,8 +1056,61 @@ func TestTranslatorSystemInitIsSilentWhenTheModelMatchesTheRequest(t *testing.T)
 	tr.Model = "opus-x"
 	// Act
 	frames := tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"model":"opus-x","cwd":"/work"}}`))
-	// Assert
+	// Assert — no model-changed (the mirror already matches); the init warms
+	// the /status cache but adds no frame of its own.
 	wantTypes(t, frames, "system")
+}
+
+func TestTranslatorSystemInitWarmsTheStatusCache(t *testing.T) {
+	// Arrange — the live init IS a status snapshot, so a client that never
+	// refreshes still renders the start-of-session state.
+	tr := NewTranslator()
+	// Act
+	tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"model":"opus-x","fast_mode_state":"off"}}`))
+	// Assert
+	var got map[string]any
+	if err := json.Unmarshal(tr.Status, &got); err != nil {
+		t.Fatalf("cached status is not valid JSON: %v", err)
+	}
+	if got["fast_mode_state"] != "off" {
+		t.Errorf("cached status = %v, want it to carry the init snapshot", got)
+	}
+}
+
+func TestTranslatorStatusEventRefreshesTheCache(t *testing.T) {
+	// Arrange — the init warmed `off`; a refresh-status re-probe reports the
+	// `/fast` toggled on since.
+	tr := NewTranslator()
+	tr.OnEvent(evt(t, `{"type":"system","session_id":"s1","uuid":"u","subtype":"init","data":{"fast_mode_state":"off"}}`))
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"status","session_id":"s1","status":{"fast_mode_state":"on"}}`))
+	// Assert — REPLACES the cache (never merges) and pushes it live so an open
+	// panel updates without re-fetching.
+	wantTypes(t, frames, "status")
+	var got map[string]any
+	if err := json.Unmarshal(tr.Status, &got); err != nil {
+		t.Fatalf("cached status is not valid JSON: %v", err)
+	}
+	if got["fast_mode_state"] != "on" {
+		t.Errorf("cached status = %v, want the refreshed snapshot", got)
+	}
+}
+
+func TestTranslatorStatusFrameCarriesTheSnapshot(t *testing.T) {
+	// Arrange
+	tr := NewTranslator()
+	// Act
+	frames := tr.OnEvent(evt(t, `{"type":"status","session_id":"s1","status":{"apiKeySource":"none"}}`))
+	// Assert — the broadcast frame carries the snapshot verbatim for the panel.
+	wantTypes(t, frames, "status")
+	sf := frames[0].(*protocol.StatusFrame)
+	var got map[string]any
+	if err := json.Unmarshal(sf.Snapshot, &got); err != nil {
+		t.Fatalf("frame snapshot is not valid JSON: %v", err)
+	}
+	if got["apiKeySource"] != "none" {
+		t.Errorf("frame snapshot = %v, want it to carry apiKeySource", got)
+	}
 }
 
 func TestTranslatorCompactBoundaryMapsToDedicatedFrame(t *testing.T) {

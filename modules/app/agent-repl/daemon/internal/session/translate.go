@@ -83,6 +83,11 @@ type Translator struct {
 	// `commands` event, deduplicated by name. Read back over HTTP by the
 	// Emacs input panel, which completes against it.
 	Commands []protocol.SlashCommand
+	// Status is the session's /status snapshot: the SDK's system:init
+	// payload. Warmed for free by the live init (onSystem) and refreshed by
+	// the shim's `status` event after a re-probe. Read back over HTTP by the
+	// webapp's status panel. Empty until the first init arrives.
+	Status json.RawMessage
 	// ClaudeSessionID is the CLI-assigned session uuid captured from
 	// system:init. Empty until init arrives. This is the DURABLE id
 	// (usable as CreateOpts.Resume across daemon restarts), unlike the
@@ -199,6 +204,8 @@ func (t *Translator) OnEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		return t.onModels(evt)
 	case "commands":
 		return t.onCommands(evt)
+	case "status":
+		return t.onStatus(evt)
 	case "stream-event":
 		return t.onStreamEvent(evt)
 	case "assistant-message":
@@ -434,6 +441,27 @@ func (t *Translator) onModels(evt *protocol.L1Event) []protocol.L2Frame {
 func (t *Translator) onCommands(evt *protocol.L1Event) []protocol.L2Frame {
 	t.Commands = dedupeCommands(evt.Commands)
 	return nil
+}
+
+// onStatus caches a freshly re-probed /status snapshot and pushes it on. Fired
+// by the shim's `status` event in answer to a refresh-status. Unlike
+// onCommands (whose only reader polls over HTTP) and unlike the init warm-up
+// (which already broadcasts its own system frame), the re-probe answers no
+// other frame, so it both replaces the cache and rides out as a StatusFrame
+// so an open panel updates without re-fetching.
+func (t *Translator) onStatus(evt *protocol.L1Event) []protocol.L2Frame {
+	t.setStatus(evt.Status)
+	return []protocol.L2Frame{&protocol.StatusFrame{
+		Envelope: protocol.Envelope{Type: "status"},
+		Snapshot: evt.Status,
+	}}
+}
+
+// setStatus records SNAPSHOT as the session's /status cache. Shared by the
+// init warm-up (onSystem, cache only) and the re-probe (onStatus, which also
+// broadcasts) so both write the cache identically.
+func (t *Translator) setStatus(snapshot json.RawMessage) {
+	t.Status = snapshot
 }
 
 // dedupeCommands collapses commands that share a name, keeping the first.
@@ -927,6 +955,14 @@ func (t *Translator) onSystem(evt *protocol.L1Event) []protocol.L2Frame {
 				t.ClaudeSessionID = init.ClaudeSessionID
 			}
 		}
+		// Warm the /status cache for free: the live init IS a status
+		// snapshot, so a client that never refreshes still renders the
+		// start-of-session state (read over GET /status). Cache only, no
+		// broadcast: unlike a refresh, the init already rides out as the
+		// SystemFrame below, so adding a status frame here would only bloat
+		// every session's opening stream. A refresh-status re-probe later
+		// overwrites the cache (onStatus) and DOES push a live frame.
+		t.setStatus(evt.Data)
 		return append(frames, &protocol.SystemFrame{
 			Envelope: protocol.Envelope{Type: "system"},
 			Subtype:  "init",

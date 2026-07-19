@@ -475,6 +475,19 @@ type SystemFrame struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+// --- §2.9a status snapshot --------------------------------------------------
+
+// StatusFrame carries the session's /status snapshot: the SDK's system:init
+// payload the GUI's status panel renders. Pushed at session init (the live
+// init warms the cache) and again after each refresh-status re-probe, so the
+// panel reflects a value changed mid-session — a /fast toggle, a config edit
+// — that the frozen init would miss. Snapshot is opaque exactly like a system
+// frame's Data.
+type StatusFrame struct {
+	Envelope
+	Snapshot json.RawMessage `json:"snapshot"`
+}
+
 // --- §2.13 in-flight message queue ------------------------------------------
 
 // QueueAddedFrame announces that a user-message submitted while a turn was
