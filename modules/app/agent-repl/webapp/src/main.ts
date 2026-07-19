@@ -244,8 +244,11 @@ async function boot(): Promise<void> {
   const renderChrome = (): void => {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
-    // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
+    // renderer draws the agent-scoped bubble topbars (see topbar.ts). The
+    // monitoring flag is the feed renderer's own gate reading (idle + live
+    // async), read back here so the strip's left-most datapoint mirrors the
+    // feed the last render already partitioned rather than re-deriving it.
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, feed.isMonitoring()), {
       agentsOpen: counterMenu === "agents",
       tasksOpen: counterMenu === "tasks",
       tokensOpen: counterMenu === "tokens",

@@ -303,43 +303,22 @@ export function retryingRowHtml(retrying: boolean): string {
 }
 
 /**
- * The "monitoring…" indicator: the AMBER row saying background (async/detached)
- * work continues while the main chain is IDLE. Distinct from the bucket-1 tail
- * rows (thinking/working/retrying/interrupting), which all mean the main chain
- * is ACTIVE — amber async-quiescence means "model available, background work
- * still running". Its ONE home is the global feed tail (see
- * `showsMonitoringRow`) — the amber signal for live async when its owning
- * bubble is scrolled off or absent; the bubble itself never repeats it, since
- * its amber border and live badge dots already say "still watching". Reuses
- * the textless-thinking arc (`.thinking-spinner`), tinted amber by
- * `.monitoring-pending`.
- *
- * Returns "" when not monitoring, so a caller can drop the node.
- */
-export function monitoringRowHtml(monitoring: boolean): string {
-  if (!monitoring) return "";
-  return (
-    `<div class="monitoring-pending" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> monitoring${animatedEllipsis()}` +
-    `</div>`
-  );
-}
-
-/**
- * Whether the GLOBAL `monitoring…` tail row shows: the session is IDLE (no
+ * Whether the GLOBAL `monitoring…` indicator shows: the session is IDLE (no
  * turn in flight, so none of thinking/working/retrying/interrupting speak for
  * the tail) yet live async continues somewhere in the feed. It is the
  * always-visible amber signal for when the owning bubble is scrolled off or
  * absent — the quiescent twin of the working row, and mutually exclusive with
- * the whole bucket-1 tail, which only runs while a turn is in flight.
+ * the whole bucket-1 tail, which only runs while a turn is in flight. It now
+ * renders as the topbar strip's left-most datapoint (see `topbarInfoHtml`)
+ * rather than a feed-tail row; this predicate is the gate either surface reads.
  *
  * A live `thinking…` indicator ALSO suppresses it, even with no main-chain
  * turn in flight: a background subagent that is mid-thought renders its own
  * `thinking…` spinner (see `Thinking`), and that more-specific live signal
  * wins the shared tail slot so the two never stack. The agent can be thinking
  * (a subagent block open) and monitoring (async still live) at once, but the
- * amber row is only the fallback for when nothing more specific speaks, so a
- * visible `thinking…` takes precedence over it (`anyLiveThinking`).
+ * amber indicator is only the fallback for when nothing more specific speaks,
+ * so a visible `thinking…` takes precedence over it (`anyLiveThinking`).
  */
 export function showsMonitoringRow(opts: {
   turnInFlight: boolean;
@@ -1199,8 +1178,8 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
  * catalog read the SAME projection (`panels.watchers`), so a bubble is amber
  * exactly when it lists live selectable work. The bubble's own liveness reads
  * from the amber border and each badge's live/settled dot; the animated
- * `monitoring…` row lives ONLY at the global feed tail (see
- * `monitoringRowHtml`), never duplicated inside the bubble.
+ * `monitoring…` signal lives ONLY in the topbar strip (see `topbarInfoHtml`),
+ * never duplicated inside the bubble.
  *
  * Every host bubble carries it — a final response, an interrupted turn's last
  * text, a tools-only turn's prompt — not just a completed answer. A quiesced
@@ -2514,6 +2493,16 @@ export class FeedRenderer {
    * holds the idle placeholder the next turn's first render starts from.
    */
   private turnTimerLabel = IDLE_LABEL;
+  /**
+   * Whether the session is IDLE yet live async continues somewhere in the
+   * feed — the amber `monitoring…` signal, now the topbar strip's left-most
+   * datapoint rather than a feed-tail row (see `topbarInfoHtml`). Recomputed
+   * from `showsMonitoringRow` at the tail of every real render/renderRestored,
+   * and read back by the chrome paint through `isMonitoring`. Defaults false so
+   * a chrome paint landing before the first feed render claims nothing to
+   * monitor.
+   */
+  private monitoring = false;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
   private backfillQueue: Array<() => void> = [];
   /** Newest user turn seen by a render, so the next one spots a fresh send. */
@@ -3016,26 +3005,18 @@ export class FeedRenderer {
       this.container.appendChild(el);
       this.nodes.set("tail-line", { el, html: tailLine });
     }
-    // The global `monitoring…` fallback, on the same idle-with-live-async
-    // terms render() shows it (see `showsMonitoringRow`), so a fresh join
-    // landing on a quiescent-but-still-watching session sees it immediately.
-    // A visible `thinking…` spinner suppresses it here too, so the two never
-    // stack on the restored feed's tail.
-    if (
-      showsMonitoringRow({
-        turnInFlight: state.turnInFlight,
-        interrupting: state.interrupting,
-        thinking: anyLiveThinking(visible),
-        anyLiveAsync: anyLiveAsync(items, panels),
-      })
-    ) {
-      const el = document.createElement("div");
-      el.className = "feed-item";
-      el.dataset.key = "monitoring";
-      el.innerHTML = monitoringRowHtml(true);
-      this.container.appendChild(el);
-      this.nodes.set("monitoring", { el, html: monitoringRowHtml(true) });
-    }
+    // The global `monitoring…` signal, on the same idle-with-live-async terms
+    // render() computes it (see `showsMonitoringRow`), so a fresh join landing
+    // on a quiescent-but-still-watching session sees it in the topbar strip
+    // immediately (read back by the chrome paint through `isMonitoring`). A
+    // visible `thinking…` spinner suppresses it here too, so the two never
+    // both claim a live slot.
+    this.monitoring = showsMonitoringRow({
+      turnInFlight: state.turnInFlight,
+      interrupting: state.interrupting,
+      thinking: anyLiveThinking(visible),
+      anyLiveAsync: anyLiveAsync(items, panels),
+    });
     // The parked queue (§2.13) renders in full at the tail — a fresh join
     // with a pending queue must show it, and the cards are cheap enough to
     // skip the tail-first backfill the history items get.
@@ -3136,6 +3117,17 @@ export class FeedRenderer {
     if (slot) slot.textContent = label;
   }
 
+  /**
+   * Whether the session is monitoring live async while idle — the amber
+   * `monitoring…` gate the last real render computed (see `showsMonitoringRow`).
+   * The chrome paint reads it back to render the topbar strip's left-most
+   * datapoint (see `sessionTopbarDatapoints`), keeping the signal a projection
+   * of the feed the renderer already partitioned rather than a re-derivation.
+   */
+  isMonitoring(): boolean {
+    return this.monitoring;
+  }
+
   render(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
@@ -3220,22 +3212,20 @@ export class FeedRenderer {
     // indicator half lives in `tailStatusRow`.
     const tailLine = tailLineHtml(state, pulse, this.turnTimerLabel);
     if (tailLine) this.reconcileTailNode("tail-line", tailLine, seen);
-    // The global `monitoring…` row: the amber fallback for when the owning
+    // The global `monitoring…` signal: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose
     // rows all mean the main chain is active). A visible `thinking…` spinner —
     // a subagent mid-thought while the main chain idles — also suppresses it,
-    // so the more-specific live signal owns the shared tail slot alone.
-    if (
-      showsMonitoringRow({
-        turnInFlight: state.turnInFlight,
-        interrupting: state.interrupting,
-        thinking: anyLiveThinking(visible),
-        anyLiveAsync: anyLiveAsync(items, panels),
-      })
-    ) {
-      this.reconcileTailNode("monitoring", monitoringRowHtml(true), seen);
-    }
+    // so the more-specific live signal owns the live slot alone. It now paints
+    // as the topbar strip's left-most datapoint (read back by the chrome paint
+    // through `isMonitoring`) rather than a feed-tail row.
+    this.monitoring = showsMonitoringRow({
+      turnInFlight: state.turnInFlight,
+      interrupting: state.interrupting,
+      thinking: anyLiveThinking(visible),
+      anyLiveAsync: anyLiveAsync(items, panels),
+    });
     // The in-flight queue (§2.13) is a subdued section at the tail, after
     // every conversation item. Each card is re-appended so a live item node
     // appended above (the agent's streaming response during the running

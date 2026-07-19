@@ -24,7 +24,6 @@ import {
   lastUserTurnId,
   MERGE_CARD_BODY,
   modelOptionsHtml,
-  monitoringRowHtml,
   panelToggleTarget,
   planToolReveal,
   pulseTarget,
@@ -398,45 +397,6 @@ describe("retryingRowHtml", () => {
   it("marks the row as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = retryingRowHtml(true);
-    // Assert
-    expect(html).toContain('role="status"');
-    expect(html).toContain('aria-live="polite"');
-  });
-});
-
-describe("monitoringRowHtml", () => {
-  it("renders nothing when not monitoring", () => {
-    // Arrange / Act / Assert — an empty string drops the tail node.
-    expect(monitoringRowHtml(false)).toBe("");
-  });
-
-  it("names the background work still being monitored", () => {
-    // Arrange / Act
-    const html = monitoringRowHtml(true);
-    // Assert
-    expect(html).toContain("monitoring");
-  });
-
-  it("trails the status word with the animated ellipsis rather than a static one", () => {
-    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
-    const html = monitoringRowHtml(true);
-    // Assert — the animated span replaced the literal "…" glyph.
-    expect(html).toContain("animated-ellipsis");
-    expect(html).not.toContain("monitoring…");
-  });
-
-  it("reuses the textless-thinking arc, tinted amber by its own class rather than a bespoke spinner", () => {
-    // Arrange / Act — like the working row, it leans on .thinking-spinner (the
-    // .monitoring-pending rule recolors it amber), so no monitoring-spinner exists.
-    const html = monitoringRowHtml(true);
-    // Assert
-    expect(html).toContain("thinking-spinner");
-    expect(html).not.toContain("monitoring-spinner");
-  });
-
-  it("marks the row as a live status region for assistive tech", () => {
-    // Arrange / Act
-    const html = monitoringRowHtml(true);
     // Assert
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-live="polite"');
@@ -5451,5 +5411,90 @@ describe("FeedRenderer: the working-frontier breath is a class, not HTML", () =>
     feed.render(state);
     // Assert
     expect(frontierBubble(container)?.classList.contains("pulsing")).toBe(true);
+  });
+});
+
+/**
+ * The `monitoring…` signal moved from a feed-tail row to the topbar strip's
+ * left-most datapoint: the feed renderer no longer appends a row, it computes
+ * the gate (`showsMonitoringRow`) at the tail of every render and banks it, and
+ * the chrome paint reads it back through `isMonitoring` (see main.ts).
+ */
+describe("FeedRenderer.isMonitoring (topbar monitoring datapoint gate)", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+  };
+
+  const mountFeed = (): FeedRenderer =>
+    new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+
+  /** An idle session (no turn in flight) carrying a live background watcher. */
+  function watchingState(over: Partial<StoreState> = {}): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1"), watcher()];
+    state.turnInFlight = false;
+    return { ...state, ...over };
+  }
+
+  it("defaults to not monitoring before the first render", () => {
+    // Arrange / Act — a fresh renderer has partitioned no feed yet, so a chrome
+    // paint landing before the first feed render claims nothing to monitor.
+    const feed = mountFeed();
+    // Assert
+    expect(feed.isMonitoring()).toBe(false);
+  });
+
+  it("reports monitoring once an idle session's render finds live async", () => {
+    // Arrange
+    const feed = mountFeed();
+    // Act — the quiescent-but-still-watching case the strip's amber datapoint speaks for.
+    feed.render(watchingState());
+    // Assert
+    expect(feed.isMonitoring()).toBe(true);
+  });
+
+  it("reports not monitoring while a turn is in flight, ceding to the working row", () => {
+    // Arrange — the same live watcher, but the main chain is active.
+    const feed = mountFeed();
+    // Act
+    feed.render(watchingState({ turnInFlight: true }));
+    // Assert
+    expect(feed.isMonitoring()).toBe(false);
+  });
+
+  it("reports not monitoring once the render finds no live async left", () => {
+    // Arrange — an idle session whose only content has already settled.
+    const feed = mountFeed();
+    // Act — no watcher among the items, so nothing to monitor.
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1")];
+    state.turnInFlight = false;
+    feed.render(state);
+    // Assert
+    expect(feed.isMonitoring()).toBe(false);
+  });
+
+  it("reports monitoring after a fresh-join renderRestored finds live async", () => {
+    // Arrange — the restored path computes the same gate as the live render, so
+    // a fresh join landing on a still-watching session lights the strip at once.
+    const feed = mountFeed();
+    // Act
+    feed.renderRestored(watchingState());
+    // Assert
+    expect(feed.isMonitoring()).toBe(true);
+  });
+
+  it("never appends a monitoring row to the feed itself", () => {
+    // Arrange — the signal lives in the topbar strip now, not the feed tail.
+    const container = document.createElement("div");
+    const feed = new FeedRenderer(container, NOOP_ACTIONS);
+    // Act
+    feed.render(watchingState());
+    // Assert — no leftover tail node carries the old row.
+    expect(container.querySelector('[data-key="monitoring"]')).toBeNull();
+    expect(container.innerHTML).not.toContain("monitoring-pending");
   });
 });
