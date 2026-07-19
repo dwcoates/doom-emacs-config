@@ -115,11 +115,11 @@ type Server struct {
 	// stale. Zero means the boot-time stat failed (staleness never asserted).
 	binaryMTime int64
 	retention   int
-	forceFake     bool
-	spawn         SpawnFunc
-	logf          func(format string, args ...any)
-	now           func() time.Time
-	upgrader      websocket.Upgrader
+	forceFake   bool
+	spawn       SpawnFunc
+	logf        func(format string, args ...any)
+	now         func() time.Time
+	upgrader    websocket.Upgrader
 	// classifyQueue / classifierModel configure the §2.13 in-flight-queue
 	// classifier every real session inherits.
 	classifyQueue   bool
@@ -184,8 +184,8 @@ type Config struct {
 	// field, and a zero value tells Emacs not to assert staleness on a guess.
 	BinaryMTime int64
 	Retention   int
-	Spawn         SpawnFunc
-	Logf          func(format string, args ...any)
+	Spawn       SpawnFunc
+	Logf        func(format string, args ...any)
 	// Now is the clock used to stamp registry records (defaults to
 	// time.Now); injected for tests.
 	Now func() time.Time
