@@ -1711,6 +1711,53 @@ describe("renderItem", () => {
     expect(html).not.toContain("data-q-submit");
   });
 
+  it("marks the resolved Q&A card with the question class the feed centers on", () => {
+    // Arrange — an answered AskUserQuestion, so the CSS centering selector matches.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            options: [{ label: "date-fns", description: "small" }],
+          },
+        ],
+      },
+      resolution: { decision: "allow" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("permission resolved question");
+  });
+
+  it("marks the pending Q&A card with the question class the feed centers on", () => {
+    // Arrange — an unresolved AskUserQuestion, so the CSS centering selector matches.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "q1",
+      toolUseId: "t1",
+      toolName: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            options: [{ label: "date-fns", description: "small" }],
+          },
+        ],
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("permission pending question");
+  });
+
   it("renders backtick-wrapped question text as inline code", () => {
     // Arrange — a pending question whose text names a code symbol.
     const item: ConversationItem = {

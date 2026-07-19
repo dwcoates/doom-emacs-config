@@ -611,6 +611,12 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(toolSelector).toContain(".feed-item > .feed-group");
   });
 
+  it("folds the top-level AskUserQuestion Q&A card into the agent center", () => {
+    // Arrange / Act — the Q&A prompt card rides the same rail as the tool cards.
+    // Assert
+    expect(toolSelector).toContain(".feed-item > .permission.question");
+  });
+
   it("shrinks the response bubble to fit its own text", () => {
     // Arrange / Act — a short answer renders a small bubble, not a full line.
     // Assert
