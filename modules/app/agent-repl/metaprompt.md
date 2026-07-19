@@ -28,7 +28,6 @@
 
 ### Not allowed without my EXPLICIT, per-use permission
 
-- Installing or uninstalling packages/tools.
 - Operating on files outside the current project.
 
 ## Testing
