@@ -124,6 +124,10 @@ type Server struct {
 	// classifier every real session inherits.
 	classifyQueue   bool
 	classifierModel string
+	// summarizeTurns / summaryModel configure the §2.14 per-turn summarizer
+	// every real session inherits.
+	summarizeTurns bool
+	summaryModel   string
 
 	sentinel   session.SentinelSink
 	remediator Remediator
@@ -213,6 +217,13 @@ type Config struct {
 	// ClassifierModel is the model the queue classifier pins; empty takes
 	// the session package's haiku default.
 	ClassifierModel string
+	// SummarizeTurns enables the §2.14 per-turn summarizer on every real
+	// session: a completed turn is distilled into the one-line topbar
+	// "current objective" label by a headless model call. False disables it.
+	SummarizeTurns bool
+	// SummaryModel is the model the summarizer pins; empty takes the
+	// session package's haiku default.
+	SummaryModel string
 	// Accounts is the canonical account roster (the -accounts flag):
 	// every root a session may run as, in menu order. Empty disables
 	// GET /accounts.
@@ -266,6 +277,8 @@ func New(cfg Config) *Server {
 		now:             now,
 		classifyQueue:   cfg.ClassifyQueue,
 		classifierModel: cfg.ClassifierModel,
+		summarizeTurns:  cfg.SummarizeTurns,
+		summaryModel:    cfg.SummaryModel,
 		sentinel:        cfg.Sentinel,
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
@@ -1432,6 +1445,8 @@ func (s *Server) sessionConfig(id string, opts CreateOpts, registrable bool, shi
 		Sentinel:        s.sentinel,
 		ClassifyQueue:   s.classifyQueue,
 		ClassifierModel: s.classifierModel,
+		SummarizeTurns:  s.summarizeTurns,
+		SummaryModel:    s.summaryModel,
 		// Share the server's clock so a session's idle stamp and the
 		// sweeper's idle check read the same time — identical to time.Now
 		// in production, injectable together under test.
@@ -1447,6 +1462,9 @@ func (s *Server) sessionConfig(id string, opts CreateOpts, registrable bool, shi
 		// must never reach the network, so it enqueues busy messages as
 		// immediate waits instead of classifying them.
 		cfg.ClassifyQueue = false
+		// The summarizer likewise spawns a REAL claude, so a fake/offline
+		// session must never fire it — it simply never emits a task-summary.
+		cfg.SummarizeTurns = false
 	}
 	if registrable {
 		cfg.Registrar = registrar{s}

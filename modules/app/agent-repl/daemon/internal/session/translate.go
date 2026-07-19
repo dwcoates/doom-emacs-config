@@ -50,6 +50,13 @@ type Translator struct {
 	// back to the Emacs input buffer, and handing it back twice would
 	// overwrite whatever the user typed after the first one.
 	turnRetracted bool
+	// turnText accumulates the active turn's streamed main-chain assistant
+	// text (§2.14): reset when a turn starts, appended by every main-chain
+	// text delta and synthesized text block, and read at the turn's result
+	// to summarize the objective. It accumulates only WHILE a turn is
+	// active, so transcript replay through OnEvent — which has no live turn
+	// — never bloats it with the whole conversation.
+	turnText strings.Builder
 	// pending set-permission-mode request_id → requested mode.
 	pendingModes map[string]protocol.PermissionMode
 	// pending set-model request_id → requested model.
@@ -220,6 +227,7 @@ func (t *Translator) OnUserMessageCmd(cmd *protocol.L1Command) protocol.L2Frame 
 	t.turnActive = true
 	t.turnResponded = false
 	t.turnRetracted = false
+	t.turnText.Reset()
 	return &protocol.UserTurnFrame{
 		Envelope:  protocol.Envelope{Type: "user-turn"},
 		RequestID: cmd.RequestID,
@@ -313,6 +321,18 @@ func (t *Translator) OnInterruptCmd() []protocol.L2Frame {
 
 // TurnActive reports whether a user turn is currently in flight.
 func (t *Translator) TurnActive() bool { return t.turnActive }
+
+// ActiveTurnText returns the main-chain assistant text the active turn has
+// streamed so far, or "" when no turn is in flight (§2.14). The session
+// hub reads it at a turn's result — before OnEvent's result handler resets
+// it — to summarize the turn's objective. "" is a real answer (nothing to
+// summarize), not a failure.
+func (t *Translator) ActiveTurnText() string {
+	if !t.turnActive {
+		return ""
+	}
+	return t.turnText.String()
+}
 
 // NoteBroadcast records what an outbound frame means for the turn's state.
 // The session hub calls it for every frame on the way to clients, so the
@@ -548,6 +568,12 @@ func (t *Translator) onStreamEvent(evt *protocol.L1Event) []protocol.L2Frame {
 		switch se.Delta.Type {
 		case "text_delta":
 			blk.text.WriteString(se.Delta.Text)
+			// Main-chain only (§2.14): a subagent's text is not the turn's
+			// own answer, so it must not wash the objective summary over
+			// with sidechain output.
+			if parent == "" && t.turnActive {
+				t.turnText.WriteString(se.Delta.Text)
+			}
 			return []protocol.L2Frame{&protocol.TextDeltaFrame{
 				Envelope: protocol.Envelope{Type: "text-delta"},
 				BlockID:  blk.id,
@@ -734,6 +760,13 @@ func (t *Translator) onAssistantMessage(evt *protocol.L1Event) []protocol.L2Fram
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
+			// The non-streamed counterpart of the text_delta accumulation
+			// (§2.14): with includePartialMessages off the turn's text
+			// arrives only here, and the objective summary would otherwise
+			// see nothing. Main-chain only, mirroring the delta filter.
+			if evt.ParentToolUseID == "" && t.turnActive {
+				t.turnText.WriteString(block.Text)
+			}
 			id := t.nextBlockID()
 			frames = append(frames,
 				&protocol.TextStartFrame{Envelope: protocol.Envelope{Type: "text-start"}, BlockID: id, MessageID: msg.ID, ParentToolUseID: evt.ParentToolUseID},
@@ -806,6 +839,10 @@ func (t *Translator) onResult(evt *protocol.L1Event) []protocol.L2Frame {
 	// §2.4 block-closure invariant: every open block closes before the
 	// result frame, including interrupted or failed turns.
 	t.turnActive = false
+	// The turn is over: the hub reads ActiveTurnText BEFORE OnEvent runs
+	// this handler (§2.14), so freeing the buffer now keeps a finished
+	// turn's full text from lingering in memory.
+	t.turnText.Reset()
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("turn ended")...)
 	usage := protocol.Usage{}
@@ -1008,6 +1045,7 @@ func (t *Translator) onClosed(evt *protocol.L1Event) []protocol.L2Frame {
 	// session NON-terminal, so nothing else resets it, and the daemon-stop
 	// guard would read the dead flag as a live turn forever.
 	t.turnActive = false
+	t.turnText.Reset()
 	frames := t.closeDanglingBlocks()
 	frames = append(frames, t.cancelPendingPermissions("session closed")...)
 	if evt.Reason == "fatal_error" {

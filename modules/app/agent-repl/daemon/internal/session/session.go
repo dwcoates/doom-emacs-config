@@ -112,6 +112,11 @@ type Session struct {
 	// message still enqueues but is treated as an immediate fail-closed
 	// wait, with no subprocess spawned.
 	classifyFn classifyFn
+	// summarizeFn produces the one-line "current objective" label a
+	// completed turn is summarized into (§2.14). Immutable for the
+	// session's life. Nil disables summarization entirely — no subprocess
+	// spawned, no task-summary frame.
+	summarizeFn summarizeFn
 	// hibernateGrace bounds the wait for a cooperative shutdown before the
 	// shim is killed; immutable for the session's life.
 	hibernateGrace time.Duration
@@ -146,6 +151,11 @@ type Session struct {
 	// withdraws by this id, so a client can only ever retract the turn it
 	// believes is running (§2.3). Guarded by mu.
 	activeTurnRequestID string
+	// summaryEpoch is bumped on every turn-completion summary kickoff and
+	// captured by the async summarizer goroutine, so a summary that returns
+	// after a NEWER turn already fired its own is dropped rather than
+	// painting a stale label over the current objective (§2.14). Guarded by mu.
+	summaryEpoch int64
 	// deathReason classifies HOW a terminal session ended: the shim's
 	// closed reason (shutdown / sdk_end / fatal_error), or "shim_died"
 	// for a hard death without a closed event. Empty while alive.
@@ -281,6 +291,18 @@ type Config struct {
 	// Tests set it to a deterministic fake so no subprocess is spawned;
 	// when set it takes precedence over ClassifyQueue.
 	ClassifyFn classifyFn
+	// SummarizeTurns enables the §2.14 per-turn summarizer: a completed
+	// turn's driving prompt and assistant text are distilled by a headless
+	// model call into the one-line topbar "current objective" label. False
+	// disables it (no subprocess spawned, no task-summary frame).
+	SummarizeTurns bool
+	// SummaryModel is the model the summarizer pins; empty takes the haiku
+	// default.
+	SummaryModel string
+	// SummarizeFn overrides the summarizer with an injected implementation.
+	// Tests set it to a deterministic fake so no subprocess is spawned;
+	// when set it takes precedence over SummarizeTurns.
+	SummarizeFn summarizeFn
 	// HibernateGrace is how long a hibernating shim is given to honor the
 	// cooperative shutdown before it is killed. Zero takes the default
 	// (hibernateGrace); tests shrink it to exercise the escalation path.
@@ -356,6 +378,19 @@ func New(cfg Config) *Session {
 			model = defaultClassifierModel
 		}
 		s.classifyFn = newClassifier(model, cfg.ConfigDir, s.logf)
+	}
+	// The summarizer mirrors the classifier's construction: an injected fn
+	// (tests) wins over the flag, and a nil summarizeFn leaves the feature
+	// off (no subprocess, no frame).
+	switch {
+	case cfg.SummarizeFn != nil:
+		s.summarizeFn = cfg.SummarizeFn
+	case cfg.SummarizeTurns:
+		model := cfg.SummaryModel
+		if model == "" {
+			model = defaultSummarizerModel
+		}
+		s.summarizeFn = newSummarizer(model, cfg.ConfigDir, s.logf)
 	}
 	return s
 }
@@ -458,6 +493,18 @@ func (s *Session) Run() {
 			continue
 		}
 		s.lastActive = s.now()
+		// §2.14: capture the just-completed turn's driving prompt and its
+		// main-chain assistant text BEFORE OnEvent's result handler resets
+		// the turn, so the async summarizer below can label what the turn
+		// was about. Only a live result with both a prompt and some answer
+		// is worth summarizing.
+		summaryPrompt, summaryResponses := "", ""
+		summarizeTurn := false
+		if evt.Type == "result" && s.summarizeFn != nil && s.translator.TurnActive() {
+			summaryPrompt = s.activeTurnText
+			summaryResponses = s.translator.ActiveTurnText()
+			summarizeTurn = summaryPrompt != "" && summaryResponses != ""
+		}
 		frames := s.translator.OnEvent(evt)
 		s.broadcastLocked(frames)
 		// Spawn announcements start tailers; completion notifications
@@ -475,6 +522,15 @@ func (s *Session) Run() {
 			if err := s.drainQueueLocked(); err != nil {
 				s.logf("session %s: draining queue after result: %v", s.ID, err)
 			}
+		}
+		// §2.14: fire the async summarizer for the turn that just ended. The
+		// epoch bump lets a later turn's summary supersede this one, and the
+		// captured prompt/response are the finished turn's — the drain above
+		// may already have started the next turn, so live state cannot be read
+		// here.
+		if summarizeTurn && !s.terminal {
+			s.summaryEpoch++
+			go s.summarize(s.summaryEpoch, summaryPrompt, summaryResponses)
 		}
 		s.notifyRegistrarLocked()
 		s.mu.Unlock()
@@ -906,6 +962,28 @@ func (s *Session) classify(queueID, runningTask, newMessage string) {
 	if err := s.applyVerdictLocked(queueID, verdict); err != nil {
 		s.logf("session %s: applying queue verdict: %v", s.ID, err)
 	}
+}
+
+// summarize runs the injected summarizer off the lock (it may spawn a
+// subprocess), then re-acquires it to broadcast the one-line label
+// (§2.14). Best-effort throughout: an empty result broadcasts nothing so
+// the last good label stands, and a summary superseded by a newer turn
+// (epoch moved) or arriving after the session ended is dropped rather
+// than painting a stale objective.
+func (s *Session) summarize(epoch int64, prompt, responses string) {
+	summary := s.summarizeFn(prompt, responses)
+	if summary == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.terminal || s.summaryEpoch != epoch {
+		return
+	}
+	s.broadcastLocked([]protocol.L2Frame{&protocol.TaskSummaryFrame{
+		Envelope: protocol.Envelope{Type: "task-summary"},
+		Summary:  summary,
+	}})
 }
 
 // applyVerdictLocked records a verdict on its queued item and broadcasts
