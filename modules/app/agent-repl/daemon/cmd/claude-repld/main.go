@@ -121,6 +121,8 @@ func main() {
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
 		classifyQueue  = flag.Bool("classify-queue", envBool("AGENT_REPL_CLASSIFY_QUEUE", true), "classify a message submitted mid-turn (interrupt vs wait) via a headless model (§2.13)")
 		classifierMdl  = flag.String("classifier-model", envStr("AGENT_REPL_CLASSIFIER_MODEL", "haiku"), "model for the in-flight-queue classifier")
+		summarizeTurns = flag.Bool("summarize-turns", envBool("AGENT_REPL_SUMMARIZE_TURNS", true), "summarize each completed turn into the one-line topbar objective via a headless model (§2.14)")
+		summaryMdl     = flag.String("summary-model", envStr("AGENT_REPL_SUMMARY_MODEL", "haiku"), "model for the per-turn objective summarizer")
 		accountsFlag   = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
 	)
 	flag.Parse()
@@ -239,6 +241,8 @@ func main() {
 		Logins:          logins,
 		ClassifyQueue:   *classifyQueue,
 		ClassifierModel: *classifierMdl,
+		SummarizeTurns:  *summarizeTurns,
+		SummaryModel:    *summaryMdl,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
 	})

@@ -171,6 +171,41 @@ func expectClosed(t *testing.T, c *Client) {
 	}
 }
 
+// newSummaryHarness is newHarness with the §2.14 per-turn summarizer wired
+// to an injected fn, so a completed turn's summary is deterministic and no
+// subprocess is ever spawned.
+func newSummaryHarness(t *testing.T, fn summarizeFn) *harness {
+	t.Helper()
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     64,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          func(string, ...any) {},
+		SummarizeFn:   fn,
+	})
+	go sess.Run()
+	cleanupSession(t, shim, sess)
+	return &harness{shim: shim, sess: sess}
+}
+
+// recvFrameOfType drains frames until one of the wanted type arrives,
+// skipping the ordinary turn frames (user-turn, text-*, result) that
+// precede an async task-summary.
+func recvFrameOfType(t *testing.T, c *Client, typ string) map[string]any {
+	t.Helper()
+	for range 64 {
+		f := recvFrame(t, c)
+		if f["type"] == typ {
+			return f
+		}
+	}
+	t.Fatalf("did not see a %q frame", typ)
+	return nil
+}
+
 // --- hello -------------------------------------------------------------------
 
 func TestSessionHelloIsFirstFrameOnAttach(t *testing.T) {
@@ -432,6 +467,106 @@ func TestSessionUserMessageBroadcastsUserTurnAndForwards(t *testing.T) {
 	forwarded := recvSent(t, h.shim)
 	if !strings.HasSuffix(string(forwarded), "\n") || !strings.Contains(string(forwarded), `"user-message"`) {
 		t.Errorf("forwarded = %q", forwarded)
+	}
+}
+
+func TestSessionCompletedTurnBroadcastsTaskSummary(t *testing.T) {
+	// Arrange — an injected summarizer records the inputs it is handed and
+	// returns a deterministic label.
+	gotInputs := make(chan [2]string, 1)
+	h := newSummaryHarness(t, func(prompt, responses string) string {
+		gotInputs <- [2]string{prompt, responses}
+		return "Objective X."
+	})
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act — a full turn: prompt, streamed answer, result.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"r1","content":"build the thing"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	recvSent(t, h.shim)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"building the widget"}}}`)
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+	// Assert — the summary reaches the client, and the summarizer saw the
+	// driving prompt plus the turn's assistant text.
+	frame := recvFrameOfType(t, c, "task-summary")
+	if frame["summary"] != "Objective X." {
+		t.Errorf("summary = %v, want %q", frame["summary"], "Objective X.")
+	}
+	inputs := <-gotInputs
+	if inputs[0] != "build the thing" {
+		t.Errorf("prompt = %q, want %q", inputs[0], "build the thing")
+	}
+	if !strings.Contains(inputs[1], "building the widget") {
+		t.Errorf("responses = %q, want it to contain the turn's assistant text", inputs[1])
+	}
+}
+
+func TestSessionEmptyTurnSummaryBroadcastsNoFrame(t *testing.T) {
+	// Arrange — a summarizer that returns "" (its best-effort failure /
+	// blank contract): no frame should reach the client, so the last good
+	// label stands.
+	h := newSummaryHarness(t, func(string, string) string { return "" })
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"r1","content":"build the thing"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	recvFrame(t, c) // user-turn
+	recvSent(t, h.shim)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working"}}}`)
+	// Act
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+	// Assert — the client sees text-start/text-delta/result but never a
+	// task-summary, even after the async summarizer has run.
+	for range 8 {
+		select {
+		case data, ok := <-c.Send:
+			if !ok {
+				return // channel closed on cleanup; no summary was seen
+			}
+			var f map[string]any
+			if err := json.Unmarshal(data, &f); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if f["type"] == "task-summary" {
+				t.Fatalf("empty summary should broadcast no frame, got %v", f)
+			}
+		case <-time.After(recvTimeout):
+			return // no more frames: the empty summary emitted nothing
+		}
+	}
+}
+
+func TestSessionStaleTurnSummaryIsDropped(t *testing.T) {
+	// Arrange — a session whose summary epoch has already advanced past the
+	// one a slow summarizer captured (a newer turn fired its own summary
+	// while this one was still running).
+	h := newSummaryHarness(t, func(string, string) string { return "stale objective" })
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	h.sess.mu.Lock()
+	h.sess.summaryEpoch = 5
+	h.sess.mu.Unlock()
+	// Act — a summary captured at epoch 3 returns after epoch moved to 5.
+	h.sess.summarize(3, "p", "r")
+	// Assert — nothing broadcast: the stale label must not paint over the
+	// current objective.
+	select {
+	case data := <-c.Send:
+		t.Fatalf("stale summary was broadcast: %s", data)
+	default:
+	}
+	// A summary matching the current epoch DOES broadcast.
+	h.sess.summarize(5, "p", "r")
+	frame := recvFrameOfType(t, c, "task-summary")
+	if frame["summary"] != "stale objective" {
+		t.Errorf("summary = %v", frame["summary"])
 	}
 }
 
