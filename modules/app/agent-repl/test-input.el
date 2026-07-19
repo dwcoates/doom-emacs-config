@@ -1890,6 +1890,15 @@ send whenever the prefix counter aligned with the period."
     ;; after-change-functions should include history-on-change
     (should (memq #'agent-repl--history-on-change after-change-functions))))
 
+(ert-deftest agent-repl-test-agent-repl-input-mode-fill-column-150 ()
+  "`agent-repl-input-mode' sets the buffer-local `fill-column' to 150.
+Pins the widened composer fill width so wrapped prose reflows to 150
+columns rather than the 70-column default."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-fill-column*"
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
+      (agent-repl-input-mode))
+    (should (= fill-column 150))))
+
 (ert-deftest agent-repl-test-agent-repl-input-mode-applies-configured-background ()
   "`agent-repl-input-mode' tints the buffer with `agent-repl--input-background-color'."
   (agent-repl-test--with-temp-buffer " *test-input-mode-bg*"
