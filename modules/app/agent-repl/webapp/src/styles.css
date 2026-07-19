@@ -634,10 +634,14 @@ pre {
    centered BETWEEN the purple response's left rail and the prompt's right
    rail rather than flush with them. Scoped to direct `.feed-item` children,
    so a tool card NESTED inside a bubble's activity panel keeps its full
-   width. The assistant's own response bubble is NOT centered — it fits its
-   text and hugs the left rail (see below). */
+   width. The AskUserQuestion Q&A card (`.permission.question`, in both its
+   pending "Question" and its resolved "answered" state) rides the same rail:
+   it is a top-level prompt card like the tool cards, so it centers with them
+   rather than spanning the full column. The assistant's own response bubble
+   is NOT centered — it fits its text and hugs the left rail (see below). */
 .feed-item > .tool-card,
-.feed-item > .feed-group {
+.feed-item > .feed-group,
+.feed-item > .permission.question {
   max-width: var(--tool-card-cap);
   margin-left: auto;
   margin-right: auto;
