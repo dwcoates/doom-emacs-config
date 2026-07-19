@@ -27,6 +27,7 @@
     --info-tokens: #b45309;
     --info-agents: #7c3aed;
     --async: #f59e0b;
+    --q-border: #eab308;
     --composer-bg: #e4e7eb;
     --code-bg: color-mix(in srgb, #000000 13%, transparent);
     font-family: ui-sans-serif, system-ui, sans-serif;
@@ -46,6 +47,7 @@
       --info-tokens: #fbbf24;
       --info-agents: #c4b5fd;
       --async: #fbbf24;
+      --q-border: #facc15;
       --composer-bg: #0c0e12;
       --code-bg: color-mix(in srgb, #000000 32%, transparent);
     }
@@ -57,7 +59,7 @@
     --card: #eef1f4; --user: #e0ecff; --assistant: #ece4fa;
     --thinking: #ea580c; --info-ws: #15803d; --info-model: #0e7490;
     --info-tokens: #b45309; --info-agents: #7c3aed; --async: #f59e0b;
-    --composer-bg: #e4e7eb;
+    --q-border: #eab308; --composer-bg: #e4e7eb;
     --code-bg: color-mix(in srgb, #000000 13%, transparent);
   }
   :root[data-theme="dark"] {
@@ -65,7 +67,7 @@
     --card: #16191f; --user: #1e2a44; --assistant: #292040;
     --thinking: #fb923c; --info-ws: #4ade80; --info-model: #22d3ee;
     --info-tokens: #fbbf24; --info-agents: #c4b5fd; --async: #fbbf24;
-    --composer-bg: #0c0e12;
+    --q-border: #facc15; --composer-bg: #0c0e12;
     --code-bg: color-mix(in srgb, #000000 32%, transparent);
   }
 
@@ -83,7 +85,7 @@
 
   /* ---------------- Sidebar (the design under review) ---------------- */
   #ws-sidebar {
-    flex: 0 0 300px; min-width: 0; display: flex; flex-direction: column;
+    flex: 0 0 20%; min-width: 0; display: flex; flex-direction: column;
     border-right: 1px solid var(--border); background: var(--bg);
     user-select: none;
   }
@@ -130,12 +132,32 @@
     padding: 0.28rem 0.7rem 0.28rem 0.9rem; cursor: pointer; min-width: 0;
   }
   .row:hover { background: var(--card); }
-  .row .glyph { width: 1.1em; text-align: center; flex: 0 0 auto; }
+  /* Lifecycle dot: the row's single status element. Breathing red =
+     thinking, solid green = done, solid orange = done+viewed, matching the
+     Emacs tab-bar status handling. */
+  .row .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+  .st.think { background: var(--err); animation: pulse 1.3s ease-in-out infinite; }
+  .st.done { background: var(--ok); }
+  .st.viewed { background: var(--thinking); }
+  .st.perm { background: var(--q-border); animation: pulse 1.3s ease-in-out infinite; }
+  .st.idle { background: none; border: 1.5px solid var(--muted); }
+  .st.dead { background: var(--muted); }
+  /* Merge lifecycle: a recycle arrow, spinning while the merge is in
+     flight, still while merely queued. */
+  .st.merge {
+    width: auto; height: auto; border-radius: 0; background: none;
+    color: var(--async); font-size: 0.9rem; line-height: 1;
+  }
+  .st.merge.live { animation: spin 1.4s linear infinite; }
   .row .name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .row .when {
+    margin-left: auto; color: var(--muted); font-size: 0.68rem;
+    flex: 0 0 auto; font-variant-numeric: tabular-nums;
+  }
   .row .chev {
-    margin-left: auto; color: var(--muted); font-size: 0.7rem;
+    color: var(--muted); font-size: 0.7rem;
     padding: 0 0.3em; border-radius: 4px; flex: 0 0 auto;
     transition: transform 0.12s;
   }
@@ -171,10 +193,11 @@
   .gitdot.clean { background: var(--ok); }
   .gitdot.dirty { background: var(--info-tokens); }
 
-  /* Activity pulse: sign of life on a thinking workspace. */
-  .pulse {
-    flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--thinking); animation: pulse 1.4s ease-in-out infinite;
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Keyboard cursor: where C-S-n / C-S-p (relayed from the Emacs input
+     window) currently point; C-S-RET selects it. */
+  .ws.navsel > .row {
+    outline: 1px dashed var(--accent); outline-offset: -1px;
   }
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
@@ -263,7 +286,7 @@
   <nav id="ws-sidebar">
     <div class="sb-head">
       <span class="sb-title">Workspaces</span>
-      <span class="sb-count">8</span>
+      <span class="sb-count">9</span>
       <span class="sb-sort" title="Toggle sort: repo / needs-attention">sort: repo</span>
     </div>
     <div class="sb-scroll">
@@ -276,8 +299,9 @@
         <div class="rows">
           <div class="ws">
             <div class="row" data-dir="~/.config/doom">
-              <span class="glyph">💤</span><span class="name">main</span>
+              <span class="st idle" title="idle"></span><span class="name">main</span>
               <span class="gitdot clean" title="git: clean"></span>
+              <span class="when">18m</span>
               <span class="chev">▸</span>
             </div>
             <div class="detail">
@@ -294,11 +318,11 @@
             <div class="kids">
               <div class="ws current open">
                 <div class="row" data-dir="~/.config/doom-worktrees/workspace-sidebar-mcx">
-                  <span class="glyph">⌛</span><span class="name">workspace-sidebar-mcx</span>
-                  <span class="pulse" title="turn in flight"></span>
+                  <span class="st think" title="thinking"></span><span class="name">workspace-sidebar-mcx</span>
                   <span class="badge async" title="2 background tasks">⚙2</span>
                   <span class="badge prio">P1</span>
                   <span class="gitdot dirty" title="git: dirty"></span>
+                  <span class="when">now</span>
                   <span class="chev">▸</span>
                 </div>
                 <div class="detail">
@@ -318,8 +342,9 @@
                 <div class="kids">
                   <div class="ws">
                     <div class="row" data-dir="~/.config/doom-worktrees/sidebar-mock-spike">
-                      <span class="glyph">❓</span><span class="name">sidebar-mock-spike</span>
+                      <span class="st perm" title="awaiting permission"></span><span class="name">sidebar-mock-spike</span>
                       <span class="gitdot clean" title="git: clean"></span>
+                      <span class="when">5m</span>
                       <span class="chev">▸</span>
                     </div>
                     <div class="detail">
@@ -336,10 +361,11 @@
                   </div>
                 </div>
               </div>
-              <div class="ws">
+              <div class="ws navsel">
                 <div class="row" data-dir="~/.config/doom-worktrees/agent-clock-fix">
-                  <span class="glyph">✅</span><span class="name">agent-clock-fix</span>
+                  <span class="st done" title="done"></span><span class="name">agent-clock-fix</span>
                   <span class="gitdot dirty" title="git: dirty"></span>
+                  <span class="when">1h</span>
                   <span class="chev">▸</span>
                 </div>
                 <div class="detail">
@@ -355,16 +381,17 @@
                   </div>
                 </div>
               </div>
-              <div class="ws gone">
+              <div class="ws">
                 <div class="row" data-dir="~/.config/doom-worktrees/magit-status-tweaks">
-                  <span class="glyph">🔀</span><span class="name">magit-status-tweaks</span>
+                  <span class="st merge" title="queued for merge">⟳</span><span class="name">magit-status-tweaks</span>
+                  <span class="when">3h</span>
                   <span class="chev">▸</span>
                 </div>
                 <div class="detail">
                   <dl>
-                    <dt>state</dt><dd>merged into main</dd>
+                    <dt>state</dt><dd>queued for merge into main</dd>
                   </dl>
-                  <div class="actions"><button>Re-open</button></div>
+                  <div class="actions"><button>Merge now</button><button class="danger">Dequeue</button></div>
                 </div>
               </div>
             </div>
@@ -374,14 +401,15 @@
 
       <section class="repo">
         <div class="repo-head">
-          <span class="tri">▾</span> services <span class="n">(2)</span>
+          <span class="tri">▾</span> services <span class="n">(3)</span>
           <span class="add" title="New workspace in this repo">+</span>
         </div>
         <div class="rows">
           <div class="ws">
             <div class="row" data-dir="~/workspace/ChessCom/services">
-              <span class="glyph">💤</span><span class="name">master</span>
+              <span class="st viewed" title="done, viewed"></span><span class="name">master</span>
               <span class="gitdot clean" title="git: clean"></span>
+              <span class="when">2d</span>
               <span class="chev">▸</span>
             </div>
             <div class="detail">
@@ -392,9 +420,20 @@
               <div class="actions"><button>Switch</button></div>
             </div>
             <div class="kids">
+              <div class="ws">
+                <div class="row" data-dir="~/workspace/ChessCom/services-worktrees/stats-endpoint">
+                  <span class="st merge live" title="merging">⟳</span><span class="name">stats-endpoint</span>
+                  <span class="when">12m</span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl><dt>state</dt><dd>merging into master</dd></dl>
+                </div>
+              </div>
               <div class="ws gone">
                 <div class="row" data-dir="~/workspace/ChessCom/services-worktrees/ceac-batch-retry">
-                  <span class="glyph">❌</span><span class="name">ceac-batch-retry</span>
+                  <span class="st dead" title="session dead"></span><span class="name">ceac-batch-retry</span>
+                  <span class="when">6d</span>
                   <span class="chev">▸</span>
                 </div>
                 <div class="detail">
@@ -414,7 +453,8 @@
         <div class="rows">
           <div class="ws">
             <div class="row" data-dir="~/scratch">
-              <span class="glyph">·</span><span class="name">scratch</span>
+              <span class="st idle" title="idle"></span><span class="name">scratch</span>
+              <span class="when">9d</span>
               <span class="chev">▸</span>
             </div>
             <div class="detail">
@@ -448,15 +488,16 @@
 
 <!-- Mock chrome: what each element demonstrates. -->
 <footer id="legend">
-  <span>▾ repo fold (syncs tab bar)</span>
+  <span>▾ repo fold (hides repo's tab-bar entries)</span>
   <span>indent = child worktree</span>
-  <span>⌛💤❓✅❌🔀 = ws-render-status glyphs</span>
-  <span>● pulse = turn in flight</span>
-  <span>⚙n = background tasks</span>
-  <span>P1 = priority</span>
-  <span>dot = git clean/dirty</span>
+  <span>breathing red = thinking · green = done · orange = done+viewed</span>
+  <span>breathing yellow = awaiting permission · hollow = idle · grey = dead</span>
+  <span>⟳ spinning = merging · ⟳ still = merge-queued</span>
+  <span>right stamp = recency</span>
+  <span>dashed ring = keyboard cursor (C-S-n/p · C-S-RET selects)</span>
   <span>row click = switch · ▸ = expand</span>
   <span>blue edge = current workspace</span>
+  <span>⚙n = background tasks · P1 = priority · dot = git clean/dirty</span>
 </footer>
 
 <script>
