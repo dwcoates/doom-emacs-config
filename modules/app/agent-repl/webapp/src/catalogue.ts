@@ -15,12 +15,14 @@
  * enumeration: 2.x are the agreed members, 3.x the boundary cases.
  */
 import "./styles.css";
+import { parseJournal } from "./async-stream.js";
 import { CLICK_THROUGH_SELECTOR, PANEL_CLASS } from "./expand.js";
 import { gnsFolds } from "./gns.js";
 import { escapeHtml } from "./highlight.js";
 import { partitionFeed } from "./partition.js";
 import {
   PanelContext,
+  activityTicker,
   asyncMembersByBubble,
   finalResponses,
   panelToggleTarget,
@@ -587,6 +589,79 @@ export function renderScenarioHtml(sc: Scenario, isOpen: (id: string) => boolean
     .join("");
 }
 
+// --- dual-body comparison (deliberation aid, taxonomy 3.2) --------------------
+
+/** The scenario registered under SLUG; throws when the catalogue lost it. */
+function mustScenario(slug: string): Scenario {
+  const sc = scenarios.find((s) => s.slug === slug);
+  if (!sc) throw new Error(`catalogue scenario missing: ${slug}`);
+  return sc;
+}
+
+/**
+ * The workflow scenario stripped to its card, so the two shape renders
+ * differ only in fold structure, never in surrounding feed chrome.
+ */
+function dualBodyItems(): ConversationItem[] {
+  return mustScenario("workflow-journal").items.filter((i) => i.kind !== "user-turn");
+}
+
+/** Shape A — today's real render: two stacked folds, both open. */
+export function dualBodyShapeAHtml(): string {
+  const base = mustScenario("workflow-journal");
+  const sc: Scenario = { ...base, items: dualBodyItems() };
+  const open = new Set(base.openIds);
+  return renderScenarioHtml(sc, (id) => open.has(id));
+}
+
+/**
+ * Shape B — the PROPOSED merged panel, hand-composed from the same CSS
+ * vocabulary and the same child renderers, since no production code draws
+ * it yet: one fold whose sectioned body stacks the child feed above the
+ * journal, under one combined ticker.
+ */
+export function dualBodyShapeBHtml(): string {
+  const items = dualBodyItems();
+  const part = partitionFeed(items);
+  const panels: PanelContext = { children: part.children, isOpen: () => false };
+  const children = part.children.get("cat-wf-1") ?? [];
+  const childFeed = children
+    .map((c) => `<div class="feed-child">${renderItem(c, undefined, undefined, panels)}</div>`)
+    .join("");
+  const wf = items.find((i): i is ToolItem => i.kind === "tool" && i.toolUseId === "cat-wf-1");
+  if (!wf) throw new Error("workflow card missing from scenario");
+  const journal = parseJournal(wf.taskOutput ?? "")
+    .rows.map(
+      (r) =>
+        `<div class="stream-row"><span class="agent-dot agent-${r.status}" aria-hidden="true">●</span> <span class="tool-name">${escapeHtml(
+          r.label,
+        )}</span><span class="stream-detail">${escapeHtml(r.detail)}</span></div>`,
+    )
+    .join("");
+  const ticker = `${activityTicker(children)} · workflow · review-changes · running`;
+  return `<div class="feed-item">
+    <div class="tool-card tool-generic">
+      <div class="tool-head"><span class="tool-name">Workflow</span><span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span></div>
+      <div class="agent-activity open" data-panel-toggle="cat-dual-b">
+        <div class="agent-ticker">${escapeHtml(ticker)} <span class="agent-caret" aria-hidden="true">▴</span></div>
+        <div class="agent-panel">
+          <div class="cat-panel-heading">activity</div>
+          ${childFeed}
+          <div class="cat-panel-heading">journal · wf-review-1</div>
+          ${journal}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** The 3.2 comparison section's inner HTML: the two shapes side by side. */
+export function dualBodySectionHtml(): string {
+  return `<h2 class="cat-title">3.2 · dual-body shapes compared</h2><p class="cat-blurb">${escapeHtml(
+    "The same Workflow call rendered both ways, frozen open. Shape A stacks the activity fold and the journal fold: two chrome rows, two clicks, each ticker truthful to its own body. Shape B merges them into one panel: one click and one background, but section headings inside and a two-summaries-in-one ticker.",
+  )}</p><div class="cat-row"><figure class="cat-variant"><figcaption>shape A — two stacked panels (today)</figcaption><div class="cat-feed">${dualBodyShapeAHtml()}</div></figure><figure class="cat-variant"><figcaption>shape B — one merged panel (proposal)</figcaption><div class="cat-feed">${dualBodyShapeBHtml()}</div></figure></div>`;
+}
+
 // --- interactive mounting -----------------------------------------------------
 
 /**
@@ -648,6 +723,14 @@ export function buildCatalogue(root: HTMLElement): void {
     const feeds = section.querySelectorAll<HTMLElement>(".cat-feed");
     variants.forEach((v, i) => mountScenario(feeds[i], sc, v.open));
   }
+  // The 3.2 dual-body comparison rides after the taxonomy sections: both
+  // shapes render frozen open (the comparison is structural, not
+  // interactive), so no scenario mounting applies.
+  const dual = document.createElement("section");
+  dual.className = "cat-section";
+  dual.id = "cat-dual-body";
+  dual.innerHTML = dualBodySectionHtml();
+  root.appendChild(dual);
 }
 
 // Auto-mount when loaded as the catalogue page's entry (never in tests,
