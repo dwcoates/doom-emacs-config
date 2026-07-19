@@ -118,14 +118,16 @@ First %s is the change-spec, second %s is the prompt."
   :group 'agent-repl)
 
 (defcustom agent-repl-interrupt-confirm t
-  "When non-nil, `agent-repl-interrupt' confirms before cancelling a running agent.
-The prompt appears only when the targeted workspace has a Claude agent
-actively running (its `:agent-state' is `:thinking' — a turn in flight);
-a workspace with no in-flight turn is interrupted without a prompt, since
-there is no running agent to cancel.  Detached background watchers and
-shells never count as a running agent and are never stopped by the
-interrupt, so they never raise the prompt.  The confirmation guards
-against an accidental `C-c C-k' aborting Claude mid-turn."
+  "When non-nil, `agent-repl-interrupt' confirms before cancelling subagents.
+The prompt appears only when the targeted workspace has one or more
+subagents in flight (its `:pending-subagents' counter is non-zero — see
+`agent-repl--agent-subagents-running-p'); a workspace whose main agent
+alone is running, or that has no turn in flight at all, is interrupted
+without a prompt, since there is no subagent work to protect.  Detached
+background watchers and shells never count as a running subagent and are
+never stopped by the interrupt, so they never raise the prompt.  The
+confirmation guards against an accidental `C-c C-k' discarding spawned
+subagent work mid-turn."
   :type 'boolean
   :group 'agent-repl)
 
@@ -502,24 +504,38 @@ session but no in-flight turn is NOT thinking.  Detached background work
 workspace carrying only such work returns nil here."
   (eq (agent-repl--ws-agent-state ws) :thinking))
 
+(defun agent-repl--agent-subagents-running-p (ws)
+  "Return non-nil when workspace WS has one or more subagents in flight.
+A subagent is a Task/Agent turn spawned within the main turn, tracked by
+WS's `:pending-subagents' counter (incremented on SubagentStart,
+decremented on SubagentStop — see `agent-repl--ws-pending-subagents').
+The main agent's own turn does NOT count: a workspace whose main agent is
+`:thinking' with no spawned subagents returns nil here.  This gates the
+`C-c C-k' cancel confirmation (see `agent-repl--confirm-cancel-running')
+so an accidental interrupt is guarded only when subagent work is actually
+at stake."
+  (> (agent-repl--ws-pending-subagents ws) 0))
+
 (defun agent-repl--confirm-cancel-prompt (running)
   "Return the confirmation prompt string naming the RUNNING workspaces.
-RUNNING is a non-empty list of workspace names whose agents are in flight."
+RUNNING is a non-empty list of workspace names that have subagents in
+flight."
   (if (= (length running) 1)
-      (format "Cancel the running agent in %s? " (car running))
-    (format "Cancel the running agents in %d workspaces (%s)? "
+      (format "Cancel the running subagents in %s? " (car running))
+    (format "Cancel the running subagents in %d workspaces (%s)? "
             (length running)
             (string-join running ", "))))
 
 (defun agent-repl--confirm-cancel-running (wss)
-  "Return non-nil if cancelling the running agents among WSS is confirmed.
+  "Return non-nil if cancelling the running subagents among WSS is confirmed.
 WSS is a list of workspace names.  Returns t WITHOUT prompting when
-`agent-repl-interrupt-confirm' is nil, or when none of WSS has a turn in
-flight (see `agent-repl--agent-thinking-p') — there is nothing to
-confirm, and detached watchers or shells alone never raise the prompt.
-Otherwise prompts once, naming the running workspaces, and returns the
-user's answer."
-  (let ((running (seq-filter #'agent-repl--agent-thinking-p wss)))
+`agent-repl-interrupt-confirm' is nil, or when none of WSS has a subagent
+in flight (see `agent-repl--agent-subagents-running-p') — there is
+nothing to confirm.  A workspace whose main agent alone is running (no
+spawned subagents), and detached watchers or shells, never raise the
+prompt.  Otherwise prompts once, naming the workspaces with subagents,
+and returns the user's answer."
+  (let ((running (seq-filter #'agent-repl--agent-subagents-running-p wss)))
     (or (not agent-repl-interrupt-confirm)
         (null running)
         (y-or-n-p (agent-repl--confirm-cancel-prompt running)))))
@@ -535,14 +551,15 @@ current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); programmatic callers pass WS so interrupts target a
 specific workspace.
 
-When the targeted agent is running (`:thinking') and NO-CONFIRM is nil,
-asks for confirmation before cancelling it, unless
-`agent-repl-interrupt-confirm' is nil; declining aborts without
-interrupting.  Only the running Claude agent is stopped — detached
-watchers and shells keep running (see
-`agent-repl--confirm-cancel-running').  Batch callers that confirm once
-for the whole set pass NO-CONFIRM non-nil to suppress the per-target
-prompt.
+When the targeted workspace has subagents in flight (its
+`:pending-subagents' counter is non-zero) and NO-CONFIRM is nil, asks for
+confirmation before cancelling, unless `agent-repl-interrupt-confirm' is
+nil; declining aborts without interrupting.  A main agent running on its
+own (no spawned subagents) is interrupted without a prompt.  Only the
+running Claude agent is stopped — detached watchers and shells keep
+running (see `agent-repl--confirm-cancel-running').  Batch callers that
+confirm once for the whole set pass NO-CONFIRM non-nil to suppress the
+per-target prompt.
 
 Interrupting BEFORE the agent has answered is semantically an undo, so
 this doubles as one: the frontend asks the daemon to retract the sent
