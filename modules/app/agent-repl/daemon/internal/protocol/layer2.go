@@ -521,3 +521,18 @@ type QueuedItem struct {
 	Verdict   string          `json:"verdict,omitempty"`
 	Reason    string          `json:"reason,omitempty"`
 }
+
+// --- §2.14 task summary ---------------------------------------------------
+
+// TaskSummaryFrame carries a one-line "current objective" label for the
+// session, produced by a headless Haiku call over a just-completed turn's
+// driving prompt and the main-chain assistant text it produced. Emitted
+// at most once per completed turn and only when the model returns a
+// usable line: the summary is best-effort, so a failed or empty one
+// emits no frame at all and the last good label stands. It carries no
+// per-turn key — a newer turn's summary simply supersedes it — and the
+// GUI renders it centered in the topbar.
+type TaskSummaryFrame struct {
+	Envelope
+	Summary string `json:"summary"`
+}
