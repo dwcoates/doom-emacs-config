@@ -208,29 +208,39 @@ export interface SystemItem {
 }
 
 /**
- * The tokens an API request carries in its input: the fresh tokens, plus
- * the cached prefix it read, plus the prefix it wrote to cache. Their sum
- * IS the conversation's context size at that request, so the last one a
- * session reported is what the session currently costs to think with.
+ * The tokens a request leaves occupying the model's context: the fresh
+ * input tokens, plus the cached prefix it read, plus the prefix it wrote
+ * to cache, PLUS the output it produced. Their sum IS the conversation's
+ * full standing size at that request — everything the model had to think
+ * with, plus the answer it just appended — so the last one a session
+ * reported is precisely how much of the context window the session now
+ * occupies, and the model max minus it is what remains.
+ *
+ * The output side is what makes this a LIVE occupancy figure rather than a
+ * turn-lagged one: excluding it would undercount by the current response
+ * until the next request folded that response into its input.
  */
 export function contextTokens(usage: Usage | null): number {
   if (!usage) return 0;
   return (
     usage.input_tokens +
     (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0)
+    (usage.cache_creation_input_tokens ?? 0) +
+    usage.output_tokens
   );
 }
 
 /**
- * Whether a usage payload carries no tokens at all. A real turn always
- * spends input tokens, so an all-zero usage identifies the one producer
- * that reports none: the synthetic result a transcript-seeded replay
- * closes each turn with (§2.11) — the transcript records no usage, and
- * adopting its zeros would wipe the session tallies on every rehydrate.
+ * Whether a usage payload carries no tokens at all. `contextTokens` now
+ * sums every dimension, output included, so a zero sum already means all
+ * four fields are zero. A real turn always spends tokens, so an all-zero
+ * usage identifies the one producer that reports none: the synthetic
+ * result a transcript-seeded replay closes each turn with (§2.11) — the
+ * transcript records no usage, and adopting its zeros would wipe the
+ * session tallies on every rehydrate.
  */
 function isZeroUsage(usage: Usage): boolean {
-  return contextTokens(usage) === 0 && usage.output_tokens === 0;
+  return contextTokens(usage) === 0;
 }
 
 /**
@@ -285,7 +295,7 @@ export function topLevelUsage(state: StoreState): Usage | null {
 
 /**
  * The running turn's context growth SO FAR: how far the session's CURRENT
- * input-side size (`contextTokens`) has moved past where the PREVIOUS result
+ * context size (`contextTokens`, input + output) has moved past where the PREVIOUS result
  * left it. This is the live twin of the settled `delta` a result stamps
  * (see `resultContext`), measured from the SAME baseline — the last result's
  * `context.total` — so the figure a turn ends on equals the delta its
