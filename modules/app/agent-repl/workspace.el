@@ -464,6 +464,26 @@ directly or wrapping it themselves with `fboundp'."
 Every such workspace shares this one key, so they group — and fold —
 together.")
 
+(defun agent-repl--repo-key-for-dir (dir)
+  "Return the repo key (canonical git common-dir) for directory DIR.
+Pure derivation with no workspace-plist caching: shells out to git via
+`agent-repl--git-string-quiet' on every call.  Returns nil when DIR is
+nil or git fails on it (deleted directory, not a repository) — a
+documented lookup-or-nil contract, since \"no repo\" is an expected
+state the caller maps onto `agent-repl--repo-key-unknown'.
+
+`agent-repl--ws-repo-key' layers the `:group-key' plist cache on top
+for workspaces; callers with only a directory (e.g. the sidebar
+roster's snapshot-only entries, which have no plist to cache on) use
+this directly and own their own caching."
+  (when-let* ((raw (and dir (agent-repl--git-string-quiet
+                             "-C" dir "rev-parse" "--git-common-dir"))))
+    (when (and (not (string-empty-p raw))
+               (not (string-prefix-p "fatal" raw)))
+      (let ((abs (if (file-name-absolute-p raw) raw
+                   (expand-file-name raw dir))))
+        (agent-repl--path-canonical abs)))))
+
 (defun agent-repl--ws-repo-key (ws)
   "Return WS's repo key: the canonical git common-dir of its project-dir.
 Cached on the workspace plist as `:group-key' so each workspace shells
@@ -474,15 +494,9 @@ the workspace.  Callers that need a total function should use
 `agent-repl--repo-key-unknown'."
   (or (agent-repl--ws-get ws :group-key)
       (when-let* ((dir (ignore-errors (agent-repl--ws-dir ws)))
-                  (raw (agent-repl--git-string-quiet
-                        "-C" dir "rev-parse" "--git-common-dir")))
-        (when (and raw (not (string-empty-p raw))
-                   (not (string-prefix-p "fatal" raw)))
-          (let* ((abs (if (file-name-absolute-p raw) raw
-                        (expand-file-name raw dir)))
-                 (key (agent-repl--path-canonical abs)))
-            (agent-repl--ws-put ws :group-key key)
-            key)))))
+                  (key (agent-repl--repo-key-for-dir dir)))
+        (agent-repl--ws-put ws :group-key key)
+        key)))
 
 (defun agent-repl--ws-repo-group (ws)
   "Return WS's fold-group key, never nil.
