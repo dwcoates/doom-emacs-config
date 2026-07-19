@@ -112,6 +112,10 @@ type L1Event struct {
 	// commands
 	Commands []SlashCommand `json:"commands,omitempty"`
 
+	// status — the SDK's system:init re-read off a throwaway probe handshake,
+	// forwarded opaque exactly like Data below.
+	Status json.RawMessage `json:"status,omitempty"`
+
 	// stream-event / assistant-message / tool-result
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 	Event           json.RawMessage `json:"event,omitempty"`
@@ -182,6 +186,7 @@ var l1EventKnownTypes = map[string]bool{
 	"ack":                true,
 	"models":             true,
 	"commands":           true,
+	"status":             true,
 	"stream-event":       true,
 	"assistant-message":  true,
 	"result":             true,
@@ -283,6 +288,7 @@ var l1CommandKnownTypes = map[string]bool{
 	"set-permission-mode": true,
 	"set-model":           true,
 	"refresh-commands":    true,
+	"refresh-status":      true,
 	"shutdown":            true,
 	"replay-request":      true,
 	// §2.13 in-flight queue overrides: Layer-2 only, daemon-handled.

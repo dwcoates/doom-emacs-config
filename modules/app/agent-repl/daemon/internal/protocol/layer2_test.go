@@ -91,6 +91,14 @@ func TestL2FrameMarshalling(t *testing.T) {
 			},
 			want: map[string]any{"type": "queue-removed", "reason": "drained", "request_id": "r1"},
 		},
+		{
+			name: "status frame carries the opaque snapshot",
+			frame: &StatusFrame{
+				Envelope: Envelope{Type: "status", Seq: 9, TS: "T", SessionID: "s1"},
+				Snapshot: json.RawMessage(`{"subtype":"init","fast_mode_state":"on"}`),
+			},
+			want: map[string]any{"type": "status", "seq": float64(9)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
