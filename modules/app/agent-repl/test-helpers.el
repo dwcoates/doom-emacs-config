@@ -196,6 +196,20 @@ advice's effect would be invisible)."
 (unless (boundp 'magit-display-buffer-function)
   (defvar magit-display-buffer-function nil "Stub."))
 
+;; The `magit-add-section-hook' call in the `(after! magit ...)' body runs
+;; eagerly under the test shim, so the hook variable, its anchor entry, and
+;; the registration helper must all exist at load time.
+(unless (fboundp 'magit-insert-unpushed-to-upstream-or-recent)
+  (defun magit-insert-unpushed-to-upstream-or-recent (&rest _args) "Stub." nil))
+(unless (boundp 'magit-status-sections-hook)
+  (defvar magit-status-sections-hook
+    (list 'magit-insert-unpushed-to-upstream-or-recent)
+    "Stub: simulated magit status-sections hook."))
+(unless (fboundp 'magit-add-section-hook)
+  (defun magit-add-section-hook (hook function &optional _at _append _local)
+    "Stub: append FUNCTION to HOOK (ignores AT/APPEND positioning)."
+    (add-hook hook function t)))
+
 ;; magit keymap stubs — `define-key' in `(after! magit-diff ...)'
 ;; executes eagerly under the test shim, so these must exist.
 (unless (boundp 'magit-unstaged-section-map)

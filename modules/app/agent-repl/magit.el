@@ -47,6 +47,19 @@ Toggle interactively with `+dwc/magit-toggle-tags-in-log' (bound to
   :type 'boolean
   :group 'agent-repl)
 
+(defcustom agent-repl-magit-merge-base-ref nil
+  "Base ref the magit-status merge-base section computes against, or nil.
+When nil, the merge-base is computed against the repository's main
+branch as returned by `magit-main-branch' (typically `master'), so a
+workspace forked off `master' shows the commit it forked from.  When a
+non-empty string, that ref is used verbatim (e.g. \"origin/master\").
+The section is inserted by `agent-repl--magit-insert-merge-base' and
+shows the single commit where the current branch diverged from the
+base ref."
+  :type '(choice (const :tag "Repository main branch" nil)
+                 (string :tag "Explicit ref"))
+  :group 'agent-repl)
+
 ;;;; --- magit settings and keybindings ---------------------------------------
 
 (defun agent-repl--magit-strip-tag-refs (args)
@@ -86,6 +99,57 @@ buffer so the change becomes visible immediately."
   (message "magit commit-list tags %s"
            (if agent-repl-magit-show-tags-in-log "shown" "hidden")))
 
+;;;; --- magit-status merge-base section --------------------------------------
+
+(declare-function magit-main-branch "magit-git")
+
+(defun agent-repl--magit-merge-base-ref ()
+  "Return the ref to compute HEAD's merge-base against, or nil.
+Returns `agent-repl-magit-merge-base-ref' when it is a non-empty
+string; otherwise the repository's main branch via `magit-main-branch'
+\(nil when the repository has no recognizable main branch)."
+  (if (and (stringp agent-repl-magit-merge-base-ref)
+           (not (string-empty-p agent-repl-magit-merge-base-ref)))
+      agent-repl-magit-merge-base-ref
+    (magit-main-branch)))
+
+(defun agent-repl--magit-merge-base-commit ()
+  "Return (BASE . SHA) for HEAD's merge-base with BASE, or nil.
+BASE is `agent-repl--magit-merge-base-ref'; SHA is the merge-base
+commit of HEAD and BASE — the point where the current branch diverged
+from BASE.  Returns nil when no base ref resolves, when BASE names the
+branch HEAD is already on (a branch's merge-base with itself is not
+worth showing), or when git yields no usable merge-base.  Git reads
+route through `agent-repl--git-string-quiet' so tests mock that wrapper
+rather than shelling out (see AGENTS.md)."
+  (let ((base (agent-repl--magit-merge-base-ref)))
+    (when (and base
+               (not (equal base (agent-repl--git-string-quiet
+                                 "rev-parse" "--abbrev-ref" "HEAD"))))
+      (let ((sha (agent-repl--git-string-quiet "merge-base" "HEAD" base)))
+        (when (and (stringp sha)
+                   (not (string-empty-p sha))
+                   (not (string-prefix-p "fatal" sha)))
+          (cons base sha))))))
+
+(defun agent-repl--magit-insert-merge-base ()
+  "Insert a magit-status section showing HEAD's merge-base with the base ref.
+The base ref is resolved by `agent-repl--magit-merge-base-ref' and the
+section shows the single fork-point commit (where the current branch
+diverged from the base) as a navigable `commit' section, so RET on it
+runs `magit-show-commit'.  Inserts nothing when
+`agent-repl--magit-merge-base-commit' returns nil.  Registered on
+`magit-status-sections-hook' after the unpushed/recent-commits section."
+  (when-let* ((pair (agent-repl--magit-merge-base-commit))
+              (base (car pair))
+              (sha (cdr pair)))
+    (magit-insert-section (commit sha)
+      (magit-insert-heading
+        (format (propertize "Merge base with %s"
+                            'font-lock-face 'magit-section-heading)
+                base))
+      (magit--insert-log nil sha '("-1")))))
+
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm agent-repl-magit-no-confirm-extras)
         magit-diff-visit-previous-blob nil)
@@ -99,6 +163,13 @@ buffer so the change becomes visible immediately."
   ;; Strip tag refs from commit-list decorations by default (toggle via `g T').
   (advice-add 'magit-format-ref-labels :filter-args
               #'agent-repl--magit-strip-tag-refs)
+
+  ;; Show the current branch's merge-base with the base ref (the fork
+  ;; point) as a status section, just after the unpushed/recent commits.
+  (magit-add-section-hook 'magit-status-sections-hook
+                          #'agent-repl--magit-insert-merge-base
+                          #'magit-insert-unpushed-to-upstream-or-recent
+                          t)
 
   (map! :map (magit-unstaged-section-map magit-staged-section-map magit-untracked-section-map magit-mode-map)
         :desc "Jump to recent commits"
