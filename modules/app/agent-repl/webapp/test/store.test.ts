@@ -722,6 +722,25 @@ describe("ConversationStore turn lifecycle", () => {
     expect(store.state.model).toBe("haiku");
   });
 
+  it("adopts a status frame's snapshot", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("status", { snapshot: { fast_mode_state: "on" } }));
+    // Assert
+    expect(store.state.statusSnapshot).toEqual({ fast_mode_state: "on" });
+  });
+
+  it("replaces the status snapshot rather than merging into it", () => {
+    // Arrange — a later re-probe reports the /fast toggled back off.
+    const store = newStore();
+    store.applyRaw(frame("status", { snapshot: { fast_mode_state: "on", output_style: "x" } }));
+    // Act
+    store.applyRaw(frame("status", { snapshot: { fast_mode_state: "off" } }));
+    // Assert — the stale output_style is gone, not carried forward.
+    expect(store.state.statusSnapshot).toEqual({ fast_mode_state: "off" });
+  });
+
   it("moves the model when the AGENT switched it, not the user", () => {
     // Arrange — the /model-switch staleness this whole path exists to fix.
     const store = newStore();

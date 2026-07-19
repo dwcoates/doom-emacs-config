@@ -86,6 +86,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     cwd: "/w",
     claudeSessionId: "",
     permissionMode: "default",
+    statusSnapshot: null,
     items: [],
     queued: [],
     turnInFlight: false,
