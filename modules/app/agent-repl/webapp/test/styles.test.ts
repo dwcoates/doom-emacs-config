@@ -2102,7 +2102,9 @@ describe("task timer styles", () => {
 });
 
 describe("queued-card (§2.13 in-flight queue)", () => {
-  const card = blockAfter(css, ".queued-card");
+  // Anchored on the line-leading rule opener, not the bare class, since the
+  // `.bubble` comment above now references `.queued-card` earlier in the file.
+  const card = blockAfter(css, "\n.queued-card {");
   const interruptBadge = blockAfter(css, ".queued-badge.interrupt");
   const userBubble = blockAfter(css, ".bubble.user");
 
@@ -2139,6 +2141,38 @@ describe("queued-card (§2.13 in-flight queue)", () => {
     // Arrange / Act — the escalating verdict borrows the app's "about to act" colour.
     // Assert
     expect(interruptBadge).toMatch(/color:\s*var\(--thinking\)/);
+  });
+
+  it("shrinks the parked card to fit its own text", () => {
+    // Arrange / Act — a short queued message renders a small card, not a full line.
+    // Assert
+    expect(card).toMatch(/width:\s*fit-content/);
+  });
+
+  it("caps the parked card at the agent column, no wider than the response's rightward cap", () => {
+    // Arrange / Act — the card grows rightward only to the same cap the purple response uses.
+    // Assert
+    expect(card).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  it("flushes the parked card's left edge with the assistant response's left rail", () => {
+    // Arrange / Act — a left margin equal to the agent column's centered side gap.
+    // Assert
+    expect(card).toMatch(
+      /margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
+    );
+  });
+
+  it("collapses the card's right leftover into one auto margin", () => {
+    // Arrange / Act — mirrors the assistant response bubble's rightward growth.
+    // Assert
+    expect(card).toMatch(/margin-right:\s*auto/);
+  });
+
+  it("drops the inert align-self now that margins place the parked card", () => {
+    // Arrange / Act — align-self is a no-op on the plain-block feed-item wrapper.
+    // Assert
+    expect(card).not.toMatch(/align-self/);
   });
 });
 

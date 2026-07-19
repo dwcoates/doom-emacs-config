@@ -568,8 +568,9 @@ pre {
    child of its `.feed-item` wrapper — a plain block, not the feed's flex row
    — so an `align-self` on it is inert; a fit-content block with one fixed
    margin and one auto margin is what actually flushes it to a rail. The
-   parked queued cards below are the one exception, left at their existing
-   width and edge. Every bubble reserves
+   parked queued cards below now ride this same fit-content, one-fixed-one-
+   auto-margin placement (see `.queued-card`), hugging the LEFT rail exactly
+   as the assistant response does. Every bubble reserves
    its 0.4px border box up front, so a turn's final response gaining the
    green (or amber async) state border on completion recolors 0.4px that
    were already laid out rather than reflowing the feed under a reader
@@ -1217,12 +1218,16 @@ pre {
    is the live bubble's), the reduced OPACITY, and the muted card grey — the
    opposite of the user bubble's saturated fill. The dash is drawn in the
    very --user blue the live bubble fills with, so even parked the card reads
-   as the user's own prompt held back rather than a foreign chrome. It
-   self-aligns to the same right edge as the user's own bubbles, since a
-   queued message IS the user's own prompt, only held back. */
+   as the user's own prompt held back rather than a foreign chrome. It fits
+   its own text and hugs the LEFT rail at the agent column, exactly as the
+   assistant response bubble does (see `.bubble.assistant`): a short queued
+   message renders a small card flush with the response's left edge and no
+   wider than the response's rightward cap, never a full-width block. */
 .queued-card {
-  align-self: flex-end;
-  max-width: 85%;
+  width: fit-content;
+  max-width: var(--agent-bubble-cap);
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
   border: 1px dashed var(--user);
   border-radius: 8px;
   background: var(--card);
