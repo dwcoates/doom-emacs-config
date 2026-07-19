@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>streaming response element catalogue</title>
+    <!-- Catalogue-only chrome. Everything inside a .cat-feed is the REAL
+         renderer's output under the REAL stylesheet; only the section
+         scaffolding around the examples is styled here, so the gallery can
+         never drift from what the GUI actually draws. -->
+    <style>
+      .cat-section {
+        border-bottom: 2px solid var(--border, #e5e7eb);
+        padding-bottom: 1.5rem;
+        margin-bottom: 1rem;
+      }
+      .cat-title {
+        font-size: 1rem;
+        margin: 0.5rem 0 0.25rem;
+      }
+      .cat-blurb {
+        font-size: 0.8rem;
+        color: var(--muted, #6b7280);
+        margin: 0 0 0.75rem;
+        max-width: 60rem;
+      }
+      .cat-row {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+      }
+      .cat-variant {
+        flex: 1 1 0;
+        min-width: 0;
+        margin: 0;
+        border: 1px dashed var(--border, #e5e7eb);
+        border-radius: 8px;
+        padding: 0.5rem;
+      }
+      .cat-variant > figcaption {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted, #6b7280);
+        margin-bottom: 0.5rem;
+      }
+      /* The real feed column's layout contract, reproduced per variant. */
+      .cat-feed {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .cat-head { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div id="main-col">
+      <header id="topbar">
+        <span class="cat-head">streaming response element catalogue</span>
+        <span>mock data rendered through the real UI elements — folds and badges are clickable</span>
+      </header>
+      <main id="feed"></main>
+    </div>
+    <script type="module" src="/src/catalogue.ts"></script>
+  </body>
+</html>
