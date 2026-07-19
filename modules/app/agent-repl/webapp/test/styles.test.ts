@@ -40,6 +40,11 @@ const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
 const body = blockAfter(css, "\nbody {");
 const clearDivider = blockAfter(css, ".clear-divider");
+// The shared rule that confines BOTH context-boundary separators (the /clear
+// rule and the /compact label) to the central column: anchored on the trailing
+// comma so it resolves to the multi-selector rule, not the standalone one.
+const dividerColumn = blockAfter(css, ".clear-divider,");
+const compactDivider = blockAfter(css, "\n.compact-divider {");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
@@ -306,11 +311,19 @@ describe("clear divider", () => {
     expect(Number(height?.[1])).toBeGreaterThanOrEqual(3);
   });
 
-  it("sizes the boundary rule to the feed column rather than the window", () => {
-    // Arrange / Act — the .clear-divider rule claims no width of its own, so the
-    // block fills exactly the bubble column that contains it.
+  it("pins the boundary rule to the central column's width rather than the window", () => {
+    // Arrange / Act — a plain block would fill the whole feed, so the shared
+    // confinement rule pins the width to the agent-bubble-cap central column.
     // Assert
-    expect(clearDivider).not.toMatch(/\bwidth:/);
+    expect(dividerColumn).toMatch(/width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  it("centers the boundary rule in that column with equal auto margins", () => {
+    // Arrange / Act — auto margins on both sides seat the rule's ends on the
+    // same rails the bubbles hug, an eighth of blank feed on each side.
+    // Assert
+    expect(dividerColumn).toMatch(/margin-left:\s*auto/);
+    expect(dividerColumn).toMatch(/margin-right:\s*auto/);
   });
 
   it("keeps the boundary rule inside the feed column's padding", () => {
@@ -331,6 +344,26 @@ describe("clear divider", () => {
     const red = isRed(token(darkTheme, "--clear-divider"));
     // Assert
     expect(red).toBe(true);
+  });
+});
+
+describe("compact divider", () => {
+  it("rides the same central-column confinement as the /clear rule", () => {
+    // Arrange / Act — the shared selector names the compact divider alongside
+    // the clear one, so a compaction boundary is capped to the same column.
+    const dividerSelector = css.slice(
+      css.indexOf(".clear-divider,"),
+      css.indexOf("{", css.indexOf(".clear-divider,")),
+    );
+    // Assert
+    expect(dividerSelector).toContain(".compact-divider");
+  });
+
+  it("centers its label text within that column so the em-dashes read symmetric", () => {
+    // Arrange / Act — a left-aligned label would jam against the column's left
+    // rail with its trailing dash stranded far to the right.
+    // Assert
+    expect(compactDivider).toMatch(/text-align:\s*center/);
   });
 });
 

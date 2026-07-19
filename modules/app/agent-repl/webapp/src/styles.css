@@ -1192,14 +1192,35 @@ pre {
 }
 
 /* The context boundary a /clear draws, between its own prompt bubble and the
-   `system: init` that re-opens the session beneath it. It carries no width of
-   its own, so it spans exactly the feed column the bubbles do rather than the
-   window edge to edge. */
+   `system: init` that re-opens the session beneath it. Its own vertical margins
+   part it from both; the shared confinement rule below spans it across the
+   central column rather than the window (see that rule). */
 .clear-divider {
   height: 4px;
-  margin: 0.75rem 0 0.25rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
   border-radius: 2px;
   background: var(--clear-divider);
+}
+/* The /compact boundary label ("— context compacted … —") centers within that
+   same central column so its framing em-dashes read as a symmetric separator
+   rather than a run of text hugging the column's left rail. */
+.compact-divider {
+  text-align: center;
+}
+/* Both context-boundary separators — the red rule a /clear draws and the
+   "— context compacted —" label a /compact drops — are confined to the CENTRAL
+   COLUMN (the `--agent-bubble-cap` width the bubbles and tool cards are framed
+   in), NOT the full feed width. A plain block child of `.feed-item` would
+   stretch edge to edge inside `#feed`'s padding, spilling past the column's
+   rails toward the window; pinning the width to the cap and centering with
+   equal auto margins lands each separator's ends on the same rails the bubbles
+   hug, so a boundary reads as cutting the conversation column, not the window. */
+.clear-divider,
+.compact-divider {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .error-banner {
