@@ -1323,10 +1323,33 @@ describe("live turn-stats row", () => {
   });
 
   it("matches the progress indicator's font size", () => {
-    // Arrange / Act — the counter and the working row directly above it.
-    // Assert — the same 0.85rem, so the two rows read as one scale.
+    // Arrange / Act — the counter and the working row beside it.
+    // Assert — the same 0.85rem, so the two halves read as one scale.
     expect(turnStatsLive).toMatch(/font-size:\s*0\.85rem/);
     expect(workingRowScale).toMatch(/font-size:\s*0\.85rem/);
+  });
+
+  it("collapses the shared row's free space to its left so it lands at the right rail", () => {
+    // Arrange / Act — the .turn-stats-live rule.
+    // Assert — an auto left margin absorbs the flex line's slack, pushing the
+    // stats to the right rail whether or not an indicator shares the line.
+    expect(turnStatsLive).toMatch(/margin-left:\s*auto/);
+  });
+});
+
+const tailLine = blockAfter(css, ".tail-line {");
+
+describe("combined tail line (indicator and stats on one row)", () => {
+  it("lays the two halves out on one flex row so they share a baseline", () => {
+    // Arrange / Act — the .tail-line wrapper rule.
+    // Assert — flex, so the indicator and the stats sit on a single line.
+    expect(tailLine).toMatch(/display:\s*flex/);
+  });
+
+  it("centers the indicator and the stats on a shared vertical center", () => {
+    // Arrange / Act — the .tail-line wrapper rule.
+    // Assert — align-items center lands the two on the same baseline.
+    expect(tailLine).toMatch(/align-items:\s*center/);
   });
 });
 
