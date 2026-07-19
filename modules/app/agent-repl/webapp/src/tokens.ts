@@ -5,13 +5,15 @@
  * state, but stat rows rather than a roster, so it renders directly
  * instead of specializing the counter-menu facade.
  *
- * The chip's figure is the TOP-LEVEL agent's cumulative input-side
- * tokens — uncached input plus cache read plus cache write, the "single
- * input tokens figure" convention — with every subagent's spend
- * excluded (§2.4: a result's `usage` never contains sidechain spend).
- * The overlay is where the resolution lives: the top-level dimensions
- * split apart, the whole-tree totals summed from the per-model map
- * (the only figure that counts subagents), and each model's own slice.
+ * The chip's figure is the session's CURRENT context occupancy — the
+ * standing `contextTokens`: uncached input plus cache read plus cache
+ * write plus the output of the last top-level request, with every
+ * subagent's spend excluded (§2.4: a result's `usage` never contains
+ * sidechain spend). Including output is what keeps the figure a LIVE
+ * occupancy the model max can be read against, not a turn-lagged one.
+ * The overlay is where the cumulative resolution lives: the top-level
+ * dimensions split apart, the whole-tree totals summed from the per-model
+ * map (the only figure that counts subagents), and each model's own slice.
  */
 import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
@@ -181,7 +183,7 @@ export function tokensMenuHtml(data: TokenMenuData, open: boolean): string {
   return dropdownChipHtml(
     "tokens",
     `tokens: ${figure}`,
-    "current context size (uncached + cache read + cache write of the last request) — click for the cumulative breakdown",
+    "current context size (uncached + cache read + cache write + output of the last request) — click for the cumulative breakdown",
     open,
     () => tokensOverlayHtml(data),
   );
