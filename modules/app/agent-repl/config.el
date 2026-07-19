@@ -340,6 +340,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
 (agent-repl--load-module "frontend")
+(agent-repl--load-module "sidebar")
 ;; There is no login module here any more.  The gui login ran in an Emacs
 ;; vterm because the OAuth flow needs a TTY and Emacs was believed to be the
 ;; only TTY host in the system.  The daemon can open a pty of its own, so it
