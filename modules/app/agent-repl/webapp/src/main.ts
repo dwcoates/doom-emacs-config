@@ -25,6 +25,7 @@ import {
 } from "./counter-menu.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
+import { SmoothReveal } from "./smooth.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
 import { HostGlobal, installHostCloseMenusHook, installHostTailHook } from "./host.js";
@@ -357,10 +358,21 @@ async function boot(): Promise<void> {
   // chords reach the cycle as an injected script rather than a key event.
   installNavHook(window as unknown as HostGlobal, nav);
 
+  // The feed is fed a SMOOTHED view of the store: still-streaming text and
+  // thinking blocks are revealed a few characters per frame rather than one
+  // API chunk at a time, so a burst reads as a fast type-out instead of a
+  // lurch. Only the feed sees the smoothed copy — nav and chrome key off turn
+  // ids and stats, which the reveal does not touch, so they take the real
+  // state. When the reveal is still catching up it asks for another frame,
+  // and that self-driven loop stops the moment every block reaches its
+  // frontier (see `SmoothReveal.reveal`).
+  const smooth = new SmoothReveal({ now: () => performance.now() });
   const rerender = (): void => {
-    feed.render(store.state);
+    const shown = smooth.reveal(store.state);
+    feed.render(shown.state);
     nav.reconcile(lastUserTurnId(store.state.items));
     renderChrome();
+    if (shown.pending) frames.schedule();
   };
 
   // Renders are coalesced onto animation frames: a message burst — the
@@ -395,6 +407,9 @@ async function boot(): Promise<void> {
     // A paint scheduled against the dead session would render the
     // just-reset (empty) store; the successor's hello drives the next one.
     frames.cancel();
+    // The successor's blocks are not this session's: drop every reveal cursor
+    // so a reused block id cannot inherit a dead session's shown length.
+    smooth.reset();
     store.reset();
     // The successor's turn is not this one's: stop the clock now rather than
     // letting it run on the dead session until the successor's hello lands.
@@ -463,6 +478,10 @@ async function boot(): Promise<void> {
           feed.renderRestored(store.state);
           nav.reconcile(lastUserTurnId(store.state.items));
           renderChrome();
+          // The restored render drew every block in full: mark them shown so
+          // a reconnect mid-stream types out only the growth that arrives
+          // AFTER the join, never re-typing prose already on screen.
+          smooth.markShown(store.state);
         } else if (result.changed) {
           // One paint per animation frame, however many messages land
           // before it. During a replay the paint keeps the chrome live
