@@ -2022,6 +2022,50 @@ in the same shape (still leftmost, nil-name still at head)."
     (agent-repl--ws-put "ws" :group-key "/repos/doom/.git")
     (should (equal (agent-repl--ws-repo-key "ws") "/repos/doom/.git"))))
 
+(ert-deftest agent-repl-test-repo-key-for-dir-nil-dir ()
+  "`--repo-key-for-dir' returns nil for a nil DIR without shelling out."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) (error "must not shell out for nil dir"))))
+    (should (null (agent-repl--repo-key-for-dir nil)))))
+
+(ert-deftest agent-repl-test-repo-key-for-dir-absolute-output ()
+  "`--repo-key-for-dir' canonicalizes an absolute git common-dir."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "/repos/doom/.git")))
+    (should (equal (agent-repl--repo-key-for-dir "/tmp/ws/")
+                   (agent-repl--path-canonical "/repos/doom/.git")))))
+
+(ert-deftest agent-repl-test-repo-key-for-dir-relative-output ()
+  "`--repo-key-for-dir' expands a relative common-dir against DIR."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) ".git")))
+    (should (equal (agent-repl--repo-key-for-dir "/repos/doom/")
+                   (agent-repl--path-canonical "/repos/doom/.git")))))
+
+(ert-deftest agent-repl-test-repo-key-for-dir-fatal-output ()
+  "`--repo-key-for-dir' maps a git \"fatal...\" answer onto nil."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "fatal: not a git repository")))
+    (should (null (agent-repl--repo-key-for-dir "/tmp/nowhere/")))))
+
+(ert-deftest agent-repl-test-repo-key-for-dir-empty-output ()
+  "`--repo-key-for-dir' maps an empty git answer onto nil."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "")))
+    (should (null (agent-repl--repo-key-for-dir "/tmp/ws/")))))
+
+(ert-deftest agent-repl-test-ws-repo-key-derives-and-caches-group-key ()
+  "`--ws-repo-key' derives via `--repo-key-for-dir' and caches `:group-key'."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws/")
+    (cl-letf (((symbol-function 'agent-repl--ws-dir)
+               (lambda (_ws) "/tmp/ws/"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _) "/repos/doom/.git")))
+      (let ((key (agent-repl--ws-repo-key "ws")))
+        (should (equal key (agent-repl--path-canonical "/repos/doom/.git")))
+        (should (equal (agent-repl--ws-get "ws" :group-key) key))))))
+
 (ert-deftest agent-repl-test-ws-repo-group-falls-back-to-unknown-sentinel ()
   "`--ws-repo-group' maps an unresolvable repo onto the `(no repo)' sentinel."
   (agent-repl-test--with-clean-state
