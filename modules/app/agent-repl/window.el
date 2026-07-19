@@ -118,7 +118,7 @@ Each keyword is independent and may be omitted:
   :DEDICATE        non-nil → `set-window-dedicated-p WIN t'.
 
   :SIZE-FIX        Symbol passed to `set-window-parameter WIN
-                   'window-size-fixed'.  Accepted values match
+                   \\='window-size-fixed'.  Accepted values match
                    Emacs's `window-size-fixed' contract: `width',
                    `height', or `t' (both).  Window parameter (not
                    buffer-local) so the lock is per-window even

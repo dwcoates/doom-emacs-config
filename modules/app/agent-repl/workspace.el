@@ -60,6 +60,7 @@
 (declare-function +workspace-exists-p "ext:persp-mode" (name))
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
+(declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
@@ -359,7 +360,7 @@ site."
 
 (defun agent-repl--ws-names-cache-usable-p ()
   "Return non-nil when `persp-names-cache' is bound and non-nil.
-'Usable' means the cache is available as a reliable tab-bar membership
+`Usable' means the cache is available as a reliable tab-bar membership
 signal — the persp-mode cache has been populated with at least one
 entry.  Returns nil when:
   - `persp-names-cache' is unbound (persp-mode not loaded), or

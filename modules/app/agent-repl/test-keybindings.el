@@ -133,9 +133,9 @@ current workspace, not NAME)."
   "read-workspace-with-default should pass current workspace as default."
   (let ((captured-default nil))
     (cl-letf (((symbol-function 'completing-read)
-               (lambda (_prompt _coll _pred _require _hist _hist-var _default)
-                 (setq captured-default _default)
-                 _default))
+               (lambda (_prompt _coll _pred _require _hist _hist-var default)
+                 (setq captured-default default)
+                 default))
               ((symbol-function '+workspace-current-name) (lambda () "current-ws")))
       (let ((result (agent-repl--read-workspace-with-default "Pick: ")))
         (should (equal captured-default "current-ws"))
@@ -884,8 +884,7 @@ var is unset, yielding the bare slug with no leading slash."
 (ert-deftest agent-repl-test-mock-workspace-commands-with-priority ()
   "mock-workspace-commands-with-priority should write a JSON file with priority and name."
   (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir)
-         (msg nil))
+         (agent-repl--output-dir tmpdir))
     (unwind-protect
         (cl-letf (((symbol-function 'completing-read)
                    (lambda (_prompt _coll &rest _) "p2"))
@@ -893,8 +892,9 @@ var is unset, yielding the bare slug with no leading slash."
                    (lambda (_prompt &rest _) "DWC/test-branch"))
                   ((symbol-function 'format-time-string)
                    (lambda (_fmt) "1234567890"))
-                  ((symbol-function 'message)
-                   (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+                  ;; Silence the command's echo; the assertions below read
+                  ;; the written JSON file, not the message.
+                  ((symbol-function 'message) #'ignore))
           (agent-repl-debug/mock-workspace-commands-with-priority)
           (let ((file (expand-file-name "workspace_commands_1234567890.json" tmpdir)))
             (should (file-exists-p file))

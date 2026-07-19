@@ -167,7 +167,8 @@ directory — whose session id must never be adopted onto the workspace
 \(see `agent-repl--update-session-id-from-sentinel').")
 
 (defun agent-repl--read-sentinel-file (file)
-  "Read sentinel FILE and return a plist (:dir DIR :session-id SID :owned BOOL :source SRC), or nil.
+  "Read sentinel FILE and return a plist, or nil.
+The plist shape is (:dir DIR :session-id SID :owned BOOL :source SRC).
 The file format is three lines: CWD, session_id, then the ownership
 marker (`agent-repl--sentinel-owned-marker' or empty).  Older
 two-line files (and single-line CWD-only files) parse as unowned with a
@@ -300,14 +301,16 @@ via `agent-repl--warn' rather than rethrown."
                        (file-name-nondirectory file) err))))
 
 (defun agent-repl--process-sentinel-file (file handler)
-  "Read sentinel FILE, delete it, resolve its workspace, then invoke HANDLER's callback.
+  "Read sentinel FILE, delete it, then dispatch it to HANDLER.
+Resolves the file's workspace, then invokes HANDLER's callback.
 HANDLER is an entry from `agent-repl--sentinel-dispatch-alist' with keys
 :warning, :callback, and :name.
 
-Reads the directory and session-id from FILE via `agent-repl--read-sentinel-file',
-then deletes FILE immediately so the poll fallback cannot race a slow handler
-and re-dispatch the same file.  Resolves the workspace via `agent-repl--ws-for-dir'.
-If the read failed \(nil return), does nothing further.  If the workspace is
+Reads the directory and session-id from FILE via
+`agent-repl--read-sentinel-file', then deletes FILE immediately so the
+poll fallback cannot race a slow handler and re-dispatch the same file.
+Resolves the workspace via `agent-repl--ws-for-dir'.  If the read
+failed \(nil return), does nothing further.  If the workspace is
 nil, logs the :warning message with the directory interpolated via %s.
 Otherwise updates the workspace's session ID (if provided), logs a standard
 entry using :name, then calls :callback with two arguments: the workspace
@@ -726,7 +729,8 @@ running but its load cycle has logically ended)."
   "Alist mapping filename prefixes to handler plists.
 Each entry is (PREFIX . PLIST) where PLIST has keys:
   :callback  - function called with (WS DIR) on match
-  :warning   - format string logged when no workspace matches (interpolates DIR via %s)
+  :warning   - format string logged when no workspace matches
+               (interpolates DIR via %s)
   :name      - handler name for debug logging
 
 Order matters: see the leading comment in the source for the prefix

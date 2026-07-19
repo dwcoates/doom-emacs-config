@@ -128,7 +128,8 @@ string would miss commits authored under the new format."
 
 (defun agent-repl--random-commit-emoji (&optional commit-type recents)
   "Return a random emoji for COMMIT-TYPE (a symbol), avoiding RECENTS.
-When COMMIT-TYPE is nil or not in `agent-repl--emoji-categories', uses `wildcard'.
+When COMMIT-TYPE is nil or not in `agent-repl--emoji-categories',
+uses `wildcard'.
 Injects a wildcard emoji `agent-repl-emoji-wildcard-chance' percent of the time
 regardless of type, to maximize variety.
 RECENTS, when non-nil, is a list of emoji strings to exclude from the pool;

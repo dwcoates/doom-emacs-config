@@ -4603,6 +4603,15 @@ reaches the handler-routing layer."
       (agent-repl--workspace-merge-async "ws1" "/tmp/repo" t))
     (should (equal dispatch-args (list "ws1" "/tmp/repo" t)))))
 
+(defmacro agent-repl-test--with-empty-merge-queue (&rest body)
+  "Run BODY with `agent-repl--merge-queue' freshly empty.
+The queue is a top-level defvar, so tests that enqueue MUST scrub it
+afterwards or later tests inherit stale state."
+  (declare (indent 0))
+  `(let ((agent-repl--merge-queue nil))
+     (unwind-protect (progn ,@body)
+       (setq agent-repl--merge-queue nil))))
+
 (ert-deftest agent-repl-test-workspace-merge-async-on-error-schedules-reopen ()
   "When the dispatch handler signals (conflict or any error), the wrapper's
 condition-case catches it and schedules `--reopen-workspace-from-state'
@@ -6427,7 +6436,7 @@ from `default-directory' via `agent-repl--git-root'."
         (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
                    (lambda (&rest _) nil))
                   ((symbol-function 'run-with-timer)
-                   (lambda (_delay _repeat fn &rest args)
+                   (lambda (_delay _repeat _fn &rest args)
                      (setq captured-args args))))
           (agent-repl--handle-create-command
            '((type . "create") (name . "DWC/new-ws")
@@ -6445,7 +6454,7 @@ from `default-directory' via `agent-repl--git-root'."
       (cl-letf (((symbol-function 'agent-repl--workspace-name-collides-p)
                  (lambda (&rest _) nil))
                 ((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat fn &rest args)
+                 (lambda (_delay _repeat _fn &rest args)
                    (setq captured-args args))))
         (agent-repl--handle-create-command
          '((type . "create") (name . "DWC/new-ws") (git_root . "/fake/root"))
@@ -6463,7 +6472,7 @@ from `default-directory' via `agent-repl--git-root'."
       (agent-repl--ws-put "source-ws" :bare-metal inst)
       (let ((timer-scheduled nil))
         (cl-letf (((symbol-function 'run-with-timer)
-                   (lambda (_delay _repeat fn &rest args)
+                   (lambda (_delay _repeat _fn &rest _args)
                      (setq timer-scheduled t))))
           (agent-repl--handle-create-command
            '((type . "create") (name . "DWC/new-ws") (fork_from . "source-ws"))
@@ -6476,7 +6485,7 @@ from `default-directory' via `agent-repl--git-root'."
   (agent-repl-test--with-clean-state
     (let ((timer-scheduled nil))
       (cl-letf (((symbol-function 'run-with-timer)
-                 (lambda (_delay _repeat fn &rest args)
+                 (lambda (_delay _repeat _fn &rest _args)
                    (setq timer-scheduled t))))
         (agent-repl--handle-create-command
          '((type . "create") (name . "DWC/new-ws") (fork_from . "nonexistent"))
@@ -10090,15 +10099,6 @@ and existing call sites that pass no arguments."
         (should (equal captured-base "master"))))))
 
 ;;;; ---- Tests: merge queue ----
-
-(defmacro agent-repl-test--with-empty-merge-queue (&rest body)
-  "Run BODY with `agent-repl--merge-queue' freshly empty.
-The queue is a top-level defvar, so tests that enqueue MUST scrub it
-afterwards or later tests inherit stale state."
-  (declare (indent 0))
-  `(let ((agent-repl--merge-queue nil))
-     (unwind-protect (progn ,@body)
-       (setq agent-repl--merge-queue nil))))
 
 (ert-deftest agent-repl-test-ws-merge-queued-p-true-when-marker-set ()
   "WS with `:repl-state :merge-queued' is detected as queued."

@@ -171,10 +171,10 @@ cannot wedge merge dispatch."
 
 When ONTO-MASTER is non-nil, the repo-routed resolution is BYPASSED and
 the `onto-master' handler is used unconditionally.  This is the
-`/create-or-update-workspace merge --onto-master' path: the workspace's PR has already
-merged into `origin/master', so the per-invocation intent (advance the
-local trunk, do not cherry-pick) MUST win over the repo's checked-in
-`.eld' handler.
+`/create-or-update-workspace merge --onto-master' path: the
+workspace's PR has already merged into `origin/master', so the
+per-invocation intent (advance the local trunk, do not cherry-pick)
+MUST win over the repo's checked-in `.eld' handler.
 
 REPO-ROOT is the directory used to locate the repo-local handler
 config; it is the workspace's `:source-ws-dir' when recorded, else
@@ -295,7 +295,7 @@ direct call from `agent-repl--pr-poll-start'); non-blocking."
    (lambda (_ok output)
      (agent-repl--pr-poll-handle-result ws project-dir main-dir output))))
 
-(defun agent-repl--pr-poll-handle-result (ws project-dir main-dir output)
+(defun agent-repl--pr-poll-handle-result (ws _project-dir main-dir output)
   "Interpret gh OUTPUT for WS and act on the PR state.
 Called on the main thread from the process sentinel.
 
@@ -422,10 +422,10 @@ The workspace has been revived — please investigate and retry the merge when r
     (target-ws &optional _args)
   "Poll for TARGET-WS's PR to merge, then refresh master from origin.
 
-Handler for repos whose `/create-or-update-workspace merge' contract is \"the PR is in
-the merge queue; poll until it lands, then bring the local master
-worktree up to date with origin\" — as opposed to the cherry-pick
-default.  A repo opts into this via its repo-local
+Handler for repos whose `/create-or-update-workspace merge' contract
+is \"the PR is in the merge queue; poll until it lands, then bring
+the local master worktree up to date with origin\" — as opposed to
+the cherry-pick default.  A repo opts into this via its repo-local
 `.claude/emacs/workspace-merge.eld' (or an entry in
 `agent-repl-workspace-merge-handler-overrides').
 

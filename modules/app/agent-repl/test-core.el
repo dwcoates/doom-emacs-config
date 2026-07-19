@@ -1595,7 +1595,7 @@ record; `agent-repl-debug' now only gates the *Messages* emit."
 
 (ert-deftest agent-repl-test-log-still-suppresses-message-when-debug-off ()
   "`agent-repl--log' must NOT call `message' when `agent-repl-debug' is nil."
-  (agent-repl-test--with-temp-logfile _
+  (agent-repl-test--with-temp-logfile path
     (let ((message-called nil))
       (cl-letf (((symbol-function 'message)
                  (lambda (&rest _) (setq message-called t))))
@@ -1645,7 +1645,7 @@ configuration that re-enables the file write."
   "`agent-repl--log-verbose' must NOT call `message' when debug is t (only verbose).
 Regression guard: the file-write decoupling must not collapse the
 verbose-vs-standard distinction at the message-emit layer."
-  (agent-repl-test--with-temp-logfile _
+  (agent-repl-test--with-temp-logfile path
     (let ((message-called nil))
       (cl-letf (((symbol-function 'message)
                  (lambda (&rest _) (setq message-called t))))
@@ -1800,7 +1800,7 @@ The master kill-switch overrides the always-on file-write decoupling."
 
 (ert-deftest agent-repl-test-write-counter-increments-per-write ()
   "Every successful file-write bumps `agent-repl--log-write-counter'."
-  (agent-repl-test--with-temp-logfile _
+  (agent-repl-test--with-temp-logfile path
     (dotimes (_ 7)
       (agent-repl--do-log-to-file "x"))
     (should (= 7 agent-repl--log-write-counter))))

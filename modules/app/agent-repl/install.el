@@ -523,7 +523,8 @@ CMD is of the form \"~/.claude/hooks/<name>.sh\"."
   (setcar issues-cell (cons (cons level msg) (car issues-cell))))
 
 (defun agent-repl--check-registration (hooks issues-cell)
-  "Populate ISSUES-CELL with any missing registrations per `agent-repl--managed-hooks'."
+  "Populate ISSUES-CELL with any missing registrations per
+`agent-repl--managed-hooks'."
   (dolist (pair agent-repl--managed-hooks)
     (let* ((event (car pair))
            (cmd (cdr pair)))

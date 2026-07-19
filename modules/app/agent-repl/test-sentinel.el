@@ -1749,8 +1749,7 @@ This is the regression guard for phantom ❓ appearing after the user is done."
 (ert-deftest agent-repl-test-poll-mix-of-known-and-unknown-files ()
   "poll-workspace-notifications should dispatch both known and unknown files."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-files nil)
-          (dispatch-results nil))
+    (let ((dispatched-files nil))
       (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
                 ((symbol-function 'directory-files)
                  (lambda (_dir _full _match _nosort)
@@ -2193,7 +2192,7 @@ This is the stall fix: a swallowed duplicate must not block loader advance."
   "Absolute path to the checked-in permission-notify.sh script.")
 
 (defun agent-repl-test--run-permission-hook (json-input)
-  "Run permission-notify.sh under an isolated state dir and return the result plist.
+  "Run permission-notify.sh under an isolated state dir.
 Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING).
 The hook resolves its sentinel dir from `AGENT_REPL_STATE_DIR' (which
 `test-helpers.el' points at a shared session temp dir), so this helper

@@ -329,7 +329,8 @@ superseded but left behind — that no client is watching."
                     (agent-repl--live-ws-names))))
 
 (defun agent-repl--frontend-turn-active-sessions ()
-  "Return workspace-bound session ids the daemon reports mid-turn; nil if unreachable.
+  "Return workspace-bound session ids the daemon reports mid-turn;
+nil if unreachable.
 The daemon-stop guard keys on this: an unreachable daemon has nothing
 to protect, so unreachability reads as \"no turns\" (loudly logged).
 

@@ -5,7 +5,8 @@
 ;;; Metaprompt permissions prefix
 
 (defcustom agent-repl-skip-permissions t
-  "When non-nil, prepend the command prefix metaprompt to each input sent to Claude."
+  "When non-nil, prepend the command prefix metaprompt to inputs.
+Applies to each input sent to Claude."
   :type 'boolean
   :group 'agent-repl)
 
@@ -231,9 +232,10 @@ a name run stops at the second slash of a path like `/Users/foo'.")
 Anchored at the very start of the string (no leading whitespace, matching
 the CLI, which only treats `/' as a command at true message start), a
 `/name' run must be followed by whitespace or the end of the string.
-That trailing boundary is what tells a command like `/create-or-update-workspace open'
-apart from a path like `/Users/foo': in the path the name run is followed
-by another `/', not whitespace or end.")
+That trailing boundary is what tells a command like
+`/create-or-update-workspace open' apart from a path like
+`/Users/foo': in the path the name run is followed by another `/',
+not whitespace or end.")
 
 (defun agent-repl--slash-command-p (raw)
   "Return non-nil if RAW is a slash-command invocation.
@@ -264,7 +266,8 @@ to it is never wanted."
     ("^/clear$" . agent-repl--posthook-mark-done))
   "Alist of (PATTERN . FUNCTION) posthooks run after input is sent.
 PATTERN is a string or regexp matched against the raw input (trimmed).
-FUNCTION is called with (WS RAW) where WS is the workspace name and RAW is the input.")
+FUNCTION is called with (WS RAW) where WS is the workspace name and
+RAW is the input.")
 
 (defun agent-repl--posthook-reset-prefix-counter (ws _raw)
   "Reset the metaprompt prefix counter for workspace WS.
@@ -518,6 +521,11 @@ owner so it survives the perspective drifting under a long turn."
             (agent-repl--skill-capf-candidates ws)
             :annotation-function #'agent-repl--skill-capf-annotation
             :exclusive 'no))))
+
+;; Company is an optional runtime dependency and absent from the
+;; compile-time load path; declare the pieces the two forms below use.
+(declare-function company-abort "company")
+(defvar company-active-map)
 
 (defun agent-repl--company-abort-and-send ()
   "Abort any open company popup, then send the input.

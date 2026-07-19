@@ -215,7 +215,8 @@ Characters matching this pattern are replaced with underscores."
 
 (defcustom agent-repl-panel-buffer-name-format "*agent-panel%s-%s*"
   "Format string for agent panel buffer names.
-First %s is the suffix (e.g. \"-input\" or empty), second %s is the workspace name."
+First %s is the suffix (e.g. \"-input\" or empty), second %s is the
+workspace name."
   :type 'string
   :group 'agent-repl)
 
@@ -357,7 +358,7 @@ all workspace metadata from `agent-repl--workspaces' is appended after FMT.
 Hardened against non-string FMT: captures a backtrace to *agent-repl-log-bug*
 the first time it happens, then coerces the value so the caller doesn't crash.
 
-Note: callers using this to build a format string for `apply #'message'
+Note: callers using this to build a format string for `apply #\\='message'
 should be aware that the returned string embeds the workspace metadata
 literally, so any `%' characters in metadata will be interpreted as
 format directives.  `agent-repl--do-log' avoids this by passing
@@ -793,12 +794,13 @@ safety on macOS; see `agent-repl--git-string'."
   (agent-repl--capture-process-output "git" args t))
 
 (defun agent-repl--gh-string-quiet (&rest args)
-  "Run a synchronous `gh' command and return its trimmed stdout, suppressing stderr.
-ARGS are the `gh' subcommand and arguments.  Returns an empty string
-when `gh' fails (no PR for branch, not authenticated, etc.).  The
-wrapper IS the external boundary for the GitHub CLI: tests must mock
-this function via `cl-letf' rather than invoke real `gh' (see
-AGENTS.md \"No External Processes or External State in Tests\").
+  "Run a synchronous `gh' command and return its trimmed stdout.
+Stderr is suppressed.  ARGS are the `gh' subcommand and arguments.
+Returns an empty string when `gh' fails (no PR for branch, not
+authenticated, etc.).  The wrapper IS the external boundary for the
+GitHub CLI: tests must mock this function via `cl-letf' rather than
+invoke real `gh' (see AGENTS.md \"No External Processes or External
+State in Tests\").
 
 Routes through `agent-repl--capture-process-output' for worker-thread
 safety on macOS; see `agent-repl--git-string'."
@@ -853,7 +855,7 @@ the older `start-process' API with a process-PUT callback.  Tests must
 mock this function via `cl-letf' rather than spawn real git (see
 AGENTS.md \"No External Processes or External State in Tests\").
 
-`:connection-type 'pipe' / `:noquery t' / `:buffer nil' are baked in
+`:connection-type \\='pipe' / `:noquery t' / `:buffer nil' are baked in
 because every existing caller wants the same shape; if a future
 caller needs different keywords, extend the signature rather than
 introducing a sibling raw `make-process' site."
@@ -912,7 +914,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
     agent-repl--image-call-process)
-  "Symbols of every function that wraps an external process or external-state mutation.
+  "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.
 
@@ -960,8 +962,9 @@ Lazily computes and caches the value on first invocation."
 
 (defun agent-repl--path-canonical (path)
   "Return a canonical, stable string for PATH suitable for hashing.
-Expands tildes and symlinks via `file-truename', then strips any trailing slash
-via `directory-file-name' so that the same directory always produces the same hash."
+Expands tildes and symlinks via `file-truename', then strips any
+trailing slash via `directory-file-name' so that the same directory
+always produces the same hash."
   (directory-file-name (file-truename path)))
 
 (defun agent-repl--workspace-id ()
@@ -995,8 +998,9 @@ expected to only invoke this from contexts where a workspace is active."
 
 (defun agent-repl--active-inst (ws)
   "Return the active `agent-repl-instantiation' for workspace WS.
-Signals an error if the environment or instantiation struct is missing —
-both must be initialized by `agent-repl--initialize-ws-env' before this is called."
+Signals an error if the environment or instantiation struct is
+missing — both must be initialized by `agent-repl--initialize-ws-env'
+before this is called."
   (let ((env (agent-repl--ws-get ws :active-env)))
     (unless env
       (error "agent-repl--active-inst: workspace %s has no :active-env (initialize-ws-env not called?)" ws))
@@ -1054,7 +1058,8 @@ which would otherwise nuke that workspace's session along with WS's own."
 ;; panel buffer that exists.
 
 (defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
-  "Regexp matching agent input buffer names (e.g. *agent-panel-input-my-workspace*).")
+  "Regexp matching agent input buffer names.
+For example, *agent-panel-input-my-workspace*.")
 
 (defconst agent-repl--frontend-buffer-re "^\\*agent-frontend-[[:alnum:]_-]+\\*$"
   "Regexp matching gui webview buffer names (e.g. *agent-frontend-my-workspace*).
@@ -1073,7 +1078,8 @@ Keeps alphanumerics, hyphens, and underscores.  Returns nil for nil NAME."
     (replace-regexp-in-string agent-repl-ws-name-allowed-chars-re "_" name)))
 
 (defun agent-repl--buffer-name (&optional suffix ws)
-  "Return a workspace-specific buffer name like *agent-panel-WS* or *agent-panel-input-WS*.
+  "Return a workspace-specific buffer name.
+The result is like *agent-panel-WS* or *agent-panel-input-WS*.
 SUFFIX, if provided, is inserted before the workspace name (e.g. \"-input\").
 WS, if provided, is the workspace name; otherwise uses the current workspace.
 Signals an error when the resolved workspace name is nil or empty — an

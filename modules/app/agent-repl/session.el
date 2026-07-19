@@ -18,18 +18,21 @@
 
 (defcustom agent-repl-managed-project-pattern "ChessCom"
   "Pattern matched against the project directory to determine permission mode.
-Projects whose expanded path contains this pattern use `agent-repl-managed-permission-flag';
-all others use `agent-repl-personal-permission-flag'."
+Projects whose expanded path contains this pattern use
+`agent-repl-managed-permission-flag'; all others use
+`agent-repl-personal-permission-flag'."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-managed-permission-flag "--permission-mode auto"
-  "Permission flag for managed projects matching `agent-repl-managed-project-pattern'."
+  "Permission flag for managed projects.
+Applies to projects matching `agent-repl-managed-project-pattern'."
   :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-personal-permission-flag "--permission-mode auto"
-  "Permission flag for personal projects not matching `agent-repl-managed-project-pattern'.
+  "Permission flag for personal projects.
+Applies to projects not matching `agent-repl-managed-project-pattern'.
 Defaults to --permission-mode auto so generated workspaces never run
 under --dangerously-skip-permissions."
   :type 'string
@@ -148,9 +151,10 @@ glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
 `:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
 `:backend-session-stash', `:config-dir-override', `:frontend' (only
-when the save marked it a deliberate choice — see below), `:last-prompt-summary',
-`:last-prompt-summary-at', `:worktree-p', and the `:merge-completed' /
-`:merge-failed' / `:merge-completed-at' bookkeeping.
+when the save marked it a deliberate choice — see below),
+`:last-prompt-summary', `:last-prompt-summary-at', `:worktree-p', and
+the `:merge-completed' / `:merge-failed' / `:merge-completed-at'
+bookkeeping.
 
 Shared by `agent-repl--initialize-ws-env' (the agent-start path) and
 `agent-repl--load-display-state' (the `SPC p p' / workspace-creation
@@ -653,9 +657,10 @@ delivered on the process's stdin by the caller."
 ;;;; Session completion handling
 
 (defun agent-repl--maybe-notify-finished (ws)
-  "Send a desktop notification that the agent finished in WS, if frame is unfocused.
-Debounces per-workspace to avoid duplicate notifications when both the hook
-and title-change paths fire for the same turn completion."
+  "Send a desktop notification that the agent finished in WS.
+Only fires when the frame is unfocused.  Debounces per-workspace to
+avoid duplicate notifications when both the hook and title-change
+paths fire for the same turn completion."
   (agent-repl--log ws "maybe-notify-finished ws=%s focused=%s" ws (if (frame-focus-state) "yes" "no"))
   (let ((last (agent-repl--ws-get ws :last-notify-time))
         (now  (float-time)))

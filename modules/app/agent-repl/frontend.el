@@ -573,7 +573,7 @@ topbar.  Omitted when the workspace has no recorded parent."
             (concat "&parent_ws=" (url-hexify-string parent)))))
 
 (defun agent-repl--frontend-sync-webview (ws session-id)
-  "Remount WS's displayed webview when it is bound to a session other than SESSION-ID.
+  "Remount WS's displayed webview when bound to a session other than SESSION-ID.
 The send path heals a dead daemon session by creating a fresh one
 \(`agent-repl--frontend-ensure-session'); without this remount the
 displayed webview keeps rendering the DEAD session while the turn

@@ -20,6 +20,11 @@
 
 ;;; Code:
 
+;; Special declaration for the xwidget buffer-local the ensure-webview
+;; tests read; the production `(defvar xwidget-webkit-buffer-name-format)'
+;; in frontend.el is file-local to that file for compilation purposes.
+(defvar xwidget-webkit-buffer-name-format)
+
 (load (expand-file-name "test-helpers.el" (file-name-directory
                                             (or load-file-name buffer-file-name)))
       nil t)
@@ -442,6 +447,9 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
   (declare (indent 1))
   `(agent-repl-ecfg-test--with-state
      (let ((,sent-sym nil))
+       ;; Not every BODY reads the capture; `ignore' marks it as
+       ;; deliberately maybe-unused so expansions compile warning-free.
+       (ignore ,sent-sym)
        (cl-letf (((symbol-function 'agent-repl--explain-config-ensure-session)
                   (lambda () "s_1"))
                  ((symbol-function 'agent-repl--explain-config-ensure-webview)
