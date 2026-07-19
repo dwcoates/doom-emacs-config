@@ -1398,6 +1398,8 @@ visible-width character."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--tabline-space-toggle nil))
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'hash-table-keys) (lambda (_ht) nil)))
         (agent-repl--update-all-workspace-states)
         (should (eq agent-repl--tabline-space-toggle t))
@@ -1852,6 +1854,8 @@ trees; under the revised model only the Stop hook writes :done."
     (let ((persp-mode nil)
           (update-called nil))
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq update-called t))))
         (agent-repl--update-all-workspace-states)
@@ -1869,6 +1873,8 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (ws) (setq updated-ws ws)))
@@ -1892,6 +1898,8 @@ is never resolved through the (real, gui-only) frontend registry."
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (agent-repl--ws-put "ws1" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (setq dead-ws ws)))
@@ -2151,6 +2159,8 @@ of the stubbed `agent-repl--agent-running-p' answer below."
       (agent-repl--ws-put "dead-ws" :project-dir "/tmp/dead")
       (agent-repl--ws-put "dead-ws" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (ws) (equal ws "running-ws")))
                 ((symbol-function 'agent-repl--update-ws-state)
@@ -2184,6 +2194,8 @@ for the running ws because the cheap state-machine work is gate-independent."
           (agent-repl-state-git-tick-modulus 5))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state)
                  (lambda (_ws) (setq state-updated t)))
@@ -2207,6 +2219,8 @@ lands on a multiple of modulus, opening the gate."
           (agent-repl--update-tick-counter 4))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--async-refresh-git-status)
@@ -2273,7 +2287,9 @@ advance.  Verified explicitly here so the entrypoint structure doesn't drift."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--tabline-space-toggle nil))
       (setq agent-repl--update-in-flight (float-time))
-      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore))
         (agent-repl--update-all-workspace-states)
         (should (eq agent-repl--tabline-space-toggle t))
         (agent-repl--update-all-workspace-states)
@@ -2332,7 +2348,9 @@ the flip from `-now' would be needless churn and could double-flip when
 both the timer and a sync caller fire in the same instant."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--tabline-space-toggle nil))
-      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+                ;; sidebar.el's roster tick rides update-all too; out of scope here.
+                ((symbol-function 'agent-repl--sidebar-tick) #'ignore))
         (agent-repl--update-all-workspace-states-now)
         (should-not agent-repl--tabline-space-toggle)))))
 

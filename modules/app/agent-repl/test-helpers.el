@@ -653,7 +653,16 @@ re-routes their frontend resolution instead."
          ;; can read state immediately after the call).
          (agent-repl--update-tick-counter 0)
          (agent-repl--update-in-flight nil)
-         (agent-repl--update-spread-sync t))
+         (agent-repl--update-spread-sync t)
+         ;; Sidebar roster state (sidebar.el): the 1Hz tick rides
+         ;; `agent-repl--update-all-workspace-states', so any test
+         ;; driving that entrypoint mutates these globals — a stale
+         ;; signature or repo-key memo leaking across tests makes a
+         ;; later test's push behavior depend on suite order.
+         (agent-repl--sidebar-nav-dir nil)
+         (agent-repl--sidebar-flat-dirs nil)
+         (agent-repl--sidebar-last-signature nil)
+         (agent-repl--sidebar-dir-repo-key-cache (make-hash-table :test 'equal)))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p agent-repl-workspace-snapshot-file)

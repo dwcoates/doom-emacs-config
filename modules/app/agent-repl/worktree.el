@@ -3623,7 +3623,12 @@ affect another agent's commands in the same JSON array."
     ("clipboard" . (agent-repl--handle-clipboard-command  . nil))
     ("send"      . (agent-repl--handle-send-command       . nil))
     ("merge"     . (agent-repl--handle-merge-command      . nil))
-    ("eval"      . (agent-repl--handle-eval-command        . nil)))
+    ("eval"      . (agent-repl--handle-eval-command        . nil))
+    ;; Sidebar actions (sidebar.el): row click -> switch, repo-header
+    ;; click -> fold, both arriving via the daemon's
+    ;; POST /workspace-command front door.
+    ("switch"    . (agent-repl--handle-switch-command      . nil))
+    ("fold"      . (agent-repl--handle-fold-command        . nil)))
   "Maps a workspace-command `type' string to (HANDLER . STAGGERS).
 HANDLER is the function `agent-repl--dispatch-workspace-command'
 invokes for that `type'.  STAGGERS non-nil marks a `create'-style

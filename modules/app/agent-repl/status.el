@@ -1965,6 +1965,8 @@ the poll."
     (setq agent-repl--update-in-flight (float-time))
     (agent-repl--update-all-workspace-states--step ws-names do-git-p gap)))
 
+(declare-function agent-repl--sidebar-tick "sidebar" ())
+
 (defun agent-repl--update-all-workspace-states ()
   "Periodic 1Hz timer entrypoint for workspace-state updates.
 Always drives `agent-repl--force-tab-bar-redraw' to force a tab-bar
@@ -2007,6 +2009,11 @@ the in-flight slot."
   ;; per second rather than on every event-driven refresh.  See
   ;; `--update-all-workspace-states-now' for why it was moved here.
   (agent-repl--poll-workspace-notifications)
+  ;; Sidebar roster push (sidebar.el): rides this timer rather than
+  ;; owning one so the whole 1Hz heartbeat lives in one place; its
+  ;; signature gate keeps the per-tick cost to in-memory reads + one
+  ;; stat.
+  (agent-repl--sidebar-tick)
   (unless (agent-repl--update-in-flight-p)
     (agent-repl--update-all-workspace-states-now)))
 

@@ -1,0 +1,480 @@
+;;; test-sidebar.el --- ERT tests for sidebar.el -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Tests for the workspaces-sidebar roster feed and its action handlers.
+;; Pure elisp: the webview push boundary
+;; (`agent-repl--frontend-webview-execute-script'), git
+;; (`agent-repl--git-string-quiet'), and the picker/tab-bar entry points
+;; are all `cl-letf'-mocked; workspace fixtures go through the
+;; `agent-repl--ws-put' wrapper API.
+;;
+;; Run with:
+;;   emacs -batch -Q -l ert -l test-sidebar.el -f ert-run-tests-batch-and-exit
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                            (or load-file-name buffer-file-name)))
+      nil t)
+
+(require 'cl-lib)
+
+;;;; ---- Helpers -----------------------------------------------------------
+
+;; No sidebar-specific state macro: `agent-repl-test--with-clean-state'
+;; (test-helpers.el) rebinds the sidebar globals along with the rest of
+;; the module state, since the 1Hz state tick reaches them from any test.
+
+(defun agent-repl-test--sidebar-ws (name dir &rest plist)
+  "Register workspace NAME at DIR with a pre-cached repo key.
+The `:group-key' default keeps roster builds off the git wrapper;
+PLIST key/value pairs are applied after it and may override it."
+  (agent-repl--ws-put name :project-dir dir)
+  (agent-repl--ws-put name :group-key "/repos/doom/.git")
+  (while plist
+    (agent-repl--ws-put name (pop plist) (pop plist))))
+
+(defun agent-repl-test--sidebar-repo (roster key)
+  "Return ROSTER's repo plist with KEY, or nil."
+  (cl-find-if (lambda (r) (equal (plist-get r :key) key))
+              (append (plist-get roster :repos) nil)))
+
+(defun agent-repl-test--sidebar-row (rows name)
+  "Return the row plist named NAME in the vector ROWS, or nil."
+  (cl-find-if (lambda (r) (equal (plist-get r :name) name))
+              (append rows nil)))
+
+;;;; ---- Wire status mapping ----------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-wire-status-table ()
+  "Each mapped render-state keyword serializes to its contract string."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (dolist (case '((:thinking . "thinking") (:permission . "permission")
+                    (:init . "init") (:idle . "idle") (:idle-async . "idle")
+                    (:stop-failed . "dead") (:dead . "dead")
+                    (:merging . "merging") (:merge-queued . "merge-queued")
+                    (:merge-conflict . "merge-conflict")
+                    (:merge-failed . "merge-failed") (:merged . "merged")))
+      (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                 (lambda (_ws) (car case))))
+        (should (equal (agent-repl--sidebar-wire-status "ws") (cdr case)))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-done-unacked ()
+  "An unacked :done serializes as plain \"done\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :agent-state :done)
+    (should (equal (agent-repl--sidebar-wire-status "ws") "done"))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-done-acked-is-viewed ()
+  "An acked :done serializes as \"done-viewed\" (tab-bar viewed semantics)."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
+                                 :agent-state :done :done-acked t)
+    (should (equal (agent-repl--sidebar-wire-status "ws") "done-viewed"))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-nil-is-none ()
+  "A nil render status (unborn workspace) serializes as \"none\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (should (equal (agent-repl--sidebar-wire-status "ws") "none"))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-unmapped-errors ()
+  "An unmapped render-state keyword signals instead of defaulting."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+               (lambda (_ws) :not-a-state)))
+      (should-error (agent-repl--sidebar-wire-status "ws")))))
+
+;;;; ---- Roster building ---------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-build-groups-by-repo ()
+  "Two same-repo workspaces land as two roots of one repo section."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "a" "/tmp/a")
+    (agent-repl-test--sidebar-ws "b" "/tmp/b")
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git")))
+      (should (= 1 (length (plist-get roster :repos))))
+      (should (equal (plist-get repo :label) "doom"))
+      (should (= 2 (length (plist-get repo :rows)))))))
+
+(ert-deftest agent-repl-test-sidebar-build-nests-child-under-parent ()
+  "A `:source-ws-dir' matching another entry nests the row as its child."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "parent" "/tmp/parent")
+    (agent-repl-test--sidebar-ws "child" "/tmp/child"
+                                 :source-ws-dir "/tmp/parent")
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git"))
+           (rows (plist-get repo :rows))
+           (parent (agent-repl-test--sidebar-row rows "parent")))
+      (should (= 1 (length rows)))
+      (should (agent-repl-test--sidebar-row (plist-get parent :children)
+                                            "child")))))
+
+(ert-deftest agent-repl-test-sidebar-build-orphan-source-roots ()
+  "A `:source-ws-dir' matching no entry leaves the row a root."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
+                                 :source-ws-dir "/tmp/gone-elsewhere")
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git")))
+      (should (agent-repl-test--sidebar-row (plist-get repo :rows) "ws")))))
+
+(ert-deftest agent-repl-test-sidebar-build-self-parent-errors ()
+  "A row whose `:source-ws-dir' is its own dir signals a corrupt plist."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :source-ws-dir "/tmp/ws")
+    (should-error (agent-repl--sidebar-build))))
+
+(ert-deftest agent-repl-test-sidebar-build-cycle-errors ()
+  "A `:source-ws-dir' cycle orphans its family and must signal."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "a" "/tmp/a" :source-ws-dir "/tmp/b")
+    (agent-repl-test--sidebar-ws "b" "/tmp/b" :source-ws-dir "/tmp/a")
+    (should-error (agent-repl--sidebar-build))))
+
+(ert-deftest agent-repl-test-sidebar-build-unknown-repo-sections-last ()
+  "The `(no repo)' sentinel section sorts after every labeled repo."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "known" "/tmp/known")
+    (agent-repl-test--sidebar-ws "lost" "/tmp/lost"
+                                 :group-key agent-repl--repo-key-unknown)
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (keys (mapcar (lambda (r) (plist-get r :key))
+                         (append (plist-get roster :repos) nil))))
+      (should (equal keys (list "/repos/doom/.git"
+                                agent-repl--repo-key-unknown))))))
+
+(ert-deftest agent-repl-test-sidebar-build-folded-repo-serialized-not-flat ()
+  "A folded repo keeps its serialized rows but yields no flat dirs."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl--toggle-repo-fold "/repos/doom/.git")
+    (let* ((built (agent-repl--sidebar-build))
+           (repo (agent-repl-test--sidebar-repo (car built) "/repos/doom/.git")))
+      (should (eq (plist-get repo :folded) t))
+      (should (= 1 (length (plist-get repo :rows))))
+      (should (null (cdr built))))))
+
+(ert-deftest agent-repl-test-sidebar-build-siblings-sort-by-created-at ()
+  "Siblings order by `:created-at' ascending."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "younger" "/tmp/younger" :created-at 200.0)
+    (agent-repl-test--sidebar-ws "older" "/tmp/older" :created-at 100.0)
+    (let* ((built (agent-repl--sidebar-build)))
+      (should (equal (cdr built)
+                     (list (agent-repl--path-canonical "/tmp/older")
+                           (agent-repl--path-canonical "/tmp/younger")))))))
+
+(ert-deftest agent-repl-test-sidebar-build-flat-order-depth-first ()
+  "Flat dirs list parents immediately before their children."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "parent" "/tmp/parent" :created-at 100.0)
+    (agent-repl-test--sidebar-ws "child" "/tmp/child"
+                                 :source-ws-dir "/tmp/parent")
+    (agent-repl-test--sidebar-ws "uncle" "/tmp/uncle" :created-at 200.0)
+    (should (equal (cdr (agent-repl--sidebar-build))
+                   (mapcar #'agent-repl--path-canonical
+                           '("/tmp/parent" "/tmp/child" "/tmp/uncle"))))))
+
+;;;; ---- Row serialization --------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-row-closed-when-not-open ()
+  "A registered workspace with no live perspective serializes closed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil)))
+      (let ((row (agent-repl--sidebar-row-plist
+                  "ws" "/tmp/ws" nil (vector))))
+        (should (eq (plist-get row :closed) t))))))
+
+(ert-deftest agent-repl-test-sidebar-row-open-not-closed ()
+  "A workspace with a live perspective serializes closed=false."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (let ((row (agent-repl--sidebar-row-plist
+                  "ws" "/tmp/ws" nil (vector))))
+        (should (eq (plist-get row :closed) :false))))))
+
+(ert-deftest agent-repl-test-sidebar-row-current-flag ()
+  "The row matching CURRENT-NAME serializes current=true."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((row (agent-repl--sidebar-row-plist "ws" "/tmp/ws" "ws" (vector))))
+      (should (eq (plist-get row :current) t)))))
+
+(ert-deftest agent-repl-test-sidebar-row-optionals-null ()
+  "Missing branch/parent/summary/recency serialize as JSON null."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((row (agent-repl--sidebar-row-plist "ws" "/tmp/ws" nil (vector))))
+      (should (eq (plist-get row :branch) :null))
+      (should (eq (plist-get row :parentBranch) :null))
+      (should (eq (plist-get row :summary) :null))
+      (should (eq (plist-get row :lastViewedAt) :null)))))
+
+(ert-deftest agent-repl-test-sidebar-roster-json-roundtrip ()
+  "The serialized roster parses back with contract keys and JSON types."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
+                                 :agent-state :thinking
+                                 :branch-name "DWC/ws"
+                                 :last-viewed-at 1000.5)
+    (let* ((json (json-serialize (car (agent-repl--sidebar-build))))
+           (parsed (json-parse-string json :object-type 'alist
+                                      :null-object :null
+                                      :false-object :false))
+           (repo (aref (alist-get 'repos parsed) 0))
+           (row (aref (alist-get 'rows repo) 0)))
+      (should (eq (alist-get 'navDir parsed) :null))
+      (should (eq (alist-get 'folded repo) :false))
+      (should (equal (alist-get 'label repo) "doom"))
+      (should (equal (alist-get 'status row) "thinking"))
+      (should (equal (alist-get 'branch row) "DWC/ws"))
+      (should (= (alist-get 'lastViewedAt row) 1000.5))
+      (should (equal (append (alist-get 'children row) nil) nil)))))
+
+;;;; ---- Repo-key memoization ----------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-repo-key-snapshot-entry-memoized ()
+  "A snapshot-only entry resolves git once and memoizes the key."
+  (agent-repl-test--with-clean-state
+    (let ((calls 0))
+      (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) (cl-incf calls) "/repos/other/.git")))
+        (agent-repl--sidebar-repo-key-for-entry "gone" "/tmp/gone")
+        (let ((key (agent-repl--sidebar-repo-key-for-entry "gone" "/tmp/gone")))
+          (should (equal key (agent-repl--path-canonical "/repos/other/.git")))
+          (should (= calls 1)))))))
+
+(ert-deftest agent-repl-test-sidebar-repo-key-snapshot-failure-memoized ()
+  "A failed resolution maps onto the sentinel and is memoized too."
+  (agent-repl-test--with-clean-state
+    (let ((calls 0))
+      (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest _) (cl-incf calls) "fatal: not a repo")))
+        (agent-repl--sidebar-repo-key-for-entry "gone" "/tmp/gone")
+        (let ((key (agent-repl--sidebar-repo-key-for-entry "gone" "/tmp/gone")))
+          (should (equal key agent-repl--repo-key-unknown))
+          (should (= calls 1)))))))
+
+;;;; ---- Pushing ------------------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-push-targets-live-webviews-only ()
+  "The push script lands in live frontend buffers and skips dead ones."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "live" "/tmp/live")
+    (agent-repl-test--sidebar-ws "dead" "/tmp/dead")
+    (let ((buf (generate-new-buffer " sidebar-live-view")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "live" :frontend-buffer buf)
+            (agent-repl--ws-put "dead" :frontend-buffer
+                                (let ((b (generate-new-buffer " dead-view")))
+                                  (kill-buffer b) b))
+            (let (pushed)
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                         (lambda (b script) (push (cons b script) pushed))))
+                (agent-repl--sidebar-push))
+              (should (= 1 (length pushed)))
+              (should (eq (caar pushed) buf))
+              (should (string-match-p "agentReplWorkspaceRoster" (cdar pushed)))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-sidebar-push-refreshes-flat-dirs ()
+  "A push rewrites `agent-repl--sidebar-flat-dirs' from the fresh build."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (setq agent-repl--sidebar-flat-dirs '("/stale"))
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+               (lambda (_b _s))))
+      (agent-repl--sidebar-push))
+    (should (equal agent-repl--sidebar-flat-dirs
+                   (list (agent-repl--path-canonical "/tmp/ws"))))))
+
+(ert-deftest agent-repl-test-sidebar-push-script-guards-missing-hook ()
+  "The push script no-ops (page side) when the hook is not yet planted."
+  (should (equal (agent-repl--sidebar-push-script "{}")
+                 "window.agentReplWorkspaceRoster && window.agentReplWorkspaceRoster({});")))
+
+;;;; ---- The 1Hz gate --------------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-tick-skips-when-signature-unchanged ()
+  "Two ticks over unchanged state push exactly once."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-tick)
+        (agent-repl--sidebar-tick))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-tick-pushes-on-fold-change ()
+  "A fold flip between ticks re-pushes."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-tick)
+        (agent-repl--toggle-repo-fold "/repos/doom/.git")
+        (agent-repl--sidebar-tick))
+      (should (= pushes 2)))))
+
+;;;; ---- Keyboard navigation -------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-nav-empty-user-errors ()
+  "Navigation over an empty roster raises `user-error'."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--sidebar-nav-move 1) :type 'user-error)))
+
+(ert-deftest agent-repl-test-sidebar-nav-next-starts-at-first ()
+  "With no cursor, next lands on the first visible row."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-flat-dirs '("/a" "/b" "/c"))
+    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-nav-move 1))
+    (should (equal agent-repl--sidebar-nav-dir "/a"))))
+
+(ert-deftest agent-repl-test-sidebar-nav-prev-starts-at-last ()
+  "With no cursor, prev lands on the last visible row."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-flat-dirs '("/a" "/b" "/c"))
+    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-nav-move -1))
+    (should (equal agent-repl--sidebar-nav-dir "/c"))))
+
+(ert-deftest agent-repl-test-sidebar-nav-wraps ()
+  "Advancing past the last row wraps to the first."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-flat-dirs '("/a" "/b")
+          agent-repl--sidebar-nav-dir "/b")
+    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-nav-move 1))
+    (should (equal agent-repl--sidebar-nav-dir "/a"))))
+
+(ert-deftest agent-repl-test-sidebar-nav-select-without-cursor-errors ()
+  "Selecting with no cursor raises `user-error'."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl-sidebar-nav-select) :type 'user-error)))
+
+(ert-deftest agent-repl-test-sidebar-nav-select-opens-cursor-dir ()
+  "Selecting opens the cursor's dir through the shared open path."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-nav-dir "/tmp/ws")
+    (let (opened)
+      (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir)
+                 (lambda (dir) (setq opened dir))))
+        (agent-repl-sidebar-nav-select))
+      (should (equal opened "/tmp/ws")))))
+
+;;;; ---- Opening -------------------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-open-dir-unknown-errors ()
+  "Opening a dir no known entry matches signals loudly."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--sidebar-open-dir "/tmp/nowhere"))))
+
+(ert-deftest agent-repl-test-sidebar-open-dir-dispatches-picker-payload ()
+  "Opening routes the entry through `agent-repl--picker-open-selection'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let (payload)
+      (cl-letf (((symbol-function 'agent-repl--picker-open-selection)
+                 (lambda (p) (setq payload p)))
+                ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+        (agent-repl--sidebar-open-dir "/tmp/ws"))
+      (should (equal (plist-get payload :name) "ws"))
+      (should (equal (plist-get payload :project-dir) "/tmp/ws"))
+      (should (eq (plist-get payload :live-p) t)))))
+
+(ert-deftest agent-repl-test-sidebar-entry-for-dir-canonicalizes ()
+  "Dir matching survives trailing-slash variance via canonicalization."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws/")
+    (should (equal (car (agent-repl--sidebar-entry-for-dir "/tmp/ws")) "ws"))))
+
+;;;; ---- Command handlers -----------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-switch-command-missing-dir-errors ()
+  "A switch command without `dir' signals instead of no-oping."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-switch-command '((type . "switch"))))))
+
+(ert-deftest agent-repl-test-sidebar-switch-command-opens-dir ()
+  "A switch command opens its dir through the shared open path."
+  (agent-repl-test--with-clean-state
+    (let (opened)
+      (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir)
+                 (lambda (dir) (setq opened dir))))
+        (agent-repl--handle-switch-command
+         '((type . "switch") (dir . "/tmp/ws"))))
+      (should (equal opened "/tmp/ws")))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-missing-key-errors ()
+  "A fold command without `repo_key' signals."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-fold-command
+                   '((type . "fold") (folded . t))))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-missing-folded-errors ()
+  "A fold command without `folded' signals — absent is not false."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (should-error (agent-repl--handle-fold-command
+                   '((type . "fold") (repo_key . "/repos/doom/.git"))))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-unknown-key-errors ()
+  "A fold command naming no known repo signals."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (should-error (agent-repl--handle-fold-command
+                   '((type . "fold") (repo_key . "/repos/foreign/.git")
+                     (folded . t))))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-folds ()
+  "A fold command with folded=true folds the repo, redraws, and pushes."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((redrawn 0) (pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf redrawn)))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-fold-command
+         '((type . "fold") (repo_key . "/repos/doom/.git") (folded . t))))
+      (should (agent-repl--repo-folded-p "/repos/doom/.git"))
+      (should (= redrawn 1))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-unfolds-on-json-false ()
+  "A fold command with folded=:json-false (json-read false) unfolds."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl--toggle-repo-fold "/repos/doom/.git")
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda ()))
+              ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--handle-fold-command
+       '((type . "fold") (repo_key . "/repos/doom/.git")
+         (folded . :json-false))))
+    (should-not (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+(ert-deftest agent-repl-test-sidebar-fold-command-idempotent ()
+  "A fold command asking for the current state toggles nothing."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl--toggle-repo-fold "/repos/doom/.git")
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda ()))
+              ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--handle-fold-command
+       '((type . "fold") (repo_key . "/repos/doom/.git") (folded . t))))
+    (should (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+(provide 'test-sidebar)
+;;; test-sidebar.el ends here

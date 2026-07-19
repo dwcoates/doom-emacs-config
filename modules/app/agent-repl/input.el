@@ -224,7 +224,16 @@ marks the turn aborted."
       :ni "M-S-j"       #'agent-repl-output-next-final
       :ni "M-S-k"       #'agent-repl-output-prev-final
       :ni "C-M-S-j"     #'agent-repl-output-next-tool
-      :ni "C-M-S-k"     #'agent-repl-output-prev-tool)
+      :ni "C-M-S-k"     #'agent-repl-output-prev-tool
+      ;; Workspace-sidebar keyboard navigation (sidebar.el): move the
+      ;; roster cursor and open the selected workspace without leaving
+      ;; the input box — the xwidget swallows keystrokes, so the
+      ;; sidebar's keys must live here.  Same shifted-chord rule as
+      ;; above: unbound, `C-S-n'/`C-S-p' would shift-translate down to
+      ;; `C-n'/`C-p' motion in the composer.
+      :ni "C-S-n"        #'agent-repl-sidebar-nav-next
+      :ni "C-S-p"        #'agent-repl-sidebar-nav-prev
+      :ni "C-S-<return>" #'agent-repl-sidebar-nav-select)
 
 ;;; Input preparation and metaprompt
 
