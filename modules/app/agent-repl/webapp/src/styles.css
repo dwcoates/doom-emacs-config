@@ -214,6 +214,194 @@ body {
   height: 100vh;
 }
 
+/* ---- The workspaces rail (sidebar.ts) ----------------------------------
+   A left dock listing every editor workspace, ported from
+   design-workspace-sidebar-mock.html. It ships `hidden` and stays that way
+   until Emacs pushes the first roster, so a bare-browser session keeps the
+   single-column layout. Fixed at a fifth of the window; the main column's
+   `flex: 1 1 auto` absorbs the rest. */
+#ws-sidebar {
+  flex: 0 0 20%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+  font-size: 14px;
+}
+#ws-sidebar[hidden] { display: none; }
+
+#ws-sidebar .sb-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+#ws-sidebar .sb-title { font-weight: 600; font-size: 0.95rem; }
+#ws-sidebar .sb-count {
+  font-size: 0.72rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.45em;
+}
+/* The transient command-failure note (WorkspaceSidebar.showError): the
+   header is the rail's one fixed slot, so a switch or fold that never
+   landed reports here rather than vanishing. */
+#ws-sidebar .sb-err {
+  margin-left: auto;
+  color: var(--err);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ws-sidebar .sb-scroll { flex: 1 1 auto; overflow-y: auto; padding: 0.35rem 0 1rem; }
+
+/* Repo section header: fold triangle + repo label in the --info-ws hue the
+   topbar already uses for the workspace datapoint. */
+#ws-sidebar .repo-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--info-ws);
+  font-weight: 700;
+}
+#ws-sidebar .repo-head:hover { background: var(--card); }
+#ws-sidebar .repo-head .tri { transition: transform 0.12s; font-size: 1.05rem; line-height: 1; }
+#ws-sidebar .repo.folded .tri { transform: rotate(-90deg); }
+#ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
+#ws-sidebar .repo.folded .rows { display: none; }
+
+/* Workspace rows. Children nest inside .kids, which draws the family guide
+   line; indentation therefore compounds per generation. */
+#ws-sidebar .row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.28rem 0.7rem 0.28rem 0.9rem;
+  cursor: pointer;
+  min-width: 0;
+}
+#ws-sidebar .row:hover { background: var(--card); }
+
+/* Lifecycle dot: the row's single status element, class-keyed by the
+   status name (statusDotHtml). Breathing red = thinking (and init), solid
+   green = done, solid orange = done+viewed, breathing yellow = awaiting
+   permission, hollow = idle, grey = dead; `none` holds the column's
+   alignment invisibly. */
+#ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+#ws-sidebar .st-thinking,
+#ws-sidebar .st-init { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st-permission { background: var(--q-border); animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st-done { background: var(--ok); }
+#ws-sidebar .st-done-viewed { background: var(--thinking); }
+#ws-sidebar .st-idle { background: none; border: 1.5px solid var(--muted); }
+#ws-sidebar .st-dead { background: var(--muted); }
+#ws-sidebar .st-none { visibility: hidden; }
+
+/* Merge lifecycle: the recycle glyph — spinning while the merge is in
+   flight, still while queued or settled (`merged` rows also recede via
+   .gone), error-red when a conflict or failure needs a human. */
+#ws-sidebar .st-merging,
+#ws-sidebar .st-merge-queued,
+#ws-sidebar .st-merged,
+#ws-sidebar .st-merge-conflict,
+#ws-sidebar .st-merge-failed {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+#ws-sidebar .st-merge-conflict,
+#ws-sidebar .st-merge-failed { color: var(--err); }
+#ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
+
+#ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ws-sidebar .row .when {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.68rem;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+#ws-sidebar .row .chev {
+  color: var(--muted);
+  font-size: 0.7rem;
+  padding: 0 0.3em;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  transition: transform 0.12s;
+}
+#ws-sidebar .row .chev:hover { background: var(--code-bg); }
+#ws-sidebar .ws.open > .row .chev { transform: rotate(90deg); }
+#ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
+#ws-sidebar .kids .row { padding-left: 0.55rem; }
+
+/* The workspace Emacs is currently showing. */
+#ws-sidebar .ws.current > .row {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  padding-left: calc(0.9rem - 3px);
+}
+#ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - 3px); }
+#ws-sidebar .ws.current > .row .name { font-weight: 600; }
+
+/* Workspaces whose agent-repl is closed (and merged ones) stay listed but
+   recede. */
+#ws-sidebar .ws.gone > .row { opacity: 0.55; }
+
+/* Keyboard cursor: where C-S-n / C-S-p (relayed from the Emacs input
+   window) currently point; C-S-RET selects it. */
+#ws-sidebar .ws.navsel > .row {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+/* Expanded detail panel under a row. */
+#ws-sidebar .detail { display: none; }
+#ws-sidebar .ws.open > .detail {
+  display: block;
+  margin: 0.15rem 0.7rem 0.45rem 2rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.78rem;
+}
+#ws-sidebar .kids .ws.open > .detail { margin-left: 1.6rem; }
+#ws-sidebar .detail dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+}
+#ws-sidebar .detail dt { color: var(--muted); }
+#ws-sidebar .detail dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ws-sidebar .detail code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0 0.25em;
+  font-size: 0.92em;
+}
+#ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
+
+@keyframes ws-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.72); }
+}
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+
 #topbar {
   display: flex;
   align-items: center;

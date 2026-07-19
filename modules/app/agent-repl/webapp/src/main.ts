@@ -54,6 +54,7 @@ import { fetchStatus, refreshStatus } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
+import { WorkspaceSidebar, installWorkspaceRosterHook } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
@@ -135,6 +136,13 @@ async function boot(): Promise<void> {
   // The Emacs host snaps the feed to its newest message through this hook
   // whenever the user switches to the workspace holding this webview.
   installHostTailHook(window as unknown as HostGlobal, feedEl);
+  // The workspaces rail. Emacs pushes the whole roster through this hook on
+  // every workspace-state change; the rail stays collapsed until the first
+  // push, so a bare-browser session keeps the single-column layout. Roster
+  // state is global to the editor, not per-session, so it lives beside the
+  // store rather than in it.
+  const sidebar = new WorkspaceSidebar(must("ws-sidebar"), { httpBase });
+  installWorkspaceRosterHook(window as unknown as HostGlobal, sidebar);
   // Incremental search over the feed (isearch semantics), driven from the
   // composer's keys below. Built before the renderer because the renderer
   // must announce every render to it: the marks live in item DOM that a

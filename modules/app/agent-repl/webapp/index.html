@@ -6,6 +6,10 @@
     <title>claude-repl</title>
   </head>
   <body>
+    <!-- The workspaces rail (sidebar.ts): a flex sibling docked left of the
+         main column. Hidden until Emacs pushes the first roster, so a
+         bare-browser session keeps the single-column layout. -->
+    <nav id="ws-sidebar" hidden></nav>
     <!-- The main column: topbar over feed over composer. -->
     <div id="main-col">
       <header id="topbar">
