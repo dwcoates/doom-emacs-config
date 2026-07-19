@@ -4,13 +4,12 @@
 
 ;; Feeds the webapp's workspaces sidebar and services its actions.
 ;;
-;; The roster universe is the OPEN workspaces — the same set the
-;; tab-bar shows sections of: a live perspective AND an
-;; `agent-repl--workspaces' registration (`agent-repl--ws-list-names').
-;; Snapshot history and tombstoned entries do not render; closing a
-;; workspace removes its row.  A row whose REPL is closed while its
-;; workspace stays open (`:repl-state' `:inactive' / `:hidden') greys
-;; out instead.
+;; The roster universe is the LIVE workspaces — every registered,
+;; non-tombstoned entry (`agent-repl--live-ws-names'), whether or not
+;; a perspective is currently open for it.  Tombstoned registrations
+;; and snapshot-only history do not render.  A live row agent-repl is
+;; not actively hosting — no open perspective, or an open one whose
+;; REPL is torn down — greys out (`agent-repl--sidebar-closed-p').
 ;;
 ;; Data flows one way, Emacs -> webview: Emacs owns the workspace model
 ;; (workspace.el), so it builds the roster — repos, family-nested rows,
@@ -93,14 +92,17 @@ default dot."
             (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
                    kw name))))))
 
-(defun agent-repl--sidebar-repl-closed-p (name)
-  "Return non-nil when open workspace NAME's REPL is closed.
-`:repl-state' `:inactive' (panels torn down) or `:hidden' (queued for
-the hide-mode sweep) — the workspace stays in the tab-bar and the
-sidebar, but its row greys out.  A nil `:repl-state' is NOT closed:
-that is a workspace whose session never started, which the \"none\"
-status dot already conveys."
-  (and (memq (agent-repl--ws-get name :repl-state) '(:inactive :hidden)) t))
+(defun agent-repl--sidebar-closed-p (name)
+  "Return non-nil when live workspace NAME renders greyed (closed).
+Closed means agent-repl is not actively hosting the workspace: either
+no perspective is open for it (`agent-repl--ws-open-p' nil — e.g. a
+merged-with-preserve-entry registration), or the perspective is open
+but the REPL is torn down (`:repl-state' `:inactive', or `:hidden'
+awaiting the hide-mode sweep).  A nil `:repl-state' on an OPEN
+workspace is NOT closed: that is a session that never started, which
+the \"none\" status dot already conveys."
+  (or (not (agent-repl--ws-open-p name))
+      (and (memq (agent-repl--ws-get name :repl-state) '(:inactive :hidden)) t)))
 
 ;;;; ---- Roster building --------------------------------------------------
 
@@ -119,19 +121,21 @@ of folded repos are excluded (they are hidden); greyed closed-REPL
 rows are included (they are visible and selectable).")
 
 (defun agent-repl--sidebar-entries ()
-  "Return the roster entries (NAME . DIR): open workspaces only.
-The universe is `agent-repl--ws-list-names' — a live perspective AND a
-registration, i.e. the tab-bar's set before fold filtering (folds are
-rendered as collapsed sections here, not dropped).  An open workspace
-without a `:project-dir' cannot be keyed by dir; it is skipped with a
-log entry rather than silently, since every normally-created workspace
-records one."
+  "Return the roster entries (NAME . DIR): live workspaces only.
+The universe is `agent-repl--live-ws-names' — every registered,
+non-tombstoned workspace, whether or not a perspective is open for it
+\(perspective-less rows render greyed via
+`agent-repl--sidebar-closed-p'; folds render as collapsed sections,
+not drops).  Tombstoned registrations and snapshot-only history do
+not render.  A live workspace without a `:project-dir' cannot be
+keyed by dir; it is skipped with a log entry rather than silently,
+since every normally-created workspace records one."
   (let (entries)
-    (dolist (name (agent-repl--ws-list-names) (nreverse entries))
+    (dolist (name (agent-repl--live-ws-names) (nreverse entries))
       (let ((dir (agent-repl--ws-get name :project-dir)))
         (if dir
             (push (cons name dir) entries)
-          (agent-repl--log name "sidebar-entries: skipping open ws=%s with no :project-dir" name))))))
+          (agent-repl--log name "sidebar-entries: skipping live ws=%s with no :project-dir" name))))))
 
 (defun agent-repl--sidebar-entry-created-at (name)
   "Return NAME's `:created-at' as a float for sibling ordering.
@@ -164,7 +168,7 @@ absent optionals, epoch-seconds float for lastViewedAt."
     (list :name name
           :dir dir
           :status (agent-repl--sidebar-wire-status name)
-          :closed (if (agent-repl--sidebar-repl-closed-p name) t :false)
+          :closed (if (agent-repl--sidebar-closed-p name) t :false)
           :current (if (equal name current-name) t :false)
           :lastViewedAt (if viewed (float-time viewed) :null)
           :branch (or (agent-repl--ws-get name :branch-name) :null)
@@ -173,15 +177,15 @@ absent optionals, epoch-seconds float for lastViewedAt."
           :children children)))
 
 (defun agent-repl--sidebar-build ()
-  "Build the roster from every open workspace.
+  "Build the roster from every live workspace.
 Returns (ROSTER . FLAT-DIRS): ROSTER is the `json-serialize'-ready
 plist, FLAT-DIRS the visible row dirs in render order (see
 `agent-repl--sidebar-flat-dirs').
 
 Family shape: an entry whose `:source-ws-dir' canonically matches
-another OPEN entry's project dir nests under it; everything else
-\(including a child whose parent workspace is closed) roots in its
-repo's section.  A child renders under its parent even if git resolves
+another LIVE entry's project dir nests under it; everything else
+\(including a child whose parent workspace is tombstoned) roots in
+its repo's section.  A child renders under its parent even if git resolves
 their repo keys differently (children are worktrees cut from the
 parent, and the family line is the sidebar's organizing claim) — the
 section a family renders in is its ROOT's repo.  Repos sort by label
@@ -274,9 +278,9 @@ tick noticing the webview) re-delivers the roster."
           json))
 
 (defun agent-repl--sidebar-live-webview-buffers ()
-  "Return every live frontend webview buffer across open workspaces."
+  "Return every live frontend webview buffer across live workspaces."
   (let (bufs)
-    (dolist (name (agent-repl--ws-list-names) (nreverse bufs))
+    (dolist (name (agent-repl--live-ws-names) (nreverse bufs))
       (let ((buf (agent-repl--ws-get name :frontend-buffer)))
         (when (buffer-live-p buf)
           (push buf bufs))))))
@@ -306,18 +310,21 @@ product, so navigation always walks the order last shown."
 
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
-Pure in-memory reads: per-open-workspace render state (status keyword,
-done-acked, repl-state, last-viewed), the current workspace, the fold
-set, the nav cursor, and the set of live webview buffers.  The webview
-set matters because a freshly (re)mounted webview needs the roster
-even when nothing in the roster itself changed."
+Pure in-memory reads plus the persp membership probe:
+per-live-workspace render state (status keyword, done-acked,
+repl-state, open-p — the greyed flag's other input, last-viewed), the
+current workspace, the fold set, the nav cursor, and the set of live
+webview buffers.  The webview set matters because a freshly
+\(re)mounted webview needs the roster even when nothing in the roster
+itself changed."
   (list (mapcar (lambda (name)
                   (list name
                         (agent-repl--ws-render-status name)
                         (and (agent-repl--ws-get name :done-acked) t)
                         (agent-repl--ws-get name :repl-state)
+                        (and (agent-repl--ws-open-p name) t)
                         (agent-repl--ws-get name :last-viewed-at)))
-                (agent-repl--ws-list-names))
+                (agent-repl--live-ws-names))
         (ignore-errors (agent-repl--ws-current-name))
         (agent-repl--folded-repo-keys)
         agent-repl--sidebar-nav-dir
@@ -384,28 +391,28 @@ expects to land on."
 ;;;; ---- Opening a workspace (shared by keyboard + click) ------------------
 
 (defun agent-repl--sidebar-entry-for-dir (dir)
-  "Return the open entry (NAME . DIR) canonically matching DIR, or nil."
+  "Return the live entry (NAME . DIR) canonically matching DIR, or nil."
   (let ((canon (agent-repl--path-canonical dir)))
     (cl-find-if (lambda (e)
                   (equal (agent-repl--path-canonical (cdr e)) canon))
                 (agent-repl--sidebar-entries))))
 
 (defun agent-repl--sidebar-open-dir (dir)
-  "Switch Emacs to the open workspace whose project dir is DIR.
+  "Switch Emacs to the live workspace whose project dir is DIR.
 Routes through `agent-repl--picker-open-selection', the canonical
-switch-or-revive: a live perspective switches in place, a
-closed-REPL one re-establishes its session.  Signals when DIR matches
-no open entry — an unknown dir means the click/cursor and the roster
-disagree, which is a contract violation to surface, not a row to
-silently ignore."
+switch-or-revive: an open perspective switches in place, a
+perspective-less or closed-REPL one is re-established.  Signals when
+DIR matches no live entry — an unknown dir means the click/cursor and
+the roster disagree, which is a contract violation to surface, not a
+row to silently ignore."
   (let ((entry (agent-repl--sidebar-entry-for-dir dir)))
     (unless entry
-      (error "agent-repl sidebar: no open workspace for dir %s" dir))
+      (error "agent-repl sidebar: no live workspace for dir %s" dir))
     (let ((name (car entry)))
       (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s"
                         name (cdr entry)
                         (and (agent-repl--ws-live-p name) t)
-                        (agent-repl--sidebar-repl-closed-p name))
+                        (agent-repl--sidebar-closed-p name))
       (agent-repl--picker-open-selection
        (list :name name
              :project-dir (cdr entry)
@@ -426,7 +433,7 @@ re-validates — the file channel is also writable by other emitters)."
     (agent-repl--sidebar-open-dir dir)))
 
 (defun agent-repl--sidebar-repo-key-known-p (key)
-  "Return non-nil when KEY names a repo some open workspace belongs to.
+  "Return non-nil when KEY names a repo some live workspace belongs to.
 The `(no repo)' sentinel counts — its section folds like any other."
   (or (equal key agent-repl--repo-key-unknown)
       (cl-some (lambda (e) (equal key (agent-repl--ws-repo-group (car e))))
