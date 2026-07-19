@@ -644,6 +644,12 @@ pre {
    duration in the time blue, the token delta in the token amber. */
 .turn-meta .turn-dur { color: var(--info-time); }
 .turn-meta .turn-diff { color: var(--info-tokens); }
+/* The duration and the context delta share ONE size on this wrapper — a notch
+   below the corner's own 0.65rem — so the two figures always read at the same
+   font and size as each other, just slightly smaller than the corner's dating
+   text. Scoped to the stats wrapper (not `.turn-meta`) so the hover timestamp
+   beneath keeps the larger 0.65rem corner size. */
+.turn-meta .turn-stats { font-size: 0.6rem; }
 /* The timestamp is hover-only now: a muted grey stamp (pushed toward --fg so
    it reads a shade more present) that drops in under the stats only while the
    reader hovers that top-right corner, so a settled feed is not littered with
