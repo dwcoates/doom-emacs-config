@@ -294,65 +294,76 @@ PROMPT is the analysis instruction."
     (agent-repl--log (agent-repl--ws-current-name) "diff-analysis: %s" change-spec)
     (agent-repl--send-to-agent msg)))
 
-(defconst agent-repl--diff-scopes
-  '((worktree    . "unstaged changes (git diff)")
-    (staged      . "staged changes (git diff --cached)")
-    (uncommitted . "uncommitted changes (git diff HEAD)")
-    (head        . "last commit (git show HEAD)")
-    (branch      . :use-branch-diff-spec))
-  "Alist mapping scope names to their change-spec strings.
-The special value `:use-branch-diff-spec' means use `agent-repl-branch-diff-spec'.")
+;; The whole cluster below — the scope tables and the two helpers — is
+;; read by `agent-repl--define-diff-commands' AT MACROEXPANSION TIME
+;; (the macro loops over `agent-repl--diff-scopes' and calls
+;; `agent-repl--diff-command-form' while expanding), so byte-compiling
+;; this file requires them at compile time as well as at load time.
+(eval-and-compile
+  (defconst agent-repl--diff-scopes
+    '((worktree    . "unstaged changes (git diff)")
+      (staged      . "staged changes (git diff --cached)")
+      (uncommitted . "uncommitted changes (git diff HEAD)")
+      (head        . "last commit (git show HEAD)")
+      (branch      . :use-branch-diff-spec))
+    "Alist mapping scope names to their change-spec strings.
+  The special value `:use-branch-diff-spec' means use `agent-repl-branch-diff-spec'.")
 
-(defconst agent-repl--diff-scope-labels
-  '((worktree    . "unstaged changes")
-    (staged      . "staged changes")
-    (uncommitted . "all uncommitted changes")
-    (head        . "the last commit")
-    (branch      . "all changes in the current branch"))
-  "Alist mapping scope symbols to human-readable labels for docstrings.")
+  (defconst agent-repl--diff-scope-labels
+    '((worktree    . "unstaged changes")
+      (staged      . "staged changes")
+      (uncommitted . "all uncommitted changes")
+      (head        . "the last commit")
+      (branch      . "all changes in the current branch"))
+    "Alist mapping scope symbols to human-readable labels for docstrings.")
 
-(defconst agent-repl--update-pr-diff-scopes
-  '((worktree    . "UNSTAGED changes (git diff). Do not consider staged changes or committed changes.")
-    (staged      . "STAGED changes (git diff --cached). Do not consider unstaged changes or committed changes.")
-    (uncommitted . "All UNCOMMITTED changes (git diff HEAD). Consider BOTH staged and unstaged changes. Do not consider committed changes.")
-    (head        . "last commit (git show HEAD)."))
-  "Scope overrides for `update-pr-diff' commands.
-These provide more explicit instructions than the standard scopes.
-The `branch' scope is omitted and falls through to the default.")
+  (defconst agent-repl--update-pr-diff-scopes
+    '((worktree    . "UNSTAGED changes (git diff). Do not consider staged changes or committed changes.")
+      (staged      . "STAGED changes (git diff --cached). Do not consider unstaged changes or committed changes.")
+      (uncommitted . "All UNCOMMITTED changes (git diff HEAD). Consider BOTH staged and unstaged changes. Do not consider committed changes.")
+      (head        . "last commit (git show HEAD)."))
+    "Scope overrides for `update-pr-diff' commands.
+  These provide more explicit instructions than the standard scopes.
+  The `branch' scope is omitted and falls through to the default.")
 
-(defun agent-repl--resolve-change-spec (scope default-spec scope-overrides)
-  "Resolve the change-spec form for SCOPE.
-DEFAULT-SPEC is the value from `agent-repl--diff-scopes'.
-SCOPE-OVERRIDES, when non-nil, is a symbol naming an alist of
- (SCOPE . CHANGE-SPEC) that takes precedence over DEFAULT-SPEC.
-Returns a string literal or the symbol `agent-repl-branch-diff-spec'."
-  (let ((override (and scope-overrides
-                       (cdr (assq scope (eval scope-overrides))))))
-    (cond
-     (override
-      (agent-repl--log nil "resolve-change-spec: override branch scope=%s" scope)
-      override)
-     ((eq default-spec :use-branch-diff-spec)
-      (agent-repl--log nil "resolve-change-spec: branch-spec branch scope=%s" scope)
-      'agent-repl-branch-diff-spec)
-     (t
-      (agent-repl--log nil "resolve-change-spec: default branch scope=%s" scope)
-      default-spec))))
+  (defun agent-repl--resolve-change-spec (scope default-spec scope-overrides)
+    "Resolve the change-spec form for SCOPE.
+  DEFAULT-SPEC is the value from `agent-repl--diff-scopes'.
+  SCOPE-OVERRIDES, when non-nil, is a symbol naming an alist of
+   (SCOPE . CHANGE-SPEC) that takes precedence over DEFAULT-SPEC.
+  Returns a string literal or the symbol `agent-repl-branch-diff-spec'."
+    ;; This runs at macroexpansion time, where a standalone byte-compile
+    ;; has not loaded core.el — hence the `fboundp' gates on the logger.
+    (let ((override (and scope-overrides
+                         (cdr (assq scope (eval scope-overrides))))))
+      (cond
+       (override
+        (when (fboundp 'agent-repl--log)
+          (agent-repl--log nil "resolve-change-spec: override branch scope=%s" scope))
+        override)
+       ((eq default-spec :use-branch-diff-spec)
+        (when (fboundp 'agent-repl--log)
+          (agent-repl--log nil "resolve-change-spec: branch-spec branch scope=%s" scope))
+        'agent-repl-branch-diff-spec)
+       (t
+        (when (fboundp 'agent-repl--log)
+          (agent-repl--log nil "resolve-change-spec: default branch scope=%s" scope))
+        default-spec))))
 
-(defun agent-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)
-  "Build one `defun' form for a diff-analysis command.
-SCOPE-ENTRY is a (SCOPE . DEFAULT-SPEC) pair from `agent-repl--diff-scopes'.
-FAMILY, DOC-VERB, PROMPT-VAR, and SCOPE-OVERRIDES are forwarded from the
-macro `agent-repl--define-diff-commands'."
-  (let* ((scope (car scope-entry))
-         (doc-scope (cdr (assq scope agent-repl--diff-scope-labels)))
-         (fn-name (intern (format "agent-repl-%s-%s" family scope)))
-         (change-spec-form (agent-repl--resolve-change-spec
-                            scope (cdr scope-entry) scope-overrides)))
-    `(defun ,fn-name ()
-       ,(format "%s %s." doc-verb doc-scope)
-       (interactive)
-       (agent-repl--send-diff-analysis ,change-spec-form ,prompt-var))))
+  (defun agent-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)
+    "Build one `defun' form for a diff-analysis command.
+  SCOPE-ENTRY is a (SCOPE . DEFAULT-SPEC) pair from `agent-repl--diff-scopes'.
+  FAMILY, DOC-VERB, PROMPT-VAR, and SCOPE-OVERRIDES are forwarded from the
+  macro `agent-repl--define-diff-commands'."
+    (let* ((scope (car scope-entry))
+           (doc-scope (cdr (assq scope agent-repl--diff-scope-labels)))
+           (fn-name (intern (format "agent-repl-%s-%s" family scope)))
+           (change-spec-form (agent-repl--resolve-change-spec
+                              scope (cdr scope-entry) scope-overrides)))
+      `(defun ,fn-name ()
+         ,(format "%s %s." doc-verb doc-scope)
+         (interactive)
+         (agent-repl--send-diff-analysis ,change-spec-form ,prompt-var)))))
 
 (defmacro agent-repl--define-diff-commands (family doc-verb prompt-var &optional scope-overrides)
   "Define 5 diff-analysis commands for FAMILY.
