@@ -99,10 +99,27 @@ in-repo file, not here.")
   '((t :background "white" :foreground "black" :weight bold))
   "Face for the Agent Input header line.")
 
-(defcustom agent-repl-input-background-shade 24
-  "Greyscale level (0-255) for the input buffer background."
+(defcustom agent-repl-input-background-shade 20
+  "Base greyscale level (0-255) for the input buffer background.
+Sets the red and green channels; the blue channel adds
+`agent-repl-input-background-blue-boost' on top for a faint blue tint."
   :type 'integer
   :group 'agent-repl)
+
+(defcustom agent-repl-input-background-blue-boost 6
+  "Extra amount added to the blue channel of the input buffer background.
+Nudges the otherwise-grey background very slightly toward blue."
+  :type 'integer
+  :group 'agent-repl)
+
+(defun agent-repl--input-background-color ()
+  "Return the input buffer background as a #rrggbb hex string.
+A dark grey base (`agent-repl-input-background-shade') tinted very
+slightly blue by `agent-repl-input-background-blue-boost'."
+  (agent-repl--rgb-hex agent-repl-input-background-shade
+                       agent-repl-input-background-shade
+                       (+ agent-repl-input-background-shade
+                          agent-repl-input-background-blue-boost)))
 
 ;; Input mode
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
@@ -110,7 +127,7 @@ in-repo file, not here.")
   (setq-local header-line-format
               "C-c C-c: clear+save | C-c C-k: interrupt | (cmd) <up>/<down>: history | C-r: search history")
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
-  (agent-repl--set-buffer-background agent-repl-input-background-shade)
+  (agent-repl--set-buffer-background (agent-repl--input-background-color))
   ;; Slash-command completion: our capf is the buffer's only completion
   ;; source, so dropping the minimum prefix to 1 makes the menu appear on a
   ;; lone `/' without affecting completion anywhere else.
