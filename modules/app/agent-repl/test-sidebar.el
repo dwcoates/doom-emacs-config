@@ -434,6 +434,77 @@ PLIST key/value pairs are applied after it and may override it."
     (should (equal (car (agent-repl--sidebar-entry-for-dir "/tmp/ws"))
                    "ws"))))
 
+;;;; ---- Recently merged ------------------------------------------------------
+
+(defun agent-repl-test--roster-repo-names (roster)
+  "Return every workspace name rendered in ROSTER's by-repo sections."
+  (apply #'append
+         (mapcar (lambda (g)
+                   (mapcar (lambda (r) (plist-get r :name))
+                           (append (plist-get g :rows) nil)))
+                 (append (plist-get roster :repos) nil))))
+
+(ert-deftest agent-repl-test-sidebar-merged-excluded-from-repo-groups ()
+  "A merged workspace leaves the by-repo list entirely."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "live" "/tmp/live")
+    (agent-repl-test--sidebar-ws "gone" "/tmp/gone"
+                                 :repl-state :merged
+                                 :merge-completed-at (float-time))
+    (let ((names (agent-repl-test--roster-repo-names
+                  (car (agent-repl--sidebar-build)))))
+      (should (member "live" names))
+      (should-not (member "gone" names)))))
+
+(ert-deftest agent-repl-test-sidebar-merged-listed-newest-first ()
+  "Recently merged rows sort by merge time, newest first."
+  (agent-repl-test--with-clean-state
+    (let ((now (float-time)))
+      (agent-repl-test--sidebar-ws "older" "/tmp/older"
+                                   :repl-state :merged :merge-completed-at (- now 100))
+      (agent-repl-test--sidebar-ws "newer" "/tmp/newer"
+                                   :repl-state :merged :merge-completed-at (- now 10))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
+        (should (equal (mapcar (lambda (r) (plist-get r :name)) rows)
+                       '("newer" "older")))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-before-epoch-hidden ()
+  "A merge older than the epoch renders nowhere at all."
+  (agent-repl-test--with-clean-state
+    (let* ((now (float-time))
+           (agent-repl--sidebar-merged-epoch now))
+      (agent-repl-test--sidebar-ws "stale" "/tmp/stale"
+                                   :repl-state :merged :merge-completed-at (- now 1000))
+      (let ((roster (car (agent-repl--sidebar-build))))
+        (should (eq (plist-get roster :recentlyMerged) :null))
+        (should-not (member "stale" (agent-repl-test--roster-repo-names roster)))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-window-wipes-past-gap ()
+  "An activity gap beyond the window bumps the epoch, wiping the section."
+  (agent-repl-test--with-clean-state
+    (let* ((now (float-time))
+           (agent-repl--sidebar-last-activity
+            (- now agent-repl-sidebar-merged-window-seconds 1))
+           (agent-repl--sidebar-merged-epoch nil)
+           (agent-repl--sidebar-merged-persisted-at now))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-save-merged-window)
+                 (lambda ())))
+        (agent-repl--sidebar-refresh-merged-window))
+      (should agent-repl--sidebar-merged-epoch))))
+
+(ert-deftest agent-repl-test-sidebar-merged-window-holds-within-gap ()
+  "An activity gap inside the window leaves the epoch untouched."
+  (agent-repl-test--with-clean-state
+    (let* ((now (float-time))
+           (agent-repl--sidebar-last-activity (- now 5))
+           (agent-repl--sidebar-merged-epoch nil)
+           (agent-repl--sidebar-merged-persisted-at now))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-save-merged-window)
+                 (lambda ())))
+        (agent-repl--sidebar-refresh-merged-window))
+      (should-not agent-repl--sidebar-merged-epoch))))
+
 ;;;; ---- Command handlers -----------------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-switch-command-missing-dir-errors ()
