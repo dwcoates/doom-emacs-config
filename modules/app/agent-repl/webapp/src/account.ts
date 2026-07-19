@@ -128,6 +128,24 @@ export async function switchAccount(
   return (await resp.json()) as SwitchOutcome;
 }
 
+/**
+ * The roster label ("personal"/"work") for the root CURRENT runs as.
+ *
+ * Empty when the account is unknown, or when its config root is not one the
+ * roster names — the caller then falls back to the bare email, which is all
+ * the identity there is to show. Two roots logged into the SAME email are the
+ * reason this exists: the email alone cannot say WHICH root is current, so the
+ * label rides beside it.
+ */
+export function accountModeLabel(
+  current: Account | null,
+  roster: RosterEntry[],
+): string {
+  if (current === null) return "";
+  const match = roster.find((root) => root.config_dir === current.config_dir);
+  return match ? match.label : "";
+}
+
 /** One entry of the account chip's dropdown. */
 export type AccountMenuEntry =
   | { kind: "reauth"; text: string }
@@ -142,18 +160,23 @@ export type AccountMenuEntry =
  * selects a root that is already authed). A root the daemon could not read
  * is offered with its problem named rather than hidden: switching to it and
  * hitting the error beats not knowing it exists.
+ *
+ * The re-auth verb names the current root's mode beside its email
+ * (`re-auth dodge@chess.com (work)`), for the same reason the chip does: with
+ * two roots on one email the email alone cannot say which is current.
  */
 export function accountMenuEntries(
   current: Account | null,
   roster: RosterEntry[],
 ): AccountMenuEntry[] {
+  const mode = accountModeLabel(current, roster);
   const entries: AccountMenuEntry[] = [
     {
       kind: "reauth",
       text:
         current === null || accountIsLoggedOut(current)
           ? "log in"
-          : `re-auth ${current.email}`,
+          : `re-auth ${current.email}${mode === "" ? "" : ` (${mode})`}`,
     },
   ];
   for (const root of roster) {
@@ -185,15 +208,18 @@ export function accountMenuEntries(
  * open time is what keeps the two sides in step. Rejects when either fetch
  * fails, so the caller renders its own fallback rather than a menu built on
  * one stale half.
+ *
+ * Returns the roster alongside so the caller can repaint the chip's mode
+ * label from the same live read the menu was built on.
  */
 export async function fetchAccountMenuEntries(
   httpBase: string,
   sessionId: string,
   fetchFn: typeof fetch = fetch,
-): Promise<{ current: Account; entries: AccountMenuEntry[] }> {
+): Promise<{ current: Account; roster: RosterEntry[]; entries: AccountMenuEntry[] }> {
   const [current, roster] = await Promise.all([
     fetchAccount(httpBase, sessionId, fetchFn),
     fetchAccounts(httpBase, fetchFn),
   ]);
-  return { current, entries: accountMenuEntries(current, roster) };
+  return { current, roster, entries: accountMenuEntries(current, roster) };
 }

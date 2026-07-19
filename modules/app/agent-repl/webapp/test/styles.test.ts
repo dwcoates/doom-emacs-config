@@ -191,6 +191,32 @@ describe("topbar pickers", () => {
   });
 });
 
+const accountMode = blockAfter(css, "#account .account-mode");
+
+describe("account chip mode label", () => {
+  it("renders the mode smaller than the email it annotates", () => {
+    // Arrange / Act — the parenthesized root label is secondary to the email.
+    const size = /font-size:\s*([\d.]+)em/.exec(accountMode);
+    // Assert
+    expect(size).not.toBeNull();
+    expect(parseFloat(size![1])).toBeLessThan(1);
+  });
+
+  it("italicizes the mode so it reads as a qualifier", () => {
+    // Arrange / Act / Assert
+    expect(accountMode).toMatch(/font-style:\s*italic/);
+  });
+
+  it("dims the mode below the email via opacity", () => {
+    // Arrange / Act — opacity, not a fixed colour, so it tracks the chip's
+    // muted / hover / logged-out colour.
+    const op = /opacity:\s*([\d.]+)/.exec(accountMode);
+    // Assert
+    expect(op).not.toBeNull();
+    expect(parseFloat(op![1])).toBeLessThan(1);
+  });
+});
+
 const alarmDot = blockAfter(css, ".spinner.alarm");
 const alarmKeyframes = blockAfter(css, "@keyframes gone-alarm");
 

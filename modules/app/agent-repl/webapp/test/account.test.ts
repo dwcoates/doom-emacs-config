@@ -11,6 +11,7 @@ import {
   accountIsLoggedOut,
   accountLabel,
   accountMenuEntries,
+  accountModeLabel,
   fetchAccount,
   fetchAccountMenuEntries,
   fetchAccounts,
@@ -202,13 +203,47 @@ describe("switchAccount", () => {
   });
 });
 
+describe("accountModeLabel", () => {
+  const personal: RosterEntry = { label: "personal", config_dir: "", email: "a@b.c" };
+  const work: RosterEntry = { label: "work", config_dir: "/w", email: "d@e.f" };
+
+  it("names the roster label for the root the current account runs as", () => {
+    // Arrange / Act / Assert
+    expect(accountModeLabel({ config_dir: "/w", email: "d@e.f" }, [personal, work])).toBe("work");
+  });
+
+  it("names personal for the CLI default empty root", () => {
+    // Arrange / Act / Assert
+    expect(accountModeLabel({ config_dir: "", email: "a@b.c" }, [personal, work])).toBe("personal");
+  });
+
+  it("returns empty for a config root the roster does not name", () => {
+    // Arrange — an off-roster account has no label to show.
+    // Act / Assert
+    expect(accountModeLabel({ config_dir: "/gone", email: "a@b.c" }, [personal, work])).toBe("");
+  });
+
+  it("returns empty before the account is known", () => {
+    // Arrange / Act / Assert
+    expect(accountModeLabel(null, [personal, work])).toBe("");
+  });
+});
+
 describe("accountMenuEntries", () => {
   const personal: RosterEntry = { label: "personal", config_dir: "", email: "a@b.c" };
   const work: RosterEntry = { label: "work", config_dir: "/w", email: "d@e.f" };
 
-  it("leads with a re-auth entry naming the current email", () => {
+  it("leads with a re-auth entry naming the current email and root", () => {
     // Arrange / Act
     const entries = accountMenuEntries({ config_dir: "", email: "a@b.c" }, [personal, work]);
+    // Assert
+    expect(entries[0]).toEqual({ kind: "reauth", text: "re-auth a@b.c (personal)" });
+  });
+
+  it("omits the root suffix when the current root is off the roster", () => {
+    // Arrange — an account whose config_dir no roster entry names has no label
+    // to show, so re-auth falls back to the bare email.
+    const entries = accountMenuEntries({ config_dir: "/gone", email: "a@b.c" }, [personal, work]);
     // Assert
     expect(entries[0]).toEqual({ kind: "reauth", text: "re-auth a@b.c" });
   });
@@ -334,6 +369,15 @@ describe("fetchAccountMenuEntries", () => {
     const { current } = await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
     // Assert
     expect(current).toEqual({ config_dir: "/w", email: "d@e.f" });
+  });
+
+  it("hands back the freshly-read roster for the chip's mode label", async () => {
+    // Arrange
+    const { fetchFn } = router({ config_dir: "/w", email: "d@e.f" }, [personal, work]);
+    // Act
+    const { roster } = await fetchAccountMenuEntries("http://d", "s_1", fetchFn);
+    // Assert
+    expect(roster).toEqual([personal, work]);
   });
 
   it("rejects when the account read fails", async () => {
