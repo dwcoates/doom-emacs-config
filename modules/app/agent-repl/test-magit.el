@@ -601,5 +601,126 @@ the first-restored-workspace splash-screen bug."
   "Toggle is an interactive command so it can be bound to a key."
   (should (commandp #'+dwc/magit-toggle-tags-in-log)))
 
+;;;; ---- Tests: agent-repl-magit-merge-base-ref (defcustom default) ----
+
+(ert-deftest agent-repl-test-magit-merge-base-ref-defaults-to-nil ()
+  "The merge-base base ref defaults to nil — meaning the repo main branch."
+  (should (null (default-value 'agent-repl-magit-merge-base-ref))))
+
+;;;; ---- Tests: agent-repl--magit-merge-base-ref (ref resolution) ----
+
+(ert-deftest agent-repl-test-magit-merge-base-ref-uses-explicit-string ()
+  "Returns `agent-repl-magit-merge-base-ref' verbatim when set to a string."
+  (let ((agent-repl-magit-merge-base-ref "origin/master"))
+    (cl-letf (((symbol-function 'magit-main-branch)
+               (lambda () (error "magit-main-branch should not be consulted"))))
+      (should (equal (agent-repl--magit-merge-base-ref) "origin/master")))))
+
+(ert-deftest agent-repl-test-magit-merge-base-ref-falls-back-to-main-branch ()
+  "Falls back to `magit-main-branch' when the option is nil."
+  (let ((agent-repl-magit-merge-base-ref nil))
+    (cl-letf (((symbol-function 'magit-main-branch) (lambda () "master")))
+      (should (equal (agent-repl--magit-merge-base-ref) "master")))))
+
+(ert-deftest agent-repl-test-magit-merge-base-ref-empty-string-falls-back ()
+  "An empty-string option is treated as unset and falls back to the main branch."
+  (let ((agent-repl-magit-merge-base-ref ""))
+    (cl-letf (((symbol-function 'magit-main-branch) (lambda () "main")))
+      (should (equal (agent-repl--magit-merge-base-ref) "main")))))
+
+(ert-deftest agent-repl-test-magit-merge-base-ref-nil-when-no-main-branch ()
+  "Returns nil when the option is nil and no main branch exists."
+  (let ((agent-repl-magit-merge-base-ref nil))
+    (cl-letf (((symbol-function 'magit-main-branch) (lambda () nil)))
+      (should (null (agent-repl--magit-merge-base-ref))))))
+
+;;;; ---- Tests: agent-repl--magit-merge-base-commit ----
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-returns-base-and-sha ()
+  "Returns (BASE . SHA) on the happy path with a diverged current branch."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref)
+               (lambda () "master"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (cond
+                  ((equal args '("rev-parse" "--abbrev-ref" "HEAD")) "feature")
+                  ((equal args '("merge-base" "HEAD" "master")) "abc123def")
+                  (t (error "unexpected git args %S" args))))))
+      (should (equal (agent-repl--magit-merge-base-commit)
+                     '("master" . "abc123def"))))))
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-nil-when-no-base ()
+  "Returns nil (and never touches git) when no base ref resolves."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref) (lambda () nil))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest _args)
+                 (error "git should not run when base ref is nil"))))
+      (should (null (agent-repl--magit-merge-base-commit))))))
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-nil-when-on-base-branch ()
+  "Returns nil when HEAD is on the base branch itself (no merge-base call)."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref)
+               (lambda () "master"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (cond
+                  ((equal args '("rev-parse" "--abbrev-ref" "HEAD")) "master")
+                  (t (error "merge-base should not run when on the base branch"))))))
+      (should (null (agent-repl--magit-merge-base-commit))))))
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-nil-when-empty-output ()
+  "Returns nil when git yields empty merge-base output."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref)
+               (lambda () "master"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (cond
+                  ((equal args '("rev-parse" "--abbrev-ref" "HEAD")) "feature")
+                  ((equal args '("merge-base" "HEAD" "master")) "")
+                  (t (error "unexpected git args %S" args))))))
+      (should (null (agent-repl--magit-merge-base-commit))))))
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-nil-when-fatal-output ()
+  "Returns nil when merge-base output is git error text (`fatal: ...')."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref)
+               (lambda () "nonexistent"))
+              ((symbol-function 'agent-repl--git-string-quiet)
+               (lambda (&rest args)
+                 (cond
+                  ((equal args '("rev-parse" "--abbrev-ref" "HEAD")) "feature")
+                  ((equal args '("merge-base" "HEAD" "nonexistent"))
+                   "fatal: Not a valid object name nonexistent")
+                  (t (error "unexpected git args %S" args))))))
+      (should (null (agent-repl--magit-merge-base-commit))))))
+
+(ert-deftest agent-repl-test-magit-merge-base-commit-passes-head-and-base-to-git ()
+  "Computes the merge-base of HEAD against the resolved base ref."
+  (agent-repl-test--with-clean-state
+    (let ((merge-base-args nil))
+      (cl-letf (((symbol-function 'agent-repl--magit-merge-base-ref)
+                 (lambda () "develop"))
+                ((symbol-function 'agent-repl--git-string-quiet)
+                 (lambda (&rest args)
+                   (cond
+                    ((equal args '("rev-parse" "--abbrev-ref" "HEAD")) "feature")
+                    ((equal (car args) "merge-base")
+                     (setq merge-base-args args)
+                     "deadbeef")
+                    (t (error "unexpected git args %S" args))))))
+        (agent-repl--magit-merge-base-commit)
+        (should (equal merge-base-args '("merge-base" "HEAD" "develop")))))))
+
+;;;; ---- Tests: merge-base section registration ----
+
+(ert-deftest agent-repl-test-magit-merge-base-section-registered ()
+  "`agent-repl--magit-insert-merge-base' is on `magit-status-sections-hook'."
+  (should (memq 'agent-repl--magit-insert-merge-base
+                magit-status-sections-hook)))
+
 (provide 'test-magit)
 ;;; test-magit.el ends here
