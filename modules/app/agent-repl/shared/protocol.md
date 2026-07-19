@@ -190,6 +190,27 @@ interface RefreshCommandsCmd {
 }
 ```
 
+#### `refresh-status`
+
+Ask the shim to re-resolve the `/status` snapshot and emit a `status` event.
+
+The SDK bakes the init-handshake fields a `/status` panel reports
+(`apiKeySource`, `output_style`, `fast_mode_state`, the MCP/plugin/skill/agent
+rosters, ...) into the live query's one init and never re-emits them, so a
+value changed mid-session (a `/fast` toggle, a config edit) is invisible to
+the live query. Re-resolving works exactly as `refresh-commands` does: the
+shim stands up a throwaway query whose prompt never yields, reads the fresh
+`system:init` off its stream, and then lets it idle, costing one process
+spawn and zero model tokens. The shim `ack`s once the `status` event has been
+emitted.
+
+```ts
+interface RefreshStatusCmd {
+  type: "refresh-status";
+  request_id: RequestId;
+}
+```
+
 #### `shutdown`
 
 Ask the shim to drain, close the SDK query, and exit cleanly. Go then
@@ -295,6 +316,28 @@ interface CommandsEvt {
   type: "commands";
   session_id: SessionId;
   commands: SlashCommand[];
+}
+```
+
+#### `status`
+
+A freshly re-resolved `/status` snapshot, emitted in answer to a
+`refresh-status`. `status` is the SDK's `system:init` message verbatim (the
+same payload the live init carries), re-read off a throwaway query's
+handshake so it reflects the CURRENT config rather than the value frozen at
+session start.
+
+The daemon caches it on the translator and pushes it on as the Layer-2
+`status` frame; the init the live session already emits warms that cache for
+free, so a client that never refreshes still sees the start-of-session
+snapshot. The shape is the SDK's to define and grows per release, so it rides
+opaque exactly like a `system` event's `data`.
+
+```ts
+interface StatusEvt {
+  type: "status";
+  session_id: SessionId;
+  status: unknown;                      // the SDK's system:init, verbatim
 }
 ```
 

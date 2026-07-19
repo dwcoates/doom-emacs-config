@@ -43,6 +43,33 @@ export const FAKE_COMMANDS: SlashCommand[] = [
   { name: "fake-bare", description: "the offline skill that takes no arguments", argumentHint: "" },
 ];
 
+/**
+ * The offline stand-in for a `/status` probe: one `system:init` payload,
+ * shaped like the real SDK's, so the webapp's status panel has every field
+ * to render offline. Distinct from the fake query's own live init (which
+ * reports the live cwd/model) because a probe reports config-resolved
+ * values, which is exactly what the real one re-reads off a throwaway
+ * handshake.
+ */
+export const FAKE_STATUS = {
+  type: "system",
+  subtype: "init",
+  cwd: "/fake/workspace",
+  model: "fake-model",
+  permissionMode: "default",
+  apiKeySource: "none",
+  claude_code_version: "fake",
+  output_style: "default",
+  fast_mode_state: "off",
+  tools: ["Bash"],
+  mcp_servers: [],
+  slash_commands: FAKE_COMMANDS.map((c) => c.name),
+  agents: [],
+  skills: [],
+  plugins: [],
+  memory_paths: {},
+};
+
 export interface FakeQueryOpts {
   sessionId: string;
   newUuid: () => string;

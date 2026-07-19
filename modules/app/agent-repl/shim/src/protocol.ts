@@ -186,6 +186,21 @@ export interface RefreshCommandsCmd {
   request_id: RequestId;
 }
 
+/**
+ * Re-resolve the session's `/status` snapshot (§1.1).
+ *
+ * The SDK bakes the init-handshake fields a `/status` panel reports
+ * (`apiKeySource`, `output_style`, `fast_mode_state`, the MCP roster, the
+ * plugin/skill/agent rosters, ...) into the live query's one init and never
+ * re-emits them, so — exactly as `refresh-commands` does for the command
+ * menu — re-resolving them means standing up a throwaway query purely to
+ * re-run that handshake, which is what this command asks the shim to do.
+ */
+export interface RefreshStatusCmd {
+  type: "refresh-status";
+  request_id: RequestId;
+}
+
 export type ShimCommand =
   | UserMessageCmd
   | PermissionDecisionCmd
@@ -193,6 +208,7 @@ export type ShimCommand =
   | SetPermissionModeCmd
   | SetModelCmd
   | RefreshCommandsCmd
+  | RefreshStatusCmd
   | ShutdownCmd;
 
 const COMMAND_TYPES: ReadonlySet<string> = new Set([
@@ -202,6 +218,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set([
   "set-permission-mode",
   "set-model",
   "refresh-commands",
+  "refresh-status",
   "shutdown",
 ]);
 
@@ -244,6 +261,23 @@ export interface CommandsEvt {
   type: "commands";
   session_id: SessionId;
   commands: SlashCommand[];
+}
+
+/**
+ * A freshly re-resolved `/status` snapshot (§1.2), emitted in answer to a
+ * `refresh-status`.
+ *
+ * `status` is the SDK's `system:init` message verbatim — the same payload
+ * the live init carries, but re-read off a throwaway query's handshake so it
+ * reflects the CURRENT config rather than the value frozen at session start.
+ * The daemon caches it and pushes it on; the shape is the SDK's to define
+ * and grows per release, so it rides as opaque `unknown` exactly like
+ * {@link SystemEvt.data}.
+ */
+export interface StatusEvt {
+  type: "status";
+  session_id: SessionId;
+  status: unknown;
 }
 
 /** Inlined subset of the Anthropic Messages streaming event union. */
@@ -434,6 +468,7 @@ export type ShimEvent =
   | AckEvt
   | ModelsEvt
   | CommandsEvt
+  | StatusEvt
   | StreamEventEvt
   | AssistantMessageEvt
   | ResultEvt

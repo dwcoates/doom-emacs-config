@@ -96,6 +96,16 @@ export interface SessionDeps {
    * actually invoke.
    */
   probeCommands: () => Promise<SlashCommand[]>;
+  /**
+   * Re-resolve the `/status` snapshot from a throwaway SDK handshake.
+   *
+   * Separate from {@link SessionDeps.createQuery} for the same reason
+   * {@link SessionDeps.probeCommands} is: the fields a `/status` panel
+   * reports are memoized against the live query's init handshake, so only a
+   * NEW handshake sees a value changed since. Resolves to the SDK's
+   * `system:init` message, whose shape is the SDK's own.
+   */
+  probeStatus: () => Promise<unknown>;
   /** Emit one Layer-1 event (the transport writes the NDJSON line). */
   emit: (evt: ShimEvent) => void;
   /** Terminate the shim process with the given exit code. */
@@ -215,6 +225,9 @@ export class ShimSession {
       case "refresh-commands":
         this.ackOnSettled(cmd.type, cmd.request_id, this.republishCommands());
         break;
+      case "refresh-status":
+        this.ackOnSettled(cmd.type, cmd.request_id, this.republishStatus());
+        break;
       case "shutdown":
         this.shutdownRequestId = cmd.request_id;
         this.deps.emit({
@@ -322,6 +335,27 @@ export class ShimSession {
       type: "commands",
       session_id: this.deps.sessionId,
       commands,
+    });
+  }
+
+  /**
+   * Re-resolve and republish the `/status` snapshot for a `refresh-status`.
+   *
+   * Goes through {@link SessionDeps.probeStatus} rather than the live query
+   * for the same reason {@link republishCommands} does: the fields a
+   * `/status` panel reports are memoized against the live query's init
+   * handshake, so re-reading them means running a fresh handshake on a
+   * throwaway query.
+   */
+  private async republishStatus(): Promise<void> {
+    this.emitStatus(await this.deps.probeStatus());
+  }
+
+  private emitStatus(status: unknown): void {
+    this.deps.emit({
+      type: "status",
+      session_id: this.deps.sessionId,
+      status,
     });
   }
 
