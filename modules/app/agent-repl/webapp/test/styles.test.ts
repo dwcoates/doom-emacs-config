@@ -2509,3 +2509,12 @@ describe("Merge status card", () => {
     expect(darkTheme).toContain("--merge-card");
   });
 });
+
+describe("status panel grid", () => {
+  it("dissolves the status-row wrapper so its spans join the parent two-column grid", () => {
+    // Arrange / Act — the label/value spans must be grid items of `.status-grid`,
+    // not buried one level down inside a `.status-row` cell of it.
+    // Assert
+    expect(blockAfter(css, "\n.status-row {")).toMatch(/display:\s*contents/);
+  });
+});
