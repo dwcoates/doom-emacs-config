@@ -98,6 +98,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
+    taskSummary: null,
     lastSeq: 0,
     ...over,
   };

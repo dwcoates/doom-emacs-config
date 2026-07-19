@@ -44,6 +44,21 @@ describe("parseFrame", () => {
     expect(frame).toMatchObject({ type: "assistant-error", message_id: "m1", error: "rate_limit" });
   });
 
+  it("recognizes the task-summary frame as a known type", () => {
+    // Arrange
+    const data = JSON.stringify({
+      type: "task-summary",
+      seq: 6,
+      ts: "T",
+      session_id: "s1",
+      summary: "Widget cache is being built.",
+    });
+    // Act
+    const { frame } = parseFrame(data);
+    // Assert
+    expect(frame).toMatchObject({ type: "task-summary", summary: "Widget cache is being built." });
+  });
+
   it("returns a null frame but a valid envelope for unknown types", () => {
     // Arrange
     const data = JSON.stringify({ type: "hologram", seq: 9, ts: "T", session_id: "s1" });

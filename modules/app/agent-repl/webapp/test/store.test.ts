@@ -2174,3 +2174,42 @@ describe("user-turn origin propagation", () => {
     expect(item?.kind === "user-turn" && item.origin).toBeUndefined();
   });
 });
+
+describe("task-summary (current objective label)", () => {
+  it("is null before any task-summary frame", () => {
+    // Arrange + Act
+    const store = newStore();
+    // Assert
+    expect(store.state.taskSummary).toBeNull();
+  });
+
+  it("adopts a task-summary frame's summary", () => {
+    // Arrange
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("task-summary", { summary: "Widget cache is being built." }));
+    // Assert
+    expect(store.state.taskSummary).toBe("Widget cache is being built.");
+  });
+
+  it("supersedes an earlier summary with a later one", () => {
+    // Arrange — an older objective, then a newer turn's objective.
+    const store = newStore();
+    store.applyRaw(frame("task-summary", { summary: "Old objective." }));
+    // Act
+    store.applyRaw(frame("task-summary", { summary: "New objective." }));
+    // Assert
+    expect(store.state.taskSummary).toBe("New objective.");
+  });
+
+  it("clears the summary on a fresh-join hello", () => {
+    // Arrange — a summary landed, then the view rebinds fresh (eviction
+    // rebuild): local state is discarded pending replay.
+    const store = newStore();
+    store.applyRaw(frame("task-summary", { summary: "Objective." }, 1));
+    // Act — a fresh join whose retained window starts past our cursor.
+    store.applyRaw(hello({ seq: 60, resume_from_seq: 50 }));
+    // Assert
+    expect(store.state.taskSummary).toBeNull();
+  });
+});

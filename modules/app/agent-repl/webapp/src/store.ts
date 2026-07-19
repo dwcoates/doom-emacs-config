@@ -481,6 +481,14 @@ export interface StoreState {
    */
   turnRetracted: boolean;
   costUsd: number | null;
+  /**
+   * The session's one-line "current objective" label (§2.14), or `null`
+   * before the first completed turn produces one. Set by every
+   * `task-summary` frame — the daemon emits one per completed turn only
+   * when a Haiku summary came back usable, so the store simply adopts the
+   * latest. Rendered centered in the topbar.
+   */
+  taskSummary: string | null;
   lastSeq: number;
 }
 
@@ -506,6 +514,7 @@ function initialState(): StoreState {
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
+    taskSummary: null,
     lastSeq: 0,
   };
 }
@@ -686,6 +695,10 @@ export class ConversationStore {
     s.interrupting = false;
     s.turnRetracted = false;
     s.costUsd = null;
+    // Discarded like the other derived state: a still-retained task-summary
+    // frame re-applies on replay, and an evicted one is simply absent until
+    // the next completed turn produces a fresh label.
+    s.taskSummary = null;
     s.lastSeq = Math.max(0, hello.resume_from_seq - 1);
     if (hello.resume_from_seq > 0 && hello.seq >= hello.resume_from_seq) {
       // Full-history replay incoming: render nothing per-frame and
@@ -1133,6 +1146,11 @@ export class ConversationStore {
         // user-turn it drained into arrives as its own frame; here we only
         // drop the parked entry.
         s.queued = s.queued.filter((q) => q.queue_id !== frame.queue_id);
+        break;
+      case "task-summary":
+        // The daemon emits one per completed turn only when a usable Haiku
+        // summary came back, so adopting the latest is the whole reducer.
+        s.taskSummary = frame.summary;
         break;
     }
   }

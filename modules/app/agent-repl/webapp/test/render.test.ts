@@ -504,6 +504,7 @@ describe("turnStatsRowHtml (live turn clock + context delta)", () => {
       interrupting: false,
       turnRetracted: false,
       costUsd: null,
+      taskSummary: null,
       lastSeq: 0,
       ...over,
     };

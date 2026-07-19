@@ -220,6 +220,28 @@ body {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
+  /* Positioning context for the absolute-centered #task-summary (§2.14). */
+  position: relative;
+}
+
+/* The session's one-line "current objective" (§2.14): absolute-centered
+   over the whole topbar, so it sits at true center regardless of how wide
+   the left cluster or the right pickers grow. Bounded to the middle band
+   and ellipsis-clipped so a long objective cannot reach — and overwrite —
+   either cluster; the full text is in its `title` tooltip. `pointer-events:
+   none` keeps it from stealing clicks from anything it may overlap when the
+   panel is narrow. Empty content collapses it to nothing. */
+#task-summary {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 44%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--tool-title);
+  font-style: italic;
 }
 
 #conn-status { color: var(--err); }
