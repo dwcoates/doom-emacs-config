@@ -1227,7 +1227,7 @@ silently start round-tripping back onto disk."
   "with-error-logging calls `agent-repl--log' with label on error."
   (let ((logged-msg nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (ws fmt &rest args)
+               (lambda (_ws fmt &rest args)
                  (setq logged-msg (apply #'format fmt args)))))
       (agent-repl--with-error-logging "my-label"
         (error "kaboom"))

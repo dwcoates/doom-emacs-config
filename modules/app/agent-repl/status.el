@@ -1496,8 +1496,10 @@ GET /sessions poll — this only renders it."
                           tab-bar-format-align-right
                           agent-repl-current-workspace-name-segment)
          tab-bar-show t
-         tab-bar-new-button-show nil
          tab-bar-close-button-show nil)
+   ;; Obsolete since 28.1 but still honored; the tab-bar-format migration is deliberate future work.
+   (with-suppressed-warnings ((obsolete tab-bar-new-button-show))
+     (setq tab-bar-new-button-show nil))
    ;; A tab-bar height change must NEVER imply an NSWindow resize.  On
    ;; macOS the implied resize can be clipped by the screen edge, so the
    ;; requested and realized frame sizes disagree and redisplay retries
@@ -1737,7 +1739,8 @@ The view is the webview buffer — see `agent-repl--agent-view-buffer-p'."
            (buffer-list)))
 
 (defun agent-repl--agent-in-saved-wconf-p (ws-name)
-  "Return non-nil if background workspace WS-NAME has an agent buffer in its saved config."
+  "Return non-nil if background workspace WS-NAME has an agent buffer in
+its saved config."
   (let* ((persp (agent-repl--ws-resolve-persp ws-name))
          (wconf (agent-repl--ws-window-conf persp)))
     (agent-repl--wconf-has-agent-p wconf)))
@@ -1777,7 +1780,8 @@ State table:
   :done + clean + acked + !dwell          → unchanged (still counting)
   :done + clean + !acked                  → unchanged (wait for user to view)
   :done + dirty                           → unchanged (wait for stage/commit)
-  anything else                           → unchanged (sentinel-owned or terminal)"
+  anything else                           → unchanged
+                                            (sentinel-owned or terminal)"
   (let* ((state (agent-repl--ws-agent-state ws))
          (acked (agent-repl--ws-get ws :done-acked))
          (acked-at (agent-repl--ws-get ws :done-acked-at))

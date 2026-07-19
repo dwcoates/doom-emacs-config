@@ -290,8 +290,9 @@ When `:last-prompt-summary-at' is set, prefixes the segment with a
 relative \"X ago\" timestamp (see
 `agent-repl--format-summary-relative-time') in a light grey color
 (distinct from the blue summary text), so the user sees how stale the
-current summary is at a glance.  The 1Hz tab-bar redraw drives `force-mode-line-update' so
-the timestamp ticks without explicit polling."
+current summary is at a glance.  The 1Hz tab-bar redraw drives
+`force-mode-line-update' so the timestamp ticks without explicit
+polling."
   (let ((ws (and (boundp 'agent-repl--owning-workspace)
                  agent-repl--owning-workspace)))
     (if (not ws)

@@ -172,6 +172,12 @@ Without region: returns file:line."
       (agent-repl--log (agent-repl--ws-current-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
       (format "%s:%d" rel (line-number-at-pos (point))))))
 
+(eval-when-compile
+  ;; Register magit-hunk-section's `to-range' slot name with eieio so
+  ;; the `eieio-oref' below compiles warning-free without magit on the
+  ;; compile-time load path.  Compile-time only; defines nothing at runtime.
+  (cl-defstruct (agent-repl--magit-hunk-slot-shim) to-range))
+
 (defun agent-repl--format-magit-hunk-ref ()
   "Format a file reference for the current magit hunk context.
 Returns a \"file:startline-endline\" string based on the hunk's to-range."
@@ -307,7 +313,8 @@ PROMPT is the analysis instruction."
       (head        . "last commit (git show HEAD)")
       (branch      . :use-branch-diff-spec))
     "Alist mapping scope names to their change-spec strings.
-  The special value `:use-branch-diff-spec' means use `agent-repl-branch-diff-spec'.")
+  The special value `:use-branch-diff-spec' means use
+  `agent-repl-branch-diff-spec'.")
 
   (defconst agent-repl--diff-scope-labels
     '((worktree    . "unstaged changes")
@@ -373,9 +380,9 @@ worktree, staged, uncommitted, head, and branch.  DOC-VERB is used in
 docstrings (e.g. \"Explain\" produces \"Explain unstaged changes.\").
 PROMPT-VAR is the symbol of the prompt variable to pass.
 
-SCOPE-OVERRIDES, when non-nil, is a symbol naming an alist of (SCOPE . CHANGE-SPEC)
-that replaces the default change-spec from `agent-repl--diff-scopes'
-for specific scopes."
+SCOPE-OVERRIDES, when non-nil, is a symbol naming an alist of
+\(SCOPE . CHANGE-SPEC) that replaces the default change-spec from
+`agent-repl--diff-scopes' for specific scopes."
   (declare (indent 2))
   `(progn
      ,@(cl-loop for scope-entry in agent-repl--diff-scopes
@@ -679,7 +686,8 @@ error via `agent-repl--warn'."
        (agent-repl--rebase-onto-origin-master-callback ws ok output)))))
 
 (defun agent-repl--exclusion-symbol-to-flag (sym)
-  "Convert exclusion SYM (e.g. \\='no-self-certified) to flag (e.g. \"--self-certified\")."
+  "Convert exclusion SYM to the corresponding flag.
+E.g. \\='no-self-certified becomes \"--self-certified\"."
   (let ((name (symbol-name sym)))
     (unless (string-prefix-p "no-" name)
       (error "agent-repl: exclusion symbol must start with `no-': %S" sym))
@@ -1087,9 +1095,10 @@ end of a successful load; reset by Emacs restart.")
 
 (defvar agent-repl--restored-workspaces nil
   "List of workspace names established by snapshot-restore in this session.
-Populated incrementally as each entry of the snapshot loader (either the
-current file or an archived file via `agent-repl-load-workspace-snapshot-from-archive')
-successfully calls `agent-repl--establish-workspace'.  Used by
+Populated incrementally as each entry of the snapshot loader (either
+the current file or an archived file via
+`agent-repl-load-workspace-snapshot-from-archive') successfully calls
+`agent-repl--establish-workspace'.  Used by
 `agent-repl-nuke-restored-workspaces' to nuke only the restored
 workspaces while sparing any workspaces the user created manually before
 or after the restore.  Entries are removed when their workspace is
@@ -1123,7 +1132,9 @@ current `(NAME :project-dir DIR)' plist shape."
            (t (error "agent-repl: malformed snapshot entry: %S" entry))))))
 
 (defun agent-repl--collect-snapshot-entries ()
-  "Return a list of (NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]) entries.
+  "Return a list of workspace snapshot entries.
+Each entry has the shape
+\(NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]).
 Sourced from `agent-repl--workspaces'.  Includes every workspace
 whose plist has a non-nil `:project-dir'.  `:priority' is deliberately
 NOT included — it lives in each project's `<root>/.claude/emacs/state.el'

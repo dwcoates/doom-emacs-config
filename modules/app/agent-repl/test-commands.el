@@ -717,6 +717,9 @@ is consulted, so BODY can assert whether a prompt was raised."
   `(agent-repl-test--with-clean-state
      (let ((dispatched nil)
            (prompted nil))
+       ;; Not every BODY reads both captures; `ignore' marks them as
+       ;; deliberately maybe-unused so expansions compile warning-free.
+       (ignore dispatched prompted)
        (agent-repl--ws-put "test-ws" :frontend 'gui)
        (agent-repl--ws-set-agent-state "test-ws" ,state)
        (cl-letf (((symbol-function '+workspace-current-name)

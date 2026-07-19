@@ -581,7 +581,7 @@ did."
                                   (agent-repl--hide-panels)))))
 
 (defun agent-repl--on-close (&optional ws)
-  "Full close: bookkeep + restore pre-panel layout + hide + deprio + save tab index.
+  "Full close: bookkeep, restore pre-panel layout, hide, deprio, save tab index.
 Sets WS's `:repl-state' to `:hidden' (NOT `:inactive' like the
 simple-close path) so the workspace becomes a kill candidate for the
 next sweep when `agent-repl-hide-mode-enabled' is on.  Restores the
@@ -791,7 +791,8 @@ Cancels any pending timer and schedules `agent-repl--on-window-change'.")
 
 (defun agent-repl--initialize-input-buffer (ws)
   "Create the agent input buffer for workspace WS and enable agent-repl-input-mode.
-Errors if the buffer is already initialized (already in `agent-repl-input-mode')."
+Errors if the buffer is already initialized (already in
+`agent-repl-input-mode')."
   (agent-repl--log ws "initialize-input-buffer")
   (let ((input-buf (agent-repl--create-buffer ws "-input")))
     (agent-repl--ws-put ws :input-buffer input-buf)

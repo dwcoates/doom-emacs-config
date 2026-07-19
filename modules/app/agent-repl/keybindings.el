@@ -425,7 +425,8 @@ doom-config worktree reloads its own checkout."
 
 (defun agent-repl-debug/mock-workspace-generation (&optional names)
   "Write a mock workspace_generation.json to trigger the file watcher.
-NAMES is an optional list of branch name strings; defaults to a single test entry."
+NAMES is an optional list of branch name strings; defaults to a single
+test entry."
   (interactive)
   (let* ((names (or names
                      (list (concat (agent-repl--workspace-prefix-slash)
@@ -449,8 +450,9 @@ NAMES is an optional list of branch name strings; defaults to a single test entr
     (message "Wrote %s with priority=%s" file priority)))
 
 (defun agent-repl-debug/process-pending-commands ()
-  "Manually scan ~/.claude-emacs/output/ and process any workspace_commands_*.json files.
-Use this to verify the processor works independently of the file watcher."
+  "Manually scan ~/.claude-emacs/output/ for workspace-command files.
+Processes any workspace_commands_*.json files found.  Use this to
+verify the processor works independently of the file watcher."
   (interactive)
   (let ((files (when (file-directory-p agent-repl--output-dir)
                  (directory-files agent-repl--output-dir t

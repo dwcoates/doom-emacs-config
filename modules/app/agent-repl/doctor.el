@@ -7,6 +7,9 @@
 ;; Skips everything inside the agent sandbox: hook installation is a
 ;; host-only concern.
 
+;; The doctor runs inside Doom, where `warn!' (doom-lib) exists.
+(declare-function warn! "doom-lib")
+
 (let ((dir (file-name-directory load-file-name)))
   (dolist (file '("install.el" "codex.el"))
     (let ((path (expand-file-name file dir)))

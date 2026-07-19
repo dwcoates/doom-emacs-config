@@ -13,6 +13,10 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;; Forward declaration: the fixture accessor defuns below reference the
+;; watcher defconst, which is defined after them.
+(defvar agent-repl-dir-watcher-test--watcher)
+
 ;;;; ---- Fixture: a self-contained test channel ----
 
 (defvar agent-repl-dir-watcher-test--dir nil

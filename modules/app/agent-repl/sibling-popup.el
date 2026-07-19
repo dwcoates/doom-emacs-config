@@ -96,7 +96,7 @@ stacked-side-window action so the default frame-wide bottom-popup
 behavior is preserved.
 
 Intended for installation as the `:actions' of a `set-popup-rule!'
-entry that would otherwise use `:side 'bottom' — see config.el's
+entry that would otherwise use `:side \\='bottom' — see config.el's
 vterm popup rule for the canonical caller."
   (let ((target (agent-repl-sibling-popup--target-window)))
     (if (window-live-p target)
