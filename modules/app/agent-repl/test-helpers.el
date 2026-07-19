@@ -123,9 +123,11 @@ advice's effect would be invisible)."
 
 ;; Doom faces used by tabline
 (unless (facep '+workspace-tab-selected-face)
-  (defface +workspace-tab-selected-face '((t :weight bold)) "Stub face."))
+  (defface +workspace-tab-selected-face '((t :weight bold)) "Stub face."
+    :group 'agent-repl))
 (unless (facep '+workspace-tab-face)
-  (defface +workspace-tab-face '((t)) "Stub face."))
+  (defface +workspace-tab-face '((t)) "Stub face."
+    :group 'agent-repl))
 
 ;; Doom leader map
 (unless (boundp 'doom-leader-map)
@@ -148,7 +150,7 @@ advice's effect would be invisible)."
 (unless (boundp 'evil-insert-state-exit-hook)
   (defvar evil-insert-state-exit-hook nil "Stub hook."))
 (unless (boundp 'evil-escape-inhibit)
-  (defvar-local evil-escape-inhibit nil "Stub."))
+  (defvar evil-escape-inhibit nil "Stub."))
 (unless (fboundp 'evil-window-left)
   (defun evil-window-left (&rest _args) "Stub." nil))
 (unless (fboundp 'evil-define-key)
@@ -624,9 +626,7 @@ re-routes their frontend resolution instead."
          (agent-repl--folded-repos (make-hash-table :test 'equal))
          (agent-repl--snapshot-load-state nil)
          (agent-repl-after-ready-functions nil)
-         (agent-repl--fullscreen-config nil)
          (agent-repl--sync-timer nil)
-         (agent-repl--hide-overlay-refcount 0)
          (agent-repl-debug nil)
          (agent-repl-default-frontend agent-repl-default-frontend)
          (agent-repl-workspace-snapshot-file

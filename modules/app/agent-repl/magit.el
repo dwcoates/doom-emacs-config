@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(declare-function magit-commit-at-point "magit-git")
+
 (defcustom agent-repl-magit-no-confirm-extras '(abort-revert abort-rebase abort-merge)
   "Extra actions to add to `magit-no-confirm'."
   :type '(repeat symbol)

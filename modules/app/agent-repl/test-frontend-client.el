@@ -344,6 +344,15 @@ RESUME-ID defaults to \"uuid-gone\"; SEARCHED defaults to one path."
         ;; the success.
         (should (equal sleeps '(0.2 0.2)))))))
 
+(defmacro agent-repl-test--with-ws (ws plist &rest body)
+  "Register workspace WS with PLIST for BODY, cleaning up after."
+  (declare (indent 2))
+  `(unwind-protect
+       (progn
+         (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
+         ,@body)
+     (remhash ,ws agent-repl--workspaces)))
+
 (ert-deftest agent-repl-test-frontend-ensure-session-fails-fast-without-daemon ()
   "A nil daemon-ensure (auto-start off/inhibited) errors immediately.
 Polling readiness against a daemon that was never started would burn
@@ -372,15 +381,6 @@ the retry budget on a misleading error."
         (should-error (agent-repl--frontend-wait-ready))))))
 
 ;;;; ---- ensure-session ----------------------------------------------------------
-
-(defmacro agent-repl-test--with-ws (ws plist &rest body)
-  "Register workspace WS with PLIST for BODY, cleaning up after."
-  (declare (indent 2))
-  `(unwind-protect
-       (progn
-         (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
-         ,@body)
-     (remhash ,ws agent-repl--workspaces)))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-reuses-live-id ()
   "A recorded id still listed live is reused without a POST."

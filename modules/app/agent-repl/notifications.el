@@ -2,6 +2,8 @@
 
 ;;; Code:
 
+(declare-function server-running-p "server")
+
 (defcustom agent-repl-terminal-notifier-executable "terminal-notifier"
   "Name or path of the terminal-notifier binary."
   :type 'string
@@ -356,7 +358,8 @@ Signals an error if no supported notification tool is found."
     (error "agent-repl: no notification backend available (none of alerter, osascript, terminal-notifier found)"))))
 
 (defvar agent-repl--notification-backend (agent-repl--select-notification-backend)
-  "Desktop notification backend function, selected at load time based on available platform tools.")
+  "Desktop notification backend function, selected at load time
+based on available platform tools.")
 
 (defun agent-repl--notify (ws title message)
   "Send a desktop notification with TITLE and MESSAGE.

@@ -15,6 +15,8 @@
 (declare-function agent-repl--drain-pending-initial-buffers "panels" (ws))
 (declare-function agent-repl--drain-pending-show-panels "panels" (ws))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(declare-function pygn-mode "pygn-mode")
+(declare-function pygn-mode-display-gui-board-at-pos "pygn-mode")
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -23,7 +25,7 @@
 ;;; Worktree initial buffers
 
 (defcustom agent-repl-workspace-initial-buffers nil
-  "Alist mapping repo path patterns to files opened when a worktree workspace is created.
+  "Alist mapping repo path patterns to files opened at worktree creation.
 Each entry is (PATTERN . FILES) where PATTERN is a regexp matched against the
 worktree path with `string-match-p', and FILES is a list of paths relative to
 the worktree root.  Files are added to the new workspace's perspective via
@@ -132,7 +134,7 @@ semantics."
    agent-repl--workspace-commands-watcher event))
 
 (defun agent-repl--register-workspace-commands-watch ()
-  "Register a file-notify watch on ~/.claude-emacs/output/ for workspace command files.
+  "Register a file-notify watch on ~/.claude-emacs/output/ for command files.
 Tears down any existing watch first to avoid duplicates on re-eval."
   (agent-repl--dir-watcher-register agent-repl--workspace-commands-watcher))
 
@@ -184,7 +186,7 @@ the exit code, or 124 when
       status)))
 
 (defun agent-repl--git-exit-code-streaming (root filter &rest args)
-  "Run git in ROOT with ARGS, streaming its output through FILTER; return exit code.
+  "Run git in ROOT with ARGS streaming output through FILTER; return exit code.
 This IS an external-boundary wrapper — tests mock it via `cl-letf'
 \(see `agent-repl--external-boundary-functions' in core.el).
 
@@ -688,16 +690,17 @@ of the calling workspace's project, mirroring the doom-config pin in
 `agent-repl--doom-config-dir' but for the explanation-engine repo.")
 
 (defun agent-repl--build-oneshot-success-suffix (invocation action-phrase)
-  "Build the canonical 'on success, invoke INVOCATION; STOP on ambiguity'
-suffix used by every one-shot workspace creator.  Appended to the
-user's preemptive prompt to tell the spawned agent the success-gated
-wrap-up action AND the safety property that genuine ambiguity must
-stop the flow rather than push on with a faulty implementation.
+  "Build the canonical \\='on success, invoke INVOCATION; STOP on
+ambiguity\\=' suffix used by every one-shot workspace creator.
+Appended to the user's preemptive prompt to tell the spawned agent the
+success-gated wrap-up action AND the safety property that genuine
+ambiguity must stop the flow rather than push on with a faulty
+implementation.
 
 INVOCATION is the rendered noun phrase referring to the wrap-up
-command (e.g. \"the /create-or-update-workspace merge skill\" or a backticked slash
-command).  It is interpolated verbatim into both the \"invoke
-INVOCATION to ACTION-PHRASE\" sentence and the \"Only invoke
+command (e.g. \"the /create-or-update-workspace merge skill\" or a
+backticked slash command).  It is interpolated verbatim into both the
+\"invoke INVOCATION to ACTION-PHRASE\" sentence and the \"Only invoke
 INVOCATION when ...\" gate sentence.
 
 ACTION-PHRASE describes what INVOCATION accomplishes (e.g. \"merge
@@ -718,8 +721,9 @@ this workspace back into its source\")."
    "merge this workspace back into its source")
   "Suffix appended to the user's preemptive prompt for the doom-oneshot
 flow.  Tells the spawned workspace agent (NOT the headless claude that
-runs `/create-or-update-workspace create') to invoke `/create-or-update-workspace merge' on success,
-or stop and surface on genuine ambiguity.")
+runs `/create-or-update-workspace create') to invoke
+`/create-or-update-workspace merge' on success, or stop and surface on
+genuine ambiguity.")
 
 (defconst agent-repl--oneshot-create-pr-command
   "/create-or-update-pr --patch --add-to-merge-queue --rebase"
@@ -744,13 +748,14 @@ repo) and runs `/check-cicd' internally; on CICD PASS the second stage
    "merge-queue run — do NOT invoke `/create-or-update-workspace merge`; STOP and "
    "surface the failing CI to the user instead.")
   "Second-stage gate appended to `agent-repl--oneshot-create-pr-suffix'.
-Chains `/create-or-update-workspace merge' onto a successful `/check-cicd' result so the
-explanation-engine one-shot tears down its editor workspace once the PR
-has landed cleanly in the merge queue.  Kept as a separate constant
-(rather than threading through `agent-repl--build-oneshot-success-suffix')
-because the two gates are structurally distinct: the first gates on
-implementation/tests/commits, the second gates on a slash-command's CICD
-result emitted by a downstream skill.")
+Chains `/create-or-update-workspace merge' onto a successful
+`/check-cicd' result so the explanation-engine one-shot tears down its
+editor workspace once the PR has landed cleanly in the merge queue.
+Kept as a separate constant (rather than threading through
+`agent-repl--build-oneshot-success-suffix') because the two gates are
+structurally distinct: the first gates on implementation/tests/commits,
+the second gates on a slash-command's CICD result emitted by a
+downstream skill.")
 
 (defconst agent-repl--oneshot-create-pr-suffix
   (concat
@@ -763,9 +768,10 @@ explanation-engine one-shot flow.  Two-stage gate:
   1. Implementation + tests + commits succeed → invoke
      `agent-repl--oneshot-create-pr-command' (push + queue + internal
      `/check-cicd').
-  2. `/check-cicd' reports PASS → invoke `/create-or-update-workspace merge' to merge
-     this workspace back into its source.  On CICD FAIL the agent must
-     STOP rather than invoke `/create-or-update-workspace merge'.")
+  2. `/check-cicd' reports PASS → invoke
+     `/create-or-update-workspace merge' to merge this workspace back
+     into its source.  On CICD FAIL the agent must STOP rather than
+     invoke `/create-or-update-workspace merge'.")
 
 ;;; Amended-oneshot tracking and per-flavor prompt queue
 
@@ -1008,7 +1014,7 @@ Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
   :group 'agent-repl)
 
 (defcustom agent-repl-workspace-generation-prompt-log-cap 4096
-  "Maximum chars of the headless-agent prompt body to include in the spawn log line.
+  "Maximum chars of the headless-agent prompt body in the spawn log line.
 Beyond this cap the log records `...[truncated]'.  Set to nil for no cap."
   :type '(choice (const :tag "Unlimited" nil) integer)
   :group 'agent-repl)
@@ -1210,7 +1216,7 @@ after a dead-workspace recreation, and every verify retry re-stamps it."
     (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
 (defun agent-repl--inherit-priority-from-source (priority source-dir)
-  "Return PRIORITY when non-nil; otherwise the `:priority' of SOURCE-DIR's workspace.
+  "Return PRIORITY, else the `:priority' of SOURCE-DIR's workspace.
 Used by `agent-repl--finalize-worktree-workspace' so a newly spawned
 child workspace inherits its parent's priority when the create command
 did not specify one of its own.  Returns nil when SOURCE-DIR is nil, does
@@ -1615,9 +1621,9 @@ reaches the user."
   "Create a new git worktree and switch to it as a project workspace.
 Prompts ONLY for the preemptive prompt; the workspace/branch name is
 generated asynchronously by a headless `claude -p --model haiku'
-invocation of the `/create-or-update-workspace create' skill.  The skill writes a
-JSON command file to ~/.claude-emacs/output/, which the existing file-watcher
-picks up to actually create the worktree.
+invocation of the `/create-or-update-workspace create' skill.  The
+skill writes a JSON command file to ~/.claude-emacs/output/, which the
+existing file-watcher picks up to actually create the worktree.
 
 The preemptive prompt is OPTIONAL.  When it is left empty (or
 whitespace-only), name generation is skipped and a second minibuffer
@@ -1813,9 +1819,9 @@ preemptive prompt (e.g. `agent-repl--oneshot-merge-suffix' or
 
 TAG is a short label (e.g. \"doom-oneshot\",
 \"explanation-engine-oneshot\") interpolated into the minibuffer prompt,
-the log line, and the user-facing 'Generating ... workspace name'
-message — keeps debugging output distinguishable across one-shot
-variants without diverging the underlying flow.
+the log line, and the user-facing \\='Generating ... workspace
+name\\=' message — keeps debugging output distinguishable across
+one-shot variants without diverging the underlying flow.
 
 MODEL, when non-nil, is the per-workspace agent model alias forwarded to
 `agent-repl--spawn-workspace-generation' so the generated workspace's
@@ -1826,9 +1832,9 @@ variants do.
 
 The suffix is appended to the PREFIXED prompt but NOT to the raw
 description used for slug generation, so the workspace name stays clean.
-The headless `claude' that runs `/create-or-update-workspace create' itself MUST NOT
-invoke the suffix's wrap-up command — the prompt builder makes that
-explicit.
+The headless `claude' that runs `/create-or-update-workspace create'
+itself MUST NOT invoke the suffix's wrap-up command — the prompt
+builder makes that explicit.
 
 The preemptive prompt is read with `agent-repl--oneshot-prompt-map':
 `RET' submits the typed text as-is, while `C-RET' submits it with
@@ -1855,9 +1861,9 @@ investigates and reports without making changes."
   "Create a one-shot worktree workspace rooted in `~/.config/doom'.
 Equivalent of `SPC TAB N' but pinned to the doom-config repo regardless
 of the calling workspace, and with an instruction appended to the
-spawned agent's first message asking it to invoke `/create-or-update-workspace merge'
-once the change is implemented, tested, and committed (or to stop and
-surface on genuine ambiguity).
+spawned agent's first message asking it to invoke
+`/create-or-update-workspace merge' once the change is implemented,
+tested, and committed (or to stop and surface on genuine ambiguity).
 
 BASE selects the git ref the new branch is created from.  It is a
 symbol key in `agent-repl--worktree-base-commits':
@@ -1903,10 +1909,11 @@ deviations:
      explanation-engine repo regardless of the calling workspace.
   2. The spawned agent is instructed to invoke
      `agent-repl--oneshot-create-pr-command' on success (push the
-     branch and queue it for merge) instead of `/create-or-update-workspace merge' (host
-     cherry-pick + reload).  The cherry-pick/reload procedure makes
-     sense for doom-config but not for a service repo where the change
-     should land via the normal PR flow.
+     branch and queue it for merge) instead of
+     `/create-or-update-workspace merge' (host cherry-pick + reload).
+     The cherry-pick/reload procedure makes sense for doom-config but
+     not for a service repo where the change should land via the normal
+     PR flow.
 
 MODEL, when non-nil, is the per-workspace agent model alias the spawned
 workspace's initial session boots under (supplied by the `SPC j C-O'
@@ -2256,9 +2263,9 @@ it was refused.  PRESERVE-ENTRY is forwarded to
       t)))
 
 (defun agent-repl--finish-workspace (ws)
-  "Tear down workspace WS: kill agent session, remove state, kill persp, remove worktree.
-WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
-it is normalized to the dirname before lookup."
+  "Tear down WS: kill agent session, state, persp, and worktree.
+WS may be a full branch name (e.g. DWC/foo) or a bare workspace name
+\(e.g. foo); it is normalized to the dirname before lookup."
   (let* ((ws (agent-repl--bare-workspace-name ws))
          (worktree-p (agent-repl--ws-get ws :worktree-p))
          (project-dir (agent-repl--ws-get ws :project-dir)))
@@ -2311,9 +2318,10 @@ mid-flight failure (cherry-pick must be aborted to leave a clean tree)."
 (defun agent-repl--format-merge-failure-prompt (err)
   "Format the prompt sent to a workspace's agent after a failed merge.
 ERR is the elisp error tuple caught by `--workspace-merge-async'.
-The directive instructs the agent to retry via `/create-or-update-workspace merge' — the
-skill rebases onto the target branch before dispatching, which resolves
-most ordering conflicts that the downstream cherry-pick cannot handle."
+The directive instructs the agent to retry via
+`/create-or-update-workspace merge' — the skill rebases onto the target
+branch before dispatching, which resolves most ordering conflicts that
+the downstream cherry-pick cannot handle."
   (format
    (concat
     "A merge attempt for this workspace just failed with the following error:\n\n"
@@ -2418,8 +2426,9 @@ async-dispatch-specific and stays in `agent-repl--workspace-merge-async'."
 
 (defun agent-repl--workspace-merge-async (ws repo-root &optional onto-master)
   "Run a workspace merge asynchronously.  Single unified entry for both
-the interactive `SPC TAB M' path and the `/create-or-update-workspace merge' skill
-dispatch — there is no behavioral difference between the two callers.
+the interactive `SPC TAB M' path and the
+`/create-or-update-workspace merge' skill dispatch — there is no
+behavioral difference between the two callers.
 
 ONTO-MASTER is forwarded to `agent-repl--dispatch-merge-handler': when
 non-nil it forces the `onto-master' handler (advance local trunk to
@@ -2516,7 +2525,7 @@ do this."
 `agent-repl--workspaces'.
 
 Requires that WS was previously closed via
-`agent-repl--close-workspace ws 'preserve-entry' so the plist entry —
+`agent-repl--close-workspace ws \\='preserve-entry' so the plist entry —
 in particular `:project-dir' — survived the close.  Wraps
 `agent-repl--establish-workspace', which creates the perspective,
 activates it, registers projectile, loads dir-locals, opens the recentf
@@ -2806,7 +2815,7 @@ resolved from CWD — the investigation must land in a real worktree."
           name))))
 
 (defun agent-repl--handle-create-command (cmd delay)
-  "Handle a \"create\" workspace command CMD, scheduling it after DELAY seconds.
+  "Handle a \"create\" workspace command CMD after DELAY seconds.
 When CMD contains a \"fork_from\" field, resolves it to a session ID so the
 new workspace forks from the source workspace's agent session and HEAD.
 If fork_from is present but resolution fails, the workspace is NOT created
@@ -2820,8 +2829,8 @@ rather than relying on the ambient Emacs context.
 CMD SHOULD contain a non-empty \"prompt\" field carrying the new
 workspace's first message.  A missing/empty prompt still creates the
 workspace (skill-driven creates may legitimately omit it) but is
-surfaced as a loud warning: the `/create-or-update-workspace create' flow always
-supplies a prompt, so a promptless create from that flow means the
+surfaced as a loud warning: the `/create-or-update-workspace create'
+flow always supplies a prompt, so a promptless create from that flow means the
 generation output dropped the field and the workspace would otherwise
 boot silently idle with no first message.
 
@@ -2830,8 +2839,9 @@ CMD MUST also contain a non-empty string \"name\" field whose bare form
 \(default \"none\").  A missing/`null'/empty name — or one that resolves
 to the nil-perspective sentinel — would otherwise leak a phantom
 \"none\" entry into `agent-repl--workspaces' and surface in workspace
-listings and nuke prompts.  Headless `/create-or-update-workspace create' occasionally emits
-such payloads when the model has no slug material to work with.
+listings and nuke prompts.  Headless
+`/create-or-update-workspace create' occasionally emits such payloads
+when the model has no slug material to work with.
 
 CMD may contain an optional \"base_commit\" field naming the git ref the
 new branch is created from (e.g. \"HEAD\", \"master\").  When absent or
@@ -3500,7 +3510,8 @@ and `;; error:' sections without ambiguity."
 
 (defun agent-repl--eval-code-string (code-string)
   "Read every top-level form from CODE-STRING and evaluate them in order.
-Returns a plist (:printed STRING :value-string STRING-OR-NIL :error STRING-OR-NIL).
+Returns a plist (:printed STRING :value-string STRING-OR-NIL
+:error STRING-OR-NIL).
 
 Captures `princ' / `print' output via a buffer-bound `standard-output'
 so a `(princ ...)' side-effect is reflected in `:printed' rather than
@@ -3706,7 +3717,8 @@ the headless workspace-generation flow occasionally emits the latter."
 
 (defun agent-repl--extract-cherry-pick-shas (log-text)
   "Extract cherry-picked commit SHAs from LOG-TEXT.
-Parses \"(cherry picked from commit SHA)\" annotations added by git cherry-pick -x."
+Parses \"(cherry picked from commit SHA)\" annotations added by git
+cherry-pick -x."
   (let (shas)
     (with-temp-buffer
       (insert log-text)
@@ -3722,9 +3734,9 @@ Parses \"(cherry picked from commit SHA)\" annotations added by git cherry-pick 
   "Compute cherry-pick start point for incorporating TARGET-BRANCH into HEAD.
 Scans HEAD's unique commits (HEAD...TARGET-BRANCH left-only) for -x annotations
 of the form \"(cherry picked from commit SHA)\". Returns the most recent TARGET
-commit whose SHA appears in those annotations — so only genuinely new commits are
-replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no annotations match
-(first-time merge, or pre-annotation history)."
+commit whose SHA appears in those annotations — so only genuinely new commits
+are replayed. Falls back to `merge-base HEAD TARGET-BRANCH' when no
+annotations match (first-time merge, or pre-annotation history)."
   ;; Each `git-string' below is a synchronous subprocess that, before
   ;; the worker-safe wait existed, could stall the whole editor.  Log
   ;; around them so a post-mortem can see exactly which step hung when a
@@ -3778,8 +3790,8 @@ Resolves via :project-dir stored in `agent-repl--workspaces'."
   (when-let* ((path (agent-repl--ws-get ws :project-dir))
               (branch (agent-repl--git-string
                        "-C" path "rev-parse" "--abbrev-ref" "HEAD"))
-              (_valid (not (or (string-empty-p branch)
-                               (string-prefix-p "fatal" branch)))))
+              (valid (not (or (string-empty-p branch)
+                              (string-prefix-p "fatal" branch)))))
     (agent-repl--log ws "workspace-branch ws=%s path=%s branch=%s" ws path branch)
     (if (string= branch "HEAD")
         (let ((sha (agent-repl--git-string "-C" path "rev-parse" "HEAD")))
@@ -3838,8 +3850,8 @@ surface depends on SILENT:
     cherry-pick via `agent-repl--check-cherry-pick-conflict' and
     signals user-error.  The user is already on the target workspace.
 
-  - SILENT non-nil (skill-dispatched `/create-or-update-workspace merge'): hands off
-    to `agent-repl--surface-silent-merge-conflict' which switches
+  - SILENT non-nil (skill-dispatched `/create-or-update-workspace merge'):
+    hands off to `agent-repl--surface-silent-merge-conflict' which switches
     to ROOT, pops magit-status, and signals — without aborting — so
     the conflict remains actionable in magit instead of disappearing
     into the log."
@@ -3969,9 +3981,9 @@ manually clean up."
 (defun agent-repl--surface-silent-merge-conflict (target-ws root)
   "Surface a stalled silent-mode cherry-pick conflict to the user.
 
-Used by skill-dispatched (`/create-or-update-workspace merge') merges when the auto-
-resolver declines.  The default silent path aborts the cherry-pick and
-signals — invisibly — leaving the user with no actionable surface.
+Used by skill-dispatched (`/create-or-update-workspace merge') merges when
+the auto-resolver declines.  The default silent path aborts the cherry-pick
+and signals — invisibly — leaving the user with no actionable surface.
 This function flips that: it switches to ROOT (so the user lands on
 the repo where the conflict lives), pops `magit-status' there so the
 unresolved files are visible, then signals `user-error' so the upstream
@@ -4943,7 +4955,6 @@ handler of `agent-repl--workspace-merge-do'."
 ;; the tree, not as a peer awaiting notification.
 
 (declare-function agent-repl--claude-headless-cmd "session")
-(declare-function agent-repl--notify-parent-of-child-merge "worktree")
 
 (defcustom agent-repl-child-merge-notify-model "sonnet"
   "Model alias for the headless `claude -p' that notifies a parent workspace.
@@ -4966,7 +4977,8 @@ terminal to answer."
   :group 'agent-repl)
 
 (defun agent-repl--notify-parent-of-child-merge (child-ws parent-ws prompt)
-  "Fire a fire-and-forget headless `claude -p' notifying PARENT-WS of CHILD-WS's merge.
+  "Fire a fire-and-forget headless `claude -p' notifying PARENT-WS of
+CHILD-WS's merge.
 PROMPT is the full `/workspace-update' prompt from
 `agent-repl--build-child-merge-notify-prompt', delivered on the
 process's stdin.
@@ -5490,8 +5502,8 @@ Reads the `:merge-completed' plist key, set by
 `agent-repl--workspace-merge-do' only after a successful cherry-pick.
 This is the source of truth for merged-state rendering — a
 workspace reads as merged exclusively because a `SPC TAB M' /
-`/create-or-update-workspace merge' invocation completed successfully, never as a
-side-effect of asynchronous ancestry polling."
+`/create-or-update-workspace merge' invocation completed successfully,
+never as a side-effect of asynchronous ancestry polling."
   (eq (agent-repl--ws-get ws :merge-completed) t))
 
 ;;; Merge queue
@@ -6138,7 +6150,8 @@ ran within `agent-repl-branch-merged-refresh-interval' seconds."
             (agent-repl--ws-put ws :merge-proc proc)))))))
 
 (defun agent-repl--branch-merged-into-p (source-dir target-dir)
-  "Return non-nil when the branch at SOURCE-DIR is an ancestor of the branch at TARGET-DIR.
+  "Return non-nil when the branch at SOURCE-DIR is an ancestor of the
+branch at TARGET-DIR.
 Synchronous dir-pair primitive used by the merge-target resolve walk
 \(see `agent-repl--resolve-merge-into-source-target'), which traverses
 arbitrary `:source-ws-dir' chains where the candidate may not be a
@@ -6157,7 +6170,8 @@ returns nil when those fail.  Otherwise runs `git merge-base
           (car branches) (cdr branches)))))
 
 (defun agent-repl--ws-name-for-dir (dir)
-  "Return the live workspace name whose `:project-dir' is canonical-equal to DIR, or nil.
+  "Return the live workspace name whose `:project-dir' is canonical-equal
+to DIR, or nil.
 Reverse lookup over `agent-repl--workspaces'.  First match wins —
 canonical paths are unique per LIVE workspace by construction.
 
@@ -6214,7 +6228,7 @@ worktree when no source was recorded).  MASTER-DIR is the worktree
 checked out on `agent-repl-master-branch-name'.
 
 Walks the `:source-ws-dir' chain upward from PARENT-DIR: at each hop
-asks 'is this candidate's branch merged into the next ancestor's
+asks `is this candidate's branch merged into the next ancestor's
 branch?'.  When yes, hops to the next ancestor and repeats.  When no
 (or when the next ancestor is unreachable / we hit master / we exceed
 `agent-repl-merge-resolve-max-depth'), returns the current candidate.

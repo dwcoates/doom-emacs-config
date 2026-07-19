@@ -1,4 +1,4 @@
-;; -*- no-byte-compile: t; -*-
+;; -*- no-byte-compile: t; lexical-binding: t; -*-
 ;;; app/agent-repl/packages.el
 
 ;; agent-repl itself needs no extra packages here — the gui/webview is

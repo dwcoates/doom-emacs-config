@@ -700,7 +700,8 @@ directory ready for links."
     (list src local-src dest)))
 
 (defmacro test-install--with-skill-dirs (bindings &rest body)
-  "Run BODY with SRC/LOCAL-SRC/DEST dirs materialized and defcustoms pointed at them.
+  "Run BODY with SRC/LOCAL-SRC/DEST dirs materialized and defcustoms
+pointed at them.
 BINDINGS is ignored — provided so future test helpers can extend."
   (declare (indent 1))
   (ignore bindings)
