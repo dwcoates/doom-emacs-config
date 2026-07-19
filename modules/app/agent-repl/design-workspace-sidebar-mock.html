@@ -115,7 +115,7 @@
     color: var(--info-ws); font-weight: 700;
   }
   .repo-head:hover { background: var(--card); }
-  .repo-head .tri { transition: transform 0.12s; font-size: 0.7rem; }
+  .repo-head .tri { transition: transform 0.12s; font-size: 1.05rem; line-height: 1; }
   .repo.folded .tri { transform: rotate(-90deg); }
   .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
   .repo-head .add {
@@ -146,7 +146,7 @@
      flight, still while merely queued. */
   .st.merge {
     width: auto; height: auto; border-radius: 0; background: none;
-    color: var(--async); font-size: 0.9rem; line-height: 1;
+    color: var(--accent); font-size: 1.15rem; line-height: 1;
   }
   .st.merge.live { animation: spin 1.4s linear infinite; }
   .row .name {
@@ -177,7 +177,8 @@
   .kids .ws.current > .row { padding-left: calc(0.55rem - 3px); }
   .ws.current > .row .name { font-weight: 600; }
 
-  /* Tombstoned (merged/dead) workspaces stay listed but recede. */
+  /* Workspaces whose agent-repl is closed (or whose session died) stay
+     listed but recede. */
   .ws.gone > .row { opacity: 0.55; }
 
   /* Badges: priority, async-live count, git cleanliness. */
@@ -286,14 +287,14 @@
   <nav id="ws-sidebar">
     <div class="sb-head">
       <span class="sb-title">Workspaces</span>
-      <span class="sb-count">9</span>
+      <span class="sb-count">10</span>
       <span class="sb-sort" title="Toggle sort: repo / needs-attention">sort: repo</span>
     </div>
     <div class="sb-scroll">
 
       <section class="repo">
         <div class="repo-head">
-          <span class="tri">▾</span> doom <span class="n">(5)</span>
+          <span class="tri">▾</span> doom <span class="n">(6)</span>
           <span class="add" title="New workspace in this repo">+</span>
         </div>
         <div class="rows">
@@ -379,6 +380,17 @@
                     <button>Merge ⇧</button>
                     <button class="danger">Close</button>
                   </div>
+                </div>
+              </div>
+              <div class="ws gone">
+                <div class="row" data-dir="~/.config/doom-worktrees/hide-dirs-cleanup">
+                  <span class="st" title="agent-repl closed"></span><span class="name">hide-dirs-cleanup</span>
+                  <span class="when">2d</span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl><dt>state</dt><dd>agent-repl closed · worktree on disk</dd></dl>
+                  <div class="actions"><button>Re-open</button></div>
                 </div>
               </div>
               <div class="ws">
@@ -492,6 +504,7 @@
   <span>indent = child worktree</span>
   <span>breathing red = thinking · green = done · orange = done+viewed</span>
   <span>breathing yellow = awaiting permission · hollow = idle · grey = dead</span>
+  <span>greyed row = agent-repl closed</span>
   <span>⟳ spinning = merging · ⟳ still = merge-queued</span>
   <span>right stamp = recency</span>
   <span>dashed ring = keyboard cursor (C-S-n/p · C-S-RET selects)</span>
