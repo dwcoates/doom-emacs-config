@@ -277,6 +277,17 @@ body {
 #account:disabled { opacity: 0.5; cursor: default; }
 #account.logged-out { color: var(--err); }
 
+/* The current root's mode label ("(work)") riding beside the email on the
+   chip. Secondary to the email it annotates: a touch smaller, italic, and
+   dimmed, so it reads as a qualifier rather than a second identity. Opacity
+   (not a fixed colour) keeps it a dimmed fraction of whatever colour the chip
+   currently is — muted, hover-bright, or the logged-out error red. */
+#account .account-mode {
+  font-size: 0.85em;
+  font-style: italic;
+  opacity: 0.7;
+}
+
 /* The account menu: the chip's dropdown, anchored under the topbar at the
    chip's left edge (main.ts sets the offset — the chip's position depends
    on its rendered label width). Above the feed, below the login overlay. */
