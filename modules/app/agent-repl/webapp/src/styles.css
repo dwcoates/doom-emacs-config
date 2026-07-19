@@ -479,13 +479,13 @@ body {
      flush with the centered response's, and follows automatically if this
      cap is retuned. */
   --agent-bubble-cap: 75%;
-  /* The grey full-width tool cards (Bash, Read, Skill, Agent, …) sit at 97.5%
+  /* The grey full-width tool cards (Bash, Read, Skill, Agent, …) sit at 98%
      of the agent column rather than filling it, so they read as centered
      BETWEEN the purple response's left rail and the prompt's right rail
      instead of spanning the whole rail-to-rail width. Derived from the cap
-     above so it tracks any retune of it: 0.975 of the column, still centered
+     above so it tracks any retune of it: 0.98 of the column, still centered
      in the same column by the equal auto margins on the tool-card rule. */
-  --tool-card-cap: calc(var(--agent-bubble-cap) * 0.975);
+  --tool-card-cap: calc(var(--agent-bubble-cap) * 0.98);
 }
 
 pre {
