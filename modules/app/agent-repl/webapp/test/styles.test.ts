@@ -949,6 +949,25 @@ describe("turn stamp", () => {
     expect(blockAfter(css, ".turn-meta .turn-diff")).toMatch(/color:\s*var\(--info-tokens\)/);
   });
 
+  it("sizes the duration and delta at ONE shared size via their wrapper, never per-span", () => {
+    // Arrange / Act — the shared size lives on `.turn-stats`, so the two figures
+    // always read at the same font-size as each other; neither span sets its own.
+    // Assert
+    expect(blockAfter(css, ".turn-meta .turn-stats")).toMatch(/font-size:\s*[\d.]+rem/);
+    expect(blockAfter(css, ".turn-meta .turn-dur")).not.toMatch(/font-size/);
+    expect(blockAfter(css, ".turn-meta .turn-diff")).not.toMatch(/font-size/);
+  });
+
+  it("sizes the two corner stats a notch below the corner's own dating size", () => {
+    // Arrange — the stats wrapper's size against the corner's base size.
+    const statsSize = Number(
+      blockAfter(css, ".turn-meta .turn-stats").match(/font-size:\s*([\d.]+)rem/)?.[1],
+    );
+    const metaSize = Number(meta.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    // Act / Assert — smaller than the timestamp corner, so the pair reads quieter.
+    expect(statsSize).toBeLessThan(metaSize);
+  });
+
   it("pulls the corner in toward the bubble's top-right corner", () => {
     // Arrange
     const [top, right] = margins(meta);
