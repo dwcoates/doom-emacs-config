@@ -1929,6 +1929,16 @@ The master kill-switch overrides the always-on file-write decoupling."
   "grey-hex for 128 (middle grey) should return #808080."
   (should (equal (agent-repl--grey-hex 128) "#808080")))
 
+(ert-deftest agent-repl-test-rgb-hex-format ()
+  "rgb-hex should format R, G, B independently into a #rrggbb string."
+  (should (equal (agent-repl--rgb-hex 0 0 0) "#000000"))
+  (should (equal (agent-repl--rgb-hex 255 255 255) "#ffffff"))
+  (should (equal (agent-repl--rgb-hex 20 20 26) "#14141a")))
+
+(ert-deftest agent-repl-test-rgb-hex-channels-independent ()
+  "rgb-hex keeps each channel distinct rather than collapsing to grey."
+  (should (equal (agent-repl--rgb-hex 1 2 3) "#010203")))
+
 (ert-deftest agent-repl-test-set-buffer-background-remaps-default-and-fringe ()
   "set-buffer-background remaps both the default and fringe faces."
   (agent-repl-test--with-temp-buffer " *test-bg*"
@@ -1936,34 +1946,34 @@ The master kill-switch overrides the always-on file-write decoupling."
       (cl-letf (((symbol-function 'face-remap-add-relative)
                  (lambda (face &rest props)
                    (push (list face props) remapped-faces))))
-        (agent-repl--set-buffer-background 30)
+        (agent-repl--set-buffer-background "#1e1e1e")
         (should (= (length remapped-faces) 2))
         (should (assq 'default remapped-faces))
         (should (assq 'fringe remapped-faces))))))
 
-(ert-deftest agent-repl-test-set-buffer-background-uses-grey-hex ()
-  "set-buffer-background passes grey-hex's output as the :background value."
+(ert-deftest agent-repl-test-set-buffer-background-applies-passed-color ()
+  "set-buffer-background passes its COLOR argument through as the :background."
   (agent-repl-test--with-temp-buffer " *test-bg-hex*"
     (let ((hex-used nil))
       (cl-letf (((symbol-function 'face-remap-add-relative)
                  (lambda (_face &rest props)
                    (setq hex-used (plist-get props :background)))))
-        (agent-repl--set-buffer-background 15)
+        (agent-repl--set-buffer-background "#0f0f0f")
         (should (equal hex-used "#0f0f0f"))))))
 
-(ert-deftest agent-repl-test-set-buffer-background-different-levels-differ ()
-  "Different grey levels passed to set-buffer-background produce different hex colors."
+(ert-deftest agent-repl-test-set-buffer-background-different-colors-differ ()
+  "Different colors passed to set-buffer-background produce different :background values."
   (let (hex-a hex-b)
     (agent-repl-test--with-temp-buffer " *test-bg-diff-a*"
       (cl-letf (((symbol-function 'face-remap-add-relative)
                  (lambda (_face &rest props)
                    (setq hex-a (plist-get props :background)))))
-        (agent-repl--set-buffer-background 15)))
+        (agent-repl--set-buffer-background "#0f0f0f")))
     (agent-repl-test--with-temp-buffer " *test-bg-diff-b*"
       (cl-letf (((symbol-function 'face-remap-add-relative)
                  (lambda (_face &rest props)
                    (setq hex-b (plist-get props :background)))))
-        (agent-repl--set-buffer-background 30)))
+        (agent-repl--set-buffer-background "#1e1e1e")))
     (should-not (equal hex-a hex-b))))
 
 ;;;; ---- Tests: harness-injected (meta) prompt spans ----

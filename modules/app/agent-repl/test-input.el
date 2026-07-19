@@ -1891,20 +1891,38 @@ send whenever the prefix counter aligned with the period."
     (should (memq #'agent-repl--history-on-change after-change-functions))))
 
 (ert-deftest agent-repl-test-agent-repl-input-mode-applies-configured-background ()
-  "`agent-repl-input-mode' tints the buffer with `agent-repl-input-background-shade'."
+  "`agent-repl-input-mode' tints the buffer with `agent-repl--input-background-color'."
   (agent-repl-test--with-temp-buffer " *test-input-mode-bg*"
-    (let ((applied-shade nil))
+    (let ((applied-color nil))
       (cl-letf (((symbol-function 'agent-repl--set-buffer-background)
-                 (lambda (shade) (setq applied-shade shade))))
+                 (lambda (color) (setq applied-color color))))
         (agent-repl-input-mode))
-      (should (= applied-shade agent-repl-input-background-shade)))))
+      (should (equal applied-color (agent-repl--input-background-color))))))
 
 (ert-deftest agent-repl-test-agent-repl-input-background-shade-is-dark ()
-  "The input buffer background shade defaults dark, not merely dim.
-Pins the darkened default: a shade at or above 37 (the prior default)
-would regress the darker-input-background change back to its old,
-lighter look."
-  (should (< agent-repl-input-background-shade 37)))
+  "The input buffer background base shade defaults dark, not merely dim.
+Pins the darkened default: a base shade at or above 24 (the prior
+default) would regress the slightly-darker-input-background change back
+to its old, lighter look."
+  (should (< agent-repl-input-background-shade 24)))
+
+(ert-deftest agent-repl-test-agent-repl-input-background-is-blue-tinted ()
+  "The input background nudges the blue channel above the grey base.
+A positive blue boost is what makes the composer very slightly blue
+rather than a pure neutral grey."
+  (should (> agent-repl-input-background-blue-boost 0)))
+
+(ert-deftest agent-repl-test-agent-repl-input-background-color-is-bluer-than-grey ()
+  "`agent-repl--input-background-color' has a blue channel above red and green.
+Pins the blue tint at the composed-hex level: the blue byte must exceed
+both the red and green bytes, which are the neutral grey base."
+  (let* ((hex (agent-repl--input-background-color))
+         (r (string-to-number (substring hex 1 3) 16))
+         (g (string-to-number (substring hex 3 5) 16))
+         (b (string-to-number (substring hex 5 7) 16)))
+    (should (= r g))
+    (should (> b r))
+    (should (> b g))))
 
 (ert-deftest agent-repl-test-agent-repl-input-mode-no-visual-line-mode ()
   "`agent-repl-input-mode' no longer force-enables `visual-line-mode'.
