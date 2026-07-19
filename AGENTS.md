@@ -4,6 +4,16 @@ Always explain at the end of your response if there were changes whether or not 
 
 Begin the persistence message with ✅ if the changes are not persistent after reloading (i.e. a reload fully resets them), or ❌ if any changes persist after reloading. When using ❌, briefly summarize which specific changes persist and why (e.g. "file written to disk", "entry added to hook").
 
+## There is NO such thing as a "pre-existing" error
+
+**Under NO circumstances — ever, in any universe — does the concept of a "pre-existing error" exist in this repository. ALL errors need fixing.**
+
+- An error encountered while working here is an error to fix, full stop. Provenance carries ZERO exculpatory weight: "already broken on the base branch", "not introduced by my change", "pre-dates this work", "artifact of the environment", and every similar framing are all invalid reasons to leave anything red.
+- This covers every kind of error without exception: test failures, build breaks, byte-compile errors, lint errors, runtime bugs, tooling errors — anything that reports as an error while you work.
+- Fix errors in the same body of work that surfaced them. An error unrelated to the main change gets its own commit; it never gets a mention-and-move-on.
+- The ONLY alternative to fixing an error outright is an explicit escalation to the user, and only when the correct fix genuinely hinges on a decision that is the user's to make. Silently tolerating an error — with or without a provenance excuse — is never an option.
+- Investigating when an error was introduced is fine as a debugging aid (it pinpoints the culprit commit); using the answer as a reason not to fix is not.
+
 ## Claude REPL
 
 ### HARD GATE: never edit the top-level doomdir `config.el` without explicit permission
