@@ -25,7 +25,10 @@ function blockAfter(source: string, marker: string): string {
   throw new Error(`unbalanced ${marker} block`);
 }
 
-const spinner = blockAfter(css, ".thinking-spinner");
+// Anchored on the line-leading base rule (`\n.thinking-spinner {`), not the
+// bare class, since the class is reused in descendant selectors that sit
+// earlier in the file (e.g. `.topbar-info .info-monitoring .thinking-spinner`).
+const spinner = blockAfter(css, "\n.thinking-spinner {");
 const keyframes = blockAfter(css, "@keyframes thinking-spin");
 const reducedSpinner = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
@@ -465,22 +468,34 @@ describe("async-quiescence border", () => {
   });
 });
 
-describe("monitoring indicator", () => {
-  const monitoringPending = blockAfter(css, ".monitoring-pending {");
-  const monitoringArc = blockAfter(css, ".monitoring-pending .thinking-spinner");
+describe("monitoring datapoint (topbar strip's left-most entry)", () => {
+  const monitoring = blockAfter(css, ".topbar-info .info-monitoring {");
+  const monitoringArc = blockAfter(css, ".topbar-info .info-monitoring .thinking-spinner");
 
   it("reads in the async amber rather than the working orange or retry purple", () => {
-    // Arrange / Act — the .monitoring-pending label rule.
+    // Arrange / Act — the .info-monitoring datapoint rule.
     // Assert
-    expect(monitoringPending).toMatch(/color:\s*var\(--async\)/);
+    expect(monitoring).toMatch(/color:\s*var\(--async\)/);
+  });
+
+  it("lays the spinner, word, and dots inline so the entry sits on the strip baseline", () => {
+    // Arrange / Act — inline-flex, since the strip's datapoints share one line
+    // rather than each being a block feed row.
+    // Assert
+    expect(monitoring).toMatch(/display:\s*inline-flex/);
   });
 
   it("tints the reused thinking arc amber rather than defining its own spinner", () => {
-    // Arrange / Act — no bespoke .monitoring-spinner exists; the row recolors
+    // Arrange / Act — no bespoke .monitoring-spinner exists; the entry recolors
     // the shared .thinking-spinner to the async hue.
     // Assert
     expect(monitoringArc).toMatch(/border-top-color:\s*var\(--async\)/);
     expect(css).not.toContain(".monitoring-spinner");
+  });
+
+  it("no longer defines the old feed-tail .monitoring-pending row", () => {
+    // Arrange / Act / Assert — the signal moved to the topbar strip entirely.
+    expect(css).not.toContain(".monitoring-pending");
   });
 });
 
@@ -1411,7 +1426,7 @@ describe("tail status rows flush the response column's left rail", () => {
     expect(rowLeft).toBe(bubbleLeft);
   });
 
-  it.each(["thinking", "working", "retrying", "monitoring", "interrupting"])(
+  it.each(["thinking", "working", "retrying", "interrupting"])(
     "flushes the %s-pending row, leaving no variant stranded at the feed gutter",
     (variant) => {
       // Arrange / Act — the grouped flush selector must name every tail-status variant.
@@ -1419,6 +1434,11 @@ describe("tail status rows flush the response column's left rail", () => {
       expect(tailFlushSelector).toContain(`.${variant}-pending`);
     },
   );
+
+  it("no longer flushes a monitoring-pending row, that signal having left the feed", () => {
+    // Arrange / Act / Assert — the monitoring datapoint moved to the topbar strip.
+    expect(tailFlushSelector).not.toContain(".monitoring-pending");
+  });
 });
 
 const statusBadges = blockAfter(css, ".result,");
@@ -1738,12 +1758,13 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew a fifth.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the three unrelated
-    // inline-flex users (.tab-chip, the counter chip, and the .async-badge).
+    // Act / Assert — one shared ticker rule, plus the four unrelated
+    // inline-flex users (.tab-chip, the counter chip, the .async-badge, and
+    // the topbar's .info-monitoring datapoint).
     expect(css).toMatch(
       /\.agent-ticker,\s*\n\.watcher-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/,
     );
-    expect(bodies.length).toBe(4);
+    expect(bodies.length).toBe(5);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {

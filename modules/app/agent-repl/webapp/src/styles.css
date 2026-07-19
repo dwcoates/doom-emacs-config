@@ -75,7 +75,8 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
-  /* The async-quiescence border (and the in-bubble catalog + monitoring row):
+  /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
+     datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
      alarm red, DISTINCT from the yellow --q-border (#eab308) and the pale
      --turn-complete-border (#e6d190). It reads as its own state — "main chain
@@ -355,6 +356,29 @@ body {
 .topbar-info .info-time {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
+}
+/* The monitoring datapoint: the AMBER strip entry saying background work
+   continues while the main chain is idle (async quiescence). It moved here from
+   the feed tail to sit LEFT-MOST among the strip's datapoints; inline-flex lays
+   the spinner arc, the word, and the dots on one baseline the way the block
+   feed rows never had to. It REUSES the textless-thinking arc rather than
+   defining its own spinner, tinted amber below so the arc reads as the --async
+   hue rather than the working orange. */
+.topbar-info .info-monitoring {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--async);
+}
+.topbar-info .info-monitoring .thinking-spinner {
+  border-color: color-mix(in srgb, var(--async) 25%, transparent);
+  border-top-color: var(--async);
+}
+/* Pull the ellipsis flush against its status word, cancelling the inline-flex
+   gap the dots' own flex item would otherwise read as "monitoring …" — the
+   strip twin of the feed rows' ellipsis-gap rule below. */
+.topbar-info .info-monitoring .animated-ellipsis {
+  margin-left: -0.4rem;
 }
 
 /* Topbar dropdowns (subagent roster, task roster, tokens breakdown): a chip
@@ -950,8 +974,8 @@ pre {
 /* The in-bubble async catalog (async-quiescence): the bubble's live-or-settled
    background work, as a bottom strip of amber badges. Set off from the answer
    prose above it by a dashed top rule, like the folds it replaces. The
-   animated monitoring row is NOT repeated here — it lives only at the global
-   feed tail; the amber border and badge dots carry the in-bubble signal. */
+   animated monitoring signal is NOT repeated here — it lives only in the topbar
+   strip; the amber border and badge dots carry the in-bubble signal. */
 .async-catalog {
   border-top: 1px dashed var(--border);
   margin-top: 0.5rem;
@@ -1540,25 +1564,10 @@ pre {
   border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
 }
-/* The monitoring indicator: the AMBER row saying background work continues
-   while the main chain is idle (async quiescence). Same geometry as the
-   thinking/working rows; it REUSES the textless-thinking arc rather than
-   defining its own spinner, tinted amber below so the arc reads as the
-   async --async hue rather than the working orange. Its one home is the
-   global feed-tail fallback — the in-bubble catalog carries no monitoring
-   row, letting its amber border and badge dots signal liveness instead. */
-.monitoring-pending {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  color: var(--async);
-  font-size: 0.85rem;
-}
-.monitoring-pending .thinking-spinner {
-  border-color: color-mix(in srgb, var(--async) 25%, transparent);
-  border-top-color: var(--async);
-}
+/* The monitoring indicator is NOT a feed-tail row: it moved to the topbar
+   strip as its left-most datapoint (see `.topbar-info .info-monitoring` above),
+   so the in-bubble catalog and the feed tail both carry none — the bubble's own
+   amber border and badge dots signal per-bubble liveness instead. */
 /* Pull the ellipsis flush against its status word. The pending rows above are
    flex with a 0.5rem inter-item gap (so the spinner clears the word), but the
    ellipsis span is its OWN flex item too, so that same gap lands between the
@@ -1570,7 +1579,6 @@ pre {
 .thinking-pending .animated-ellipsis,
 .working-pending .animated-ellipsis,
 .retrying-pending .animated-ellipsis,
-.monitoring-pending .animated-ellipsis,
 .interrupting-pending .animated-ellipsis {
   margin-left: -0.5rem;
 }
@@ -1581,12 +1589,11 @@ pre {
    `margin-left` and the centered `.feed-item > .tool-card` derive from), so
    the identical left margin lands a running "thinking…"/"working…"/"retrying…"
    row's spinner directly beneath where the last response bubble's own left edge
-   sits. One grouped rule for all five rows, the twin of their shared
+   sits. One grouped rule for all four rows, the twin of their shared
    ellipsis-gap rule above. */
 .thinking-pending,
 .working-pending,
 .retrying-pending,
-.monitoring-pending,
 .interrupting-pending {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
 }
