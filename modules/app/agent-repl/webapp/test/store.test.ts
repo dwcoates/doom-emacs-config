@@ -60,11 +60,16 @@ function resultFrame(fields: Record<string, unknown> = {}): string {
   });
 }
 
-/** A usage frame declaring a request that carried TOTAL tokens of context. */
+/**
+ * A usage frame declaring a request that carried TOTAL tokens of context.
+ * Output is 0 so the standing size equals TOTAL exactly: `contextTokens`
+ * now sums the output side too, so a non-zero output here would inflate
+ * every standing figure these tests pin past their round TOTAL.
+ */
 function usageFrame(total: number): string {
   return frame("usage", {
     message_id: "m1",
-    usage: { input_tokens: total, output_tokens: 2 },
+    usage: { input_tokens: total, output_tokens: 0 },
   });
 }
 
@@ -339,8 +344,8 @@ describe("ConversationStore tool cards", () => {
       parent_tool_use_id: "a1",
       usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 90 },
     }));
-    // Assert — input plus cache read, on the item.
-    expect((store.state.items[0] as ToolItem).contextTokens).toBe(100);
+    // Assert — input, cache read, and the output it produced, on the item.
+    expect((store.state.items[0] as ToolItem).contextTokens).toBe(102);
   });
 
   it("keeps an attributed usage frame away from the session standing", () => {
@@ -573,13 +578,26 @@ describe("ConversationStore turn lifecycle", () => {
       },
       cost_usd: 0.2,
     }));
-    // Assert — input plus cache read IS the request's context size.
-    expect(store.state.contextTokens).toBe(200);
+    // Assert — input, cache read, and output IS the request's context size.
+    expect(store.state.contextTokens).toBe(220);
     expect(store.state.costUsd).toBe(0.2);
   });
 
-  it("stamps a result with the session's standing input tokens", () => {
-    // Arrange — a request's input side IS the context it carried.
+  it("counts the request's output side into the standing context size", () => {
+    // Arrange — the output the model just produced occupies the window too,
+    // so the live figure carries it, not the input side alone.
+    const store = newStore();
+    // Act
+    store.applyRaw(frame("usage", {
+      message_id: "m1",
+      usage: { input_tokens: 100, output_tokens: 25 },
+    }));
+    // Assert — 100 input + 25 output, no lag by the output it produced.
+    expect(store.state.contextTokens).toBe(125);
+  });
+
+  it("stamps a result with the session's standing context tokens", () => {
+    // Arrange — a request's input side plus its output IS the context it carried.
     const store = newStore();
     store.applyRaw(frame("usage", {
       message_id: "m1",
@@ -592,8 +610,8 @@ describe("ConversationStore turn lifecycle", () => {
     }));
     // Act
     store.applyRaw(resultFrame());
-    // Assert
-    expect(resultItems(store)[0].context).toEqual({ total: 300_000, delta: 300_000 });
+    // Assert — 1000 + 250,000 + 49,000 input side, plus 20 output.
+    expect(resultItems(store)[0].context).toEqual({ total: 300_020, delta: 300_020 });
   });
 
   it("measures a result's increase against the previous result's standing", () => {
