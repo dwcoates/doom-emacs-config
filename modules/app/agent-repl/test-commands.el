@@ -683,6 +683,10 @@ state from the previous turn must be reset by Emacs."
     (agent-repl--ws-incf-pending-subagents "test-ws")
     (cl-letf (((symbol-function '+workspace-current-name)
                (lambda () "test-ws"))
+              ;; Subagents are pending, so the cancel confirmation fires;
+              ;; confirm it so the test exercises the delivered/clearing path.
+              ((symbol-function 'y-or-n-p)
+               (lambda (_prompt) t))
               ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                (lambda (_ws _kind) t))
               ((symbol-function 'run-at-time)
@@ -733,15 +737,17 @@ is consulted, so BODY can assert whether a prompt was raised."
          ,@body))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/prompts-and-cancels-when-confirmed ()
-  "A running agent confirmed at the prompt is interrupted."
+  "A workspace with subagents in flight, confirmed at the prompt, is interrupted."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl--ws-incf-pending-subagents "test-ws")
     (agent-repl-interrupt)
     (should prompted)
     (should (equal dispatched '("test-ws" escape)))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/aborts-when-declined ()
-  "A running agent declined at the prompt is NOT interrupted."
+  "A workspace with subagents, declined at the prompt, is NOT interrupted."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
+    (agent-repl--ws-incf-pending-subagents "test-ws")
     (agent-repl-interrupt)
     (should prompted)
     (should-not dispatched)))
@@ -749,6 +755,7 @@ is consulted, so BODY can assert whether a prompt was raised."
 (ert-deftest agent-repl-cmd-test-interrupt/leaves-running-agent-alone-when-declined ()
   "A declined confirmation leaves the agent-state at :thinking."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
+    (agent-repl--ws-incf-pending-subagents "test-ws")
     (agent-repl-interrupt)
     (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking))))
 
@@ -759,25 +766,34 @@ is consulted, so BODY can assert whether a prompt was raised."
     (should-not prompted)
     (should (equal dispatched '("test-ws" escape)))))
 
+(ert-deftest agent-repl-cmd-test-interrupt/no-prompt-when-only-main-agent-running ()
+  "A `:thinking' workspace with no spawned subagents is interrupted without a prompt."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl-interrupt)
+    (should-not prompted)
+    (should (equal dispatched '("test-ws" escape)))))
+
 (ert-deftest agent-repl-cmd-test-interrupt/no-prompt-when-confirm-disabled ()
-  "With `agent-repl-interrupt-confirm' nil, a running agent is interrupted directly."
+  "With `agent-repl-interrupt-confirm' nil, subagents are interrupted directly."
   (let ((agent-repl-interrupt-confirm nil))
     (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+      (agent-repl--ws-incf-pending-subagents "test-ws")
       (agent-repl-interrupt)
       (should-not prompted)
       (should (equal dispatched '("test-ws" escape))))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/no-confirm-arg-suppresses-prompt ()
-  "Passing NO-CONFIRM non-nil interrupts a running agent without prompting."
+  "Passing NO-CONFIRM non-nil interrupts running subagents without prompting."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl--ws-incf-pending-subagents "test-ws")
     (agent-repl-interrupt "test-ws" t)
     (should-not prompted)
     (should (equal dispatched '("test-ws" escape)))))
 
 ;;;; ---- agent-repl--confirm-cancel-running / prompt ----
 
-(ert-deftest agent-repl-cmd-test-confirm-cancel/skips-prompt-with-no-running-agent ()
-  "No running agent among the set returns t without consulting `y-or-n-p'."
+(ert-deftest agent-repl-cmd-test-confirm-cancel/skips-prompt-with-no-running-subagent ()
+  "No workspace with subagents in the set returns t without consulting `y-or-n-p'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "idle-ws" :idle)
     (let ((prompted nil))
@@ -786,10 +802,21 @@ is consulted, so BODY can assert whether a prompt was raised."
         (should (agent-repl--confirm-cancel-running '("idle-ws")))
         (should-not prompted)))))
 
-(ert-deftest agent-repl-cmd-test-confirm-cancel/prompts-once-when-a-running-agent-present ()
-  "A running agent in the set consults `y-or-n-p' exactly once."
+(ert-deftest agent-repl-cmd-test-confirm-cancel/skips-prompt-when-only-main-agent-running ()
+  "A `:thinking' workspace with no subagents returns t without prompting."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (let ((prompted nil))
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (_prompt) (setq prompted t) t)))
+        (should (agent-repl--confirm-cancel-running '("run-ws")))
+        (should-not prompted)))))
+
+(ert-deftest agent-repl-cmd-test-confirm-cancel/prompts-once-when-a-running-subagent-present ()
+  "A workspace with subagents in the set consults `y-or-n-p' exactly once."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (agent-repl--ws-incf-pending-subagents "run-ws")
     (agent-repl--ws-set-agent-state "idle-ws" :idle)
     (let ((prompt-count 0))
       (cl-letf (((symbol-function 'y-or-n-p)
@@ -801,6 +828,7 @@ is consulted, so BODY can assert whether a prompt was raised."
   "A nil `agent-repl-interrupt-confirm' returns t without prompting."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (agent-repl--ws-incf-pending-subagents "run-ws")
     (let ((agent-repl-interrupt-confirm nil)
           (prompted nil))
       (cl-letf (((symbol-function 'y-or-n-p)
@@ -809,14 +837,14 @@ is consulted, so BODY can assert whether a prompt was raised."
         (should-not prompted)))))
 
 (ert-deftest agent-repl-cmd-test-confirm-cancel-prompt/names-single-workspace ()
-  "The singular prompt names the one running workspace."
+  "The singular prompt names the one workspace with subagents."
   (should (equal (agent-repl--confirm-cancel-prompt '("alpha"))
-                 "Cancel the running agent in alpha? ")))
+                 "Cancel the running subagents in alpha? ")))
 
 (ert-deftest agent-repl-cmd-test-confirm-cancel-prompt/counts-multiple-workspaces ()
-  "The plural prompt reports the count and the running workspace names."
+  "The plural prompt reports the count and the workspace names with subagents."
   (should (equal (agent-repl--confirm-cancel-prompt '("alpha" "beta"))
-                 "Cancel the running agents in 2 workspaces (alpha, beta)? ")))
+                 "Cancel the running subagents in 2 workspaces (alpha, beta)? ")))
 
 (ert-deftest agent-repl-cmd-test-agent-thinking-p/thinking-is-in-flight ()
   "A `:thinking' workspace reads as having a turn in flight."
@@ -829,6 +857,18 @@ is consulted, so BODY can assert whether a prompt was raised."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "idle-ws" :idle)
     (should-not (agent-repl--agent-thinking-p "idle-ws"))))
+
+(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/nonzero-counter-is-running ()
+  "A workspace with a non-zero `:pending-subagents' counter reads as running subagents."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-incf-pending-subagents "run-ws")
+    (should (agent-repl--agent-subagents-running-p "run-ws"))))
+
+(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/thinking-without-subagents-is-not-running ()
+  "A `:thinking' workspace with a zero subagent counter does NOT read as running subagents."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (should-not (agent-repl--agent-subagents-running-p "run-ws"))))
 
 ;;;; ---- agent-repl-interrupt: undo of an unanswered send ----
 
