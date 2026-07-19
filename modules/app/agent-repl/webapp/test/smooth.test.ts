@@ -51,6 +51,7 @@ function state(items: ConversationItem[]): StoreState {
     cwd: "/w",
     claudeSessionId: "",
     permissionMode: "default",
+    statusSnapshot: null,
     items,
     queued: [],
     turnInFlight: true,

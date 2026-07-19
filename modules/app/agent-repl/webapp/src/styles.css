@@ -1441,6 +1441,25 @@ pre {
 }
 .unsupported-err { color: var(--err); font-style: normal; font-weight: normal; }
 
+/* The /status panel: the rich graphical replacement for the CLI's interactive
+   status command, rendered in place of the generic unsupported card. A
+   two-column label/value grid, reading like a settled panel rather than a
+   refusal. */
+.status-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.9rem;
+  margin-top: 0.35rem;
+  font-size: 0.9em;
+}
+/* Each row wraps a label/value pair for grouping, but `display: contents`
+   dissolves the wrapper so both spans participate as cells of the parent
+   `.status-grid`'s two columns rather than landing in a single cell. */
+.status-row { display: contents; }
+.status-label { color: var(--muted); white-space: nowrap; }
+.status-value { color: var(--fg); overflow-wrap: anywhere; }
+.status-loading { color: var(--muted); font-style: italic; margin-top: 0.35rem; }
+
 /* --- pending indicators (running tool call, textless thinking) ------------- */
 /* Textless thinking: an orange spinner, with no quote bar, so the "model is
    working" beat reads as progress rather than as quoted content. */

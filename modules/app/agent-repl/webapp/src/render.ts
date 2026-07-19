@@ -35,6 +35,7 @@ import {
   transcriptFeed,
 } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
+import { StatusResponse, StatusSnapshot, statusPanelHtml } from "./status.js";
 import {
   chessGameContainerHtml,
   hydrateChessGames,
@@ -105,6 +106,20 @@ export interface Actions {
    * Present only when a daemon backs the webapp.
    */
   addSupport?(command: string): Promise<string>;
+  /**
+   * Fetch the session's `/status` snapshot and account for the status panel
+   * (GET /sessions/{id}/status). Present only when a daemon backs the webapp;
+   * without it a refused `/status` falls back to the generic unsupported
+   * card. Session-bound by main.ts, like `addSupport`.
+   */
+  getStatus?(): Promise<StatusResponse>;
+  /**
+   * Ask the daemon to re-probe the `/status` snapshot (POST
+   * /sessions/{id}/status/refresh). Fire-and-forget: the fresh value returns
+   * later as a `status` frame the store adopts. Present alongside
+   * `getStatus`.
+   */
+  refreshStatus?(): Promise<void>;
   /**
    * Fired after every render, once the feed's DOM is settled.
    *
@@ -653,6 +668,14 @@ export interface PanelContext {
    * stating the refusal rather than dangling a button that cannot work.
    */
   canAddSupport?: boolean;
+  /**
+   * The rendered `/status` panel, when the GUI has real support for it
+   * (a `getStatus` action is wired). A refused `/status` renders THIS in
+   * place of the generic unsupported card; absent, that command falls back
+   * to the card like any other. Renderer-owned so the async fetch's result
+   * survives the card's per-frame re-renders.
+   */
+  statusCard?: string;
   /**
    * The agent-scoped topbar strip a subagent's card carries (see
    * topbar.ts): the SAME renderer the session header uses, scoped to
@@ -2076,6 +2099,13 @@ export function renderItem(
       // near-zero duration, so its card replaces the chip outright.
       const unsupported = parseUnsupportedCommand(item.resultText);
       if (unsupported !== null) {
+        // `/status` is refused like any other terminal-only command, but the
+        // GUI now renders it richly in place of the generic card (the whole
+        // point of this workspace). Other refusals still offer the
+        // build-support button.
+        if (unsupported === "status" && panels?.statusCard !== undefined) {
+          return panels.statusCard;
+        }
         return UnsupportedCommandCard(
           unsupported,
           panels?.supportPhases?.get(unsupported),
@@ -2527,6 +2557,18 @@ export class FeedRenderer {
    */
   private supportPhases = new Map<string, SupportPhase>();
   /**
+   * The `/status` panel's fetch state. Renderer state (like supportPhases)
+   * so a re-render cannot wipe a landed snapshot back to a spinner. `idle`
+   * until a refused `/status` first appears, then `loading` until GET
+   * /status resolves; the store's `statusSnapshot` frame overlays the
+   * freshest snapshot on top of whichever GET landed.
+   */
+  private statusState:
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "loaded"; data: StatusResponse }
+    | { kind: "error"; error: string } = { kind: "idle" };
+  /**
    * Which counter overlay is open on which agent bubble's topbar, keyed
    * by agent id. Renderer state (like openPanels) so the overlay survives
    * the card's per-frame re-renders; at most one entry, mirroring the
@@ -2753,6 +2795,7 @@ export class FeedRenderer {
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
+      statusCard: this.statusCardHtml(),
       // The FULL item list, not the feed's clear-cut one: the roster
       // retention stamps (`deactivatedAtTurn`) ride the whole-session
       // counted-turn clock, so the strip's own clock must too — a cut
@@ -2771,6 +2814,78 @@ export class FeedRenderer {
           Date.now(),
         ),
     };
+  }
+
+  /**
+   * The rendered `/status` panel, or undefined when the GUI has no status
+   * support wired (no `getStatus` action) — in which case a refused
+   * `/status` falls back to the generic unsupported card.
+   *
+   * Merges three sources: the store's `statusSnapshot` (the freshest, from a
+   * `refresh-status` push frame) preferred over the GET's snapshot, the
+   * GET's account, and the store's live model / permission mode.
+   */
+  private statusCardHtml(): string | undefined {
+    if (!this.actions.getStatus) return undefined;
+    const st = this.statusState;
+    const store = this.lastState;
+    const loaded = st.kind === "loaded" ? st.data : null;
+    const fromFrame = (store?.statusSnapshot ?? null) as StatusSnapshot | null;
+    return statusPanelHtml({
+      snapshot: fromFrame ?? loaded?.snapshot ?? null,
+      account: loaded?.account ?? null,
+      model: store?.model ?? "",
+      permissionMode: store?.permissionMode ?? "default",
+      loading: st.kind === "idle" || st.kind === "loading",
+      error: st.kind === "error" ? st.error : undefined,
+    });
+  }
+
+  /**
+   * Kick off the `/status` fetch the first time a refused `/status` appears.
+   *
+   * Fetched once (gated on `idle`): a re-probe is triggered so the snapshot
+   * reflects any mid-session change, and the GET seeds an instant value
+   * (account plus the init-warmed snapshot) while that re-probe is in flight.
+   */
+  private maybeRequestStatus(state: StoreState): void {
+    if (!this.actions.getStatus) return;
+    if (this.statusState.kind !== "idle") return;
+    const hasStatusRefusal = state.items.some(
+      (i) => i.kind === "result" && parseUnsupportedCommand(i.resultText) === "status",
+    );
+    if (hasStatusRefusal) this.requestStatus();
+  }
+
+  /**
+   * Fetch the `/status` snapshot and account, triggering a re-probe first so
+   * the panel converges on the freshest snapshot.
+   *
+   * The re-probe is best-effort: its failure is logged, never swallowed, but
+   * does not fail the panel — the GET's cached snapshot still renders. The
+   * GET's own failure IS surfaced, on the panel, as an error state.
+   */
+  private requestStatus(): void {
+    const get = this.actions.getStatus;
+    if (!get) return;
+    if (this.statusState.kind !== "idle") return;
+    this.statusState = { kind: "loading" };
+    void this.actions.refreshStatus?.().catch((err: unknown) => {
+      console.error("status refresh failed", err);
+    });
+    void get().then(
+      (data) => {
+        this.statusState = { kind: "loaded", data };
+        this.rerender();
+      },
+      (err: unknown) => {
+        this.statusState = {
+          kind: "error",
+          error: err instanceof Error ? err.message : String(err),
+        };
+        this.rerender();
+      },
+    );
   }
 
   /**
@@ -3131,6 +3246,10 @@ export class FeedRenderer {
   render(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
+    // A refused `/status` turns this feed into the status panel's host: kick
+    // off its one-time fetch before building HTML so this very frame shows
+    // the loading state rather than the bare card.
+    this.maybeRequestStatus(state);
     const turnId = lastUserTurnId(state.items);
     // A fresh prompt re-follows the tail: it lifts any nested-view freeze so
     // the sender watches the answer (repinsToTail lets the fresh turn win too).

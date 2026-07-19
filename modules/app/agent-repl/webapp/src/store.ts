@@ -368,6 +368,16 @@ export interface StoreState {
    */
   claudeSessionId: string;
   permissionMode: PermissionMode;
+  /**
+   * The session's `/status` snapshot: the SDK's `system:init` payload the
+   * status panel renders. Pushed by a `status` frame — the daemon's answer
+   * to a `refresh-status` re-probe — so it reflects a value changed
+   * mid-session (a `/fast` toggle, a config edit) that the frozen init would
+   * miss. `null` until the first refresh lands; the panel seeds an instant
+   * value from GET /status meanwhile, and prefers this fresher one once it
+   * arrives. Opaque exactly like the frame's `snapshot`.
+   */
+  statusSnapshot: unknown;
   items: ConversationItem[];
   /**
    * The in-flight message queue (§2.13): messages submitted while a turn
@@ -501,6 +511,7 @@ function initialState(): StoreState {
     cwd: "",
     claudeSessionId: "",
     permissionMode: "default",
+    statusSnapshot: null,
     items: [],
     queued: [],
     turnInFlight: false,
@@ -1055,6 +1066,12 @@ export class ConversationStore {
         break;
       case "models":
         s.models = frame.models;
+        break;
+      case "status":
+        // A `refresh-status` re-probe answered: adopt the fresh snapshot the
+        // panel renders. REPLACES rather than merges — a value cleared since
+        // the last probe (a `/fast` toggled back off) must disappear.
+        s.statusSnapshot = frame.snapshot;
         break;
       case "model-changed":
         // Every origin lands here: a switch the user picked, one the agent

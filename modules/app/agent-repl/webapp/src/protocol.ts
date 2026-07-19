@@ -505,6 +505,21 @@ export interface SystemFrame extends WsEnvelope {
   data: unknown;
 }
 
+// --- §2.9a status snapshot --------------------------------------------------
+
+/**
+ * The session's `/status` snapshot (the SDK's `system:init` payload) the
+ * status panel renders. Pushed ONLY by a `refresh-status` re-probe — the
+ * live init warms the daemon's cache silently and is read back over GET —
+ * so this frame carries a value that changed mid-session (a `/fast` toggle,
+ * a config edit) the frozen init would miss. Opaque exactly like a
+ * `SystemFrame`'s `data`.
+ */
+export interface StatusFrame extends WsEnvelope {
+  type: "status";
+  snapshot: unknown;
+}
+
 // --- §2.13 in-flight message queue -------------------------------------------
 
 /**
@@ -595,6 +610,7 @@ export type L2Frame =
   | ModelsFrame
   | ModelChangedFrame
   | SystemFrame
+  | StatusFrame
   | QueueAddedFrame
   | QueueClassifiedFrame
   | QueueRemovedFrame
@@ -633,6 +649,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "models",
   "model-changed",
   "system",
+  "status",
   "queue-added",
   "queue-classified",
   "queue-removed",
