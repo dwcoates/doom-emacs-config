@@ -377,11 +377,11 @@ describe("final-response border", () => {
     expect(finalBubble).toMatch(/border-color:\s*var\(--final-response\)/);
   });
 
-  it("reserves the thinned 0.4px border box on every bubble so the state border never reflows the feed", () => {
-    // Arrange / Act — the shared .bubble rule lays the thinned 0.4px out up
+  it("reserves the thinned 0.3px border box on every bubble so the state border never reflows the feed", () => {
+    // Arrange / Act — the shared .bubble rule lays the thinned 0.3px out up
     // front, and the final-response rule only recolors it.
     // Assert
-    expect(bubble).toMatch(/border:\s*0\.4px\s+solid\s+transparent/);
+    expect(bubble).toMatch(/border:\s*0\.3px\s+solid\s+transparent/);
     expect(finalBubble).not.toMatch(/border:\s/);
   });
 
@@ -467,13 +467,13 @@ describe("async-quiescence border", () => {
     expect(asyncLive).not.toMatch(/border-width/);
   });
 
-  it("thins both state border widths to 0.4px by reserving 0.4px on the base bubble", () => {
+  it("thins both state border widths to 0.3px by reserving 0.3px on the base bubble", () => {
     // Arrange / Act — neither state border overrides the width, so both inherit
-    // the thinned 0.4px the base .bubble lays out (final-response and async-live alike).
+    // the thinned 0.3px the base .bubble lays out (final-response and async-live alike).
     const bubble = blockAfter(css, ".bubble ");
     const finalBubble = blockAfter(css, ".bubble.assistant.final-response");
     // Assert
-    expect(bubble).toMatch(/border:\s*0\.4px\s+solid/);
+    expect(bubble).toMatch(/border:\s*0\.3px\s+solid/);
     expect(finalBubble).not.toMatch(/border-width/);
     expect(asyncLive).not.toMatch(/border-width/);
   });
