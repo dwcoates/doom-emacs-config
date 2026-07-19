@@ -33,6 +33,7 @@ import {
   repinsToTail,
   retryingRowHtml,
   showsMonitoringRow,
+  tailLineHtml,
   tailStatusRow,
   turnStatsRowHtml,
   wakeRemainingLabel,
@@ -3110,6 +3111,57 @@ describe("tailStatusRow", () => {
     const row = tailStatusRow(false, false, null);
     // Assert
     expect(row).toBeNull();
+  });
+});
+
+describe("tailLineHtml (the shared indicator + turn-stats line)", () => {
+  /** A store state, defaulted to a running turn with an unknown context. */
+  function lineState(over: Partial<StoreState> = {}): StoreState {
+    const state = new ConversationStore().state;
+    state.turnInFlight = true;
+    state.turnStartedAt = "2026-05-24T10:00:00.000Z";
+    return { ...state, ...over };
+  }
+
+  it("wraps both halves in one flex line so they share a baseline", () => {
+    // Arrange — a dead-air gap on a running turn: the working indicator speaks.
+    const html = tailLineHtml(lineState(), { kind: "working" }, "5s");
+    // Assert — one `.tail-line` carrying both the indicator and the stats.
+    expect(html).toContain(`<div class="tail-line">`);
+    expect(html).toContain("working-pending");
+    expect(html).toContain("turn-stats-live");
+  });
+
+  it("orders the indicator before the stats so it lands on the left", () => {
+    // Arrange
+    const html = tailLineHtml(lineState(), { kind: "working" }, "5s") ?? "";
+    // Assert — the indicator's markup precedes the stats' in source order.
+    expect(html.indexOf("working-pending")).toBeLessThan(html.indexOf("turn-stats-live"));
+  });
+
+  it("shows the stats alone on the line when a streaming bubble carries the beat", () => {
+    // Arrange — a `text` pulse breathes a bubble, so no tail indicator speaks.
+    const html = tailLineHtml(lineState(), { kind: "text", blockId: "b1" }, "5s") ?? "";
+    // Assert — the line still mounts, carrying only the stats.
+    expect(html).toContain(`<div class="tail-line">`);
+    expect(html).toContain("turn-stats-live");
+    expect(html).not.toContain("working-pending");
+  });
+
+  it("shows the indicator alone on the line when the turn carries no stats", () => {
+    // Arrange — an interrupt outside a running turn: an indicator, no stats.
+    const html = tailLineHtml(lineState({ turnStartedAt: null, interrupting: true }), null, "5s") ?? "";
+    // Assert
+    expect(html).toContain(`<div class="tail-line">`);
+    expect(html).toContain("interrupting-pending");
+    expect(html).not.toContain("turn-stats-live");
+  });
+
+  it("drops the line when neither half speaks", () => {
+    // Arrange — off-turn with nothing live at the tail.
+    const html = tailLineHtml(lineState({ turnStartedAt: null }), null, "5s");
+    // Assert
+    expect(html).toBeNull();
   });
 });
 

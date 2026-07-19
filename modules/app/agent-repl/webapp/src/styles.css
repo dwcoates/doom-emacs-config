@@ -1556,27 +1556,44 @@ pre {
 .interrupting-pending {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
 }
+/* The combined feed-tail line: the live progress indicator and the running
+   turn-stats share ONE flex row so they sit on a single baseline at the same
+   0.85rem size rather than stacking on two lines (see `tailLineHtml`). The row
+   spans the full feed width, so each half keeps the inset it carried when the
+   two were separate rows — the indicator's `margin-left` (the grouped flush
+   rule above) pins it to the response column's left rail, and the stats'
+   `margin-left: auto` below collapses the row's free space to their left,
+   pushing them across to the right rail their `margin-right` insets. Whichever
+   half is absent, the surviving half lands on the same rail it always did.
+   `align-items: center` lands the indicator and the stats on a shared vertical
+   center. */
+.tail-line {
+  display: flex;
+  align-items: center;
+}
 /* The live turn-stats row: the running turn's elapsed clock and the context
-   it has grown so far, shown at the feed tail right below the progress
-   indicator for as long as the turn runs (see turnStatsRowHtml). It is the
-   running twin of the corner a final response settles into (.turn-meta), so it
-   reuses the SAME two topbar hues — the clock's --info-time blue and the
-   delta's --info-tokens amber — bullet-separated. Same tail geometry as the
-   pending rows above, minus the spinner: the indicator directly above already
-   carries the arc.
+   it has grown so far, shown at the feed tail beside the progress indicator on
+   the shared `.tail-line` for as long as the turn runs (see turnStatsRowHtml).
+   It is the running twin of the corner a final response settles into
+   (.turn-meta), so it reuses the SAME two topbar hues — the clock's
+   --info-time blue and the delta's --info-tokens amber — bullet-separated.
+   Same tail geometry as the pending rows beside it, minus the spinner: the
+   indicator to its left already carries the arc.
 
    Right-biased to the response column's right rail rather than the feed's far
    edge: a `margin-right` of the same half-leftover the prompt bubble hugs (see
    `.bubble.user`) insets the block so `text-align: right` lands the figures at
    the column's right-most limit — where a capped tool card and the prompt's
-   own right edge sit — rather than out at the window gutter. The counters thus
-   grow toward the right of the same center stream the response bubbles occupy,
-   the mirror of the indicator above flushing to that stream's left rail. */
+   own right edge sit — rather than out at the window gutter. A `margin-left:
+   auto` absorbs the shared row's free space, so the counters land at that
+   right rail whether or not an indicator shares the line, the mirror of the
+   indicator flushing to that stream's left rail. */
 .turn-stats-live {
   padding: 0.25rem 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
 .turn-stats-live .info-time { color: var(--info-time); }

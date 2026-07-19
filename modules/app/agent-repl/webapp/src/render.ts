@@ -1930,6 +1930,34 @@ export function turnStatsRowHtml(state: StoreState, timerLabel: string): string 
 }
 
 /**
+ * The combined feed-tail line: the live progress indicator (the main chain's
+ * interrupting/retrying/working row) on the LEFT and the running turn-stats
+ * (elapsed clock + grown context) on the RIGHT, sharing ONE flex row so the
+ * two sit on a single baseline at the same 0.85rem size rather than stacking
+ * on two lines. The indicator keeps the `margin-left` that flushes it to the
+ * response column's left rail, and the stats keep the `margin-right` that
+ * flushes them to its right rail (see `.tail-line` in styles.css).
+ *
+ * Either half may be absent: a streaming bubble carries the beat itself, so
+ * the turn runs with stats but no tail indicator, and an interrupting row can
+ * outlive the running turn's stats. The wrapper is emitted only when at least
+ * one half has content, and returns null when BOTH are empty so the caller
+ * drops the node. The `monitoring…` fallback is NOT folded in here: it speaks
+ * only while the turn is idle, when no stats run, so it stays its own node.
+ */
+export function tailLineHtml(
+  state: StoreState,
+  pulse: PulseTarget,
+  timerLabel: string,
+): string | null {
+  const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
+  const indicator = tailRow ? tailRow.html : "";
+  const stats = turnStatsRowHtml(state, timerLabel);
+  if (!indicator && !stats) return null;
+  return `<div class="tail-line">${indicator}${stats}</div>`;
+}
+
+/**
  * A final response's top-right corner content: the turn's elapsed time in
  * the topbar's time color, then the context delta it moved in the topbar's
  * token color, bullet-separated (`5s · +12,000`). The context total itself
@@ -2974,29 +3002,19 @@ export class FeedRenderer {
       this.nodes.set(key, { el, html: "" });
       shells.push({ el, entry });
     }
-    // A fresh join landing mid-turn shows the active tail status row
-    // immediately, above the parked queue — the same tail slot and precedence
-    // (`tailStatusRow`) render() keeps it in.
-    const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
-    if (tailRow) {
+    // A fresh join landing mid-turn shows the combined tail line immediately,
+    // above the parked queue — the same slot, precedence, and running clock +
+    // grown-context figure render() keeps it in (see `tailLineHtml`): the live
+    // progress indicator (left) and the running turn-stats (right) on one flex
+    // row.
+    const tailLine = tailLineHtml(state, pulse, this.turnTimerLabel);
+    if (tailLine) {
       const el = document.createElement("div");
       el.className = "feed-item";
-      el.dataset.key = tailRow.key;
-      el.innerHTML = tailRow.html;
+      el.dataset.key = "tail-line";
+      el.innerHTML = tailLine;
       this.container.appendChild(el);
-      this.nodes.set(tailRow.key, { el, html: tailRow.html });
-    }
-    // The live turn-stats row, so a fresh join landing mid-turn shows the
-    // running clock and grown-context figure immediately, on the same
-    // turn-in-flight terms render() shows it.
-    if (state.turnStartedAt !== null) {
-      const el = document.createElement("div");
-      el.className = "feed-item";
-      el.dataset.key = "turn-stats";
-      const html = turnStatsRowHtml(state, this.turnTimerLabel);
-      el.innerHTML = html;
-      this.container.appendChild(el);
-      this.nodes.set("turn-stats", { el, html });
+      this.nodes.set("tail-line", { el, html: tailLine });
     }
     // The global `monitoring…` fallback, on the same idle-with-live-async
     // terms render() shows it (see `showsMonitoringRow`), so a fresh join
@@ -3192,22 +3210,16 @@ export class FeedRenderer {
       // animation never notices.
       this.applyPulse(entry.el, feedEntry, pulse);
     }
-    // The tail status row rides at the tail of the live turn's content, above
-    // the parked queue. Force-appended (like the queue cards below) so a live
-    // item node appended above never lands beneath it; whichever key is not
-    // reconciled this frame falls out of `seen` and the sweep removes it. The
-    // precedence lives in `tailStatusRow`.
-    const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
-    if (tailRow) this.reconcileTailNode(tailRow.key, tailRow.html, seen);
-    // The live turn-stats row rides just BELOW the progress indicator, for
-    // exactly as long as the turn runs: the elapsed clock (blue) and the
-    // context grown so far (amber), the running twin of the corner a final
-    // response settles into. Force-appended after the tail status row so it
-    // trails it; dropped the moment the turn ends (the guard fails, its key
-    // falls out of `seen`, the sweep removes it).
-    if (state.turnStartedAt !== null) {
-      this.reconcileTailNode("turn-stats", turnStatsRowHtml(state, this.turnTimerLabel), seen);
-    }
+    // The combined tail line rides at the tail of the live turn's content,
+    // above the parked queue: the live progress indicator (left) and the
+    // running turn-stats (right) share one flex row (see `tailLineHtml`), so
+    // the two sit on a single baseline rather than stacking. Force-appended
+    // (like the queue cards below) so a live item node appended above never
+    // lands beneath it; dropped the moment both halves fall silent (its key
+    // falls out of `seen` and the sweep removes it). The precedence within the
+    // indicator half lives in `tailStatusRow`.
+    const tailLine = tailLineHtml(state, pulse, this.turnTimerLabel);
+    if (tailLine) this.reconcileTailNode("tail-line", tailLine, seen);
     // The global `monitoring…` row: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose
