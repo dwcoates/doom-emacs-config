@@ -1,0 +1,512 @@
+<!doctype html>
+<!-- Design mock for the workspaces sidebar (see design discussion in the
+     workspace-sidebar workspace). Static, self-contained, no build step:
+     open directly in a browser. Palette variables are copied verbatim from
+     webapp/src/styles.css so the mock previews exactly how the sidebar
+     would sit against the real app chrome in both themes. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Workspace Sidebar — design mock</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --card: #eef1f4;
+    --user: #e0ecff;
+    --assistant: #ece4fa;
+    --accent: #2563eb;
+    --ok: #16a34a;
+    --err: #dc2626;
+    --thinking: #ea580c;
+    --info-ws: #15803d;
+    --info-model: #0e7490;
+    --info-tokens: #b45309;
+    --info-agents: #7c3aed;
+    --async: #f59e0b;
+    --composer-bg: #e4e7eb;
+    --code-bg: color-mix(in srgb, #000000 13%, transparent);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318;
+      --fg: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #2a2e37;
+      --card: #16191f;
+      --user: #1e2a44;
+      --assistant: #292040;
+      --thinking: #fb923c;
+      --info-ws: #4ade80;
+      --info-model: #22d3ee;
+      --info-tokens: #fbbf24;
+      --info-agents: #c4b5fd;
+      --async: #fbbf24;
+      --composer-bg: #0c0e12;
+      --code-bg: color-mix(in srgb, #000000 32%, transparent);
+    }
+  }
+  /* Mock-only theme override so both themes can be previewed with the toggle
+     button; the real app relies on prefers-color-scheme alone. */
+  :root[data-theme="light"] {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb;
+    --card: #eef1f4; --user: #e0ecff; --assistant: #ece4fa;
+    --thinking: #ea580c; --info-ws: #15803d; --info-model: #0e7490;
+    --info-tokens: #b45309; --info-agents: #7c3aed; --async: #f59e0b;
+    --composer-bg: #e4e7eb;
+    --code-bg: color-mix(in srgb, #000000 13%, transparent);
+  }
+  :root[data-theme="dark"] {
+    --bg: #111318; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37;
+    --card: #16191f; --user: #1e2a44; --assistant: #292040;
+    --thinking: #fb923c; --info-ws: #4ade80; --info-model: #22d3ee;
+    --info-tokens: #fbbf24; --info-agents: #c4b5fd; --async: #fbbf24;
+    --composer-bg: #0c0e12;
+    --code-bg: color-mix(in srgb, #000000 32%, transparent);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    display: flex; flex-direction: column; height: 100vh;
+    cursor: default; font-size: 14px;
+  }
+  .app { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: row; }
+  code {
+    background: var(--code-bg); border-radius: 4px; padding: 0 0.25em;
+    font-size: 0.92em;
+  }
+
+  /* ---------------- Sidebar (the design under review) ---------------- */
+  #ws-sidebar {
+    flex: 0 0 262px; min-width: 0; display: flex; flex-direction: column;
+    border-right: 1px solid var(--border); background: var(--bg);
+    user-select: none;
+  }
+  .sb-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--border);
+  }
+  .sb-title { font-weight: 600; font-size: 0.95rem; }
+  .sb-count {
+    font-size: 0.72rem; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 0 0.45em;
+  }
+  .sb-sort {
+    margin-left: auto; font-size: 0.72rem; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.1em 0.5em;
+    cursor: pointer;
+  }
+  .sb-sort:hover { background: var(--card); }
+  .sb-scroll { flex: 1 1 auto; overflow-y: auto; padding: 0.35rem 0 1rem; }
+
+  /* Repo section header: fold triangle + repo label in the --info-ws hue the
+     topbar already uses for the workspace datapoint. */
+  .repo-head {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.45rem 0.7rem 0.25rem; cursor: pointer;
+    font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--info-ws); font-weight: 700;
+  }
+  .repo-head:hover { background: var(--card); }
+  .repo-head .tri { transition: transform 0.12s; font-size: 0.7rem; }
+  .repo.folded .tri { transform: rotate(-90deg); }
+  .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
+  .repo-head .add {
+    margin-left: auto; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 5px; padding: 0 0.4em; font-size: 0.8rem; cursor: pointer;
+  }
+  .repo-head .add:hover { color: var(--fg); background: var(--card); }
+  .repo.folded .rows { display: none; }
+
+  /* Workspace rows. Children nest inside .kids, which draws the family guide
+     line; indentation therefore compounds per generation. */
+  .row {
+    display: flex; align-items: center; gap: 0.45rem;
+    padding: 0.28rem 0.7rem 0.28rem 0.9rem; cursor: pointer; min-width: 0;
+  }
+  .row:hover { background: var(--card); }
+  .row .glyph { width: 1.1em; text-align: center; flex: 0 0 auto; }
+  .row .name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .chev {
+    margin-left: auto; color: var(--muted); font-size: 0.7rem;
+    padding: 0 0.3em; border-radius: 4px; flex: 0 0 auto;
+    transition: transform 0.12s;
+  }
+  .row .chev:hover { background: var(--code-bg); }
+  .ws.open > .row .chev { transform: rotate(90deg); }
+  .kids {
+    margin-left: 1.55rem; border-left: 1px solid var(--border);
+  }
+  .kids .row { padding-left: 0.55rem; }
+
+  /* The workspace Emacs is currently showing. */
+  .ws.current > .row {
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    padding-left: calc(0.9rem - 3px);
+  }
+  .kids .ws.current > .row { padding-left: calc(0.55rem - 3px); }
+  .ws.current > .row .name { font-weight: 600; }
+
+  /* Tombstoned (merged/dead) workspaces stay listed but recede. */
+  .ws.gone > .row { opacity: 0.55; }
+
+  /* Badges: priority, async-live count, git cleanliness. */
+  .badge {
+    flex: 0 0 auto; font-size: 0.68rem; border-radius: 999px;
+    padding: 0 0.4em; line-height: 1.5;
+  }
+  .badge.prio { color: var(--accent); border: 1px solid var(--accent); }
+  .badge.async {
+    color: var(--async); border: 1px solid var(--async); font-variant-numeric: tabular-nums;
+  }
+  .gitdot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; }
+  .gitdot.clean { background: var(--ok); }
+  .gitdot.dirty { background: var(--info-tokens); }
+
+  /* Activity pulse: sign of life on a thinking workspace. */
+  .pulse {
+    flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--thinking); animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.72); }
+  }
+
+  /* Expanded detail panel under a row. */
+  .detail { display: none; }
+  .ws.open > .detail {
+    display: block; margin: 0.15rem 0.7rem 0.45rem 2rem;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.5rem 0.6rem; font-size: 0.78rem;
+  }
+  .kids .ws.open > .detail { margin-left: 1.6rem; }
+  .detail dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; }
+  .detail dt { color: var(--muted); }
+  .detail dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
+  .detail .actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+  .detail button {
+    font: inherit; font-size: 0.75rem; cursor: pointer;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.15em 0.6em;
+  }
+  .detail button:hover { border-color: var(--accent); color: var(--accent); }
+  .detail button.danger:hover { border-color: var(--err); color: var(--err); }
+
+  /* ---------------- Faux main column (context only) ---------------- */
+  #main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+  #topbar {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  #topbar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  #topbar .dp b { font-weight: 600; }
+  .dp-ws b { color: var(--info-ws); }
+  .dp-model b { color: var(--info-model); }
+  .dp-tokens b { color: var(--info-tokens); }
+  .dp-agents b { color: var(--info-agents); }
+  #feed { flex: 1 1 auto; overflow-y: auto; padding: 1rem 1.2rem; }
+  .bubble {
+    max-width: 46rem; border-radius: 10px; padding: 0.55rem 0.8rem;
+    margin: 0 0 0.7rem; line-height: 1.45;
+  }
+  .bubble.user { background: var(--user); margin-left: auto; }
+  .bubble.assistant { background: var(--assistant); }
+  .tool-card {
+    max-width: 46rem; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.45rem 0.8rem; margin: 0 0 0.7rem;
+    color: var(--muted); font-size: 0.85rem;
+  }
+  #composer {
+    border-top: 1px solid var(--border); background: var(--composer-bg);
+    padding: 0.6rem 0.9rem; color: var(--muted); font-size: 0.85rem;
+  }
+
+  /* ---------------- Mock chrome (not part of the design) ---------------- */
+  #legend {
+    flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem;
+    padding: 0.5rem 0.9rem; border-top: 2px dashed var(--border);
+    font-size: 0.75rem; color: var(--muted);
+  }
+  #theme-toggle {
+    position: fixed; top: 0.5rem; right: 0.6rem; z-index: 50;
+    font: inherit; font-size: 0.75rem; cursor: pointer;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.2em 0.6em;
+  }
+  #toast {
+    position: fixed; bottom: 3.2rem; left: 50%; transform: translateX(-50%);
+    background: var(--fg); color: var(--bg); border-radius: 8px;
+    padding: 0.4em 0.9em; font-size: 0.8rem; opacity: 0;
+    transition: opacity 0.15s; pointer-events: none; z-index: 50;
+    max-width: 80vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #toast.show { opacity: 0.92; }
+</style>
+</head>
+<body>
+<button id="theme-toggle">theme: auto</button>
+<div id="toast"></div>
+
+<div class="app">
+  <!-- ============ The proposed sidebar ============ -->
+  <nav id="ws-sidebar">
+    <div class="sb-head">
+      <span class="sb-title">Workspaces</span>
+      <span class="sb-count">8</span>
+      <span class="sb-sort" title="Toggle sort: repo / needs-attention">sort: repo</span>
+    </div>
+    <div class="sb-scroll">
+
+      <section class="repo">
+        <div class="repo-head">
+          <span class="tri">▾</span> doom <span class="n">(5)</span>
+          <span class="add" title="New workspace in this repo">+</span>
+        </div>
+        <div class="rows">
+          <div class="ws">
+            <div class="row" data-dir="~/.config/doom">
+              <span class="glyph">💤</span><span class="name">main</span>
+              <span class="gitdot clean" title="git: clean"></span>
+              <span class="chev">▸</span>
+            </div>
+            <div class="detail">
+              <dl>
+                <dt>branch</dt><dd><code>master</code></dd>
+                <dt>dir</dt><dd><code>~/.config/doom</code></dd>
+                <dt>viewed</dt><dd>18m ago</dd>
+              </dl>
+              <div class="actions">
+                <button>Switch</button>
+                <button class="danger">Close</button>
+              </div>
+            </div>
+            <div class="kids">
+              <div class="ws current open">
+                <div class="row" data-dir="~/.config/doom-worktrees/workspace-sidebar-mcx">
+                  <span class="glyph">⌛</span><span class="name">workspace-sidebar-mcx</span>
+                  <span class="pulse" title="turn in flight"></span>
+                  <span class="badge async" title="2 background tasks">⚙2</span>
+                  <span class="badge prio">P1</span>
+                  <span class="gitdot dirty" title="git: dirty"></span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl>
+                    <dt>branch</dt><dd><code>DWC/workspace-sidebar-mcx</code></dd>
+                    <dt>parent</dt><dd>main · <code>master</code></dd>
+                    <dt>dir</dt><dd><code>~/.config/doom-worktrees/workspace-sidebar-mcx</code></dd>
+                    <dt>viewed</dt><dd>now</dd>
+                  </dl>
+                  <p class="summary">“Kick around sidebar design ideas”</p>
+                  <div class="actions">
+                    <button>Switch</button>
+                    <button>Merge ⇧</button>
+                    <button class="danger">Close</button>
+                  </div>
+                </div>
+                <div class="kids">
+                  <div class="ws">
+                    <div class="row" data-dir="~/.config/doom-worktrees/sidebar-mock-spike">
+                      <span class="glyph">❓</span><span class="name">sidebar-mock-spike</span>
+                      <span class="gitdot clean" title="git: clean"></span>
+                      <span class="chev">▸</span>
+                    </div>
+                    <div class="detail">
+                      <dl>
+                        <dt>branch</dt><dd><code>DWC/sidebar-mock-spike</code></dd>
+                        <dt>parent</dt><dd>workspace-sidebar-mcx</dd>
+                      </dl>
+                      <p class="summary">“Awaiting permission: Bash”</p>
+                      <div class="actions">
+                        <button>Switch</button>
+                        <button class="danger">Close</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="ws">
+                <div class="row" data-dir="~/.config/doom-worktrees/agent-clock-fix">
+                  <span class="glyph">✅</span><span class="name">agent-clock-fix</span>
+                  <span class="gitdot dirty" title="git: dirty"></span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl>
+                    <dt>branch</dt><dd><code>DWC/agent-clock-fix</code></dd>
+                    <dt>parent</dt><dd>main · <code>master</code></dd>
+                  </dl>
+                  <p class="summary">“Fix agent clock drift on resume”</p>
+                  <div class="actions">
+                    <button>Switch</button>
+                    <button>Merge ⇧</button>
+                    <button class="danger">Close</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ws gone">
+                <div class="row" data-dir="~/.config/doom-worktrees/magit-status-tweaks">
+                  <span class="glyph">🔀</span><span class="name">magit-status-tweaks</span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl>
+                    <dt>state</dt><dd>merged into main</dd>
+                  </dl>
+                  <div class="actions"><button>Re-open</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="repo">
+        <div class="repo-head">
+          <span class="tri">▾</span> services <span class="n">(2)</span>
+          <span class="add" title="New workspace in this repo">+</span>
+        </div>
+        <div class="rows">
+          <div class="ws">
+            <div class="row" data-dir="~/workspace/ChessCom/services">
+              <span class="glyph">💤</span><span class="name">master</span>
+              <span class="gitdot clean" title="git: clean"></span>
+              <span class="chev">▸</span>
+            </div>
+            <div class="detail">
+              <dl>
+                <dt>branch</dt><dd><code>master</code></dd>
+                <dt>dir</dt><dd><code>~/workspace/ChessCom/services</code></dd>
+              </dl>
+              <div class="actions"><button>Switch</button></div>
+            </div>
+            <div class="kids">
+              <div class="ws gone">
+                <div class="row" data-dir="~/workspace/ChessCom/services-worktrees/ceac-batch-retry">
+                  <span class="glyph">❌</span><span class="name">ceac-batch-retry</span>
+                  <span class="chev">▸</span>
+                </div>
+                <div class="detail">
+                  <dl><dt>state</dt><dd>session dead</dd></dl>
+                  <div class="actions"><button>Revive</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="repo folded">
+        <div class="repo-head">
+          <span class="tri">▾</span> (no repo) <span class="n">(1)</span>
+        </div>
+        <div class="rows">
+          <div class="ws">
+            <div class="row" data-dir="~/scratch">
+              <span class="glyph">·</span><span class="name">scratch</span>
+              <span class="chev">▸</span>
+            </div>
+            <div class="detail">
+              <dl><dt>dir</dt><dd><code>~/scratch</code></dd></dl>
+              <div class="actions"><button>Switch</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </nav>
+
+  <!-- ============ Faux main column, for context only ============ -->
+  <div id="main-col">
+    <header id="topbar">
+      <span class="dot"></span>
+      <span class="dp dp-ws">ws <b>workspace-sidebar-mcx</b></span>
+      <span class="dp dp-model">model <b>fable-5</b></span>
+      <span class="dp dp-tokens">ctx <b>132k</b></span>
+      <span class="dp dp-agents">agents <b>2</b></span>
+    </header>
+    <main id="feed">
+      <div class="bubble user">Can you generate me an example mock html document that would show your design/graphics?</div>
+      <div class="tool-card">⏺ Read(webapp/src/styles.css) · 220 lines</div>
+      <div class="bubble assistant">Here's the sidebar mock, docked left of the feed exactly where the row-flex layout slots it…</div>
+    </main>
+    <footer id="composer">Emacs owns input — composer hidden (composer=0)</footer>
+  </div>
+</div>
+
+<!-- Mock chrome: what each element demonstrates. -->
+<footer id="legend">
+  <span>▾ repo fold (syncs tab bar)</span>
+  <span>indent = child worktree</span>
+  <span>⌛💤❓✅❌🔀 = ws-render-status glyphs</span>
+  <span>● pulse = turn in flight</span>
+  <span>⚙n = background tasks</span>
+  <span>P1 = priority</span>
+  <span>dot = git clean/dirty</span>
+  <span>row click = switch · ▸ = expand</span>
+  <span>blue edge = current workspace</span>
+</footer>
+
+<script>
+  // Mock-only wiring: fold, expand, fake switch toast, theme preview.
+  const toast = document.getElementById('toast');
+  let toastTimer = 0;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+  }
+
+  document.querySelectorAll('.repo-head').forEach((head) => {
+    head.addEventListener('click', (ev) => {
+      if (ev.target.classList.contains('add')) {
+        showToast('would emit workspace_commands: new workspace in this repo');
+        return;
+      }
+      head.closest('.repo').classList.toggle('folded');
+    });
+  });
+
+  document.querySelectorAll('.row').forEach((row) => {
+    row.addEventListener('click', (ev) => {
+      if (ev.target.classList.contains('chev')) {
+        row.closest('.ws').classList.toggle('open');
+        return;
+      }
+      showToast('would switch: agent-repl-switch-to-project ' + row.dataset.dir);
+    });
+  });
+
+  document.querySelectorAll('.detail button').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      showToast('mock action: ' + btn.textContent);
+    });
+  });
+
+  const themes = ['auto', 'light', 'dark'];
+  const toggle = document.getElementById('theme-toggle');
+  let themeIdx = 0;
+  toggle.addEventListener('click', () => {
+    themeIdx = (themeIdx + 1) % themes.length;
+    const t = themes[themeIdx];
+    if (t === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    toggle.textContent = 'theme: ' + t;
+  });
+</script>
+</body>
+</html>
