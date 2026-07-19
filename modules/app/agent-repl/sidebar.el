@@ -4,14 +4,21 @@
 
 ;; Feeds the webapp's workspaces sidebar and services its actions.
 ;;
+;; The roster universe is the OPEN workspaces — the same set the
+;; tab-bar shows sections of: a live perspective AND an
+;; `agent-repl--workspaces' registration (`agent-repl--ws-list-names').
+;; Snapshot history and tombstoned entries do not render; closing a
+;; workspace removes its row.  A row whose REPL is closed while its
+;; workspace stays open (`:repl-state' `:inactive' / `:hidden') greys
+;; out instead.
+;;
 ;; Data flows one way, Emacs -> webview: Emacs owns the workspace model
 ;; (workspace.el), so it builds the roster — repos, family-nested rows,
 ;; per-row lifecycle status — serializes it to JSON, and pushes it into
 ;; every live webview through the `agentReplWorkspaceRoster' host hook
 ;; over the execute-script channel frontend.el owns.  The push is gated
 ;; by a cheap in-memory signature computed on the 1Hz state tick
-;; (status.el), so the rebuild (which stats/reads the snapshot file and
-;; may resolve repo keys) runs only when something visible changed.
+;; (status.el), so the rebuild runs only when something visible changed.
 ;;
 ;; Actions flow the long way around, webview -> daemon -> Emacs: the
 ;; webapp cannot call into Emacs, so a sidebar click POSTs to the
@@ -31,9 +38,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--frontend-webview-execute-script "frontend" (buf script))
-(declare-function agent-repl--known-workspace-entries "commands" ())
 (declare-function agent-repl--picker-open-selection "commands" (payload))
-(declare-function agent-repl--workspace-snapshot-file-for-read "commands" ())
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 
 ;;;; ---- The host-hook contract ------------------------------------------
@@ -88,6 +93,15 @@ default dot."
             (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
                    kw name))))))
 
+(defun agent-repl--sidebar-repl-closed-p (name)
+  "Return non-nil when open workspace NAME's REPL is closed.
+`:repl-state' `:inactive' (panels torn down) or `:hidden' (queued for
+the hide-mode sweep) — the workspace stays in the tab-bar and the
+sidebar, but its row greys out.  A nil `:repl-state' is NOT closed:
+that is a workspace whose session never started, which the \"none\"
+status dot already conveys."
+  (and (memq (agent-repl--ws-get name :repl-state) '(:inactive :hidden)) t))
+
 ;;;; ---- Roster building --------------------------------------------------
 
 (defvar agent-repl--sidebar-nav-dir nil
@@ -101,49 +115,36 @@ round-trip.")
   "Visible row dirs in sidebar render order, cached by the last build.
 Depth-first over unfolded repos — exactly the order the webapp renders
 rows in, so `C-S-n' / `C-S-p' walk what the user actually sees.  Rows
-of folded repos are excluded (they are hidden), closed rows are
-included (they are visible and selectable).")
+of folded repos are excluded (they are hidden); greyed closed-REPL
+rows are included (they are visible and selectable).")
 
-(defvar agent-repl--sidebar-dir-repo-key-cache (make-hash-table :test 'equal)
-  "Memo: canonical dir -> repo key (or `none') for snapshot-only entries.
-Snapshot-only entries have no workspace plist to carry `:group-key',
-so without this memo every rebuild would shell git once per such
-entry.  Failed resolutions are cached as `none' on the same grounds —
-a dir that is not a repo does not become one, and re-shelling git for
-it every rebuild would dwarf the cost the memo exists to avoid.")
-
-(defun agent-repl--sidebar-repo-key-for-entry (name dir)
-  "Return the repo key for roster entry NAME at DIR — total, never nil.
-Known workspaces resolve through `agent-repl--ws-repo-group' (which
-caches on the plist); snapshot-only entries resolve DIR through
-`agent-repl--repo-key-for-dir', memoized in
-`agent-repl--sidebar-dir-repo-key-cache'.  Unresolvable dirs map onto
-`agent-repl--repo-key-unknown', the same sentinel contract
-`agent-repl--ws-repo-group' documents."
-  (if (agent-repl--ws-known-p name)
-      (agent-repl--ws-repo-group name)
-    (let ((cached (gethash dir agent-repl--sidebar-dir-repo-key-cache)))
-      (cond
-       ((eq cached 'none) agent-repl--repo-key-unknown)
-       (cached cached)
-       (t (let ((key (agent-repl--repo-key-for-dir dir)))
-            (puthash dir (or key 'none) agent-repl--sidebar-dir-repo-key-cache)
-            (or key agent-repl--repo-key-unknown)))))))
+(defun agent-repl--sidebar-entries ()
+  "Return the roster entries (NAME . DIR): open workspaces only.
+The universe is `agent-repl--ws-list-names' — a live perspective AND a
+registration, i.e. the tab-bar's set before fold filtering (folds are
+rendered as collapsed sections here, not dropped).  An open workspace
+without a `:project-dir' cannot be keyed by dir; it is skipped with a
+log entry rather than silently, since every normally-created workspace
+records one."
+  (let (entries)
+    (dolist (name (agent-repl--ws-list-names) (nreverse entries))
+      (let ((dir (agent-repl--ws-get name :project-dir)))
+        (if dir
+            (push (cons name dir) entries)
+          (agent-repl--log name "sidebar-entries: skipping open ws=%s with no :project-dir" name))))))
 
 (defun agent-repl--sidebar-entry-created-at (name)
   "Return NAME's `:created-at' as a float for sibling ordering.
-`most-positive-fixnum' when unknown (snapshot-only entries and rows
-that never recorded creation), so undated rows sort after dated ones
-rather than interleaving unpredictably."
-  (let ((v (and (agent-repl--ws-known-p name)
-                (agent-repl--ws-get name :created-at))))
+`most-positive-fixnum' when unrecorded, so undated rows sort after
+dated ones rather than interleaving unpredictably."
+  (let ((v (agent-repl--ws-get name :created-at)))
     (if v (float-time v) most-positive-fixnum)))
 
 (defun agent-repl--sidebar-sibling-sort (nodes)
   "Sort sibling NODES (plists with :name) by creation time, then name.
 Creation order IS the family chronology — a workspace cut earlier
 lists earlier — and the name tiebreak keeps the order deterministic
-for undated snapshot-only rows."
+for undated rows."
   (sort nodes
         (lambda (a b)
           (let ((ta (agent-repl--sidebar-entry-created-at (plist-get a :name)))
@@ -153,40 +154,40 @@ for undated snapshot-only rows."
               (< ta tb))))))
 
 (defun agent-repl--sidebar-row-plist (name dir current-name children)
-  "Serialize one roster row for NAME at canonical DIR.
+  "Serialize one roster row for open workspace NAME at canonical DIR.
 CURRENT-NAME is the active workspace's name (computed once per build).
 CHILDREN is the already-serialized vector of child rows.  Keys and
 value shapes are the webapp's WorkspaceRow contract
 \(webapp/src/sidebar.ts): JSON booleans (`t' / `:false'), `:null' for
 absent optionals, epoch-seconds float for lastViewedAt."
-  (let* ((known (agent-repl--ws-known-p name))
-         (viewed (and known (agent-repl--ws-get name :last-viewed-at))))
+  (let ((viewed (agent-repl--ws-get name :last-viewed-at)))
     (list :name name
           :dir dir
-          :status (if known (agent-repl--sidebar-wire-status name) "none")
-          :closed (if (and known (agent-repl--ws-open-p name)) :false t)
+          :status (agent-repl--sidebar-wire-status name)
+          :closed (if (agent-repl--sidebar-repl-closed-p name) t :false)
           :current (if (equal name current-name) t :false)
           :lastViewedAt (if viewed (float-time viewed) :null)
-          :branch (or (and known (agent-repl--ws-get name :branch-name)) :null)
-          :parentBranch (or (and known (agent-repl--ws-get name :parent-branch-name)) :null)
-          :summary (or (and known (agent-repl--ws-get name :last-prompt-summary)) :null)
+          :branch (or (agent-repl--ws-get name :branch-name) :null)
+          :parentBranch (or (agent-repl--ws-get name :parent-branch-name) :null)
+          :summary (or (agent-repl--ws-get name :last-prompt-summary) :null)
           :children children)))
 
 (defun agent-repl--sidebar-build ()
-  "Build the roster from every known workspace entry.
+  "Build the roster from every open workspace.
 Returns (ROSTER . FLAT-DIRS): ROSTER is the `json-serialize'-ready
 plist, FLAT-DIRS the visible row dirs in render order (see
 `agent-repl--sidebar-flat-dirs').
 
 Family shape: an entry whose `:source-ws-dir' canonically matches
-another entry's project dir nests under it; everything else roots in
-its repo's section.  A child renders under its parent even if git
-resolves their repo keys differently (children are worktrees cut from
-the parent, and the family line is the sidebar's organizing claim) —
-the section a family renders in is its ROOT's repo.  Repos sort by
-label with the `(no repo)' sentinel last; siblings sort by creation
-time (`agent-repl--sidebar-sibling-sort')."
-  (let* ((entries (agent-repl--known-workspace-entries))
+another OPEN entry's project dir nests under it; everything else
+\(including a child whose parent workspace is closed) roots in its
+repo's section.  A child renders under its parent even if git resolves
+their repo keys differently (children are worktrees cut from the
+parent, and the family line is the sidebar's organizing claim) — the
+section a family renders in is its ROOT's repo.  Repos sort by label
+with the `(no repo)' sentinel last; siblings sort by creation time
+\(`agent-repl--sidebar-sibling-sort')."
+  (let* ((entries (agent-repl--sidebar-entries))
          (current (ignore-errors (agent-repl--ws-current-name)))
          (nodes (mapcar (lambda (e)
                           (list :name (car e)
@@ -198,20 +199,19 @@ time (`agent-repl--sidebar-sibling-sort')."
          (emitted 0)
          repo-keys)
     (dolist (n nodes) (puthash (plist-get n :dir) n by-dir))
-    ;; Attach each node under its parent when the parent is itself a
-    ;; roster entry; self-parenting is a corrupted plist, not a family.
+    ;; Attach each node under its parent when the parent is itself an
+    ;; open entry; self-parenting is a corrupted plist, not a family.
     (dolist (n nodes)
       (let* ((name (plist-get n :name))
              (dir (plist-get n :dir))
-             (src (and (agent-repl--ws-known-p name)
-                       (agent-repl--ws-get name :source-ws-dir)))
+             (src (agent-repl--ws-get name :source-ws-dir))
              (parent-dir (and src (agent-repl--path-canonical src))))
         (when (equal parent-dir dir)
           (error "agent-repl--sidebar-build: ws=%s is its own parent (dir=%s)"
                  name dir))
         (if (and parent-dir (gethash parent-dir by-dir))
             (push n (gethash parent-dir children))
-          (let ((key (agent-repl--sidebar-repo-key-for-entry name dir)))
+          (let ((key (agent-repl--ws-repo-group name)))
             (unless (gethash key roots-by-repo)
               (push key repo-keys))
             (push n (gethash key roots-by-repo))))))
@@ -274,14 +274,12 @@ tick noticing the webview) re-delivers the roster."
           json))
 
 (defun agent-repl--sidebar-live-webview-buffers ()
-  "Return every live frontend webview buffer across known workspaces."
+  "Return every live frontend webview buffer across open workspaces."
   (let (bufs)
-    (dolist (entry (agent-repl--known-workspace-entries) (nreverse bufs))
-      (let ((name (car entry)))
-        (when (agent-repl--ws-known-p name)
-          (let ((buf (agent-repl--ws-get name :frontend-buffer)))
-            (when (buffer-live-p buf)
-              (push buf bufs))))))))
+    (dolist (name (agent-repl--ws-list-names) (nreverse bufs))
+      (let ((buf (agent-repl--ws-get name :frontend-buffer)))
+        (when (buffer-live-p buf)
+          (push buf bufs))))))
 
 (defun agent-repl--sidebar-push ()
   "Rebuild the roster and push it into every live webview.
@@ -306,33 +304,23 @@ product, so navigation always walks the order last shown."
 (defvar agent-repl--sidebar-last-signature nil
   "Signature of the roster state as of the last pushed build.")
 
-(defun agent-repl--sidebar-snapshot-mtime ()
-  "Modification time of the on-disk workspace snapshot, or nil.
-The snapshot contributes roster rows for workspaces no longer in
-memory, so its mtime stands in for their content in the signature —
-one `file-attributes' stat per tick instead of a full read."
-  (when-let* ((file (agent-repl--workspace-snapshot-file-for-read)))
-    (file-attribute-modification-time (file-attributes file))))
-
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
-Pure in-memory reads plus one stat: per-live-workspace render state
-\(status keyword, done-acked, open-p, last-viewed), the current
-workspace, the fold set, the nav cursor, the snapshot mtime, and the
-set of live webview buffers.  The webview set matters because a
-freshly (re)mounted webview needs the roster even when nothing in the
-roster itself changed."
+Pure in-memory reads: per-open-workspace render state (status keyword,
+done-acked, repl-state, last-viewed), the current workspace, the fold
+set, the nav cursor, and the set of live webview buffers.  The webview
+set matters because a freshly (re)mounted webview needs the roster
+even when nothing in the roster itself changed."
   (list (mapcar (lambda (name)
                   (list name
                         (agent-repl--ws-render-status name)
                         (and (agent-repl--ws-get name :done-acked) t)
-                        (and (agent-repl--ws-open-p name) t)
+                        (agent-repl--ws-get name :repl-state)
                         (agent-repl--ws-get name :last-viewed-at)))
-                (agent-repl--live-ws-names))
+                (agent-repl--ws-list-names))
         (ignore-errors (agent-repl--ws-current-name))
         (agent-repl--folded-repo-keys)
         agent-repl--sidebar-nav-dir
-        (agent-repl--sidebar-snapshot-mtime)
         (mapcar #'buffer-name (agent-repl--sidebar-live-webview-buffers))))
 
 (defun agent-repl--sidebar-tick ()
@@ -396,31 +384,28 @@ expects to land on."
 ;;;; ---- Opening a workspace (shared by keyboard + click) ------------------
 
 (defun agent-repl--sidebar-entry-for-dir (dir)
-  "Return the known entry (NAME . DIR) canonically matching DIR, or nil.
-Deliberately spans the full known universe (in-memory plus snapshot),
-unlike `agent-repl--ws-name-for-dir' (live-only): the sidebar lists
-closed and prior-session workspaces precisely so they can be revived."
+  "Return the open entry (NAME . DIR) canonically matching DIR, or nil."
   (let ((canon (agent-repl--path-canonical dir)))
     (cl-find-if (lambda (e)
                   (equal (agent-repl--path-canonical (cdr e)) canon))
-                (agent-repl--known-workspace-entries))))
+                (agent-repl--sidebar-entries))))
 
 (defun agent-repl--sidebar-open-dir (dir)
-  "Switch Emacs to the workspace whose project dir is DIR.
+  "Switch Emacs to the open workspace whose project dir is DIR.
 Routes through `agent-repl--picker-open-selection', the canonical
-switch-or-revive: a live perspective switches in place, anything else
-\(closed, tombstoned, prior-session) is revived from persisted state.
-Signals when DIR matches no known entry — an unknown dir means the
-click/cursor and the roster disagree, which is a contract violation to
-surface, not a row to silently ignore."
+switch-or-revive: a live perspective switches in place, a
+closed-REPL one re-establishes its session.  Signals when DIR matches
+no open entry — an unknown dir means the click/cursor and the roster
+disagree, which is a contract violation to surface, not a row to
+silently ignore."
   (let ((entry (agent-repl--sidebar-entry-for-dir dir)))
     (unless entry
-      (error "agent-repl sidebar: no known workspace for dir %s" dir))
+      (error "agent-repl sidebar: no open workspace for dir %s" dir))
     (let ((name (car entry)))
-      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s open=%s"
+      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s"
                         name (cdr entry)
                         (and (agent-repl--ws-live-p name) t)
-                        (and (agent-repl--ws-open-p name) t))
+                        (agent-repl--sidebar-repl-closed-p name))
       (agent-repl--picker-open-selection
        (list :name name
              :project-dir (cdr entry)
@@ -441,13 +426,11 @@ re-validates — the file channel is also writable by other emitters)."
     (agent-repl--sidebar-open-dir dir)))
 
 (defun agent-repl--sidebar-repo-key-known-p (key)
-  "Return non-nil when KEY names a repo some known entry belongs to.
+  "Return non-nil when KEY names a repo some open workspace belongs to.
 The `(no repo)' sentinel counts — its section folds like any other."
   (or (equal key agent-repl--repo-key-unknown)
-      (cl-some (lambda (e)
-                 (equal key (agent-repl--sidebar-repo-key-for-entry
-                             (car e) (agent-repl--path-canonical (cdr e)))))
-               (agent-repl--known-workspace-entries))))
+      (cl-some (lambda (e) (equal key (agent-repl--ws-repo-group (car e))))
+               (agent-repl--sidebar-entries))))
 
 (defun agent-repl--handle-fold-command (cmd)
   "Handle a \"fold\" workspace command CMD (a sidebar repo-header click).

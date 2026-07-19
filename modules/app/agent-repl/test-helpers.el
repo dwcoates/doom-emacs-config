@@ -661,8 +661,7 @@ re-routes their frontend resolution instead."
          ;; later test's push behavior depend on suite order.
          (agent-repl--sidebar-nav-dir nil)
          (agent-repl--sidebar-flat-dirs nil)
-         (agent-repl--sidebar-last-signature nil)
-         (agent-repl--sidebar-dir-repo-key-cache (make-hash-table :test 'equal)))
+         (agent-repl--sidebar-last-signature nil))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p agent-repl-workspace-snapshot-file)
