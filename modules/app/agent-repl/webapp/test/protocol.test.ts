@@ -28,6 +28,21 @@ describe("parseFrame", () => {
     expect(frame).toMatchObject({ type: "interrupt" });
   });
 
+  it("recognizes the status frame as a known type", () => {
+    // Arrange
+    const data = JSON.stringify({
+      type: "status",
+      seq: 6,
+      ts: "T",
+      session_id: "s1",
+      snapshot: { fast_mode_state: "on" },
+    });
+    // Act
+    const { frame } = parseFrame(data);
+    // Assert — a known frame parses non-null (unknown types return null).
+    expect(frame).toMatchObject({ type: "status", snapshot: { fast_mode_state: "on" } });
+  });
+
   it("recognizes the assistant-error frame as a known type", () => {
     // Arrange
     const data = JSON.stringify({

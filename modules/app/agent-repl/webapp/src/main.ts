@@ -50,6 +50,7 @@ import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
+import { fetchStatus, refreshStatus } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
@@ -196,6 +197,12 @@ async function boot(): Promise<void> {
     // resolves to the workspace name Emacs was asked for — Emacs, not the
     // daemon, decides what actually happens next.
     addSupport: (command) => requestSupportWorkspace(httpBase, activeSessionId, command),
+    // The `/status` panel's data, targeting the CURRENT session so a rebind
+    // reads the status of the checkout in view. `getStatus` seeds the panel
+    // (snapshot + account); `refreshStatus` re-probes so the snapshot reflects
+    // any mid-session change, arriving back as a `status` frame.
+    getStatus: () => fetchStatus(httpBase, activeSessionId),
+    refreshStatus: () => refreshStatus(httpBase, activeSessionId),
   });
 
   const statusEl = must("conn-status");

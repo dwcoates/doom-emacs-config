@@ -451,6 +451,7 @@ describe("turnStatsRowHtml (live turn clock + context delta)", () => {
       cwd: "/w",
       claudeSessionId: "",
       permissionMode: "default",
+      statusSnapshot: null,
       items: [],
       queued: [],
       turnInFlight: true,
@@ -5224,6 +5225,47 @@ describe("unsupported slash-command card", () => {
     );
     // Assert
     expect(html).toContain(`data-add-support="plugin:cmd"`);
+  });
+
+  it("renders the rich status panel for a refused /status when one is wired", () => {
+    // Arrange + Act — the whole point of this workspace: /status stops being
+    // dead weight and becomes a real panel.
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      ctx({ statusCard: `<div class="status-panel">STATUS PANEL</div>` }),
+    );
+    // Assert
+    expect(html).toContain("STATUS PANEL");
+    expect(html).not.toContain("data-add-support");
+  });
+
+  it("falls back to the add-support card for /status when no panel is wired", () => {
+    // Arrange + Act — a webapp with no status support (no getStatus action)
+    // still offers to build it, exactly as for any other refused command.
+    const html = renderItem(
+      refusal("/status isn't available in this environment."),
+      undefined,
+      undefined,
+      ctx({ statusCard: undefined }),
+    );
+    // Assert
+    expect(html).toContain(`data-add-support="status"`);
+  });
+
+  it("ignores the status panel for a non-status refusal", () => {
+    // Arrange + Act — the panel is /status-specific; another refused command
+    // never renders it.
+    const html = renderItem(
+      refusal("/foo isn't available in this environment."),
+      undefined,
+      undefined,
+      ctx({ statusCard: `<div class="status-panel">STATUS PANEL</div>` }),
+    );
+    // Assert
+    expect(html).toContain(`data-add-support="foo"`);
+    expect(html).not.toContain("STATUS PANEL");
   });
 });
 
