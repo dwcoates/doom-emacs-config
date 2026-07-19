@@ -569,7 +569,7 @@ should not abort the polling loop."
         (cancel-called-for nil))
     (puthash "foo" 'old-timer agent-repl--active-pr-polls)
     (cl-letf (((symbol-function 'cancel-timer)
-               (lambda (t) (setq cancel-called-for t)))
+               (lambda (_timer) (setq cancel-called-for t)))
               ((symbol-function 'agent-repl--pr-poll-tick)
                (lambda (&rest _) nil))
               ((symbol-function 'run-with-timer)

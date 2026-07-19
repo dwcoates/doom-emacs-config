@@ -1,5 +1,16 @@
 ;;; keybindings.el --- keybindings and debug helpers -*- lexical-binding: t; -*-
 
+;; `map!' comes from Doom.  Byte-compiled outside a Doom session
+;; (emacs -batch -Q) the macro is undefined, so the compiler treats each
+;; `(map! ...)' body as a function-call form — and the dotted
+;; `(:prefix ("j" . "claude"))' pair is not a valid form, which aborts
+;; the compile.  Provide an expansion-time no-op for that case only; a
+;; real Doom session (and any Doom-driven compile) has the genuine
+;; macro, so this guard is inert there.
+(eval-when-compile
+  (unless (fboundp 'map!)
+    (defmacro map! (&rest _args) nil)))
+
 ;;; Section 1: Internal helpers
 
 (defconst agent-repl--output-dir
