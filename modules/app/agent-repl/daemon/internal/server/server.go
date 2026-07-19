@@ -409,6 +409,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)
 	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands)
+	mux.HandleFunc("GET /sessions/{id}/status", s.handleStatus)
+	mux.HandleFunc("POST /sessions/{id}/status/refresh", s.handleRefreshStatus)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
 	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
@@ -849,6 +851,76 @@ func (s *Server) handleRefreshCommands(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := sess.InjectCommand(map[string]any{
 		"type":       "refresh-commands",
+		"request_id": newRequestID(),
+	}); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// handleStatus serves the session's /status snapshot for the webapp's status
+// panel: the cached system:init the panel renders, plus the one section the
+// init omits — the logged-in account, read fresh from the config dir.
+//
+// Read-only, pollable, and never resurrects a session, exactly like
+// handleCommands. The snapshot is the value the live init warmed (or a
+// refresh-status re-probe last refreshed); model and permission mode are NOT
+// folded in here because the webapp already tracks them live from their own
+// frames, so the panel overlays the fresher ones it holds.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.resolveForAttach(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	// The account block is the sole /status section with no supported
+	// non-interactive surface (init omits it), so it is read fresh from the
+	// session's config dir here, exactly as GET /sessions/{id}/account does.
+	identity, err := account.Read(sess.Info().ConfigDir)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	snapshot := sess.Status()
+	if snapshot == nil {
+		// A null snapshot is a real answer meaning "no init has landed yet",
+		// never an error: the panel triggers a refresh-status on open and
+		// re-renders when the fresh frame arrives.
+		snapshot = json.RawMessage("null")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string]any{
+		"snapshot": snapshot,
+		"account":  identity,
+	})
+}
+
+// handleRefreshStatus asks the shim to re-resolve the /status snapshot, and
+// returns immediately without waiting — the fresh snapshot arrives as a
+// StatusFrame the open panel re-renders on. A hibernated session has no shim
+// to probe and re-resolves from a fresh init when next revived, so the
+// refresh is a no-op for it. Mirrors handleRefreshCommands.
+func (s *Server) handleRefreshStatus(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.resolveForAttach(r.PathValue("id"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sess == nil {
+		httpError(w, http.StatusNotFound, "no such session")
+		return
+	}
+	if sess.Hibernated() {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	if err := sess.InjectCommand(map[string]any{
+		"type":       "refresh-status",
 		"request_id": newRequestID(),
 	}); err != nil {
 		httpError(w, http.StatusConflict, err.Error())
