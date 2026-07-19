@@ -308,11 +308,12 @@ body {
 #ws-sidebar .st-none { visibility: hidden; }
 
 /* Merge lifecycle: the recycle glyph — spinning while the merge is in
-   flight, still while queued or settled (`merged` rows also recede via
-   .gone), error-red when a conflict or failure needs a human. */
+   flight, still while queued, error-red when a conflict or failure needs a
+   human.  `merged` is NOT here: a settled merge has left the pipeline and
+   renders in the Recently Merged section, where the recycle mark would
+   misread as still-queued, so it takes the purple disc below instead. */
 #ws-sidebar .st-merging,
 #ws-sidebar .st-merge-queued,
-#ws-sidebar .st-merged,
 #ws-sidebar .st-merge-conflict,
 #ws-sidebar .st-merge-failed {
   width: auto;
@@ -326,6 +327,17 @@ body {
 #ws-sidebar .st-merge-conflict,
 #ws-sidebar .st-merge-failed { color: var(--err); }
 #ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
+#ws-sidebar .st-merged { background: var(--info-agents); }
+
+/* Recently Merged: settled history rather than live work, so it is set off
+   from the by-repo list above by a light rule and carries a purple header
+   matching its rows' dots. */
+#ws-sidebar .repo.merged-section {
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+}
+#ws-sidebar .repo.merged-section .repo-head { color: var(--info-agents); }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ws-sidebar .row .when {

@@ -106,6 +106,141 @@ the \"none\" status dot already conveys."
   (or (not (agent-repl--ws-open-p name))
       (and (memq (agent-repl--ws-get name :repl-state) '(:inactive :hidden)) t)))
 
+;;;; ---- The recently-merged window ---------------------------------------
+
+(defconst agent-repl--sidebar-merged-key "__recently_merged__"
+  "Fold key and roster key of the Recently Merged section.
+Deliberately shaped like a repo key without being one: reusing the repo
+fold machinery (`agent-repl--repo-folded-p') lets the section collapse
+through the same click path and the same fold set the repo sections use,
+so the webapp needs no second fold contract.")
+
+(defcustom agent-repl-sidebar-merged-window-seconds (* 6 60 60)
+  "Inactivity gap, in seconds, that wipes the Recently Merged section.
+Once agent-repl observes no user activity for this long, every
+already-merged workspace ages out of the section and then renders
+nowhere in the sidebar.  Both flavors of inactivity count: Emacs sitting
+idle, and Emacs not running at all."
+  :type 'integer
+  :group 'agent-repl)
+
+(defvar agent-repl--sidebar-merged-epoch nil
+  "Epoch seconds after which a completed merge still counts as recent.
+`agent-repl--sidebar-refresh-merged-window' bumps it to now on every
+observed inactivity gap, and that bump is what wipes the section.")
+
+(defvar agent-repl--sidebar-last-activity nil
+  "Epoch seconds of the last observed USER activity.
+Persisted so the gap check spans restarts: a shutdown longer than
+`agent-repl-sidebar-merged-window-seconds' must read as inactivity
+exactly like an equally long idle stretch does.")
+
+(defvar agent-repl--sidebar-merged-persisted-at 0
+  "Epoch seconds of the last merged-window write, throttling disk churn.")
+
+(defun agent-repl--sidebar-merged-state-file ()
+  "Absolute path of the file persisting the recently-merged window."
+  (agent-repl--global-state-file "sidebar-merged-window.el"))
+
+(defun agent-repl--sidebar-load-merged-window ()
+  "Hydrate the merged-window state from disk into memory."
+  (let ((file (agent-repl--sidebar-merged-state-file)))
+    (when (file-readable-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (let ((data (read (current-buffer))))
+          (setq agent-repl--sidebar-last-activity (plist-get data :last-activity)
+                agent-repl--sidebar-merged-epoch (plist-get data :epoch)))))))
+
+(defun agent-repl--sidebar-save-merged-window ()
+  "Write the merged-window state to disk."
+  (let ((file (agent-repl--sidebar-merged-state-file)))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (prin1 (list :last-activity agent-repl--sidebar-last-activity
+                   :epoch agent-repl--sidebar-merged-epoch)
+             (current-buffer)))))
+
+(defun agent-repl--sidebar-refresh-merged-window ()
+  "Advance the activity stamp, wiping the merged window across a gap.
+Returns the current epoch.
+
+The stamp is the moment of the last real user input, `now' minus
+`current-idle-time', which is what makes ONE comparison cover both
+flavors of inactivity.  While Emacs sits idle the stamp freezes at the
+last keystroke, so the gap grows with the idle time.  Across a restart
+the persisted stamp is still the pre-shutdown keystroke, so the gap is
+caught on the first tick back.  A tick during ordinary use keeps the
+stamp near `now', so the gap stays at zero.
+
+The write is throttled: this runs at 1Hz and the state changes at human
+timescales, so it hits disk only when the epoch actually moved or a
+minute has passed."
+  (unless agent-repl--sidebar-last-activity
+    (agent-repl--sidebar-load-merged-window))
+  (let* ((now (float-time))
+         (idle (if (current-idle-time) (float-time (current-idle-time)) 0))
+         (activity (- now idle))
+         (last (or agent-repl--sidebar-last-activity activity))
+         (wiped nil))
+    (when (>= (- now last) agent-repl-sidebar-merged-window-seconds)
+      (agent-repl--log nil "sidebar-merged-window: %.0fs gap >= %ds — wiping recently-merged"
+                        (- now last) agent-repl-sidebar-merged-window-seconds)
+      (setq agent-repl--sidebar-merged-epoch now
+            wiped t))
+    (setq agent-repl--sidebar-last-activity (max last activity))
+    (when (or wiped (> (- now agent-repl--sidebar-merged-persisted-at) 60))
+      (setq agent-repl--sidebar-merged-persisted-at now)
+      (agent-repl--sidebar-save-merged-window))
+    agent-repl--sidebar-merged-epoch))
+
+(defun agent-repl--sidebar-merged-p (name)
+  "Return non-nil when workspace NAME's render status is `:merged'."
+  (eq (agent-repl--ws-render-status name) :merged))
+
+(defun agent-repl--sidebar-merged-at (name)
+  "Return NAME's merge-completion time as epoch seconds, or 0 when absent."
+  (let ((at (agent-repl--ws-get name :merge-completed-at)))
+    (cond ((null at) 0)
+          ((numberp at) at)
+          (t (float-time at)))))
+
+(defun agent-repl--sidebar-recently-merged-p (name)
+  "Return non-nil when merged NAME merged at or after the current epoch.
+A nil epoch means no inactivity gap has been observed yet, so every
+completed merge still counts as recent."
+  (let ((at (agent-repl--sidebar-merged-at name)))
+    (and (> at 0)
+         (or (null agent-repl--sidebar-merged-epoch)
+             (>= at agent-repl--sidebar-merged-epoch)))))
+
+(defun agent-repl--sidebar-merged-sorted (entries)
+  "Return the recently-merged ENTRIES, newest merge first."
+  (sort (cl-remove-if-not (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
+                          (copy-sequence entries))
+        (lambda (a b)
+          (> (agent-repl--sidebar-merged-at (car a))
+             (agent-repl--sidebar-merged-at (car b))))))
+
+(defun agent-repl--sidebar-merged-group (entries current-name)
+  "Return the Recently Merged group plist for ENTRIES, or nil when empty.
+Shaped exactly like a repo group so the webapp validates and folds it
+through the same path.  Merged rows carry no children: the family tree
+is an organizing claim about live work, and a merged workspace has left
+that tree."
+  (let ((recent (agent-repl--sidebar-merged-sorted entries)))
+    (when recent
+      (list :key agent-repl--sidebar-merged-key
+            :label "Recently Merged"
+            :folded (if (agent-repl--repo-folded-p agent-repl--sidebar-merged-key)
+                        t :false)
+            :rows (vconcat
+                   (mapcar (lambda (e)
+                             (agent-repl--sidebar-row-plist
+                              (car e) (agent-repl--path-canonical (cdr e))
+                              current-name []))
+                           recent))))))
+
 ;;;; ---- Roster building --------------------------------------------------
 
 (defvar agent-repl--sidebar-nav-dir nil
@@ -173,6 +308,8 @@ absent optionals, epoch-seconds float for lastViewedAt."
           :closed (if (agent-repl--sidebar-closed-p name) t :false)
           :current (if (equal name current-name) t :false)
           :lastViewedAt (if viewed (float-time viewed) :null)
+          :mergedAt (let ((at (agent-repl--sidebar-merged-at name)))
+                      (if (> at 0) at :null))
           :branch (or (agent-repl--ws-get name :branch-name) :null)
           :parentBranch (or (agent-repl--ws-get name :parent-branch-name) :null)
           :summary (or (agent-repl--ws-get name :last-prompt-summary) :null)
@@ -192,8 +329,22 @@ their repo keys differently (children are worktrees cut from the
 parent, and the family line is the sidebar's organizing claim) — the
 section a family renders in is its ROOT's repo.  Repos sort by label
 with the `(no repo)' sentinel last; siblings sort by creation time
-\(`agent-repl--sidebar-sibling-sort')."
-  (let* ((entries (agent-repl--sidebar-entries))
+\(`agent-repl--sidebar-sibling-sort').
+
+Merged workspaces are partitioned out of ENTRIES BEFORE NODES is built,
+so they never enter the repo tree and the emitted-vs-node-count
+invariant below still compares two exact counts rather than being
+loosened to tolerate a second bucket.  They render instead in the
+`:recentlyMerged' group, and only while they sit inside the window
+`agent-repl--sidebar-refresh-merged-window' maintains — a merge older
+than the current epoch renders nowhere."
+  (let* ((all-entries (agent-repl--sidebar-entries))
+         (merged-entries (cl-remove-if-not
+                          (lambda (e) (agent-repl--sidebar-merged-p (car e)))
+                          all-entries))
+         (entries (cl-remove-if
+                   (lambda (e) (agent-repl--sidebar-merged-p (car e)))
+                   all-entries))
          (current (ignore-errors (agent-repl--ws-current-name)))
          (nodes (mapcar (lambda (e)
                           (list :name (car e)
@@ -262,9 +413,17 @@ with the `(no repo)' sentinel last; siblings sort by creation time
       (unless (= emitted (length nodes))
         (error "agent-repl--sidebar-build: emitted %d of %d rows — :source-ws-dir cycle orphaned a family"
                emitted (length nodes)))
-      (cons (list :repos repos
-                  :navDir (or agent-repl--sidebar-nav-dir :null))
-            (nreverse flat)))))
+      (let* ((recent (agent-repl--sidebar-merged-group merged-entries current))
+             (recent-folded (agent-repl--repo-folded-p agent-repl--sidebar-merged-key))
+             (recent-dirs (and recent (not recent-folded)
+                               (mapcar (lambda (e)
+                                         (agent-repl--path-canonical (cdr e)))
+                                       (agent-repl--sidebar-merged-sorted
+                                        merged-entries)))))
+        (cons (list :repos repos
+                    :recentlyMerged (or recent :null)
+                    :navDir (or agent-repl--sidebar-nav-dir :null))
+              (append (nreverse flat) recent-dirs))))))
 
 ;;;; ---- Pushing into the webviews ----------------------------------------
 
@@ -330,13 +489,22 @@ itself changed."
         (ignore-errors (agent-repl--ws-current-name))
         (agent-repl--folded-repo-keys)
         agent-repl--sidebar-nav-dir
+        ;; The epoch is its own axis: wiping the Recently Merged section
+        ;; drops rows without changing any per-workspace render state, so
+        ;; without this the gate would skip the push that clears them.
+        agent-repl--sidebar-merged-epoch
         (mapcar #'buffer-name (agent-repl--sidebar-live-webview-buffers))))
 
 (defun agent-repl--sidebar-tick ()
   "1Hz entry point (status.el's state tick): push when the signature moved.
 The signature compare is the hot-path gate — the rebuild and push
 behind it run only on actual change, so per-tick logging stays on the
-verbose ladder."
+verbose ladder.
+
+The merged-window refresh runs BEFORE the signature is taken, since the
+epoch it maintains is one of the signature's inputs and a wipe must be
+visible to this very tick's compare rather than the next one."
+  (agent-repl--sidebar-refresh-merged-window)
   (let ((sig (agent-repl--sidebar-signature)))
     (if (equal sig agent-repl--sidebar-last-signature)
         (agent-repl--log-verbose nil "sidebar-tick: signature unchanged, skip")

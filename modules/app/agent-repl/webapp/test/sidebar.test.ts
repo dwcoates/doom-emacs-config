@@ -34,6 +34,7 @@ function row(over: Partial<WorkspaceRow> = {}): WorkspaceRow {
     closed: false,
     current: false,
     lastViewedAt: null,
+    mergedAt: null,
     branch: null,
     parentBranch: null,
     summary: null,
@@ -47,7 +48,7 @@ function group(over: Partial<RepoGroup> = {}): RepoGroup {
 }
 
 function roster(over: Partial<WorkspaceRoster> = {}): WorkspaceRoster {
-  return { repos: [group()], navDir: null, ...over };
+  return { repos: [group()], recentlyMerged: null, navDir: null, ...over };
 }
 
 /** Render with no panels open, at the fixed clock, with no error note. */
@@ -189,9 +190,14 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("merge-failed")).toContain(">⟳<");
   });
 
-  it("carries the recycle glyph on a merged dot", () => {
+  it("drops the recycle glyph from a merged dot", () => {
     // Arrange + Act + Assert
-    expect(statusDotHtml("merged")).toContain(">⟳<");
+    expect(statusDotHtml("merged")).not.toContain(">⟳<");
+  });
+
+  it("keeps the recycle glyph on a merge-queued dot", () => {
+    // Arrange + Act + Assert
+    expect(statusDotHtml("merge-queued")).toContain(">⟳<");
   });
 
   it("leaves a disc status empty of the glyph", () => {
@@ -297,6 +303,40 @@ describe("sidebarHtml", () => {
     const out = html(roster({ repos: [group({ rows: [row({ lastViewedAt: NOW_S - 300 })] })] }));
     // Assert
     expect(out).toContain(`<span class="when">5m</span>`);
+  });
+
+  it("stamps a merged row's recency from its mergedAt, not its lastViewedAt", () => {
+    // Arrange
+    const merged = row({ status: "merged", mergedAt: NOW_S - 7200, lastViewedAt: NOW_S - 300 });
+    // Act
+    const out = html(roster({ repos: [group({ rows: [merged] })] }));
+    // Assert
+    expect(out).toContain(`<span class="when">2h</span>`);
+  });
+
+  it("renders the recently-merged group as its own marked section", () => {
+    // Arrange
+    const recent = group({ key: "__recently_merged__", label: "Recently Merged" });
+    // Act
+    const out = html(roster({ recentlyMerged: recent }));
+    // Assert
+    expect(out).toContain("merged-section");
+  });
+
+  it("orders the recently-merged section after the repo sections", () => {
+    // Arrange
+    const recent = group({ key: "__recently_merged__", label: "Recently Merged" });
+    // Act
+    const out = html(roster({ repos: [group({ label: "doom" })], recentlyMerged: recent }));
+    // Assert
+    expect(out.indexOf("merged-section")).toBeGreaterThan(out.indexOf(">doom<"));
+  });
+
+  it("omits the recently-merged section when nothing merged recently", () => {
+    // Arrange + Act
+    const out = html(roster({ recentlyMerged: null }));
+    // Assert
+    expect(out).not.toContain("merged-section");
   });
 
   it("details a row's branch, parent, and dir when present", () => {

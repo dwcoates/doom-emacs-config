@@ -46,13 +46,15 @@ const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "none",
 ]);
 
-/** The statuses whose dot is the recycle glyph rather than a disc. */
+/** The statuses whose dot is the recycle glyph rather than a disc.
+ * `merged` is deliberately absent: a settled merge is no longer part of the
+ * merge pipeline the glyph denotes, and it renders in its own Recently
+ * Merged section where the recycle mark would misread as still-queued. */
 const MERGE_GLYPH_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
   "merging",
   "merge-queued",
   "merge-conflict",
   "merge-failed",
-  "merged",
 ]);
 
 export interface WorkspaceRow {
@@ -63,6 +65,10 @@ export interface WorkspaceRow {
   current: boolean;
   /** Epoch SECONDS (Emacs time), or null for a workspace never viewed. */
   lastViewedAt: number | null;
+  /** Epoch SECONDS the merge completed, or null when never merged. Drives
+   * the when-column for Recently Merged rows, where merge age is the fact
+   * worth showing rather than when the workspace was last looked at. */
+  mergedAt: number | null;
   branch: string | null;
   parentBranch: string | null;
   summary: string | null;
@@ -78,6 +84,10 @@ export interface RepoGroup {
 
 export interface WorkspaceRoster {
   repos: RepoGroup[];
+  /** Workspaces merged inside the current activity window, newest first, or
+   * null when none qualify. Shaped as a RepoGroup so it folds and validates
+   * through the repo path; Emacs wipes it after a 6h inactivity gap. */
+  recentlyMerged: RepoGroup | null;
   /** The keyboard cursor: the dir C-S-n / C-S-p currently point at. */
   navDir: string | null;
 }
@@ -134,6 +144,7 @@ function validateRow(value: unknown, path: string): WorkspaceRow {
     closed: asBoolean(value.closed, `${path}.closed`),
     current: asBoolean(value.current, `${path}.current`),
     lastViewedAt: asNullableNumber(value.lastViewedAt, `${path}.lastViewedAt`),
+    mergedAt: asNullableNumber(value.mergedAt, `${path}.mergedAt`),
     branch: asNullableString(value.branch, `${path}.branch`),
     parentBranch: asNullableString(value.parentBranch, `${path}.parentBranch`),
     summary: asNullableString(value.summary, `${path}.summary`),
@@ -160,6 +171,13 @@ export function validateWorkspaceRoster(value: unknown): WorkspaceRoster {
   if (!Array.isArray(value.repos)) fail("roster.repos", "an array", value.repos);
   return {
     repos: value.repos.map((g, i) => validateGroup(g, `roster.repos[${i}]`)),
+    // Explicit null is the "no recent merges" signal Emacs sends; anything
+    // else must be a well-formed group, so an absent key falls through to
+    // validateGroup and fails loudly rather than defaulting to empty.
+    recentlyMerged:
+      value.recentlyMerged === null
+        ? null
+        : validateGroup(value.recentlyMerged, "roster.recentlyMerged"),
     navDir: asNullableString(value.navDir, "roster.navDir"),
   };
 }
@@ -239,7 +257,7 @@ function workspaceHtml(
   return `<div class="${cls.join(" ")}">
     <div class="row" data-row-dir="${escapeHtml(row.dir)}">
       ${statusDotHtml(row.status)}<span class="name">${escapeHtml(row.name)}</span>
-      <span class="when">${formatRecency(row.lastViewedAt, nowMs)}</span>
+      <span class="when">${formatRecency(row.mergedAt ?? row.lastViewedAt, nowMs)}</span>
       <span class="chev" data-chev>▸</span>
     </div>
     ${detailHtml(row)}
@@ -255,9 +273,12 @@ function repoSectionHtml(
   navDir: string | null,
   open: ReadonlySet<string>,
   nowMs: number,
+  extraClass = "",
 ): string {
   const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs)).join("");
-  return `<section class="repo${group.folded ? " folded" : ""}">
+  return `<section class="repo${group.folded ? " folded" : ""}${
+    extraClass === "" ? "" : ` ${extraClass}`
+  }">
     <div class="repo-head" data-repo-key="${escapeHtml(group.key)}">
       <span class="tri">▾</span> ${escapeHtml(group.label)} <span class="n">(${countRows(
         group.rows,
@@ -284,12 +305,18 @@ export function sidebarHtml(
   const repos = roster.repos
     .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs))
     .join("");
+  // Settled merges render last, in their own section, so they read as
+  // history rather than as live work sitting in the repo they came from.
+  const merged =
+    roster.recentlyMerged === null
+      ? ""
+      : repoSectionHtml(roster.recentlyMerged, roster.navDir, open, nowMs, "merged-section");
   return `<div class="sb-head">
       <span class="sb-title">Workspaces</span>
       <span class="sb-count">${total}</span>
       ${err}
     </div>
-    <div class="sb-scroll">${repos}</div>`;
+    <div class="sb-scroll">${repos}${merged}</div>`;
 }
 
 /** The header note shown when a POSTed command did not land. */
