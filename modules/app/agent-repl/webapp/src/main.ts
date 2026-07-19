@@ -199,6 +199,7 @@ async function boot(): Promise<void> {
 
   const statusEl = must("conn-status");
   const infoEl = must("session-info");
+  const summaryEl = must("task-summary");
   const modeEl = must<HTMLSelectElement>("mode-select");
   const modelEl = must<HTMLSelectElement>("model-select");
   const spinnerEl = must("spinner");
@@ -262,6 +263,13 @@ async function boot(): Promise<void> {
     if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
     if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
+    // The centered "current objective" label (§2.14): textContent (not
+    // innerHTML) so the daemon's summary is inert text, and the full line
+    // rides in the tooltip since the strip ellipsis-clips it. Empty until
+    // the first completed turn produces one, which collapses the element.
+    const summary = s.taskSummary ?? "";
+    summaryEl.textContent = summary;
+    summaryEl.title = summary;
     // Empty string when no compaction runs, which collapses the slot.
     compactBarEl.innerHTML = compactionBannerHtml(s.compacting);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";

@@ -548,6 +548,21 @@ export interface QueueRemovedFrame extends WsEnvelope {
   request_id?: string;
 }
 
+// --- §2.14 task summary ------------------------------------------------------
+
+/**
+ * A one-line "current objective" label for the session, produced by a
+ * headless Haiku call over a just-completed turn's driving prompt and the
+ * assistant text it produced. Best-effort and superseding: the daemon
+ * emits one only when the model returned a usable line, and a newer turn's
+ * summary simply replaces the last. The GUI renders it centered in the
+ * topbar.
+ */
+export interface TaskSummaryFrame extends WsEnvelope {
+  type: "task-summary";
+  summary: string;
+}
+
 export type L2Frame =
   | HelloFrame
   | ResultFrame
@@ -582,7 +597,8 @@ export type L2Frame =
   | SystemFrame
   | QueueAddedFrame
   | QueueClassifiedFrame
-  | QueueRemovedFrame;
+  | QueueRemovedFrame
+  | TaskSummaryFrame;
 
 /** The set of frame types this client version understands. */
 export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
@@ -620,6 +636,7 @@ export const KNOWN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "queue-added",
   "queue-classified",
   "queue-removed",
+  "task-summary",
 ]);
 
 /**
