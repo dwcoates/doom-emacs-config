@@ -422,6 +422,10 @@ Keep entries minimal — one short sentence or a brief code block per rule.
 
 The animated `thinking…`/`working…`/`retrying…`/`interrupting…`/`monitoring…` indicators at the bottom of the webapp feed are **tail status rows** (`webapp/src/render.ts`); the in-flight precedence set (interrupting > compacting > retrying > working) is the **bucket-1 tail** (`tailStatusRow`), `monitoring…` is its idle-but-async-live fallback, and each animates via `animatedEllipsis()`.
 
+## GUI nomenclature: the central column
+
+The **central column** is the framed strip of the webapp feed the conversation renders inside — the `--agent-bubble-cap` width (75% of `#feed`, centered, an eighth of blank margin each side; `webapp/src/styles.css`), NOT the full width of the encompassing Emacs window. Its **rails** are the column's left and right edges: the assistant response bubble's left edge hugs the left rail and the user prompt bubble's right edge hugs the right rail, while the full-width tool cards (Agent, Bash, Read, Skill, …) center between them at `--tool-card-cap`. Anything spanning the conversation (e.g. the `/clear` red rule and `/compact` label dividers) is confined to this column, not the window.
+
 ## Debugging Vexing / Non-Obvious Bugs
 
 When facing a bug that resists immediate root-cause identification, **do not speculate indefinitely**. Instead, shift to an instrumentation-first approach:
