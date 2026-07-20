@@ -203,6 +203,34 @@ actually holds `chess-widget.js', so a stale or empty dist is skipped."
                 (file-exists-p (expand-file-name "chess-widget.js" dir)))
               (agent-repl--frontend-widget-assets-candidates))))
 
+(defun agent-repl--widget-doctor-issues ()
+  "Return (LEVEL . MESSAGE) issues for the chess-widget capability.
+Warns when no widget-assets dir resolves (the capability is off, so a
+chess-game bubble would render nothing) or when the resolved dir lacks
+the `chess-widget.js' the webapp imports.  No-ops in the sandbox, where
+the daemon and its assets are a host concern.  Aggregated by `doctor.el'
+alongside the install and codex checks."
+  (if (agent-repl--in-sandbox-p)
+      nil
+    (let ((dir (agent-repl--frontend-discover-widget-assets-dir)))
+      (cond
+       ((null dir)
+        (list (cons 'warn
+                    (format (concat "chess-widget capability OFF: no widget-assets dir resolves"
+                                    " — set agent-repl-frontend-widget-assets-dir or put a"
+                                    " cee-web-widget/dist under %s, then"
+                                    " M-x agent-repl-frontend-daemon-restart")
+                            (or agent-repl-frontend-widget-assets-search-root
+                                "your explanation-engine checkout")))))
+       ((not (file-exists-p (expand-file-name "chess-widget.js" dir)))
+        (list (cons 'warn
+                    (format (concat "chess-widget dir %s lacks chess-widget.js"
+                                    " — point agent-repl-frontend-widget-assets-dir at a real"
+                                    " cee-web-widget/dist, then"
+                                    " M-x agent-repl-frontend-daemon-restart")
+                            dir))))
+       (t nil)))))
+
 ;;;; ---- State ------------------------------------------------------------
 
 (defvar agent-repl--frontend-daemon-process nil
