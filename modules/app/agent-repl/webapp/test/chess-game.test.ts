@@ -87,6 +87,7 @@ import {
   hydrateChessGames,
   parseSessionPointer,
   releaseChessGames,
+  WIDGET_UNAVAILABLE_MSG,
 } from "../src/chess-game.js";
 
 describe("chessGameKind", () => {
@@ -253,19 +254,20 @@ describe("hydrateChessGames", () => {
     expect(el.innerHTML).toContain("game file not found");
   });
 
-  it("renders a capability error in frame when the bundle fails to load", async () => {
-    // Arrange
+  it("renders the curated capability message when the bundle fails to load", async () => {
+    // Arrange — a rejecting loadMount models the bundle import 404ing.
     arrange();
     cfg.loadMount = async () => {
-      throw new Error("widget assets are not served");
+      throw new Error("Failed to fetch dynamically imported module");
     };
     configureChessGames(cfg);
     const el = fakeContainer("/ws/chess-game-a.pgn");
     // Act
     hydrateChessGames(rootOf(el));
     await flush();
-    // Assert
-    expect(el.innerHTML).toContain("widget assets are not served");
+    // Assert — the raw browser error is replaced by actionable remediation.
+    expect(el.innerHTML).toContain(WIDGET_UNAVAILABLE_MSG);
+    expect(el.innerHTML).not.toContain("Failed to fetch");
   });
 
   it("passes the previously serialized state to a re-mount", async () => {

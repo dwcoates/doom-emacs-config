@@ -144,6 +144,16 @@ export interface ChessGameRoot {
 const CHESS_GAME_SELECTOR = ".chess-game[data-game-file]";
 const WIDGET_BUNDLE_PATH = "/widget-assets/chess-widget.js";
 
+/**
+ * Shown in the board frame when the widget bundle cannot be loaded (the
+ * daemon is not serving /widget-assets/, i.e. the chess-widget capability
+ * is off). Actionable remediation rather than the raw browser
+ * "Failed to fetch dynamically imported module" string. Exported so tests
+ * can assert against it.
+ */
+export const WIDGET_UNAVAILABLE_MSG =
+  "chess widget not installed: the daemon is not serving /widget-assets/. Set agent-repl-frontend-widget-assets-dir (or make a cee-web-widget/dist discoverable), then run M-x agent-repl-frontend-daemon-restart.";
+
 export interface ChessGameConfig {
   /** Daemon HTTP base, e.g. http://127.0.0.1:8787 */
   base: string;
@@ -232,16 +242,7 @@ async function fetchTextDefault(url: string): Promise<string> {
 
 function loadMount(cfg: ChessGameConfig): Promise<ChessWidgetMount> {
   if (mountPromise === null) {
-    mountPromise = (async () => {
-      if (cfg.loadMount) return cfg.loadMount();
-      const mod = (await import(/* @vite-ignore */ `${cfg.base}${WIDGET_BUNDLE_PATH}`)) as {
-        default?: ChessWidgetMount;
-      };
-      if (typeof mod.default !== "function") {
-        throw new Error("widget bundle carries no mount export");
-      }
-      return mod.default;
-    })();
+    mountPromise = importWidgetMount(cfg);
     // A failed load must not poison the capability forever: the daemon
     // may gain the -widget-assets mount on its next restart.
     mountPromise.catch(() => {
@@ -249,6 +250,40 @@ function loadMount(cfg: ChessGameConfig): Promise<ChessWidgetMount> {
     });
   }
   return mountPromise;
+}
+
+// importWidgetMount resolves the widget bundle's mount export. A failure to
+// LOAD the bundle (typically a 404 on /widget-assets/ — the daemon is not
+// serving the assets, i.e. the capability is off) is remapped to
+// WIDGET_UNAVAILABLE_MSG so the frame shows actionable remediation instead
+// of the raw browser import-failure string; a bundle that loads but is
+// malformed keeps its own distinct "no mount export" error.
+//
+// Stale-webview note: this curated message only reaches a webview running
+// THIS renderer. A webview whose loaded JS predates the chess-game renderer
+// never recognizes the marker and shows it as literal text, and nothing
+// here can detect that (the loaded code is what would do the detecting).
+// The authoritative off-capability detector is the daemon-side probe of
+// GET /capabilities (used by the show-chess-game skill); the fix for a
+// stale webview is a daemon bounce, which remounts every webview.
+async function importWidgetMount(cfg: ChessGameConfig): Promise<ChessWidgetMount> {
+  let mount: ChessWidgetMount | undefined;
+  try {
+    if (cfg.loadMount) {
+      mount = await cfg.loadMount();
+    } else {
+      const mod = (await import(/* @vite-ignore */ `${cfg.base}${WIDGET_BUNDLE_PATH}`)) as {
+        default?: ChessWidgetMount;
+      };
+      mount = mod.default;
+    }
+  } catch {
+    throw new Error(WIDGET_UNAVAILABLE_MSG);
+  }
+  if (typeof mount !== "function") {
+    throw new Error("widget bundle carries no mount export");
+  }
+  return mount;
 }
 
 /** Builds the widget mount options for one payload (fetch + classify). */
