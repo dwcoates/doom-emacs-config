@@ -23,6 +23,21 @@
 
 (require 'cl-lib)
 
+;;;; ---- Shared widget-dist helpers -------------------------------------------
+
+(defun agent-repl-test--make-widget-dist (dir)
+  "Create DIR as a cee-web-widget dist holding a stub `chess-widget.js'."
+  (make-directory dir t)
+  (with-temp-file (expand-file-name "chess-widget.js" dir)
+    (insert "export default 0")))
+
+(defmacro agent-repl-test--with-temp-root (var &rest body)
+  "Bind VAR to a fresh temp directory for BODY, deleting it afterward."
+  (declare (indent 1))
+  `(let ((,var (make-temp-file "agent-repl-widget-" t)))
+     (unwind-protect (progn ,@body)
+       (delete-directory ,var t))))
+
 ;;;; ---- Fake daemon process --------------------------------------------------
 
 (cl-defstruct agent-repl-test--fake-daemon
@@ -637,13 +652,27 @@ multi-repo config dir as work, matching how sessions record the dirs."
                       (cdr (member "-widget-assets" cmd)))))))
 
 (ert-deftest agent-repl-test-daemon-command-omits-widget-assets-when-empty ()
-  "An empty widget-assets dir keeps the flag off the argv entirely."
-  ;; Arrange
-  (let ((agent-repl-frontend-widget-assets-dir ""))
+  "With no explicit dir and nothing discoverable, the flag stays off the argv."
+  ;; Arrange — empty dir and discovery disabled (nil search root).
+  (let ((agent-repl-frontend-widget-assets-dir "")
+        (agent-repl-frontend-widget-assets-search-root nil))
     ;; Act
     (let ((cmd (agent-repl--frontend-daemon-command)))
       ;; Assert
       (should-not (member "-widget-assets" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-command-carries-discovered-widget-assets ()
+  "An empty dir lets auto-discovery put a found dist on the argv."
+  ;; Arrange — no explicit dir, but a discoverable dist under the search root.
+  (agent-repl-test--with-temp-root root
+    (let* ((agent-repl-frontend-widget-assets-dir "")
+           (agent-repl-frontend-widget-assets-search-root root)
+           (dist (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root)))
+      (agent-repl-test--make-widget-dist dist)
+      ;; Act
+      (let ((cmd (agent-repl--frontend-daemon-command)))
+        ;; Assert
+        (should (member dist (cdr (member "-widget-assets" cmd))))))))
 
 (ert-deftest agent-repl-test-daemon-command-carries-remediation-dir ()
   "The daemon argv nominates the checkout the lost-session analyst works in."
@@ -814,6 +843,54 @@ already been restarted."
       (agent-repl-frontend-daemon-restart)
       ;; Assert
       (should (string-match-p "rebound 3 open workspaces" reported)))))
+
+;;;; ---- Widget-assets auto-discovery -----------------------------------------
+
+(ert-deftest agent-repl-test--widget-override-wins ()
+  "An explicit widget-assets dir is returned verbatim, ahead of discovery."
+  (agent-repl-test--with-temp-root root
+    (let ((agent-repl-frontend-widget-assets-dir (expand-file-name "explicit" root))
+          (agent-repl-frontend-widget-assets-search-root root))
+      ;; A real discoverable dist is present, yet the override still wins.
+      (agent-repl-test--make-widget-dist
+       (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root))
+      (should (equal (agent-repl--frontend-discover-widget-assets-dir)
+                     (expand-file-name "explicit" root))))))
+
+(ert-deftest agent-repl-test--widget-discovers-canonical-checkout ()
+  "An empty dir auto-discovers the canonical explanation-engine dist."
+  (agent-repl-test--with-temp-root root
+    (let* ((agent-repl-frontend-widget-assets-dir "")
+           (agent-repl-frontend-widget-assets-search-root root)
+           (dist (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root)))
+      (agent-repl-test--make-widget-dist dist)
+      (should (equal (agent-repl--frontend-discover-widget-assets-dir) dist)))))
+
+(ert-deftest agent-repl-test--widget-discovers-worktree-dist ()
+  "With no canonical dist, discovery finds one under explanation-engine-worktrees."
+  (agent-repl-test--with-temp-root root
+    (let* ((agent-repl-frontend-widget-assets-dir "")
+           (agent-repl-frontend-widget-assets-search-root root)
+           (dist (expand-file-name
+                  "explanation-engine-worktrees/wt1/apps/cee-web-widget/dist" root)))
+      (agent-repl-test--make-widget-dist dist)
+      (should (equal (agent-repl--frontend-discover-widget-assets-dir) dist)))))
+
+(ert-deftest agent-repl-test--widget-skips-dist-without-bundle ()
+  "A dist dir lacking chess-widget.js is not selected."
+  (agent-repl-test--with-temp-root root
+    (let ((agent-repl-frontend-widget-assets-dir "")
+          (agent-repl-frontend-widget-assets-search-root root))
+      (make-directory
+       (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root) t)
+      (should-not (agent-repl--frontend-discover-widget-assets-dir)))))
+
+(ert-deftest agent-repl-test--widget-discovery-nil-when-absent ()
+  "Discovery returns nil when no dist exists under the search root."
+  (agent-repl-test--with-temp-root root
+    (let ((agent-repl-frontend-widget-assets-dir "")
+          (agent-repl-frontend-widget-assets-search-root root))
+      (should-not (agent-repl--frontend-discover-widget-assets-dir)))))
 
 (provide 'test-daemon)
 
