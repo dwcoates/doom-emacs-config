@@ -951,10 +951,6 @@ function ToolCard(
   // the session strip's renderer scoped to THIS agent (see topbar.ts).
   const agentTopbar =
     SUBAGENT_TOOLS.has(item.toolName) ? panels?.agentTopbar?.(item) ?? "" : "";
-  // The source this card's fold hangs on: daemon-classified for live
-  // cards, synthesized from the spawn announcement for transcript-parsed
-  // ones — which is what lets a nested spawn card fold at any depth.
-  const source = member?.source;
   // TABBAR, when a consecutive-run group hands one in, is the row of member
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
@@ -967,7 +963,6 @@ function ToolCard(
       ${progress}
       ${folds}
       ${toolResult(item)}
-      ${liveTaskOutput(item, source)}
       ${agentComposer(item, panels)}
     </div>`;
 }
@@ -1014,12 +1009,6 @@ function agentComposer(item: ToolItem, panels?: PanelContext): string {
 function taskOutputPre(text: string): string {
   if (text === "") return "";
   return `<pre class="tool-output task-live-output">${escapeHtml(text)}</pre>`;
-}
-
-function liveTaskOutput(item: ToolItem, source: AsyncSource | undefined): string {
-  // A card with an async source renders its tail inside its own fold (see
-  // AsyncFold), so painting it here too would double it.
-  return source ? "" : taskOutputPre(item.taskOutput ?? "");
 }
 
 /**
@@ -1124,14 +1113,14 @@ function asyncFace(source: AsyncSource): string {
  * through (Shape A: a member owning several bodies stacks one fold each).
  *
  * A child-feed body is the activity fold, keyed by the tool-use id as
- * ever. A sourced body is the async fold, keyed `async:<toolUseId>` so
+ * ever. A stream body is the async fold, keyed `async:<toolUseId>` so
  * the two never collide on a card that owns both. Both render through
  * the same Fold skeleton into the same `.agent-panel`; the face reads
  * the MEMBER's one status, so the fold can never disagree with the head
  * badge about liveness. The `mayNest` guard cuts a sourced fold at the
  * depth cap and on a cycle (a nested spawn announcing an ancestor's own
- * id). A source-less raw body renders no fold here — the inline tail
- * still covers it (see liveTaskOutput).
+ * id). A source-less raw body (an announcement-less tail) wears the SAME
+ * dress with an `output` face, so no stream renders zero-click inline.
  */
 function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext): string {
   if (!panels) return "";
@@ -1140,15 +1129,17 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
     return ActivitySection(item.toolUseId, spec.items, panels);
   }
   const source = member.source;
-  if (!source) return "";
-  if (!mayNest(panels.depth ?? 0, panels.seenSources, source.source_id)) return "";
+  if (source && !mayNest(panels.depth ?? 0, panels.seenSources, source.source_id)) return "";
   const id = `async:${item.toolUseId}`;
   const arc = member.settled ? "" : `<span class="tool-spinner" aria-hidden="true"></span>`;
+  const face = source
+    ? asyncFace({ ...source, status: member.status })
+    : `output · ${capLabel(toolHeadline(item) !== "" ? toolHeadline(item) : item.toolName, 60)} · ${member.status}`;
   return Fold({
     id,
     foldClass: "async-fold",
     tickerClass: "async-ticker",
-    ticker: `${arc}${escapeHtml(asyncFace({ ...source, status: member.status }))}`,
+    ticker: `${arc}${escapeHtml(face)}`,
     body: () => streamBodyHtml(spec, panels),
     open: panels.isOpen(id),
   });
