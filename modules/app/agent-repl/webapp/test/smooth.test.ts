@@ -123,14 +123,97 @@ describe("SmoothReveal.reveal", () => {
     expect(out.pending).toBe(true);
   });
 
-  it("holds a still-revealing block's done flag false", () => {
-    // Arrange — a whole short block that arrived done in one frame.
+  it("renders a block that first arrives done immediately, without typing it out", () => {
+    // Arrange — a fully-received block reaches the reveal for the first time (a
+    // replay, a gap-fill, or a hidden workspace's drained backlog).
     const smooth = new SmoothReveal(fakeClock(), opts);
     // Act
-    const out = smooth.reveal(state([textItem({ text: "hi", done: true })]));
-    // Assert — it types out rather than snapping, so it reads as streaming.
+    const out = smooth.reveal(state([textItem({ text: "already done", done: true })]));
+    // Assert — the whole text shows at once, real done preserved, no frame asked.
+    expect(shownText(out.state).text).toBe("already done");
+    expect(shownText(out.state).done).toBe(true);
+    expect(out.pending).toBe(false);
+  });
+
+  it("keeps finishing a live tail's type-out after its done flag lands", () => {
+    // Arrange — a block first seen still streaming animates partway.
+    const clock = fakeClock();
+    const smooth = new SmoothReveal(clock, opts);
+    smooth.reveal(state([textItem({ text: "0123456789" })]));
+    clock.advance(16);
+    smooth.reveal(state([textItem({ text: "0123456789" })]));
+    // Act — text-end lands (done true) while the reveal is still behind.
+    clock.advance(16);
+    const out = smooth.reveal(state([textItem({ text: "0123456789", done: true })]));
+    // Assert — it holds done false and keeps typing rather than snapping to full.
+    expect(shownText(out.state).text.length).toBeLessThan(10);
     expect(shownText(out.state).done).toBe(false);
     expect(out.pending).toBe(true);
+  });
+
+  it("shows a superseded block in full while typing out only the live tail", () => {
+    // Arrange — a drained backlog: an earlier finished block, then the tail the
+    // agent is still producing.
+    const smooth = new SmoothReveal(fakeClock(), opts);
+    const first = textItem({ blockId: "b1", text: "first block done", done: true });
+    const tail = textItem({ blockId: "b2", text: "streaming tail" });
+    // Act
+    const out = smooth.reveal(state([first, tail]));
+    // Assert — the finished block shows whole, the tail starts from nothing.
+    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    expect(shown[0].text).toBe("first block done");
+    expect(shown[1].text).toBe("");
+    expect(out.pending).toBe(true);
+  });
+
+  it("renders a whole finished turn's backlog without any animation", () => {
+    // Arrange — a hidden workspace's turn completed: text blocks then a result,
+    // all first seen here at once when the workspace is switched back to.
+    const smooth = new SmoothReveal(fakeClock(), opts);
+    const t1 = textItem({ blockId: "b1", text: "answer one", done: true });
+    const t2 = textItem({ blockId: "b2", text: "answer two", done: true });
+    const result: ConversationItem = {
+      kind: "result",
+      subtype: "success",
+      durationMs: 1,
+      sincePrevFinalMs: 1,
+      numTurns: 1,
+      totalCostUsd: 0,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      isError: false,
+      context: null,
+    };
+    const s = state([t1, t2, result]);
+    // Act
+    const out = smooth.reveal(s);
+    // Assert — both bubbles show whole, no frame is requested, and the untouched
+    // state passes through by identity rather than as an animated copy.
+    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    expect(shown.map((i) => i.text)).toEqual(["answer one", "answer two"]);
+    expect(out.pending).toBe(false);
+    expect(out.state).toBe(s);
+  });
+
+  it("snaps a partially-typed tail to full once a later bubble supersedes it", () => {
+    // Arrange — the tail animates partway while the workspace is visible.
+    const clock = fakeClock();
+    const smooth = new SmoothReveal(clock, opts);
+    smooth.reveal(state([textItem({ blockId: "b1", text: "0123456789" })]));
+    clock.advance(16);
+    smooth.reveal(state([textItem({ blockId: "b1", text: "0123456789" })]));
+    // Act — hidden meanwhile: the block finished and a later block arrived, so
+    // the once-tail block is no longer the last item on switch-back.
+    clock.advance(16);
+    const out = smooth.reveal(
+      state([
+        textItem({ blockId: "b1", text: "0123456789", done: true }),
+        textItem({ blockId: "b2", text: "next" }),
+      ]),
+    );
+    // Assert — the superseded block shows in full, not its half-typed prefix.
+    const shown = out.state.items.filter((i): i is TextItem => i.kind === "text");
+    expect(shown[0].text).toBe("0123456789");
+    expect(shown[0].done).toBe(true);
   });
 
   it("advances at the floor rate near the frontier", () => {
