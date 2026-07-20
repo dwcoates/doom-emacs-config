@@ -28,7 +28,12 @@ import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { SmoothReveal } from "./smooth.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
-import { HostGlobal, installHostCloseMenusHook, installHostTailHook } from "./host.js";
+import {
+  HostGlobal,
+  installHostCloseMenusHook,
+  installHostTailHook,
+  installHostTextScaleHook,
+} from "./host.js";
 import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
@@ -140,6 +145,10 @@ async function boot(): Promise<void> {
   // The Emacs host snaps the feed to its newest message through this hook
   // whenever the user switches to the workspace holding this webview.
   installHostTailHook(window as unknown as HostGlobal, feedEl);
+  // The Emacs host dials the feed's text size up or down through this hook,
+  // sizing the document root's font so every rem-based run of text scales
+  // together (the interactive text-size commands in frontend.el fire it).
+  installHostTextScaleHook(window as unknown as HostGlobal, document.documentElement);
   // The workspaces rail. Emacs pushes the whole roster through this hook on
   // every workspace-state change; the rail stays collapsed until the first
   // push, so a bare-browser session keeps the single-column layout. Roster
