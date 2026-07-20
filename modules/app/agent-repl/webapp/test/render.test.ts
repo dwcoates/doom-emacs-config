@@ -5460,6 +5460,63 @@ describe("navTokensForEntry", () => {
 });
 
 /**
+ * render() reuses mounted nodes in place and, before the reorder pass, mounted
+ * a NEW node with a bare appendChild — correct only while every new entry is
+ * the newest item (the live-stream invariant). A gap-fill revisit (§2.10)
+ * reconciles a whole backlog burst at once, where a batched entry can belong
+ * above an already-mounted node; it must slot at its feed rank, not the tail,
+ * so the revisited feed matches the live one (and renderRestored's rebuild).
+ */
+describe("FeedRenderer: reconcile honors feed order on a batched revisit", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+  };
+
+  function mount(): { container: HTMLElement; feed: FeedRenderer } {
+    const container = document.createElement("div");
+    return { container, feed: new FeedRenderer(container, NOOP_ACTIONS) };
+  }
+
+  function stateOf(items: ConversationItem[]): StoreState {
+    const state = new ConversationStore().state;
+    state.items = items;
+    return state;
+  }
+
+  const keysInDom = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll<HTMLElement>(".feed-item[data-key]")].map(
+      (el) => el.dataset.key ?? "",
+    );
+
+  it("slots a batched entry above an already-mounted node instead of at the tail", () => {
+    // Arrange — first paint mounts the text bubble alone (the state before a
+    // background turn streamed a tool call in above it).
+    const { container, feed } = mount();
+    feed.render(stateOf([userTurnAt(9, 0), text("b1")]));
+    // Act — a gap-fill revisit reconciles the burst at once: the tool now
+    // precedes the text in feed order while the text node is already mounted.
+    feed.render(stateOf([userTurnAt(9, 0), bash("t1"), text("b1")]));
+    // Assert — the new tool node lands ABOVE the mounted text, not beneath it.
+    const keys = keysInDom(container);
+    expect(keys.indexOf("tool:t1")).toBeLessThan(keys.indexOf("text:b1"));
+  });
+
+  it("still appends a genuinely-newest tail item beneath the mounted feed", () => {
+    // Arrange
+    const { container, feed } = mount();
+    feed.render(stateOf([userTurnAt(9, 0), text("b1")]));
+    // Act — the live path: the new item is the newest, so it belongs last.
+    feed.render(stateOf([userTurnAt(9, 0), text("b1"), bash("t1")]));
+    // Assert
+    const keys = keysInDom(container);
+    expect(keys.indexOf("text:b1")).toBeLessThan(keys.indexOf("tool:t1"));
+  });
+});
+
+/**
  * The reconcile toggles the working-frontier breath as a CLASS on the mounted
  * bubble (`applyPulse`), never as part of an item's HTML. The point is a
  * continuous animation: a pulse that moves onto or off a bubble whose body did
