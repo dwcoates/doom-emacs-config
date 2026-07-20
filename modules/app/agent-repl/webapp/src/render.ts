@@ -2425,6 +2425,22 @@ export function panelToggleTarget<T extends { contains(node: T): boolean }>(
 }
 
 /**
+ * The panels that open ALONGSIDE a toggled-open panel. An async badge's
+ * detail mounts the member's card with its stream behind the card's own
+ * `async:` fold, and a stream the user must open TWICE reads as "doesn't
+ * stream" — so opening the badge seeds the stream fold open with it.
+ * Closing the badge leaves the seed alone: it is a first-open convenience,
+ * not a lock, and the user's own later toggles win. The member key's tool
+ * use id is its last segment (`member:<host>:<toolUseId>`), split from the
+ * right because a host id's shape is not ours to constrain.
+ */
+export function panelSeedsOnOpen(id: string): string[] {
+  if (!id.startsWith("member:")) return [];
+  const toolUseId = id.slice(id.lastIndexOf(":") + 1);
+  return toolUseId === "" ? [] : [`async:${toolUseId}`];
+}
+
+/**
  * The ONE per-bubble async projection the amber border and the in-bubble
  * catalog both read: every bubble that owns detached background work → its
  * member tool items. Two sources, one map — the turn-hosted members
@@ -2797,6 +2813,7 @@ export class FeedRenderer {
     const opened = !this.openPanels.has(id);
     if (opened) {
       this.openPanels.add(id);
+      for (const seed of panelSeedsOnOpen(id)) this.openPanels.add(seed);
     } else {
       this.openPanels.delete(id);
     }
