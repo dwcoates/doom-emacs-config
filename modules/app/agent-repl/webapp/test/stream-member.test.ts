@@ -226,6 +226,59 @@ describe("resolveMember", () => {
     const m = resolveMember(tool({ result: SPAWN_RESULT, progressElapsedS: 2 }), ctx());
     expect(m?.elapsedMs).toBe(2000);
   });
+
+  it("settles on the transcript's own terminal record when no notification landed", () => {
+    // Arrange — the stream says it ended; the notification never arrived.
+    const tail = `{"type":"result","subtype":"success","is_error":false}`;
+    const m = resolveMember(
+      pollAgent(),
+      ctx({ tails: { ag1: { text: tail, offset: 1, done: false, elapsedMs: 5 } } }),
+    );
+    // Assert
+    expect(m?.status).toBe("done");
+    expect(m?.settled).toBe(true);
+  });
+
+  it("reads a failing terminal record as an errored member", () => {
+    // Arrange
+    const tail = `{"type":"result","subtype":"error_during_execution"}`;
+    const m = resolveMember(
+      pollAgent(),
+      ctx({ tails: { ag1: { text: tail, offset: 1, done: false, elapsedMs: 5 } } }),
+    );
+    // Assert
+    expect(m?.status).toBe("error");
+  });
+
+  it("carries the transcript's token figure onto the member", () => {
+    // Arrange
+    const tail = `{"type":"assistant","message":{"usage":{"output_tokens":42},"content":[]}}`;
+    const m = resolveMember(
+      pollAgent(),
+      ctx({ tails: { ag1: { text: tail, offset: 1, done: false, elapsedMs: 5 } } }),
+    );
+    // Assert
+    expect(m?.outputTokens).toBe(42);
+  });
+
+  it("carries no token figure for a stream that is not a transcript", () => {
+    // Arrange — a shell spool is bytes; tokens would be an invention.
+    const m = resolveMember(
+      tool({
+        result: SPAWN_RESULT,
+        taskOutput: "plain shell output",
+        asyncSource: {
+          source_id: "bg1",
+          kind: "shell",
+          status: "running",
+          stream: { transport: "ws", format: "text" },
+        },
+      }),
+      ctx(),
+    );
+    // Assert
+    expect(m?.outputTokens).toBeUndefined();
+  });
 });
 
 /** A detached agent spawn, poll-transport by classification. */
