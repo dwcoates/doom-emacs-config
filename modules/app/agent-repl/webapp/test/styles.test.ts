@@ -2787,3 +2787,25 @@ describe("sidebar init dot", () => {
     expect(lightTheme).toMatch(/--init:\s*#3366cc/);
   });
 });
+
+describe("sidebar merge glyph size", () => {
+  // The merge-family glyph (⟳) is a thin stroke, so at the disc statuses' own
+  // box it reads optically smaller than a solid fill. Its font-size is bumped
+  // above the pre-bump 1.15rem so its drawn ring optically matches the fixed
+  // 9px disc alongside the green/red/orange/yellow dots.
+  const mergeGlyph = blockAfter(css, "#ws-sidebar .st-merging,");
+  const disc = blockAfter(css, "#ws-sidebar .st {");
+
+  it("sizes the merge glyph above the pre-bump 1.15rem so it matches the disc", () => {
+    // Arrange + Act
+    const glyphSize = Number(mergeGlyph.match(/font-size:\s*([\d.]+)rem/)?.[1]);
+    // Assert
+    expect(glyphSize).toBeGreaterThan(1.15);
+  });
+
+  it("keeps the disc statuses the fixed 9px circle the glyph is tuned against", () => {
+    // Arrange + Act + Assert
+    expect(disc).toMatch(/width:\s*9px/);
+    expect(disc).toMatch(/height:\s*9px/);
+  });
+});

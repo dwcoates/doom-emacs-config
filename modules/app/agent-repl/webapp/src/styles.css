@@ -380,7 +380,11 @@ body {
   border-radius: 0;
   background: none;
   color: var(--accent);
-  font-size: 1.15rem;
+  /* Sized ABOVE the 9px disc statuses above (#ws-sidebar .st): the recycle
+     glyph is a thin stroke, so at a disc-matching box it reads optically
+     SMALLER than a solid fill alongside the green/red/orange/yellow dots. The
+     bump grows its drawn ring until it optically matches the 9px disc. */
+  font-size: 1.3rem;
   line-height: 1;
 }
 #ws-sidebar .st-merge-conflict,
