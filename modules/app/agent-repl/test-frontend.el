@@ -644,6 +644,177 @@ never reach the webview and the dropdowns would hang open."
   (should (memq #'agent-repl--frontend-close-menus-on-input-click
                 window-selection-change-functions)))
 
+;;;; ---- Adjusting the webview's text size -------------------------------------
+
+(ert-deftest agent-repl-test-frontend-text-size-script-shape-positive-delta ()
+  "The text-size script guards on the hook and passes a positive delta."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--frontend-text-size-script 0.02)
+                 (concat "window.agentReplAdjustTextScale && "
+                         "window.agentReplAdjustTextScale(0.02);"))))
+
+(ert-deftest agent-repl-test-frontend-text-size-script-shape-negative-delta ()
+  "The text-size script passes a negative delta as a bare JS number."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--frontend-text-size-script -0.02)
+                 (concat "window.agentReplAdjustTextScale && "
+                         "window.agentReplAdjustTextScale(-0.02);"))))
+
+(ert-deftest agent-repl-test-frontend-text-size-script-shape-reset ()
+  "The text-size script passes the `reset' symbol as the quoted JS string."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--frontend-text-size-script 'reset)
+                 (concat "window.agentReplAdjustTextScale && "
+                         "window.agentReplAdjustTextScale(\"reset\");"))))
+
+(ert-deftest agent-repl-test-frontend-text-size-hook-name-matches-webapp ()
+  "The hook name lisp calls is the one the webapp plants on `window'.
+webapp/src/host.ts exports `TEXT_SCALE_HOOK'; a rename on either side
+silently turns the text-size commands into no-ops."
+  ;; Arrange
+  (let* ((host-ts (expand-file-name "webapp/src/host.ts" agent-repl--frontend-root))
+         (source (progn
+                   (should (file-exists-p host-ts))
+                   (with-temp-buffer
+                     (insert-file-contents host-ts)
+                     (buffer-string)))))
+    ;; Act + Assert
+    (should (string-match-p
+             (regexp-quote (format "export const TEXT_SCALE_HOOK = \"%s\";"
+                                   agent-repl-frontend-text-size-hook))
+             source))))
+
+(ert-deftest agent-repl-test-frontend-adjust-text-size-runs-the-hook ()
+  "The adjust evaluates the webapp's text-size hook inside the live webview."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+          (calls nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (b script) (push (cons b script) calls))))
+              ;; Act
+              (agent-repl--frontend-adjust-text-size "ws1" 0.02)
+              ;; Assert
+              (should (equal calls
+                             (list (cons buf
+                                         (agent-repl--frontend-text-size-script 0.02)))))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-adjust-text-size-returns-buffer ()
+  "The adjust returns the live webview buffer it drove, so callers can tell
+whether a script actually ran."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (_b _script) nil)))
+              ;; Act + Assert
+              (should (eq (agent-repl--frontend-adjust-text-size "ws1" 'reset) buf))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-adjust-text-size-without-webview-is-noop ()
+  "A workspace with no webview is never asked to resize, and the adjust
+reports nil so the interactive command can signal.  The wrapper is left
+guarded, so any call would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act + Assert — no :frontend-buffer, so the boundary is not reached.
+    (should-not (agent-repl--frontend-adjust-text-size "ws1" 0.02))))
+
+(ert-deftest agent-repl-test-frontend-adjust-text-size-dead-webview-is-noop ()
+  "A recorded but killed webview is never asked to resize, and reports nil.
+The wrapper is left guarded, so any call would fail the test loudly."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (kill-buffer buf)
+      ;; Act + Assert — the dead buffer is not reachable by a script.
+      (should-not (agent-repl--frontend-adjust-text-size "ws1" 0.02)))))
+
+(ert-deftest agent-repl-test-frontend-text-size-increase-sends-positive-step ()
+  "The increase command drives the current workspace's webview by +one step."
+  ;; Arrange
+  (let ((agent-repl-frontend-text-size-step 0.05))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+            (calls nil))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "ws1" :frontend-buffer buf)
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                         (lambda (_b script) (push script calls)))
+                        ((symbol-function 'agent-repl--ws-current-name)
+                         (lambda () "ws1")))
+                ;; Act
+                (agent-repl-frontend-text-size-increase)
+                ;; Assert
+                (should (equal calls
+                               (list (agent-repl--frontend-text-size-script 0.05))))))
+          (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-text-size-decrease-sends-negative-step ()
+  "The decrease command drives the current workspace's webview by -one step."
+  ;; Arrange
+  (let ((agent-repl-frontend-text-size-step 0.05))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+            (calls nil))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "ws1" :frontend-buffer buf)
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                         (lambda (_b script) (push script calls)))
+                        ((symbol-function 'agent-repl--ws-current-name)
+                         (lambda () "ws1")))
+                ;; Act
+                (agent-repl-frontend-text-size-decrease)
+                ;; Assert
+                (should (equal calls
+                               (list (agent-repl--frontend-text-size-script -0.05))))))
+          (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-text-size-reset-sends-reset ()
+  "The reset command drives the current workspace's webview with `reset'."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*agent-frontend-ws1*"))
+          (calls nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                       (lambda (_b script) (push script calls)))
+                      ((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () "ws1")))
+              ;; Act
+              (agent-repl-frontend-text-size-reset)
+              ;; Assert
+              (should (equal calls
+                             (list (agent-repl--frontend-text-size-script 'reset))))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-text-size-command-errors-without-workspace ()
+  "The text-size commands signal when there is no current workspace."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+    ;; Act / Assert
+    (should-error (agent-repl-frontend-text-size-increase) :type 'user-error)))
+
+(ert-deftest agent-repl-test-frontend-text-size-command-errors-without-webview ()
+  "The text-size commands signal when the current workspace has no webview."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+      ;; Act / Assert — no :frontend-buffer, so nothing to resize.
+      (should-error (agent-repl-frontend-text-size-reset) :type 'user-error))))
+
 ;;;; ---- Placement ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-display-hides-panels-first ()

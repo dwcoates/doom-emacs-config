@@ -93,6 +93,16 @@ that namespace and the webview must stay outside it."
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-text-size-step 0.02
+  "Fraction of the base text size one text-size command nudges the webview.
+The gui's text size is a scale multiplier on the webapp's root font
+\(webapp/src/host.ts), and each `agent-repl-frontend-text-size-increase'
+or `agent-repl-frontend-text-size-decrease' adds or subtracts this
+fraction.  Deliberately small so the size can be dialed in finely — the
+default 0.02 is a two-percent step."
+  :type 'number
+  :group 'agent-repl)
+
 ;;;; ---- Capability -----------------------------------------------------------
 
 (defun agent-repl--frontend-xwidget-available-p ()
@@ -385,6 +395,83 @@ input panel all leave the webview untouched."
 
 (add-hook 'window-selection-change-functions
           #'agent-repl--frontend-close-menus-on-input-click)
+
+;;;; ---- Adjusting the webview's text size -------------------------------------
+
+(defconst agent-repl-frontend-text-size-hook "agentReplAdjustTextScale"
+  "Name of the webapp global that resizes the feed's text.
+The webapp plants it on `window' at boot (`TEXT_SCALE_HOOK' in
+webapp/src/host.ts) — the two names are one contract and MUST match.  It
+takes a numeric delta added to the page's current text scale, or the
+string \"reset\" to restore the default size.")
+
+(defun agent-repl--frontend-text-size-script (arg)
+  "Return the JS that drives the text-size hook with ARG.
+ARG is either a number delta added to the page's current text scale, or
+the symbol `reset' to restore the default size.  Guarded on the hook's
+existence: a webview mid-boot or mid-navigation has no hook yet, an
+expected state rather than a violated invariant — a page that has not
+finished booting has no text to resize."
+  (let ((js-arg (if (numberp arg)
+                    (format "%s" arg)
+                  (format "%S" (symbol-name arg)))))
+    (format "window.%s && window.%s(%s);"
+            agent-repl-frontend-text-size-hook
+            agent-repl-frontend-text-size-hook
+            js-arg)))
+
+(defun agent-repl--frontend-adjust-text-size (ws arg)
+  "Drive WS's webview text-size hook with ARG, returning the webview buffer.
+ARG is a number delta or the symbol `reset'.  Returns the webview buffer
+when the script ran, or nil when WS has no live webview — a closed panel
+mounts a fresh webview (default size) on its next open, so the size is a
+live-page preference rather than persistent state."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (agent-repl--log ws "adjust-text-size: arg=%s buf=%s" arg (buffer-name buf))
+      (agent-repl--frontend-webview-execute-script
+       buf (agent-repl--frontend-text-size-script arg))
+      buf)))
+
+(defun agent-repl--frontend-text-size-command (arg)
+  "Drive the current workspace's webview text size with ARG.
+ARG is a number delta or the symbol `reset'.  Shared by the interactive
+increase, decrease, and reset commands.  Signals when there is no
+current workspace, or when the current workspace has no webview open."
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (unless (agent-repl--frontend-adjust-text-size ws arg)
+      (user-error "agent-repl: no webview open for workspace %s" ws))))
+
+;;;###autoload
+(defun agent-repl-frontend-text-size-increase ()
+  "Increase the current workspace's gui text size by one fine step.
+The step is `agent-repl-frontend-text-size-step' of the base size, small
+by design so the size can be dialed in precisely.  Scales the webapp's
+root font, so every rem-sized run of text in the feed grows together.
+Signals when there is no current workspace or no webview open for it."
+  (interactive)
+  (agent-repl--frontend-text-size-command agent-repl-frontend-text-size-step))
+
+;;;###autoload
+(defun agent-repl-frontend-text-size-decrease ()
+  "Decrease the current workspace's gui text size by one fine step.
+The inverse of `agent-repl-frontend-text-size-increase', shrinking the
+webapp's root font by `agent-repl-frontend-text-size-step' of the base
+size.  Signals when there is no current workspace or no webview open for
+it."
+  (interactive)
+  (agent-repl--frontend-text-size-command (- agent-repl-frontend-text-size-step)))
+
+;;;###autoload
+(defun agent-repl-frontend-text-size-reset ()
+  "Reset the current workspace's gui text size to its default.
+Restores the webapp's root font to the base size, discarding every
+increase and decrease applied to the live page.  Signals when there is
+no current workspace or no webview open for it."
+  (interactive)
+  (agent-repl--frontend-text-size-command 'reset))
 
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 

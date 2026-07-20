@@ -3,8 +3,16 @@ import {
   CLOSE_MENUS_HOOK,
   HostGlobal,
   TAIL_HOOK,
+  TEXT_SCALE_BASE_PX,
+  TEXT_SCALE_HOOK,
+  TEXT_SCALE_MAX,
+  TEXT_SCALE_MIN,
+  TextScaleRoot,
+  clampTextScale,
   installHostCloseMenusHook,
   installHostTailHook,
+  installHostTextScaleHook,
+  textScalePx,
 } from "../src/host.js";
 import { ScrollTail } from "../src/scroll.js";
 
@@ -79,5 +87,115 @@ describe("installHostCloseMenusHook", () => {
       closed += 1;
     });
     expect(closed).toBe(0);
+  });
+});
+
+/** A fresh root whose only observable is the font size the hook writes. */
+const freshRoot = (): TextScaleRoot => ({ style: { fontSize: "" } });
+
+/** Fire the planted text-scale hook the way an Emacs host script does. */
+const fireTextScale = (target: HostGlobal, arg: unknown): number =>
+  (target[TEXT_SCALE_HOOK] as (arg: unknown) => number)(arg);
+
+describe("clampTextScale", () => {
+  it("passes a mid-range scale through unchanged", () => {
+    expect(clampTextScale(1.2)).toBe(1.2);
+  });
+
+  it("floors a scale below the minimum", () => {
+    expect(clampTextScale(TEXT_SCALE_MIN - 1)).toBe(TEXT_SCALE_MIN);
+  });
+
+  it("caps a scale above the maximum", () => {
+    expect(clampTextScale(TEXT_SCALE_MAX + 1)).toBe(TEXT_SCALE_MAX);
+  });
+});
+
+describe("installHostTextScaleHook", () => {
+  it("plants the hook under the name frontend.el calls", () => {
+    const target: HostGlobal = {};
+    installHostTextScaleHook(target, freshRoot());
+    expect(typeof target[TEXT_SCALE_HOOK]).toBe("function");
+  });
+
+  it("leaves the root font untouched until the host fires it", () => {
+    const root = freshRoot();
+    installHostTextScaleHook({}, root);
+    expect(root.style.fontSize).toBe("");
+  });
+
+  it("grows the root font by a positive delta off the base", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, 0.5);
+    expect(root.style.fontSize).toBe(`${textScalePx(1.5)}px`);
+  });
+
+  it("shrinks the root font by a negative delta off the base", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, -0.25);
+    expect(root.style.fontSize).toBe(`${textScalePx(0.75)}px`);
+  });
+
+  it("accumulates successive deltas rather than replacing them", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, 0.1);
+    fireTextScale(target, 0.1);
+    expect(root.style.fontSize).toBe(`${textScalePx(1.2)}px`);
+  });
+
+  it("rounds binary-float dust out of the emitted px string", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    // 1.4 * 16 lands as 22.400000000000002 in raw float; the emitted
+    // string must carry the rounded value, never that dust.
+    fireTextScale(target, 0.4);
+    expect(root.style.fontSize).toBe("22.4px");
+  });
+
+  it("returns the new scale so the host can read where it landed", () => {
+    const target: HostGlobal = {};
+    installHostTextScaleHook(target, freshRoot());
+    expect(fireTextScale(target, 0.3)).toBeCloseTo(1.3);
+  });
+
+  it("floors the accumulated scale at the minimum", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, -100);
+    expect(root.style.fontSize).toBe(`${textScalePx(TEXT_SCALE_MIN)}px`);
+  });
+
+  it("caps the accumulated scale at the maximum", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, 100);
+    expect(root.style.fontSize).toBe(`${textScalePx(TEXT_SCALE_MAX)}px`);
+  });
+
+  it("restores the base size when fired with reset", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, 0.5);
+    fireTextScale(target, "reset");
+    expect(root.style.fontSize).toBe(`${TEXT_SCALE_BASE_PX}px`);
+  });
+
+  it("ignores a non-finite argument, leaving the scale where it was", () => {
+    const target: HostGlobal = {};
+    const root = freshRoot();
+    installHostTextScaleHook(target, root);
+    fireTextScale(target, 0.3);
+    fireTextScale(target, "banana");
+    expect(root.style.fontSize).toBe(`${textScalePx(1.3)}px`);
   });
 });
