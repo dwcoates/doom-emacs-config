@@ -54,7 +54,11 @@ import { fetchStatus, refreshStatus } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
-import { WorkspaceSidebar, installWorkspaceRosterHook } from "./sidebar.js";
+import {
+  WorkspaceSidebar,
+  installWorkspaceExpandHook,
+  installWorkspaceRosterHook,
+} from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
@@ -143,6 +147,9 @@ async function boot(): Promise<void> {
   // store rather than in it.
   const sidebar = new WorkspaceSidebar(must("ws-sidebar"), { httpBase });
   installWorkspaceRosterHook(window as unknown as HostGlobal, sidebar);
+  // C-S-RET in the input window fires the expand hook to unfold the
+  // cursor row's detail panel (openDirs is client-owned, off the roster).
+  installWorkspaceExpandHook(window as unknown as HostGlobal, sidebar);
   // Incremental search over the feed (isearch semantics), driven from the
   // composer's keys below. Built before the renderer because the renderer
   // must announce every render to it: the marks live in item DOM that a

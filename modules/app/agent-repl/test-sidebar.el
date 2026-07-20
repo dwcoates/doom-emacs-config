@@ -320,6 +320,34 @@ PLIST key/value pairs are applied after it and may override it."
   (should (equal (agent-repl--sidebar-push-script "{}")
                  "window.agentReplWorkspaceRoster && window.agentReplWorkspaceRoster({});")))
 
+(ert-deftest agent-repl-test-sidebar-expand-script-guards-missing-hook ()
+  "The expand script no-ops (page side) when the hook is not yet planted."
+  (should (equal (agent-repl--sidebar-expand-script "/tmp/ws")
+                 "window.agentReplWorkspaceExpand && window.agentReplWorkspaceExpand(\"/tmp/ws\");")))
+
+(ert-deftest agent-repl-test-sidebar-expand-script-json-encodes-dir ()
+  "A dir with JS-hostile characters rides in as an escaped JSON string."
+  (should (equal (agent-repl--sidebar-expand-script "/tmp/a\"b")
+                 "window.agentReplWorkspaceExpand && window.agentReplWorkspaceExpand(\"/tmp/a\\\"b\");")))
+
+(ert-deftest agent-repl-test-sidebar-expand-push-fires-in-live-webviews ()
+  "The expand push lands the expand script in a live frontend buffer."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "live" "/tmp/live")
+    (let ((buf (generate-new-buffer " sidebar-expand-view")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "live" :frontend-buffer buf)
+            (let (pushed)
+              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                         (lambda (b script) (push (cons b script) pushed))))
+                (agent-repl--sidebar-expand-push "/tmp/live"))
+              (should (= 1 (length pushed)))
+              (should (eq (caar pushed) buf))
+              (should (string-match-p "agentReplWorkspaceExpand" (cdar pushed)))
+              (should (string-match-p "/tmp/live" (cdar pushed)))))
+        (kill-buffer buf)))))
+
 ;;;; ---- The 1Hz gate --------------------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-tick-skips-when-signature-unchanged ()
@@ -356,7 +384,7 @@ PLIST key/value pairs are applied after it and may override it."
   "With no cursor, next lands on the first visible row."
   (agent-repl-test--with-clean-state
     (setq agent-repl--sidebar-flat-dirs '("/a" "/b" "/c"))
-    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+    (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir) (lambda (_dir))))
       (agent-repl--sidebar-nav-move 1))
     (should (equal agent-repl--sidebar-nav-dir "/a"))))
 
@@ -364,7 +392,7 @@ PLIST key/value pairs are applied after it and may override it."
   "With no cursor, prev lands on the last visible row."
   (agent-repl-test--with-clean-state
     (setq agent-repl--sidebar-flat-dirs '("/a" "/b" "/c"))
-    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+    (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir) (lambda (_dir))))
       (agent-repl--sidebar-nav-move -1))
     (should (equal agent-repl--sidebar-nav-dir "/c"))))
 
@@ -373,24 +401,35 @@ PLIST key/value pairs are applied after it and may override it."
   (agent-repl-test--with-clean-state
     (setq agent-repl--sidebar-flat-dirs '("/a" "/b")
           agent-repl--sidebar-nav-dir "/b")
-    (cl-letf (((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+    (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir) (lambda (_dir))))
       (agent-repl--sidebar-nav-move 1))
     (should (equal agent-repl--sidebar-nav-dir "/a"))))
 
-(ert-deftest agent-repl-test-sidebar-nav-select-without-cursor-errors ()
-  "Selecting with no cursor raises `user-error'."
+(ert-deftest agent-repl-test-sidebar-nav-move-opens-landed-dir ()
+  "Moving auto-selects: the landed row opens through the shared open path."
   (agent-repl-test--with-clean-state
-    (should-error (agent-repl-sidebar-nav-select) :type 'user-error)))
-
-(ert-deftest agent-repl-test-sidebar-nav-select-opens-cursor-dir ()
-  "Selecting opens the cursor's dir through the shared open path."
-  (agent-repl-test--with-clean-state
-    (setq agent-repl--sidebar-nav-dir "/tmp/ws")
+    (setq agent-repl--sidebar-flat-dirs '("/a" "/b")
+          agent-repl--sidebar-nav-dir "/a")
     (let (opened)
       (cl-letf (((symbol-function 'agent-repl--sidebar-open-dir)
                  (lambda (dir) (setq opened dir))))
-        (agent-repl-sidebar-nav-select))
-      (should (equal opened "/tmp/ws")))))
+        (agent-repl--sidebar-nav-move 1))
+      (should (equal opened "/b")))))
+
+(ert-deftest agent-repl-test-sidebar-nav-show-info-without-cursor-errors ()
+  "Showing info with no cursor raises `user-error'."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl-sidebar-nav-show-info) :type 'user-error)))
+
+(ert-deftest agent-repl-test-sidebar-nav-show-info-expands-cursor-dir ()
+  "Showing info toggles the cursor row's detail panel via the expand push."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-nav-dir "/tmp/ws")
+    (let (expanded)
+      (cl-letf (((symbol-function 'agent-repl--sidebar-expand-push)
+                 (lambda (dir) (setq expanded dir))))
+        (agent-repl-sidebar-nav-show-info))
+      (should (equal expanded "/tmp/ws")))))
 
 ;;;; ---- Opening -------------------------------------------------------------
 

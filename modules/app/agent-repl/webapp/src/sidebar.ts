@@ -373,15 +373,26 @@ export class WorkspaceSidebar {
     this.mount.innerHTML = sidebarHtml(this.roster, this.openDirs, this.now(), this.errorNote);
   }
 
+  /**
+   * Flip DIR's detail panel open or shut and repaint. The single
+   * mutation point for `openDirs`, shared by the chevron click and the
+   * Emacs expand hook (C-S-RET) so the two entry points can never
+   * disagree. A dir with no rendered row still records in `openDirs`; it
+   * simply has no panel to show until such a row appears.
+   */
+  toggleDetail(dir: string): void {
+    if (this.openDirs.has(dir)) this.openDirs.delete(dir);
+    else this.openDirs.add(dir);
+    this.render();
+  }
+
   private onClick(target: HTMLElement): void {
     // The chevron sits inside the row, so it must claim the click first
     // or every expansion would also switch workspaces.
     if (target.closest("[data-chev]")) {
       const dir = target.closest("[data-row-dir]")?.getAttribute("data-row-dir");
       if (dir == null) throw new Error("workspace sidebar: chevron outside a row");
-      if (this.openDirs.has(dir)) this.openDirs.delete(dir);
-      else this.openDirs.add(dir);
-      this.render();
+      this.toggleDetail(dir);
       return;
     }
     const rowEl = target.closest("[data-row-dir]");
@@ -445,5 +456,26 @@ export const ROSTER_HOOK = "agentReplWorkspaceRoster";
 export function installWorkspaceRosterHook(target: HostGlobal, sidebar: WorkspaceSidebar): void {
   target[ROSTER_HOOK] = (roster: unknown): void => {
     sidebar.update(roster);
+  };
+}
+
+/**
+ * Name of the global Emacs fires to toggle a row's detail panel from the
+ * keyboard (C-S-RET): the host evaluates
+ * `window.agentReplWorkspaceExpand(<dir json literal>)`, so the hook
+ * receives the row's canonical project dir as a string. The lisp side
+ * (`agent-repl--sidebar-expand-hook`) MUST match this string.
+ */
+export const EXPAND_HOOK = "agentReplWorkspaceExpand";
+
+/** Plants the expand hook on the host global (main.ts boot). */
+export function installWorkspaceExpandHook(target: HostGlobal, sidebar: WorkspaceSidebar): void {
+  target[EXPAND_HOOK] = (dir: unknown): void => {
+    // The call is machine-built by Emacs, so a non-string dir is a
+    // contract breach to surface, not an input to coerce.
+    if (typeof dir !== "string") {
+      throw new Error(`workspace expand hook: dir must be a string, got ${JSON.stringify(dir)}`);
+    }
+    sidebar.toggleDetail(dir);
   };
 }
