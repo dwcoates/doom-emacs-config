@@ -2276,6 +2276,24 @@ would otherwise boot silently idle."
     (should (string-match-p "\\`DWC/dup-[a-z]\\{3\\}\\'" (nth 1 scheduled-names)))
     (should-not (equal (nth 0 scheduled-names) (nth 1 scheduled-names)))))
 
+(ert-deftest agent-repl-test-handle-create-command-forwards-postprocessing-prompt ()
+  "handle-create-command parses `postprocessing_prompt' and forwards it as the
+trailing (8th) scheduled arg to `agent-repl--create-worktree-from-command'."
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/pp") (git_root . "/tmp/repo")
+       (postprocessing_prompt . "run the suite after merge"))
+     0)
+    (should (equal (nth 7 scheduled-args) "run the suite after merge"))))
+
+(ert-deftest agent-repl-test-handle-create-command-omits-postprocessing-prompt-when-absent ()
+  "With no `postprocessing_prompt' field, the forwarded trailing arg is nil."
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/pp") (git_root . "/tmp/repo"))
+     0)
+    (should (null (nth 7 scheduled-args)))))
+
 ;;;; ---- Tests: worktree-add-callback ----
 
 (ert-deftest agent-repl-test-worktree-add-callback-failure ()
@@ -2284,38 +2302,48 @@ would otherwise boot silently idle."
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id _cb &optional source-dir no-agent model)
+               (lambda (path dirname prompt priority fork-id _cb &optional source-dir no-agent model _postproc)
                  (setq finalized (list path dirname prompt priority fork-id source-dir no-agent model)))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet" t "ok")
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet" nil t "ok")
       (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" "/src/dir" nil "sonnet"))))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-no-agent ()
   "NO-AGENT is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src no-agent _model)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src no-agent _model _postproc)
                  (setq captured no-agent))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil "/src/dir" t nil t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" t nil nil t "ok")
       (should (eq captured t)))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-model ()
   "MODEL is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent model)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent model _postproc)
                  (setq captured model))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil "haiku" t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil "haiku" nil t "ok")
       (should (equal captured "haiku")))))
+
+(ert-deftest agent-repl-test-worktree-add-callback-forwards-postprocessing-prompt ()
+  "POSTPROCESSING-PROMPT is forwarded to `agent-repl--finalize-worktree-workspace'."
+  (let ((captured :unset))
+    (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent _model postproc)
+                 (setq captured postproc))))
+      (agent-repl--worktree-add-callback
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil nil "run the suite" t "ok")
+      (should (equal captured "run the suite")))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
 
@@ -5462,7 +5490,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model)
+                 (lambda (_name _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model _postproc)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
@@ -5473,7 +5501,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command
          "/tmp/repo/" "name" "prompt" 5 nil nil "opus")
@@ -5485,10 +5513,70 @@ receives nil so the session uses the interactive-model default."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
         (should (null captured-model))))))
+
+(ert-deftest agent-repl-test-create-worktree-from-command-forwards-postprocessing-prompt ()
+  "POSTPROCESSING-PROMPT flows through to `agent-repl--do-create-worktree-workspace'
+as the trailing positional arg."
+  (agent-repl-test--with-clean-state
+    (let ((captured :unset))
+      (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent _model &optional postproc)
+                   (setq captured postproc))))
+        (agent-repl--create-worktree-from-command
+         "/tmp/repo/" "name" "prompt" 5 nil nil nil "run the suite after merge")
+        (should (equal captured "run the suite after merge"))))))
+
+;;;; ---- Tests: postprocessing prompt (run after merge fully finished) ----
+
+(ert-deftest agent-repl-test-maybe-run-postprocessing-prompt-delivers-to-source ()
+  "A target-ws carrying :postprocessing-prompt has it delivered to the source ws."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (delivered nil))
+    (agent-repl--ws-put "child" :postprocessing-prompt "run the suite")
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (ws prompt) (setq delivered (list ws prompt)))))
+      (agent-repl--maybe-run-postprocessing-prompt "source" "child")
+      (should (equal delivered '("source" "run the suite"))))))
+
+(ert-deftest agent-repl-test-maybe-run-postprocessing-prompt-fires-once ()
+  "Delivery clears :postprocessing-prompt so it never fires twice."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (count 0))
+    (agent-repl--ws-put "child" :postprocessing-prompt "run the suite")
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (&rest _) (cl-incf count))))
+      (agent-repl--maybe-run-postprocessing-prompt "source" "child")
+      (agent-repl--maybe-run-postprocessing-prompt "source" "child")
+      (should (= 1 count))
+      (should (null (agent-repl--ws-get "child" :postprocessing-prompt))))))
+
+(ert-deftest agent-repl-test-maybe-run-postprocessing-prompt-noop-when-absent ()
+  "With no :postprocessing-prompt, nothing is delivered."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (delivered nil))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (&rest _) (setq delivered t))))
+      (agent-repl--maybe-run-postprocessing-prompt "source" "child")
+      (should-not delivered))))
+
+(ert-deftest agent-repl-test-merge-finalize-runs-postprocessing-last ()
+  "merge-finalize-on-main runs the postprocessing prompt AFTER load/clear/drain."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (thunk) (funcall thunk)))
+              ((symbol-function 'load-file) (lambda (&rest _) (push 'load calls)))
+              ((symbol-function 'agent-repl--clear-in-flight-merge)
+               (lambda (&rest _) (push 'clear calls)))
+              ((symbol-function 'agent-repl--drain-merge-queue)
+               (lambda () (push 'drain calls)))
+              ((symbol-function 'agent-repl--maybe-run-postprocessing-prompt)
+               (lambda (&rest _) (push 'postproc calls))))
+      (agent-repl--merge-finalize-on-main "source" "child" (float-time))
+      (should (equal (nreverse calls) '(load clear drain postproc))))))
 
 ;;;; ---- Tests: eager-open of a generated workspace's REPL ----
 

@@ -1320,7 +1320,8 @@ priority placement it is due."
 
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id
-                                                       callback &optional source-dir no-agent model)
+                                                       callback &optional source-dir no-agent model
+                                                       postprocessing-prompt)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
@@ -1359,7 +1360,13 @@ MODEL, when non-nil, is the per-workspace agent model alias (from the
 workspace-generation JSON's `model' field); stored under `:model' so
 `agent-repl--build-start-cmd' passes it as `--model' when booting the
 session.  When nil, the session falls back to
-`agent-repl-interactive-model' (default \"opus\")."
+`agent-repl-interactive-model' (default \"opus\").
+
+POSTPROCESSING-PROMPT, when non-nil, is a prompt (from the dispatch
+JSON's `postprocessing_prompt' field) stored under `:postprocessing-prompt';
+`agent-repl--maybe-run-postprocessing-prompt' delivers it to this
+workspace's source after this workspace's merge is fully finished.  It
+survives the merge tombstone (not a runtime key)."
   (agent-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s source-dir=%s model=%s"
                     path dirname priority fork-session-id (or source-dir "nil") (or model "nil"))
   (agent-repl--with-preserved-focus
@@ -1392,7 +1399,8 @@ session.  When nil, the session falls back to
         :priority effective-priority
         :fork-session-id fork-session-id
         :source-ws-dir source-dir
-        :model model)
+        :model model
+        :postprocessing-prompt postprocessing-prompt)
       (agent-repl--inherit-config-dir-override ws source-dir)
       ;; Cache branch names at construction time so --merge-base-ancestor-args
       ;; can skip the per-tick synchronous rev-parse calls on the warm path.
@@ -1418,7 +1426,8 @@ session.  When nil, the session falls back to
 
 (defun agent-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id
-                                               callback source-dir no-agent model ok output)
+                                               callback source-dir no-agent model
+                                               postprocessing-prompt ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
@@ -1432,7 +1441,8 @@ per-workspace agent model alias)."
         (agent-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
         (agent-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
-         priority fork-session-id callback source-dir no-agent model))
+         priority fork-session-id callback source-dir no-agent model
+         postprocessing-prompt))
     (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (agent-repl--warn dirname "git worktree add failed: %s" output)))
 
@@ -1440,7 +1450,8 @@ per-workspace agent model alias)."
                                               fork-session-id
                                               dirname preemptive-prompt
                                               priority callback
-                                              &optional source-dir no-agent model)
+                                              &optional source-dir no-agent model
+                                              postprocessing-prompt)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 On success, also creates the companion start tag at BASE-COMMIT (see
@@ -1461,7 +1472,7 @@ so the booted session runs under `--model MODEL'."
                       (agent-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id callback source-dir
-                       no-agent model ok output))))
+                       no-agent model postprocessing-prompt ok output))))
     (agent-repl--log dirname "worktree async git add: %S" add-args)
     (agent-repl--async-git "worktree-add" git-root add-args after-add)))
 
@@ -1507,7 +1518,7 @@ report the new path as an existing project."
       (agent-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model)
+(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model postprocessing-prompt)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
@@ -1562,7 +1573,7 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
                                    fork-session-id
                                    dirname preemptive-prompt
                                    priority callback source-dir
-                                   no-agent model)))
+                                   no-agent model postprocessing-prompt)))
       (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
@@ -2144,6 +2155,23 @@ fails on worker\".  The cost is negligible — the timer queue drains
 on the very next event-loop tick."
   (run-at-time 0 nil thunk))
 
+(defun agent-repl--maybe-run-postprocessing-prompt (current-ws target-ws)
+  "Deliver TARGET-WS's `:postprocessing-prompt' to CURRENT-WS, exactly once.
+Called at the very end of `agent-repl--merge-finalize-on-main' — after
+TARGET-WS's merge is FULLY finished — so a workspace dispatched with a
+`postprocessing_prompt' field has that prompt run as a new turn in the
+SOURCE workspace (CURRENT-WS) it merged into.  TARGET-WS itself is torn
+down by the merge, so the prompt cannot run there; the key survives the
+tombstone because it is not a runtime key.  The key is cleared after
+reading so it fires once, and a nil/blank prompt is a no-op."
+  (let ((pp (agent-repl--ws-get target-ws :postprocessing-prompt)))
+    (when (and (stringp pp) (not (string-empty-p pp)))
+      (agent-repl--ws-put target-ws :postprocessing-prompt nil)
+      (agent-repl--log current-ws
+                        "postprocessing-prompt: merge of %s fully finished, delivering its prompt to source %s"
+                        target-ws current-ws)
+      (agent-repl--dispatch-prompt-command current-ws pp))))
+
 (defun agent-repl--merge-finalize-on-main (current-ws target-ws t0-do)
   "Defer the post-cherry-pick finalization steps to the MAIN thread.
 Reloads the config (`load-file'), clears TARGET-WS's in-flight merge
@@ -2190,7 +2218,12 @@ stall behind a stale in-flight gate."
      (agent-repl--drain-merge-queue)
      (agent-repl--log current-ws
                        "merge-finalize: drain-merge-queue DONE elapsed=%.3fs"
-                       (- (float-time) t0-do)))))
+                       (- (float-time) t0-do))
+     ;; The merge is now FULLY finished (load -> clear -> drain complete),
+     ;; so run TARGET-WS's postprocessing prompt (if it carried one) in the
+     ;; source it merged into.  Safe here: this thunk already runs on the
+     ;; main thread, and the config reload above has re-defined the callee.
+     (agent-repl--maybe-run-postprocessing-prompt current-ws target-ws))))
 
 ;;;; ---- Thread-safe process teardown ----
 ;;
@@ -2604,7 +2637,7 @@ silently degrade to the default base when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model)
+(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model postprocessing-prompt)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `agent-repl--handle-create-command'); it is threaded through so the
@@ -2643,7 +2676,7 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
     (agent-repl--do-create-worktree-workspace
      name fork-session-id prompt
      #'agent-repl--worktree-generation-eager-open-callback
-     priority base-commit git-root source-dir nil model)))
+     priority base-commit git-root source-dir nil model postprocessing-prompt)))
 
 (defcustom agent-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -2847,6 +2880,27 @@ resolved from CWD — the investigation must land in a real worktree."
           (puthash resume-id name agent-repl--resume-investigation-workspaces)
           name))))
 
+(defvar agent-repl--pending-postprocessing-prompts (make-hash-table :test 'equal)
+  "Bare-workspace-name -> postprocessing prompt, set at create-dispatch time.
+The create dispatch may carry a `postprocessing_prompt' field — a prompt
+the frontend runs AFTER the created workspace's merge fully finishes (see
+`agent-repl--maybe-run-postprocessing-prompt').  It is stashed here keyed
+by the new workspace's bare name at dispatch time and consumed once by
+`agent-repl--finalize-worktree-workspace', which moves it onto the
+workspace's `:postprocessing-prompt' plist entry.  This side table mirrors
+the dispatch->finalize handoff `agent-repl--oneshot-track-workspace' uses,
+avoiding threading the value through the whole worktree-creation chain.")
+
+(defun agent-repl--stash-pending-postprocessing-prompt (bare-name prompt)
+  "Record PROMPT as BARE-NAME's pending postprocessing prompt."
+  (puthash bare-name prompt agent-repl--pending-postprocessing-prompts))
+
+(defun agent-repl--take-pending-postprocessing-prompt (bare-name)
+  "Return and remove BARE-NAME's pending postprocessing prompt, or nil when none."
+  (when-let ((prompt (gethash bare-name agent-repl--pending-postprocessing-prompts)))
+    (remhash bare-name agent-repl--pending-postprocessing-prompts)
+    prompt))
+
 (defun agent-repl--handle-create-command (cmd delay)
   "Handle a \"create\" workspace command CMD after DELAY seconds.
 When CMD contains a \"fork_from\" field, resolves it to a session ID so the
@@ -2898,6 +2952,10 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
          (model (and (stringp cmd-model)
                      (not (string-empty-p cmd-model))
                      cmd-model))
+         (cmd-postprocessing (alist-get 'postprocessing_prompt cmd nil))
+         (postprocessing-prompt (and (stringp cmd-postprocessing)
+                                     (not (string-empty-p cmd-postprocessing))
+                                     cmd-postprocessing))
          (nil-name (agent-repl--ws-nil-name))
          (bare-name (and (stringp name)
                          (not (string-empty-p name))
@@ -2964,7 +3022,8 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
                             (or model "nil"))
           (run-with-timer delay nil
                           #'agent-repl--create-worktree-from-command
-                          git-root effective-name prompt priority fork-session-id base-commit model)))))))
+                          git-root effective-name prompt priority fork-session-id base-commit model
+                          postprocessing-prompt)))))))
 
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
