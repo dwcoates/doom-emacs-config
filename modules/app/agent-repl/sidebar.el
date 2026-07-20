@@ -28,8 +28,10 @@
 ;; Keyboard navigation never leaves Emacs: `C-S-n' / `C-S-p' (input.el,
 ;; from the input window — the xwidget swallows keystrokes, so the page
 ;; itself never sees keys) move an Emacs-owned cursor that rides the
-;; roster push as `navDir', and `C-S-RET' opens the cursor's workspace
-;; directly — no webapp round-trip involved.
+;; roster push as `navDir' AND open the workspace it lands on, so the
+;; highlight always doubles as the active selection.  `C-S-RET' unfolds
+;; the cursor row's detail panel via the expand hook — the one gesture
+;; that touches webapp-owned panel state instead of the roster.
 
 ;;; Code:
 
@@ -51,6 +53,15 @@ webapp/src/host.ts) — the two names are one contract and MUST match.
 The hook receives the roster as an already-parsed object: the push
 script interpolates the JSON text directly into the call, and JSON is
 a valid JS expression.")
+
+(defconst agent-repl--sidebar-expand-hook "agentReplWorkspaceExpand"
+  "Name of the webapp global that toggles a row's detail panel.
+Planted on `window' at boot (`EXPAND_HOOK' in webapp/src/sidebar.ts) —
+the two names are one contract and MUST match.  Receives one argument,
+the row's canonical project dir, as a JSON string.  Backs `C-S-RET',
+whose target panel is webapp-owned client state (`openDirs') the
+roster never carries, so the keyboard reaches it through this hook
+rather than a roster rebuild.")
 
 (defconst agent-repl--sidebar-status-wire
   '((:thinking       . "thinking")
@@ -438,6 +449,17 @@ tick noticing the webview) re-delivers the roster."
           agent-repl--sidebar-roster-hook
           json))
 
+(defun agent-repl--sidebar-expand-script (dir)
+  "Return the JavaScript that toggles DIR's detail panel in the webapp.
+Guards on the hook exactly as `agent-repl--sidebar-push-script' does —
+a webview mid-navigation has not planted it yet.  DIR rides in as a
+JSON string literal (`json-serialize'), so any character in a path
+survives interpolation intact."
+  (format "window.%s && window.%s(%s);"
+          agent-repl--sidebar-expand-hook
+          agent-repl--sidebar-expand-hook
+          (json-serialize dir)))
+
 (defun agent-repl--sidebar-live-webview-buffers ()
   "Return every live frontend webview buffer across live workspaces."
   (let (bufs)
@@ -463,6 +485,18 @@ product, so navigation always walks the order last shown."
     (agent-repl--log nil "sidebar-push: rows=%d webviews=%d nav=%s json-bytes=%d"
                       (length (cdr built)) (length bufs)
                       agent-repl--sidebar-nav-dir (length json))))
+
+(defun agent-repl--sidebar-expand-push (dir)
+  "Toggle DIR's detail panel across every live webview.
+The panel is webapp-owned client state (`openDirs'), so unlike a fold
+this fires the expand hook WITHOUT rebuilding the roster — the page
+flips the panel and re-renders on its own.  No roster round-trip means
+`agent-repl--sidebar-flat-dirs' is left untouched here."
+  (let ((script (agent-repl--sidebar-expand-script dir))
+        (bufs (agent-repl--sidebar-live-webview-buffers)))
+    (dolist (buf bufs)
+      (agent-repl--frontend-webview-execute-script buf script))
+    (agent-repl--log nil "sidebar-expand-push: dir=%s webviews=%d" dir (length bufs))))
 
 ;;;; ---- The 1Hz change gate ----------------------------------------------
 
@@ -523,10 +557,14 @@ navigate a stale nothing."
   agent-repl--sidebar-flat-dirs)
 
 (defun agent-repl--sidebar-nav-move (delta)
-  "Move the keyboard cursor DELTA rows (wrapping) and push the highlight.
+  "Move the keyboard cursor DELTA rows (wrapping) and open where it lands.
 With no cursor yet, DELTA > 0 starts at the first visible row and
 DELTA < 0 at the last — the two ends a user reaching for next/prev
-expects to land on."
+expects to land on.  Opening the landed workspace IS the auto-select:
+`C-S-n' / `C-S-p' both move the highlight and switch to it, so the
+cursor is never a mere preview.  `agent-repl--sidebar-open-dir' pushes
+the fresh roster, so the moved highlight rides that same push and no
+separate highlight push is needed."
   (let ((dirs (agent-repl--sidebar-visible-dirs)))
     (unless dirs
       (user-error "agent-repl sidebar: no workspaces to navigate"))
@@ -538,25 +576,29 @@ expects to land on."
       (setq agent-repl--sidebar-nav-dir (nth next dirs))
       (agent-repl--log nil "sidebar-nav-move: delta=%d idx=%s -> dir=%s of %d"
                         delta cur agent-repl--sidebar-nav-dir (length dirs))
-      (agent-repl--sidebar-push))))
+      (agent-repl--sidebar-open-dir agent-repl--sidebar-nav-dir))))
 
 (defun agent-repl-sidebar-nav-next ()
-  "Move the sidebar's keyboard cursor to the next visible workspace row."
+  "Move the sidebar's keyboard cursor to the next row and open it."
   (interactive)
   (agent-repl--sidebar-nav-move 1))
 
 (defun agent-repl-sidebar-nav-prev ()
-  "Move the sidebar's keyboard cursor to the previous visible workspace row."
+  "Move the sidebar's keyboard cursor to the previous row and open it."
   (interactive)
   (agent-repl--sidebar-nav-move -1))
 
-(defun agent-repl-sidebar-nav-select ()
-  "Open the workspace under the sidebar's keyboard cursor."
+(defun agent-repl-sidebar-nav-show-info ()
+  "Unfold the detail panel of the workspace under the sidebar's cursor.
+Toggles the same per-row panel the chevron click drives, so a second
+press folds it back.  Emacs owns the cursor but the panel is
+webapp-owned client state, so this reaches the page through
+`agent-repl--sidebar-expand-push' rather than a roster rebuild."
   (interactive)
   (let ((dir agent-repl--sidebar-nav-dir))
     (unless dir
       (user-error "agent-repl sidebar: no row selected — C-S-n / C-S-p first"))
-    (agent-repl--sidebar-open-dir dir)))
+    (agent-repl--sidebar-expand-push dir)))
 
 ;;;; ---- Opening a workspace (shared by keyboard + click) ------------------
 
