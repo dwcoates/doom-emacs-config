@@ -431,6 +431,40 @@ func TestE2EFakeResumeReportsResumedClaudeSessionID(t *testing.T) {
 	}
 }
 
+func TestE2EBackgroundCompletionNotificationReachesTheClient(t *testing.T) {
+	// The fake emits its completion notification flagged isReplay, the
+	// shape the real SDK sends for harness-injected messages — this test
+	// is the regression fence for the shim dropping flagged
+	// notifications, which left every async badge spinning forever.
+	// Arrange
+	h := newE2EHarness(t)
+	id := h.createSession(t)
+	conn := h.dial(t, id)
+	readFrame(t, conn) // hello
+
+	// Act
+	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"!bg sleep 1"}`)
+	frames := readUntil(t, conn, "result")
+
+	// Assert — the task-notification frame arrived, correlated to the
+	// spawning call, before the turn's result closed the stream.
+	var notification map[string]any
+	for _, f := range frames {
+		if f["type"] == "task-notification" {
+			notification = f
+		}
+	}
+	if notification == nil {
+		t.Fatalf("no task-notification frame in %v", frameTypes(frames))
+	}
+	if notification["task_id"] == "" || notification["tool_use_id"] == "" {
+		t.Errorf("notification lacks correlation ids: %v", notification)
+	}
+	if notification["status"] != "completed" {
+		t.Errorf("status = %v", notification["status"])
+	}
+}
+
 // TestE2ERealSDKSmoke drives ONE live-API turn through the full stack.
 // Opt-in only: consumes real quota and needs ambient claude credentials.
 //
