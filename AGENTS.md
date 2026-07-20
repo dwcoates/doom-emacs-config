@@ -415,6 +415,7 @@ When asked to make changes, commit your work when done. Commit freely and often.
 ## AGENTS.md Updates
 
 Keep entries minimal — one short sentence or a brief code block per rule.
+Prefer adding a new entry under an existing relevant section over creating a new top-level heading.
 
 # Agent Guidelines for agent-repl Development
 
