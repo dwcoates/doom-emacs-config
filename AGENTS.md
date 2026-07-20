@@ -426,6 +426,18 @@ The animated `thinking…`/`working…`/`retrying…`/`interrupting…`/`monitor
 
 The **central column** is the framed strip of the webapp feed the conversation renders inside — the `--agent-bubble-cap` width (75% of `#feed`, centered, an eighth of blank margin each side; `webapp/src/styles.css`), NOT the full width of the encompassing Emacs window. Its **rails** are the column's left and right edges: the assistant response bubble's left edge hugs the left rail and the user prompt bubble's right edge hugs the right rail, while the full-width tool cards (Agent, Bash, Read, Skill, …) center between them at `--tool-card-cap`. Anything spanning the conversation (e.g. the `/clear` red rule and `/compact` label dividers) is confined to this column, not the window.
 
+## GUI nomenclature: streaming response elements
+
+A **streaming response element** is any response element — bubble or badge — that can be expanded to show a continuous stream of update information specific to an asynchronous process. The element is the expandable UNIT (a fold or a badge), not its host bubble; one bubble can carry several at once.
+
+The consolidated architecture behind every such element is three orthogonal pieces (`webapp/src/stream-member.ts`, `webapp/src/render.ts`):
+
+- **Member** — the model. `resolveMember` is the ONE place a call's streaming nature is decided: its effective source (daemon-classified or synthesized from the spawn announcement), ONE status (`running`/`done`/`error`/`killed`, notification status surfaced), ONE tail (ws-streamed over polled), and a `BodySpec` list in Shape A stacking order (child feed above the detached stream — a dual-body card stacks two folds, never a merged panel).
+- **Face** — the collapsed identity. One status→badge vocabulary (`memberBadge`), one label truncation rule (`capLabel`), the poll-fed elapsed, and the shared top-right `Stop` button (bare label, prompt-mediated caveat in the tooltip), on both geometries: the card head row and the amber catalog pill.
+- **Panel** — the expansion. Every body renders through `MemberFold` into the same `.agent-panel` inset, dispatched per `BodySpec` (`child-feed` → the partitioned child feed, `jsonl-transcript` → nested bubbles, `jsonl-journal` → rows, `raw` → a `<pre>`), with the depth cap, cycle guard, item cap, and dropped-notice enforced there alone. A catalog badge's expansion mounts the member's OWN `ToolCard` inside a Panel — badge context and feed context are one code path and cannot diverge.
+
+Membership rulings from the deliberation: a `TaskCreate` card's update history is a member via its child-feed body (task-id claims, `partition.ts`); the gns-sockets fold shares the fold dress with a rehosted-items body (`gns.ts`); an announcement-less tail is a raw member wearing the same dress (nothing renders zero-click inline); a thinking disclosure is NOT a member (it streams the model's own turn, not a detached process). The standing regression gallery for all of this is the catalogue page (`webapp/catalogue.html`, scenarios in `webapp/src/catalogue.ts`).
+
 ## Debugging Vexing / Non-Obvious Bugs
 
 When facing a bug that resists immediate root-cause identification, **do not speculate indefinitely**. Instead, shift to an instrumentation-first approach:
