@@ -687,7 +687,12 @@ timestamp (orthogonal to `:repl-state'):
     unacknowledged (regardless of any leftover ack from a prior
     cycle); `on-workspace-switch' sets them when the user next
     selects the workspace."
-  (agent-repl--log ws "mark-agent-done ws=%s" ws)
+  (agent-repl--log ws "mark-agent-done ws=%s merged=%s repl-state=%s merge-completed-at=%s"
+                    ws
+                    (or (eq (agent-repl--ws-get ws :repl-state) :merged)
+                        (eq (agent-repl--ws-get ws :merge-completed) t))
+                    (agent-repl--ws-get ws :repl-state)
+                    (agent-repl--ws-get ws :merge-completed-at))
   (agent-repl--ws-set-agent-state ws :done)
   (let ((current (agent-repl--current-ws-p ws)))
     (agent-repl--ws-put ws :done-acked current)
