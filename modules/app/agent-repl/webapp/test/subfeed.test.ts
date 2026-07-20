@@ -239,6 +239,31 @@ describe("openSubfeedSourceIds", () => {
     expect([...ids]).toEqual(["bg1"]);
   });
 
+  it("polls nothing for an announcement-less raw member, whose tail is ws-fed", () => {
+    // Arrange — taskOutput with no spawn announcement and no source: the
+    // raw member's fold opens, but there is no detached id to poll.
+    const item: ToolItem = {
+      kind: "tool",
+      toolUseId: "t1",
+      toolName: "Bash",
+      messageId: "m1",
+      ts: "2026-05-24T10:00:00.000Z",
+      inputJson: "{}",
+      input: { command: "make watch" },
+      inputDone: true,
+      taskOutput: "watch: ok",
+    };
+    // Act
+    const ids = openSubfeedSourceIds({
+      items: [item],
+      watchers: new Map(),
+      isOpen: () => true,
+      tailText: () => undefined,
+    });
+    // Assert
+    expect(ids.size).toBe(0);
+  });
+
   it("polls nothing while every fold is shut", () => {
     // Arrange / Act
     const ids = collect({ items: [spawnCard("Bash", "with ID: bg1")], isOpen: () => false });
