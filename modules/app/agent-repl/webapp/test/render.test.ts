@@ -4358,27 +4358,80 @@ describe("task stop control", () => {
     };
   }
 
-  it("offers a stop button while the spawned task still runs", () => {
+  it("offers a bare Stop verb on the face while the spawned task still runs", () => {
     // Arrange + Act
     const html = renderItem(bgSpawn());
-    // Assert — the label owns being prompt-mediated.
-    expect(html).toContain("task-stop");
-    expect(html).toContain("stop bg7 · asks the agent");
+    // Assert — the tooltip owns being prompt-mediated; the label stays bare.
+    expect(html).toContain("face-stop");
+    expect(html).toContain(">Stop</button>");
+    expect(html).toContain(`title="asks the agent to stop bg7 via TaskStop"`);
     expect(html).toContain(`data-send-prompt="Stop the background task bg7`);
+  });
+
+  it("rides the head's right side rather than the card bottom", () => {
+    // Arrange + Act
+    const html = renderItem(bgSpawn());
+    // Assert — the Stop is inside the tool-head's face-side span.
+    const head = html.slice(html.indexOf("tool-head"), html.indexOf("</div>"));
+    expect(head).toContain("face-stop");
   });
 
   it("withdraws the button once the completion notification lands", () => {
     // Arrange + Act
     const html = renderItem(bgSpawn(true));
     // Assert
-    expect(html).not.toContain("task-stop");
+    expect(html).not.toContain("face-stop");
+  });
+
+  it("offers one Stop covering every id a multi-spawn card announced", () => {
+    // Arrange
+    const item: ToolItem = {
+      ...bgSpawn(),
+      result: {
+        isError: false,
+        content: "Running with ID: bg7. Also running with ID: bg8.",
+      },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html.match(/face-stop/g)?.length).toBe(1);
+    expect(html).toContain(`data-send-prompt="Stop the background tasks bg7, bg8`);
+  });
+
+  it("keeps a spawning card's badge running until the notification lands", () => {
+    // Arrange + Act — the result landed, the detached task did not.
+    const html = renderItem(bgSpawn());
+    // Assert
+    expect(html).toContain("running…");
+    expect(renderItem(bgSpawn(true))).toContain(`<span class="badge ok">done</span>`);
+  });
+
+  it("surfaces a killed notification as a stopped badge", () => {
+    // Arrange
+    const item = {
+      ...bgSpawn(),
+      notification: { taskId: "bg7", status: "killed", text: "<task-notification/>" },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="badge err">stopped</span>`);
+  });
+
+  it("surfaces an errored notification as an error badge", () => {
+    // Arrange
+    const item = {
+      ...bgSpawn(),
+      notification: { taskId: "bg7", status: "failed", text: "<task-notification/>" },
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`<span class="badge err">error</span>`);
   });
 
   it("offers no control on a card that spawned nothing", () => {
     // Arrange + Act
     const html = renderItem(tool());
     // Assert
-    expect(html).not.toContain("task-controls");
+    expect(html).not.toContain("face-stop");
   });
 });
 
@@ -4891,7 +4944,7 @@ describe("async catalog", () => {
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
     // Assert
     expect(html).toContain("polled line");
-    expect(html).toContain("watcher-elapsed");
+    expect(html).toContain("face-elapsed");
   });
 
   it("prefers the store-streamed tail over the polled one", () => {

@@ -1810,13 +1810,13 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew a fifth.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the four unrelated
-    // inline-flex users (.tab-chip, the counter chip, the .async-badge, and
-    // the topbar's .info-monitoring datapoint).
+    // Act / Assert — one shared ticker rule, plus the five unrelated
+    // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
+    // topbar's .info-monitoring datapoint, and the face's .face-side).
     expect(css).toMatch(
       /\.agent-ticker,\s*\n\.watcher-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/,
     );
-    expect(bodies.length).toBe(5);
+    expect(bodies.length).toBe(6);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
