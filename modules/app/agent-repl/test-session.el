@@ -615,7 +615,8 @@ workspace's durable session id."
   "mark-agent-done sets :agent-state :done unconditionally."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
                    (when (eq state :done) (setq done-set ws)))))
         (agent-repl--mark-agent-done "ws1")
@@ -628,7 +629,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
   (agent-repl-test--with-clean-state
     (let ((done-set nil))
       ;; Any hypothetical visibility — mark-agent-done does not read it.
-      (cl-letf (((symbol-function 'get-buffer-window)
+      (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+                ((symbol-function 'get-buffer-window)
                  (lambda (&rest _) 'some-window))
                 ((symbol-function 'agent-repl--ws-set-agent-state)
                  (lambda (ws state)
@@ -640,7 +642,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
   "mark-agent-done sets :done-acked t when the workspace is current
 (user is actively looking when :done arrives)."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+              ((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) t)))
       (agent-repl--mark-agent-done "ws1")
       (should (eq (agent-repl--ws-get "ws1" :done-acked) t)))))
@@ -649,7 +652,8 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
   "mark-agent-done stamps :done-acked-at with current time when the
 workspace is current, so the focus-dwell countdown can start."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+              ((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) t)))
       (let ((before (float-time)))
         (agent-repl--mark-agent-done "ws1")
@@ -664,7 +668,8 @@ from a prior cycle."
   (agent-repl-test--with-clean-state
     ;; Pretend a prior cycle left :done-acked t — must be cleared.
     (agent-repl--ws-put "ws1" :done-acked t)
-    (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+              ((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) nil)))
       (agent-repl--mark-agent-done "ws1")
       (should (null (agent-repl--ws-get "ws1" :done-acked))))))
@@ -675,10 +680,23 @@ a stale focus timestamp from a prior cycle does not bleed into the
 new :done lifecycle."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :done-acked-at (float-time))
-    (cl-letf (((symbol-function 'agent-repl--current-ws-p)
+    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
+              ((symbol-function 'agent-repl--current-ws-p)
                (lambda (_ws) nil)))
       (agent-repl--mark-agent-done "ws1")
       (should (null (agent-repl--ws-get "ws1" :done-acked-at))))))
+
+(ert-deftest agent-repl-test-mark-agent-done-notifies ()
+  "mark-agent-done fires the finished notification for WS, so every
+transition to :done — not just the Stop-hook completion path — notifies
+the user when the frame is unfocused."
+  (agent-repl-test--with-clean-state
+    (let (notified)
+      (cl-letf (((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--maybe-notify-finished)
+                 (lambda (ws) (setq notified ws))))
+        (agent-repl--mark-agent-done "ws1")
+        (should (equal notified "ws1"))))))
 
 (ert-deftest agent-repl-test-handle-agent-finished-notifies-other-ws ()
   "handle-agent-finished should record a line when WS is not the current workspace."
