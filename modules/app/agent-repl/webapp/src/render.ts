@@ -1154,33 +1154,6 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
   });
 }
 
-/**
- * One watcher's row inside a bubble's fold: its identity and one-vocabulary
- * face badge, then the SAME live surface its own tool card carries — the
- * daemon's file tail, the face-side Stop, and the message composer —
- * resolved through the same stream-member record the card reads, so the
- * two surfaces cannot disagree about liveness or tail.
- */
-function WatcherRow(item: ToolItem, panels?: PanelContext): string {
-  const member = resolveMember(item, memberCtx(panels));
-  const ids = member?.taskIds ?? [];
-  const label = ids.length > 0 ? `${item.toolName} · ${ids.join(", ")}` : item.toolName;
-  const headline = toolHeadline(item);
-  const status = memberBadge(member?.status ?? "done");
-  const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
-  const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
-  // The same BodySpec dispatch the card's own fold uses, rather than a
-  // second hand-rolled <pre>: a watcher that is a background agent renders
-  // its transcript as nested bubbles here too. The row is the STREAM view,
-  // so the member's child-feed body stays with its card.
-  const streamSpec = member?.bodies.find((b) => b.kind !== "child-feed");
-  const tail = streamSpec ? streamBodyHtml(streamSpec, panels) : "";
-  return `<div class="watcher-row">
-      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${faceSide(member)}</div>
-      ${desc}${progress}${tail}${agentComposer(item, panels)}
-    </div>`;
-}
-
 /** A member's badge label: its tool name and first announced id, capped. */
 function asyncBadgeLabel(item: ToolItem): string {
   const ids = spawnedTaskIds(item);
@@ -1238,9 +1211,15 @@ function AsyncCatalog(hostId: string, panels?: PanelContext): string {
   const members = panels?.watchers?.get(hostId) ?? [];
   if (members.length === 0) return "";
   const badges = members.map((m) => AsyncBadge(hostId, m, panels)).join("");
+  // An open badge expands the member's OWN CARD inside the shared panel
+  // inset — the very ToolCard the feed renders, so badge context and feed
+  // context are one code path (face, folds, Stop, composer, topbar all
+  // included) and cannot diverge. The card's folds arrive collapsed,
+  // carrying their usual `async:`/tool-use keys, which the feed instance
+  // of the same card shares.
   const details = members
     .filter((m) => panels?.isOpen(`member:${hostId}:${m.toolUseId}`) ?? false)
-    .map((m) => WatcherRow(m, panels))
+    .map((m) => `<div class="agent-panel"><div class="feed-child">${ToolCard(m, panels)}</div></div>`)
     .join("");
   return `<div class="async-catalog"><div class="async-badges">${badges}</div>${details}</div>`;
 }

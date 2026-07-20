@@ -411,7 +411,7 @@ export const scenarios: Scenario[] = [
     slug: "host-catalog",
     title: "host bubble's async catalog: badges expanding to watcher rows",
     blurb:
-      "A final response hosting three members its turn armed: two live (amber badges, amber bubble border outranking the green final-response) and one settled (grey badge). Expanded, the agent member's badge opens its WatcherRow — the same transcript-as-bubbles dispatch, plus stop control and composer.",
+      "A final response hosting three members its turn armed: two live (amber badges, amber bubble border outranking the green final-response) and one settled (grey badge). Expanded, the agent member's badge opens the member's OWN CARD inside the panel inset — the very ToolCard the feed renders, folds, Stop, and composer included — with its transcript fold opened here to show the nested bubbles.",
     items: [
       userTurn("cat-u6", "Kick off the soak and the migration, then summarize"),
       tool(
@@ -463,7 +463,7 @@ export const scenarios: Scenario[] = [
     tails: {
       "ag-9": { text: BADGE_TRANSCRIPT, offset: 512, done: false, elapsedMs: 96_000 },
     },
-    openIds: ["member:cat-final-6:cat-w2"],
+    openIds: ["member:cat-final-6:cat-w2", "async:cat-w2"],
   },
   {
     taxonomy: "2.3",

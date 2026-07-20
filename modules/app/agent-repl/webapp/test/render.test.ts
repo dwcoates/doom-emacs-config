@@ -4885,7 +4885,7 @@ describe("async catalog", () => {
     // Assert
     expect(html).toContain("async-catalog");
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
-    expect(html).not.toContain("watcher-row");
+    expect(html).not.toContain("tool-card");
   });
 
   it("never repeats the monitoring line inside the bubble catalog while a member is live", () => {
@@ -4905,13 +4905,15 @@ describe("async catalog", () => {
     expect(html).toContain(`<div class="async-badge" data-panel-toggle="member:b1:w1"`);
   });
 
-  it("expands a badge's WatcherRow detail and its live tail when open", () => {
+  it("expands a badge into the member's own card inside the panel inset", () => {
     // Arrange
     const w = watcher("bg1", { taskOutput: "polling the queue…" });
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), watcherPanels([w], true));
-    // Assert
-    expect(html).toContain("watcher-row");
+    // Assert — the detail is the very ToolCard the feed renders, in an
+    // .agent-panel wrap, its tail behind the card's own (open) fold.
+    expect(html).toContain(`<div class="agent-panel"><div class="feed-child">`);
+    expect(html).toContain("tool-card tool-bash");
     expect(html).toContain("task-live-output");
     expect(html).toContain("polling the queue…");
   });
@@ -5124,10 +5126,12 @@ describe("gns-sockets fold", () => {
     };
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — the member badge stays closed while the gns fold opens.
+    // Assert — the member badge stays closed while the gns fold opens: the
+    // Bash watcher's card (the badge's detail) never mounts, while the gns
+    // panel and its folded Agent card do.
     expect(html).toContain(`data-panel-toggle="member:b1:w1"`);
     expect(html).toContain(`data-panel-toggle="gns:b1"`);
-    expect(html).not.toContain("watcher-row");
+    expect(html).not.toContain("tool-bash");
     expect(html).toContain("agent-panel");
   });
 });

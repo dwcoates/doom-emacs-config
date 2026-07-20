@@ -79,12 +79,15 @@ describe("catalogue scenarios", () => {
     const html = renderScenarioHtml(scenario("host-catalog"), closed);
     expect(html).toContain("async-badge");
     expect(html).toContain("async-live");
-    expect(html).not.toContain("watcher-row");
+    // Every fold closed means no detail panel is mounted anywhere.
+    expect(html).not.toContain("agent-panel");
   });
 
-  it("host-catalog expanded opens the agent member's watcher row", () => {
+  it("host-catalog expanded opens the member's own card with its transcript", () => {
     const html = expanded("host-catalog");
-    expect(html).toContain("watcher-row");
+    // The badge detail is the member's ToolCard in the panel inset, its
+    // transcript fold open and rendering nested bubbles.
+    expect(html).toContain(`<div class="agent-panel"><div class="feed-child">`);
     expect(html).toContain("Halfway through");
   });
 
