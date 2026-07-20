@@ -51,7 +51,7 @@ import {
 } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
 import { renderPromptBody } from "./prompt-body.js";
-import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
+import { findTreeRegion, looksLikeIntendedTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { navTokensForItem } from "./nav.js";
 import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
@@ -530,6 +530,28 @@ export function queuedCardKey(item: QueuedItem): string {
   return `queued:${item.queue_id}`;
 }
 
+// Bubbles already warned about a metaprompt-tree postprocessing misfire. A
+// persistent misfire re-renders on every feed pass, so each bubble warns at
+// most once.
+const warnedTreeMisfires = new Set<string>();
+
+/**
+ * Warn (once per bubble) when a completed, header-led text segment produced
+ * no tree region: the response reads as an intended metaprompt tree, yet the
+ * postprocessing did not fire. A segment carrying a ``` fence is skipped,
+ * because the markdown fence handler may still render a fenced tree from it.
+ */
+function warnTreeMisfire(blockId: string, done: boolean, segText: string): void {
+  if (!done) return;
+  if (segText.includes("```")) return;
+  if (!looksLikeIntendedTree(segText)) return;
+  if (warnedTreeMisfires.has(blockId)) return;
+  warnedTreeMisfires.add(blockId);
+  console.warn(
+    `metaprompt-tree: postprocessing did not fire for a header-led response (block ${blockId})`,
+  );
+}
+
 /**
  * A turn's FINAL response gets the green border (§2.4): the answer the
  * turn actually landed on, set apart from the running commentary the
@@ -598,12 +620,22 @@ function TextStream(
   const body = splitChessGameSegments(item.text, !item.done)
     .map((seg) => {
       if ("path" in seg) return chessGameContainerHtml(seg.path);
-      // A bare metaprompt TLDR tree (no code fence — fenced trees are the
-      // markdown fence handler's job) renders as hanging-indent tree lines;
-      // the markdown pipeline would shear its wrapped branches to column 0.
-      if (!seg.text.includes("```") && isMetapromptTree(seg.text)) {
-        return `<div class="mp-tree">${renderTreeHtml(seg.text, inline)}</div>`;
+      // A bare metaprompt TLDR tree renders as hanging-indent tree lines (the
+      // markdown pipeline would shear its wrapped branches to column 0). The
+      // model sometimes wraps the tree in stray prefix/postfix prose or a
+      // fenced block despite the format, so carve out the tree's line bounds
+      // and render only that region as a tree, keeping any surrounding lines
+      // on the markdown path (fenced trees stay the fence handler's job —
+      // findTreeRegion skips fenced lines).
+      const region = findTreeRegion(seg.text);
+      if (region) {
+        const before = region.before.trim() === "" ? "" : renderMarkdown(region.before);
+        const after = region.after.trim() === "" ? "" : renderMarkdown(region.after);
+        return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline)}</div>${after}`;
       }
+      // A header-led segment that yielded no tree region is a postprocessing
+      // misfire — surface it once per bubble so such cases stay visible.
+      warnTreeMisfire(item.blockId, item.done, seg.text);
       return renderMarkdown(seg.text);
     })
     .join("");
