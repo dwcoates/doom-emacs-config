@@ -31,6 +31,7 @@ Renders an interactive chess board inside the current agent-repl response bubble
    - `EXIT CODE 1:` usage error. IMMEDIATELY terminate and surface the raw error.
    - `EXIT CODE 2:` environment or input error. IMMEDIATELY terminate and surface the raw error.
    - `EXIT CODE 3:` the engine daemon's address was not discoverable. Ask the user for the backend URL, then re-run step 1c as `<skill_base_dir>/run.sh --write-session <session-id> <url>`.
+   - `EXIT CODE 4:` the chess-widget capability is unavailable, so no board can render. stdout is actionable remediation, NOT a marker. Surface the printed remediation to the user VERBATIM as plain text, and NEVER emit a marker line.
 3. Emit the marker line in the response:
    - a. Re-emit the printed marker line VERBATIM, on its own line, as plain text.
    - b. NEVER wrap the marker line in a code fence, inline code, or a blockquote — a fenced marker renders as literal text instead of a board.
@@ -41,4 +42,4 @@ Renders an interactive chess board inside the current agent-repl response bubble
 - **CRITICAL NOTE: the marker line must be re-emitted verbatim and unfenced.** Any wrapping or edit breaks the board rendering.
 - **CRITICAL NOTE: never paste large game payloads into the response.** The payload travels through `run.sh`; the response carries only the marker line.
 - **IMPORTANT NOTE: do not self-remediate `run.sh` failures or read its internals.** React only to the documented exit codes.
-- **IMPORTANT NOTE: the board requires the GUI's chess capability to be configured.** When the board shows a capability error in place, tell the user to configure the widget assets for the agent-repl daemon.
+- **IMPORTANT NOTE: the board requires the agent-repl daemon's chess capability.** When `run.sh` exits 4 it has already printed the remediation to surface, so NEVER hand-write your own capability guidance and NEVER emit a marker anyway.
