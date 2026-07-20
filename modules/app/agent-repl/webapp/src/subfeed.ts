@@ -122,12 +122,12 @@ export function mayNest(
  * collected RECURSIVELY so polling mirrors exactly what the renderer
  * draws at every depth.
  *
- * Two roots, matching the two fold surfaces. A spawning card's async
- * fold (`async:<toolUseId>`) contributes its poll source; an in-bubble
- * catalog badge (`member:<host>:<toolUseId>`) contributes its own member's
- * announced ids, since an open badge renders that member's tail inline (a
- * WatcherRow) the moment it opens. From either root the walk descends into a
- * transcript source's
+ * Two roots, matching the two streaming surfaces. A card's async fold
+ * (`async:<toolUseId>`) contributes its poll source; an in-bubble catalog
+ * badge (`member:<host>:<toolUseId>`) contributes its own member's
+ * announced ids, since an open badge mounts that member's card (whose
+ * face reads the poll-fed elapsed) the moment it opens. From either root
+ * the walk descends into a transcript source's
  * accumulated tail — TAILTEXT, the poller's own state — because that
  * parse is where the nested spawn cards live: opening depth N's fold
  * polls its tail, whose parse reveals depth N+1's cards, whose folds
