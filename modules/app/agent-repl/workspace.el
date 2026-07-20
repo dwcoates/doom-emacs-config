@@ -1004,6 +1004,71 @@ passing for an already-merged workspace."
                           ws (if (eq canonical-ws ws) "t" "nil") new-cache)
         (agent-repl--ws-update-names-cache new-cache))))))
 
+(defun agent-repl--reorder-workspace-next-to (ws anchor)
+  "Move workspace WS to sit immediately after ANCHOR in `persp-names-cache'.
+Places WS's tab-bar entry directly to the right of ANCHOR's entry so a
+child workspace surfaces next to the parent workspace it was generated
+from.
+
+Mirrors `agent-repl--reorder-workspace-by-priority' in structure:
+preserves cache string identity via the `(car (member ws cache))'
+canonicalization (`persp-remove-from-menu' relies on `eql' identity
+for string removal), and the `persp-nil-name' slot at the cache head.
+When ANCHOR is the `persp-nil-name' sentinel — the only case where a
+cache-present ANCHOR is absent from the visible portion — WS lands at
+the front of the visible portion, i.e. immediately after the sentinel.
+
+No-op when the cache does not contain WS, when ANCHOR is nil, absent
+from the cache, or `equal' to WS, when persp-mode is not loaded, or
+when `persp-update-names-cache' is unavailable.  Those bail-outs fall
+back to the caller's alternative placement (typically
+`agent-repl--reorder-workspace-by-priority').  Each entry, every
+bail-out, and the post-mutation cache state are logged so the silent
+no-op paths are observable when reproducing ordering bugs.
+
+This function is part of the persp-mode integration boundary owned
+by `workspace.el' (see file Commentary and AGENTS.md).  Callers must
+route through it; they may not mutate `persp-names-cache' directly."
+  (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
+    (agent-repl--log ws "reorder-workspace-next-to: ENTRY ws=%s anchor=%s cache=%S"
+                      ws anchor cache-snapshot)
+    (cond
+     ((not (boundp 'persp-names-cache))
+      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=cache-unbound" ws))
+     ((not (member ws persp-names-cache))
+      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=not-in-cache cache=%S"
+                        ws persp-names-cache))
+     ((null anchor)
+      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=no-anchor" ws))
+     ((not (member anchor persp-names-cache))
+      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-not-in-cache anchor=%s cache=%S"
+                        ws anchor persp-names-cache))
+     ((equal ws anchor)
+      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-is-self" ws))
+     (t
+      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+             (canonical-ws (car (member ws persp-names-cache)))
+             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
+             (visible (if nil-name
+                          (cl-remove nil-name without-ws :test #'equal :count 1)
+                        without-ws))
+             (anchor-pos (cl-position anchor visible :test #'equal))
+             (new-visible (if anchor-pos
+                              (append (cl-subseq visible 0 (1+ anchor-pos))
+                                      (list canonical-ws)
+                                      (cl-subseq visible (1+ anchor-pos)))
+                            ;; ANCHOR was the `persp-nil-name' sentinel (dropped
+                            ;; from `visible' above); put WS at the front so it
+                            ;; still lands immediately after the sentinel.
+                            (cons canonical-ws visible)))
+             (new-cache (if (and nil-name (member nil-name persp-names-cache))
+                            (cons nil-name new-visible)
+                          new-visible)))
+        (agent-repl--log ws "reorder-workspace-next-to: APPLY ws=%s canonical-eq-input=%s anchor=%s position=%s new-cache=%S"
+                          ws (if (eq canonical-ws ws) "t" "nil")
+                          anchor (or anchor-pos "front") new-cache)
+        (agent-repl--ws-update-names-cache new-cache))))))
+
 ;;;; ---- persp-mode identity / navigation boundary -----------------------
 ;;
 ;; These thin wrappers insulate callers from the +workspace-* API names so
