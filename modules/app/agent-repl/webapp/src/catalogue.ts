@@ -517,11 +517,11 @@ export const scenarios: Scenario[] = [
     openIds: ["gns:cat-final-8"],
   },
   {
-    taxonomy: "3.3",
+    taxonomy: "3.3 (resolved)",
     slug: "inline-shell",
-    title: "boundary: announcement-less tail, inline with no expansion",
+    title: "announcement-less tail, now a raw member in the shared dress",
     blurb:
-      "A streamed tail on a call whose result announced NO task id: with nothing to synthesize a source from (a result that does announce one grows a fold even without daemon classification), the tail paints zero-click into the card as a plain <pre>. Boundary case: a continuous stream of an async process that is NOT expandable — it fails the definition today, yet is arguably the same element wanting the same dress.",
+      "A streamed tail on a call whose result announced NO task id: formerly the one stream that painted zero-click inline as a plain <pre>, it now resolves as a raw member and wears the same fold dress as every other streaming element, with an `output` face naming the command.",
     items: [
       userTurn("cat-u9", "Keep the build watcher running"),
       tool(
@@ -534,7 +534,7 @@ export const scenarios: Scenario[] = [
         },
       ),
     ],
-    openIds: [],
+    openIds: ["async:cat-plainshell-1"],
   },
   {
     taxonomy: "3.4",

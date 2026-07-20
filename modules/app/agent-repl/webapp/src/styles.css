@@ -1074,13 +1074,11 @@ pre {
    HTML only while open — see ActivitySection), and a second click on the
    ticker folds it back. Clicks inside the panel belong to the children. */
 /* Every fold wears one look, because every fold IS one component (see the
-   shared `Fold` skeleton): the activity panel on a spawning card, the
-   watcher fold inside a final-response bubble, and the async fold a card
-   carrying a detached source wears. They were three near-identical rule
-   sets — the two tickers were byte-for-byte identical — so they are one
-   selector list here; only .watcher-fold's slightly roomier rule below
-   still differs, and only because it sets off answer prose rather than
-   card chrome. */
+   shared `Fold` skeleton): the activity panel on a spawning card and the
+   async fold every stream body wears. They were near-identical rule sets —
+   the tickers were byte-for-byte identical — so they are one selector list
+   here; only .gns-fold's slightly roomier rule below still differs, and
+   only because it sets off answer prose rather than card chrome. */
 .agent-activity,
 .async-fold {
   border-top: 1px dashed var(--border);
@@ -1098,7 +1096,6 @@ pre {
    fold's top, never in the tab bar). max-width keeps a long "N steps · …"
    line from spilling past the card. */
 .agent-ticker,
-.watcher-ticker,
 .async-ticker,
 .gns-ticker {
   display: inline-flex;
@@ -1129,28 +1126,19 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-/* The watcher fold inside a final-response bubble (§ watcher-bubble
-   expansion): the collapsed ticker mirrors an activity fold's pill, and the
-   open body reuses .agent-panel wholesale. A dashed top rule sets it off
-   from the answer prose above it. The spinner in the ticker is the sole
-   live signal — a final-response bubble belongs to an ended turn, which
-   never breathes, so the arc is what says a watcher is still running. */
-.watcher-fold,
+/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
+   bridge upkeep that followed the answer, wearing the shared fold dress —
+   dashed rule, pill ticker, .agent-panel body — with slightly roomier
+   spacing because it sets off answer prose rather than card chrome. Its
+   body is a child feed (folded cards and bubbles through renderItem). */
 .gns-fold {
   border-top: 1px dashed var(--border);
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   cursor: zoom-in;
 }
-.watcher-fold.open,
 .gns-fold.open { cursor: default; }
-.watcher-fold.open > .watcher-ticker,
 .gns-fold.open > .gns-ticker { cursor: zoom-out; }
-/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
-   bridge upkeep that followed the answer, wearing the exact watcher-fold
-   dress — dashed rule, pill ticker, .agent-panel body — so a bubble
-   carrying both reads as one folding vocabulary. Its body is a child feed
-   (folded cards and bubbles through renderItem), not watcher rows. */
 /* A row-format stream's entries (§2.6 jsonl-journal / events). Rows, not
    bubbles: a workflow journal is a record log and a task's stream is state
    transitions, so neither has a speaker to attribute a bubble to. */
@@ -1179,8 +1167,6 @@ pre {
   font-style: italic;
   padding-bottom: 0.25rem;
 }
-.watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
-.watcher-head { display: flex; align-items: center; gap: 0.5rem; }
 /* The face's right-aligned side, pushed to the head's right edge: the live
    elapsed figure (poll-fed, heartbeat fallback) and the shared Stop verb.
    Stop is the one action every live member offers, so it rides the face
@@ -1305,20 +1291,18 @@ pre {
 .tool-progress { color: var(--muted); font-style: italic; }
 /* The scheduled-wakeup anchor: pending-work orange, like the run badge. */
 .wake-at { color: var(--thinking); font-style: italic; }
-/* Prompt-mediated card controls: each button asks the AGENT (a real
-   turn, queued like any prompt) and its label owns that. One shared
-   shape; only the color separates stop from send. */
-.task-controls { margin-top: 0.35rem; }
-.task-stop, .task-msg {
+/* The composer's prompt-mediated send button: it asks the AGENT (a real
+   turn, queued like any prompt) and its label owns that. The stop verb
+   moved to the face's top-right .face-stop above. */
+.task-msg {
   font-size: 0.75rem;
   cursor: pointer;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 99px;
   padding: 0.1rem 0.6rem;
+  color: var(--accent);
 }
-.task-stop { color: var(--err); }
-.task-msg { color: var(--accent); }
 /* The freeform composer for a live background agent. */
 .agent-msg { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
 .agent-msg-input { flex: 1; min-width: 0; font-size: 0.8rem; }

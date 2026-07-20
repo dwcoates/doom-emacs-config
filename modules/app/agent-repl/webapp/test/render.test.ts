@@ -4467,11 +4467,11 @@ describe("dual-body stacking (Shape A)", () => {
 });
 
 describe("live task output", () => {
-  it("streams the daemon's file tail into a capped output box", () => {
-    // Arrange
-    const item: ToolItem = {
+  /** A tail with NO spawn announcement: the announcement-less raw member. */
+  function tailOnly(): ToolItem {
+    return {
       kind: "tool",
-    ts: "2026-05-24T10:00:00.000Z",
+      ts: "2026-05-24T10:00:00.000Z",
       toolUseId: "t1",
       messageId: "m1",
       toolName: "Bash",
@@ -4480,18 +4480,38 @@ describe("live task output", () => {
       inputDone: true,
       taskOutput: "compiling…\nlinking…\n",
     };
+  }
+
+  it("wears the shared fold dress with an output face, never a zero-click pre", () => {
+    // Arrange
+    const panels: PanelContext = { children: new Map(), isOpen: () => false };
     // Act
-    const html = renderItem(item);
+    const html = renderItem(tailOnly(), undefined, undefined, panels);
+    // Assert — the announcement-less tail is a raw member now.
+    expect(html).toContain("async-fold");
+    expect(html).toContain("output · make · running");
+    expect(html).not.toContain("task-live-output");
+  });
+
+  it("streams the daemon's file tail into the open fold's panel", () => {
+    // Arrange
+    const panels: PanelContext = { children: new Map(), isOpen: (id) => id === "async:t1" };
+    // Act
+    const html = renderItem(tailOnly(), undefined, undefined, panels);
     // Assert
     expect(html).toContain("task-live-output");
     expect(html).toContain("linking…");
   });
 
-  it("renders no tail box before any output streams", () => {
+  it("renders no tail fold before any output streams", () => {
     // Arrange + Act
-    const html = renderItem(tool());
+    const html = renderItem(tool(), undefined, undefined, {
+      children: new Map(),
+      isOpen: () => true,
+    });
     // Assert
     expect(html).not.toContain("task-live-output");
+    expect(html).not.toContain("async-fold");
   });
 });
 
