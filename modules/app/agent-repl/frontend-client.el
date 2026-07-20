@@ -58,6 +58,21 @@
 (define-error 'agent-repl-resume-transcript-missing
   "agent-repl: resume target has no transcript" 'error)
 
+;; When non-nil, a resume whose transcript the daemon cannot find DEGRADES
+;; to a fresh conversation instead of opening a diagnostic investigation
+;; workspace.  The default (nil) behavior on the daemon's
+;; `resume_transcript_missing' hard-fail is to REFUSE a silent fresh start:
+;; the client opens an investigation workspace
+;; (`agent-repl--dispatch-resume-investigation') and re-raises a
+;; non-recoverable error.  Binding this non-nil OVERRIDES that — the create
+;; logs the lost-workspace resume attempt and simply recreates the session
+;; with no resume.  `agent-repl-force-fresh-conversation' (the command)
+;; starts a fresh conversation directly and does not rely on this override.
+(defvar agent-repl--force-fresh-conversation nil
+  "When non-nil, a lost-transcript resume degrades to a fresh conversation.
+Overrides the default `resume_transcript_missing' investigation dispatch
+in `agent-repl--frontend-create-session'.")
+
 ;;;; ---- Customization ----------------------------------------------------
 
 (defcustom agent-repl-frontend-http-timeout 10
@@ -218,17 +233,37 @@ conversation.  Never returns normally."
                           resume-id ws-name)
                   resume-id ws-name))))
 
-(defun agent-repl--frontend-create-session (cwd &optional model resume)
+(defun agent-repl--frontend-force-fresh-on-lost-transcript (cwd model resume-id)
+  "Degrade a lost-transcript resume for RESUME-ID to a FRESH conversation.
+Invoked in place of `agent-repl--frontend-handle-resume-transcript-missing'
+when `agent-repl--force-fresh-conversation' overrides the default
+investigation dispatch.  Logs the override, then recreates the session in
+CWD with MODEL and NO resume (which cannot re-trigger the lost-transcript
+hard-fail), and returns the fresh session id."
+  (agent-repl--log nil
+                   (concat "force-fresh-conversation: lost resume %s overridden — creating a "
+                           "fresh conversation in %s (skipping investigation)")
+                   resume-id cwd)
+  (agent-repl--frontend-create-session cwd model nil))
+
+(defun agent-repl--frontend-create-session (cwd &optional model resume force-fresh)
   "POST /sessions rooted at CWD; return the new session id.
 MODEL and RESUME (a durable claude session uuid) are optional
 passthroughs.  Signals on HTTP failure or a malformed response.
 
 When the daemon HARD-FAILS a RESUME whose transcript it cannot find
-\(HTTP 422, `code: \"resume_transcript_missing\"'), this does NOT start a
-fresh conversation: it opens an investigation workspace for the lost
-session and signals a non-recoverable
-`agent-repl-resume-transcript-missing' naming that workspace, via
-`agent-repl--frontend-handle-resume-transcript-missing'.
+\(HTTP 422, `code: \"resume_transcript_missing\"'), the lost-workspace
+resume attempt is ALWAYS logged, then one of two branches runs:
+
+ - Default (FORCE-FRESH nil, and `agent-repl--force-fresh-conversation'
+   nil): this does NOT start a fresh conversation.  It opens an
+   investigation workspace for the lost session and signals a
+   non-recoverable `agent-repl-resume-transcript-missing' naming that
+   workspace, via `agent-repl--frontend-handle-resume-transcript-missing'.
+ - Override (FORCE-FRESH non-nil, defaulting to
+   `agent-repl--force-fresh-conversation'): the investigation is SKIPPED
+   and the session is recreated with no resume — a fresh conversation —
+   via `agent-repl--frontend-force-fresh-on-lost-transcript'.
 
 MODEL defaults to `agent-repl-interactive-model' when nil, matching the
 CLI-launch path (`agent-repl--compute-claude-flags'): a gui session that
@@ -250,7 +285,8 @@ per-workspace account, and without this field every gui session would
 silently run as whichever account the daemon happened to inherit."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
-  (let* ((model (agent-repl--effective-model model))
+  (let* ((force-fresh (or force-fresh agent-repl--force-fresh-conversation))
+         (model (agent-repl--effective-model model))
          (config-dir (agent-repl--compute-config-dir cwd))
          (payload (append `(("cwd" . ,cwd))
                           (when model `(("model" . ,model)))
@@ -275,10 +311,19 @@ silently run as whichever account the daemon happened to inherit."
         id))
      (t
       (let ((missing (agent-repl--frontend-resume-transcript-missing body)))
-        (if missing
-            (agent-repl--frontend-handle-resume-transcript-missing cwd resume missing)
-          (error "agent-repl: POST /sessions failed (HTTP %s): %s"
-                 status (string-trim (or body "")))))))))
+        (if (not missing)
+            (error "agent-repl: POST /sessions failed (HTTP %s): %s"
+                   status (string-trim (or body "")))
+          (let ((resume-id (or (alist-get 'resume_id missing) resume)))
+            ;; The daemon could not find this resume target's transcript,
+            ;; so we ARE attempting to resume a lost workspace — surface
+            ;; that loudly in the log regardless of which branch handles it.
+            (agent-repl--log nil
+                             "resume target %s has no transcript — attempting to resume a LOST workspace"
+                             resume-id)
+            (if force-fresh
+                (agent-repl--frontend-force-fresh-on-lost-transcript cwd model resume-id)
+              (agent-repl--frontend-handle-resume-transcript-missing cwd resume missing)))))))))
 
 (defun agent-repl--frontend-list-sessions ()
   "Return the daemon's session list (alist entries, possibly nil)."
@@ -869,6 +914,28 @@ the subsequent open attaches to the continued conversation."
               dir (agent-repl--ws-get ws :model) claude-session-id)))
     (agent-repl--ws-put ws :frontend-session-id id)
     (agent-repl--log ws "gui adopted claude session %s as %s" claude-session-id id)
+    id))
+
+(defun agent-repl--frontend-force-fresh-session (ws)
+  "Create a FRESH daemon session for WS (NO resume), bind it, and return its id.
+Mirrors `agent-repl--gui-adopt-session' but passes NO resume, so a BLANK
+conversation replaces whatever the normal ensure path would replay.
+Resets the reattach failure markers so the fresh binding reads as healthy.
+Does NOT sync the webview — callers that display do that.  The fresh
+session captures its own durable id through the usual hook path once it
+runs, so a later resume continues the fresh conversation rather than the
+discarded one."
+  (unless (agent-repl--ensure-frontend-daemon)
+    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
+  (agent-repl--frontend-wait-ready)
+  (let* ((dir (or (agent-repl--ws-get ws :project-dir)
+                  (agent-repl--resolve-current-git-root)))
+         (id (agent-repl--frontend-create-session
+              dir (agent-repl--ws-get ws :model) nil)))
+    (agent-repl--ws-put ws :frontend-session-id id)
+    (agent-repl--ws-put ws :reattach-failed nil)
+    (agent-repl--ws-put ws :reattach-failures nil)
+    (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)" id dir)
     id))
 
 (defun agent-repl--frontend-send-user-message (ws text)

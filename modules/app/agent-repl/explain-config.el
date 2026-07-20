@@ -47,7 +47,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--frontend-wait-ready "agent-repl-frontend-client" ())
-(declare-function agent-repl--frontend-create-session "agent-repl-frontend-client" (cwd &optional model resume))
+(declare-function agent-repl--frontend-create-session "agent-repl-frontend-client" (cwd &optional model resume force-fresh))
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
