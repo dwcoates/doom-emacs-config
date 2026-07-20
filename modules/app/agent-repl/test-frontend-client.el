@@ -292,6 +292,136 @@ RESUME-ID defaults to \"uuid-gone\"; SEARCHED defaults to one path."
   "The predicate returns nil (never signals) on a non-JSON body."
   (should-not (agent-repl--frontend-resume-transcript-missing "not json at all")))
 
+;;;; ---- force-fresh override of the lost-transcript hard-fail ----------------
+
+(defun agent-repl-test--fresh-or-missing (fresh-id)
+  "Return a responder: 422 hard-fail when POST carries a resume, else 200 FRESH-ID.
+Mimics the daemon rejecting the resumed create but accepting the
+resume-less recreate the force-fresh override retries with."
+  (lambda (_method _url &optional payload)
+    (if (and payload (string-match-p "\"resume\"" payload))
+        (agent-repl-test--resume-missing-body)
+      (agent-repl-test--json-ok `((session_id . ,fresh-id))))))
+
+(ert-deftest agent-repl-test-frontend-create-force-fresh-var-degrades-to-fresh ()
+  "With the override var set, a lost-transcript resume returns a fresh id."
+  ;; Arrange
+  (let ((agent-repl--force-fresh-conversation t))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (&rest _) (error "investigation must not run"))))
+      (agent-repl-test--with-http
+          (agent-repl-test--fresh-or-missing "fresh-sid")
+        ;; Act / Assert
+        (should (equal (agent-repl--frontend-create-session "/w" nil "uuid-gone")
+                       "fresh-sid"))))))
+
+(ert-deftest agent-repl-test-frontend-create-force-fresh-arg-degrades-to-fresh ()
+  "The explicit FORCE-FRESH arg degrades even when the override var is nil."
+  ;; Arrange
+  (let ((agent-repl--force-fresh-conversation nil))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (&rest _) (error "investigation must not run"))))
+      (agent-repl-test--with-http
+          (agent-repl-test--fresh-or-missing "fresh-sid")
+        ;; Act / Assert
+        (should (equal (agent-repl--frontend-create-session "/w" nil "uuid-gone" t)
+                       "fresh-sid"))))))
+
+(ert-deftest agent-repl-test-frontend-create-force-fresh-skips-investigation ()
+  "The override does NOT dispatch an investigation workspace."
+  ;; Arrange
+  (let ((agent-repl--force-fresh-conversation t)
+        (dispatched nil))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (&rest _) (setq dispatched t) "ws")))
+      (agent-repl-test--with-http
+          (agent-repl-test--fresh-or-missing "fresh-sid")
+        ;; Act
+        (agent-repl--frontend-create-session "/w" nil "uuid-gone")
+        ;; Assert
+        (should-not dispatched)))))
+
+(ert-deftest agent-repl-test-frontend-create-force-fresh-recreate-omits-resume ()
+  "The forced fresh recreate posts a payload with no resume field."
+  ;; Arrange
+  (let ((agent-repl--force-fresh-conversation t))
+    (agent-repl-test--with-http
+        (agent-repl-test--fresh-or-missing "fresh-sid")
+      ;; Act — two POSTs fire: the resumed attempt, then the fresh recreate.
+      (agent-repl--frontend-create-session "/w" nil "uuid-gone")
+      ;; Assert — the last POST (the recreate) carries no resume.
+      (should-not (string-match-p "\"resume\"" (nth 2 (car (last requests))))))))
+
+(ert-deftest agent-repl-test-frontend-create-lost-resume-is-logged ()
+  "The lost-workspace resume attempt is surfaced in the log."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
+               (lambda (&rest _) "ws"))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (agent-repl-test--with-http
+          (lambda (&rest _) (agent-repl-test--resume-missing-body))
+        ;; Act — default (investigation) branch still logs the attempt.
+        (ignore-errors (agent-repl--frontend-create-session "/w" nil "uuid-gone"))
+        ;; Assert
+        (should (seq-find (lambda (m)
+                            (string-match-p "attempting to resume a LOST workspace" m))
+                          logged))))))
+
+;;;; ---- force-fresh session recreate ----------------------------------------
+
+(ert-deftest agent-repl-test-frontend-force-fresh-session-omits-resume ()
+  "`agent-repl--frontend-force-fresh-session' creates its session with no resume."
+  ;; Arrange
+  (let ((captured-resume 'unset))
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--frontend-create-session)
+               (lambda (_dir &optional _model resume &rest _)
+                 (setq captured-resume resume) "fresh-sid")))
+      (unwind-protect
+          (progn
+            (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
+            ;; Act
+            (agent-repl--frontend-force-fresh-session "ws1")
+            ;; Assert
+            (should (null captured-resume)))
+        (remhash "ws1" agent-repl--workspaces)))))
+
+(ert-deftest agent-repl-test-frontend-force-fresh-session-binds-fresh-id ()
+  "The fresh session id is bound as the workspace's frontend session."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
+            ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+            ((symbol-function 'agent-repl--frontend-create-session)
+             (lambda (&rest _) "fresh-sid")))
+    (unwind-protect
+        (progn
+          (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
+          ;; Act / Assert
+          (should (equal (agent-repl--frontend-force-fresh-session "ws1") "fresh-sid"))
+          (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "fresh-sid")))
+      (remhash "ws1" agent-repl--workspaces))))
+
+(ert-deftest agent-repl-test-frontend-force-fresh-session-clears-reattach-markers ()
+  "The recreate resets the workspace's reattach failure markers."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
+            ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+            ((symbol-function 'agent-repl--frontend-create-session)
+             (lambda (&rest _) "fresh-sid")))
+    (unwind-protect
+        (progn
+          (puthash "ws1" (list :project-dir "/w" :reattach-failed t :reattach-failures 3)
+                   agent-repl--workspaces)
+          ;; Act
+          (agent-repl--frontend-force-fresh-session "ws1")
+          ;; Assert
+          (should-not (agent-repl--ws-get "ws1" :reattach-failed))
+          (should-not (agent-repl--ws-get "ws1" :reattach-failures)))
+      (remhash "ws1" agent-repl--workspaces))))
+
 ;;;; ---- liveness -------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-live-p-true-for-listed ()

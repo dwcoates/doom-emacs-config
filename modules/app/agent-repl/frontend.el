@@ -48,6 +48,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -645,6 +646,24 @@ the current workspace."
     (unless (agent-repl--frontend-remount-webview ws)
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (message "agent-repl: webview reloaded")))
+
+;;;###autoload
+(defun agent-repl-force-fresh-conversation ()
+  "Start a FRESH conversation for the current workspace, discarding resume.
+Recreates the workspace's daemon session with no resume — a blank
+conversation replaces the resumed one — via
+`agent-repl--frontend-force-fresh-session', then snaps the displayed
+webview to the fresh session.  Use to abandon a wedged or unwanted
+resumed conversation on demand, without opening the resume-loss
+investigation workspace the automatic path dispatches.  Signals when
+there is no current workspace."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (let ((id (agent-repl--frontend-force-fresh-session ws)))
+      (agent-repl--frontend-sync-webview ws id)
+      (message "agent-repl: started a fresh conversation (%s)" id))))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
