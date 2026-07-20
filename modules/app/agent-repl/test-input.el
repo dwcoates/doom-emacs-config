@@ -1636,6 +1636,64 @@ a hybrid-UI or gui-only workspace's send."
         (agent-repl--do-send "ws1" "input" "raw"))
       (should (equal dispatch-args '("ws1" "input" "raw" nil))))))
 
+;;;; ---- Tests: fire-metaprompt-read (standalone re-read, e.g. post-/compact) ----
+
+(ert-deftest agent-repl-test-fire-metaprompt-read-dispatches-wrapped-directive ()
+  "`agent-repl--fire-metaprompt-read' sends the meta-wrapped read-directive.
+INPUT is the command prefix bracketed as a harness-injected span; RAW is
+empty so the gui draws no bubble and skips the prompt summary."
+  (agent-repl-test--with-clean-state
+    (let ((send-args nil)
+          (agent-repl-skip-permissions t)
+          (agent-repl-command-prefix "BODY")
+          (agent-repl--command-prefix "READ-DIRECTIVE"))
+      (cl-letf (((symbol-function 'agent-repl--do-send)
+                 (lambda (&rest args) (setq send-args args))))
+        (agent-repl--fire-metaprompt-read "ws1"))
+      (should (equal send-args
+                     (list "ws1" (agent-repl--meta-wrap "READ-DIRECTIVE") ""))))))
+
+(ert-deftest agent-repl-test-fire-metaprompt-read-resets-prefix-counter ()
+  "`agent-repl--fire-metaprompt-read' resets the prefix counter to 0.
+Realigns periodic re-injection to a fresh period from this send."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-skip-permissions t)
+          (agent-repl-command-prefix "BODY")
+          (agent-repl--command-prefix "READ-DIRECTIVE"))
+      (agent-repl--ws-put "ws1" :prefix-counter 9)
+      (cl-letf (((symbol-function 'agent-repl--do-send) #'ignore))
+        (agent-repl--fire-metaprompt-read "ws1"))
+      (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0)))))
+
+(ert-deftest agent-repl-test-fire-metaprompt-read-noop-when-skip-permissions-off ()
+  "`agent-repl--fire-metaprompt-read' is a no-op when the metaprompt is disabled.
+`agent-repl-skip-permissions' nil means the metaprompt system is off, so the
+read-directive must not be re-established behind the user's back."
+  (agent-repl-test--with-clean-state
+    (let ((sent nil)
+          (agent-repl-skip-permissions nil)
+          (agent-repl-command-prefix "BODY")
+          (agent-repl--command-prefix "READ-DIRECTIVE"))
+      (agent-repl--ws-put "ws1" :prefix-counter 9)
+      (cl-letf (((symbol-function 'agent-repl--do-send)
+                 (lambda (&rest _) (setq sent t))))
+        (agent-repl--fire-metaprompt-read "ws1"))
+      (should-not sent)
+      (should (= (agent-repl--ws-get "ws1" :prefix-counter) 9)))))
+
+(ert-deftest agent-repl-test-fire-metaprompt-read-noop-when-no-command-prefix ()
+  "`agent-repl--fire-metaprompt-read' is a no-op when `agent-repl-command-prefix' is nil.
+Mirrors the gate `agent-repl--should-prepend-metaprompt-p' applies."
+  (agent-repl-test--with-clean-state
+    (let ((sent nil)
+          (agent-repl-skip-permissions t)
+          (agent-repl-command-prefix nil)
+          (agent-repl--command-prefix "READ-DIRECTIVE"))
+      (cl-letf (((symbol-function 'agent-repl--do-send)
+                 (lambda (&rest _) (setq sent t))))
+        (agent-repl--fire-metaprompt-read "ws1"))
+      (should-not sent))))
+
 (ert-deftest agent-repl-test-interrupt-agent-delegates-to-frontend-dispatch ()
   "`agent-repl--interrupt-agent' forwards WS to
 `agent-repl--frontend-dispatch-interrupt' with the `ctrl-c' gesture."
