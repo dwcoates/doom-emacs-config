@@ -6,6 +6,7 @@
 
 (declare-function agent-repl--do-log "core")
 (declare-function agent-repl--mark-ws-thinking "input")
+(declare-function agent-repl--fire-metaprompt-read "input")
 (declare-function agent-repl--mark-dead "status")
 (declare-function agent-repl--frontend-api "frontend-client")
 (declare-function agent-repl--state-save "history")
@@ -313,8 +314,12 @@ Resolves the workspace via `agent-repl--ws-for-dir'.  If the read
 failed \(nil return), does nothing further.  If the workspace is
 nil, logs the :warning message with the directory interpolated via %s.
 Otherwise updates the workspace's session ID (if provided), logs a standard
-entry using :name, then calls :callback with two arguments: the workspace
-name and the directory."
+entry using :name, then calls :callback with the workspace name and the
+directory.  A callback whose arity accepts a third argument (currently only
+`agent-repl--on-session-start-event') additionally receives the SessionStart
+`:source' so it can act on the session's origin (e.g. re-fire the metaprompt
+after a /compact); every other handler keeps its two-argument (ws dir)
+contract untouched."
   (let* ((sentinel-data (agent-repl--read-sentinel-file file))
          (dir (plist-get sentinel-data :dir))
          (session-id (plist-get sentinel-data :session-id))
@@ -362,7 +367,17 @@ name and the directory."
                               (plist-get handler :name)
                               (file-name-nondirectory file) dir ws
                               (agent-repl--ws-get ws :agent-state))
-            (funcall (plist-get handler :callback) ws dir))
+            ;; Pass SOURCE only to callbacks whose arity accepts a third
+            ;; argument.  `--on-session-start-event' consumes it (to re-fire
+            ;; the metaprompt after a /compact); every other event handler
+            ;; keeps its two-argument (ws dir) contract, so calling it with a
+            ;; third arg would signal `wrong-number-of-arguments'.
+            (let* ((cb (plist-get handler :callback))
+                   (max-arity (cdr (func-arity cb))))
+              (if (or (eq max-arity 'many)
+                      (and (integerp max-arity) (>= max-arity 3)))
+                  (funcall cb ws dir source)
+                (funcall cb ws dir))))
         (error
          (agent-repl--do-log ws "process-sentinel-file: handler=%s ERRORED file=%s dir=%s ws=%s err=%S"
                               (list (plist-get handler :name)
@@ -535,7 +550,7 @@ recovery is left to the user."
     (agent-repl--mark-ws-thinking ws)
     (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :agent-state))))
 
-(defun agent-repl--on-session-start-event (ws _dir)
+(defun agent-repl--on-session-start-event (ws _dir &optional source)
   "Handle a session_start event for workspace WS.
 This is the agent becoming ready.  Flips `:agent-state' from nil/`:init'
 to `:idle' (guarded so a lagging/re-fired session_start never clobbers
@@ -549,7 +564,15 @@ latch.
 Hook firing (after-ready and the ws-fully-loaded latch flip) runs
 UNCONDITIONALLY on every observed `session_start' for WS — duplicate
 or stale events still flip the latch and fire the narrow hook so
-observers waiting on them are never stalled by a swallowed duplicate."
+observers waiting on them are never stalled by a swallowed duplicate.
+
+SOURCE is the SessionStart hook's origin field (see
+`agent-repl--read-sentinel-file'): \"startup\", \"resume\", \"clear\",
+or \"compact\".  A \"compact\" origin means Claude Code replaced the
+conversation context with a summary — dropping the previously-injected
+metaprompt guidelines — while continuing the same session mid-work, so
+the read-directive is re-fired via `agent-repl--fire-metaprompt-read'
+to re-establish them in the fresh context."
   (agent-repl--log ws "on-session-start-event: ENTER ws=%s agent-state=%s"
                     ws (agent-repl--ws-get ws :agent-state))
   (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
@@ -564,7 +587,13 @@ observers waiting on them are never stalled by a swallowed duplicate."
   ;; Flip the agent-side bit on the fully-loaded latch.  If
   ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
   ;; hook; otherwise we just record the bit and wait for switch settle.
-  (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready))
+  (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready)
+  ;; A compaction summary replaces the context that carried the metaprompt
+  ;; guidelines, so re-fire the read-directive to re-establish them.  Runs
+  ;; last, after the ws is marked ready and pending prompts have drained, so
+  ;; the re-read lands cleanly on the compacted session.
+  (when (equal source "compact")
+    (agent-repl--fire-metaprompt-read ws)))
 
 (defun agent-repl--run-after-ready-hooks (ws)
   "Run `agent-repl-after-ready-functions' for WS, isolating hook errors.

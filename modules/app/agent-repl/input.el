@@ -665,6 +665,41 @@ Handles input preparation, sending, history, and persistence."
   (agent-repl--log (agent-repl--ws-current-name) "send-with-metaprompt")
   (agent-repl--send nil nil t))
 
+(defun agent-repl--fire-metaprompt-read (ws)
+  "Send the metaprompt read-directive to WS as a standalone message.
+Re-establishes the metaprompt guidelines in WS's agent after an event
+that drops them from context — a successful `/compact', whose summary
+replaces the detailed conversation that carried the previously-injected
+directive.  Unlike `/clear', which idles a fresh session and so can
+defer re-injection to the next user prompt via
+`agent-repl--posthook-reset-prefix-counter', a compacted session
+continues mid-work, so the directive is fired PROACTIVELY here.
+
+No-op unless the metaprompt system is active — `agent-repl-skip-permissions'
+and `agent-repl-command-prefix', the same gate
+`agent-repl--should-prepend-metaprompt-p' applies to the periodic
+injection — so a user who has turned the metaprompt off never has it
+re-established behind their back.
+
+The directive (`agent-repl--command-prefix') is meta-wrapped
+\(`agent-repl--meta-wrap') so the gui strips it to an empty user turn
+and draws no bubble, exactly as the periodic prefix injection and the
+webapp's auto-continue nudge do.  RAW is empty: no user text sits
+behind a harness re-read, and an empty RAW makes
+`agent-repl--gui-send-turn' skip the prompt summary and match no
+posthook.
+
+The prefix counter is reset to 0 first so periodic re-injection
+realigns to a fresh period from this send — the send's own increment
+lands it at 1, so the next user prompt is one-into-period and never
+falls on a boundary that would redundantly re-inject right behind this
+read."
+  (if (not (and agent-repl-skip-permissions agent-repl-command-prefix))
+      (agent-repl--log ws "fire-metaprompt-read: SKIP ws=%s (metaprompt system inactive)" ws)
+    (agent-repl--log ws "fire-metaprompt-read: ws=%s" ws)
+    (agent-repl--ws-put ws :prefix-counter 0)
+    (agent-repl--do-send ws (agent-repl--meta-wrap agent-repl--command-prefix) "")))
+
 (defun agent-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
   (agent-repl--log (agent-repl--ws-current-name) "append-to-input-buffer: len=%d" (length text))
