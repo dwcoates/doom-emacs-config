@@ -332,6 +332,11 @@ type AsyncSource struct {
 	Label string `json:"label,omitempty"`
 	// running | done | error | killed
 	Status string `json:"status"`
+	// The stream's file, when the structured result named a readable one —
+	// the STRUCTURED twin of the prose path the tailer's spawn regexes read,
+	// so the poll route's path record survives a prose wording drift (see
+	// superviseTailersLocked). Correlation data; clients need not read it.
+	OutputFile string `json:"output_file,omitempty"`
 }
 
 // AsyncSourceFrame announces that ToolUseID's call spawned detached work.

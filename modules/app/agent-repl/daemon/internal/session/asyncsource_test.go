@@ -45,6 +45,27 @@ func TestClassifyAsyncSourceRefusesASynchronousSubagent(t *testing.T) {
 	}
 }
 
+func TestClassifyAsyncSourceCarriesTheReadableOutputFile(t *testing.T) {
+	// Arrange / Act
+	src := classifyAsyncSource("Agent", json.RawMessage(asyncAgentSpawn), false)
+	// Assert — the structured path is what keeps the poll route's record
+	// alive when the prose announcement's wording drifts.
+	if src.OutputFile != "/tmp/claude-501/slug/sess/tasks/ad2e2275ec191e1e1.output" {
+		t.Fatalf("want the structured outputFile on the source, got %q", src.OutputFile)
+	}
+}
+
+func TestClassifyAsyncSourceWithholdsTheOutputFileWhenUnreadable(t *testing.T) {
+	// Arrange — canReadOutputFile:false forbids serving the path.
+	payload := `{"isAsync":true,"agentId":"a1","outputFile":"/tmp/claude-1/s/tasks/a1.output","canReadOutputFile":false}`
+	// Act
+	src := classifyAsyncSource("Agent", json.RawMessage(payload), false)
+	// Assert
+	if src.OutputFile != "" {
+		t.Fatalf("want no output file on an unreadable source, got %q", src.OutputFile)
+	}
+}
+
 func TestClassifyAsyncSourceWithholdsAStreamWhenTheOutputFileIsUnreadable(t *testing.T) {
 	// Arrange
 	payload := `{"isAsync":true,"agentId":"a1","outputFile":"/tmp/claude-1/s/tasks/a1.output","canReadOutputFile":false}`
