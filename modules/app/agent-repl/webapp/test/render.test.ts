@@ -40,6 +40,7 @@ import {
   navTokensForEntry,
 } from "../src/render.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
+import { TIMER_SLOT } from "../src/timer.js";
 import { AsyncSource } from "../src/protocol.js";
 import {
   ConversationItem,
@@ -3171,6 +3172,107 @@ describe("tailLineHtml (the shared indicator + turn-stats line)", () => {
     const html = tailLineHtml(lineState({ turnStartedAt: null }), null, "5s");
     // Assert
     expect(html).toBeNull();
+  });
+});
+
+/**
+ * The combined tail line now paints into a bottom-pinned slot OUTSIDE the
+ * scrolling feed (see `#tail-slot`), so the progress indicator + running
+ * turn-stats stay stuck to the window's bottom rather than trailing the last
+ * bubble as the feed grows. The renderer writes it into the slot handed to its
+ * constructor, never into the feed container, and empties the slot off-turn.
+ */
+describe("FeedRenderer: the tail line pins to the bottom slot, not the feed", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+  };
+
+  function mount(): { container: HTMLElement; tailSlot: HTMLElement; feed: FeedRenderer } {
+    const container = document.createElement("div");
+    const tailSlot = document.createElement("div");
+    return { container, tailSlot, feed: new FeedRenderer(container, NOOP_ACTIONS, tailSlot) };
+  }
+
+  /** A running turn: a live turn drives the tail line's stats half. */
+  function runningTurn(): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1")];
+    state.turnInFlight = true;
+    state.turnStartedAt = "2026-05-24T10:00:00.000Z";
+    return state;
+  }
+
+  /** A settled session: no turn in flight, so the tail line has nothing to say. */
+  function offTurn(): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1")];
+    state.turnInFlight = false;
+    return state;
+  }
+
+  it("render() writes the tail line into the slot", () => {
+    // Arrange
+    const { tailSlot, feed } = mount();
+    // Act
+    feed.render(runningTurn());
+    // Assert
+    expect(tailSlot.querySelector(".tail-line")).not.toBeNull();
+  });
+
+  it("render() keeps the tail line out of the feed container", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(runningTurn());
+    // Assert — the feed no longer carries the trailing tail node.
+    expect(container.querySelector(".tail-line")).toBeNull();
+    expect(container.querySelector('[data-key="tail-line"]')).toBeNull();
+  });
+
+  it("renderRestored() writes the tail line into the slot too", () => {
+    // Arrange — a fresh join lands the same tail line in the same slot.
+    const { container, tailSlot, feed } = mount();
+    // Act
+    feed.renderRestored(runningTurn());
+    // Assert
+    expect(tailSlot.querySelector(".tail-line")).not.toBeNull();
+    expect(container.querySelector(".tail-line")).toBeNull();
+  });
+
+  it("empties the slot off-turn so :empty collapses it", () => {
+    // Arrange — a running turn mounted the line into the slot.
+    const { tailSlot, feed } = mount();
+    feed.render(runningTurn());
+    expect(tailSlot.innerHTML).not.toBe("");
+    // Act — the turn ends, so neither half of the line speaks.
+    feed.render(offTurn());
+    // Assert — the slot is empty, which `#tail-slot:empty` collapses.
+    expect(tailSlot.innerHTML).toBe("");
+  });
+
+  it("repaints the running clock into the slot's own timer span", () => {
+    // Arrange — the once-a-second tick targets the slot, not the feed.
+    const { tailSlot, feed } = mount();
+    feed.render(runningTurn());
+    // Act
+    feed.paintTurnTimer("42s");
+    // Assert
+    const slotSpan = tailSlot.querySelector(`.turn-stats-live [${TIMER_SLOT}]`);
+    expect(slotSpan?.textContent).toBe("42s");
+  });
+
+  it("reuses the mounted line across an unchanged render so its spinner never restarts", () => {
+    // Arrange — the tail line is mounted once.
+    const { tailSlot, feed } = mount();
+    feed.render(runningTurn());
+    const first = tailSlot.querySelector(".tail-line");
+    // Act — an identical render leaves the same html, so the slot is not rewritten.
+    feed.render(runningTurn());
+    // Assert — the very same node survives, so a live arc keeps animating.
+    expect(tailSlot.querySelector(".tail-line")).toBe(first);
   });
 });
 
