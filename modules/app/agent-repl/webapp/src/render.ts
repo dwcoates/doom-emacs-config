@@ -2497,6 +2497,21 @@ export function anyLiveThinking(items: readonly ConversationItem[]): boolean {
  */
 export class FeedRenderer {
   private container: HTMLElement;
+  /**
+   * The bottom-pinned slot the combined tail line renders into (see
+   * `#tail-slot`): a flex sibling OUTSIDE the scrolling feed, so the progress
+   * indicator + running turn-stats stay stuck to the window's bottom rather
+   * than floating just under the last bubble as the feed grows. Defaults to a
+   * detached element for headless tests that do not exercise the tail.
+   */
+  private tailSlot: HTMLElement;
+  /**
+   * The last tail-line HTML written to the slot. A render rewrites the slot
+   * only when this changes, so a mounted spinner/arc keeps animating across
+   * renders instead of resetting to frame 0 — the same continuity the old
+   * in-feed `reconcileTailNode` gave it by comparing html before rewriting.
+   */
+  private tailHtml = "";
   private actions: Actions;
   private nodes = new Map<string, { el: HTMLElement; html: string }>();
   /** AskUserQuestion picks (renderer-owned so re-renders keep them). */
@@ -2575,8 +2590,13 @@ export class FeedRenderer {
    */
   private agentMenus = new Map<string, TopbarMenu>();
 
-  constructor(container: HTMLElement, actions: Actions) {
+  constructor(
+    container: HTMLElement,
+    actions: Actions,
+    tailSlot: HTMLElement = document.createElement("div"),
+  ) {
     this.container = container;
+    this.tailSlot = tailSlot;
     this.actions = actions;
     if (actions.fetchTaskTail) {
       const fetchTail = actions.fetchTaskTail;
@@ -3105,20 +3125,12 @@ export class FeedRenderer {
       this.nodes.set(key, { el, html: "" });
       shells.push({ el, entry });
     }
-    // A fresh join landing mid-turn shows the combined tail line immediately,
-    // above the parked queue — the same slot, precedence, and running clock +
+    // A fresh join landing mid-turn shows the combined tail line immediately in
+    // its bottom-pinned slot — the same content, precedence, and running clock +
     // grown-context figure render() keeps it in (see `tailLineHtml`): the live
     // progress indicator (left) and the running turn-stats (right) on one flex
-    // row.
-    const tailLine = tailLineHtml(state, pulse, this.turnTimerLabel);
-    if (tailLine) {
-      const el = document.createElement("div");
-      el.className = "feed-item";
-      el.dataset.key = "tail-line";
-      el.innerHTML = tailLine;
-      this.container.appendChild(el);
-      this.nodes.set("tail-line", { el, html: tailLine });
-    }
+    // row, stuck to the window's bottom rather than trailing the last bubble.
+    this.renderTailLine(tailLineHtml(state, pulse, this.turnTimerLabel));
     // The global `monitoring…` signal, on the same idle-with-live-async terms
     // render() computes it (see `showsMonitoringRow`), so a fresh join landing
     // on a quiescent-but-still-watching session sees it in the topbar strip
@@ -3195,26 +3207,19 @@ export class FeedRenderer {
   }
 
   /**
-   * Ensure a single-purpose tail node (keyed KEY) exists, holds HTML, and
-   * sits at the current bottom of the feed, marking it seen so the reconcile
-   * sweep keeps it. Force-appends so a live item node appended above never
-   * lands beneath it — the same discipline the queue cards follow.
+   * Paint the combined tail line into the bottom-pinned slot outside the feed
+   * (see `#tail-slot`), so the progress indicator + running turn-stats stay
+   * stuck to the window's bottom rather than trailing the last bubble as the
+   * feed grows. HTML is null (or "") off-turn, which empties the slot and lets
+   * `:empty` collapse it. Rewrites only when the html actually changed, so a
+   * live spinner/arc keeps animating across renders instead of resetting to
+   * frame 0 — the continuity the old in-feed reconcile gave it.
    */
-  private reconcileTailNode(key: string, html: string, seen: Set<string>): void {
-    seen.add(key);
-    let entry = this.nodes.get(key);
-    if (!entry) {
-      const el = document.createElement("div");
-      el.className = "feed-item";
-      el.dataset.key = key;
-      entry = { el, html: "" };
-      this.nodes.set(key, entry);
-    }
-    if (entry.html !== html) {
-      entry.el.innerHTML = html;
-      entry.html = html;
-    }
-    this.container.appendChild(entry.el);
+  private renderTailLine(html: string | null): void {
+    const next = html ?? "";
+    if (next === this.tailHtml) return;
+    this.tailSlot.innerHTML = next;
+    this.tailHtml = next;
   }
 
   /**
@@ -3227,7 +3232,7 @@ export class FeedRenderer {
    */
   paintTurnTimer(label: string): void {
     this.turnTimerLabel = label;
-    const slot = this.container.querySelector(`.turn-stats-live [${TIMER_SLOT}]`);
+    const slot = this.tailSlot.querySelector(`.turn-stats-live [${TIMER_SLOT}]`);
     if (slot) slot.textContent = label;
   }
 
@@ -3336,16 +3341,14 @@ export class FeedRenderer {
       // animation never notices.
       this.applyPulse(entry.el, feedEntry, pulse);
     }
-    // The combined tail line rides at the tail of the live turn's content,
-    // above the parked queue: the live progress indicator (left) and the
+    // The combined tail line paints into its bottom-pinned slot outside the
+    // feed (see `#tail-slot`): the live progress indicator (left) and the
     // running turn-stats (right) share one flex row (see `tailLineHtml`), so
-    // the two sit on a single baseline rather than stacking. Force-appended
-    // (like the queue cards below) so a live item node appended above never
-    // lands beneath it; dropped the moment both halves fall silent (its key
-    // falls out of `seen` and the sweep removes it). The precedence within the
-    // indicator half lives in `tailStatusRow`.
-    const tailLine = tailLineHtml(state, pulse, this.turnTimerLabel);
-    if (tailLine) this.reconcileTailNode("tail-line", tailLine, seen);
+    // the two sit on a single baseline rather than stacking, stuck to the
+    // window's bottom rather than trailing the last bubble. Dropped the moment
+    // both halves fall silent (the slot empties and `:empty` collapses it). The
+    // precedence within the indicator half lives in `tailStatusRow`.
+    this.renderTailLine(tailLineHtml(state, pulse, this.turnTimerLabel));
     // The global `monitoring…` signal: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose

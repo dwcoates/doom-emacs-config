@@ -44,6 +44,13 @@
            collapsed) otherwise. -->
       <div id="compact-progress-slot"></div>
       <main id="feed"></main>
+      <!-- The live tail line's bottom-pinned slot: the progress indicator
+           (thinking/working/retrying/interrupting) and the running turn-stats
+           (elapsed clock + grown context) render HERE, a flex sibling wedged
+           between the scrolling feed and the composer, so they stay stuck to
+           the window's bottom rather than floating just under the last bubble
+           as the feed grew. Empty (and so collapsed via :empty) off-turn. -->
+      <div id="tail-slot"></div>
       <!-- The feed search's echo area: `C-s` in the composer starts an
            incremental search over the feed, and the query, the position among
            the matches, and any folds the search could not reach are reported
