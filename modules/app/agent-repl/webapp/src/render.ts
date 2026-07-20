@@ -28,7 +28,6 @@ import {
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
 import {
-  effectiveAsyncSource,
   mayNest,
   mergeChildren,
   openSubfeedSourceIds,
@@ -36,6 +35,12 @@ import {
 } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
 import { StatusResponse, StatusSnapshot, statusPanelHtml } from "./status.js";
+import {
+  MemberContext,
+  MemberStatus,
+  StreamMember,
+  resolveMember,
+} from "./stream-member.js";
 import {
   chessGameContainerHtml,
   hydrateChessGames,
@@ -751,6 +756,71 @@ function toolHeadline(item: ToolItem): string {
 }
 
 /**
+ * The resolver context this renderer's PanelContext backs: children come
+ * back visibility-filtered (exactly what a panel would draw), tails from
+ * the poller when one is wired. Panel-less renders still resolve, so a
+ * bare card keeps its face and Stop control.
+ */
+function memberCtx(panels?: PanelContext): MemberContext {
+  return {
+    children: (id) => (panels?.children.get(id) ?? []).filter(visibleChild),
+    taskTail: (id) => panels?.taskTail?.(id),
+  };
+}
+
+/** The one truncation rule every face label wears. */
+function capLabel(label: string, max: number): string {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
+
+/** The one status→badge vocabulary every streaming face renders. */
+function memberBadge(status: MemberStatus, inputDone = true): string {
+  switch (status) {
+    case "running":
+      return `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>${
+        inputDone ? "running…" : "streaming input…"
+      }</span>`;
+    case "done":
+      return `<span class="badge ok">done</span>`;
+    case "error":
+      return `<span class="badge err">error</span>`;
+    case "killed":
+      return `<span class="badge err">stopped</span>`;
+  }
+}
+
+/**
+ * The shared Stop control, every face's top-right verb: bare label, with
+ * the prompt-mediated caveat in the tooltip (the send asks the agent to
+ * run TaskStop and spends a real turn, since no daemon-native kill
+ * exists). One button per member, stopping every id the member spawned;
+ * gone once the member settles.
+ */
+function stopButton(member: StreamMember): string {
+  if (member.settled || member.taskIds.length === 0) return "";
+  const ids = member.taskIds.join(", ");
+  const one = member.taskIds.length === 1;
+  const prompt = `Stop the background task${one ? "" : "s"} ${ids} (TaskStop), then confirm ${
+    one ? "it" : "they"
+  } stopped.`;
+  return `<button type="button" class="face-stop" data-send-prompt="${escapeHtml(
+    prompt,
+  )}" title="asks the agent to stop ${escapeHtml(ids)} via TaskStop">Stop</button>`;
+}
+
+/** The face's right-aligned side: live elapsed, then the Stop verb. */
+function faceSide(member: StreamMember | null): string {
+  if (!member) return "";
+  const elapsed =
+    member.elapsedMs !== undefined
+      ? `<span class="face-elapsed">${escapeHtml(formatElapsed(member.elapsedMs))}</span>`
+      : "";
+  const stop = stopButton(member);
+  if (elapsed === "" && stop === "") return "";
+  return `<span class="face-side">${elapsed}${stop}</span>`;
+}
+
+/**
  * The collapsed face of an activity panel: how many steps the child feed
  * holds and the most recent one with something to say, capped so the
  * line stays a line.
@@ -841,20 +911,23 @@ function ToolCard(
   tabBar = "",
 ): string {
   const variant = SPECIAL_TOOLS.has(item.toolName) ? item.toolName : "Generic";
-  // In-flight is ONE look, whichever phase the call is in: the orange run
-  // badge carrying the same arc the thinking indicator spins, held
-  // invisible for its first second by CSS (see .tool-spinner) so the
-  // sub-second tools — Edit, Read, most Bash — never flash it. Only the
-  // badge's label distinguishes the two phases; a settled card drops the
-  // badge for done/error. The card body carries no indicator of its own,
-  // so the arc is the single place motion lives.
-  const status = item.result
-    ? item.result.isError
-      ? `<span class="badge err">error</span>`
-      : `<span class="badge ok">done</span>`
-    : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>${
-        item.inputDone ? "running…" : "streaming input…"
-      }</span>`;
+  // The head badge is the member's FACE when the call streams: one status
+  // vocabulary (memberBadge), notification-aware, so a spawning card reads
+  // running until its detached work settles rather than done the moment
+  // the spawn call returned. A non-streaming call reads the same
+  // vocabulary off its own result phase. In-flight is ONE look either
+  // way: the orange run badge carrying the same arc the thinking
+  // indicator spins, held invisible for its first second by CSS (see
+  // .tool-spinner) so the sub-second tools never flash it.
+  const member = resolveMember(item, memberCtx(panels));
+  const phase: MemberStatus = member
+    ? member.status
+    : item.result
+      ? item.result.isError
+        ? "error"
+        : "done"
+      : "running";
+  const status = memberBadge(phase, item.inputDone);
   const progress = item.progress
     ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>`
     : "";
@@ -876,14 +949,14 @@ function ToolCard(
   // The source this card's fold hangs on: daemon-classified for live
   // cards, synthesized from the spawn announcement for transcript-parsed
   // ones — which is what lets a nested spawn card fold at any depth.
-  const source = effectiveAsyncSource(item);
+  const source = member?.source;
   // TABBAR, when a consecutive-run group hands one in, is the row of member
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
   return `
     <div class="tool-card tool-${variant.toLowerCase()}">
       ${tabBar}
-      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}</div>
+      <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}${faceSide(member)}</div>
       ${agentTopbar}
       ${toolInput(item)}
       ${progress}
@@ -891,7 +964,6 @@ function ToolCard(
       ${AsyncFold(item, source, panels)}
       ${toolResult(item)}
       ${liveTaskOutput(item, source)}
-      ${taskControls(item, panels)}
       ${agentComposer(item, panels)}
     </div>`;
 }
@@ -1042,8 +1114,7 @@ function asyncStreamHtml(item: ToolItem, source: AsyncSource, panels?: PanelCont
 /** The collapsed face of an async fold: what the work is and whether it runs. */
 function asyncFace(source: AsyncSource): string {
   const label = source.label !== undefined && source.label !== "" ? source.label : source.source_id;
-  const capped = label.length > 60 ? `${label.slice(0, 59)}…` : label;
-  return `${source.kind} · ${capped} · ${source.status}`;
+  return `${source.kind} · ${capLabel(label, 60)} · ${source.status}`;
 }
 
 /**
@@ -1079,86 +1150,31 @@ function AsyncFold(item: ToolItem, source: AsyncSource | undefined, panels?: Pan
 }
 
 /**
- * Whether a watcher has SETTLED — no longer counted live by a fold. It
- * settles when its completion notification lands OR a successful `TaskStop`
- * for one of its task ids has been folded under it. The prompt-mediated stop
- * button never yields a task-notification (daemon liveness is notification-
- * only, see `tailer.go`), so the settled TaskStop card — already parsed and
- * folded under the spawner by `partitionFeed` — is the sole signal that a
- * stop actually took. An in-flight or errored TaskStop does not settle.
- */
-function watcherSettled(item: ToolItem, panels?: PanelContext): boolean {
-  if (item.notification) return true;
-  const ids = new Set(spawnedTaskIds(item));
-  return (panels?.children.get(item.toolUseId) ?? []).some(
-    (c) =>
-      c.kind === "tool" &&
-      c.toolName === "TaskStop" &&
-      c.result !== undefined &&
-      !c.result.isError &&
-      typeof c.input?.task_id === "string" &&
-      ids.has(c.input.task_id),
-  );
-}
-
-/**
- * Stop controls for the detached work a card spawned, gone once the task
- * has settled (its notification landed or its TaskStop took). Prompt-mediated
- * on purpose (see Actions.sendPrompt): the button asks the agent to run
- * TaskStop, and its label owns that instead of posing as an instant kill
- * switch.
- */
-function taskControls(item: ToolItem, panels?: PanelContext): string {
-  const live = watcherSettled(item, panels) ? [] : spawnedTaskIds(item);
-  if (live.length === 0) return "";
-  const buttons = live
-    .map((id) => {
-      const prompt = `Stop the background task ${id} (TaskStop), then confirm it stopped.`;
-      return `<button type="button" class="task-stop" data-send-prompt="${escapeHtml(
-        prompt,
-      )}" title="sends a prompt to the agent">stop ${escapeHtml(id)} · asks the agent</button>`;
-    })
-    .join("");
-  return `<div class="task-controls">${buttons}</div>`;
-}
-
-/**
- * One watcher's row inside a bubble's fold: its identity and live/settled
- * badge, then the SAME live surface its own tool card carries — the
- * daemon's file tail, the stop control, and the message composer — reused
- * wholesale rather than re-implemented. A watcher is live until it settles
- * — its completion notification lands or a successful TaskStop for its task
- * takes — which is when the arc gives way to a settled badge.
+ * One watcher's row inside a bubble's fold: its identity and one-vocabulary
+ * face badge, then the SAME live surface its own tool card carries — the
+ * daemon's file tail, the face-side Stop, and the message composer —
+ * resolved through the same stream-member record the card reads, so the
+ * two surfaces cannot disagree about liveness or tail.
  */
 function WatcherRow(item: ToolItem, panels?: PanelContext): string {
-  const ids = spawnedTaskIds(item);
+  const member = resolveMember(item, memberCtx(panels));
+  const ids = member?.taskIds ?? [];
   const label = ids.length > 0 ? `${item.toolName} · ${ids.join(", ")}` : item.toolName;
   const headline = toolHeadline(item);
-  // The poller's tail for this watcher, if a fold is open and a daemon has
-  // answered — this is the ONLY tail a background agent ever has, since the
-  // WS never streamed it into item.taskOutput.
-  const polled = ids.map((id) => panels?.taskTail?.(id)).find(Boolean);
-  const status = watcherSettled(item, panels)
-    ? `<span class="badge ok">done</span>`
-    : `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>running…</span>`;
-  // Live elapsed comes from the poll (which the daemon computes from the
-  // spawn time); the store's progressElapsedS freezes once the spawning
-  // call settles, so it is only the fallback.
-  const elapsedMs = polled?.elapsedMs ?? (item.progressElapsedS !== undefined ? item.progressElapsedS * 1000 : undefined);
-  const elapsed = elapsedMs !== undefined ? `<span class="watcher-elapsed">${escapeHtml(formatElapsed(elapsedMs))}</span>` : "";
+  const status = memberBadge(member?.status ?? "done");
   const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
   const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
   // The same format-driven renderer the card's own fold uses, rather than a
   // second hand-rolled <pre>: a watcher that is a background agent renders
   // its transcript as nested bubbles here too. A watcher the daemon
-  // classified no source for falls back to the raw tail it always had.
-  const source = effectiveAsyncSource(item);
+  // classified no source for falls back to the raw member tail.
+  const source = member?.source;
   const tail = source
     ? asyncStreamHtml(item, source, panels)
-    : taskOutputPre(item.taskOutput ?? polled?.text ?? "");
+    : taskOutputPre(member?.tail ?? "");
   return `<div class="watcher-row">
-      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${elapsed}</div>
-      ${desc}${progress}${tail}${taskControls(item, panels)}${agentComposer(item, panels)}
+      <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${faceSide(member)}</div>
+      ${desc}${progress}${tail}${agentComposer(item, panels)}
     </div>`;
 }
 
@@ -1166,7 +1182,7 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
 function asyncBadgeLabel(item: ToolItem): string {
   const ids = spawnedTaskIds(item);
   const label = ids.length > 0 ? `${item.toolName} · ${ids[0]}` : item.toolName;
-  return label.length > 24 ? `${label.slice(0, 23)}…` : label;
+  return capLabel(label, 24);
 }
 
 /**
@@ -1185,13 +1201,17 @@ function asyncBadgeLabel(item: ToolItem): string {
  */
 function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): string {
   const id = `member:${hostId}:${item.toolUseId}`;
-  const settled = watcherSettled(item, panels);
+  const member = resolveMember(item, memberCtx(panels));
+  const settled = member?.settled ?? false;
+  const status = member?.status ?? "done";
+  // The dot speaks the same one-status vocabulary as every face badge; a
+  // killed member reads the error hue, since the dot palette has no
+  // third settled color.
+  const dot = status === "running" ? "running" : status === "done" ? "done" : "error";
   const open = panels?.isOpen(id) ?? false;
   return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
-  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${
-    settled ? "done" : "running"
-  }" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</div>`;
+  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</div>`;
 }
 
 /**
@@ -2459,7 +2479,13 @@ export function hasLiveAsync(
   hostId: string,
   panels?: PanelContext,
 ): boolean {
-  return (panels?.watchers?.get(hostId) ?? []).some((m) => !watcherSettled(m, panels));
+  return (panels?.watchers?.get(hostId) ?? []).some((m) => memberLive(m, panels));
+}
+
+/** Whether ITEM resolves to a still-live stream member. */
+function memberLive(item: ToolItem, panels?: PanelContext): boolean {
+  const member = resolveMember(item, memberCtx(panels));
+  return member !== null && !member.settled;
 }
 
 /**
@@ -2474,7 +2500,7 @@ export function anyLiveAsync(
   items: readonly ConversationItem[],
   panels?: PanelContext,
 ): boolean {
-  return items.some((i) => isWatcher(i) && !watcherSettled(i, panels));
+  return items.some((i) => isWatcher(i) && memberLive(i, panels));
 }
 
 /**

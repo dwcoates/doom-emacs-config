@@ -1181,9 +1181,22 @@ pre {
 }
 .watcher-row { display: flex; flex-direction: column; gap: 0.35rem; }
 .watcher-head { display: flex; align-items: center; gap: 0.5rem; }
-/* The live elapsed the poll feeds (the store's frozen heartbeat is only a
-   fallback): a muted monospace figure trailing the watcher's badge. */
-.watcher-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The face's right-aligned side, pushed to the head's right edge: the live
+   elapsed figure (poll-fed, heartbeat fallback) and the shared Stop verb.
+   Stop is the one action every live member offers, so it rides the face
+   top-right rather than the panel bottom; its tooltip owns the
+   prompt-mediated caveat, keeping the label bare. */
+.face-side { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem; }
+.face-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.face-stop {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 99px;
+  border: 1px solid var(--err);
+  color: var(--err);
+  background: var(--card);
+  cursor: pointer;
+}
 
 /* The in-bubble async catalog (async-quiescence): the bubble's live-or-settled
    background work, as a bottom strip of amber badges. Set off from the answer
