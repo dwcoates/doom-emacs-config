@@ -235,6 +235,14 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* The agent column's width cap, the single source both the centered
+     response/tool rule and the prompt's right-edge alignment derive from:
+     the prompt's right margin is half the leftover so its right edge lands
+     flush with the centered response's, and follows automatically if this
+     cap is retuned. Declared on the column (not just #feed) so the
+     bottom-pinned #tail-slot below the feed inherits the same cap, landing
+     the tail line's rails on the very columns the feed's bubbles hug. */
+  --agent-bubble-cap: 75%;
 }
 
 /* ---- The workspaces rail (sidebar.ts) ----------------------------------
@@ -761,12 +769,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  /* The agent column's width cap, the single source both the centered
-     response/tool rule and the prompt's right-edge alignment derive from:
-     the prompt's right margin is half the leftover so its right edge lands
-     flush with the centered response's, and follows automatically if this
-     cap is retuned. */
-  --agent-bubble-cap: 75%;
   /* The grey full-width tool cards (Bash, Read, Skill, Agent, …) sit at 98.5%
      of the agent column rather than filling it, so they read as centered
      BETWEEN the purple response's left rail and the prompt's right rail
@@ -1879,10 +1881,24 @@ pre {
 .interrupting-pending {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
 }
+/* The live tail line's bottom-pinned slot (see `#tail-slot` in index.html): a
+   flex sibling wedged between the scrolling #feed and the #composer, so the
+   progress indicator + running turn-stats stay stuck to the window's bottom
+   rather than floating just under the last bubble as the feed grows (which
+   moved them around the UI). `flex: none` keeps it content-sized so #feed
+   absorbs all the leftover height, and the horizontal padding matches #feed's
+   so the row's content box lines up with the feed's — landing the tail line's
+   rails on the very columns the bubbles above hug. Empty (and so collapsed via
+   :empty) off-turn, when the tail line has no content to show. */
+#tail-slot {
+  flex: none;
+  padding: 0.25rem 1rem;
+}
+#tail-slot:empty { display: none; }
 /* The combined feed-tail line: the live progress indicator and the running
    turn-stats share ONE flex row so they sit on a single baseline at the same
    0.85rem size rather than stacking on two lines (see `tailLineHtml`). The row
-   spans the full feed width, so each half keeps the inset it carried when the
+   spans the full slot width, so each half keeps the inset it carried when the
    two were separate rows — the indicator's `margin-left` (the grouped flush
    rule above) pins it to the response column's left rail, and the stats'
    `margin-left: auto` below collapses the row's free space to their left,

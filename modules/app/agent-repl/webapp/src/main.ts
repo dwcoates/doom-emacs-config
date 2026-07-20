@@ -164,6 +164,11 @@ async function boot(): Promise<void> {
     searchStatusEl.classList.toggle("on", text !== "");
   });
   installSearchHook(window as unknown as SearchHost, search);
+  // The live tail line's bottom-pinned slot (see `#tail-slot`): a flex sibling
+  // between the scrolling feed and the composer, so the progress indicator +
+  // running turn-stats stay stuck to the window's bottom rather than trailing
+  // the last bubble as the feed grows.
+  const tailSlotEl = must("tail-slot");
   const feed = new FeedRenderer(feedEl, {
     onRendered: () => search.refresh(),
     decidePermission: (requestId, behavior) => {
@@ -218,7 +223,7 @@ async function boot(): Promise<void> {
     // any mid-session change, arriving back as a `status` frame.
     getStatus: () => fetchStatus(httpBase, activeSessionId),
     refreshStatus: () => refreshStatus(httpBase, activeSessionId),
-  });
+  }, tailSlotEl);
 
   const statusEl = must("conn-status");
   const infoEl = must("session-info");

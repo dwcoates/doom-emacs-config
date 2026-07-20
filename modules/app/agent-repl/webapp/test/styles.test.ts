@@ -39,6 +39,7 @@ const darkTheme = blockAfter(css, "@media (prefers-color-scheme: dark)");
 const lightTheme = blockAfter(css, ":root");
 const composerInput = blockAfter(css, "#composer-input");
 const body = blockAfter(css, "\nbody {");
+const mainCol = blockAfter(css, "\n#main-col {");
 const clearDivider = blockAfter(css, ".clear-divider");
 // The shared rule that confines BOTH context-boundary separators (the /clear
 // rule and the /compact label) to the central column: anchored on the trailing
@@ -706,10 +707,11 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(toolCentered).toMatch(/max-width:\s*var\(--tool-card-cap\)/);
   });
 
-  it("sets the agent bubble cap to 75% on the feed", () => {
-    // Arrange / Act — an eighth of blank margin on each side once centered.
+  it("sets the agent bubble cap to 75% on the column so the tail slot inherits it", () => {
+    // Arrange / Act — the cap now lives on #main-col, not #feed, so the
+    // bottom-pinned #tail-slot sibling inherits it and its rails match the feed's.
     // Assert
-    expect(feed).toMatch(/--agent-bubble-cap:\s*75%/);
+    expect(mainCol).toMatch(/--agent-bubble-cap:\s*75%/);
   });
 
   it("derives the tool-card cap as 0.985 of the agent column on the feed", () => {
@@ -770,7 +772,7 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
 
   it("caps the prompt bubble narrower than the agent column", () => {
     // Arrange — the prompt's own ceiling against the agent cap token.
-    const agentCapPct = Number(feed.match(/--agent-bubble-cap:\s*(\d+)%/)?.[1]);
+    const agentCapPct = Number(mainCol.match(/--agent-bubble-cap:\s*(\d+)%/)?.[1]);
     // Act / Assert — the prompt's ceiling sits under the response's.
     expect(maxWidthPct(userBubble)).toBeLessThan(agentCapPct);
   });
@@ -1516,6 +1518,38 @@ describe("live turn-stats row", () => {
 });
 
 const tailLine = blockAfter(css, ".tail-line {");
+const tailSlot = blockAfter(css, "#tail-slot {");
+const tailSlotEmpty = blockAfter(css, "#tail-slot:empty {");
+
+describe("bottom-pinned tail slot (#tail-slot)", () => {
+  it("stays content-sized so the feed absorbs the leftover height", () => {
+    // Arrange / Act — the #tail-slot rule.
+    // Assert — flex:none keeps the slot the height of its one row, so #feed's
+    // flex:1 takes the rest and the slot sits stuck at the window's bottom.
+    expect(tailSlot).toMatch(/flex:\s*none/);
+  });
+
+  it("matches the feed's horizontal padding so the rails line up", () => {
+    // Arrange / Act — the #tail-slot rule.
+    // Assert — the same 1rem side padding #feed carries, so the tail line's
+    // content box lines up with the feed's and its rails hug the same columns.
+    expect(tailSlot).toMatch(/padding:\s*0\.25rem\s+1rem/);
+  });
+
+  it("collapses when empty so an off-turn slot takes no vertical space", () => {
+    // Arrange / Act — the #tail-slot:empty rule.
+    // Assert — display:none, so the slot the renderer empties off-turn vanishes
+    // rather than leaving a gap above the composer.
+    expect(tailSlotEmpty).toMatch(/display:\s*none/);
+  });
+
+  it("inherits the agent-bubble cap from the column, not the feed", () => {
+    // Arrange / Act — the #main-col rule now declares the cap.
+    // Assert — declared on the column so the sibling #tail-slot inherits it and
+    // the tail line's rails match the feed's; a feed-scoped var would not reach.
+    expect(mainCol).toMatch(/--agent-bubble-cap:\s*75%/);
+  });
+});
 
 describe("combined tail line (indicator and stats on one row)", () => {
   it("lays the two halves out on one flex row so they share a baseline", () => {
