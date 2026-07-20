@@ -96,34 +96,52 @@ export class SmoothReveal {
   ) {}
 
   /**
-   * Return a view of `state` whose still-streaming text/thinking blocks are
-   * truncated to the length revealed so far, plus whether any block is still
-   * behind its frontier (so the caller schedules another frame).
+   * Return a view of `state` whose LIVE TAIL text/thinking block is truncated
+   * to the length revealed so far, plus whether it is still behind its
+   * frontier (so the caller schedules another frame).
    *
-   * A block first seen here grows from nothing, so even a one-frame burst
-   * types out; a truncated block reads as still-streaming (its `done` is held
-   * false) so the cursor stays and no final-response chip or breath lands
-   * before the text has finished arriving on screen. A block already caught
-   * up passes through untouched — real `done` and all — so a settled feed
-   * renders from the genuine store state, not a copy.
+   * Only the most recent bubble — the last item, still being produced — types
+   * out. Every earlier block is fully received (the SDK closes a content block
+   * before opening the next), as is any block that first arrives here already
+   * `done`, so both render whole at once: a replay, a reconnect gap-fill, or a
+   * hidden workspace's drained backlog must not re-type prose the agent
+   * finished long ago. A truncated block reads as still-streaming (its `done`
+   * is held false) so no final-response chip or breath lands before the text
+   * has finished arriving on screen. A block that is caught up (or never
+   * animated) passes through untouched — real `done` and all — so a settled
+   * feed renders from the genuine store state, not a copy.
    */
   reveal(state: StoreState): { state: StoreState; pending: boolean } {
     const now = this.clock.now();
     const live = new Set<string>();
     let pending = false;
     let changed = false;
-    const items = state.items.map((item) => {
+    const lastIndex = state.items.length - 1;
+    const items = state.items.map((item, index) => {
       if (item.kind !== "text" && item.kind !== "thinking") return item;
       const id = item.blockId;
       live.add(id);
       const full = item.text.length;
-      // First sight of a LIVE block reveals from zero. Restored/replayed
-      // prose never reaches this seed: `markShown` pre-marks it fully shown
-      // so a reconnect does not re-type text already on screen.
+      // A block with any later item is fully received — the SDK closes a
+      // content block before the next one opens — so only the last item can
+      // still be streaming. `superseded` marks everything else: a replayed,
+      // gap-filled, or backlog-drained block whose text arrived complete
+      // while this webview was not painting, which must show at once rather
+      // than re-typing prose the agent already finished.
+      const superseded = index !== lastIndex;
       let track = this.tracks.get(id);
       if (!track) {
-        track = { revealed: 0, last: now };
+        // First sight. Type out ONLY the genuinely-live tail (the last item,
+        // still open); seed everything else fully shown so it renders whole
+        // immediately. `markShown` pre-marks a restore, so restored prose
+        // never reaches this seed either.
+        track = { revealed: superseded || item.done ? full : 0, last: now };
         this.tracks.set(id, track);
+      } else if (superseded && track.revealed < full) {
+        // A block that WAS the animating tail but got superseded while this
+        // webview was hidden is now fully received: snap it to full rather
+        // than resuming its half-finished type-out on switch-back.
+        track.revealed = full;
       }
       const revealed = this.step(track, full, now);
       track.revealed = revealed;
