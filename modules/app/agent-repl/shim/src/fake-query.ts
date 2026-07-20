@@ -310,8 +310,13 @@ export function createFakeQuery(
         ],
       },
     });
+    // isReplay mirrors the real SDK: the CLI enqueues the injected
+    // completion message onto the stream flagged as a replay, so the
+    // fake must too — an unflagged notification here would green-light
+    // a shim that drops the flagged shape production actually sends.
     emit({
       type: "user",
+      isReplay: true,
       parent_tool_use_id: null,
       message: {
         role: "user",

@@ -982,7 +982,11 @@ describe("ShimSession SDK message mapping", () => {
     expect(h.eventsOfType("tool-result")).toEqual([]);
   });
 
-  it("emits no task_notification for a replayed user message", async () => {
+  it("forwards a task_notification even on a replayed user message", async () => {
+    // The CLI enqueues the live completion message onto the SDK stream
+    // flagged as a replay, so the replay guard must not gate the
+    // notification scan — doing so starves the daemon of the only
+    // done-signal detached work ever gets.
     // Arrange
     const h = makeHarness();
     // Act
@@ -997,7 +1001,28 @@ describe("ShimSession SDK message mapping", () => {
       },
     });
     // Assert
-    expect(h.eventsOfType("system")).toEqual([]);
+    expect(h.eventsOfType("system")[0]).toMatchObject({
+      subtype: "task_notification",
+      data: { text: "<task-notification>done</task-notification>" },
+    });
+  });
+
+  it("forwards a task_notification once when its replay repeats the same uuid", async () => {
+    // Arrange
+    const h = makeHarness();
+    const msg = {
+      type: "user",
+      uuid: "u3rn2",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "<task-notification>done</task-notification>" }],
+      },
+    };
+    // Act — the live emission, then the SDK's duplicate-ack replay of it.
+    await drive(h, msg, { ...msg, isReplay: true });
+    // Assert
+    expect(h.eventsOfType("system")).toHaveLength(1);
   });
 
   it("emits nothing for user messages with plain string content", async () => {
