@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  findTreeRegion,
   isMetapromptTree,
+  looksLikeIntendedTree,
   railOffsets,
   renderTreeHtml,
   splitTreeLine,
@@ -167,5 +169,82 @@ describe("renderTreeHtml", () => {
     const shout = (s: string): string => s.toUpperCase();
     // Act + Assert
     expect(renderTreeHtml("├── 1.1 detail", shout)).toContain("DETAIL");
+  });
+});
+
+describe("findTreeRegion", () => {
+  const HEADER = "Response (✏️ changes made)";
+  const BODY = ["1 🔧 Fixed it", "├── 1.1 Detail", "└── 1.2 More"].join("\n");
+
+  it("returns the whole tree with empty prefix and suffix for a clean tree", () => {
+    // Act
+    const region = findTreeRegion(`${HEADER}\n\n${BODY}`);
+    // Assert
+    expect(region).toEqual({ before: "", tree: `${HEADER}\n\n${BODY}`, after: "" });
+  });
+
+  it("splits leading prose out of the tree region", () => {
+    // Act
+    const region = findTreeRegion(`Some preamble.\n\n${HEADER}\n\n${BODY}`);
+    // Assert
+    expect(region?.before).toBe("Some preamble.\n");
+    expect(region?.tree).toBe(`${HEADER}\n\n${BODY}`);
+  });
+
+  it("splits trailing prose out of the tree region", () => {
+    // Act
+    const region = findTreeRegion(`${HEADER}\n\n${BODY}\n\nA closing note.`);
+    // Assert
+    expect(region?.tree).toBe(`${HEADER}\n\n${BODY}`);
+    expect(region?.after).toBe("\nA closing note.");
+  });
+
+  it("pulls a directly-preceding header into the region", () => {
+    // Arrange — header on the line immediately above the first root.
+    const region = findTreeRegion(`${HEADER}\n${BODY}`);
+    // Assert
+    expect(region?.tree.startsWith(HEADER)).toBe(true);
+  });
+
+  it("keeps the region even when no header line precedes the tree", () => {
+    // Act
+    const region = findTreeRegion(BODY);
+    // Assert
+    expect(region).toEqual({ before: "", tree: BODY, after: "" });
+  });
+
+  it("excludes a trailing fenced block from the tree region", () => {
+    // Arrange — a stray fence must not suppress the bare tree.
+    const region = findTreeRegion(`${HEADER}\n\n${BODY}\n\n\`\`\`\ncode\n\`\`\``);
+    // Assert
+    expect(region?.tree).toBe(`${HEADER}\n\n${BODY}`);
+    expect(region?.after).toContain("```");
+  });
+
+  it("does not detect a tree that lives inside a fence", () => {
+    // Act + Assert — the fence handler owns fenced trees.
+    expect(findTreeRegion(`\`\`\`\n${BODY}\n\`\`\``)).toBeNull();
+  });
+
+  it("returns null for ordinary prose", () => {
+    // Act + Assert
+    expect(findTreeRegion("Just a normal answer.\nWith two lines.")).toBeNull();
+  });
+
+  it("returns null for a single stray connector line in prose", () => {
+    // Arrange — one connector is not two, so it is not a tree.
+    expect(findTreeRegion(["p1", "p2", "├── 1.1 stray", "p3"].join("\n"))).toBeNull();
+  });
+});
+
+describe("looksLikeIntendedTree", () => {
+  it("is true when the first non-blank line is the Response header", () => {
+    // Act + Assert
+    expect(looksLikeIntendedTree("Response (👀 no changes made)\n\nprose")).toBe(true);
+  });
+
+  it("is false when no header opens the text", () => {
+    // Act + Assert
+    expect(looksLikeIntendedTree("Just prose here.\nMore prose.")).toBe(false);
   });
 });
