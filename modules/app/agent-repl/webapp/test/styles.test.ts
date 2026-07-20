@@ -1800,22 +1800,22 @@ describe("activity fold", () => {
     expect(css).toMatch(/\.agent-activity,\s*\n\.async-fold\s*\{/);
   });
 
-  it("groups the watcher and gns folds, which share the roomier spacing", () => {
-    // Arrange / Act — both set off answer prose rather than card chrome.
+  it("keeps the gns fold's roomier spacing as its own rule", () => {
+    // Arrange / Act — the gns fold sets off answer prose rather than card
+    // chrome, so it alone keeps the roomier 0.5rem spacing.
     // Assert
-    expect(css).toMatch(/\.watcher-fold,\s*\n\.gns-fold\s*\{/);
+    expect(css).toMatch(/\.gns-fold\s*\{/);
+    expect(css).not.toContain(".watcher-fold");
   });
 
-  it("declares the ticker pill exactly once for all four folds", () => {
+  it("declares the ticker pill exactly once for all folds", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
-    // byte-identical, so a new fold silently grew a fifth.
+    // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
     // Act / Assert — one shared ticker rule, plus the five unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
     // topbar's .info-monitoring datapoint, and the face's .face-side).
-    expect(css).toMatch(
-      /\.agent-ticker,\s*\n\.watcher-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/,
-    );
+    expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
     expect(bodies.length).toBe(6);
   });
 

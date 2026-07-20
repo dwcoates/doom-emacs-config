@@ -112,11 +112,17 @@ describe("catalogue scenarios", () => {
     expect(html).toContain("respawn the slack bridge");
   });
 
-  it("inline-shell renders its tail zero-click with no fold", () => {
+  it("inline-shell wears the shared fold dress with an output face", () => {
     const html = renderScenarioHtml(scenario("inline-shell"), closed);
+    expect(html).toContain("async-fold");
+    expect(html).toContain("output · make watch · done");
+    expect(html).not.toContain("task-live-output");
+  });
+
+  it("inline-shell streams its tail inside the open fold", () => {
+    const html = expanded("inline-shell");
     expect(html).toContain("task-live-output");
     expect(html).toContain("watch: build ok");
-    expect(html).not.toContain("async-fold");
   });
 
   it("dual-body shape A stacks two separate open panels", () => {
