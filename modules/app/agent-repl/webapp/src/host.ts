@@ -60,3 +60,73 @@ export function installHostCloseMenusHook(target: HostGlobal, close: () => void)
     close();
   };
 }
+
+/**
+ * Name of the global that nudges the page's text size.
+ * `agent-repl-frontend-text-size-hook' (frontend.el) MUST match this
+ * string.
+ */
+export const TEXT_SCALE_HOOK = "agentReplAdjustTextScale";
+
+/**
+ * The root font size, in px, that a scale of 1 maps to. The feed is laid
+ * out almost entirely in `rem`, so scaling this one number grows or
+ * shrinks every run of text together. 16 is the WKWebView default, so the
+ * page looks identical at scale 1 whether or not the host has ever fired
+ * the hook.
+ */
+export const TEXT_SCALE_BASE_PX = 16;
+
+/** Floor on the scale factor, so a held key can't shrink text to nothing. */
+export const TEXT_SCALE_MIN = 0.5;
+
+/** Ceiling on the scale factor, so a held key can't blow text off screen. */
+export const TEXT_SCALE_MAX = 3;
+
+/** The single mutable field the text-scale hook writes. */
+export interface TextScaleRoot {
+  style: { fontSize: string };
+}
+
+/** Clamp SCALE into the supported range, keeping text legible and on screen. */
+export function clampTextScale(scale: number): number {
+  return Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, scale));
+}
+
+/**
+ * The px font size for SCALE, rounded to thousandths.
+ *
+ * The scale accumulates fine-grained deltas, so the raw product carries
+ * binary-float dust (1.2 * 16 lands as 19.200000000000003). Sub-pixel
+ * precision is already more than the render needs, so the emitted string
+ * is rounded there rather than showing that dust in the DOM.
+ */
+export function textScalePx(scale: number): number {
+  return Math.round(scale * TEXT_SCALE_BASE_PX * 1e3) / 1e3;
+}
+
+/**
+ * Plant the text-scale hook on TARGET, sizing ROOT's font when fired.
+ *
+ * The page owns the current scale — Emacs has no per-webview state of its
+ * own to keep it in — so the hook holds it in a closure that starts at 1
+ * and accumulates every nudge. The host fires it with either a finite
+ * number DELTA (added to the current scale, then clamped) or the string
+ * `"reset"` (back to 1); anything else leaves the scale untouched. The
+ * new scale is returned from the hook so a caller can read where it landed.
+ */
+export function installHostTextScaleHook(target: HostGlobal, root: TextScaleRoot): void {
+  let scale = 1;
+  target[TEXT_SCALE_HOOK] = (arg: unknown): number => {
+    if (arg === "reset") {
+      scale = 1;
+    } else {
+      const delta = typeof arg === "number" ? arg : Number(arg);
+      if (Number.isFinite(delta)) {
+        scale = clampTextScale(scale + delta);
+      }
+    }
+    root.style.fontSize = `${textScalePx(scale)}px`;
+    return scale;
+  };
+}
