@@ -643,10 +643,12 @@ restores its panels on switch."
       (error "agent-repl sidebar: no live workspace for dir %s" dir))
     (let* ((name (car entry))
            (closed (agent-repl--sidebar-closed-p name)))
-      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s"
+      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s merged=%s"
                         name (cdr entry)
                         (and (agent-repl--ws-live-p name) t)
-                        closed)
+                        closed
+                        (or (eq (agent-repl--ws-get name :repl-state) :merged)
+                            (eq (agent-repl--ws-get name :merge-completed) t)))
       ;; Arm the panel show BEFORE switching so a closed target comes up
       ;; running AND open rather than running-but-headless.  Drained by
       ;; `agent-repl--on-workspace-switch' once the workspace activates.

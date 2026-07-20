@@ -331,8 +331,11 @@ session is on."
                          ws (agent-repl-frontend-name running))
       (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
       (let ((fe (agent-repl--ws-frontend ws)))
-        (agent-repl--log ws "boot-session: ws=%s booting on %s"
-                         ws (agent-repl-frontend-name fe))
+        (agent-repl--log ws "boot-session: ws=%s booting on %s merged=%s merge-completed-at=%s"
+                         ws (agent-repl-frontend-name fe)
+                         (or (eq (agent-repl--ws-get ws :repl-state) :merged)
+                             (eq (agent-repl--ws-get ws :merge-completed) t))
+                         (agent-repl--ws-get ws :merge-completed-at))
         (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))))
 
 (provide 'frontends)
