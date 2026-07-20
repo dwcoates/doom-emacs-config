@@ -4435,6 +4435,37 @@ describe("task stop control", () => {
   });
 });
 
+describe("dual-body stacking (Shape A)", () => {
+  it("stacks the child-feed fold above the async fold on one card", () => {
+    // Arrange — an inline subagent that ALSO spawned detached work.
+    const item: ToolItem = {
+      kind: "tool",
+      ts: "2026-05-24T10:00:00.000Z",
+      toolUseId: "t1",
+      messageId: "m1",
+      toolName: "Agent",
+      inputJson: "{}",
+      input: { description: "spawner" },
+      inputDone: true,
+      result: { isError: false, content: "Command running in background with ID: bg1" },
+      asyncSource: { source_id: "bg1", kind: "shell", status: "running" },
+    };
+    const child: ToolItem = { ...item, toolUseId: "c1", toolName: "Read", result: undefined, asyncSource: undefined };
+    const panels: PanelContext = {
+      children: new Map([["t1", [child]]]),
+      isOpen: () => false,
+    };
+    // Act
+    const html = renderItem(item, undefined, undefined, panels);
+    // Assert — both folds render, activity first (Shape A order).
+    const activityAt = html.indexOf("agent-activity");
+    const asyncAt = html.indexOf("async-fold");
+    expect(activityAt).toBeGreaterThan(-1);
+    expect(asyncAt).toBeGreaterThan(-1);
+    expect(activityAt).toBeLessThan(asyncAt);
+  });
+});
+
 describe("live task output", () => {
   it("streams the daemon's file tail into a capped output box", () => {
     // Arrange
