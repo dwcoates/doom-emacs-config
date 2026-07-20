@@ -4,6 +4,12 @@ Always explain at the end of your response if there were changes whether or not 
 
 Begin the persistence message with ✅ if the changes are not persistent after reloading (i.e. a reload fully resets them), or ❌ if any changes persist after reloading. When using ❌, briefly summarize which specific changes persist and why (e.g. "file written to disk", "entry added to hook").
 
+## Related repo: explanation-engine (CEE) — chess.com work
+
+- **Location**: `~/workspace/ChessCom/explanation-engine`, with worktrees under `~/workspace/ChessCom/explanation-engine-worktrees/`.
+- **What it is**: the ChessCom Chess Explanation Engine ("CEE"), a chess.com work repo — the chess analysis/explanation backend (`services/` engine services, `sdks/lang/go/` Go SDK, the embeddable `apps/cee-web-widget/`, and the source of many agent-repl skills in its `.claude/skills/`).
+- **Workspaces**: you may be asked to (or may want to) generate workspaces for it via the workspace-generation skill; its generated worktrees land under `explanation-engine-worktrees/`.
+
 ## There is NO such thing as a "pre-existing" error
 
 **Under NO circumstances — ever, in any universe — does the concept of a "pre-existing error" exist in this repository. ALL errors need fixing.**
