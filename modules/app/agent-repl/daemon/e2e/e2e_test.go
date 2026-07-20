@@ -71,7 +71,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 			proc, err := shim.Spawn(shim.Options{
 				Argv:     server.ShimArgv(node, script, sessionID, false, opts),
 				Dir:      opts.CWD,
-				ExtraEnv: server.ShimEnv(opts),
+				ExtraEnv: server.ShimEnv(opts, ""),
 				Logf:     t.Logf,
 			})
 			if err != nil {

@@ -148,9 +148,10 @@ func main() {
 			Dir:  opts.CWD,
 			// The SDK's claude subprocess inherits this overlay: the
 			// ownership marker (whose hook scripts stamp sentinel line 3,
-			// so Emacs accepts session-id updates from this CLI) and the
-			// session's CLAUDE_CONFIG_DIR (which account it runs as).
-			ExtraEnv: server.ShimEnv(opts),
+			// so Emacs accepts session-id updates from this CLI), the
+			// session's CLAUDE_CONFIG_DIR (which account it runs as), and
+			// this daemon's own addr (so a session's tools can probe it).
+			ExtraEnv: server.ShimEnv(opts, *addr),
 		})
 		if err != nil {
 			return nil, err
@@ -245,6 +246,8 @@ func main() {
 		SummaryModel:    *summaryMdl,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
+		WidgetAssetsDir: *widgetAssets,
+		DaemonAddr:      *addr,
 	})
 
 	mux := http.NewServeMux()
@@ -252,6 +255,7 @@ func main() {
 	mux.Handle("/sessions/", srv.Handler())
 	mux.Handle("/remediation", srv.Handler())
 	mux.Handle("/accounts", srv.Handler())
+	mux.Handle("/capabilities", srv.Handler())
 	mux.Handle("/workspaces/", srv.Handler())
 	mux.Handle("/shutdown", srv.Handler())
 	if h := webappHandler(*webappDir, log.Printf); h != nil {
