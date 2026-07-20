@@ -25,6 +25,10 @@
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
+  /* Agent boot: the same blue the Emacs tab-bar paints the :init state
+     (`agent-repl--color-init-blue'), so a starting workspace reads as one
+     state across both renderers instead of red in one and blue in the other. */
+  --init: #3366cc;
   /* Tool card titles: matches the Emacs modeline "Agent Input" ai-title
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
@@ -298,8 +302,11 @@ body {
    permission, hollow = idle, grey = dead; `none` holds the column's
    alignment invisibly. */
 #ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
-#ws-sidebar .st-thinking,
-#ws-sidebar .st-init { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* Booting breathes like thinking because both are live, but in the tab-bar's
+   init blue: red here read as an error on a workspace that was merely
+   starting, and as identical to a thinking one. */
+#ws-sidebar .st-init { background: var(--init); animation: ws-pulse 1.3s ease-in-out infinite; }
 #ws-sidebar .st-permission { background: var(--q-border); animation: ws-pulse 1.3s ease-in-out infinite; }
 #ws-sidebar .st-done { background: var(--ok); }
 #ws-sidebar .st-done-viewed { background: var(--thinking); }
