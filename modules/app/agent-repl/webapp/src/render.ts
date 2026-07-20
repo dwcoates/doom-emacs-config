@@ -36,6 +36,7 @@ import {
 import { parseUnsupportedCommand } from "./unsupported.js";
 import { StatusResponse, StatusSnapshot, statusPanelHtml } from "./status.js";
 import {
+  BodySpec,
   MemberContext,
   MemberStatus,
   StreamMember,
@@ -940,8 +941,12 @@ function ToolCard(
   ).length;
   const permBadge =
     pendingPerms > 0 ? `<span class="badge perm">needs permission</span>` : "";
-  const activity =
-    panels && children.length > 0 ? ActivitySection(item.toolUseId, children, panels) : "";
+  // The member's bodies render as stacked folds in Shape A order (child
+  // feed above the detached stream), each through the one MemberFold.
+  const folds =
+    member !== null
+      ? member.bodies.map((spec) => MemberFold(member, spec, panels)).join("")
+      : "";
   // A subagent's card carries its own live topbar right under the head:
   // the session strip's renderer scoped to THIS agent (see topbar.ts).
   const agentTopbar =
@@ -960,8 +965,7 @@ function ToolCard(
       ${agentTopbar}
       ${toolInput(item)}
       ${progress}
-      ${activity}
-      ${AsyncFold(item, source, panels)}
+      ${folds}
       ${toolResult(item)}
       ${liveTaskOutput(item, source)}
       ${agentComposer(item, panels)}
@@ -1086,28 +1090,26 @@ function journalRows(text: string): string {
 }
 
 /**
- * One source's stream, rendered by the renderer its FORMAT names (§2.6).
+ * One stream body, rendered by the renderer its BodySpec names (§2.6).
  *
  * The single place the generalization lands: adding a newly supported async
  * type is a `format` the daemon already classifies plus an arm here, not a
  * bespoke card. Nothing is forced into a shape its data lacks — a shell's
- * spool is bytes, so it stays a <pre>.
+ * spool is bytes, so it stays a <pre>. The member's tail is already the
+ * one-precedence text (stream-member.ts), so no surface re-decides it.
  */
-function asyncStreamHtml(item: ToolItem, source: AsyncSource, panels?: PanelContext): string {
-  // The ws-streamed tail (shells) wins when present; otherwise the polled
-  // tail, which is a background agent's only source since the WS never
-  // carried its transcript.
-  const polled = panels?.taskTail?.(source.source_id);
-  const text = item.taskOutput !== undefined && item.taskOutput !== "" ? item.taskOutput : polled?.text ?? "";
-  switch (source.stream?.format) {
-    case "jsonl-transcript":
+function streamBodyHtml(spec: BodySpec, panels?: PanelContext): string {
+  switch (spec.kind) {
+    case "child-feed":
+      return feedChildren(spec.items, panels);
+    case "transcript":
       // Recursing into a parsed stream is the one place depth grows, so
       // the descended context carries the guards a deeper fold reads.
-      return transcriptBubbles(text, descend(panels, source.source_id));
-    case "jsonl-journal":
-      return journalRows(text);
-    default:
-      return taskOutputPre(text);
+      return transcriptBubbles(spec.text, descend(panels, spec.sourceId));
+    case "journal":
+      return journalRows(spec.text);
+    case "raw":
+      return taskOutputPre(spec.text);
   }
 }
 
@@ -1118,33 +1120,36 @@ function asyncFace(source: AsyncSource): string {
 }
 
 /**
- * The fold a card carrying an async source wears: its detached work's
- * stream, behind a click.
+ * One fold per member body — the unified Panel every expansion goes
+ * through (Shape A: a member owning several bodies stacks one fold each).
  *
- * Built on the same Fold as the activity panel and the watcher fold, with
- * open state in the renderer (openPanels) so it survives the card's
- * per-frame re-renders while its stream grows. Keyed `async:<toolUseId>` so
- * it never collides with the card's own activity panel — a card can have
- * both (an inline subagent that also spawned detached work). SOURCE is the
- * card's effective source (see effectiveAsyncSource), precomputed by
- * ToolCard so the fold and the raw tail can never both render. The
- * `mayNest` guard cuts the fold at the depth cap and on a cycle — a
- * nested spawn announcing an ancestor's own id — and a polled tail that
- * reports done settles the face a synthetic source cannot settle itself.
+ * A child-feed body is the activity fold, keyed by the tool-use id as
+ * ever. A sourced body is the async fold, keyed `async:<toolUseId>` so
+ * the two never collide on a card that owns both. Both render through
+ * the same Fold skeleton into the same `.agent-panel`; the face reads
+ * the MEMBER's one status, so the fold can never disagree with the head
+ * badge about liveness. The `mayNest` guard cuts a sourced fold at the
+ * depth cap and on a cycle (a nested spawn announcing an ancestor's own
+ * id). A source-less raw body renders no fold here — the inline tail
+ * still covers it (see liveTaskOutput).
  */
-function AsyncFold(item: ToolItem, source: AsyncSource | undefined, panels?: PanelContext): string {
-  if (!source || !panels) return "";
+function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext): string {
+  if (!panels) return "";
+  const item = member.item;
+  if (spec.kind === "child-feed") {
+    return ActivitySection(item.toolUseId, spec.items, panels);
+  }
+  const source = member.source;
+  if (!source) return "";
   if (!mayNest(panels.depth ?? 0, panels.seenSources, source.source_id)) return "";
   const id = `async:${item.toolUseId}`;
-  const settled = source.status !== "running" || (panels.taskTail?.(source.source_id)?.done ?? false);
-  const face = settled && source.status === "running" ? { ...source, status: "done" as const } : source;
-  const arc = settled ? "" : `<span class="tool-spinner" aria-hidden="true"></span>`;
+  const arc = member.settled ? "" : `<span class="tool-spinner" aria-hidden="true"></span>`;
   return Fold({
     id,
     foldClass: "async-fold",
     tickerClass: "async-ticker",
-    ticker: `${arc}${escapeHtml(asyncFace(face))}`,
-    body: () => asyncStreamHtml(item, source, panels),
+    ticker: `${arc}${escapeHtml(asyncFace({ ...source, status: member.status }))}`,
+    body: () => streamBodyHtml(spec, panels),
     open: panels.isOpen(id),
   });
 }
@@ -1164,14 +1169,12 @@ function WatcherRow(item: ToolItem, panels?: PanelContext): string {
   const status = memberBadge(member?.status ?? "done");
   const desc = headline !== "" ? `<div class="file-path">${escapeHtml(headline)}</div>` : "";
   const progress = item.progress ? `<div class="tool-progress">${escapeHtml(item.progress)}</div>` : "";
-  // The same format-driven renderer the card's own fold uses, rather than a
+  // The same BodySpec dispatch the card's own fold uses, rather than a
   // second hand-rolled <pre>: a watcher that is a background agent renders
-  // its transcript as nested bubbles here too. A watcher the daemon
-  // classified no source for falls back to the raw member tail.
-  const source = member?.source;
-  const tail = source
-    ? asyncStreamHtml(item, source, panels)
-    : taskOutputPre(member?.tail ?? "");
+  // its transcript as nested bubbles here too. The row is the STREAM view,
+  // so the member's child-feed body stays with its card.
+  const streamSpec = member?.bodies.find((b) => b.kind !== "child-feed");
+  const tail = streamSpec ? streamBodyHtml(streamSpec, panels) : "";
   return `<div class="watcher-row">
       <div class="watcher-head"><span class="tool-name">${escapeHtml(label)}</span>${status}${faceSide(member)}</div>
       ${desc}${progress}${tail}${agentComposer(item, panels)}
