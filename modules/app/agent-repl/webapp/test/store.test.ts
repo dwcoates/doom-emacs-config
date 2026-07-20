@@ -435,6 +435,51 @@ describe("ConversationStore tool cards", () => {
     // Assert — the completion is never swallowed.
     expect(store.state.items[0]).toMatchObject({ kind: "system", subtype: "task-notification" });
   });
+
+  it("lands a notification with a foreign tool-use-id on the card that announced its task id", () => {
+    // Arrange — the spawn announced bg1 in its result prose.
+    const store = newStore();
+    runToolStart(store);
+    store.applyRaw(
+      frame("tool-use-result", {
+        tool_use_id: "t1",
+        is_error: false,
+        content: "Command running in background with ID: bg1",
+      }),
+    );
+    // Act — the notification's tag names a call the feed never saw.
+    store.applyRaw(
+      frame("task-notification", {
+        tool_use_id: "t-foreign",
+        task_id: "bg1",
+        status: "completed",
+        text: "<task-notification/>",
+      }),
+    );
+    // Assert — the member settles instead of stranding amber.
+    expect((store.state.items[0] as ToolItem).notification).toMatchObject({
+      taskId: "bg1",
+      status: "completed",
+    });
+  });
+
+  it("lands a tagless notification on the card whose classified source id matches", () => {
+    // Arrange — a spawn whose only announcement is the daemon classification.
+    const store = newStore();
+    runToolStart(store);
+    store.applyRaw(
+      frame("async-source", {
+        tool_use_id: "t1",
+        source: { source_id: "ag1", kind: "agent", status: "running" },
+      }),
+    );
+    // Act — no tool-use-id tag at all.
+    store.applyRaw(
+      frame("task-notification", { task_id: "ag1", status: "completed", text: "<t/>" }),
+    );
+    // Assert
+    expect((store.state.items[0] as ToolItem).notification).toMatchObject({ taskId: "ag1" });
+  });
 });
 
 describe("ConversationStore permissions", () => {

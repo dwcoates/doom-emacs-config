@@ -24,6 +24,9 @@ import {
   WsEnvelope,
   parseFrame,
 } from "./protocol.js";
+// A runtime cycle (partition imports store's types and helpers), safe in
+// ESM because every cross-use is call-time, never module-init.
+import { spawnedTaskIds } from "./partition.js";
 import { isClearTurn } from "./turn.js";
 
 // --- conversation items -------------------------------------------------------
@@ -892,10 +895,16 @@ export class ConversationStore {
       }
       case "task-notification": {
         // The completion lands on the SPAWNING card when the payload
-        // names one the feed knows; anything else surfaces as a system
-        // note rather than vanishing — a background completion is never
-        // swallowed.
-        const item = frame.tool_use_id ? this.findTool(frame.tool_use_id) : undefined;
+        // names one the feed knows. A payload whose tool-use-id tag is
+        // missing or names a call the feed never saw falls back to the
+        // card that ANNOUNCED the task id — the id is the durable half of
+        // the correlation, so a harness that drops or mangles the tag
+        // still settles its member instead of stranding it amber. Only
+        // when neither resolves does the completion surface as a system
+        // note rather than vanishing — it is never swallowed.
+        const item =
+          (frame.tool_use_id ? this.findTool(frame.tool_use_id) : undefined) ??
+          (frame.task_id ? this.findSpawner(frame.task_id) : undefined);
         if (item) {
           item.notification = {
             taskId: frame.task_id,
@@ -1237,6 +1246,19 @@ export class ConversationStore {
   private findTool(toolUseId: string): ToolItem | undefined {
     return this.findLast(
       (i): i is ToolItem => i.kind === "tool" && i.toolUseId === toolUseId,
+    );
+  }
+
+  /**
+   * The call that spawned TASKID: classified source id first (structured,
+   * so immune to prose drift), announced ids second — the notification
+   * fallback when the payload's tool-use-id tag resolves to no card.
+   */
+  private findSpawner(taskId: string): ToolItem | undefined {
+    return this.findLast(
+      (i): i is ToolItem =>
+        i.kind === "tool" &&
+        (i.asyncSource?.source_id === taskId || spawnedTaskIds(i).includes(taskId)),
     );
   }
 
