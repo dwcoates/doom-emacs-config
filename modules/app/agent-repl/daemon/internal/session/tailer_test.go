@@ -560,6 +560,49 @@ func TestTaskOutputJoinsAnAnnouncementSplitAcrossChunks(t *testing.T) {
 	}
 }
 
+// --- the structured descriptor records the poll route's path --------------------
+
+func asyncSourceFrame(sourceID, outputFile string) protocol.L2Frame {
+	return &protocol.AsyncSourceFrame{
+		Envelope:  protocol.Envelope{Type: "async-source"},
+		ToolUseID: "t1",
+		Source: protocol.AsyncSource{
+			SourceID:   sourceID,
+			Kind:       "agent",
+			Status:     "running",
+			OutputFile: outputFile,
+		},
+	}
+}
+
+func TestSuperviseRecordsTheStructuredAgentOutputPath(t *testing.T) {
+	// Arrange — a classified spawn whose prose the regexes cannot read.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	// Act
+	s.mu.Lock()
+	s.superviseTailersLocked([]protocol.L2Frame{asyncSourceFrame("ag1", "/tmp/claude-0/x/tasks/ag1.output")})
+	rec, ok := s.taskPaths["ag1"]
+	s.mu.Unlock()
+	// Assert — the poll route survives a prose wording drift.
+	if !ok || rec.path != "/tmp/claude-0/x/tasks/ag1.output" {
+		t.Fatalf("want the structured path recorded, got %+v ok=%v", rec, ok)
+	}
+}
+
+func TestSuperviseRefusesAStructuredPathOutsideTheSpool(t *testing.T) {
+	// Arrange — confinement binds the structured path exactly as the prose one.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
+	// Act
+	s.mu.Lock()
+	s.superviseTailersLocked([]protocol.L2Frame{asyncSourceFrame("ag2", "/etc/passwd")})
+	_, ok := s.taskPaths["ag2"]
+	s.mu.Unlock()
+	// Assert
+	if ok {
+		t.Fatal("a path outside the spool must never be recorded")
+	}
+}
+
 // --- TaskStop settles a task without a completion notification ------------------
 
 func toolResultFrame(toolUseID string, isErr bool) protocol.L2Frame {

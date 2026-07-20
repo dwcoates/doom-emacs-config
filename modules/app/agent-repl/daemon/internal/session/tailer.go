@@ -278,6 +278,14 @@ func (s *Session) superviseTailersLocked(frames []protocol.L2Frame) {
 		} else if ann := parseAgentSpawn(f); ann != nil {
 			s.recordTaskPathLocked(ann.TaskID, ann.Path)
 		}
+		// The classifier's descriptor is the STRUCTURED twin of the prose
+		// announcements above: recording its path too keeps the poll route
+		// alive when the prose wording drifts out from under the regexes.
+		// First-path-wins makes the overlap with parseAgentSpawn harmless.
+		if a, ok := f.(*protocol.AsyncSourceFrame); ok &&
+			a.Source.OutputFile != "" && allowedTaskOutputPath(a.Source.OutputFile) {
+			s.recordTaskPathLocked(a.Source.SourceID, filepath.Clean(a.Source.OutputFile))
+		}
 		if n, ok := f.(*protocol.TaskNotificationFrame); ok && n.TaskID != "" {
 			// The completion notification is the fallback path source for a
 			// background agent whose spawn result named none, and it marks

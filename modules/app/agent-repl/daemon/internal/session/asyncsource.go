@@ -92,9 +92,12 @@ func classifyAsyncSource(toolName string, structured json.RawMessage, isError bo
 		// shape replay.go already parses — so the client renders it as
 		// nested bubbles, exactly as it renders an inline subagent. It is
 		// polled rather than pushed: pushing a whole transcript through the
-		// retention ring would evict the conversation it belongs to.
+		// retention ring would evict the conversation it belongs to. The
+		// path rides the descriptor so the poll route's record no longer
+		// depends on the prose announcement matching (parseAgentSpawn).
 		if s.OutputFile != "" && s.CanReadOutputFile {
 			src.Stream = &protocol.StreamRef{Transport: "poll", Format: "jsonl-transcript"}
+			src.OutputFile = s.OutputFile
 		}
 		return src
 
