@@ -249,6 +249,55 @@ describe("sidebar surface (--sidebar-bg)", () => {
   });
 });
 
+describe("sidebar overlay (floating dock)", () => {
+  it("insets the rail from the window with a margin so it floats free of the edges", () => {
+    // Arrange / Act — the rail's own inset.
+    // Assert
+    expect(sidebarRule).toMatch(/margin:\s*0\.5rem/);
+  });
+
+  it("rounds the rail's corners so it reads as a detached card", () => {
+    // Arrange / Act — the rail's corner radius.
+    // Assert
+    expect(sidebarRule).toMatch(/border-radius:\s*10px/);
+  });
+
+  it("lifts the rail off the feed with the --sidebar-shadow drop shadow", () => {
+    // Arrange / Act — the rail's own shadow.
+    // Assert
+    expect(sidebarRule).toMatch(/box-shadow:\s*var\(--sidebar-shadow\)/);
+  });
+
+  it("drops the hard border-right split divider the flush rail drew", () => {
+    // Arrange / Act — the overlay is delimited by its inset gap and shadow, not a rule.
+    // Assert — no border-right declaration (the comment naming it is fine).
+    expect(sidebarRule).not.toMatch(/border-right\s*:/);
+  });
+
+  it("clips the rail's children to the rounded corners", () => {
+    // Arrange / Act — overflow:hidden keeps .sb-head's divider inside the radius.
+    // Assert
+    expect(sidebarRule).toMatch(/overflow:\s*hidden/);
+  });
+
+  it("defines a drop shadow token for the light theme", () => {
+    // Arrange / Act — the light root's shadow token.
+    // Assert — a shadow needs at least one length (offset/blur).
+    expect(cssVar(lightTheme, "--sidebar-shadow")).toMatch(/px/);
+  });
+
+  it("deepens the dark-theme shadow so the lift still registers on the dark feed", () => {
+    // Arrange — each theme's shadow opacity, pulled from its color-mix percentage.
+    const pct = (block: string): number => {
+      const m = cssVar(block, "--sidebar-shadow").match(/#000000\s+(\d+)%/);
+      if (m === null) throw new Error("shadow is not a #000000 color-mix");
+      return Number(m[1]);
+    };
+    // Act / Assert — dark carries more black than light.
+    expect(pct(darkTheme)).toBeGreaterThan(pct(lightTheme));
+  });
+});
+
 describe("flush header dividers (--topbar-h)", () => {
   it("pins the topbar to the shared header height", () => {
     // Arrange / Act — the topbar's own height declaration.
