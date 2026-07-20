@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ModelUsage, Usage } from "../src/protocol.js";
 import {
   TokenMenuData,
+  compactTokens,
   formatTokens,
   tokensMenuHtml,
   tokensOverlayHtml,
@@ -47,6 +48,24 @@ describe("formatTokens", () => {
   it("groups thousands with commas", () => {
     // Arrange + Act + Assert
     expect(formatTokens(1234567)).toBe("1,234,567");
+  });
+});
+
+describe("compactTokens", () => {
+  it("writes a sub-thousand count as its plain digits", () => {
+    // Arrange + Act + Assert
+    expect(compactTokens(812)).toBe("812");
+  });
+
+  it("keeps one decimal only below ten thousand, where it still reads", () => {
+    // Arrange + Act + Assert
+    expect(compactTokens(9_460)).toBe("9.5k");
+    expect(compactTokens(12_340)).toBe("12k");
+  });
+
+  it("writes a million-scale count in M", () => {
+    // Arrange + Act + Assert
+    expect(compactTokens(1_230_000)).toBe("1.2M");
   });
 });
 

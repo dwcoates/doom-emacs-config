@@ -5116,6 +5116,44 @@ describe("async catalog", () => {
     expect(html).toContain("streamed line");
     expect(html).not.toContain("polled line");
   });
+
+  it("shows the member's live token spend on its badge", () => {
+    // Arrange — a detached agent whose polled transcript meters 12,340 tokens.
+    const agent = watcher("ag1", {
+      toolName: "Agent",
+      result: { isError: false, content: "Async agent launched. agentId: ag1" },
+      asyncSource: {
+        source_id: "ag1",
+        kind: "agent",
+        status: "running",
+        stream: { transport: "poll", format: "jsonl-transcript" },
+      },
+    });
+    const tail = `{"type":"assistant","message":{"usage":{"output_tokens":12340},"content":[]}}`;
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => false,
+      watchers: new Map([["b1", [agent]]]),
+      taskTail: (id) =>
+        id === "ag1" ? { text: tail, offset: 1, done: false, elapsedMs: 0 } : undefined,
+    };
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
+    // Assert — the collapsed pill carries the compact figure.
+    expect(html).toContain(`<span class="async-badge-tokens">12k tok</span>`);
+  });
+
+  it("shows no token figure on a badge whose stream meters none", () => {
+    // Arrange — a shell spool carries no usage records.
+    const html = renderItem(
+      text("b1"),
+      undefined,
+      finalsClosing(text("b1")),
+      watcherPanels([watcher("bg1", { taskOutput: "bytes" })]),
+    );
+    // Assert
+    expect(html).not.toContain("async-badge-tokens");
+  });
 });
 
 describe("async-quiescence border (the invariant)", () => {

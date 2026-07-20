@@ -711,6 +711,12 @@ describe("async catalog badges", () => {
     // Assert
     expect(badge).toMatch(/cursor:\s*pointer/);
   });
+
+  it("mutes the token spend so the label stays the badge's voice", () => {
+    // Arrange / Act — the .async-badge-tokens rule.
+    // Assert
+    expect(blockAfter(css, ".async-badge-tokens")).toMatch(/color:\s*var\(--muted\)/);
+  });
 });
 
 describe("the bubble pulse", () => {

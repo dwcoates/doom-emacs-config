@@ -15,7 +15,7 @@ import {
 } from "./topbar.js";
 import { taskCreateToolUseId } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { formatTokens } from "./tokens.js";
+import { compactTokens, formatTokens } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -1177,9 +1177,16 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
   // third settled color.
   const dot = status === "running" ? "running" : status === "done" ? "done" : "error";
   const open = panels?.isOpen(id) ?? false;
+  // The spend rides the badge whenever the stream meters one (see
+  // transcriptStats): live it ticks with the tail, settled it is the
+  // run's total — the collapsed pill's one glanceable progress figure.
+  const tokens =
+    member?.outputTokens !== undefined
+      ? ` <span class="async-badge-tokens">${escapeHtml(compactTokens(member.outputTokens))} tok</span>`
+      : "";
   return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
-  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}</div>`;
+  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}${tokens}</div>`;
 }
 
 /**

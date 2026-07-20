@@ -1274,6 +1274,9 @@ pre {
 }
 .async-badge.active { background: color-mix(in srgb, var(--async) 18%, transparent); }
 .async-badge.settled { border-color: var(--border); color: var(--muted); }
+/* The member's token spend, muted so the label stays the badge's voice —
+   live it ticks with the stream, settled it reads the run's total. */
+.async-badge-tokens { color: var(--muted); font-size: 0.7rem; }
 
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
