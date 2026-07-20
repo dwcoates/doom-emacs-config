@@ -2815,10 +2815,10 @@ export class FeedRenderer {
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
       statusCard: this.statusCardHtml(),
-      // The FULL item list, not the feed's clear-cut one: the roster
-      // retention stamps (`deactivatedAtTurn`) ride the whole-session
-      // counted-turn clock, so the strip's own clock must too — a cut
-      // list's smaller count would freeze every settled row at "just now".
+      // The FULL item list, not the feed's clear-cut one: the agent-scoped
+      // rosters (agentSubagents / agentTasks) resolve the agent's direct
+      // children and its task calls, which can sit anywhere in the session,
+      // so a cut list would drop the ones outside the current feed window.
       agentTopbar: (agent) =>
         agentTopbarHtml(
           this.lastState?.items ?? [],

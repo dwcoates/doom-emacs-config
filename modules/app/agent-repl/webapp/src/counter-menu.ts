@@ -2,19 +2,17 @@
  * counter-menu — the shared facade behind every topbar dropdown counter
  * (subagents, tasks, and any future roster).
  *
- * A counter is a chip in the session-datapoint run: a count, a caret, an
- * optional "N still working" badge, and an overlay listing one row per
- * entry with a status dot. Each concrete counter (see `agents.ts`,
- * `tasks.ts`) is a thin specialization: it projects `StoreState.items`
- * into `CounterEntry[]` and supplies a `CounterSpec` naming its DOM
- * classes and nouns. Everything visual and every retention rule lives
+ * A counter is a chip in the session-datapoint run: a count, a caret, and
+ * an overlay listing one row per entry with a status dot. Each concrete
+ * counter (see `agents.ts`, `tasks.ts`) is a thin specialization: it
+ * projects `StoreState.items` into `CounterEntry[]` and supplies a
+ * `CounterSpec` naming its DOM classes and nouns. Everything visual lives
  * HERE, so the two counters can never drift in look or behavior.
  *
- * Retention: a terminal entry is not dropped the instant it settles. It
- * lingers in the roster for `RETENTION_TURNS` counted turns after it went
- * terminal, greyed and stamped with how long ago that was, then falls off
- * the list (and out of the count) entirely. An entry that is still active
- * never prunes.
+ * The roster shows ONLY entries that are still actively running: a terminal
+ * entry (done or errored) drops out the instant it settles, so the topbar
+ * is a live view of what async is running right now, never a log of what
+ * has finished.
  */
 import { escapeHtml } from "./highlight.js";
 
@@ -32,14 +30,6 @@ const ACTIVE_STATUSES: ReadonlySet<CounterStatus> = new Set([
   "running",
 ]);
 
-/**
- * How many counted turns a terminal entry survives in the roster after it
- * settles. At turn-distance 0 through `RETENTION_TURNS` it still renders
- * (greyed, with its age); beyond that it is pruned from both the overlay
- * and the chip's count.
- */
-export const RETENTION_TURNS = 5;
-
 /** One row of a counter's roster: the projection every counter feeds in. */
 export interface CounterEntry {
   /** Stable key: the tool-use id, task id, or whatever the counter tracks. */
@@ -51,11 +41,6 @@ export interface CounterEntry {
   status: CounterStatus;
   /** Whether the row is indented as spawned-by-another (subagent nesting). */
   nested: boolean;
-  /**
-   * The counted-turn ordinal at which the entry went terminal, or null
-   * while it is still active. Drives both the age label and the prune.
-   */
-  deactivatedAtTurn: number | null;
 }
 
 /** The DOM/vocabulary knobs that make one counter look like itself. */
@@ -66,8 +51,6 @@ export interface CounterSpec {
   item: string;
   /** Chip label noun (e.g. `agent` → `3 agents`). */
   noun: string;
-  /** The working-count badge noun (e.g. `running` → `2 running`). */
-  busyNoun: string;
   /** The chip's `title` attribute. */
   title: string;
   /** Row headline shown when `summary` is still empty. */
@@ -77,47 +60,6 @@ export interface CounterSpec {
 /** Whether the entry is still working (not yet terminal). */
 export function isActive(entry: CounterEntry): boolean {
   return ACTIVE_STATUSES.has(entry.status);
-}
-
-/** How many of the roster's entries are still working. */
-export function activeCount(entries: readonly CounterEntry[]): number {
-  return entries.filter(isActive).length;
-}
-
-/**
- * Counted turns since the entry went terminal, or null while it is still
- * active. Never negative: a stamp from a later turn than `currentTurn`
- * (which cannot happen in order) clamps to 0.
- */
-export function turnsSince(
-  entry: CounterEntry,
-  currentTurn: number,
-): number | null {
-  if (entry.deactivatedAtTurn === null) return null;
-  return Math.max(0, currentTurn - entry.deactivatedAtTurn);
-}
-
-/**
- * Whether the entry still belongs in the roster: every active entry, plus
- * a terminal one whose age has not yet passed `RETENTION_TURNS`.
- */
-export function isVisible(entry: CounterEntry, currentTurn: number): boolean {
-  const age = turnsSince(entry, currentTurn);
-  return age === null || age <= RETENTION_TURNS;
-}
-
-/** The roster minus entries that have aged out of the retention window. */
-export function pruneByRecency(
-  entries: readonly CounterEntry[],
-  currentTurn: number,
-): CounterEntry[] {
-  return entries.filter((e) => isVisible(e, currentTurn));
-}
-
-/** `just now` / `1 turn ago` / `N turns ago` — a terminal entry's age. */
-export function turnsAgoLabel(age: number): string {
-  if (age <= 0) return "just now";
-  return `${age} turn${age === 1 ? "" : "s"} ago`;
 }
 
 /** `1 agent` / `3 tasks` — the chip's own label. */
@@ -166,47 +108,38 @@ export function dropdownChipHtml(
 }
 
 /**
- * A counter's chip and (when open) its overlay. Renders to nothing when
- * the pruned roster is empty: a zero chip is a control over an empty list,
- * so it hides until the session has something to count.
+ * A counter's chip and (when open) its overlay. The roster is filtered to
+ * the entries still actively running (`isActive`): a settled entry drops
+ * out at once, so the chip counts only live async. Renders to nothing when
+ * no entry is active — a zero chip is a control over an empty list, so it
+ * hides until the scope has something running.
  *
  * OPEN is renderer-owned disclosure state (like the feed's question
  * selections), so the overlay survives the per-frame topbar re-render.
- * CURRENT-TURN is the counted-turn clock the retention window measures
- * against.
  */
 export function counterMenuHtml(
   spec: CounterSpec,
   entries: readonly CounterEntry[],
   open: boolean,
-  currentTurn: number,
 ): string {
-  const visible = pruneByRecency(entries, currentTurn);
+  const visible = entries.filter(isActive);
   if (visible.length === 0) return "";
-  const busy = activeCount(visible);
-  const badge =
-    busy > 0
-      ? ` <span class="${spec.menu}-running">${busy} ${escapeHtml(spec.busyNoun)}</span>`
-      : "";
   return dropdownChipHtml(
     spec.menu,
-    `${escapeHtml(countLabel(spec.noun, visible.length))}${badge}`,
+    escapeHtml(countLabel(spec.noun, visible.length)),
     spec.title,
     open,
-    () => counterOverlayHtml(spec, visible, currentTurn),
+    () => counterOverlayHtml(spec, visible),
   );
 }
 
 /**
- * The dropped roster: one row per visible entry, in projection order. A
- * terminal (inactive) row is greyed via the `inactive` class and trades
- * its bare status word for `<status> · <age>`, so the reader sees both
- * what happened and how long ago.
+ * The dropped roster: one row per active entry, in projection order, each
+ * carrying its status dot and bare status word.
  */
 export function counterOverlayHtml(
   spec: CounterSpec,
   entries: readonly CounterEntry[],
-  currentTurn: number,
 ): string {
   const rows = entries
     .map((e) => {
@@ -214,14 +147,7 @@ export function counterOverlayHtml(
         ? `<span class="${spec.item}-type">${escapeHtml(e.detail)}</span>`
         : "";
       const headline = e.summary === "" ? spec.placeholder : e.summary;
-      const age = turnsSince(e, currentTurn);
-      const inactive = age !== null;
-      const statusText = inactive
-        ? `${e.status} · ${turnsAgoLabel(age)}`
-        : e.status;
-      const rowClass = `${spec.item}-row${e.nested ? " nested" : ""}${
-        inactive ? " inactive" : ""
-      }`;
+      const rowClass = `${spec.item}-row${e.nested ? " nested" : ""}`;
       // The id is the entry's stable key (a subagent's tool-use id, a
       // task's id): it addresses the row so a click can act on the entry
       // it names — both rosters jump the feed to the entry's bubble.
@@ -229,7 +155,7 @@ export function counterOverlayHtml(
         <span class="${spec.item}-dot ${spec.item}-${e.status}" aria-hidden="true">●</span>
         <span class="${spec.item}-desc">${escapeHtml(headline)}</span>
         ${detail}
-        <span class="${spec.item}-status">${escapeHtml(statusText)}</span>
+        <span class="${spec.item}-status">${escapeHtml(e.status)}</span>
       </li>`;
     })
     .join("");
