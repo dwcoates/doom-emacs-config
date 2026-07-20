@@ -2213,7 +2213,6 @@ describe("agent bubble topbar styles", () => {
 });
 
 const tasksToggle = blockAfter(css, ".info-tasks {");
-const inactiveDesc = blockAfter(css, ".agent-row.inactive .agent-desc,");
 const taskRunningDot = blockAfter(css, ".task-dot.task-starting,");
 
 describe("task roster styles", () => {
@@ -2238,12 +2237,6 @@ describe("task roster styles", () => {
     const separation = Math.abs(hue(token(lightTheme, "--info-tasks")) - hue(token(lightTheme, "--info-agents")));
     // Act + Assert — a comfortable hue gap in the light palette.
     expect(Math.min(separation, 360 - separation)).toBeGreaterThan(40);
-  });
-
-  it("greys the headline of a settled (inactive) row", () => {
-    // Arrange / Act — the inactive greying rule covers both rosters.
-    // Assert
-    expect(inactiveDesc).toMatch(/color:\s*var\(--muted\)/);
   });
 
   it("pulses the dot of a task still working", () => {

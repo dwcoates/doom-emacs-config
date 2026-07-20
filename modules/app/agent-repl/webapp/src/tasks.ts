@@ -14,9 +14,9 @@
  * `taskIdFromCreateResult`. If that wording changes, updates stop
  * correlating and each create would strand as its own row.
  *
- * A `deleted` task is dropped outright (no dead row). Terminal
- * (`completed`) tasks linger under the shared recency window (see
- * `counter-menu.ts`), then prune.
+ * A `deleted` task is dropped outright (no dead row). A `completed` task
+ * drops out of the topbar the instant it settles — the counter shows only
+ * tasks still actively running (see `counter-menu.ts`).
  */
 import {
   CounterEntry,
@@ -25,7 +25,6 @@ import {
   counterMenuHtml,
 } from "./counter-menu.js";
 import { ConversationItem, ToolItem, stringField } from "./store.js";
-import { countedTurns } from "./turn-clock.js";
 
 /** The harness task-list tools the roster is projected from. */
 export const TASK_TOOLS: ReadonlySet<string> = new Set(["TaskCreate", "TaskUpdate"]);
@@ -35,7 +34,6 @@ export const TASKS_SPEC: CounterSpec = {
   menu: "tasks",
   item: "task",
   noun: "task",
-  busyNoun: "active",
   title: "session tasks",
   placeholder: "pending…",
 };
@@ -106,7 +104,6 @@ interface TaskRecord {
   subject: string;
   status: CounterStatus;
   deleted: boolean;
-  deactivatedAtTurn: number | null;
   order: number;
 }
 
@@ -125,8 +122,7 @@ export function sessionTasks(items: readonly ConversationItem[]): CounterEntry[]
  * `TaskUpdate` calls, folded exactly as the session roster folds — the
  * agent-scoped twin of `sessionTasks`, feeding a bubble topbar's counter.
  * The harness task list is session-global, so a task the agent only
- * UPDATED still rows here (its subject as the agent's calls named it);
- * completion ages stay on the session's counted-turn clock.
+ * UPDATED still rows here (its subject as the agent's calls named it).
  */
 export function agentTasks(
   items: readonly ConversationItem[],
@@ -136,9 +132,8 @@ export function agentTasks(
 }
 
 /**
- * The task fold behind both rosters: ITEMS is always the FULL session
- * list (so `countedTurns` stamps ages on the session clock), and IN-SCOPE
- * picks which task calls the roster counts.
+ * The task fold behind both rosters: ITEMS is the full task-call list and
+ * IN-SCOPE picks which of those calls the roster counts.
  */
 function taskEntries(
   items: readonly ConversationItem[],
@@ -155,7 +150,6 @@ function taskEntries(
         subject,
         status: "starting",
         deleted: false,
-        deactivatedAtTurn: null,
         order: order++,
       };
       byId.set(id, rec);
@@ -163,8 +157,7 @@ function taskEntries(
     return rec;
   };
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+  for (const item of items) {
     if (item.kind !== "tool" || !TASK_TOOLS.has(item.toolName)) continue;
     if (!inScope(item)) continue;
 
@@ -188,8 +181,6 @@ function taskEntries(
       rec.deleted = true;
     } else if (status !== "") {
       rec.status = mapTaskStatus(status);
-      rec.deactivatedAtTurn =
-        rec.status === "done" ? countedTurns(items, i) : null;
     }
   }
 
@@ -202,7 +193,6 @@ function taskEntries(
       detail: "",
       status: rec.status,
       nested: false,
-      deactivatedAtTurn: rec.deactivatedAtTurn,
     }));
 }
 
@@ -210,7 +200,6 @@ function taskEntries(
 export function tasksMenuHtml(
   entries: readonly CounterEntry[],
   open: boolean,
-  currentTurn: number,
 ): string {
-  return counterMenuHtml(TASKS_SPEC, entries, open, currentTurn);
+  return counterMenuHtml(TASKS_SPEC, entries, open);
 }

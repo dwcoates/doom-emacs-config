@@ -35,7 +35,6 @@ import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.j
 import { agentTasks, sessionTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
 import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
-import { countedTurns } from "./turn-clock.js";
 
 /**
  * One scope's values for every datapoint the strip renders. Both builders
@@ -77,8 +76,6 @@ export interface TopbarDatapoints {
   agents: readonly CounterEntry[];
   /** The scope's task roster (see `tasks.ts`). */
   tasks: readonly CounterEntry[];
-  /** The counted-turn clock the counter retention windows age against. */
-  currentTurn: number;
 }
 
 /** Which of the strip's overlays its owner currently has open. */
@@ -102,9 +99,9 @@ export interface TopbarDisclosure {
  * immediately left of a dropdown showing the same thing is noise.
  *
  * The two counter chips are the shared `counter-menu` facade: the
- * subagent roster and the task roster. The disclosure state is the
- * caller's (only one overlay is ever open at a time), and CURRENT-TURN is
- * the counted-turn clock their recency windows age against.
+ * subagent roster and the task roster, each filtered to only its still-
+ * running members. The disclosure state is the caller's, so only one
+ * overlay is ever open at a time.
  *
  * TIMER-LABEL renders the `time:` datapoint only when non-null — an agent
  * bubble's own span, marked (`TIMER_SLOT`) so the bubble tick can repaint
@@ -139,9 +136,9 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
     const tokens = d.contextTokens === null ? "—" : formatTokens(d.contextTokens);
     parts.push(`tokens: <span class="info-tokens">${tokens}</span>`);
   }
-  const agentsMenu = agentsMenuHtml(d.agents, open.agentsOpen, d.currentTurn);
+  const agentsMenu = agentsMenuHtml(d.agents, open.agentsOpen);
   if (agentsMenu !== "") parts.push(agentsMenu);
-  const tasksMenu = tasksMenuHtml(d.tasks, open.tasksOpen, d.currentTurn);
+  const tasksMenu = tasksMenuHtml(d.tasks, open.tasksOpen);
   if (tasksMenu !== "") parts.push(tasksMenu);
   return parts.join(" · ");
 }
@@ -194,7 +191,6 @@ export function sessionTopbarDatapoints(
     },
     agents: sessionSubagents(state.items),
     tasks: sessionTasks(state.items),
-    currentTurn: countedTurns(state.items),
   };
 }
 
@@ -232,7 +228,6 @@ export function agentTopbarDatapoints(
     tokenMenu: null,
     agents: agentSubagents(items, agent.toolUseId),
     tasks: agentTasks(items, agent.toolUseId),
-    currentTurn: countedTurns(items),
   };
 }
 

@@ -33,7 +33,6 @@ export const AGENTS_SPEC: CounterSpec = {
   menu: "agents",
   item: "agent",
   noun: "agent",
-  busyNoun: "running",
   title: "session subagents",
   placeholder: "starting…",
 };
@@ -47,12 +46,9 @@ function subagentStatus(item: ToolItem): CounterStatus {
 
 /**
  * One subagent call as a roster row. NESTED marks the row as
- * spawned-by-another, which the overlay renders indented.
- *
- * `deactivatedAtTurn` maps straight from the item's stamp: an active
- * subagent (no result) is unstamped, which reads as null (never
- * deactivated); a settled one carries the counted turn its result landed
- * on, which the recency window ages against.
+ * spawned-by-another, which the overlay renders indented. A settled
+ * subagent still projects a row here; the topbar counter is what filters it
+ * out, showing only the ones still running (see `counterMenuHtml`).
  */
 function subagentEntry(item: ToolItem, nested: boolean): CounterEntry {
   return {
@@ -61,7 +57,6 @@ function subagentEntry(item: ToolItem, nested: boolean): CounterEntry {
     detail: stringField(item, "subagent_type"),
     status: subagentStatus(item),
     nested,
-    deactivatedAtTurn: item.deactivatedAtTurn ?? null,
   };
 }
 
@@ -105,7 +100,6 @@ export function agentSubagents(
 export function agentsMenuHtml(
   agents: readonly CounterEntry[],
   open: boolean,
-  currentTurn: number,
 ): string {
-  return counterMenuHtml(AGENTS_SPEC, agents, open, currentTurn);
+  return counterMenuHtml(AGENTS_SPEC, agents, open);
 }

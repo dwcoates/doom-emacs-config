@@ -24,7 +24,6 @@ import {
   WsEnvelope,
   parseFrame,
 } from "./protocol.js";
-import { countedTurns } from "./turn-clock.js";
 import { isClearTurn } from "./turn.js";
 
 // --- conversation items -------------------------------------------------------
@@ -126,15 +125,6 @@ export interface ToolItem {
     content: string | Array<{ type: "text"; text: string }>;
     render?: RenderHint;
   };
-  /**
-   * The counted-turn ordinal in effect when this tool's result arrived,
-   * stamped once at result time. A subagent's result mutates its
-   * spawn-positioned item in place, so the item's array position records
-   * when it STARTED, not when it finished — this field is the only record
-   * of when the call went terminal, which the topbar's recency window ages
-   * against. Absent until the result lands.
-   */
-  deactivatedAtTurn?: number;
 }
 export interface PermissionItem {
   kind: "permission";
@@ -861,10 +851,6 @@ export class ConversationStore {
             render: frame.render,
           };
           item.resultTs = frame.ts;
-          // Stamp when this call went terminal, in counted turns. The
-          // item's array position dates its START; a result arriving turns
-          // later is the only place that later moment is recorded.
-          item.deactivatedAtTurn = countedTurns(s.items);
         }
         break;
       }
