@@ -162,7 +162,10 @@
 ;;;; ---- Tests: alerter backend ----
 
 (ert-deftest agent-repl-test-alerter-spawns-clickable-with-args ()
-  "alerter backend should spawn with title/message/sound/sender/timeout and a ws group."
+  "alerter backend should spawn with GNU double-dash title/message/sound/sender/timeout and a ws group.
+The installed alerter (Swift ArgumentParser) rejects single-dash flags
+with exit 64 and delivers no banner, so the double-dash spelling is
+load-bearing."
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--notify-spawn)
                (lambda (&rest args) (setq captured args) nil)))
@@ -171,13 +174,13 @@
       (should (eq (nth 1 captured) 'alerter))
       (should (equal (nth 2 captured) agent-repl-alerter-executable))
       (should (equal (nth 3 captured)
-                     (list "-title" "My Title"
-                           "-message" "My Message"
-                           "-sound" agent-repl-notification-sound
-                           "-sender" agent-repl-notification-sender
-                           "-timeout" (number-to-string
-                                       agent-repl-notification-click-timeout-seconds)
-                           "-group" "agent-repl:ws-a"))))))
+                     (list "--title" "My Title"
+                           "--message" "My Message"
+                           "--sound" agent-repl-notification-sound
+                           "--sender" agent-repl-notification-sender
+                           "--timeout" (number-to-string
+                                        agent-repl-notification-click-timeout-seconds)
+                           "--group" "agent-repl:ws-a"))))))
 
 (ert-deftest agent-repl-test-alerter-watchdog-outlives-click-timeout ()
   "The alerter watchdog must exceed alerter's own self-dismiss timeout."
@@ -189,12 +192,12 @@
       (should (> (nth 4 captured) agent-repl-notification-click-timeout-seconds)))))
 
 (ert-deftest agent-repl-test-alerter-nil-ws-omits-group ()
-  "With a nil WS the alerter backend must not add a -group (no key to coalesce on)."
+  "With a nil WS the alerter backend must not add a --group (no key to coalesce on)."
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--notify-spawn)
                (lambda (&rest args) (setq captured args) nil)))
       (agent-repl--notify-backend-alerter nil "T" "M")
-      (should-not (member "-group" (nth 3 captured))))))
+      (should-not (member "--group" (nth 3 captured))))))
 
 (ert-deftest agent-repl-test-alerter-on-activate-jumps-on-click ()
   "A click token from alerter must focus Emacs and switch to the workspace."
