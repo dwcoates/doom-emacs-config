@@ -17,6 +17,12 @@
      BELOW --card so the row-hover and detail-panel washes (both --card) still
      read as a further lift over the rail instead of inverting against it. */
   --sidebar-bg: #ffffff;
+  /* The lift under the floating workspaces rail (#ws-sidebar): a soft,
+     low-opacity drop shadow that reads as the rail hovering above the feed
+     rather than sharing its plane. color-mix keeps it theme-tunable — the
+     dark theme deepens it, since a faint shadow all but vanishes on a dark
+     ground. */
+  --sidebar-shadow: 0 2px 12px color-mix(in srgb, #000000 14%, transparent);
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -170,6 +176,10 @@
        off the conversation while its --card hover/detail washes still lift
        off the rail. */
     --sidebar-bg: #14161b;
+    /* Deeper than the light theme's shadow: a faint drop shadow reads as
+       nothing against the dark feed, so the rail's lift needs a heavier black
+       to still register. */
+    --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -256,8 +266,19 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  /* A floating dock, not a flush split pane: inset from the window on every
+     side, rounded, and lifted off the feed by --sidebar-shadow, so the rail
+     reads as an overlay hovering over the conversation rather than a
+     hard-bordered column carved out of it. The old right-edge split border is
+     gone — the inset gap and the shadow now delimit the rail. overflow:hidden
+     clips .sb-head's divider and the row-hover washes to the rounded corners.
+     The rail still reserves its flex column, so the feed is never obscured;
+     the shadow alone supplies the "on top of" read. */
+  margin: 0.5rem;
+  border-radius: 10px;
+  overflow: hidden;
   background: var(--sidebar-bg);
+  box-shadow: var(--sidebar-shadow);
   user-select: none;
   font-size: 14px;
 }
