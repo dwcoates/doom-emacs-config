@@ -1287,6 +1287,37 @@ carries its own `agent-repl--with-preserved-focus'.  PATH is unused —
 name DIRNAME."
   (agent-repl--eager-open-panels dirname))
 
+(defun agent-repl--place-generated-workspace (ws source-dir)
+  "Place newly-generated workspace WS in the tab-bar.
+When SOURCE-DIR resolves to a live parent workspace that is present in
+the tab-bar, WS is inserted immediately after that parent so a child
+workspace surfaces next to the workspace it was generated from (via
+`agent-repl--reorder-workspace-next-to').
+
+Otherwise WS falls back to priority-based placement (via
+`agent-repl--reorder-workspace-by-priority').  The fallback covers a
+parentless workspace (SOURCE-DIR nil, e.g. the `SPC TAB N' origin/master
+path), a SOURCE-DIR that maps to no live workspace, and a parent that is
+no longer in the tab-bar (closed or not yet rendered).
+
+The `not-in-cache' / self guards are checked here rather than delegated
+to `agent-repl--reorder-workspace-next-to': the next-to primitive only
+no-ops on a missing anchor, so without the pre-check WS would be left at
+persp-mode's default append-at-end position instead of getting the
+priority placement it is due."
+  (let ((parent (and source-dir (agent-repl--ws-name-for-dir source-dir))))
+    (if (and parent
+             (boundp 'persp-names-cache)
+             (member parent persp-names-cache)
+             (not (equal parent ws)))
+        (progn
+          (agent-repl--log ws "place-generated-workspace: next-to parent=%s source-dir=%s"
+                            parent source-dir)
+          (agent-repl--reorder-workspace-next-to ws parent))
+      (agent-repl--log ws "place-generated-workspace: priority-fallback parent=%s source-dir=%s"
+                        (or parent "nil") (or source-dir "nil"))
+      (agent-repl--reorder-workspace-by-priority ws))))
+
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id
                                                        callback &optional source-dir no-agent model)
@@ -1372,7 +1403,9 @@ session.  When nil, the session falls back to
         (let ((parent-branch (agent-repl--git-string-quiet "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD")))
           (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
             (agent-repl--ws-put ws :parent-branch-name parent-branch))))
-      (agent-repl--reorder-workspace-by-priority ws)
+      ;; Place the new tab next to its parent's tab when SOURCE-DIR names a
+      ;; live workspace; otherwise fall back to priority-based placement.
+      (agent-repl--place-generated-workspace ws source-dir)
       (agent-repl--setup-worktree-session ws-id path ws no-agent)
       (agent-repl--info ws "Worktree '%s' ready." dirname)))
   ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only

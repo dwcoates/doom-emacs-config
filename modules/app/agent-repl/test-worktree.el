@@ -9392,6 +9392,65 @@ were reached without the wrapper stub."
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))
       (should (null (agent-repl--ws-name-for-dir "/missing/"))))))
 
+;;;; ---- Tests: --place-generated-workspace (child tab placement) ----
+
+(defmacro agent-repl-test--capturing-workspace-placement (&rest body)
+  "Run BODY with the two tab-placement functions stubbed to record calls.
+Binds `calls' to a list that accumulates (next-to WS ANCHOR) or
+(priority WS) entries in call order, and stubs `agent-repl--path-canonical'
+with `identity' so `agent-repl--ws-name-for-dir' resolves literal dirs."
+  (declare (indent 0) (debug t))
+  `(let ((calls nil))
+     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity)
+               ((symbol-function 'agent-repl--reorder-workspace-next-to)
+                (lambda (ws anchor) (push (list 'next-to ws anchor) calls)))
+               ((symbol-function 'agent-repl--reorder-workspace-by-priority)
+                (lambda (ws) (push (list 'priority ws) calls))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-place-generated-workspace-next-to-live-parent ()
+  "Child is inserted next to its parent when SOURCE-DIR names a live, cached workspace."
+  (agent-repl-test--with-clean-state
+    (puthash "parent-ws" '(:project-dir "/parent/") agent-repl--workspaces)
+    (let ((persp-names-cache '("main" "parent-ws" "child-ws")))
+      (agent-repl-test--capturing-workspace-placement
+        (agent-repl--place-generated-workspace "child-ws" "/parent/")
+        (should (equal calls '((next-to "child-ws" "parent-ws"))))))))
+
+(ert-deftest agent-repl-test-place-generated-workspace-priority-when-source-dir-nil ()
+  "A parentless workspace (SOURCE-DIR nil) falls back to priority placement."
+  (agent-repl-test--with-clean-state
+    (let ((persp-names-cache '("main" "child-ws")))
+      (agent-repl-test--capturing-workspace-placement
+        (agent-repl--place-generated-workspace "child-ws" nil)
+        (should (equal calls '((priority "child-ws"))))))))
+
+(ert-deftest agent-repl-test-place-generated-workspace-priority-when-parent-unknown ()
+  "A SOURCE-DIR that maps to no live workspace falls back to priority placement."
+  (agent-repl-test--with-clean-state
+    (let ((persp-names-cache '("main" "child-ws")))
+      (agent-repl-test--capturing-workspace-placement
+        (agent-repl--place-generated-workspace "child-ws" "/unknown/")
+        (should (equal calls '((priority "child-ws"))))))))
+
+(ert-deftest agent-repl-test-place-generated-workspace-priority-when-parent-not-in-cache ()
+  "A resolved parent absent from the tab-bar cache falls back to priority placement."
+  (agent-repl-test--with-clean-state
+    (puthash "parent-ws" '(:project-dir "/parent/") agent-repl--workspaces)
+    (let ((persp-names-cache '("main" "child-ws")))
+      (agent-repl-test--capturing-workspace-placement
+        (agent-repl--place-generated-workspace "child-ws" "/parent/")
+        (should (equal calls '((priority "child-ws"))))))))
+
+(ert-deftest agent-repl-test-place-generated-workspace-priority-when-parent-is-self ()
+  "A SOURCE-DIR resolving to the child itself falls back to priority placement."
+  (agent-repl-test--with-clean-state
+    (puthash "child-ws" '(:project-dir "/parent/") agent-repl--workspaces)
+    (let ((persp-names-cache '("main" "child-ws")))
+      (agent-repl-test--capturing-workspace-placement
+        (agent-repl--place-generated-workspace "child-ws" "/parent/")
+        (should (equal calls '((priority "child-ws"))))))))
+
 ;;;; ---- Tests: ws-merged-p ----
 
 (ert-deftest agent-repl-test-ws-merged-p-true-when-cached-merged ()
