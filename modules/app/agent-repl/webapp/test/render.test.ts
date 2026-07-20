@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Actions,
   FeedRenderer,
@@ -3567,6 +3567,77 @@ describe("TextStream metaprompt trees", () => {
     };
     // Act + Assert
     expect(renderItem(item)).not.toContain("mp-tree");
+  });
+
+  it("renders the tree while keeping leading prose on the markdown path", () => {
+    // Arrange — the model prepended a preamble line before the tree.
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "b1",
+      messageId: "m1",
+      text: "Here is my answer:\n\nResponse (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — tree still postprocessed, preamble still rendered as prose.
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain("Here is my answer");
+  });
+
+  it("renders the tree even when a stray code fence trails it", () => {
+    // Arrange — a trailing fence used to suppress the whole bare tree.
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "b2",
+      messageId: "m1",
+      text: "Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More\n\n```\ncode\n```",
+      done: true,
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — both the tree and the fenced block render.
+    expect(html).toContain(`class="mp-tree"`);
+    expect(html).toContain(`class="md-code"`);
+  });
+
+  it("warns once when a header-led response yields no tree region", () => {
+    // Arrange — the mandated header with no tree beneath it is a misfire.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "mp-misfire-1",
+      messageId: "m1",
+      text: "Response (👀 no changes made)\n\nJust prose, no tree at all.",
+      done: true,
+    };
+    // Act — a persistent misfire re-renders, but must warn only once.
+    renderItem(item);
+    renderItem(item);
+    // Assert
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("does not warn while a header-led response is still streaming", () => {
+    // Arrange — a partial tree mid-stream must not log a misfire.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const item: ConversationItem = {
+      kind: "text",
+      ts: TEXT_TS,
+      blockId: "mp-misfire-2",
+      messageId: "m1",
+      text: "Response (👀 no changes made)\n\nJust prose, no tree at all.",
+      done: false,
+    };
+    // Act
+    renderItem(item);
+    // Assert
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
