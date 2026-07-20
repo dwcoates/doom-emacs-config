@@ -9,6 +9,14 @@
      near-white #f9fafb, so a card lifts off the feed instead of melting into
      it, while staying above the composer well (--composer-bg) below it. */
   --card: #eef1f4;
+  /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
+     sidebar reads as a lifted dock rather than the same sheet the
+     conversation scrolls on. In the light theme --bg is already pure white —
+     the lightness ceiling — so the lift only shows in the dark theme, where
+     --bg has headroom; the border-right still delimits the rail in both. Kept
+     BELOW --card so the row-hover and detail-panel washes (both --card) still
+     read as a further lift over the rail instead of inverting against it. */
+  --sidebar-bg: #ffffff;
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -141,6 +149,13 @@
      against them in EITHER theme — the mark is a background change, and the
      text under it must not go along for the ride. */
   --search-fg: #1a1a1a;
+  /* The shared height of the two top header bars — the main column's #topbar
+     and the sidebar's .sb-head. Pinning BOTH to one value (rather than letting
+     each size to its own content) is what lands their bottom rules flush at the
+     same y: the topbar is otherwise the taller of the two, since its select
+     pickers outsize the sidebar's plain title, and the two dividers drift apart.
+     Comfortably clears the 0.85rem select at any renderer's control metrics. */
+  --topbar-h: 2.75rem;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -151,6 +166,10 @@
     --muted: #9ca3af;
     --border: #2a2e37;
     --card: #16191f;
+    /* Lighter than the feed's #111318, darker than --card, so the rail lifts
+       off the conversation while its --card hover/detail washes still lift
+       off the rail. */
+    --sidebar-bg: #14161b;
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -230,7 +249,7 @@ body {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--sidebar-bg);
   user-select: none;
   font-size: 14px;
 }
@@ -240,7 +259,11 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.55rem 0.7rem;
+  /* Fixed to --topbar-h (not content-sized) so its bottom rule lands flush
+     with the #topbar divider across the column seam; horizontal padding only,
+     since the height now governs the vertical box. */
+  height: var(--topbar-h);
+  padding: 0 0.7rem;
   border-bottom: 1px solid var(--border);
 }
 #ws-sidebar .sb-title { font-weight: 600; font-size: 0.95rem; }
@@ -425,7 +448,11 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem 1rem;
+  /* Fixed to --topbar-h (shared with .sb-head) so the two header dividers land
+     flush; horizontal padding only, with the height governing the vertical box.
+     align-items: center keeps the pickers centered within it. */
+  height: var(--topbar-h);
+  padding: 0 1rem;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   /* Positioning context for the absolute-centered #task-summary (§2.14). */
