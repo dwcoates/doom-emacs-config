@@ -24,6 +24,7 @@ import {
   lastUserTurnId,
   MERGE_CARD_BODY,
   modelOptionsHtml,
+  panelSeedsOnOpen,
   panelToggleTarget,
   planToolReveal,
   pulseTarget,
@@ -5843,5 +5844,23 @@ describe("FeedRenderer.isMonitoring (topbar monitoring datapoint gate)", () => {
     // Assert — no leftover tail node carries the old row.
     expect(container.querySelector('[data-key="monitoring"]')).toBeNull();
     expect(container.innerHTML).not.toContain("monitoring-pending");
+  });
+});
+
+describe("panelSeedsOnOpen", () => {
+  it("seeds a member badge's stream fold open alongside the badge", () => {
+    // Arrange / Act / Assert — one open, not two, reaches the stream.
+    expect(panelSeedsOnOpen("member:b1:w1")).toEqual(["async:w1"]);
+  });
+
+  it("splits the tool use id from the right, leaving the host's shape alone", () => {
+    // Arrange — a host id carrying its own colon.
+    expect(panelSeedsOnOpen("member:req:1:w9")).toEqual(["async:w9"]);
+  });
+
+  it("seeds nothing for a non-member toggle", () => {
+    // Arrange / Act / Assert
+    expect(panelSeedsOnOpen("async:t1")).toEqual([]);
+    expect(panelSeedsOnOpen("watchers:b1")).toEqual([]);
   });
 });
