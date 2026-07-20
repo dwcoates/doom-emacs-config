@@ -193,3 +193,38 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
     bodies,
   };
 }
+
+/**
+ * Every poll-transport source id owned by a still-LIVE member, fold state
+ * notwithstanding — the always-on half of the poll set (the other half,
+ * openSubfeedSourceIds, follows what the user has expanded).
+ *
+ * A collapsed badge used to have exactly one settling signal: the harness
+ * notification landing with a matching tool_use_id. Everything else the
+ * resolver trusts — the poll's done flag, the tail a settling scan reads —
+ * only existed for OPEN folds, so a missed notification left the badge
+ * amber forever and its final output unfetched. Polling every live member
+ * keeps those signals flowing while there is anything to settle; the
+ * moment a member settles it drops out of this set, so a quiesced session
+ * polls nothing.
+ *
+ * WS members are excluded on the same grounds openSubfeedSourceIds excludes
+ * them: their tail already arrives as task-output-delta frames, and the poll
+ * route's done flag flips on the very notification a ws member settles by —
+ * a poll would add a round trip and no signal.
+ */
+export function livePollSourceIds(
+  watchers: ReadonlyMap<string, readonly ToolItem[]>,
+  ctx: MemberContext,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const list of watchers.values()) {
+    for (const item of list) {
+      const member = resolveMember(item, ctx);
+      if (member === null || member.settled) continue;
+      if (member.source?.stream?.transport !== "poll") continue;
+      ids.add(member.source.source_id);
+    }
+  }
+  return ids;
+}

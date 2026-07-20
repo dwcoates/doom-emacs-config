@@ -40,6 +40,7 @@ import {
   MemberContext,
   MemberStatus,
   StreamMember,
+  livePollSourceIds,
   resolveMember,
 } from "./stream-member.js";
 import {
@@ -2944,20 +2945,27 @@ export class FeedRenderer {
   }
 
   /**
-   * Point the poller at the sources in currently-open folds — at EVERY
-   * depth, via the recursive walk openSubfeedSourceIds shares with the
-   * renderer's own guards. Called after every render so opening a fold
-   * starts its polls and closing one stops them (a nested fold's tail
-   * discovered by a poll feeds the next sync); a no-op when no daemon
-   * fetch was wired.
+   * Point the poller at the sources that need polling: those in
+   * currently-open folds — at EVERY depth, via the recursive walk
+   * openSubfeedSourceIds shares with the renderer's own guards — UNIONED
+   * with every still-live member's poll source regardless of fold state
+   * (livePollSourceIds), so a collapsed badge keeps receiving the done
+   * flag and the tail its settling and token figures read. Called after
+   * every render so opening a fold starts its polls and closing one stops
+   * them (a nested fold's tail discovered by a poll feeds the next sync);
+   * a no-op when no daemon fetch was wired.
    */
-  private syncWatcherPolls(watchers: ReadonlyMap<string, readonly ToolItem[]>): void {
+  private syncWatcherPolls(
+    watchers: ReadonlyMap<string, readonly ToolItem[]>,
+    panels: PanelContext,
+  ): void {
     const ids = openSubfeedSourceIds({
       items: this.lastState?.items ?? [],
       watchers,
       isOpen: (id) => this.openPanels.has(id),
       tailText: (id) => this.watcherPoller?.tail(id)?.text,
     });
+    for (const id of livePollSourceIds(watchers, memberCtx(panels))) ids.add(id);
     this.watcherPoller?.sync(ids);
   }
 
@@ -3112,7 +3120,7 @@ export class FeedRenderer {
     const top = part.top.filter((i) => !gns.folded.has(i));
     const watchers = asyncMembersByBubble(visible, gns.byBubble);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
-    this.syncWatcherPolls(watchers);
+    this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
     const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
@@ -3288,7 +3296,7 @@ export class FeedRenderer {
     const top = part.top.filter((i) => !gns.folded.has(i));
     const watchers = asyncMembersByBubble(visible, gns.byBubble);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
-    this.syncWatcherPolls(watchers);
+    this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
     const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const seen = new Set<string>();
