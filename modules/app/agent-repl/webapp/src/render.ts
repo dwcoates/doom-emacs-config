@@ -3287,6 +3287,9 @@ export class FeedRenderer {
     const finals = finalResponses(visible);
     const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const seen = new Set<string>();
+    // Walks the container as the desired order is emitted, so each node can be
+    // slotted at its rank. `null` means "next goes at the very front".
+    let prevNode: ChildNode | null = null;
     for (const feedEntry of groupFeed(top)) {
       const key = this.entryKey(feedEntry);
       seen.add(key);
@@ -3296,10 +3299,23 @@ export class FeedRenderer {
         const el = document.createElement("div");
         el.className = "feed-item";
         el.dataset.key = key;
-        this.container.appendChild(el);
         entry = { el, html: "" };
         this.nodes.set(key, entry);
       }
+      // Slot the node at its `groupFeed(top)` rank rather than only appending
+      // new ones at the tail. render() reuses mounted nodes in place, and a
+      // bare append is correct ONLY while every new entry is the newest item —
+      // the live-stream invariant. A gap-fill revisit (§2.10) reconciles a
+      // whole backlog burst at once, where a batched entry can belong ABOVE an
+      // already-mounted node; without this move it strands at the tail, which
+      // is the reordering `renderRestored` gets for free by rebuilding from
+      // scratch. The `!==` guard makes the steady-state live path a no-op, so
+      // an in-order breathing bubble is never moved (nor its animation reset).
+      const desiredNext: ChildNode | null = prevNode
+        ? prevNode.nextSibling
+        : this.container.firstChild;
+      if (entry.el !== desiredNext) this.container.insertBefore(entry.el, desiredNext);
+      prevNode = entry.el;
       this.stampNav(entry.el, feedEntry, finals, html);
       if (entry.html !== html) {
         // A section the user clicked open outlives the re-render of the
