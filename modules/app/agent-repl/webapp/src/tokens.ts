@@ -43,6 +43,17 @@ export function formatTokens(n: number): string {
 }
 
 /**
+ * Token counts as a pill wears them: `812`, `12.3k`, `1.2M`. A badge has
+ * no room for locale commas, and at pill scale the magnitude is the
+ * information — the trailing digits are noise.
+ */
+export function compactTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/**
  * A cost estimate row's text. Two decimals once the figure is readable
  * at that resolution, four below a dime so small spends do not all
  * collapse into `$0.00`.
