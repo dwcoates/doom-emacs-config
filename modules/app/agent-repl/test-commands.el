@@ -652,7 +652,7 @@ focus or flip a hidden buffer's evil state."
                 ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                  (lambda (ws kind) (setq dispatched (list ws kind)) t))
                 ((symbol-function 'run-at-time)
-                 (lambda (_time _repeat _fn _arg) nil)))
+                 (lambda (&rest _) nil)))
         (agent-repl-interrupt)
         (should (equal dispatched '("test-ws" escape)))))))
 
@@ -668,7 +668,7 @@ reports the interrupt was delivered."
               ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                (lambda (_ws _kind) t))
               ((symbol-function 'run-at-time)
-               (lambda (_time _repeat _fn _arg) nil)))
+               (lambda (&rest _) nil)))
       (agent-repl-interrupt)
       (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done)))))
 
@@ -690,7 +690,7 @@ state from the previous turn must be reset by Emacs."
               ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                (lambda (_ws _kind) t))
               ((symbol-function 'run-at-time)
-               (lambda (_time _repeat _fn _arg) nil)))
+               (lambda (&rest _) nil)))
       (agent-repl-interrupt)
       (should-not (agent-repl--ws-stop-received-p "test-ws"))
       (should (= 0 (agent-repl--ws-pending-subagents "test-ws"))))))
@@ -733,7 +733,7 @@ is consulted, so BODY can assert whether a prompt was raised."
                  ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                   (lambda (ws kind) (setq dispatched (list ws kind)) t))
                  ((symbol-function 'run-at-time)
-                  (lambda (_time _repeat _fn _arg) nil)))
+                  (lambda (&rest _) nil)))
          ,@body))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/prompts-and-cancels-when-confirmed ()
@@ -888,7 +888,7 @@ its frontend interrupt reporting OUTCOME.  Binds `input-buf' to the buffer."
                        ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                         (lambda (_ws _kind) ,outcome))
                        ((symbol-function 'run-at-time)
-                        (lambda (_time _repeat _fn _arg) nil)))
+                        (lambda (&rest _) nil)))
                ,@body))
          (kill-buffer input-buf)))))
 

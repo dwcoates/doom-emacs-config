@@ -686,7 +686,14 @@ timestamp (orthogonal to `:repl-state'):
   - Otherwise, clear both flags so this fresh :done starts
     unacknowledged (regardless of any leftover ack from a prior
     cycle); `on-workspace-switch' sets them when the user next
-    selects the workspace."
+    selects the workspace.
+
+Finally fires the finished desktop notification via
+`agent-repl--maybe-notify-finished', so every transition to :done —
+not just the Stop-hook completion path — notifies the user when Emacs
+is unfocused.  The notification is gated on frame focus and debounced
+there, so the interrupt and /clear paths (which mark :done while the
+user is focused) stay silent."
   (agent-repl--log ws "mark-agent-done ws=%s merged=%s repl-state=%s merge-completed-at=%s"
                     ws
                     (or (eq (agent-repl--ws-get ws :repl-state) :merged)
@@ -696,7 +703,8 @@ timestamp (orthogonal to `:repl-state'):
   (agent-repl--ws-set-agent-state ws :done)
   (let ((current (agent-repl--current-ws-p ws)))
     (agent-repl--ws-put ws :done-acked current)
-    (agent-repl--ws-put ws :done-acked-at (and current (float-time)))))
+    (agent-repl--ws-put ws :done-acked-at (and current (float-time))))
+  (agent-repl--maybe-notify-finished ws))
 
 (defun agent-repl--refresh-magit-status-for-dir (dir &optional ws)
   "Refresh any magit-status buffer whose `default-directory' canonicalizes to DIR.
@@ -738,9 +746,10 @@ target workspace) share the same buffer-matching logic."
 Errors hard if WS is not registered in `agent-repl--workspaces' — a
 stop event arriving for an unknown workspace indicates a race (e.g.
 sentinel firing after kill cleared state) that we surface rather than
-silently absorb.  Otherwise: marks agent-state as :done, refreshes any
-open magit-status buffer for the workspace's repo, notifies the user if
-the frame is unfocused, emits a finished-in-workspace message when the
+silently absorb.  Otherwise: marks agent-state as :done (which also
+notifies the user when the frame is unfocused — see
+`agent-repl--mark-agent-done'), refreshes any open magit-status buffer
+for the workspace's repo, emits a finished-in-workspace message when the
 current workspace is different, and drains any deferred-prompt queue
 \(see `agent-repl--drain-deferred-prompts')."
   (unless (gethash ws agent-repl--workspaces)
@@ -748,7 +757,6 @@ current workspace is different, and drains any deferred-prompt queue
   (agent-repl--log ws "handle-agent-finished ws=%s" ws)
   (agent-repl--mark-agent-done ws)
   (agent-repl--refresh-magit-status ws)
-  (agent-repl--maybe-notify-finished ws)
   (unless (agent-repl--current-ws-p ws)
     (agent-repl--info ws "Agent finished in workspace: %s" ws))
   (agent-repl--drain-deferred-prompts ws))
