@@ -2604,3 +2604,24 @@ describe("status panel grid", () => {
     expect(blockAfter(css, "\n.status-row {")).toMatch(/display:\s*contents/);
   });
 });
+
+describe("sidebar init dot", () => {
+  it("paints the init dot its own blue rather than the thinking red", () => {
+    // Arrange + Act
+    const init = blockAfter(css, "#ws-sidebar .st-init {");
+    // Assert
+    expect(init).toContain("var(--init)");
+  });
+
+  it("keeps the init dot breathing like the other live states", () => {
+    // Arrange + Act
+    const init = blockAfter(css, "#ws-sidebar .st-init {");
+    // Assert
+    expect(init).toContain("ws-pulse");
+  });
+
+  it("defines --init as the Emacs tab-bar's init blue", () => {
+    // Arrange + Act + Assert
+    expect(lightTheme).toMatch(/--init:\s*#3366cc/);
+  });
+});

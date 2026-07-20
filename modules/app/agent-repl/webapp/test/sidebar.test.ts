@@ -135,7 +135,7 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("thinking")).toContain(`class="st st-thinking"`);
   });
 
-  it("keys an init dot to its own class (styled like thinking)", () => {
+  it("keys an init dot to its own class (styled blue, unlike thinking)", () => {
     // Arrange + Act + Assert
     expect(statusDotHtml("init")).toContain(`class="st st-init"`);
   });
