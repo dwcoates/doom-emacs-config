@@ -149,11 +149,59 @@ Set to nil to hand the analyst no --permission-mode at all."
 Names a widget dist directory (e.g. an explanation-engine checkout's
 `apps/cee-web-widget/dist') that the daemon mounts read-only at
 /widget-assets/ — nothing is ever copied into this repo.  The webapp
-probes that mount to enable chess-game bubbles.  Empty disables the
-flag; the daemon then also honors $AGENT_REPL_WIDGET_ASSETS from its
-own inherited environment."
+probes that mount to enable chess-game bubbles.
+
+When empty this is NOT the end of the story: the daemon-launch argv is
+then filled by AUTO-DISCOVERY (see
+`agent-repl--frontend-discover-widget-assets-dir'), which looks for a
+real `cee-web-widget/dist' under
+`agent-repl-frontend-widget-assets-search-root'.  A non-empty value here
+is an explicit override that always wins over discovery.  The daemon also
+honors $AGENT_REPL_WIDGET_ASSETS from its own inherited environment."
   :type 'string
   :group 'agent-repl)
+
+(defcustom agent-repl-frontend-widget-assets-search-root
+  "~/workspace/ChessCom"
+  "Root under which the widget-assets dir is auto-discovered.
+When `agent-repl-frontend-widget-assets-dir' is empty, discovery looks
+for an `apps/cee-web-widget/dist' (holding the `chess-widget.js' the
+webapp imports) under an explanation-engine checkout below this root.
+Empty or nil disables auto-discovery, leaving only the explicit dir."
+  :type 'string
+  :group 'agent-repl)
+
+(defun agent-repl--frontend-widget-assets-candidates ()
+  "Return candidate `cee-web-widget/dist' dirs under the search root, best first.
+The canonical explanation-engine checkout is tried first, then its
+worktrees under `explanation-engine-worktrees', then any other direct
+sibling checkout below `agent-repl-frontend-widget-assets-search-root'.
+Only the path shapes are assembled here; the caller checks existence."
+  (let ((root (and agent-repl-frontend-widget-assets-search-root
+                   (not (string-empty-p agent-repl-frontend-widget-assets-search-root))
+                   (expand-file-name agent-repl-frontend-widget-assets-search-root)))
+        (rel "apps/cee-web-widget/dist"))
+    (when (and root (file-directory-p root))
+      (let ((worktrees (expand-file-name "explanation-engine-worktrees" root)))
+        (append
+         (list (expand-file-name (concat "explanation-engine/" rel) root))
+         (when (file-directory-p worktrees)
+           (mapcar (lambda (d) (expand-file-name rel d))
+                   (directory-files worktrees t "\\`[^.]" t)))
+         (mapcar (lambda (d) (expand-file-name rel d))
+                 (directory-files root t "\\`[^.]" t)))))))
+
+(defun agent-repl--frontend-discover-widget-assets-dir ()
+  "Resolve the widget-assets dir the daemon should serve, or nil.
+An explicit `agent-repl-frontend-widget-assets-dir' always wins and is
+returned verbatim (expanded).  When it is empty, auto-discover the first
+candidate (see `agent-repl--frontend-widget-assets-candidates') that
+actually holds `chess-widget.js', so a stale or empty dist is skipped."
+  (if (not (string-empty-p agent-repl-frontend-widget-assets-dir))
+      (expand-file-name agent-repl-frontend-widget-assets-dir)
+    (seq-find (lambda (dir)
+                (file-exists-p (expand-file-name "chess-widget.js" dir)))
+              (agent-repl--frontend-widget-assets-candidates))))
 
 ;;;; ---- State ------------------------------------------------------------
 
@@ -257,9 +305,8 @@ endpoint to exactly these roots."
       (when agent-repl-frontend-remediation-permission-mode
         (list "-remediation-permission-mode"
               agent-repl-frontend-remediation-permission-mode))))
-   (unless (string-empty-p agent-repl-frontend-widget-assets-dir)
-     (list "-widget-assets"
-           (expand-file-name agent-repl-frontend-widget-assets-dir)))
+   (when-let ((widget (agent-repl--frontend-discover-widget-assets-dir)))
+     (list "-widget-assets" widget))
    (when-let ((claude (executable-find "claude")))
      (list "-claude-bin" claude))))
 
