@@ -298,6 +298,43 @@ describe("sidebar overlay (floating dock)", () => {
   });
 });
 
+describe("sidebar merge glyph on-axis spin", () => {
+  // The merge-family recycle glyph (`⟳`) spun by ws-spin: its ink sits
+  // off-center in its line box, so it must be centered inside a fixed square
+  // box for the rotation to be on its own axis rather than an orbit. Anchored
+  // on the trailing comma so it resolves to the multi-selector merge-family
+  // rule, not the standalone `.st-merging` animation rule.
+  const mergeGlyph = blockAfter(css, "#ws-sidebar .st-merging,");
+
+  it("lays the glyph out as a flex box so its single glyph can be centered", () => {
+    // Arrange / Act — the merge-family rule.
+    // Assert
+    expect(mergeGlyph).toMatch(/display:\s*inline-flex/);
+  });
+
+  it("centers the glyph on both axes so the box center lands on the ink", () => {
+    // Arrange / Act — centering the lone glyph is what puts the spin on-axis.
+    // Assert
+    expect(mergeGlyph).toMatch(/align-items:\s*center/);
+    expect(mergeGlyph).toMatch(/justify-content:\s*center/);
+  });
+
+  it("gives the glyph a square box so the rotation is symmetric about its center", () => {
+    // Arrange — a non-square box would re-introduce an off-axis wobble.
+    const width = mergeGlyph.match(/(?<![-\w])width:\s*([^;]+);/)?.[1].trim();
+    const height = mergeGlyph.match(/(?<![-\w])height:\s*([^;]+);/)?.[1].trim();
+    // Act / Assert
+    expect(width).toBe(height);
+  });
+
+  it("sizes the box in em so it tracks font-size rather than pinning the glyph size here", () => {
+    // Arrange / Act — the sibling size fix owns font-size; an em box follows it.
+    const width = mergeGlyph.match(/(?<![-\w])width:\s*([^;]+);/)?.[1].trim();
+    // Assert
+    expect(width).toMatch(/em$/);
+  });
+});
+
 describe("flush header dividers (--topbar-h)", () => {
   it("pins the topbar to the shared header height", () => {
     // Arrange / Act — the topbar's own height declaration.
@@ -1974,11 +2011,12 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the five unrelated
+    // Act / Assert — one shared ticker rule, plus the six unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
-    // topbar's .info-monitoring datapoint, and the face's .face-side).
+    // topbar's .info-monitoring datapoint, the face's .face-side, and the
+    // sidebar merge glyph that centers itself for an on-axis spin).
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(6);
+    expect(bodies.length).toBe(7);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {

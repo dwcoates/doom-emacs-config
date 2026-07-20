@@ -375,8 +375,17 @@ body {
 #ws-sidebar .st-merge-queued,
 #ws-sidebar .st-merge-conflict,
 #ws-sidebar .st-merge-failed {
-  width: auto;
-  height: auto;
+  /* The recycle glyph's ink sits off-center in its line box, so ws-spin
+     rotating it about the default box center (transform-origin 50% 50%) made it
+     orbit rather than turn in place.  Center the glyph geometrically inside a
+     fixed square box — a flex box that centers its single glyph on both axes —
+     so the box center lands on the glyph and the spin is on-axis.  The box is
+     sized in em so it tracks font-size, leaving the sibling size fix intact. */
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 0;
   background: none;
   color: var(--accent);
