@@ -169,6 +169,69 @@ export function parseTranscript(text: string, cap = STREAM_ITEM_CAP): ParsedTran
   return { items: items.slice(items.length - cap), dropped: items.length - cap };
 }
 
+/** What a transcript's own records say about the run's fate and spend. */
+export interface TranscriptStats {
+  /** The stream's terminal `result` record has landed: the run is over. */
+  finished: boolean;
+  /** The terminal record read as a failure rather than a success. */
+  error: boolean;
+  /**
+   * Output tokens spent so far: the terminal record's authoritative total
+   * once it lands, else the sum over the assistant messages seen — a LIVE
+   * figure that grows with the tail. Undefined when no record carried one.
+   */
+  outputTokens: number | undefined;
+}
+
+function num(o: Record<string, unknown> | undefined, key: string): number | undefined {
+  const v = o?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * Scan a transcript tail for the run's FATE, independent of the bubble
+ * parse: the terminal `{"type":"result"}` record is the stream's own
+ * completion signal — the one settling source that cannot be lost in
+ * transit, because it arrives with the very bytes the fold reads — and
+ * the per-message `usage` records are the badge's token figure. A tail
+ * cut mid-line simply reports unfinished until the next poll completes
+ * the record.
+ */
+export function transcriptStats(text: string): TranscriptStats {
+  let finished = false;
+  let error = false;
+  let summed: number | undefined;
+  let terminal: number | undefined;
+  for (const entry of jsonlObjects(text)) {
+    if (str(entry, "type") === "result") {
+      finished = true;
+      const subtype = str(entry, "subtype");
+      error = entry.is_error === true || (subtype !== "" && subtype !== "success");
+      terminal = num(obj(entry, "usage"), "output_tokens");
+    } else {
+      const tokens = num(obj(obj(entry, "message"), "usage"), "output_tokens");
+      if (tokens !== undefined) summed = (summed ?? 0) + tokens;
+    }
+  }
+  return { finished, error, outputTokens: terminal ?? summed };
+}
+
+/**
+ * transcriptStats memoized per source on the tail's LENGTH: the poller
+ * only ever appends, so an unchanged length is an unchanged scan, and a
+ * badge re-rendering every second does not re-walk a megabyte transcript
+ * that grew by nothing.
+ */
+const statsCache = new Map<string, { len: number; stats: TranscriptStats }>();
+
+export function transcriptStatsCached(sourceId: string, text: string): TranscriptStats {
+  const hit = statsCache.get(sourceId);
+  if (hit && hit.len === text.length) return hit.stats;
+  const stats = transcriptStats(text);
+  statsCache.set(sourceId, { len: text.length, stats });
+  return stats;
+}
+
 /**
  * Parse a workflow run's journal.jsonl into rows.
  *

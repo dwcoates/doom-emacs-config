@@ -16,6 +16,7 @@
  * tails) through MemberContext, so the record is a pure function of
  * store + render state.
  */
+import { TranscriptStats, transcriptStatsCached } from "./async-stream.js";
 import { AsyncSource } from "./protocol.js";
 import { spawnedTaskIds } from "./partition.js";
 import { ConversationItem, ToolItem } from "./store.js";
@@ -54,6 +55,13 @@ export interface StreamMember {
   elapsedMs: number | undefined;
   /** The stream's accumulated text: the ws-streamed tail first, else polled. */
   tail: string;
+  /**
+   * Output tokens the detached work has spent, read from its transcript's
+   * own usage records (see transcriptStats) — live while it runs, the
+   * terminal record's total once it lands. Undefined for streams that
+   * carry no usage (a shell's spool, a journal).
+   */
+  outputTokens: number | undefined;
   /** The member's expandable bodies, child feed above stream (Shape A). */
   bodies: BodySpec[];
 }
@@ -130,9 +138,11 @@ function polledTail(
  * 3. The daemon-classified source status, when it has gone terminal.
  * 4. The poll's own done flag, which outruns a notification that has not
  *    landed yet.
- * 5. The call's own result, for members with nothing detached (an inline
+ * 5. The transcript's own terminal record (transcriptStats), which no
+ *    lost notification can take away — the stream says when it ended.
+ * 6. The call's own result, for members with nothing detached (an inline
  *    subagent, an announcement-less tail).
- * 6. Running.
+ * 7. Running.
  */
 export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember | null {
   const source = effectiveAsyncSource(item);
@@ -146,6 +156,11 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
     return null;
   }
 
+  const stats: TranscriptStats | undefined =
+    source?.stream?.format === "jsonl-transcript" && tail !== ""
+      ? transcriptStatsCached(source.source_id, tail)
+      : undefined;
+
   const fromNotification = notificationStatus(item);
   let status: MemberStatus;
   if (fromNotification !== null) {
@@ -156,6 +171,8 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
     status = source.status;
   } else if (polled?.done) {
     status = "done";
+  } else if (stats?.finished) {
+    status = stats.error ? "error" : "done";
   } else if (!source && taskIds.length === 0) {
     status = item.result ? (item.result.isError ? "error" : "done") : "running";
   } else {
@@ -190,6 +207,7 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
       polled?.elapsedMs ??
       (item.progressElapsedS !== undefined ? item.progressElapsedS * 1000 : undefined),
     tail,
+    outputTokens: stats?.outputTokens,
     bodies,
   };
 }
