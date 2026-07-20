@@ -1159,6 +1159,113 @@ identity-distinct string injected by `agent-repl-set-priority' from
         (agent-repl--reorder-workspace-by-priority "new-p1")
         (should (equal (car captured) "main"))))))
 
+;;;; ---- Tests: --reorder-workspace-next-to ----
+
+(ert-deftest agent-repl-test-reorder-next-to-inserts-immediately-after-anchor ()
+  "reorder-workspace-next-to splices ws directly after the anchor entry."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "parent" "other" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "parent")
+        (should (equal captured '("main" "parent" "child" "other")))))))
+
+(ert-deftest agent-repl-test-reorder-next-to-anchor-is-last-visible ()
+  "reorder-workspace-next-to keeps ws right after an anchor that is the last visible tab."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "other" "parent" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "parent")
+        (should (equal captured '("main" "other" "parent" "child")))))))
+
+(ert-deftest agent-repl-test-reorder-next-to-preserves-nil-persp-position ()
+  "reorder-workspace-next-to keeps persp-nil-name at the head of the cache."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "parent" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "parent")
+        (should (equal (car captured) "main"))))))
+
+(ert-deftest agent-repl-test-reorder-next-to-anchor-is-nil-name-lands-at-front ()
+  "reorder-workspace-next-to puts ws right after the persp-nil-name sentinel when the anchor is that sentinel."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "other" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "main")
+        (should (equal captured '("main" "child" "other")))))))
+
+(ert-deftest agent-repl-test-reorder-next-to-preserves-cache-string-identity ()
+  "After next-to reorder, the ws slot is `eq' to the canonical cache string, not the ws argument."
+  (agent-repl-test--with-clean-state
+    (let* ((canonical (copy-sequence "child"))
+           (fresh (copy-sequence "child"))
+           (persp-nil-name "main")
+           (persp-names-cache (list "main" "parent" canonical))
+           (captured nil))
+      (should-not (eq canonical fresh))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to fresh "parent")
+        (let ((injected (car (member "child" captured))))
+          (should injected)
+          (should (eq injected canonical))
+          (should-not (eq injected fresh)))))))
+
+(ert-deftest agent-repl-test-reorder-next-to-noop-when-ws-not-in-cache ()
+  "reorder-workspace-next-to no-ops when ws is not registered in the cache."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "parent"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "parent")
+        (should-not captured)))))
+
+(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-not-in-cache ()
+  "reorder-workspace-next-to no-ops when the anchor is absent from the cache."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "parent")
+        (should-not captured)))))
+
+(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-nil ()
+  "reorder-workspace-next-to no-ops when the anchor is nil."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" nil)
+        (should-not captured)))))
+
+(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-is-self ()
+  "reorder-workspace-next-to no-ops when the anchor names ws itself."
+  (agent-repl-test--with-clean-state
+    (let* ((persp-nil-name "main")
+           (persp-names-cache '("main" "child"))
+           (captured nil))
+      (cl-letf (((symbol-function 'persp-update-names-cache)
+                 (lambda (new-cache) (setq captured new-cache))))
+        (agent-repl--reorder-workspace-next-to "child" "child")
+        (should-not captured)))))
+
 ;;;; ---- Tests: --ws-resolve-persp ----
 
 (ert-deftest agent-repl-test-ws-resolve-persp-returns-persp-when-found ()
