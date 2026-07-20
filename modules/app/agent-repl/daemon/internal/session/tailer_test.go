@@ -589,6 +589,22 @@ func TestSuperviseRecordsTheStructuredAgentOutputPath(t *testing.T) {
 	}
 }
 
+func TestSuperviseRecordsAWorkflowJournalPathFromTheDescriptor(t *testing.T) {
+	// Arrange — a workflow descriptor names its journal under the session's
+	// own config root, which is the journal confinement boundary.
+	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1, ConfigDir: "/cfg"})
+	journal := "/cfg/projects/-slug/subagents/workflows/wf_1/journal.jsonl"
+	// Act
+	s.mu.Lock()
+	s.superviseTailersLocked([]protocol.L2Frame{asyncSourceFrame("wj1", journal)})
+	rec, ok := s.taskPaths["wj1"]
+	s.mu.Unlock()
+	// Assert
+	if !ok || rec.path != journal {
+		t.Fatalf("want the journal path recorded, got %+v ok=%v", rec, ok)
+	}
+}
+
 func TestSuperviseRefusesAStructuredPathOutsideTheSpool(t *testing.T) {
 	// Arrange — confinement binds the structured path exactly as the prose one.
 	s := New(Config{ID: "s1", Shim: newFakeShim(), ModelReconcileInterval: -1})
