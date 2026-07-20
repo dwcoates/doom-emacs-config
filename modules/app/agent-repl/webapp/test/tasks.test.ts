@@ -60,7 +60,6 @@ function entry(over: Partial<CounterEntry> = {}): CounterEntry {
     detail: "",
     status: "running",
     nested: false,
-    deactivatedAtTurn: null,
     ...over,
   };
 }
@@ -192,20 +191,7 @@ describe("sessionTasks", () => {
     expect(task.summary).toBe("rewire the counter");
   });
 
-  it("stamps the completion turn from the counted clock", () => {
-    // Arrange — one counted turn precedes the completing update.
-    const items: ConversationItem[] = [
-      userTurn("go"),
-      taskCreate(),
-      taskUpdate({ input: { taskId: "1", status: "completed" } }),
-    ];
-    // Act
-    const [task] = sessionTasks(items);
-    // Assert
-    expect(task.deactivatedAtTurn).toBe(1);
-  });
-
-  it("clears the deactivation stamp when a task reopens", () => {
+  it("reopens a completed task back to running when an update reactivates it", () => {
     // Arrange — completed then pushed back to in_progress.
     const items: ConversationItem[] = [
       taskCreate(),
@@ -215,7 +201,7 @@ describe("sessionTasks", () => {
     // Act
     const [task] = sessionTasks(items);
     // Assert
-    expect(task.deactivatedAtTurn).toBeNull();
+    expect(task.status).toBe("running");
   });
 
   it("keeps tasks in creation order", () => {
@@ -287,20 +273,6 @@ describe("agentTasks", () => {
     ]);
   });
 
-  it("stamps a completion's age on the session's counted-turn clock", () => {
-    // Arrange — two counted turns precede the agent's completing update.
-    const items: ConversationItem[] = [
-      userTurn("first"),
-      userTurn("second"),
-      taskCreate({ parentToolUseId: "a1" }),
-      taskUpdate({ parentToolUseId: "a1", input: { taskId: "1", status: "completed" } }),
-    ];
-    // Act
-    const [task] = agentTasks(items, "a1");
-    // Assert
-    expect(task.deactivatedAtTurn).toBe(2);
-  });
-
   it("keeps a nested agent's task calls out of another agent's roster", () => {
     // Arrange — a2's create is not a1's.
     const items = [taskCreate({ parentToolUseId: "a2" })];
@@ -310,22 +282,36 @@ describe("agentTasks", () => {
 });
 
 describe("tasksMenuHtml", () => {
-  it("labels the chip with the task count", () => {
+  it("labels the chip with the running-task count", () => {
     // Arrange + Act
-    const html = tasksMenuHtml([entry()], false, 0);
+    const html = tasksMenuHtml([entry()], false);
     // Assert
     expect(html).toContain("1 task");
   });
 
   it("uses the tasks chip class", () => {
     // Arrange + Act
-    const html = tasksMenuHtml([entry()], false, 0);
+    const html = tasksMenuHtml([entry()], false);
     // Assert
     expect(html).toContain("info-tasks");
   });
 
   it("renders nothing when the session created no tasks", () => {
     // Arrange + Act + Assert
-    expect(tasksMenuHtml([], false, 0)).toBe("");
+    expect(tasksMenuHtml([], false)).toBe("");
+  });
+
+  it("hides a completed task from the roster", () => {
+    // Arrange — a done task is no longer active.
+    const html = tasksMenuHtml([entry({ status: "done" })], false);
+    // Act + Assert — the chip disappears once nothing is active.
+    expect(html).toBe("");
+  });
+
+  it("counts only the still-active tasks", () => {
+    // Arrange — one running, one done.
+    const tasks = [entry({ id: "1", status: "running" }), entry({ id: "2", status: "done" })];
+    // Act + Assert
+    expect(tasksMenuHtml(tasks, false)).toContain("1 task");
   });
 });

@@ -16,7 +16,6 @@ function agentTool(over: Partial<ToolItem> = {}): ToolItem {
     input: { description: "hunt the flake", subagent_type: "Explore" },
     inputDone: true,
     result: { isError: false, content: "found it" },
-    deactivatedAtTurn: 4,
     ...over,
   };
 }
@@ -39,7 +38,6 @@ function entry(over: Partial<CounterEntry> = {}): CounterEntry {
     detail: "Explore",
     status: "running",
     nested: false,
-    deactivatedAtTurn: null,
     ...over,
   };
 }
@@ -112,7 +110,7 @@ describe("sessionSubagents", () => {
 
   it("reads a call whose input is still streaming as starting", () => {
     // Arrange
-    const item = agentTool({ inputDone: false, input: undefined, result: undefined, deactivatedAtTurn: undefined });
+    const item = agentTool({ inputDone: false, input: undefined, result: undefined });
     // Act
     const [agent] = sessionSubagents([item]);
     // Assert
@@ -121,7 +119,7 @@ describe("sessionSubagents", () => {
 
   it("leaves the summary empty while the input still streams", () => {
     // Arrange
-    const item = agentTool({ inputDone: false, input: undefined, result: undefined, deactivatedAtTurn: undefined });
+    const item = agentTool({ inputDone: false, input: undefined, result: undefined });
     // Act
     const [agent] = sessionSubagents([item]);
     // Assert
@@ -130,7 +128,7 @@ describe("sessionSubagents", () => {
 
   it("reads a call awaiting its result as running", () => {
     // Arrange + Act
-    const [agent] = sessionSubagents([agentTool({ result: undefined, deactivatedAtTurn: undefined })]);
+    const [agent] = sessionSubagents([agentTool({ result: undefined })]);
     // Assert
     expect(agent.status).toBe("running");
   });
@@ -180,22 +178,6 @@ describe("sessionSubagents", () => {
     // Assert
     expect(agents.map((a) => a.id)).toEqual(["t2"]);
   });
-
-  it("carries the deactivation turn stamped on a settled call", () => {
-    // Arrange + Act
-    const [agent] = sessionSubagents([agentTool()]);
-    // Assert
-    expect(agent.deactivatedAtTurn).toBe(4);
-  });
-
-  it("reads an unstamped active call as never deactivated", () => {
-    // Arrange
-    const item = agentTool({ result: undefined, deactivatedAtTurn: undefined });
-    // Act
-    const [agent] = sessionSubagents([item]);
-    // Assert
-    expect(agent.deactivatedAtTurn).toBeNull();
-  });
 });
 
 describe("agentSubagents", () => {
@@ -243,27 +225,34 @@ describe("agentSubagents", () => {
 describe("agentsMenuHtml", () => {
   it("renders nothing when the session spawned no subagents", () => {
     // Arrange + Act + Assert
-    expect(agentsMenuHtml([], false, 0)).toBe("");
+    expect(agentsMenuHtml([], false)).toBe("");
   });
 
-  it("labels the chip with the subagent count", () => {
+  it("labels the chip with the running-subagent count", () => {
     // Arrange + Act
-    const html = agentsMenuHtml([entry(), entry({ id: "t2" })], false, 0);
+    const html = agentsMenuHtml([entry(), entry({ id: "t2" })], false);
     // Assert
     expect(html).toContain("2 agents");
   });
 
   it("renders the subagent menu under the agents class", () => {
     // Arrange + Act
-    const html = agentsMenuHtml([entry()], false, 0);
+    const html = agentsMenuHtml([entry()], false);
     // Assert
     expect(html).toContain("agents-menu");
   });
 
-  it("ages a settled subagent out of the roster past the retention window", () => {
-    // Arrange — one done subagent, deactivated long ago.
-    const agents = [entry({ status: "done", deactivatedAtTurn: 0 })];
-    // Act + Assert — the whole chip disappears once nothing survives.
-    expect(agentsMenuHtml(agents, false, 99)).toBe("");
+  it("hides a settled subagent from the roster", () => {
+    // Arrange — one done subagent, no longer running.
+    const agents = [entry({ status: "done" })];
+    // Act + Assert — the whole chip disappears once nothing is running.
+    expect(agentsMenuHtml(agents, false)).toBe("");
+  });
+
+  it("counts only the still-running subagents", () => {
+    // Arrange — one running, one done.
+    const agents = [entry({ id: "t1", status: "running" }), entry({ id: "t2", status: "done" })];
+    // Act + Assert
+    expect(agentsMenuHtml(agents, false)).toContain("1 agent");
   });
 });

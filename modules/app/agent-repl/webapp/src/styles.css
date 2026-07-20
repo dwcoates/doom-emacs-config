@@ -678,9 +678,6 @@ body {
 .info-tokens { color: var(--info-tokens); }
 .info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
 .agents-caret, .tasks-caret, .tokens-caret { font-size: 0.7rem; }
-/* The one datapoint that is not a settled number: entries still working
-   read in the palette's in-flight orange, as the thinking indicator does. */
-.agents-running, .tasks-running { color: var(--thinking); }
 
 .agents-overlay, .tasks-overlay, .tokens-overlay {
   position: absolute;
@@ -766,10 +763,6 @@ body {
 /* An entry another entry spawned is indented under the roster, so the
    nesting the feed shows through parent_tool_use_id survives into the list. */
 .agent-row.nested, .task-row.nested { padding-left: 1.25rem; }
-/* A settled (inactive) entry greys its headline, so a done row reads as past
-   while its dot still carries the done/error color and its age its label. */
-.agent-row.inactive .agent-desc,
-.task-row.inactive .task-desc { color: var(--muted); }
 
 .agent-desc {
   color: var(--fg);

@@ -28,10 +28,10 @@ import {
   topbarInfoHtml,
 } from "../src/topbar.js";
 import { CounterEntry } from "../src/counter-menu.js";
-import { StoreState, ToolItem, UserTurnItem } from "../src/store.js";
+import { StoreState, ToolItem } from "../src/store.js";
 import { IDLE_LABEL, TIMER_SLOT } from "../src/timer.js";
 
-/** A counter entry, defaulted to an active one that never prunes. */
+/** A counter entry, defaulted to an active (still-running) one. */
 function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
   return {
     id: "t1",
@@ -39,7 +39,6 @@ function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
     detail: "Explore",
     status: "running",
     nested: false,
-    deactivatedAtTurn: null,
     ...over,
   };
 }
@@ -58,7 +57,6 @@ function datapoints(over: Partial<TopbarDatapoints> = {}): TopbarDatapoints {
     tokenMenu: null,
     agents: [],
     tasks: [],
-    currentTurn: 0,
     ...over,
   };
 }
@@ -122,16 +120,6 @@ function agentItem(over: Partial<ToolItem> = {}): ToolItem {
     input: { description: "hunt the flake", subagent_type: "Explore" },
     inputDone: true,
     ...over,
-  };
-}
-
-/** A counted user turn (a real prompt, not a bare built-in slash). */
-function userTurn(text = "do the thing", requestId = "r1"): UserTurnItem {
-  return {
-    kind: "user-turn",
-    requestId,
-    content: [{ type: "text", text }],
-    ts: "2026-05-24T09:00:00.000Z",
   };
 }
 
@@ -563,13 +551,6 @@ describe("sessionTopbarDatapoints", () => {
     // Act + Assert
     expect(sessionTopbarDatapoints(state, null, false).tasks.map((t) => t.id)).toEqual(["1"]);
   });
-
-  it("reads the counted-turn clock off the session's items", () => {
-    // Arrange
-    const state = storeState({ items: [userTurn(), userTurn("more", "r2")] });
-    // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, false).currentTurn).toBe(2);
-  });
 });
 
 describe("agentElapsedLabel", () => {
@@ -641,16 +622,6 @@ describe("agentTopbarDatapoints", () => {
     const d = agentTopbarDatapoints([agent, taskCreate("a1"), taskCreate()], agent, NOW_MS);
     // Assert
     expect(d.tasks).toHaveLength(1);
-  });
-
-  it("ages against the session's counted-turn clock", () => {
-    // Arrange — the retention stamps are on the session clock, so the
-    // window must be too.
-    const agent = agentItem();
-    // Act
-    const d = agentTopbarDatapoints([userTurn(), agent], agent, NOW_MS);
-    // Assert
-    expect(d.currentTurn).toBe(1);
   });
 });
 
