@@ -1861,7 +1861,7 @@ func TestRemediationRefusesADormantSession(t *testing.T) {
 
 func TestShimEnvAlwaysMarksOwnership(t *testing.T) {
 	// Arrange / Act
-	env := ShimEnv(CreateOpts{})
+	env := ShimEnv(CreateOpts{}, "")
 	// Assert
 	if !slices.Contains(env, "AGENT_REPL_OWNED=1") {
 		t.Fatalf("env = %v, want the ownership marker", env)
@@ -1870,7 +1870,7 @@ func TestShimEnvAlwaysMarksOwnership(t *testing.T) {
 
 func TestShimEnvExportsSessionConfigDir(t *testing.T) {
 	// Arrange / Act
-	env := ShimEnv(CreateOpts{ConfigDir: "/home/u/.claude-chesscom"})
+	env := ShimEnv(CreateOpts{ConfigDir: "/home/u/.claude-chesscom"}, "")
 	// Assert
 	if !slices.Contains(env, "CLAUDE_CONFIG_DIR=/home/u/.claude-chesscom") {
 		t.Fatalf("env = %v, want the session's CLAUDE_CONFIG_DIR", env)
@@ -1880,12 +1880,95 @@ func TestShimEnvExportsSessionConfigDir(t *testing.T) {
 func TestShimEnvOmitsConfigDirWhenUnset(t *testing.T) {
 	// Arrange / Act — an empty ConfigDir must leave the inherited value
 	// alone, NOT export CLAUDE_CONFIG_DIR="" (a config root named "").
-	env := ShimEnv(CreateOpts{})
+	env := ShimEnv(CreateOpts{}, "")
 	// Assert
 	for _, e := range env {
 		if strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
 			t.Fatalf("env = %v, want no CLAUDE_CONFIG_DIR entry", env)
 		}
+	}
+}
+
+func TestShimEnvExportsDaemonAddr(t *testing.T) {
+	// Arrange / Act — a non-empty addr rides down as AGENT_REPL_DAEMON_ADDR
+	// so a session's tools can reach this daemon's HTTP surface.
+	env := ShimEnv(CreateOpts{}, "127.0.0.1:8787")
+	// Assert
+	if !slices.Contains(env, "AGENT_REPL_DAEMON_ADDR=127.0.0.1:8787") {
+		t.Fatalf("env = %v, want the daemon addr export", env)
+	}
+}
+
+func TestShimEnvOmitsDaemonAddrWhenEmpty(t *testing.T) {
+	// Arrange / Act — an empty addr must not export AGENT_REPL_DAEMON_ADDR="".
+	env := ShimEnv(CreateOpts{}, "")
+	// Assert
+	for _, e := range env {
+		if strings.HasPrefix(e, "AGENT_REPL_DAEMON_ADDR=") {
+			t.Fatalf("env = %v, want no AGENT_REPL_DAEMON_ADDR entry", env)
+		}
+	}
+}
+
+// capabilities is the decoded GET /capabilities envelope.
+type capabilities struct {
+	WidgetAssets bool   `json:"widget_assets"`
+	WidgetDir    string `json:"widget_assets_dir"`
+	WidgetBundle bool   `json:"widget_bundle_present"`
+}
+
+func getCapabilities(t *testing.T, cfg Config) capabilities {
+	t.Helper()
+	srv := New(cfg)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	resp, err := http.Get(ts.URL + "/capabilities")
+	if err != nil {
+		t.Fatalf("GET /capabilities: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var caps capabilities
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return caps
+}
+
+func TestCapabilitiesReportsWidgetAssetsOffWhenUnconfigured(t *testing.T) {
+	// Arrange / Act — no WidgetAssetsDir means the capability is off.
+	caps := getCapabilities(t, Config{Logf: func(string, ...any) {}})
+	// Assert
+	if caps.WidgetAssets || caps.WidgetDir != "" || caps.WidgetBundle {
+		t.Fatalf("caps = %+v, want widget capability off", caps)
+	}
+}
+
+func TestCapabilitiesReportsWidgetBundlePresent(t *testing.T) {
+	// Arrange — a dist dir that actually holds the mount bundle.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chess-widget.js"), []byte("export default 0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	caps := getCapabilities(t, Config{Logf: func(string, ...any) {}, WidgetAssetsDir: dir})
+	// Assert
+	if !caps.WidgetAssets || caps.WidgetDir != dir || !caps.WidgetBundle {
+		t.Fatalf("caps = %+v, want widget on with bundle present at %q", caps, dir)
+	}
+}
+
+func TestCapabilitiesReportsBundleMissingWhenDistLacksIt(t *testing.T) {
+	// Arrange — a configured dir that does NOT contain chess-widget.js:
+	// the route would mount but the mount import would 404.
+	dir := t.TempDir()
+	// Act
+	caps := getCapabilities(t, Config{Logf: func(string, ...any) {}, WidgetAssetsDir: dir})
+	// Assert — capability "on" but bundle missing, the distinguishable case.
+	if !caps.WidgetAssets || caps.WidgetBundle {
+		t.Fatalf("caps = %+v, want widget on but bundle absent", caps)
 	}
 }
 

@@ -89,10 +89,16 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 // ConfigDir deliberately leaves the daemon's own value (or its absence)
 // inherited rather than exporting an empty override, which the CLI would
 // read as a config root literally named "".
-func ShimEnv(opts CreateOpts) []string {
+// AGENT_REPL_DAEMON_ADDR carries THIS daemon's -addr down to the CLI so a
+// session's tools can reach the daemon's HTTP surface (e.g. the
+// show-chess-game skill probing GET /capabilities); empty leaves it unset.
+func ShimEnv(opts CreateOpts, daemonAddr string) []string {
 	env := []string{"AGENT_REPL_OWNED=1"}
 	if opts.ConfigDir != "" {
 		env = append(env, "CLAUDE_CONFIG_DIR="+opts.ConfigDir)
+	}
+	if daemonAddr != "" {
+		env = append(env, "AGENT_REPL_DAEMON_ADDR="+daemonAddr)
 	}
 	return env
 }
@@ -128,6 +134,14 @@ type Server struct {
 	// every real session inherits.
 	summarizeTurns bool
 	summaryModel   string
+	// widgetAssetsDir is the embeddable-widget dist the daemon serves at
+	// /widget-assets/ (empty = the capability is off); GET /capabilities
+	// reports it so a client detects the capability authoritatively.
+	widgetAssetsDir string
+	// daemonAddr is this daemon's own listen address (-addr), exported to
+	// every session as AGENT_REPL_DAEMON_ADDR so a session's tools can
+	// reach this daemon's HTTP surface.
+	daemonAddr string
 
 	sentinel   session.SentinelSink
 	remediator Remediator
@@ -224,6 +238,14 @@ type Config struct {
 	// SummaryModel is the model the summarizer pins; empty takes the
 	// session package's haiku default.
 	SummaryModel string
+	// WidgetAssetsDir is the embeddable-widget dist served at /widget-assets/
+	// (the -widget-assets flag); empty means the chess-widget capability is
+	// off. Surfaced on GET /capabilities.
+	WidgetAssetsDir string
+	// DaemonAddr is the daemon's own listen address (-addr), exported to each
+	// session as AGENT_REPL_DAEMON_ADDR so its tools can probe this daemon
+	// (e.g. the show-chess-game capability check).
+	DaemonAddr string
 	// Accounts is the canonical account roster (the -accounts flag):
 	// every root a session may run as, in menu order. Empty disables
 	// GET /accounts.
@@ -279,6 +301,8 @@ func New(cfg Config) *Server {
 		classifierModel: cfg.ClassifierModel,
 		summarizeTurns:  cfg.SummarizeTurns,
 		summaryModel:    cfg.SummaryModel,
+		widgetAssetsDir: cfg.WidgetAssetsDir,
+		daemonAddr:      cfg.DaemonAddr,
 		sentinel:        cfg.Sentinel,
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
@@ -416,6 +440,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
 	mux.HandleFunc("POST /sessions/{id}/account", s.handleAccountSwitch)
 	mux.HandleFunc("GET /accounts", s.handleAccounts)
+	mux.HandleFunc("GET /capabilities", s.handleCapabilities)
 	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
 	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
 	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
@@ -1062,6 +1087,31 @@ func (s *Server) handleAccounts(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, s.logf, map[string][]accountStatus{"accounts": roster})
+}
+
+// handleCapabilities reports which optional daemon capabilities are wired,
+// so a client detects them authoritatively rather than inferring from a
+// 404. Today it covers the embeddable chess-widget: whether the daemon
+// serves /widget-assets/ at all (widget_assets), the dir it serves from
+// (widget_assets_dir), and whether that dir actually holds the mount bundle
+// the webapp imports (widget_bundle_present). The last field distinguishes
+// "capability off" from "configured but pointing at a dist missing
+// chess-widget.js", which the show-chess-game skill needs to word its
+// remediation correctly.
+func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
+	dir := s.widgetAssetsDir
+	bundlePresent := false
+	if dir != "" {
+		if info, err := os.Stat(filepath.Join(dir, "chess-widget.js")); err == nil && !info.IsDir() {
+			bundlePresent = true
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, s.logf, map[string]any{
+		"widget_assets":         dir != "",
+		"widget_assets_dir":     dir,
+		"widget_bundle_present": bundlePresent,
+	})
 }
 
 // switchDrainTimeout bounds how long an account switch waits for the old
