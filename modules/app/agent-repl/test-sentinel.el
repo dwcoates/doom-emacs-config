@@ -348,6 +348,47 @@ would adopt it into a workspace; the drain only deletes."
         (should (equal callback-args '("ws1" "/some/dir")))
         (should (equal deleted-file "/tmp/stop_123"))))))
 
+(ert-deftest agent-repl-test-process-sentinel-file-threads-source-to-arity-3-callback ()
+  "process-sentinel-file passes the sentinel `:source' to a callback that accepts it.
+Only a callback whose arity admits a third argument (the session-start
+handler) receives the SessionStart origin."
+  (agent-repl-test--with-clean-state
+    (let ((callback-args nil))
+      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
+                 (lambda (_f) '(:dir "/some/dir" :session-id "sid-1" :source "compact")))
+                ((symbol-function 'agent-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
+                 #'ignore)
+                ((symbol-function 'delete-file) #'ignore))
+        (agent-repl--process-sentinel-file
+         "/tmp/session_start_1"
+         (list :callback (lambda (ws dir &optional source)
+                           (setq callback-args (list ws dir source)))
+               :warning "warn %s"
+               :name "handle-session-start"))
+        (should (equal callback-args '("ws1" "/some/dir" "compact")))))))
+
+(ert-deftest agent-repl-test-process-sentinel-file-omits-source-for-arity-2-callback ()
+  "process-sentinel-file calls a two-argument callback with (ws dir) only.
+Passing the `:source' as a third arg would signal `wrong-number-of-arguments',
+so the arity guard must withhold it from the fixed two-argument handlers."
+  (agent-repl-test--with-clean-state
+    (let ((callback-args nil))
+      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
+                 (lambda (_f) '(:dir "/some/dir" :session-id "sid-1" :source "compact")))
+                ((symbol-function 'agent-repl--ws-for-dir)
+                 (lambda (_d) "ws1"))
+                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
+                 #'ignore)
+                ((symbol-function 'delete-file) #'ignore))
+        (agent-repl--process-sentinel-file
+         "/tmp/stop_1"
+         (list :callback (lambda (ws dir) (setq callback-args (list ws dir)))
+               :warning "warn %s"
+               :name "handle-stop"))
+        (should (equal callback-args '("ws1" "/some/dir")))))))
+
 (ert-deftest agent-repl-test-process-sentinel-file-deletes-before-callback ()
   "File must be deleted before the callback runs so a slow callback cannot be
 re-dispatched by the poll fallback observing a still-present file."
@@ -2062,6 +2103,40 @@ prompt there; without the drain the dispatch silently never executes."
     (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
       (agent-repl--on-session-start-event "ws1" "/some/dir")
       (should (eq (agent-repl--ws-agent-state "ws1") :idle)))))
+
+(ert-deftest agent-repl-test-on-session-start-compact-fires-metaprompt-read ()
+  "A `compact'-origin session_start re-fires the metaprompt read-directive."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
+                ((symbol-function 'agent-repl--fire-metaprompt-read)
+                 (lambda (ws) (setq fired ws))))
+        (agent-repl--on-session-start-event "ws1" "/some/dir" "compact")
+        (should (equal fired "ws1"))))))
+
+(ert-deftest agent-repl-test-on-session-start-startup-does-not-fire-metaprompt-read ()
+  "A `startup'-origin session_start does NOT re-fire the metaprompt read.
+A fresh session's first user prompt already carries the counter-0 injection."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
+                ((symbol-function 'agent-repl--fire-metaprompt-read)
+                 (lambda (ws) (setq fired ws))))
+        (agent-repl--on-session-start-event "ws1" "/some/dir" "startup")
+        (should-not fired)))))
+
+(ert-deftest agent-repl-test-on-session-start-nil-source-does-not-fire-metaprompt-read ()
+  "A session_start with no source (older hook / non-session-start writer) is inert."
+  (agent-repl-test--with-clean-state
+    (let ((fired nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
+                ((symbol-function 'agent-repl--fire-metaprompt-read)
+                 (lambda (ws) (setq fired ws))))
+        (agent-repl--on-session-start-event "ws1" "/some/dir")
+        (should-not fired)))))
 
 ;;;; ---- Tests: ws-fully-loaded latch ----
 
