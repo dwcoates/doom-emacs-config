@@ -199,6 +199,77 @@ describe("topbar pickers", () => {
   });
 });
 
+const sidebarRule = blockAfter(css, "\n#ws-sidebar {");
+const sbHead = blockAfter(css, "#ws-sidebar .sb-head {");
+const topbarRule = blockAfter(css, "\n#topbar {");
+
+/** The value assigned to custom property `name` within `block`. */
+function cssVar(block: string, name: string): string {
+  const m = block.match(new RegExp(`${name}:\\s*([^;]+);`));
+  if (m === null) throw new Error(`block has no ${name}`);
+  return m[1].trim();
+}
+
+/** Sum of a `#rrggbb` literal's three channels — a coarse lightness proxy. */
+function lightness(hex: string): number {
+  return channels(hex).reduce((a, b) => a + b, 0);
+}
+
+describe("sidebar surface (--sidebar-bg)", () => {
+  it("fills the rail with --sidebar-bg rather than the feed's --bg", () => {
+    // Arrange / Act — the rail's own fill token.
+    // Assert
+    expect(sidebarRule).toMatch(/background:\s*var\(--sidebar-bg\)/);
+  });
+
+  it("lifts the dark-theme rail lighter than the feed it docks beside", () => {
+    // Arrange
+    const bg = cssVar(darkTheme, "--bg");
+    const sb = cssVar(darkTheme, "--sidebar-bg");
+    // Act / Assert — no channel darker than the feed, and lighter overall.
+    channels(sb).forEach((c, i) => expect(c).toBeGreaterThanOrEqual(channels(bg)[i]));
+    expect(lightness(sb)).toBeGreaterThan(lightness(bg));
+  });
+
+  it("keeps the dark-theme rail no lighter than --card so its hover/detail washes still lift", () => {
+    // Arrange
+    const card = cssVar(darkTheme, "--card");
+    const sb = cssVar(darkTheme, "--sidebar-bg");
+    // Act / Assert — every channel at or below --card leaves the --card washes above it.
+    channels(sb).forEach((c, i) => expect(c).toBeLessThanOrEqual(channels(card)[i]));
+  });
+
+  it("caps the light-theme rail at the feed's white, never sinking below it", () => {
+    // Arrange
+    const bg = cssVar(lightTheme, "--bg");
+    const sb = cssVar(lightTheme, "--sidebar-bg");
+    // Act / Assert — white is the lightness ceiling, so the rail matches the feed.
+    expect(lightness(sb)).toBe(lightness(bg));
+  });
+});
+
+describe("flush header dividers (--topbar-h)", () => {
+  it("pins the topbar to the shared header height", () => {
+    // Arrange / Act — the topbar's own height declaration.
+    // Assert
+    expect(topbarRule).toMatch(/height:\s*var\(--topbar-h\)/);
+  });
+
+  it("pins the sidebar header to the same shared height", () => {
+    // Arrange / Act — the sidebar header's own height declaration.
+    // Assert
+    expect(sbHead).toMatch(/height:\s*var\(--topbar-h\)/);
+  });
+
+  it("draws the same bottom rule under both headers so their dividers land flush", () => {
+    // Arrange / Act — one border definition, two headers.
+    const divider = /border-bottom:\s*1px solid var\(--border\)/;
+    // Assert
+    expect(topbarRule).toMatch(divider);
+    expect(sbHead).toMatch(divider);
+  });
+});
+
 const accountMode = blockAfter(css, "#account .account-mode");
 
 describe("account chip mode label", () => {
