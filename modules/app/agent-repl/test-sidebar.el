@@ -466,6 +466,54 @@ PLIST key/value pairs are applied after it and may override it."
         (agent-repl--sidebar-open-dir "/tmp/ws"))
       (should (equal booted '("ws" . "/tmp/ws"))))))
 
+(ert-deftest agent-repl-test-sidebar-open-dir-arms-show-when-perspless ()
+  "A perspective-less (closed) target arms `:pending-show-panels' so it opens."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--picker-open-selection) (lambda (_p)))
+              ((symbol-function 'agent-repl--frontend-boot-session) (lambda (&rest _)))
+              ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-open-dir "/tmp/ws"))
+    (should (eq (agent-repl--ws-get "ws" :pending-show-panels) t))))
+
+(ert-deftest agent-repl-test-sidebar-open-dir-arms-show-when-repl-torn-down ()
+  "An open perspective with an `:inactive' REPL still arms `:pending-show-panels'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :inactive)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--picker-open-selection) (lambda (_p)))
+              ((symbol-function 'agent-repl--frontend-boot-session) (lambda (&rest _)))
+              ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-open-dir "/tmp/ws"))
+    (should (eq (agent-repl--ws-get "ws" :pending-show-panels) t))))
+
+(ert-deftest agent-repl-test-sidebar-open-dir-leaves-open-target-unarmed ()
+  "An already-open (hosted) target is not armed — its panels restore on switch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :active)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--picker-open-selection) (lambda (_p)))
+              ((symbol-function 'agent-repl--frontend-boot-session) (lambda (&rest _)))
+              ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+      (agent-repl--sidebar-open-dir "/tmp/ws"))
+    (should-not (agent-repl--ws-get "ws" :pending-show-panels))))
+
+(ert-deftest agent-repl-test-sidebar-open-dir-arms-show-before-switch ()
+  "The show flag is armed BEFORE `--picker-open-selection' runs the switch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :inactive)
+    (let (armed-at-switch)
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--picker-open-selection)
+                 (lambda (_p)
+                   (setq armed-at-switch
+                         (agent-repl--ws-get "ws" :pending-show-panels))))
+                ((symbol-function 'agent-repl--frontend-boot-session) (lambda (&rest _)))
+                ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+        (agent-repl--sidebar-open-dir "/tmp/ws"))
+      (should (eq armed-at-switch t)))))
+
 (ert-deftest agent-repl-test-sidebar-entry-for-dir-canonicalizes ()
   "Dir matching survives trailing-slash variance via canonicalization."
   (agent-repl-test--with-clean-state
