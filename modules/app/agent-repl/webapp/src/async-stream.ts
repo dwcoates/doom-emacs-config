@@ -16,6 +16,7 @@
  * shell's spool is bytes, so it has no parser here at all and stays a
  * `<pre>`.
  */
+import { AsyncSource } from "./protocol.js";
 import { ConversationItem, TextItem, ThinkingItem, ToolItem } from "./store.js";
 
 /**
@@ -93,6 +94,94 @@ function blockText(content: unknown): string {
 }
 
 /**
+ * The harness's per-tool status vocabulary narrowed onto the closed
+ * AsyncSource enum, mirroring the daemon's asyncStatus: unknown reads as
+ * running, because a fold wrongly saying done hides live output while one
+ * wrongly saying running only spins a beat too long.
+ */
+function asyncStatus(raw: string): AsyncSource["status"] {
+  switch (raw) {
+    case "completed":
+    case "done":
+    case "success":
+      return "done";
+    case "failed":
+    case "error":
+      return "error";
+    case "killed":
+    case "cancelled":
+    case "canceled":
+      return "killed";
+    default:
+      return "running";
+  }
+}
+
+/**
+ * The webapp MIRROR of the daemon's classifyAsyncSource (asyncsource.go),
+ * for cards the daemon's frames never reach: a transcript-parsed spawn at
+ * depth two and deeper, whose structured `toolUseResult` sidecar rides the
+ * very JSONL this module already parses. One classification, two runtimes
+ * — which is what retires prose-regex spawn detection everywhere except
+ * pre-structured history.
+ */
+export function classifyAsyncSource(
+  toolName: string,
+  structured: Record<string, unknown> | undefined,
+  isError: boolean,
+): AsyncSource | undefined {
+  if (isError || structured === undefined) return undefined;
+  switch (toolName) {
+    case "Task":
+    case "Agent": {
+      // A synchronous subagent is NOT an async source: its stream already
+      // arrived inline. Only a detached one owns a stream that outlives
+      // the call.
+      const agentId = str(structured, "agentId");
+      if (structured.isAsync !== true || agentId === "") return undefined;
+      const description = str(structured, "description");
+      const src: AsyncSource = {
+        source_id: agentId,
+        kind: "agent",
+        label: description !== "" ? description : undefined,
+        status: asyncStatus(str(structured, "status")),
+      };
+      if (str(structured, "outputFile") !== "" && structured.canReadOutputFile === true) {
+        src.stream = { transport: "poll", format: "jsonl-transcript" };
+      }
+      return src;
+    }
+    case "Bash": {
+      const taskId = str(structured, "backgroundTaskId");
+      if (taskId === "") return undefined;
+      return {
+        source_id: taskId,
+        kind: "shell",
+        status: asyncStatus(str(structured, "status")),
+        stream: { transport: "ws", format: "text" },
+      };
+    }
+    case "Workflow": {
+      const taskId = str(structured, "taskId");
+      if (taskId === "") return undefined;
+      const name = str(structured, "workflowName");
+      const src: AsyncSource = {
+        source_id: taskId,
+        kind: "workflow",
+        label: name !== "" ? name : undefined,
+        status: asyncStatus(str(structured, "status")),
+      };
+      if (str(structured, "transcriptDir") !== "") {
+        src.stream = { transport: "poll", format: "jsonl-journal" };
+      }
+      return src;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Parse a subagent's JSONL transcript into feed items.
  *
  * Deliberately a REDUCED model of the daemon's replay parsing: text,
@@ -160,6 +249,13 @@ export function parseTranscript(text: string, cap = STREAM_ITEM_CAP): ParsedTran
             isError: block.is_error === true,
             content: blockText(block.content),
           };
+          // The entry's structured toolUseResult sidecar is the parsed
+          // twin of the live wire's async-source frame: classifying it
+          // here gives a depth-two spawn card the SAME structural
+          // verdict a live card gets, retiring prose detection for it.
+          const sidecar = obj(entry, "toolUseResult");
+          const src = classifyAsyncSource(target.toolName, sidecar, block.is_error === true);
+          if (src) target.asyncSource = src;
         }
       }
     }
