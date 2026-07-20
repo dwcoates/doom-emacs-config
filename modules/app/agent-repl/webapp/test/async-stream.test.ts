@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyAsyncSource,
   parseJournal,
   parseTranscript,
   transcriptStats,
@@ -274,5 +275,126 @@ describe("transcriptStatsCached", () => {
     const b = transcriptStatsCached("src-same", raw);
     // Assert
     expect(b).toBe(a);
+  });
+});
+
+describe("classifyAsyncSource (the daemon mirror)", () => {
+  const agentSpawn = {
+    isAsync: true,
+    status: "async_launched",
+    agentId: "ag1",
+    description: "hunt bugs",
+    outputFile: "/tmp/claude-1/s/tasks/ag1.output",
+    canReadOutputFile: true,
+  };
+
+  it("classifies a detached agent spawn with a polled transcript stream", () => {
+    // Arrange / Act
+    const src = classifyAsyncSource("Agent", agentSpawn, false);
+    // Assert
+    expect(src).toMatchObject({
+      source_id: "ag1",
+      kind: "agent",
+      status: "running",
+      stream: { transport: "poll", format: "jsonl-transcript" },
+    });
+  });
+
+  it("refuses a synchronous subagent, whose stream already arrived inline", () => {
+    // Arrange — the completion sidecar of a sync agent carries no isAsync.
+    const sync = { agentId: "ag1", status: "completed", totalTokens: 5 };
+    // Act / Assert
+    expect(classifyAsyncSource("Agent", sync, false)).toBeUndefined();
+  });
+
+  it("withholds the stream when the output file is unreadable", () => {
+    // Arrange
+    const spawn = { ...agentSpawn, canReadOutputFile: false };
+    // Act
+    const src = classifyAsyncSource("Agent", spawn, false);
+    // Assert — the source is real but nothing may be read from it.
+    expect(src?.stream).toBeUndefined();
+  });
+
+  it("classifies a backgrounded shell as a ws text stream", () => {
+    // Arrange / Act
+    const src = classifyAsyncSource("Bash", { backgroundTaskId: "bg1" }, false);
+    // Assert
+    expect(src).toMatchObject({
+      source_id: "bg1",
+      kind: "shell",
+      stream: { transport: "ws", format: "text" },
+    });
+  });
+
+  it("classifies a workflow spawn as a polled journal", () => {
+    // Arrange
+    const spawn = {
+      status: "async_launched",
+      taskId: "wj1",
+      workflowName: "review",
+      transcriptDir: "/cfg/projects/-s/subagents/workflows/wf_1",
+    };
+    // Act
+    const src = classifyAsyncSource("Workflow", spawn, false);
+    // Assert
+    expect(src).toMatchObject({
+      source_id: "wj1",
+      kind: "workflow",
+      label: "review",
+      stream: { transport: "poll", format: "jsonl-journal" },
+    });
+  });
+
+  it("refuses an errored spawn no matter what the payload says", () => {
+    // Arrange / Act / Assert
+    expect(classifyAsyncSource("Agent", agentSpawn, true)).toBeUndefined();
+  });
+
+  it("reads an unknown status as running rather than terminal", () => {
+    // Arrange / Act
+    const src = classifyAsyncSource("Agent", { ...agentSpawn, status: "reticulating" }, false);
+    // Assert — a wrong done hides live output.
+    expect(src?.status).toBe("running");
+  });
+});
+
+describe("parseTranscript sidecar classification", () => {
+  it("attaches the structural classification to a parsed spawn card", () => {
+    // Arrange — a depth-two agent spawn with its toolUseResult sidecar.
+    const spawn = line({
+      type: "assistant",
+      message: { id: "m1", content: [{ type: "tool_use", id: "tu1", name: "Agent", input: {} }] },
+    });
+    const result = line({
+      type: "user",
+      toolUseResult: { isAsync: true, agentId: "ag9", status: "async_launched" },
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "tu1", content: "launched", is_error: false }],
+      },
+    });
+    // Act
+    const { items } = parseTranscript(`${spawn}\n${result}`);
+    // Assert — the parsed card carries the same verdict a live card gets.
+    expect((items[0] as ToolItem).asyncSource).toMatchObject({ source_id: "ag9", kind: "agent" });
+  });
+
+  it("leaves a sync agent's parsed card unclassified", () => {
+    // Arrange — no isAsync in the sidecar.
+    const spawn = line({
+      type: "assistant",
+      message: { id: "m1", content: [{ type: "tool_use", id: "tu1", name: "Agent", input: {} }] },
+    });
+    const result = line({
+      type: "user",
+      toolUseResult: { agentId: "ag9", status: "completed" },
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "tu1", content: "done", is_error: false }],
+      },
+    });
+    // Act
+    const { items } = parseTranscript(`${spawn}\n${result}`);
+    // Assert
+    expect((items[0] as ToolItem).asyncSource).toBeUndefined();
   });
 });
