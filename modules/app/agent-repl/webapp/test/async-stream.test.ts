@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseJournal, parseTranscript } from "../src/async-stream.js";
+import {
+  parseJournal,
+  parseTranscript,
+  transcriptStats,
+  transcriptStatsCached,
+} from "../src/async-stream.js";
 import { TextItem, ToolItem } from "../src/store.js";
 
 /** One JSONL line of a subagent transcript. */
@@ -184,5 +189,90 @@ describe("parseJournal", () => {
     const { rows } = parseJournal(raw);
     // Assert
     expect(rows).toEqual([]);
+  });
+});
+
+/** An assistant transcript entry carrying an output-token usage figure. */
+function usageMsg(tokens: number): string {
+  return line({
+    type: "assistant",
+    message: { id: "m1", role: "assistant", usage: { output_tokens: tokens }, content: [] },
+  });
+}
+
+describe("transcriptStats", () => {
+  const resultLine = (o: Record<string, unknown> = {}): string =>
+    line({ type: "result", subtype: "success", is_error: false, ...o });
+
+  it("reads an unterminated stream as unfinished", () => {
+    // Arrange / Act
+    const stats = transcriptStats(usageMsg(5));
+    // Assert
+    expect(stats.finished).toBe(false);
+  });
+
+  it("reads the terminal result record as finished", () => {
+    // Arrange / Act
+    const stats = transcriptStats([usageMsg(5), resultLine()].join("\n"));
+    // Assert
+    expect(stats).toMatchObject({ finished: true, error: false });
+  });
+
+  it("reads a failing terminal record as an error", () => {
+    // Arrange / Act
+    const stats = transcriptStats(resultLine({ subtype: "error_during_execution" }));
+    // Assert
+    expect(stats).toMatchObject({ finished: true, error: true });
+  });
+
+  it("sums per-message usage into a live token figure", () => {
+    // Arrange / Act
+    const stats = transcriptStats([usageMsg(5), usageMsg(7)].join("\n"));
+    // Assert
+    expect(stats.outputTokens).toBe(12);
+  });
+
+  it("prefers the terminal record's authoritative total over the sum", () => {
+    // Arrange
+    const raw = [usageMsg(5), resultLine({ usage: { output_tokens: 40 } })].join("\n");
+    // Act / Assert
+    expect(transcriptStats(raw).outputTokens).toBe(40);
+  });
+
+  it("reports no token figure when no record carried usage", () => {
+    // Arrange / Act
+    const stats = transcriptStats(line({ type: "assistant", message: { content: [] } }));
+    // Assert
+    expect(stats.outputTokens).toBeUndefined();
+  });
+
+  it("treats a truncated terminal line as not yet finished", () => {
+    // Arrange — the poll cut the result record mid-line.
+    const raw = [usageMsg(5), resultLine().slice(0, 10)].join("\n");
+    // Act / Assert
+    expect(transcriptStats(raw).finished).toBe(false);
+  });
+});
+
+describe("transcriptStatsCached", () => {
+  it("rescans when the tail grows, so the figure tracks the stream", () => {
+    // Arrange
+    const first = usageMsg(5);
+    const grown = [first, usageMsg(7)].join("\n");
+    // Act
+    transcriptStatsCached("src-grow", first);
+    const stats = transcriptStatsCached("src-grow", grown);
+    // Assert
+    expect(stats.outputTokens).toBe(12);
+  });
+
+  it("reuses the scan while the tail is unchanged", () => {
+    // Arrange
+    const raw = usageMsg(5);
+    // Act — same length, same source: the very object comes back.
+    const a = transcriptStatsCached("src-same", raw);
+    const b = transcriptStatsCached("src-same", raw);
+    // Assert
+    expect(b).toBe(a);
   });
 });
