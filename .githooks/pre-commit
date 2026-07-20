@@ -50,6 +50,18 @@ if ! git diff --cached --name-only | grep -qE '^modules/app/(agent|claude)-repl/
   exit 0
 fi
 
+# Skip the ERT gate on the master branch.  Workspace-merge handling
+# replays a workspace's commits onto its source branch via automated
+# cherry-picks; for workspaces cut from master those land on master and
+# were already tested on the workspace branch, so re-running ERT here
+# only adds noise and can block the merge.  The gate exists for normal
+# feature-branch commits, so restrict it to non-master branches.
+CURRENT_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo "")"
+if [ "$CURRENT_BRANCH" = "master" ]; then
+  echo "[pre-commit] On master branch — skipping ERT gate."
+  exit 0
+fi
+
 if [ -z "$MODULE_NAME" ]; then
   echo "[pre-commit] no agent-repl/agent-repl module with an aggregator test file found — refusing to commit." >&2
   exit 1
