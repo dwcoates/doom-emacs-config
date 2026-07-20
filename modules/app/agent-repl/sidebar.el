@@ -610,7 +610,7 @@ webapp-owned client state, so this reaches the page through
                 (agent-repl--sidebar-entries))))
 
 (defun agent-repl--sidebar-open-dir (dir)
-  "Switch Emacs to the live workspace whose project dir is DIR, and start it.
+  "Switch Emacs to the live workspace whose project dir is DIR, and open it.
 Routes through `agent-repl--picker-open-selection', the canonical
 switch-or-revive: an open perspective switches in place, a
 perspective-less or closed-REPL one is re-established.  Signals when
@@ -626,15 +626,32 @@ torn down (`:repl-state' `:inactive' / `:hidden', the greyed rows
 `agent-repl--sidebar-closed-p' marks) takes the switch branch and would
 otherwise land the user in a dead REPL.  The boot door no-ops when a
 live session already exists, so the revive branch's own boot is never
-doubled."
+doubled.
+
+Booting alone leaves the session running but HEADLESS — a closed target
+\(`agent-repl--sidebar-closed-p') would land the user in bare windows
+with the agent panels hidden.  So its `:pending-show-panels' flag is
+armed BEFORE the switch, and the switch's own
+`agent-repl--on-workspace-switch' drain then shows the panels the
+instant the workspace activates — the same door workspace generation
+comes up visible through.  This is the keyboard / click equivalent of
+pressing `SPC o c' in the target while it is closed.  An already-open
+target needs no arming: `agent-repl--ensure-own-panels-on-persp-switch'
+restores its panels on switch."
   (let ((entry (agent-repl--sidebar-entry-for-dir dir)))
     (unless entry
       (error "agent-repl sidebar: no live workspace for dir %s" dir))
-    (let ((name (car entry)))
+    (let* ((name (car entry))
+           (closed (agent-repl--sidebar-closed-p name)))
       (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s"
                         name (cdr entry)
                         (and (agent-repl--ws-live-p name) t)
-                        (agent-repl--sidebar-closed-p name))
+                        closed)
+      ;; Arm the panel show BEFORE switching so a closed target comes up
+      ;; running AND open rather than running-but-headless.  Drained by
+      ;; `agent-repl--on-workspace-switch' once the workspace activates.
+      (when closed
+        (agent-repl--ws-put name :pending-show-panels t))
       (agent-repl--picker-open-selection
        (list :name name
              :project-dir (cdr entry)
