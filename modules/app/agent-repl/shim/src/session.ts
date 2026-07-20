@@ -134,6 +134,10 @@ export class ShimSession {
   private turnsInFlight = 0;
   private shutdownRequestId: RequestId | null = null;
   private closed = false;
+  /** Uuids of task-notification messages already forwarded, so a live
+   *  emission followed by the SDK's duplicate-acknowledgment replay of
+   *  the same message forwards exactly once per shim process. */
+  private readonly seenNotificationUuids = new Set<string>();
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -537,17 +541,24 @@ export class ShimSession {
    * OTHER text block stays host-side noise (system reminders, local
    * command echoes) and is dropped as before.
    *
+   * Task-notification texts are scanned BEFORE the replay guard: the
+   * CLI enqueues the harness-injected completion message onto the SDK
+   * stream flagged as a replay, so gating the scan on `isReplay` starves
+   * the daemon of the ONLY signal that detached work concluded — no
+   * badge ever settles and async_live never drops.  Re-observing a
+   * notification on a genuine history replay (session resume) is
+   * harmless downstream — the daemon's task settle and the webapp's
+   * notification write are both idempotent — and the per-uuid dedup
+   * below keeps one shim process from emitting the same notification
+   * twice.  Tool results stay replay-gated: re-emitting one would
+   * report a tool_use_id the daemon has already seen.
+   *
    * The message's `tool_use_result` sibling rides along on each emitted
    * tool-result event (see ToolResultEvt.structured) — it is the SDK's
    * structured twin of the flattened `content`, and dropping it is what
    * forced every downstream layer to scrape ids out of English prose.
    */
   private mapUserMessage(msg: SdkMessageLike): void {
-    // A replay is the SDK re-emitting a message already in its history,
-    // marked only by `isReplay` — the `type` is plain "user", identical to
-    // a real one. Acting on it would emit a SECOND tool-result for a
-    // tool_use_id already reported, so it is skipped whole.
-    if (msg.isReplay === true) return;
     const message = msg.message as { content?: unknown } | undefined;
     const content = message?.content;
     const blocks: ContentBlock[] =
@@ -560,10 +571,13 @@ export class ShimSession {
       if (block.type === "text") {
         const text = String((block as { text?: unknown }).text ?? "");
         if (text.includes("<task-notification>")) {
+          const uuid = String(msg.uuid ?? "");
+          if (uuid !== "" && this.seenNotificationUuids.has(uuid)) continue;
+          if (uuid !== "") this.seenNotificationUuids.add(uuid);
           this.deps.emit({
             type: "system",
             session_id: this.deps.sessionId,
-            uuid: msg.uuid ?? "",
+            uuid,
             subtype: "task_notification",
             data: { text },
           });
@@ -571,6 +585,11 @@ export class ShimSession {
         continue;
       }
       if (block.type !== "tool_result") continue;
+      // A replay is the SDK re-emitting a message already in its history,
+      // marked only by `isReplay` — the `type` is plain "user", identical
+      // to a real one.  Acting on it would emit a SECOND tool-result for
+      // a tool_use_id already reported.
+      if (msg.isReplay === true) continue;
       const tr = block as ContentBlockToolResult;
       this.deps.emit({
         type: "tool-result",
