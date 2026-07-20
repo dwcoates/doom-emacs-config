@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  Scenario,
-  dualBodyShapeAHtml,
-  dualBodyShapeBHtml,
-  renderScenarioHtml,
-  scenarios,
-} from "../src/catalogue.js";
+import { Scenario, renderScenarioHtml, scenarios } from "../src/catalogue.js";
 
 /** The scenario registered under SLUG; throws when the catalogue lost it. */
 function scenario(slug: string): Scenario {
@@ -125,18 +119,12 @@ describe("catalogue scenarios", () => {
     expect(html).toContain("watch: build ok");
   });
 
-  it("dual-body shape A stacks two separate open panels", () => {
-    const html = dualBodyShapeAHtml();
+  it("workflow-journal stacks two separate open panels (the decided Shape A)", () => {
+    // The dual-body decision landed as Shape A: a card owning both an
+    // inline child feed and a detached stream stacks one fold per body.
+    const html = expanded("workflow-journal");
     expect(html.match(/class="agent-panel"/g)?.length).toBe(2);
     expect(html).toContain("async-fold open");
-    expect(html).toContain("stream-row");
-  });
-
-  it("dual-body shape B merges into a single sectioned panel", () => {
-    const html = dualBodyShapeBHtml();
-    expect(html.match(/class="agent-panel"/g)?.length).toBe(1);
-    expect(html).toContain("cat-panel-heading");
-    expect(html).toContain("feed-child");
     expect(html).toContain("stream-row");
   });
 
