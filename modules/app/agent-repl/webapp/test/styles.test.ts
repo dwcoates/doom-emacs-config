@@ -1434,6 +1434,14 @@ describe("live turn-stats row", () => {
     // stats to the right rail whether or not an indicator shares the line.
     expect(turnStatsLive).toMatch(/margin-left:\s*auto/);
   });
+
+  it("keeps the clock and the token delta on one line once the delta appears", () => {
+    // Arrange / Act — the .turn-stats-live rule.
+    // Assert — nowrap, so the bullet-separated `1m 30s · +12,000` never breaks
+    // at its inner spaces onto a line below the indicator when the token delta
+    // widens the box, the same single-line protection `.turn-meta` carries.
+    expect(turnStatsLive).toMatch(/white-space:\s*nowrap/);
+  });
 });
 
 const tailLine = blockAfter(css, ".tail-line {");

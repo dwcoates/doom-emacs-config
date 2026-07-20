@@ -1883,12 +1883,21 @@ pre {
    own right edge sit — rather than out at the window gutter. A `margin-left:
    auto` absorbs the shared row's free space, so the counters land at that
    right rail whether or not an indicator shares the line, the mirror of the
-   indicator flushing to that stream's left rail. */
+   indicator flushing to that stream's left rail.
+
+   `white-space: nowrap` keeps the elapsed clock and the token delta on ONE
+   line beside the indicator, the same protection the settled twin `.turn-meta`
+   carries. Without it the bullet-separated figures break at their inner
+   spaces: as a shrinkable flex item on the `.tail-line`, this box's min-content
+   collapses to the widest breakable run, so the moment the token delta is
+   appended (`1m 30s · +12,000`, wider than the clock alone) the box shrinks and
+   drops the figures onto a line BELOW the indicator instead of staying on it. */
 .turn-stats-live {
   padding: 0.25rem 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  white-space: nowrap;
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
