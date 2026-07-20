@@ -282,8 +282,11 @@ func (s *Session) superviseTailersLocked(frames []protocol.L2Frame) {
 		// announcements above: recording its path too keeps the poll route
 		// alive when the prose wording drifts out from under the regexes.
 		// First-path-wins makes the overlap with parseAgentSpawn harmless.
-		if a, ok := f.(*protocol.AsyncSourceFrame); ok &&
-			a.Source.OutputFile != "" && allowedTaskOutputPath(a.Source.OutputFile) {
+		// The same two confinement predicates the poll route re-validates
+		// gate the record: the task spool for agents, the session's own
+		// config root for workflow journals.
+		if a, ok := f.(*protocol.AsyncSourceFrame); ok && a.Source.OutputFile != "" &&
+			(allowedTaskOutputPath(a.Source.OutputFile) || allowedJournalPath(a.Source.OutputFile, root)) {
 			s.recordTaskPathLocked(a.Source.SourceID, filepath.Clean(a.Source.OutputFile))
 		}
 		if n, ok := f.(*protocol.TaskNotificationFrame); ok && n.TaskID != "" {

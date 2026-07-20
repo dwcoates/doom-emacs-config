@@ -15,6 +15,9 @@ const (
 	bgShellResult = `{"stdout":"","stderr":"","interrupted":false,"isImage":false,` +
 		`"noOutputExpected":false,"backgroundTaskId":"bf8vj85v1"}`
 	plainShellResult = `{"stdout":"hi","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false}`
+	workflowSpawn    = `{"status":"async_launched","taskId":"wj7025gze","taskType":"local_workflow",` +
+		`"workflowName":"adversarial-branch-review","runId":"wf_bd77b668-e04",` +
+		`"transcriptDir":"/Users/u/.claude/projects/-slug/subagents/workflows/wf_bd77b668-e04"}`
 )
 
 func TestClassifyAsyncSourceNamesABackgroundAgentBySourceID(t *testing.T) {
@@ -162,6 +165,36 @@ func TestClassifyAsyncSourceReadsAnUnknownStatusAsRunningRatherThanTerminal(t *t
 	// spins a beat too long, so unknown must fail toward running.
 	if src.Status != "running" {
 		t.Fatalf("want an unknown status to read as running, got %q", src.Status)
+	}
+}
+
+func TestClassifyAsyncSourceNamesAWorkflowByItsTaskID(t *testing.T) {
+	// Arrange / Act
+	src := classifyAsyncSource("Workflow", json.RawMessage(workflowSpawn), false)
+	// Assert
+	if src == nil || src.SourceID != "wj7025gze" || src.Kind != "workflow" {
+		t.Fatalf("want the taskId as a workflow source, got %+v", src)
+	}
+}
+
+func TestClassifyAsyncSourceGivesAWorkflowAJournalStream(t *testing.T) {
+	// Arrange / Act
+	src := classifyAsyncSource("Workflow", json.RawMessage(workflowSpawn), false)
+	// Assert — the run's journal.jsonl is the progress stream, polled.
+	if src.Stream == nil || src.Stream.Format != "jsonl-journal" || src.Stream.Transport != "poll" {
+		t.Fatalf("want a polled jsonl-journal stream, got %+v", src.Stream)
+	}
+	if src.OutputFile != "/Users/u/.claude/projects/-slug/subagents/workflows/wf_bd77b668-e04/journal.jsonl" {
+		t.Fatalf("want the journal path on the source, got %q", src.OutputFile)
+	}
+}
+
+func TestClassifyAsyncSourceRefusesAWorkflowWithoutATaskID(t *testing.T) {
+	// Arrange / Act — a malformed spawn names no task to stream.
+	src := classifyAsyncSource("Workflow", json.RawMessage(`{"status":"async_launched"}`), false)
+	// Assert
+	if src != nil {
+		t.Fatalf("a task-less workflow owns no stream, got %+v", src)
 	}
 }
 

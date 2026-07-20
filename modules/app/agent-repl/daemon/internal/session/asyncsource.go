@@ -36,6 +36,11 @@ type asyncStructured struct {
 	// (it is announced only in the result prose), so the tailer's own
 	// discovery still owns the file and this only names the source.
 	BackgroundTaskID string `json:"backgroundTaskId"`
+	// Workflow: the run's task id, display name, and transcript directory,
+	// whose journal.jsonl is the run's progress stream.
+	TaskID        string `json:"taskId"`
+	WorkflowName  string `json:"workflowName"`
+	TranscriptDir string `json:"transcriptDir"`
 	// Shared: "async_launched", "completed", "killed", ...
 	Status string `json:"status"`
 }
@@ -114,6 +119,26 @@ func classifyAsyncSource(toolName string, structured json.RawMessage, isError bo
 			Status:   asyncStatus(s.Status),
 			Stream:   &protocol.StreamRef{Transport: "ws", Format: "text"},
 		}
+
+	case "Workflow":
+		if s.TaskID == "" {
+			return nil
+		}
+		src := &protocol.AsyncSource{
+			SourceID: s.TaskID,
+			Kind:     "workflow",
+			Label:    s.WorkflowName,
+			Status:   asyncStatus(s.Status),
+		}
+		// The run's journal.jsonl is its progress stream — a record log,
+		// polled like an agent transcript rather than pushed. The path
+		// rides the descriptor for the poll route's record, confined by
+		// allowedJournalPath at the recording site.
+		if s.TranscriptDir != "" {
+			src.Stream = &protocol.StreamRef{Transport: "poll", Format: "jsonl-journal"}
+			src.OutputFile = s.TranscriptDir + "/journal.jsonl"
+		}
+		return src
 	}
 	return nil
 }
