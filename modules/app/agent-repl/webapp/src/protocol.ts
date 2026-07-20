@@ -387,6 +387,12 @@ export interface AsyncSource {
   /** A value outside this enum reads as `running` — see the store. */
   status: "running" | "done" | "error" | "killed";
   stream?: StreamRef;
+  /**
+   * The stream's file, when the structured result named a readable one.
+   * Daemon-side correlation data (the poll route's path record); carried
+   * here only for wire fidelity.
+   */
+  output_file?: string;
 }
 
 /**
