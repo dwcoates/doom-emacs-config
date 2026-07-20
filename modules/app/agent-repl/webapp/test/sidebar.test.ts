@@ -9,12 +9,14 @@ import { HostGlobal } from "../src/host.js";
 import {
   COMMAND_FAILED_NOTICE,
   COMMAND_FAILED_NOTICE_MS,
+  EXPAND_HOOK,
   ROSTER_HOOK,
   RepoGroup,
   WorkspaceRoster,
   WorkspaceRow,
   WorkspaceSidebar,
   formatRecency,
+  installWorkspaceExpandHook,
   installWorkspaceRosterHook,
   sidebarHtml,
   statusDotHtml,
@@ -533,6 +535,37 @@ describe("WorkspaceSidebar", () => {
     expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(false);
   });
 
+  it("opens a row's detail panel from toggleDetail (the keyboard path)", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(roster());
+    // Act
+    sidebar.toggleDetail("/tmp/ws");
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(true);
+  });
+
+  it("closes the panel on a second toggleDetail", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(roster());
+    sidebar.toggleDetail("/tmp/ws");
+    // Act
+    sidebar.toggleDetail("/tmp/ws");
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(false);
+  });
+
+  it("does not POST anything for a toggleDetail", () => {
+    // Arrange
+    const { sidebar, calls } = harness();
+    sidebar.update(roster());
+    // Act
+    sidebar.toggleDetail("/tmp/ws");
+    // Assert
+    expect(calls).toHaveLength(0);
+  });
+
   it("surfaces a non-2xx command response in the header", async () => {
     // Arrange
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -598,5 +631,56 @@ describe("installWorkspaceRosterHook", () => {
     (target[ROSTER_HOOK] as (r: unknown) => void)(roster());
     // Assert
     expect(mount.hidden).toBe(false);
+  });
+});
+
+describe("installWorkspaceExpandHook", () => {
+  it("names the hook the way the Emacs side must call it", () => {
+    // Arrange + Act + Assert
+    expect(EXPAND_HOOK).toBe("agentReplWorkspaceExpand");
+  });
+
+  it("plants the hook under that name", () => {
+    // Arrange
+    const target: HostGlobal = {};
+    const { sidebar } = harness();
+    // Act
+    installWorkspaceExpandHook(target, sidebar);
+    // Assert
+    expect(typeof target[EXPAND_HOOK]).toBe("function");
+  });
+
+  it("unfolds the addressed row's detail panel when fired", () => {
+    // Arrange
+    const target: HostGlobal = {};
+    const { mount, sidebar } = harness();
+    sidebar.update(roster());
+    installWorkspaceExpandHook(target, sidebar);
+    // Act — the way an Emacs host script fires it, dir as a plain string.
+    (target[EXPAND_HOOK] as (d: unknown) => void)("/tmp/ws");
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(true);
+  });
+
+  it("folds the panel back when fired a second time", () => {
+    // Arrange
+    const target: HostGlobal = {};
+    const { mount, sidebar } = harness();
+    sidebar.update(roster());
+    installWorkspaceExpandHook(target, sidebar);
+    (target[EXPAND_HOOK] as (d: unknown) => void)("/tmp/ws");
+    // Act
+    (target[EXPAND_HOOK] as (d: unknown) => void)("/tmp/ws");
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(false);
+  });
+
+  it("throws on a non-string dir rather than coercing it", () => {
+    // Arrange
+    const target: HostGlobal = {};
+    const { sidebar } = harness();
+    installWorkspaceExpandHook(target, sidebar);
+    // Act + Assert
+    expect(() => (target[EXPAND_HOOK] as (d: unknown) => void)(7)).toThrow(/must be a string/);
   });
 });
