@@ -26,6 +26,12 @@ mkrepo() {
   git -C "$repo" config user.email "test@example.com"
   git -C "$repo" config user.name "Test"
 
+  # Pin every test repo to a deterministic NON-master branch so the
+  # master-branch skip (see pre-commit) never fires in the gate tests,
+  # regardless of the host's init.defaultBranch.  The master-skip cases
+  # override HEAD to refs/heads/master explicitly.
+  git -C "$repo" symbolic-ref HEAD refs/heads/work
+
   # Minimal repo layout expected by the hook (module name parameterizable
   # so the legacy agent-repl fallback can be exercised).
   mkdir -p "$repo/modules/app/$module"
@@ -100,6 +106,52 @@ EOF
     pass "cherry-pick: emacs is never invoked"
   else
     fail "cherry-pick: emacs was invoked despite CHERRY_PICK_HEAD"
+  fi
+
+  rm -rf "$repo" "$stub_dir"
+}
+
+test_master_branch_skips_ert() {
+  local repo; repo="$(mkrepo)"
+  # Put the repo on master; no CHERRY_PICK_HEAD — a plain commit, but on
+  # master the gate must be skipped so workspace-merge cherry-picks onto
+  # master never trip ERT.
+  git -C "$repo" symbolic-ref HEAD refs/heads/master
+  stage_el_file "$repo"
+
+  local out exit_code=0
+  out="$(git -C "$repo" -c core.hooksPath=.git/hooks commit -m "on master" 2>&1)" || exit_code=$?
+
+  if echo "$out" | grep -q "On master branch"; then
+    pass "master: hook prints skip message"
+  else
+    fail "master: expected skip message in output" "$out"
+  fi
+
+  rm -rf "$repo"
+}
+
+test_master_branch_does_not_invoke_emacs() {
+  local repo; repo="$(mkrepo)"
+  git -C "$repo" symbolic-ref HEAD refs/heads/master
+  stage_el_file "$repo"
+
+  # Use a stub emacs that leaves a sentinel file if called.
+  local stub_dir; stub_dir="$(mktemp -d)"
+  local sentinel="$stub_dir/emacs-was-called"
+  cat > "$stub_dir/emacs" <<EOF
+#!/usr/bin/env bash
+touch "$sentinel"
+exit 0
+EOF
+  chmod +x "$stub_dir/emacs"
+
+  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "on master" >/dev/null 2>&1 || true
+
+  if [ ! -f "$sentinel" ]; then
+    pass "master: emacs is never invoked"
+  else
+    fail "master: emacs was invoked despite master branch"
   fi
 
   rm -rf "$repo" "$stub_dir"
@@ -209,6 +261,8 @@ test_missing_aggregator_refuses_commit() {
 echo "=== test-pre-commit.sh ==="
 test_cherry_pick_skips_ert
 test_cherry_pick_does_not_invoke_emacs
+test_master_branch_skips_ert
+test_master_branch_does_not_invoke_emacs
 test_normal_commit_reaches_ert_when_el_staged
 test_normal_commit_no_el_skips_ert
 test_legacy_claude_repl_layout_still_gated
