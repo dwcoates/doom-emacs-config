@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemberContext, resolveMember } from "../src/stream-member.js";
+import { MemberContext, livePollSourceIds, resolveMember } from "../src/stream-member.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 import { TaskTail } from "../src/watcher-poll.js";
 
@@ -225,5 +225,64 @@ describe("resolveMember", () => {
   it("falls back to the frozen heartbeat elapsed when never polled", () => {
     const m = resolveMember(tool({ result: SPAWN_RESULT, progressElapsedS: 2 }), ctx());
     expect(m?.elapsedMs).toBe(2000);
+  });
+});
+
+/** A detached agent spawn, poll-transport by classification. */
+function pollAgent(opts: Partial<ToolItem> = {}): ToolItem {
+  return tool({
+    toolName: "Agent",
+    result: { isError: false, content: "Async agent launched. agentId: ag1" },
+    asyncSource: {
+      source_id: "ag1",
+      kind: "agent",
+      status: "running",
+      stream: { transport: "poll", format: "jsonl-transcript" },
+    },
+    ...opts,
+  });
+}
+
+describe("livePollSourceIds", () => {
+  it("includes a live poll-transport member's source id, fold state notwithstanding", () => {
+    // Arrange
+    const watchers = new Map([["b1", [pollAgent()]]]);
+    // Act / Assert
+    expect(livePollSourceIds(watchers, ctx())).toEqual(new Set(["ag1"]));
+  });
+
+  it("drops a member the moment it settles", () => {
+    // Arrange — the completion notification landed; nothing left to poll for.
+    const watchers = new Map([
+      ["b1", [pollAgent({ notification: { status: "completed", text: "done" } })]],
+    ]);
+    // Act / Assert
+    expect(livePollSourceIds(watchers, ctx()).size).toBe(0);
+  });
+
+  it("excludes a ws-transport member, whose tail already streams", () => {
+    // Arrange
+    const shell = tool({
+      result: SPAWN_RESULT,
+      asyncSource: {
+        source_id: "bg1",
+        kind: "shell",
+        status: "running",
+        stream: { transport: "ws", format: "text" },
+      },
+    });
+    const watchers = new Map([["b1", [shell]]]);
+    // Act / Assert
+    expect(livePollSourceIds(watchers, ctx()).size).toBe(0);
+  });
+
+  it("dedups one member hosted on two bubbles to a single id", () => {
+    // Arrange — the same spawn card can appear under two hosts (gns re-host).
+    const watchers = new Map([
+      ["b1", [pollAgent()]],
+      ["b2", [pollAgent()]],
+    ]);
+    // Act / Assert
+    expect(livePollSourceIds(watchers, ctx())).toEqual(new Set(["ag1"]));
   });
 });
