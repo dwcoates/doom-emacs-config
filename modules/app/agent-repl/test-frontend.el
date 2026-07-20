@@ -311,6 +311,29 @@ bundle would never be refetched."
           (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
           (should (= (length agent-repl-test--urls) 2)))))))
 
+;;;; ---- force-fresh-conversation command --------------------------------------
+
+(ert-deftest agent-repl-test-frontend-force-fresh-command-errors-without-workspace ()
+  "The force-fresh command signals when there is no current workspace."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+    ;; Act / Assert
+    (should-error (agent-repl-force-fresh-conversation) :type 'user-error)))
+
+(ert-deftest agent-repl-test-frontend-force-fresh-command-recreates-and-syncs ()
+  "The force-fresh command recreates the session and snaps the webview to it."
+  ;; Arrange
+  (let (synced)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--frontend-force-fresh-session)
+               (lambda (ws) (should (equal ws "ws1")) "fresh-sid"))
+              ((symbol-function 'agent-repl--frontend-sync-webview)
+               (lambda (ws id) (setq synced (list ws id)))))
+      ;; Act
+      (agent-repl-force-fresh-conversation)
+      ;; Assert — the fresh id is what the displayed webview is synced to.
+      (should (equal synced '("ws1" "fresh-sid"))))))
+
 ;;;; ---- Copy chords ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
