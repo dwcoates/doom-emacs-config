@@ -302,12 +302,19 @@ UNUserNotificationCenter API current macOS supports, so it delivers a
 banner where terminal-notifier only hangs.  Unlike osascript, alerter
 blocks until the banner is clicked or dismissed — or self-dismisses after
 `agent-repl-notification-click-timeout-seconds' — printing an activation
-token to stdout.  The banner is attributed to Emacs via -sender
+token to stdout.  The banner is attributed to Emacs via --sender
 \(`agent-repl-notification-sender') so a click foregrounds Emacs, and the
 on-activate handler runs in-process to focus Emacs and switch to WS when
 the token reports a click (see `agent-repl--alerter-click-p' and
-`agent-repl--notification-activate').  A -group keyed to WS coalesces
+`agent-repl--notification-activate').  A --group keyed to WS coalesces
 repeat notifications for the same workspace.
+
+Flags are passed GNU-style with a double dash (`--message', `--title', …):
+the current alerter is a Swift ArgumentParser CLI that only accepts
+double-dash long options and rejects single-dash spellings with exit 64
+\(`At least one of --message, --remove, or --list is required'), delivering
+no banner.  Double dashes are also accepted by the legacy Go alerter, so
+this spelling works across both.
 
 Because alerter is EXPECTED to stay alive awaiting a click, the hang
 watchdog is set beyond its self-dismiss timeout so a waiting banner is not
@@ -316,12 +323,12 @@ mistaken for a hang."
          (keyed (and ws (stringp ws) (not (string-empty-p ws)))))
     (agent-repl--notify-spawn
      ws 'alerter agent-repl-alerter-executable
-     (append (list "-title" title
-                   "-message" message
-                   "-sound" agent-repl-notification-sound
-                   "-sender" agent-repl-notification-sender
-                   "-timeout" (number-to-string timeout))
-             (when keyed (list "-group" (concat "agent-repl:" ws))))
+     (append (list "--title" title
+                   "--message" message
+                   "--sound" agent-repl-notification-sound
+                   "--sender" agent-repl-notification-sender
+                   "--timeout" (number-to-string timeout))
+             (when keyed (list "--group" (concat "agent-repl:" ws))))
      (+ timeout agent-repl-notify-timeout-seconds)
      (lambda (output)
        (when (agent-repl--alerter-click-p output)
