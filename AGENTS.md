@@ -341,6 +341,8 @@ To verify parenthesis balance in an `.el` file (skipping strings and comments):
 python3 .claude/check-parens.py <file.el>
 ```
 
+Handy as a quick sanity check before invoking the byte-compiler.
+
 ## No Redundant Mechanisms
 
 Never maintain two mechanisms for the same thing. Redundancy adds complexity, obscures which path is authoritative, and creates subtle divergence bugs. If a new approach replaces an old one, **delete the old one** — do not keep it "as a fallback." If the new approach isn't trusted enough to stand alone, it's not ready to ship.
