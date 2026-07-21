@@ -89,6 +89,18 @@ import {
   releaseChessGames,
   WIDGET_UNAVAILABLE_MSG,
 } from "../src/chess-game.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+
+/** A logger wired to a console spy only — matches wslog.test.ts's fixture. */
+function spyLogger(): { logger: ForwardingLogger; consoleLines: string[] } {
+  const consoleLines: string[] = [];
+  const logger = new ForwardingLogger(
+    () => true,
+    (level, line) => consoleLines.push(`${level}: ${line}`),
+    () => 0,
+  );
+  return { logger, consoleLines };
+}
 
 describe("chessGameKind", () => {
   it.each([
@@ -316,6 +328,102 @@ describe("hydrateChessGames", () => {
     const el = fakeContainer("/ws/chess-game-a.pgn");
     // Act + Assert
     expect(() => hydrateChessGames(rootOf(el))).toThrow(/not configured/);
+  });
+
+  describe("failure and drop logging", () => {
+    afterEach(() => resetLoggingForTests());
+
+    it("logs an error unconditionally when hydration fails, even with a detached container", async () => {
+      // Arrange — the DOM fallback is conditional on isConnected; the log is not.
+      const spy = spyLogger();
+      setLogger(spy.logger);
+      arrange(async () => {
+        throw new Error("game file not found");
+      });
+      const el = fakeContainer("/ws/chess-game-a.pgn");
+      // Act — the container detaches before the failing fetch settles.
+      hydrateChessGames(rootOf(el));
+      el.isConnected = false;
+      await flush();
+      // Assert — no DOM fallback (nothing connected to render into)...
+      expect(el.innerHTML).toBe("spinner");
+      // ...but the failure is still logged.
+      const errorLines = spy.consoleLines.filter((l) => l.startsWith("error:"));
+      expect(errorLines).toHaveLength(1);
+      expect(errorLines[0]).toContain("/ws/chess-game-a.pgn");
+      expect(errorLines[0]).toContain("s_1");
+      expect(errorLines[0]).toContain("game file not found");
+    });
+
+    it("logs an error when hydration fails on a still-connected container", async () => {
+      // Arrange
+      const spy = spyLogger();
+      setLogger(spy.logger);
+      arrange(async () => {
+        throw new Error("game file not found");
+      });
+      const el = fakeContainer("/ws/chess-game-a.pgn");
+      // Act
+      hydrateChessGames(rootOf(el));
+      await flush();
+      // Assert — both the DOM fallback and the log fire.
+      expect(el.innerHTML).toContain("game file not found");
+      const errorLines = spy.consoleLines.filter((l) => l.startsWith("error:"));
+      expect(errorLines).toHaveLength(1);
+    });
+
+    it("logs a warning when a loaded payload's container detached before mount", async () => {
+      // Arrange
+      const spy = spyLogger();
+      setLogger(spy.logger);
+      arrange();
+      const el = fakeContainer("/ws/chess-game-a.pgn");
+      // Act
+      hydrateChessGames(rootOf(el));
+      el.isConnected = false;
+      await flush();
+      // Assert
+      const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+      expect(warnLines).toHaveLength(1);
+      expect(warnLines[0]).toContain("/ws/chess-game-a.pgn");
+      expect(warnLines[0]).toContain("s_1");
+      expect(mounted).toHaveLength(0);
+    });
+
+    it("dedups the detached-container warning across repeated re-renders of the same board", async () => {
+      // Arrange — a fast-streaming bubble mints a fresh container per pass;
+      // each one loses the isConnected race for the same logical board.
+      const spy = spyLogger();
+      setLogger(spy.logger);
+      arrange();
+      const first = fakeContainer("/ws/chess-game-a.pgn");
+      const second = fakeContainer("/ws/chess-game-a.pgn");
+      // Act
+      hydrateChessGames(rootOf(first));
+      first.isConnected = false;
+      await flush();
+      hydrateChessGames(rootOf(second));
+      second.isConnected = false;
+      await flush();
+      // Assert — same stateKey (feedKey::path::idx) on both passes, so the
+      // repeat is suppressed rather than flooding the log.
+      const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+      expect(warnLines).toHaveLength(1);
+    });
+
+    it("logs a warning when a container carries no game-file path", () => {
+      // Arrange
+      const spy = spyLogger();
+      setLogger(spy.logger);
+      arrange();
+      const el = fakeContainer("");
+      // Act
+      hydrateChessGames(rootOf(el));
+      // Assert
+      const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+      expect(warnLines).toHaveLength(1);
+      expect(warnLines[0]).toContain("missing its game-file path");
+    });
   });
 });
 
