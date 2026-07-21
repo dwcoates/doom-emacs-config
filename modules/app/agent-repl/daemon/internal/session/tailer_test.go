@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,7 +150,7 @@ func TestReadTailChunkReadsAppendedBytesIncrementally(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Act
-	first, off := readTailChunk(path, 0)
+	first, off, _ := readTailChunk(path, 0)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +161,7 @@ func TestReadTailChunkReadsAppendedBytesIncrementally(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	second, _ := readTailChunk(path, off)
+	second, _, _ := readTailChunk(path, off)
 	// Assert
 	if first != "hello " || second != "world" {
 		t.Fatalf("first = %q, second = %q", first, second)
@@ -169,10 +170,11 @@ func TestReadTailChunkReadsAppendedBytesIncrementally(t *testing.T) {
 
 func TestReadTailChunkLeavesOffsetOnMissingFile(t *testing.T) {
 	// Arrange + Act
-	text, off := readTailChunk(filepath.Join(t.TempDir(), "absent.output"), 3)
-	// Assert — the file may simply not exist yet on early ticks.
-	if text != "" || off != 3 {
-		t.Fatalf("text = %q, off = %d", text, off)
+	text, off, err := readTailChunk(filepath.Join(t.TempDir(), "absent.output"), 3)
+	// Assert — the file may simply not exist yet on early ticks, which is
+	// not a read failure (err stays nil so the tail logs nothing).
+	if text != "" || off != 3 || err != nil {
+		t.Fatalf("text = %q, off = %d, err = %v", text, off, err)
 	}
 }
 
@@ -184,11 +186,102 @@ func TestReadTailChunkNeverSplitsARune(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Act
-	first, off := readTailChunk(path, 0)
-	rest, _ := readTailChunk(path, off)
+	first, off, _ := readTailChunk(path, 0)
+	rest, _, _ := readTailChunk(path, off)
 	// Assert — the rune arrives whole in the second chunk.
 	if strings.Contains(first, "�") || rest != "é" {
 		t.Fatalf("first ends %q, rest = %q", first[len(first)-4:], rest)
+	}
+}
+
+func TestReadTailChunkReportsARealReadError(t *testing.T) {
+	// Arrange — a file the process cannot open (an unreadable dir prefix
+	// stands in for a permission/IO failure that is NOT "not written yet").
+	dir := filepath.Join(t.TempDir(), "locked")
+	if err := os.MkdirAll(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	// Act
+	_, _, err := readTailChunk(filepath.Join(dir, "t.output"), 0)
+	// Assert — a genuine failure surfaces (so the tail can log it), rather
+	// than being absorbed like the expected not-written-yet case.
+	if err == nil {
+		t.Skip("filesystem allowed the read (running as root?); cannot exercise the error path")
+	}
+}
+
+func tailerSession(t *testing.T) (*Session, *logCapture) {
+	t.Helper()
+	lc := &logCapture{}
+	s := New(Config{
+		ID:                     "s1",
+		Shim:                   newFakeShim(),
+		ModelReconcileInterval: -1,
+		NotifWatchInterval:     -1,
+		Logf:                   lc.logf,
+	})
+	s.translator.CWD = "/w"
+	return s, lc
+}
+
+func TestTailFailLogsOncePerDistinctError(t *testing.T) {
+	// Arrange
+	s, lc := tailerSession(t)
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	// Act — the same error across two ticks.
+	s.tailFailLocked("bg1", errors.New("permission denied"))
+	s.tailFailLocked("bg1", errors.New("permission denied"))
+	s.mu.Unlock()
+	// Assert — one line, not one per tick.
+	if got := lc.containing("tailer read failed task=bg1"); len(got) != 1 {
+		t.Fatalf("fail log lines = %v, want exactly one", got)
+	}
+}
+
+func TestTailFailLogsAgainWhenTheErrorChanges(t *testing.T) {
+	// Arrange
+	s, lc := tailerSession(t)
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	// Act — two distinct errors.
+	s.tailFailLocked("bg1", errors.New("permission denied"))
+	s.tailFailLocked("bg1", errors.New("input/output error"))
+	s.mu.Unlock()
+	// Assert
+	if got := lc.containing("tailer read failed task=bg1"); len(got) != 2 {
+		t.Fatalf("fail log lines = %v, want exactly two distinct", got)
+	}
+}
+
+func TestTailOKLogsRecoveryOnceAfterAFailure(t *testing.T) {
+	// Arrange — a failed tail, then a clean read.
+	s, lc := tailerSession(t)
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	s.tailFailLocked("bg1", errors.New("permission denied"))
+	// Act — recovery, then a second clean read that must stay silent.
+	s.tailOKLocked("bg1")
+	s.tailOKLocked("bg1")
+	s.mu.Unlock()
+	// Assert
+	if got := lc.containing("tailer recovered task=bg1"); len(got) != 1 {
+		t.Fatalf("recovery log lines = %v, want exactly one", got)
+	}
+}
+
+func TestTailOKIsSilentWithoutAPriorFailure(t *testing.T) {
+	// Arrange — a healthy tail that never failed.
+	s, lc := tailerSession(t)
+	s.mu.Lock()
+	s.recordTaskPathLocked("bg1", "/tmp/claude-0/x/tasks/bg1.output")
+	// Act
+	s.tailOKLocked("bg1")
+	s.mu.Unlock()
+	// Assert — steady-state success logs nothing.
+	if got := lc.containing("tailer recovered"); len(got) != 0 {
+		t.Fatalf("recovery log lines = %v, want none", got)
 	}
 }
 
