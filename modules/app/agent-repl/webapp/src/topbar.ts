@@ -30,7 +30,7 @@
 import { agentSubagents, agentsMenuHtml, sessionSubagents, SUBAGENT_TOOLS } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
-import { animatedEllipsis, escapeHtml } from "./highlight.js";
+import { escapeHtml } from "./highlight.js";
 import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.js";
 import { agentTasks, sessionTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
@@ -42,14 +42,6 @@ import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
  * error until each scope has decided what it means there.
  */
 export interface TopbarDatapoints {
-  /**
-   * Whether background async is still live while the scope is idle — the amber
-   * `monitoring…` signal, rendered as the strip's LEFT-MOST datapoint. Only the
-   * session scope ever sets it true; an agent bubble passes false, since its own
-   * amber border and live badge dots already speak for its members (see
-   * `monitoringDatapointHtml`).
-   */
-  monitoring: boolean;
   /** Session-only chrome; null renders no entry (agents always pass null). */
   parentWs: string | null;
   /**
@@ -119,9 +111,6 @@ export interface TopbarDisclosure {
  */
 export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): string {
   const parts: string[] = [];
-  if (d.monitoring) {
-    parts.push(monitoringDatapointHtml());
-  }
   if (d.parentWs) {
     parts.push(`parent workspace: <span class="info-ws">${escapeHtml(d.parentWs)}</span>`);
   }
@@ -144,39 +133,18 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
 }
 
 /**
- * The `monitoring…` datapoint: the AMBER strip entry saying background
- * (async/detached) work continues while the main chain is IDLE. It is the
- * strip's left-most datapoint, the always-visible signal for live async when
- * the owning bubble is scrolled off or absent — the quiescent twin of the
- * feed-tail working row, and shown only while nothing more specific speaks (see
- * `showsMonitoringRow`). Reuses the textless-thinking arc (`.thinking-spinner`),
- * tinted amber by `.info-monitoring`, and marked a live status region so
- * assistive tech announces it. Inline (a `<span>`, not the old block row) so it
- * sits on the strip's baseline beside the other datapoints.
- */
-export function monitoringDatapointHtml(): string {
-  return (
-    `<span class="info-monitoring" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> monitoring${animatedEllipsis()}` +
-    `</span>`
-  );
-}
-
-/**
  * The session's datapoints for the header strip. The turn clock is NOT among
  * them: it moved to the live feed-tail row beside the progress indicator (see
  * `turnStatsRowHtml`), so the session passes `timerLabel: null` and the strip
- * omits the `time:` datapoint entirely. MONITORING is the feed's amber
- * `monitoring…` gate (see `FeedRenderer.isMonitoring`), which the strip renders
- * as its left-most datapoint when the session is idle yet still watching.
+ * omits the `time:` datapoint entirely. The idle-with-live-async signal is
+ * not here either: it breathes as the sidebar's amber dot on the session's
+ * own row (see `WorkspaceSidebar.setMonitoring`), not as strip text.
  */
 export function sessionTopbarDatapoints(
   state: StoreState,
   parentWs: string | null,
-  monitoring: boolean,
 ): TopbarDatapoints {
   return {
-    monitoring,
     parentWs,
     timerLabel: null,
     // The session's tokens datapoint is the dropdown: the chip reads the
@@ -217,9 +185,6 @@ export function agentTopbarDatapoints(
   nowMs: number,
 ): TopbarDatapoints {
   return {
-    // The global `monitoring…` signal is session-only chrome: a bubble's own
-    // amber border and live badge dots already speak for its members.
-    monitoring: false,
     parentWs: null,
     timerLabel: agentElapsedLabel(agent, nowMs),
     contextTokens: agent.contextTokens ?? null,

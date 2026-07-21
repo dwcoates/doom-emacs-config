@@ -58,6 +58,34 @@ function html(r: WorkspaceRoster, open: ReadonlySet<string> = new Set()): string
   return sidebarHtml(r, open, NOW_MS, null);
 }
 
+describe("the session monitoring overlay", () => {
+  it("breathes only the current row's dot, leaving the roster's other rows alone", () => {
+    // Arrange — two idle rows, one current.
+    const r = roster({
+      repos: [
+        group({
+          rows: [
+            row({ name: "me", dir: "/tmp/me", current: true }),
+            row({ name: "other", dir: "/tmp/other" }),
+          ],
+        }),
+      ],
+    });
+    // Act
+    const out = sidebarHtml(r, new Set(), NOW_MS, null, true);
+    // Assert — exactly one overlay dot, on the current row.
+    expect(out.match(/st-monitoring/g)?.length).toBe(1);
+    expect(out).toContain(`data-row-dir="/tmp/me"`);
+  });
+
+  it("paints no overlay anywhere while the session is not monitoring", () => {
+    // Arrange
+    const r = roster({ repos: [group({ rows: [row({ current: true })] })] });
+    // Act / Assert
+    expect(sidebarHtml(r, new Set(), NOW_MS, null, false)).not.toContain("st-monitoring");
+  });
+});
+
 describe("validateWorkspaceRoster", () => {
   it("passes a well-formed roster through intact", () => {
     // Arrange
@@ -205,6 +233,16 @@ describe("statusDotHtml", () => {
   it("leaves a disc status empty of the glyph", () => {
     // Arrange + Act + Assert
     expect(statusDotHtml("done")).not.toContain("⟳");
+  });
+
+  it("overlays the breathing monitoring dot on a quiescent status", () => {
+    // Arrange + Act + Assert — the session-local monitoring overlay.
+    expect(statusDotHtml("idle", true)).toContain(`class="st st-monitoring"`);
+  });
+
+  it("never lets the monitoring overlay outrank an active status", () => {
+    // Arrange + Act + Assert — thinking's red breath is more specific.
+    expect(statusDotHtml("thinking", true)).toContain(`class="st st-thinking"`);
   });
 
   it("only spins the in-flight merge, never the queued one", () => {
@@ -416,6 +454,16 @@ afterEach(() => {
 });
 
 describe("WorkspaceSidebar", () => {
+  it("repaints the rail when the monitoring gate flips", () => {
+    // Arrange — a pushed roster whose only row is the current workspace.
+    const { mount, sidebar } = harness();
+    sidebar.update(roster({ repos: [group({ rows: [row({ current: true })] })] }));
+    // Act
+    sidebar.setMonitoring(true);
+    // Assert — the current row's dot breathes amber without a fresh push.
+    expect(mount.innerHTML).toContain("st-monitoring");
+  });
+
   it("stays hidden until the first roster push", () => {
     // Arrange + Act
     const { mount } = harness();

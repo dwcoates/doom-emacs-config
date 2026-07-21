@@ -659,33 +659,23 @@ describe("async-quiescence border", () => {
   });
 });
 
-describe("monitoring datapoint (topbar strip's left-most entry)", () => {
-  const monitoring = blockAfter(css, ".topbar-info .info-monitoring {");
-  const monitoringArc = blockAfter(css, ".topbar-info .info-monitoring .thinking-spinner");
+describe("monitoring indicator (the sidebar's breathing amber dot)", () => {
+  const dot = blockAfter(css, "#ws-sidebar .st-monitoring");
 
-  it("reads in the async amber rather than the working orange or retry purple", () => {
-    // Arrange / Act — the .info-monitoring datapoint rule.
+  it("breathes in the async amber like thinking's red breath", () => {
+    // Arrange / Act — the .st-monitoring rule.
     // Assert
-    expect(monitoring).toMatch(/color:\s*var\(--async\)/);
+    expect(dot).toMatch(/background:\s*var\(--async\)/);
+    expect(dot).toMatch(/animation:\s*ws-pulse/);
   });
 
-  it("lays the spinner, word, and dots inline so the entry sits on the strip baseline", () => {
-    // Arrange / Act — inline-flex, since the strip's datapoints share one line
-    // rather than each being a block feed row.
-    // Assert
-    expect(monitoring).toMatch(/display:\s*inline-flex/);
-  });
-
-  it("tints the reused thinking arc amber rather than defining its own spinner", () => {
-    // Arrange / Act — no bespoke .monitoring-spinner exists; the entry recolors
-    // the shared .thinking-spinner to the async hue.
-    // Assert
-    expect(monitoringArc).toMatch(/border-top-color:\s*var\(--async\)/);
-    expect(css).not.toContain(".monitoring-spinner");
+  it("no longer defines the topbar's .info-monitoring datapoint", () => {
+    // Arrange / Act / Assert — the signal moved to the sidebar dot entirely.
+    expect(css).not.toContain(".info-monitoring");
   });
 
   it("no longer defines the old feed-tail .monitoring-pending row", () => {
-    // Arrange / Act / Assert — the signal moved to the topbar strip entirely.
+    // Arrange / Act / Assert
     expect(css).not.toContain(".monitoring-pending");
   });
 });
@@ -2017,12 +2007,12 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the six unrelated
+    // Act / Assert — one shared ticker rule, plus the five unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
-    // topbar's .info-monitoring datapoint, the face's .face-side, and the
-    // sidebar merge glyph that centers itself for an on-axis spin).
+    // face's .face-side, and the sidebar merge glyph that centers itself
+    // for an on-axis spin).
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(7);
+    expect(bodies.length).toBe(6);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
