@@ -6,6 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { parseJournal } from "./async-stream.js";
+import { logDedup } from "./wslog.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -779,6 +780,7 @@ function childLine(item: ConversationItem): string {
     case "permission":
       return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
     default:
+      logDedup("child-line-kind", "warn", `childLine: unhandled item kind ${item.kind}`);
       return "";
   }
 }
@@ -830,8 +832,12 @@ function capLabel(label: string, max: number): string {
   return label.length > max ? `${label.slice(0, max - 1)}…` : label;
 }
 
-/** The one status→badge vocabulary every streaming face renders. */
-function memberBadge(status: MemberStatus, inputDone = true): string {
+/**
+ * The one status→badge vocabulary every streaming face renders. Exported
+ * for direct testing of the off-enum default (a status value outside
+ * `MemberStatus`, e.g. a newer daemon's addition this build predates).
+ */
+export function memberBadge(status: MemberStatus, inputDone = true): string {
   switch (status) {
     case "running":
       return `<span class="badge run"><span class="tool-spinner" aria-hidden="true"></span>${
@@ -843,6 +849,9 @@ function memberBadge(status: MemberStatus, inputDone = true): string {
       return `<span class="badge err">error</span>`;
     case "killed":
       return `<span class="badge err">stopped</span>`;
+    default:
+      logDedup("member-badge-status", "warn", `memberBadge: unexpected status ${String(status)}`);
+      return "";
   }
 }
 
@@ -1822,6 +1831,7 @@ export function rendersEmpty(
     case "system":
       return item.subtype === "init";
     default:
+      logDedup("renders-empty-kind", "warn", `rendersEmpty: unhandled item kind ${item.kind}`);
       return false;
   }
 }

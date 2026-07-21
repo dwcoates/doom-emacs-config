@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Actions,
   FeedRenderer,
@@ -23,6 +23,7 @@ import {
   itemKey,
   lastUserTurnId,
   MERGE_CARD_BODY,
+  memberBadge,
   modelOptionsHtml,
   panelSeedsOnOpen,
   panelToggleTarget,
@@ -41,6 +42,7 @@ import {
   workingRowHtml,
   navTokensForEntry,
 } from "../src/render.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { TIMER_SLOT } from "../src/timer.js";
 import { AsyncSource } from "../src/protocol.js";
@@ -6076,5 +6078,46 @@ describe("panelSeedsOnOpen", () => {
     // Arrange / Act / Assert
     expect(panelSeedsOnOpen("async:t1")).toEqual([]);
     expect(panelSeedsOnOpen("watchers:b1")).toEqual([]);
+  });
+});
+
+describe("off-enum status/kind logging", () => {
+  function spyLines(): string[] {
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    return lines;
+  }
+  afterEach(() => resetLoggingForTests());
+
+  it("memberBadge logs and renders empty for an off-enum status", () => {
+    // Arrange — a status value outside MemberStatus (a newer daemon's addition).
+    const lines = spyLines();
+    // Act
+    const html = memberBadge("teleporting" as unknown as Parameters<typeof memberBadge>[0]);
+    // Assert
+    expect(html).toBe("");
+    expect(lines).toContain("warn: memberBadge: unexpected status teleporting");
+  });
+
+  it("memberBadge dedups a repeated off-enum status", () => {
+    // Arrange
+    const lines = spyLines();
+    const bad = "teleporting" as unknown as Parameters<typeof memberBadge>[0];
+    // Act
+    memberBadge(bad);
+    memberBadge(bad);
+    // Assert — one line despite two calls (hot render path).
+    expect(lines.filter((l) => l.includes("memberBadge"))).toHaveLength(1);
+  });
+
+  it("rendersEmpty logs and returns false for an unhandled item kind", () => {
+    // Arrange
+    const lines = spyLines();
+    const item = { kind: "quasar" } as unknown as ConversationItem;
+    // Act
+    const empty = rendersEmpty(item);
+    // Assert
+    expect(empty).toBe(false);
+    expect(lines.some((l) => l.includes("rendersEmpty: unhandled item kind quasar"))).toBe(true);
   });
 });
