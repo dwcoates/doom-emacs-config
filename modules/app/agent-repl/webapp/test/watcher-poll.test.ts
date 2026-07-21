@@ -1,5 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchTail, TaskTailResponse, WatcherPoller } from "../src/watcher-poll.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+
+/** A logger wired to spies: captured console lines, no forwarding. */
+function spyLogger(): { logger: ForwardingLogger; consoleLines: string[] } {
+  const consoleLines: string[] = [];
+  const logger = new ForwardingLogger(
+    () => true,
+    (level, line) => consoleLines.push(`${level}: ${line}`),
+    () => 0,
+  );
+  return { logger, consoleLines };
+}
 
 /** A fetchTail returning the queued chunks in order, recording its offsets. */
 function scriptedFetch(chunks: Array<Partial<TaskTailResponse>>): {
@@ -96,6 +108,88 @@ describe("WatcherPoller.poll", () => {
     await poller.poll("a");
     // Assert
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("WatcherPoller.poll failure logging", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  it("logs a failing task-tail fetch exactly once across repeated failures", async () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    const fetch: FetchTail = async () => {
+      throw new Error("network");
+    };
+    const poller = new WatcherPoller(fetch, () => {});
+    // Act — the 1s loop retries from the same offset every tick.
+    await poller.poll("a");
+    await poller.poll("a");
+    await poller.poll("a");
+    // Assert
+    const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+    expect(warnLines).toHaveLength(1);
+    expect(warnLines[0]).toContain("a");
+    expect(warnLines[0]).toContain("network");
+  });
+
+  it("logs again when the failure's error message changes", async () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    let calls = 0;
+    const fetch: FetchTail = async () => {
+      calls++;
+      throw new Error(calls === 1 ? "network" : "timeout");
+    };
+    const poller = new WatcherPoller(fetch, () => {});
+    // Act
+    await poller.poll("a");
+    await poller.poll("a");
+    // Assert
+    const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+    expect(warnLines).toHaveLength(2);
+    expect(warnLines[0]).toContain("network");
+    expect(warnLines[1]).toContain("timeout");
+  });
+
+  it("logs one recovery line after a failure and re-arms the dedup key", async () => {
+    // Arrange — fail once, then succeed, then fail again with the same message.
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    let calls = 0;
+    const fetch: FetchTail = async (_id, offset) => {
+      calls++;
+      if (calls === 1 || calls === 3) throw new Error("network");
+      return { text: "ok", offset: offset + 2, done: false, elapsed_ms: 0 };
+    };
+    const poller = new WatcherPoller(fetch, () => {});
+    // Act
+    await poller.poll("a"); // fails
+    await poller.poll("a"); // succeeds -> recovery
+    await poller.poll("a"); // fails again, same message as before
+    // Assert
+    const infoLines = spy.consoleLines.filter((l) => l.startsWith("info:"));
+    const warnLines = spy.consoleLines.filter((l) => l.startsWith("warn:"));
+    expect(infoLines).toHaveLength(1);
+    expect(infoLines[0]).toContain("a");
+    // The dedup key re-armed on recovery, so the identical error logs again.
+    expect(warnLines).toHaveLength(2);
+  });
+
+  it("stays silent on steady-state success with no prior failure", async () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    const { fetch } = scriptedFetch([{ text: "a" }, { text: "b" }]);
+    const poller = new WatcherPoller(fetch, () => {});
+    // Act
+    await poller.poll("a");
+    await poller.poll("a");
+    // Assert — no recovery noise absent a preceding failure.
+    expect(spy.consoleLines).toHaveLength(0);
   });
 });
 

@@ -9,6 +9,7 @@
  * open, so nothing enters the durable replay ring and nothing polls once
  * every fold is shut.
  */
+import { clearDedup, log, logDedup } from "./wslog.js";
 
 /** The daemon's task-output route response (see server.handleTaskOutput). */
 export interface TaskTailResponse {
@@ -52,6 +53,8 @@ export class WatcherPoller {
   private active = new Set<string>();
   private inflight = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Task ids whose most recent poll failed, so recovery logs only once. */
+  private failed = new Set<string>();
 
   constructor(
     private fetchTail: FetchTail,
@@ -118,9 +121,18 @@ export class WatcherPoller {
           this.timer = null;
         }
       }
+      if (this.failed.delete(id)) {
+        clearDedup(`watcher-poll:${id}`);
+        log("info", `watcher poll recovered for task ${id}`);
+      }
       this.onUpdate();
-    } catch {
-      // A failed poll is transient; the next tick retries from the same offset.
+    } catch (err) {
+      // A failed poll is transient; the next tick retries from the same
+      // offset. Dedup per task so a persistently failing route logs once
+      // per distinct error rather than once per second.
+      this.failed.add(id);
+      const reason = err instanceof Error ? err.message : String(err);
+      logDedup(`watcher-poll:${id}`, "warn", `watcher poll failed for task ${id}: ${reason}`);
     } finally {
       this.inflight.delete(id);
     }
