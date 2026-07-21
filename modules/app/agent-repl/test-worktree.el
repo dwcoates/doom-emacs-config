@@ -1834,6 +1834,45 @@ UI, run the merge on a worker thread, and reopen on failure."
          '((type . "merge") (workspace . "feature-one")))
         (should (eq onto nil))))))
 
+(ert-deftest agent-repl-test-handle-merge-command-defers-merge-when-before-ws-merge-pending ()
+  "When the resolved ws carries `:before-ws-merge-prompt', handle-merge-command
+delivers the action to the ws's OWN session and does NOT start the merge."
+  (agent-repl-test--with-clean-state
+    (let ((async-called nil) (delivered nil))
+      (agent-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+      (agent-repl--ws-put "feature-one" :before-ws-merge-prompt "bump the version")
+      (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
+                 (lambda (&rest _) (setq async-called t)))
+                ((symbol-function 'agent-repl--dispatch-prompt-command)
+                 (lambda (ws prompt) (setq delivered (list ws prompt)))))
+        (agent-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one") (pr_was_merged . t)))
+        (should-not async-called)
+        (should (equal (car delivered) "feature-one"))
+        (should (string-prefix-p "bump the version" (cadr delivered)))
+        (should (null (agent-repl--ws-get "feature-one" :before-ws-merge-prompt)))))))
+
+(ert-deftest agent-repl-test-handle-merge-command-merges-on-reinvocation-after-before-ws-merge ()
+  "Once the before-ws-merge action has fired (key cleared), the child's
+re-invoked merge command proceeds to `--workspace-merge-async'."
+  (agent-repl-test--with-clean-state
+    (let ((async-count 0))
+      (agent-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
+      (agent-repl--ws-put "feature-one" :before-ws-merge-prompt "bump the version")
+      (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
+                 (lambda (&rest _) (cl-incf async-count)))
+                ((symbol-function 'agent-repl--dispatch-prompt-command)
+                 (lambda (&rest _) nil)))
+        ;; First command: intercepted — delivers the action, clears the key,
+        ;; and defers rather than merging.
+        (agent-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one") (pr_was_merged . t)))
+        (should (= async-count 0))
+        ;; Second command (child re-invoked `/workspace merge'): merges.
+        (agent-repl--handle-merge-command
+         '((type . "merge") (workspace . "feature-one") (pr_was_merged . t)))
+        (should (= async-count 1))))))
+
 ;;;; ---- Tests: resolve-merge-workspace-name ----
 
 (ert-deftest agent-repl-test-resolve-merge-workspace-name-literal ()
@@ -2294,6 +2333,36 @@ trailing (8th) scheduled arg to `agent-repl--create-worktree-from-command'."
      0)
     (should (null (nth 7 scheduled-args)))))
 
+(ert-deftest agent-repl-test-handle-create-command-forwards-before-ws-merge ()
+  "handle-create-command parses `before_ws_merge' and forwards it as the
+trailing (9th) scheduled arg to `agent-repl--create-worktree-from-command'."
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/bwm") (git_root . "/tmp/repo")
+       (before_ws_merge . "bump the version"))
+     0)
+    (should (equal (nth 8 scheduled-args) "bump the version"))))
+
+(ert-deftest agent-repl-test-handle-create-command-omits-before-ws-merge-when-absent ()
+  "With no `before_ws_merge' field, the forwarded trailing arg is nil."
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/bwm") (git_root . "/tmp/repo"))
+     0)
+    (should (null (nth 8 scheduled-args)))))
+
+(ert-deftest agent-repl-test-handle-create-command-before-ws-merge-and-postprocessing-are-independent ()
+  "`before_ws_merge' and `postprocessing_prompt' forward as two distinct
+args, each carried verbatim without disturbing the other."
+  (agent-repl-test--with-create-command-stubs ()
+    (agent-repl--handle-create-command
+     `((type . "create") (name . "DWC/both") (git_root . "/tmp/repo")
+       (postprocessing_prompt . "run the suite after merge")
+       (before_ws_merge . "bump the version"))
+     0)
+    (should (equal (nth 7 scheduled-args) "run the suite after merge"))
+    (should (equal (nth 8 scheduled-args) "bump the version"))))
+
 ;;;; ---- Tests: worktree-add-callback ----
 
 (ert-deftest agent-repl-test-worktree-add-callback-failure ()
@@ -2302,48 +2371,58 @@ trailing (8th) scheduled arg to `agent-repl--create-worktree-from-command'."
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
                (lambda (&rest _args) (setq finalized t))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil nil "git error output")
+       "/tmp/path" "dirname" nil nil nil nil nil nil nil nil nil nil "git error output")
       (should-not finalized))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-success ()
   "When git worktree add succeeds, finalize is called."
   (let ((finalized nil))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (path dirname prompt priority fork-id _cb &optional source-dir no-agent model _postproc)
+               (lambda (path dirname prompt priority fork-id _cb &optional source-dir no-agent model _postproc _bwm)
                  (setq finalized (list path dirname prompt priority fork-id source-dir no-agent model)))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet" nil t "ok")
+       "/tmp/path" "dirname" "prompt" 5 "fork-123" nil "/src/dir" nil "sonnet" nil nil t "ok")
       (should (equal finalized '("/tmp/path" "dirname" "prompt" 5 "fork-123" "/src/dir" nil "sonnet"))))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-no-agent ()
   "NO-AGENT is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src no-agent _model _postproc)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src no-agent _model _postproc _bwm)
                  (setq captured no-agent))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil "/src/dir" t nil nil t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" t nil nil nil t "ok")
       (should (eq captured t)))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-model ()
   "MODEL is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent model _postproc)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent model _postproc _bwm)
                  (setq captured model))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil "haiku" nil t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil "haiku" nil nil t "ok")
       (should (equal captured "haiku")))))
 
 (ert-deftest agent-repl-test-worktree-add-callback-forwards-postprocessing-prompt ()
   "POSTPROCESSING-PROMPT is forwarded to `agent-repl--finalize-worktree-workspace'."
   (let ((captured :unset))
     (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
-               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent _model postproc)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent _model postproc _bwm)
                  (setq captured postproc))))
       (agent-repl--worktree-add-callback
-       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil nil "run the suite" t "ok")
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil nil "run the suite" nil t "ok")
       (should (equal captured "run the suite")))))
+
+(ert-deftest agent-repl-test-worktree-add-callback-forwards-before-ws-merge-prompt ()
+  "BEFORE-WS-MERGE-PROMPT is forwarded to `agent-repl--finalize-worktree-workspace'."
+  (let ((captured :unset))
+    (cl-letf (((symbol-function 'agent-repl--finalize-worktree-workspace)
+               (lambda (_path _dirname _prompt _priority _fork _cb &optional _src _no-agent _model _postproc bwm)
+                 (setq captured bwm))))
+      (agent-repl--worktree-add-callback
+       "/tmp/path" "dirname" nil nil nil nil "/src/dir" nil nil nil "bump the version" t "ok")
+      (should (equal captured "bump the version")))))
 
 ;;;; ---- Tests: worktree-fetch-callback ----
 
@@ -5490,7 +5569,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-source-dir :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model _postproc)
+                 (lambda (_name _fork _prompt _cb _priority _base &optional _git-root source-dir _no-agent _model _postproc _bwm)
                    (setq captured-source-dir source-dir))))
         (agent-repl--create-worktree-from-command "/tmp/cmd-repo/" "name" "prompt" 5)
         (should (equal captured-source-dir "/tmp/cmd-repo/"))))))
@@ -5501,7 +5580,7 @@ JSON, so it eagerly resolves at entry-point time."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc _bwm)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command
          "/tmp/repo/" "name" "prompt" 5 nil nil "opus")
@@ -5513,7 +5592,7 @@ receives nil so the session uses the interactive-model default."
   (agent-repl-test--with-clean-state
     (let ((captured-model :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent &optional model _postproc _bwm)
                    (setq captured-model model))))
         (agent-repl--create-worktree-from-command "/tmp/repo/" "name" "prompt" 5)
         (should (null captured-model))))))
@@ -5524,11 +5603,23 @@ as the trailing positional arg."
   (agent-repl-test--with-clean-state
     (let ((captured :unset))
       (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent _model &optional postproc)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent _model &optional postproc _bwm)
                    (setq captured postproc))))
         (agent-repl--create-worktree-from-command
          "/tmp/repo/" "name" "prompt" 5 nil nil nil "run the suite after merge")
         (should (equal captured "run the suite after merge"))))))
+
+(ert-deftest agent-repl-test-create-worktree-from-command-forwards-before-ws-merge-prompt ()
+  "BEFORE-WS-MERGE-PROMPT flows through to `agent-repl--do-create-worktree-workspace'
+as the trailing positional arg."
+  (agent-repl-test--with-clean-state
+    (let ((captured :unset))
+      (cl-letf (((symbol-function 'agent-repl--do-create-worktree-workspace)
+                 (lambda (_name _fork _prompt _cb _priority _base _git _src _no-agent _model &optional _postproc bwm)
+                   (setq captured bwm))))
+        (agent-repl--create-worktree-from-command
+         "/tmp/repo/" "name" "prompt" 5 nil nil nil nil "bump the version")
+        (should (equal captured "bump the version"))))))
 
 ;;;; ---- Tests: postprocessing prompt (run after merge fully finished) ----
 
@@ -5577,6 +5668,49 @@ as the trailing positional arg."
                (lambda (&rest _) (push 'postproc calls))))
       (agent-repl--merge-finalize-on-main "source" "child" (float-time))
       (should (equal (nreverse calls) '(load clear drain postproc))))))
+
+;;;; ---- Tests: before-ws-merge prompt (run in the child before its merge) ----
+
+(ert-deftest agent-repl-test-before-ws-merge-turn-appends-reinvoke-instruction ()
+  "The delivered turn is the verbatim action followed by the re-invoke directive."
+  (let ((turn (agent-repl--before-ws-merge-turn "bump the version")))
+    (should (string-prefix-p "bump the version" turn))
+    (should (string-suffix-p agent-repl--before-ws-merge-reinvoke-instruction turn))))
+
+(ert-deftest agent-repl-test-maybe-run-before-ws-merge-prompt-delivers-to-self ()
+  "A target-ws carrying :before-ws-merge-prompt has the action delivered to
+ITSELF (the child, not a source), wrapped with the re-invoke directive, and
+the call returns non-nil to signal the caller to defer the merge."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (delivered nil))
+    (agent-repl--ws-put "child" :before-ws-merge-prompt "bump the version")
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (ws prompt) (setq delivered (list ws prompt)))))
+      (should (agent-repl--maybe-run-before-ws-merge-prompt "child"))
+      (should (equal (car delivered) "child"))
+      (should (string-prefix-p "bump the version" (cadr delivered)))
+      (should (string-match-p "create-or-update-workspace merge" (cadr delivered))))))
+
+(ert-deftest agent-repl-test-maybe-run-before-ws-merge-prompt-fires-once ()
+  "Delivery clears :before-ws-merge-prompt so a re-invoked merge is not deferred again."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (count 0))
+    (agent-repl--ws-put "child" :before-ws-merge-prompt "bump the version")
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (&rest _) (cl-incf count))))
+      (should (agent-repl--maybe-run-before-ws-merge-prompt "child"))
+      (should-not (agent-repl--maybe-run-before-ws-merge-prompt "child"))
+      (should (= 1 count))
+      (should (null (agent-repl--ws-get "child" :before-ws-merge-prompt))))))
+
+(ert-deftest agent-repl-test-maybe-run-before-ws-merge-prompt-noop-when-absent ()
+  "With no :before-ws-merge-prompt, nothing is delivered and the call returns nil."
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
+        (delivered nil))
+    (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+               (lambda (&rest _) (setq delivered t))))
+      (should-not (agent-repl--maybe-run-before-ws-merge-prompt "child"))
+      (should-not delivered))))
 
 ;;;; ---- Tests: eager-open of a generated workspace's REPL ----
 
