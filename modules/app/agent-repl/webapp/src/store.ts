@@ -796,6 +796,7 @@ export class ConversationStore {
       case "text-delta": {
         const item = this.findText(frame.block_id);
         if (item) item.text += frame.text;
+        else this.log("warn", `dropped text-delta: no block ${frame.block_id}`);
         break;
       }
       case "text-end": {
@@ -803,6 +804,8 @@ export class ConversationStore {
         if (item) {
           item.text = frame.final_text;
           item.done = true;
+        } else {
+          this.log("warn", `dropped text-end: no block ${frame.block_id}`);
         }
         break;
       }
@@ -832,6 +835,7 @@ export class ConversationStore {
       case "thinking-delta": {
         const item = this.findThinking(frame.block_id);
         if (item) item.text += frame.text;
+        else this.log("warn", `dropped thinking-delta: no block ${frame.block_id}`);
         break;
       }
       case "thinking-end": {
@@ -840,6 +844,8 @@ export class ConversationStore {
           item.text = frame.final_text;
           item.done = true;
           item.signature = frame.signature;
+        } else {
+          this.log("warn", `dropped thinking-end: no block ${frame.block_id}`);
         }
         break;
       }
@@ -859,6 +865,7 @@ export class ConversationStore {
       case "tool-use-input-delta": {
         const item = this.findTool(frame.tool_use_id);
         if (item) item.inputJson += frame.partial_json;
+        else this.log("warn", `dropped tool-use-input-delta: no tool ${frame.tool_use_id}`);
         break;
       }
       case "tool-use-input-end": {
@@ -867,6 +874,8 @@ export class ConversationStore {
           item.input = frame.input;
           item.inputJson = JSON.stringify(frame.input, null, 2);
           item.inputDone = true;
+        } else {
+          this.log("warn", `dropped tool-use-input-end: no tool ${frame.tool_use_id}`);
         }
         break;
       }
@@ -879,6 +888,8 @@ export class ConversationStore {
             render: frame.render,
           };
           item.resultTs = frame.ts;
+        } else {
+          this.log("warn", `dropped tool-use-result: no tool ${frame.tool_use_id}`);
         }
         break;
       }
@@ -887,6 +898,8 @@ export class ConversationStore {
         if (item) {
           item.progress = frame.text;
           item.progressElapsedS = frame.elapsed_seconds;
+        } else {
+          this.log("warn", `dropped tool-use-progress: no tool ${frame.tool_use_id}`);
         }
         break;
       }
@@ -910,12 +923,27 @@ export class ConversationStore {
               ? frame.source.status
               : "running",
           };
+        } else {
+          // The worst drop in this switch: with no spawning card to hang
+          // the descriptor on, the whole stream is unreachable — no fold
+          // ever appears for it, silently, unless this line is watched for.
+          this.log(
+            "warn",
+            `dropped async-source: no tool ${frame.tool_use_id} (source ${frame.source.source_id})`,
+          );
         }
         break;
       }
       case "task-output-delta": {
         const item = frame.tool_use_id ? this.findTool(frame.tool_use_id) : undefined;
-        if (item) item.taskOutput = (item.taskOutput ?? "") + frame.text;
+        if (item) {
+          item.taskOutput = (item.taskOutput ?? "") + frame.text;
+        } else {
+          this.log(
+            "warn",
+            `dropped task-output-delta: no tool ${frame.tool_use_id ?? "(unset)"} (task ${frame.task_id})`,
+          );
+        }
         break;
       }
       case "task-notification": {
@@ -957,6 +985,8 @@ export class ConversationStore {
         const item = this.findPermission(frame.request_id);
         if (item) {
           item.resolution = { decision: frame.decision, message: frame.message };
+        } else {
+          this.log("warn", `dropped permission-resolved: no permission request ${frame.request_id}`);
         }
         break;
       }
