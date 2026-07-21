@@ -23,10 +23,12 @@ import (
 	"claude-repld/internal/login"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
+	"claude-repld/internal/replog"
 	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/stateroot"
 )
 
 const daemonVersion = "0.1.0"
@@ -105,6 +107,29 @@ func launchedBinaryMTime() int64 {
 
 func main() {
 	bootedAt := time.Now()
+
+	// Disk log, wired before anything can log: every log.Printf line
+	// lands in both stderr (the *claude-repld* buffer Emacs captures)
+	// and a per-run file under the state root, so daemon history
+	// survives the buffer and stays readable without a live editor.
+	// An unresolvable root or unopenable file is fatal — a daemon whose
+	// evidence trail cannot exist is exactly the failure this log is
+	// for, and Fatalf still reaches stderr.
+	logRoot, err := stateroot.Root()
+	if err != nil {
+		log.Fatalf("claude-repld: %v", err)
+	}
+	logFile, logWarnings, err := replog.Open(logRoot)
+	if err != nil {
+		log.Fatalf("claude-repld: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	log.Printf("claude-repld: booted (pid %d); logging to %s", os.Getpid(), logFile.Name())
+	for _, w := range logWarnings {
+		log.Printf("claude-repld: %s", w)
+	}
+
 	binaryMTime := launchedBinaryMTime()
 
 	var (
