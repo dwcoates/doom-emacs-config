@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/protocol"
 )
 
@@ -117,18 +118,40 @@ type transcriptAssistantMeta struct {
 
 // replayState carries the accumulators one replay pass threads through
 // its entries: the synthetic user-turn counter, the last assistant
-// metadata (for the trailing usage frame), and the background-agent ids
+// metadata (for the trailing usage frame), the background-agent ids
 // each Task/Agent result announced (agentId → spawning tool_use_id),
 // which is what links a subagents/agent-<id>.jsonl file back to the
-// card that spawned it.
+// card that spawned it, and the tally of everything the pass silently
+// skipped (counts).
 type replayState struct {
 	seq      int
 	lastMeta transcriptAssistantMeta
 	agentIDs map[string]string
+	counts   replaySkipCounts
 }
 
 func newReplayState() *replayState {
 	return &replayState{agentIDs: map[string]string{}}
+}
+
+// replaySkipCounts tallies, by category, everything one seed pass
+// silently dropped: a malformed transcript line, an undecodable user
+// message/block, a decode-skipped sidechain entry, or an unreadable
+// sidechain dir/file. Every site that already skips-and-continues
+// (deliberately, per this file's header) increments the matching field
+// instead of gaining new control flow, so a partially-rendered history
+// stays distinguishable from a genuinely short one without changing what
+// actually gets skipped.
+type replaySkipCounts struct {
+	malformedLines  int // replayEntryFrames: entry JSON failed to decode
+	undecodableUser int // replayUserFrames: user message/content/block failed to decode
+	sidechainDecode int // sidechainEntryFrames: sidechain entry/message/block failed to decode
+	unreadableFiles int // sidechainBatches: subagents dir or a per-file read failed
+}
+
+// empty reports whether no category saw a skip this pass.
+func (c replaySkipCounts) empty() bool {
+	return c == replaySkipCounts{}
 }
 
 // replayBatch is one transcript entry's frames plus the entry's own
@@ -198,13 +221,16 @@ func BuildReplayFrames(t *Translator, r io.Reader) []protocol.L2Frame {
 // that can be linked to the Task/Agent call that spawned it replays as
 // parented frames, interleaved with the main chain by entry timestamp.
 // Files with no discoverable spawner are skipped like malformed lines —
-// unparented frames would pollute the main feed instead of nesting.
-func BuildReplayFramesWithAgents(t *Translator, r io.Reader, subagentsDir string) []protocol.L2Frame {
+// unparented frames would pollute the main feed instead of nesting. logf
+// receives the individual sidechain dir/file read failures as they
+// happen (see sidechainBatches); the returned replaySkipCounts is the
+// pass's full tally for the caller's own end-of-seed summary.
+func BuildReplayFramesWithAgents(t *Translator, r io.Reader, subagentsDir string, logf dlog.Logf) ([]protocol.L2Frame, replaySkipCounts) {
 	st := newReplayState()
 	batches := buildReplayBatches(t, r, st)
-	batches = append(batches, sidechainBatches(t, subagentsDir, st)...)
+	batches = append(batches, sidechainBatches(t, subagentsDir, st, logf)...)
 	sort.SliceStable(batches, func(i, j int) bool { return batches[i].ts < batches[j].ts })
-	return flattenWithUsage(batches, st)
+	return flattenWithUsage(batches, st), st.counts
 }
 
 // closeReplayTurns inserts a synthetic §2.4 result frame at each turn
@@ -329,6 +355,7 @@ func replayResultSubtype(ts, subtype string) protocol.L2Frame {
 func replayEntryFrames(t *Translator, line []byte, st *replayState) ([]protocol.L2Frame, string) {
 	var entry transcriptEntry
 	if err := json.Unmarshal(line, &entry); err != nil {
+		st.counts.malformedLines++
 		return nil, ""
 	}
 	if entry.IsSidechain || entry.IsMeta {
@@ -416,6 +443,7 @@ var agentIDRe = regexp.MustCompile(`agentId:\s*([0-9a-fA-F]+)`)
 func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *replayState) []protocol.L2Frame {
 	var msg transcriptUserMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
+		st.counts.undecodableUser++
 		return nil
 	}
 	var text string
@@ -435,6 +463,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 	}
 	var rawBlocks []json.RawMessage
 	if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
+		st.counts.undecodableUser++
 		return nil
 	}
 	var frames []protocol.L2Frame
@@ -442,6 +471,7 @@ func replayUserFrames(t *Translator, message json.RawMessage, ts string, st *rep
 	for _, raw := range rawBlocks {
 		var block transcriptUserBlock
 		if err := json.Unmarshal(raw, &block); err != nil {
+			st.counts.undecodableUser++
 			continue
 		}
 		if block.Type == "tool_result" {
@@ -540,10 +570,22 @@ func replayToolResult(t *Translator, block transcriptUserBlock, ts, parent strin
 // under dir. A file links to its spawner via the announced agentId
 // (background agents) or by its first user prompt matching a replayed
 // Task/Agent input's prompt (foreground agents, claimed at most once);
-// files with neither are skipped.
-func sidechainBatches(t *Translator, dir string, st *replayState) []replayBatch {
+// files with neither are skipped. A dir/file read failure is logged
+// individually (via logf) as well as tallied on st.counts: unlike a
+// malformed line, an unreadable subagents dir drops ALL of a session's
+// subagent history at once, so it is rare and high-value enough to
+// surface on its own instead of waiting for the batched summary.
+func sidechainBatches(t *Translator, dir string, st *replayState, logf dlog.Logf) []replayBatch {
 	des, err := os.ReadDir(dir)
 	if err != nil {
+		// A session that never spawned a subagent has no subagents dir at
+		// all — os.IsNotExist is that ordinary case, not a failure worth
+		// logging or counting. Anything else (permission denied, the dir
+		// replaced by a plain file, …) is the silent-loss this instruments.
+		if !os.IsNotExist(err) {
+			st.counts.unreadableFiles++
+			logf("sidechain subagents dir unreadable: %s: %v", dir, err)
+		}
 		return nil
 	}
 	var batches []replayBatch
@@ -556,8 +598,11 @@ func sidechainBatches(t *Translator, dir string, st *replayState) []replayBatch 
 		if !ok {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		filePath := filepath.Join(dir, de.Name())
+		data, err := os.ReadFile(filePath)
 		if err != nil {
+			st.counts.unreadableFiles++
+			logf("sidechain file unreadable: %s: %v", filePath, err)
 			continue
 		}
 		entryLines := transcriptLines(data)
@@ -570,7 +615,7 @@ func sidechainBatches(t *Translator, dir string, st *replayState) []replayBatch 
 		}
 		claimed[parent] = true
 		for _, line := range entryLines {
-			if frames, ts := sidechainEntryFrames(t, line, parent); len(frames) > 0 {
+			if frames, ts := sidechainEntryFrames(t, line, parent, st); len(frames) > 0 {
 				batches = append(batches, replayBatch{ts: ts, frames: frames})
 			}
 		}
@@ -666,10 +711,12 @@ func firstUserText(entryLines [][]byte) string {
 // its spawning call. Assistant entries replay in full (their blocks all
 // carry the parent); user entries contribute ONLY tool_result blocks —
 // the injected prompt is the spawning call's own input, never a user
-// bubble in the feed.
-func sidechainEntryFrames(t *Translator, line []byte, parent string) ([]protocol.L2Frame, string) {
+// bubble in the feed. Every decode failure along the way is tallied on
+// st.counts.sidechainDecode, folded into the seed's end-of-pass summary.
+func sidechainEntryFrames(t *Translator, line []byte, parent string, st *replayState) ([]protocol.L2Frame, string) {
 	var entry transcriptEntry
 	if err := json.Unmarshal(line, &entry); err != nil {
+		st.counts.sidechainDecode++
 		return nil, ""
 	}
 	if entry.IsMeta {
@@ -686,16 +733,22 @@ func sidechainEntryFrames(t *Translator, line []byte, parent string) ([]protocol
 	case "user":
 		var msg transcriptUserMessage
 		if err := json.Unmarshal(entry.Message, &msg); err != nil {
+			st.counts.sidechainDecode++
 			return nil, ""
 		}
 		var rawBlocks []json.RawMessage
 		if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
+			st.counts.sidechainDecode++
 			return nil, ""
 		}
 		var frames []protocol.L2Frame
 		for _, raw := range rawBlocks {
 			var block transcriptUserBlock
-			if err := json.Unmarshal(raw, &block); err != nil || block.Type != "tool_result" {
+			if err := json.Unmarshal(raw, &block); err != nil {
+				st.counts.sidechainDecode++
+				continue
+			}
+			if block.Type != "tool_result" {
 				continue
 			}
 			frames = append(frames, replayToolResult(t, block, entry.Timestamp, parent)...)
@@ -751,13 +804,33 @@ func (s *Session) SeedFromTranscript(path, claudeSessionID string) error {
 			s.logf("session %s: close transcript %s: %v", s.ID, path, cerr)
 		}
 	}()
-	s.broadcastLocked(BuildReplayFramesWithAgents(s.translator, f, subagentsDirFor(path)))
+	// Tagged once here so every log line this seed pass produces — the
+	// individual sidechain dir/file failures plus the end-of-pass summary
+	// below — carries the same session/cwd/transcript identity.
+	tagged := dlog.Tag(s.logf, "session", s.ID, "cwd", s.translator.CWD, "transcript", path)
+	frames, counts := BuildReplayFramesWithAgents(s.translator, f, subagentsDirFor(path), tagged)
+	logReplaySkips(tagged, counts)
+	s.broadcastLocked(frames)
 	// The replay adopts the transcript's last main-chain model into the
 	// mirror, so write it through here: a resumed session whose record
 	// predates the write-through (or drifted before the restart) is
 	// corrected to the model it is actually resuming on.
 	s.notifyRegistrarLocked()
 	return nil
+}
+
+// logReplaySkips logs one summary line for a seed pass when ANY category
+// of counts is nonzero. Every skip site this file already had (a
+// malformed line, an undecodable user entry, a decode-skipped sidechain
+// entry, an unreadable sidechain file) continues to skip and continue —
+// this only makes a partially-rendered history distinguishable, in the
+// log, from a genuinely short conversation.
+func logReplaySkips(logf dlog.Logf, counts replaySkipCounts) {
+	if counts.empty() {
+		return
+	}
+	logf("transcript seed skipped: malformed_lines=%d undecodable_user=%d sidechain_decode=%d unreadable_sidechain_files=%d",
+		counts.malformedLines, counts.undecodableUser, counts.sidechainDecode, counts.unreadableFiles)
 }
 
 // subagentsDirFor returns the per-session sidechain directory the CLI
