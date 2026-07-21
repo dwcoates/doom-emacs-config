@@ -30,6 +30,14 @@
      than a flat fill. The black stays well under the sidebar's, and the light
      theme carries the highlight brighter, so the effect is a quiet 3D hint. */
   --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 7%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent);
+  /* The depth cue at the very bottom edge of the window (see body::after): a
+     soft, upward-fading wash of black pinned across the full width, seating the
+     GUI a plane BELOW the Emacs input window docked beneath it rather than
+     sharing its plane. Kept a touch more subtle than the sidebar's floating
+     dock (--sidebar-shadow) — its black sits just under the sidebar's — since
+     this is a quiet seam cue, not a lifted overlay. The dark theme deepens it,
+     since a faint wash all but vanishes on a dark ground. */
+  --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 10%, transparent), transparent);
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -193,6 +201,11 @@
        would glow rather than hint at depth on the dark washes. Still kept well
        under the dark sidebar's black, so the bubble stays the subtler lift. */
     --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+    /* Deeper than the light theme's bottom wash: a faint gradient reads as
+       nothing against the dark feed, so the seam cue needs a heavier black to
+       still register. Still kept just under the dark sidebar's black, so the
+       bottom edge stays the subtler shade. */
+    --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 38%, transparent), transparent);
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -248,6 +261,23 @@ body {
      own (pointer, zoom-in, ns-resize), and the composer restores the
      editable-field I-beam. */
   cursor: default;
+}
+
+/* The window's bottom-edge depth cue: a fixed, full-width wash pinned to the
+   very bottom of the viewport that fades upward, seating the GUI a plane BELOW
+   the Emacs input window docked beneath it. `pointer-events: none` keeps it
+   inert over the composer it overlays, and it sits below the modal login
+   overlay (z-index 50) so a login still fully covers the page. */
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 12px;
+  background: var(--bottom-shadow);
+  pointer-events: none;
+  z-index: 45;
 }
 
 /* The main column: topbar over feed over composer. `min-width: 0` lets
