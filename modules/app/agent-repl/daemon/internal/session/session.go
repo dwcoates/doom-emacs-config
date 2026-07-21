@@ -106,6 +106,16 @@ type Session struct {
 	// Model-drift reconciler clock (§2.12); immutable for the session's life.
 	reconcileInterval time.Duration
 	reconcileTicks    <-chan time.Time
+	// Transcript notification watch clock (notifwatch.go); immutable.
+	notifWatchInterval time.Duration
+	notifWatchTicks    <-chan time.Time
+	// Transcript watch cursor: the tailed path, the read offset, the
+	// partial trailing line, and the uuids already emitted. All guarded
+	// by mu (ticks and replay-path changes both touch them).
+	notifPath   string
+	notifOffset int64
+	notifCarry  string
+	notifSeen   map[string]struct{}
 	// classifyFn decides whether a message queued while a turn is in
 	// flight should interrupt the turn or wait (§2.13). Immutable for the
 	// session's life. Nil disables classification: a busy-submitted
@@ -278,6 +288,14 @@ type Config struct {
 	// real ticker; tests inject a channel so the check runs on demand
 	// rather than on a wall clock.
 	ModelReconcileTicks <-chan time.Time
+	// NotifWatchInterval is how often the transcript notification watch
+	// (notifwatch.go) polls for wake entries the SDK stream failed to
+	// deliver. Zero takes the default; negative disables the watch, the
+	// fake-session posture (no transcript to tail).
+	NotifWatchInterval time.Duration
+	// NotifWatchTicks overrides the watch's clock, the reconciler's twin
+	// test seam.
+	NotifWatchTicks <-chan time.Time
 	// ClassifyQueue enables the §2.13 in-flight-queue classifier: a
 	// message submitted while a turn is in flight is classified
 	// (interrupt vs wait) by a headless model call. False leaves the queue
@@ -326,6 +344,9 @@ func New(cfg Config) *Session {
 	if cfg.ModelReconcileInterval == 0 {
 		cfg.ModelReconcileInterval = DefaultModelReconcileInterval
 	}
+	if cfg.NotifWatchInterval == 0 {
+		cfg.NotifWatchInterval = DefaultNotifWatchInterval
+	}
 	if cfg.HibernateGrace <= 0 {
 		cfg.HibernateGrace = hibernateGrace
 	}
@@ -348,23 +369,26 @@ func New(cfg Config) *Session {
 		// record materialized to serve an attach (history from the
 		// transcript) without paying for a CLI nobody has prompted yet.
 		// Revive gives it a shim when someone finally acts.
-		hibernated:        cfg.Shim == nil,
-		translator:        translator,
-		retention:         cfg.Retention,
-		now:               cfg.Now,
-		logf:              cfg.Logf,
-		sentinel:          cfg.Sentinel,
-		registrar:         cfg.Registrar,
-		configDir:         cfg.ConfigDir,
-		reconcileInterval: cfg.ModelReconcileInterval,
-		reconcileTicks:    cfg.ModelReconcileTicks,
-		hibernateGrace:    cfg.HibernateGrace,
-		tailInterval:      cfg.TaskTailInterval,
-		clients:           map[*Client]struct{}{},
-		tailers:           map[string]chan struct{}{},
-		taskPaths:         map[string]taskPathRec{},
-		lastActive:        cfg.Now(),
-		done:              make(chan struct{}),
+		hibernated:         cfg.Shim == nil,
+		translator:         translator,
+		retention:          cfg.Retention,
+		now:                cfg.Now,
+		logf:               cfg.Logf,
+		sentinel:           cfg.Sentinel,
+		registrar:          cfg.Registrar,
+		configDir:          cfg.ConfigDir,
+		reconcileInterval:  cfg.ModelReconcileInterval,
+		reconcileTicks:     cfg.ModelReconcileTicks,
+		notifWatchInterval: cfg.NotifWatchInterval,
+		notifWatchTicks:    cfg.NotifWatchTicks,
+		notifSeen:          map[string]struct{}{},
+		hibernateGrace:     cfg.HibernateGrace,
+		tailInterval:       cfg.TaskTailInterval,
+		clients:            map[*Client]struct{}{},
+		tailers:            map[string]chan struct{}{},
+		taskPaths:          map[string]taskPathRec{},
+		lastActive:         cfg.Now(),
+		done:               make(chan struct{}),
 	}
 	// An injected classifier (tests) wins over the flag; otherwise the
 	// flag builds the real subprocess classifier. A nil classifyFn leaves
@@ -479,6 +503,9 @@ func (s *Session) Run() {
 	// session, and the reconciler must die with the shim it checks or a
 	// revive would leave a second one running behind it.
 	go s.runModelReconciler(runDone, s.reconcileTicks, s.reconcileInterval)
+	// The transcript notification watch rides the same lifecycle: it dies
+	// with the shim it compensates for and a revive starts a fresh one.
+	go s.runNotifWatch(runDone, s.notifWatchTicks, s.notifWatchInterval)
 	for evt := range shim.Events() {
 		s.mu.Lock()
 		// A cooperative hibernation makes the shim emit its own `closed`
