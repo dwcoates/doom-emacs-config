@@ -501,15 +501,24 @@ func isInterruptText(text string) bool {
 // promptless turn the notification wakes as a user-prompted one (which
 // the webapp's gns-sockets fold keys off; see webapp/src/gns.ts).
 func replayTaskNotification(t *Translator, text, ts string) []protocol.L2Frame {
+	return stampReplay(taskNotificationFrames(t, text), ts)
+}
+
+// taskNotificationFrames maps a raw <task-notification> payload through
+// the translator exactly as the live shim event does — the ONE mapping
+// the live path, the replay path, and the transcript watch
+// (notifwatch.go) all share, so the three can never diverge on how a
+// completion parses.
+func taskNotificationFrames(t *Translator, text string) []protocol.L2Frame {
 	data, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
 		return nil
 	}
-	return stampReplay(t.OnEvent(&protocol.L1Event{
+	return t.OnEvent(&protocol.L1Event{
 		Type:    "system",
 		Subtype: "task_notification",
 		Data:    data,
-	}), ts)
+	})
 }
 
 // replayToolResult translates one transcript tool_result block through
