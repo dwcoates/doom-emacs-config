@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/protocol"
 )
 
@@ -597,6 +598,8 @@ func (s *Session) Run() {
 		s.terminal = true
 		s.deathReason = "shim_died"
 		s.broadcastLocked(s.translator.OnShimDeath())
+		dlog.Tag(s.logf, "cwd", s.translator.CWD)(
+			"session %s: shim exited without a closed event (reason=%s) — broadcasting error frame", s.ID, s.deathReason)
 		s.broadcastLocked([]protocol.L2Frame{&protocol.ErrorFrame{
 			Envelope:    protocol.Envelope{Type: "error"},
 			Code:        "shim_died",
