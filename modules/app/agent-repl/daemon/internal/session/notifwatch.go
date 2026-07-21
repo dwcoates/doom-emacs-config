@@ -22,6 +22,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -131,18 +132,31 @@ func (s *Session) notifWatchTick() {
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		s.notifWatchFailLocked("open transcript", err)
 		return
 	}
 	defer f.Close()
 	fi, err := f.Stat()
-	if err != nil || fi.Size() <= s.notifOffset {
+	if err != nil {
+		s.notifWatchFailLocked("stat transcript", err)
+		return
+	}
+	// Open + stat succeeded: the tail is reachable again, whatever the
+	// last failure was.
+	s.notifWatchOKLocked()
+	if fi.Size() <= s.notifOffset {
 		return
 	}
 	if _, err := f.Seek(s.notifOffset, io.SeekStart); err != nil {
+		s.notifWatchFailLocked("seek transcript", err)
 		return
 	}
 	buf, err := io.ReadAll(io.LimitReader(f, notifReadMax))
-	if len(buf) == 0 || (err != nil && err != io.EOF) {
+	if err != nil && err != io.EOF {
+		s.notifWatchFailLocked("read transcript", err)
+		return
+	}
+	if len(buf) == 0 {
 		return
 	}
 	s.notifOffset += int64(len(buf))
@@ -154,6 +168,31 @@ func (s *Session) notifWatchTick() {
 	for _, line := range lines[:len(lines)-1] {
 		s.emitTranscriptNotificationLocked(line)
 	}
+}
+
+// notifWatchFailLocked surfaces a transcript-tail failure. The watch
+// ticks every 1.5s, so a persistent failure (transcript deleted, config
+// dir unreadable) logs once per DISTINCT error, not once per tick —
+// silence here previously swallowed the errors entirely, leaving no
+// trace of why dropped-stream notifications stopped settling. Callers
+// hold s.mu.
+func (s *Session) notifWatchFailLocked(stage string, err error) {
+	msg := fmt.Sprintf("%s: %v", stage, err)
+	if s.notifErr == msg {
+		return
+	}
+	s.notifErr = msg
+	s.logf("session %s: notifwatch %s (logged once until the error changes)", s.ID, msg)
+}
+
+// notifWatchOKLocked marks the tail healthy again, logging the recovery
+// so a failure window has a visible close. Callers hold s.mu.
+func (s *Session) notifWatchOKLocked() {
+	if s.notifErr == "" {
+		return
+	}
+	s.logf("session %s: notifwatch recovered from %s", s.ID, s.notifErr)
+	s.notifErr = ""
 }
 
 // emitTranscriptNotificationLocked recognizes one transcript line as a

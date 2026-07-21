@@ -116,6 +116,10 @@ type Session struct {
 	notifOffset int64
 	notifCarry  string
 	notifSeen   map[string]struct{}
+	// Last transcript-tail failure, or "" while the watch is healthy.
+	// The tick fires every 1.5s, so failures log once per distinct
+	// error rather than once per tick (see notifWatchFailLocked).
+	notifErr string
 	// classifyFn decides whether a message queued while a turn is in
 	// flight should interrupt the turn or wait (§2.13). Immutable for the
 	// session's life. Nil disables classification: a busy-submitted
@@ -789,6 +793,12 @@ func (s *Session) Attach(c *Client) {
 	defer s.mu.Unlock()
 	s.clients[c] = struct{}{}
 	c.Send <- s.helloLocked()
+	var resumeFrom int64
+	if len(s.ring) > 0 {
+		resumeFrom = s.ring[0].seq
+	}
+	s.logf("session %s: client attached (%d attached); hello resume_from_seq=%d seq=%d",
+		s.ID, len(s.clients), resumeFrom, s.seq)
 }
 
 // Detach unregisters a client; its Send channel is closed.
@@ -798,6 +808,7 @@ func (s *Session) Detach(c *Client) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		close(c.Send)
+		s.logf("session %s: client detached (%d attached)", s.ID, len(s.clients))
 	}
 }
 
@@ -1223,17 +1234,33 @@ func (s *Session) Shutdown(reason string) error {
 // replayLocked implements §2.10: re-send retained frames with their
 // original seq/ts, or a fresh hello when from_seq has been evicted.
 func (s *Session) replayLocked(c *Client, fromSeq int64) {
-	if len(s.ring) == 0 || fromSeq < s.ring[0].seq {
+	var ringFirst, ringLast int64
+	if len(s.ring) > 0 {
+		ringFirst, ringLast = s.ring[0].seq, s.ring[len(s.ring)-1].seq
+	}
+	if len(s.ring) == 0 || fromSeq < ringFirst {
+		// The gap predates the retention window: a replay cannot close
+		// it, so the client rebuilds from a fresh hello instead. Logged
+		// because a client stuck LOOPING here (hole in the ring, hello
+		// never converging) is a wedged-feed signature.
+		s.logf("session %s: replay-request from_seq=%d predates ring [%d..%d] — answering with a fresh hello",
+			s.ID, fromSeq, ringFirst, ringLast)
 		s.sendToClientLocked(c, s.helloLocked())
 		return
 	}
+	served := 0
 	for _, r := range s.ring {
 		if r.seq >= fromSeq {
 			if !s.sendToClientLocked(c, r.data) {
+				s.logf("session %s: replay-request from_seq=%d aborted after %d frames — client detached mid-replay",
+					s.ID, fromSeq, served)
 				return
 			}
+			served++
 		}
 	}
+	s.logf("session %s: replay-request from_seq=%d served %d frames (ring [%d..%d])",
+		s.ID, fromSeq, served, ringFirst, ringLast)
 }
 
 // broadcastLocked stamps, retains and fans out frames. Callers hold s.mu.
@@ -1302,6 +1329,10 @@ func (s *Session) broadcastLocked(frames []protocol.L2Frame) {
 // already had its channel closed, so it is skipped.
 func (s *Session) sendToClientLocked(c *Client, data []byte) bool {
 	if _, attached := s.clients[c]; !attached {
+		// Benign in the shim-death drain race (see doc comment), but a
+		// frame silently not reaching a client is exactly what a wedged
+		// feed looks like from the webview — so the skip leaves a trace.
+		s.logf("session %s: send skipped — client already detached", s.ID)
 		return false
 	}
 	select {
