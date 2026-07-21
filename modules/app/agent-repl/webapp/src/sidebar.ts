@@ -57,6 +57,22 @@ const MERGE_GLYPH_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
   "merge-failed",
 ]);
 
+/**
+ * The quiescent statuses the session's own MONITORING overlay may repaint:
+ * a workspace at rest whose background async still lives shows the
+ * breathing amber dot instead of its resting disc. Active and merge
+ * states stay untouched — thinking's red breath and the merge glyphs are
+ * strictly more specific signals than "background work continues".
+ * Session-local chrome on top of the Emacs-pushed roster, NOT a roster
+ * status: Emacs never asserts "monitoring", the webview overlays it for
+ * its OWN current row exactly as the topbar datapoint it replaces did.
+ */
+const MONITORABLE_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
+  "idle",
+  "done",
+  "done-viewed",
+]);
+
 export interface WorkspaceRow {
   name: string;
   dir: string;
@@ -205,7 +221,10 @@ export function formatRecency(lastViewedAt: number | null, nowMs: number): strin
  * breath, or spin. The merge family carries the recycle glyph as content;
  * every disc status renders an empty span the stylesheet shapes.
  */
-export function statusDotHtml(status: WorkspaceStatus): string {
+export function statusDotHtml(status: WorkspaceStatus, monitoring = false): string {
+  if (monitoring && MONITORABLE_STATUSES.has(status)) {
+    return `<span class="st st-monitoring" title="monitoring"></span>`;
+  }
   const glyph = MERGE_GLYPH_STATUSES.has(status) ? "⟳" : "";
   return `<span class="st st-${status}" title="${status}">${glyph}</span>`;
 }
@@ -240,6 +259,7 @@ function workspaceHtml(
   navDir: string | null,
   open: ReadonlySet<string>,
   nowMs: number,
+  monitoring: boolean,
 ): string {
   const cls = ["ws"];
   if (row.current) cls.push("current");
@@ -250,13 +270,15 @@ function workspaceHtml(
     row.children.length === 0
       ? ""
       : `<div class="kids">${row.children
-          .map((c) => workspaceHtml(c, navDir, open, nowMs))
+          .map((c) => workspaceHtml(c, navDir, open, nowMs, monitoring))
           .join("")}</div>`;
   // The dir addresses the row for the mount's delegated click handler:
   // a body click switches to it, the chevron click toggles its panel.
+  // The monitoring overlay touches only THIS session's row: the roster's
+  // other rows keep exactly the status Emacs asserted.
   return `<div class="${cls.join(" ")}">
     <div class="row" data-row-dir="${escapeHtml(row.dir)}">
-      ${statusDotHtml(row.status)}<span class="name">${escapeHtml(row.name)}</span>
+      ${statusDotHtml(row.status, monitoring && row.current)}<span class="name">${escapeHtml(row.name)}</span>
       <span class="when">${formatRecency(row.mergedAt ?? row.lastViewedAt, nowMs)}</span>
       <span class="chev" data-chev>▸</span>
     </div>
@@ -274,8 +296,9 @@ function repoSectionHtml(
   open: ReadonlySet<string>,
   nowMs: number,
   extraClass = "",
+  monitoring = false,
 ): string {
-  const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs)).join("");
+  const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring)).join("");
   return `<section class="repo${group.folded ? " folded" : ""}${
     extraClass === "" ? "" : ` ${extraClass}`
   }">
@@ -299,11 +322,12 @@ export function sidebarHtml(
   open: ReadonlySet<string>,
   nowMs: number,
   errorNote: string | null,
+  monitoring = false,
 ): string {
   const total = roster.repos.reduce((n, g) => n + countRows(g.rows), 0);
   const err = errorNote === null ? "" : `<span class="sb-err">${escapeHtml(errorNote)}</span>`;
   const repos = roster.repos
-    .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs))
+    .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring))
     .join("");
   // Settled merges render last, in their own section, so they read as
   // history rather than as live work sitting in the repo they came from.
@@ -347,6 +371,8 @@ export class WorkspaceSidebar {
    */
   private readonly openDirs = new Set<string>();
   private errorNote: string | null = null;
+  /** The session's own idle-with-live-async gate (see setMonitoring). */
+  private monitoring = false;
 
   constructor(mount: HTMLElement, opts: WorkspaceSidebarOptions) {
     this.mount = mount;
@@ -370,7 +396,27 @@ export class WorkspaceSidebar {
 
   private render(): void {
     if (this.roster === null) return;
-    this.mount.innerHTML = sidebarHtml(this.roster, this.openDirs, this.now(), this.errorNote);
+    this.mount.innerHTML = sidebarHtml(
+      this.roster,
+      this.openDirs,
+      this.now(),
+      this.errorNote,
+      this.monitoring,
+    );
+  }
+
+  /**
+   * Adopt the session's monitoring gate (FeedRenderer.isMonitoring) and
+   * repaint when it moved: the CURRENT row's quiescent dot breathes amber
+   * while this session idles with live background async — the sidebar
+   * home of the signal the topbar `monitoring…` datapoint used to carry.
+   * Session-local chrome layered over the roster, so every other row
+   * still shows exactly what Emacs last asserted.
+   */
+  setMonitoring(on: boolean): void {
+    if (on === this.monitoring) return;
+    this.monitoring = on;
+    this.render();
   }
 
   /**

@@ -331,8 +331,9 @@ export function retryingRowHtml(retrying: boolean): string {
  * always-visible amber signal for when the owning bubble is scrolled off or
  * absent — the quiescent twin of the working row, and mutually exclusive with
  * the whole bucket-1 tail, which only runs while a turn is in flight. It now
- * renders as the topbar strip's left-most datapoint (see `topbarInfoHtml`)
- * rather than a feed-tail row; this predicate is the gate either surface reads.
+ * breathes as the sidebar's amber dot on the session's own row (see
+ * `WorkspaceSidebar.setMonitoring`) rather than as topbar text or a feed-tail
+ * row; this predicate is the gate that surface reads.
  *
  * A live `thinking…` indicator ALSO suppresses it, even with no main-chain
  * turn in flight: a background subagent that is mid-thought renders its own
@@ -2612,12 +2613,12 @@ export class FeedRenderer {
   private turnTimerLabel = IDLE_LABEL;
   /**
    * Whether the session is IDLE yet live async continues somewhere in the
-   * feed — the amber `monitoring…` signal, now the topbar strip's left-most
-   * datapoint rather than a feed-tail row (see `topbarInfoHtml`). Recomputed
-   * from `showsMonitoringRow` at the tail of every real render/renderRestored,
-   * and read back by the chrome paint through `isMonitoring`. Defaults false so
-   * a chrome paint landing before the first feed render claims nothing to
-   * monitor.
+   * feed — the amber monitoring signal, now the sidebar's breathing dot on
+   * the session's own row (see `WorkspaceSidebar.setMonitoring`) rather than
+   * topbar text or a feed-tail row. Recomputed from `showsMonitoringRow` at
+   * the tail of every real render/renderRestored, and read back by the
+   * chrome paint through `isMonitoring`. Defaults false so a chrome paint
+   * landing before the first feed render claims nothing to monitor.
    */
   private monitoring = false;
   /** Pending bottom-up fill steps from renderRestored, oldest last. */
@@ -3212,9 +3213,9 @@ export class FeedRenderer {
     // progress indicator (left) and the running turn-stats (right) on one flex
     // row, stuck to the window's bottom rather than trailing the last bubble.
     this.renderTailLine(tailLineHtml(state, pulse, this.turnTimerLabel));
-    // The global `monitoring…` signal, on the same idle-with-live-async terms
+    // The global monitoring signal, on the same idle-with-live-async terms
     // render() computes it (see `showsMonitoringRow`), so a fresh join landing
-    // on a quiescent-but-still-watching session sees it in the topbar strip
+    // on a quiescent-but-still-watching session sees its sidebar dot breathe
     // immediately (read back by the chrome paint through `isMonitoring`). A
     // visible `thinking…` spinner suppresses it here too, so the two never
     // both claim a live slot.
@@ -3436,7 +3437,7 @@ export class FeedRenderer {
     // rows all mean the main chain is active). A visible `thinking…` spinner —
     // a subagent mid-thought while the main chain idles — also suppresses it,
     // so the more-specific live signal owns the live slot alone. It now paints
-    // as the topbar strip's left-most datapoint (read back by the chrome paint
+    // as the sidebar's breathing amber dot (read back by the chrome paint
     // through `isMonitoring`) rather than a feed-tail row.
     this.monitoring = showsMonitoringRow({
       turnInFlight: state.turnInFlight,

@@ -281,15 +281,17 @@ async function boot(): Promise<void> {
   const renderChrome = (): void => {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
-    // renderer draws the agent-scoped bubble topbars (see topbar.ts). The
-    // monitoring flag is the feed renderer's own gate reading (idle + live
-    // async), read back here so the strip's left-most datapoint mirrors the
-    // feed the last render already partitioned rather than re-deriving it.
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, feed.isMonitoring()), {
+    // renderer draws the agent-scoped bubble topbars (see topbar.ts).
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
       agentsOpen: counterMenu === "agents",
       tasksOpen: counterMenu === "tasks",
       tokensOpen: counterMenu === "tokens",
     });
+    // The idle-with-live-async signal breathes as the sidebar's amber dot on
+    // this session's own row rather than as strip text. The flag is the feed
+    // renderer's own gate reading (idle + live async), read back here so the
+    // rail mirrors the feed the last render already partitioned.
+    sidebar.setMonitoring(feed.isMonitoring());
     // After the strip exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
     timer.sync(s.turnStartedAt);
