@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientLogCmd } from "../src/protocol.js";
 import {
   FORWARD_WINDOW_MS,
   ForwardingLogger,
   MAX_FORWARDS_PER_WINDOW,
+  clearDedup,
+  log,
+  logDedup,
+  resetLoggingForTests,
+  setLogger,
 } from "../src/wslog.js";
 
 /** A logger wired to spies: captured forwards, captured console lines. */
@@ -99,5 +104,77 @@ describe("ForwardingLogger", () => {
       level: "info",
       message: "after rollover",
     });
+  });
+});
+
+describe("module-level singleton", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("routes log() through the installed ForwardingLogger", () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act
+    log("warn", "routed");
+    // Assert
+    expect(spy.consoleLines).toEqual(["warn: routed"]);
+  });
+
+  it("falls back to the console before a logger is installed", () => {
+    // Arrange
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Act
+    log("warn", "early line");
+    // Assert
+    expect(warn).toHaveBeenCalledWith("early line");
+  });
+
+  it("logDedup suppresses a repeated message under the same key", () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act — a per-frame guard fires three times with the same error.
+    logDedup("feed-render", "error", "boom");
+    logDedup("feed-render", "error", "boom");
+    logDedup("feed-render", "error", "boom");
+    // Assert
+    expect(spy.consoleLines).toEqual(["error: boom"]);
+  });
+
+  it("logDedup logs again when the message under the key changes", () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    logDedup("k", "warn", "first error");
+    // Act
+    logDedup("k", "warn", "second error");
+    // Assert
+    expect(spy.consoleLines).toEqual(["warn: first error", "warn: second error"]);
+  });
+
+  it("logDedup keys are independent", () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act
+    logDedup("a", "info", "same");
+    logDedup("b", "info", "same");
+    // Assert
+    expect(spy.consoleLines).toHaveLength(2);
+  });
+
+  it("clearDedup re-arms a key for an identical message", () => {
+    // Arrange
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    logDedup("poll:t1", "warn", "tail fetch failed");
+    // Act — recovery observed, then the same failure returns.
+    clearDedup("poll:t1");
+    logDedup("poll:t1", "warn", "tail fetch failed");
+    // Assert
+    expect(spy.consoleLines).toHaveLength(2);
   });
 });
