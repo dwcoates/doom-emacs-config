@@ -19,6 +19,7 @@ import {
   LOGIN_OPEN,
   closeLogin,
   decodeTerminalChunk,
+  describeChunkType,
   encodeKeystrokes,
   loginNotice,
   loginTerminalUrl,
@@ -186,6 +187,35 @@ describe("decodeTerminalChunk", () => {
     const chunk = decodeTerminalChunk({ not: "a frame" });
     // Assert
     expect(chunk).toBeNull();
+  });
+});
+
+describe("describeChunkType", () => {
+  // The caller logs this string when decodeTerminalChunk drops a frame, so
+  // it has to actually name what arrived rather than a generic "unknown".
+  it("names an object's constructor", () => {
+    // Arrange / Act / Assert
+    expect(describeChunkType({ not: "a frame" })).toBe("Object");
+  });
+
+  it("names a number's constructor", () => {
+    // Arrange / Act / Assert
+    expect(describeChunkType(7)).toBe("Number");
+  });
+
+  it("names a boolean's constructor", () => {
+    // Arrange / Act / Assert
+    expect(describeChunkType(true)).toBe("Boolean");
+  });
+
+  it("names null explicitly rather than throwing", () => {
+    // Arrange / Act / Assert — null has no .constructor to read.
+    expect(describeChunkType(null)).toBe("null");
+  });
+
+  it("names undefined explicitly rather than throwing", () => {
+    // Arrange / Act / Assert — undefined has no .constructor to read.
+    expect(describeChunkType(undefined)).toBe("undefined");
   });
 });
 
