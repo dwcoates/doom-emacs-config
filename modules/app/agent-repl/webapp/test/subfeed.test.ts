@@ -138,6 +138,15 @@ describe("effectiveAsyncSource", () => {
     expect(effectiveAsyncSource(classified)).toBe(classified.asyncSource);
   });
 
+  it("synthesizes an agent transcript source for a Task-named spawn too", () => {
+    // Arrange — the classifier's shared tool table treats Task as Agent.
+    const source = effectiveAsyncSource(
+      spawnCard("Task", "Async agent launched. agentId: a8, output_file: /tmp/claude-1/s/tasks/a8.output"),
+    );
+    // Assert
+    expect(source).toMatchObject({ kind: "agent", stream: { format: "jsonl-transcript" } });
+  });
+
   it("synthesizes a poll transcript source for an Agent spawn", () => {
     // Act
     const source = effectiveAsyncSource(spawnCard("Agent", "Async agent launched. agentId: a7, output_file: /tmp/claude-1/s/tasks/a7.output"));

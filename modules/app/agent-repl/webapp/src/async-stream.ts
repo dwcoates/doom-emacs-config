@@ -118,6 +118,28 @@ function asyncStatus(raw: string): AsyncSource["status"] {
 }
 
 /**
+ * The stream shape a spawn's TOOL implies — the ONE tool-to-(kind, format)
+ * table the classifier arms below and subfeed's pre-structured synthesis
+ * both read, so the two cannot drift. Transport stays per-site on purpose:
+ * a classified live shell is ws-tailed while everything synthesized or
+ * polled reads the poll route.
+ */
+export function asyncShape(toolName: string): {
+  kind: AsyncSource["kind"];
+  format: "jsonl-transcript" | "jsonl-journal" | "text";
+} {
+  switch (toolName) {
+    case "Task":
+    case "Agent":
+      return { kind: "agent", format: "jsonl-transcript" };
+    case "Workflow":
+      return { kind: "workflow", format: "jsonl-journal" };
+    default:
+      return { kind: "shell", format: "text" };
+  }
+}
+
+/**
  * The webapp MIRROR of the daemon's classifyAsyncSource (asyncsource.go),
  * for cards the daemon's frames never reach: a transcript-parsed spawn at
  * depth two and deeper, whose structured `toolUseResult` sidecar rides the
@@ -140,39 +162,42 @@ export function classifyAsyncSource(
       const agentId = str(structured, "agentId");
       if (structured.isAsync !== true || agentId === "") return undefined;
       const description = str(structured, "description");
+      const { kind, format } = asyncShape(toolName);
       const src: AsyncSource = {
         source_id: agentId,
-        kind: "agent",
+        kind,
         label: description !== "" ? description : undefined,
         status: asyncStatus(str(structured, "status")),
       };
       if (str(structured, "outputFile") !== "" && structured.canReadOutputFile === true) {
-        src.stream = { transport: "poll", format: "jsonl-transcript" };
+        src.stream = { transport: "poll", format };
       }
       return src;
     }
     case "Bash": {
       const taskId = str(structured, "backgroundTaskId");
       if (taskId === "") return undefined;
+      const { kind, format } = asyncShape(toolName);
       return {
         source_id: taskId,
-        kind: "shell",
+        kind,
         status: asyncStatus(str(structured, "status")),
-        stream: { transport: "ws", format: "text" },
+        stream: { transport: "ws", format },
       };
     }
     case "Workflow": {
       const taskId = str(structured, "taskId");
       if (taskId === "") return undefined;
       const name = str(structured, "workflowName");
+      const { kind, format } = asyncShape(toolName);
       const src: AsyncSource = {
         source_id: taskId,
-        kind: "workflow",
+        kind,
         label: name !== "" ? name : undefined,
         status: asyncStatus(str(structured, "status")),
       };
       if (str(structured, "transcriptDir") !== "") {
-        src.stream = { transport: "poll", format: "jsonl-journal" };
+        src.stream = { transport: "poll", format };
       }
       return src;
     }
