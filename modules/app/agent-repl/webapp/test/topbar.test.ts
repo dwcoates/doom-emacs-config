@@ -50,7 +50,6 @@ function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
  */
 function datapoints(over: Partial<TopbarDatapoints> = {}): TopbarDatapoints {
   return {
-    monitoring: false,
     parentWs: null,
     timerLabel: IDLE_LABEL,
     contextTokens: null,
@@ -272,42 +271,14 @@ describe("topbarInfoHtml", () => {
     expect(html).toContain("</span> · tokens:");
   });
 
-  it("renders the monitoring datapoint when the session is watching live async", () => {
-    // Arrange + Act
-    const html = strip({ monitoring: true });
-    // Assert — the amber strip entry, reusing the thinking arc under its own class.
-    expect(html).toContain(`<span class="info-monitoring"`);
-    expect(html).toContain("monitoring");
-    expect(html).toContain("thinking-spinner");
-  });
-
-  it("omits the monitoring datapoint when the session is not watching", () => {
-    // Arrange + Act + Assert — nothing to monitor, so no entry.
-    expect(strip({ monitoring: false })).not.toContain("info-monitoring");
-  });
-
-  it("places the monitoring datapoint left-most, ahead of the parent workspace", () => {
-    // Arrange + Act — both present, so their order in the joined strip is testable.
-    const html = strip({ monitoring: true, parentWs: "ws" });
-    // Assert — monitoring leads, and the dot separator sits between the two.
-    expect(html.indexOf("info-monitoring")).toBeLessThan(html.indexOf("parent workspace:"));
-    expect(html).toContain(`</span> · parent workspace:`);
-  });
-
-  it("trails the monitoring word with the animated ellipsis rather than a static one", () => {
-    // Arrange + Act — the dots cycle beside the arc, so the entry reads live.
-    const html = strip({ monitoring: true });
-    // Assert — the animated span replaced the literal "…" glyph.
-    expect(html).toContain("animated-ellipsis");
-    expect(html).not.toContain("monitoring…");
-  });
-
-  it("marks the monitoring datapoint a live status region for assistive tech", () => {
-    // Arrange + Act
-    const html = strip({ monitoring: true });
+  it("renders no monitoring datapoint, the signal having moved to the sidebar dot", () => {
+    // Arrange + Act — the idle-with-live-async signal breathes as the
+    // sidebar's amber dot (see WorkspaceSidebar.setMonitoring), never as
+    // strip text.
+    const html = strip({ parentWs: "ws" });
     // Assert
-    expect(html).toContain('role="status"');
-    expect(html).toContain('aria-live="polite"');
+    expect(html).not.toContain("info-monitoring");
+    expect(html).not.toContain("monitoring");
   });
 
   it("does not print the model, which the picker now both names and switches", () => {
@@ -475,7 +446,7 @@ describe("sessionTopbarDatapoints", () => {
     // Arrange — the last result's session-cumulative snapshot.
     const state = storeState({ resultUsage: { input_tokens: 10, output_tokens: 20 } });
     // Act
-    const d = sessionTopbarDatapoints(state, null, false);
+    const d = sessionTopbarDatapoints(state, null);
     // Assert
     expect(d.tokenMenu?.topLevel).toEqual({ input_tokens: 10, output_tokens: 20 });
   });
@@ -484,7 +455,7 @@ describe("sessionTopbarDatapoints", () => {
     // Arrange — the store's current context size feeds the chip.
     const state = storeState({ contextTokens: 132_576 });
     // Act
-    const d = sessionTopbarDatapoints(state, null, false);
+    const d = sessionTopbarDatapoints(state, null);
     // Assert
     expect(d.tokenMenu?.contextSize).toBe(132_576);
   });
@@ -503,7 +474,7 @@ describe("sessionTopbarDatapoints", () => {
       },
     };
     // Act
-    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null, false);
+    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null);
     // Assert
     expect(d.tokenMenu?.models).toEqual(modelUsage);
   });
@@ -511,45 +482,35 @@ describe("sessionTopbarDatapoints", () => {
   it("projects no plain standing, which stays in the store for the result chips", () => {
     // Arrange + Act — the strip's session tokens datapoint is the
     // dropdown; a standing here would render nothing anyway.
-    const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null, false);
+    const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null);
     // Assert
     expect(d.contextTokens).toBeNull();
   });
 
   it("passes the parent workspace through", () => {
     // Arrange + Act + Assert
-    expect(sessionTopbarDatapoints(storeState(), "ws", false).parentWs).toBe("ws");
-  });
-
-  it("passes the monitoring flag through so the strip lights its amber datapoint", () => {
-    // Arrange + Act + Assert — the feed renderer's gate reading (see isMonitoring).
-    expect(sessionTopbarDatapoints(storeState(), null, true).monitoring).toBe(true);
-  });
-
-  it("carries a false monitoring flag through when the session is not watching", () => {
-    // Arrange + Act + Assert
-    expect(sessionTopbarDatapoints(storeState(), null, false).monitoring).toBe(false);
+    expect(sessionTopbarDatapoints(storeState(), "ws").parentWs).toBe("ws");
   });
 
   it("carries no timer, its turn clock having moved to the feed-tail row", () => {
     // Arrange + Act + Assert — a null timerLabel makes the strip omit the
     // `time:` datapoint; the running clock lives beside the progress
     // indicator now (see turnStatsRowHtml).
-    expect(sessionTopbarDatapoints(storeState(), null, false).timerLabel).toBeNull();
+    expect(sessionTopbarDatapoints(storeState(), null).timerLabel).toBeNull();
   });
 
   it("projects the session-wide subagent roster", () => {
     // Arrange
     const state = storeState({ items: [agentItem()] });
     // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, false).agents.map((a) => a.id)).toEqual(["a1"]);
+    expect(sessionTopbarDatapoints(state, null).agents.map((a) => a.id)).toEqual(["a1"]);
   });
 
   it("projects the session-wide task roster", () => {
     // Arrange
     const state = storeState({ items: [taskCreate()] });
     // Act + Assert
-    expect(sessionTopbarDatapoints(state, null, false).tasks.map((t) => t.id)).toEqual(["1"]);
+    expect(sessionTopbarDatapoints(state, null).tasks.map((t) => t.id)).toEqual(["1"]);
   });
 });
 
@@ -574,12 +535,6 @@ describe("agentTopbarDatapoints", () => {
   it("carries no parent workspace, which is session-only chrome", () => {
     // Arrange + Act + Assert
     expect(agentTopbarDatapoints([agentItem()], agentItem(), NOW_MS).parentWs).toBeNull();
-  });
-
-  it("never monitors, since the global signal is session-only chrome", () => {
-    // Arrange + Act + Assert — a bubble's own amber border and badge dots
-    // already speak for its members, so its strip never shows the datapoint.
-    expect(agentTopbarDatapoints([agentItem()], agentItem(), NOW_MS).monitoring).toBe(false);
   });
 
   it("reads the agent's own banked context tokens", () => {

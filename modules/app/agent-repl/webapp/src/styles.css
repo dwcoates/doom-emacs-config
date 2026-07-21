@@ -355,6 +355,10 @@ body {
    alignment invisibly. */
 #ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
 #ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* The session-local monitoring overlay: the current row's quiescent dot
+   breathes the async amber while background work continues — the sidebar
+   home of the signal the topbar `monitoring…` datapoint used to carry. */
+#ws-sidebar .st-monitoring { background: var(--async); animation: ws-pulse 1.3s ease-in-out infinite; }
 /* Booting breathes like thinking because both are live, but in the tab-bar's
    init blue: red here read as an error on a workspace that was merely
    starting, and as identical to a thinking one. */
@@ -633,30 +637,6 @@ body {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
 }
-/* The monitoring datapoint: the AMBER strip entry saying background work
-   continues while the main chain is idle (async quiescence). It moved here from
-   the feed tail to sit LEFT-MOST among the strip's datapoints; inline-flex lays
-   the spinner arc, the word, and the dots on one baseline the way the block
-   feed rows never had to. It REUSES the textless-thinking arc rather than
-   defining its own spinner, tinted amber below so the arc reads as the --async
-   hue rather than the working orange. */
-.topbar-info .info-monitoring {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--async);
-}
-.topbar-info .info-monitoring .thinking-spinner {
-  border-color: color-mix(in srgb, var(--async) 25%, transparent);
-  border-top-color: var(--async);
-}
-/* Pull the ellipsis flush against its status word, cancelling the inline-flex
-   gap the dots' own flex item would otherwise read as "monitoring …" — the
-   strip twin of the feed rows' ellipsis-gap rule below. */
-.topbar-info .info-monitoring .animated-ellipsis {
-  margin-left: -0.4rem;
-}
-
 /* Topbar dropdowns (subagent roster, task roster, tokens breakdown): a chip
    in the session-datapoint run that drops an overlay. The two counters share
    the counter-menu facade's parallel class stems; the tokens menu emits the
@@ -1878,10 +1858,10 @@ pre {
   border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
 }
-/* The monitoring indicator is NOT a feed-tail row: it moved to the topbar
-   strip as its left-most datapoint (see `.topbar-info .info-monitoring` above),
-   so the in-bubble catalog and the feed tail both carry none — the bubble's own
-   amber border and badge dots signal per-bubble liveness instead. */
+/* The monitoring indicator is NOT a feed-tail row: it breathes as the
+   sidebar's amber dot on the session's own row (`.st-monitoring`), so the
+   in-bubble catalog, the feed tail, and the topbar strip all carry none —
+   the bubble's own amber border and badge dots signal per-bubble liveness. */
 /* Pull the ellipsis flush against its status word. The pending rows above are
    flex with a 0.5rem inter-item gap (so the spinner clears the word), but the
    ellipsis span is its OWN flex item too, so that same gap lands between the
