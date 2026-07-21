@@ -2329,4 +2329,49 @@ describe("delivery-path logging", () => {
     // Assert
     expect(result.send).toEqual({ type: "replay-request", from_seq: 2 });
   });
+
+  it("logs a text-delta naming no block the feed holds", () => {
+    // Arrange — no text-start ever opened block b9.
+    const { store, lines } = newLoggedStore();
+    // Act
+    store.applyRaw(frame("text-delta", { block_id: "b9", text: "x" }));
+    // Assert — named, and dropped rather than invented.
+    expect(lines).toContain("warn: dropped text-delta: no block b9");
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("logs a tool-use-result naming no tool the feed holds", () => {
+    // Arrange — no tool-use-start ever opened call t9.
+    const { store, lines } = newLoggedStore();
+    // Act
+    store.applyRaw(
+      frame("tool-use-result", { tool_use_id: "t9", is_error: false, content: "ok" }),
+    );
+    // Assert
+    expect(lines).toContain("warn: dropped tool-use-result: no tool t9");
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("logs an async-source orphan naming no spawning card the feed holds", () => {
+    // Arrange — no tool-use-start ever opened call t9; without this line the
+    // whole detached stream is unreachable, silently, since no fold ever
+    // gets a card to hang on.
+    const { store, lines } = newLoggedStore();
+    const source = { source_id: "a9", kind: "agent", status: "running" };
+    // Act
+    store.applyRaw(frame("async-source", { tool_use_id: "t9", source }));
+    // Assert
+    expect(lines).toContain("warn: dropped async-source: no tool t9 (source a9)");
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("logs a permission-resolved naming no request the feed holds", () => {
+    // Arrange — no permission-request ever opened p9.
+    const { store, lines } = newLoggedStore();
+    // Act
+    store.applyRaw(frame("permission-resolved", { request_id: "p9", decision: "allow" }));
+    // Assert
+    expect(lines).toContain("warn: dropped permission-resolved: no permission request p9");
+    expect(store.state.items).toHaveLength(0);
+  });
 });
