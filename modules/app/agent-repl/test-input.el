@@ -63,6 +63,88 @@
       (agent-repl--ws-put "ws1" :prefix-counter 0)
       (should (equal (agent-repl--prepare-input "ws1" "raw text") "raw text")))))
 
+;;;; ---- Tests: Per-workspace metaprompt path resolution ----
+
+(ert-deftest agent-repl-test-metaprompt-file-for-prefers-ws-worktree-copy ()
+  "`agent-repl--metaprompt-file-for' points at the metaprompt inside WS's own
+worktree when that worktree carries the in-repo copy."
+  (agent-repl-test--with-clean-state
+    (let* ((root (make-temp-file "agent-repl-mp-" t))
+           (sub (expand-file-name "modules/app/agent-repl" root))
+           (file (expand-file-name "metaprompt.md" sub)))
+      (unwind-protect
+          (progn
+            (make-directory sub t)
+            (with-temp-file file (insert "body"))
+            (agent-repl--ws-put "ws1" :project-dir root)
+            (should (equal (agent-repl--metaprompt-file-for "ws1") file)))
+        (delete-directory root t)))))
+
+(ert-deftest agent-repl-test-metaprompt-file-for-falls-back-when-ws-lacks-copy ()
+  "`agent-repl--metaprompt-file-for' returns the canonical file when WS's
+project dir exists but does not vendor the in-repo metaprompt."
+  (agent-repl-test--with-clean-state
+    (let ((root (make-temp-file "agent-repl-nomp-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir root)
+            (should (equal (agent-repl--metaprompt-file-for "ws1")
+                           agent-repl-metaprompt-file)))
+        (delete-directory root t)))))
+
+(ert-deftest agent-repl-test-metaprompt-file-for-falls-back-without-project-dir ()
+  "`agent-repl--metaprompt-file-for' returns the canonical file when WS has no
+:project-dir at all."
+  (agent-repl-test--with-clean-state
+    (should (equal (agent-repl--metaprompt-file-for "ws-none")
+                   agent-repl-metaprompt-file))))
+
+(ert-deftest agent-repl-test-command-prefix-for-reformats-with-ws-path ()
+  "`agent-repl--command-prefix-for' formats the directive with WS's own
+worktree metaprompt path when WS resolves to a non-canonical file."
+  (agent-repl-test--with-clean-state
+    (let* ((root (make-temp-file "agent-repl-mp-" t))
+           (sub (expand-file-name "modules/app/agent-repl" root))
+           (file (expand-file-name "metaprompt.md" sub))
+           (agent-repl-command-prefix-template "read %s now"))
+      (unwind-protect
+          (progn
+            (make-directory sub t)
+            (with-temp-file file (insert "body"))
+            (agent-repl--ws-put "ws1" :project-dir root)
+            (should (equal (agent-repl--command-prefix-for "ws1")
+                           (format "read %s now" file))))
+        (delete-directory root t)))))
+
+(ert-deftest agent-repl-test-command-prefix-for-uses-global-for-canonical ()
+  "`agent-repl--command-prefix-for' returns the shared pre-formatted prefix
+when WS resolves to the canonical metaprompt file, so foreign-project
+workspaces stay byte-for-byte unchanged."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--command-prefix "CANONICAL PREFIX"))
+      ;; ws-none has no :project-dir, so it resolves to the canonical file.
+      (should (equal (agent-repl--command-prefix-for "ws-none")
+                     "CANONICAL PREFIX")))))
+
+(ert-deftest agent-repl-test-prepare-input-prefix-points-at-ws-worktree ()
+  "`agent-repl--prepare-input' prepends a directive pointing at WS's OWN
+worktree metaprompt, not the load-time canonical copy."
+  (agent-repl-test--with-clean-state
+    (let* ((root (make-temp-file "agent-repl-mp-" t))
+           (sub (expand-file-name "modules/app/agent-repl" root))
+           (file (expand-file-name "metaprompt.md" sub))
+           (agent-repl-skip-permissions t)
+           (agent-repl-prefix-period 1))
+      (unwind-protect
+          (progn
+            (make-directory sub t)
+            (with-temp-file file (insert "body"))
+            (agent-repl--ws-put "ws1" :project-dir root)
+            (agent-repl--ws-put "ws1" :prefix-counter 0)
+            (should (string-match-p (regexp-quote file)
+                                    (agent-repl--prepare-input "ws1" "hello"))))
+        (delete-directory root t)))))
+
 ;;;; ---- Tests: Composite state functions (migrated) ----
 
 (ert-deftest agent-repl-test-mark-ws-thinking-composite ()

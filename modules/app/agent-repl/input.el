@@ -366,6 +366,40 @@ a valid git_root without it."
         (concat raw (format " [source-ws:%s path:%s]" ws dir)))
     raw))
 
+(defun agent-repl--metaprompt-file-for (ws)
+  "Metaprompt path the read-directive should point WS at.
+`agent-repl-metaprompt-file' is fixed at load time to the checkout Emacs
+loaded `input.el' from — the main worktree — so a WS running in a
+DIFFERENT worktree of the same repo would be told to read (and thereby be
+primed to edit against) that OTHER tree rather than its own.  That is the
+root of the recurring \"edited master instead of the worktree\" mistake:
+the agent works in its worktree but every absolute path it is handed is
+master-rooted.  When WS's own `:project-dir' carries the metaprompt at the
+in-repo path, return that copy so the agent reads, and is primed against,
+the worktree it actually runs in; otherwise fall back to the canonical
+file — WS is a foreign project that does not vendor the agent-repl
+module, so the canonical path is the only metaprompt there is."
+  (let* ((root (agent-repl--ws-get ws :project-dir))
+         (in-ws (and root
+                     (expand-file-name "modules/app/agent-repl/metaprompt.md"
+                                       root))))
+    (if (and in-ws (file-exists-p in-ws))
+        in-ws
+      agent-repl-metaprompt-file)))
+
+(defun agent-repl--command-prefix-for (ws)
+  "Read-directive string for WS, pointing at WS's own metaprompt copy.
+Formats `agent-repl-command-prefix-template' with
+`agent-repl--metaprompt-file-for' so each workspace is told to read the
+metaprompt inside the worktree it runs in.  Reduces to the shared,
+pre-formatted `agent-repl--command-prefix' whenever WS resolves to the
+canonical file, so foreign-project workspaces (and callers that mock the
+global prefix) are byte-for-byte unchanged."
+  (let ((file (agent-repl--metaprompt-file-for ws)))
+    (if (equal file agent-repl-metaprompt-file)
+        agent-repl--command-prefix
+      (format agent-repl-command-prefix-template file))))
+
 (defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
   "Optionally prepend metaprompt prefix to RAW for workspace WS.
 When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter).
@@ -383,7 +417,7 @@ matching) is untouched."
         (tagged (agent-repl--maybe-inject-source-ws ws raw)))
     (agent-repl--log ws "prepare-input counter=%d period=%d" counter agent-repl-prefix-period)
     (if (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt)
-        (concat (agent-repl--meta-wrap agent-repl--command-prefix) "\n\n" tagged)
+        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" tagged)
       tagged)))
 
 ;;; Slash-command completion
@@ -681,7 +715,8 @@ and `agent-repl-command-prefix', the same gate
 injection — so a user who has turned the metaprompt off never has it
 re-established behind their back.
 
-The directive (`agent-repl--command-prefix') is meta-wrapped
+The directive (`agent-repl--command-prefix-for', pointing at WS's own
+worktree copy of the metaprompt) is meta-wrapped
 \(`agent-repl--meta-wrap') so the gui strips it to an empty user turn
 and draws no bubble, exactly as the periodic prefix injection and the
 webapp's auto-continue nudge do.  RAW is empty: no user text sits
@@ -698,7 +733,7 @@ read."
       (agent-repl--log ws "fire-metaprompt-read: SKIP ws=%s (metaprompt system inactive)" ws)
     (agent-repl--log ws "fire-metaprompt-read: ws=%s" ws)
     (agent-repl--ws-put ws :prefix-counter 0)
-    (agent-repl--do-send ws (agent-repl--meta-wrap agent-repl--command-prefix) "")))
+    (agent-repl--do-send ws (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "")))
 
 (defun agent-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
