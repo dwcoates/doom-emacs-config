@@ -371,7 +371,7 @@ describe("window bottom-edge depth shading", () => {
   const bottomEdge = blockAfter(css, "\nbody::after");
   /** The black-mix opacity percentage of a shadow/wash token. */
   const shadowPct = (block: string, name: string): number => {
-    const m = cssVar(block, name).match(/#000000\s+(\d+)%/);
+    const m = cssVar(block, name).match(/#000000\s+([\d.]+)%/);
     if (m === null) throw new Error(`${name} is not a #000000 color-mix`);
     return Number(m[1]);
   };
@@ -418,13 +418,13 @@ describe("window bottom-edge depth shading", () => {
   it("defines a bottom-edge depth token for the light theme", () => {
     // Arrange / Act — a wash needs a black-mix layer to read as depth.
     // Assert
-    expect(cssVar(lightTheme, "--bottom-shadow")).toMatch(/#000000\s+\d+%/);
+    expect(cssVar(lightTheme, "--bottom-shadow")).toMatch(/#000000\s+[\d.]+%/);
   });
 
   it("defines a bottom-edge depth token for the dark theme", () => {
     // Arrange / Act — the dark-scheme override carries its own bottom wash.
     // Assert
-    expect(cssVar(darkTheme, "--bottom-shadow")).toMatch(/#000000\s+\d+%/);
+    expect(cssVar(darkTheme, "--bottom-shadow")).toMatch(/#000000\s+[\d.]+%/);
   });
 
   it("keeps the light-theme bottom wash more subtle than the sidebar dock's", () => {
@@ -451,6 +451,25 @@ describe("window bottom-edge depth shading", () => {
     expect(shadowPct(darkTheme, "--bottom-shadow")).toBeGreaterThan(
       shadowPct(lightTheme, "--bottom-shadow"),
     );
+  });
+
+  it("keeps the wash thin so it reads as a seam cue rather than a heavy band", () => {
+    // Arrange — the bottom edge is a quiet depth hint, half its prior 12px.
+    const h = Number(bottomEdge.match(/height:\s*(\d+)px/)?.[1]);
+    // Act / Assert
+    expect(h).toBe(6);
+  });
+
+  it("holds the light-theme bottom wash at its quarter-lighter opacity", () => {
+    // Arrange / Act — 25% lighter than its prior 10% black, so 7.5%.
+    // Assert
+    expect(shadowPct(lightTheme, "--bottom-shadow")).toBe(7.5);
+  });
+
+  it("holds the dark-theme bottom wash at its quarter-lighter opacity", () => {
+    // Arrange / Act — 25% lighter than its prior 38% black, so 28.5%.
+    // Assert
+    expect(shadowPct(darkTheme, "--bottom-shadow")).toBe(28.5);
   });
 });
 
