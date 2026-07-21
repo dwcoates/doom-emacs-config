@@ -44,7 +44,7 @@ func TestLastTranscriptModelReadsTheFinalAssistantModel(t *testing.T) {
 		assistantLine("opus"),
 		assistantLine("haiku"))
 	// Act
-	got, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	got, _, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
 	// Assert
 	if err != nil || got != "haiku" {
 		t.Errorf("model = %q, err = %v, want haiku", got, err)
@@ -57,7 +57,7 @@ func TestLastTranscriptModelIgnoresSidechainEntries(t *testing.T) {
 		assistantLine("opus"),
 		sidechainLine("haiku"))
 	// Act
-	got, _ := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	got, _, _ := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
 	// Assert — the subagent's model is not the session's model.
 	if got != "opus" {
 		t.Errorf("model = %q, want opus (a sidechain model leaked)", got)
@@ -71,7 +71,7 @@ func TestLastTranscriptModelSkipsSyntheticEntries(t *testing.T) {
 		assistantLine("opus"),
 		assistantLine("<synthetic>"))
 	// Act
-	got, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	got, _, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
 	// Assert — the placeholder names no model; the scan stays on the real one.
 	if err != nil || got != "opus" {
 		t.Errorf("model = %q, err = %v, want opus", got, err)
@@ -84,10 +84,13 @@ func TestLastTranscriptModelSkipsMalformedLines(t *testing.T) {
 		assistantLine("opus"),
 		`{"type":"assistant","message":{"id":"m","mod`)
 	// Act
-	got, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	got, skipped, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
 	// Assert
 	if err != nil || got != "opus" {
 		t.Errorf("model = %q, err = %v, want opus", got, err)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped = %d, want 1", skipped)
 	}
 }
 
@@ -109,7 +112,7 @@ func TestLastTranscriptModelReadsOnlyTheTailOfAHugeTranscript(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	// Act
-	got, err := LastTranscriptModel(path)
+	got, _, err := LastTranscriptModel(path)
 	// Assert
 	if err != nil || got != "haiku" {
 		t.Errorf("model = %q, err = %v, want haiku", got, err)
@@ -121,7 +124,7 @@ func TestLastTranscriptModelErrorsOnAMissingTranscript(t *testing.T) {
 	// cannot do its job, which is reported, never silently treated as "no
 	// model" (that would blank a perfectly good mirror).
 	// Act
-	_, err := LastTranscriptModel(filepath.Join(t.TempDir(), "nope.jsonl"))
+	_, _, err := LastTranscriptModel(filepath.Join(t.TempDir(), "nope.jsonl"))
 	// Assert
 	if err == nil {
 		t.Error("err = nil, want a read failure")
@@ -132,7 +135,7 @@ func TestLastTranscriptModelReturnsEmptyWhenNoAssistantEntryExists(t *testing.T)
 	// Arrange — a conversation with no assistant turn yet.
 	dir := writeTranscript(t, "/w", "uuid", `{"type":"user","message":{"content":"hi"}}`)
 	// Act
-	got, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
+	got, _, err := LastTranscriptModel(TranscriptPath(dir, "/w", "uuid"))
 	// Assert
 	if err != nil || got != "" {
 		t.Errorf("model = %q, err = %v, want empty", got, err)
@@ -299,6 +302,75 @@ func TestReconcileModelLeavesTheMirrorAloneWhenTheTranscriptIsUnreadable(t *test
 	}
 	if len(logged) == 0 {
 		t.Error("the unreadable transcript was swallowed, not logged")
+	}
+}
+
+func TestReconcileModelLogsOnceWhenCorruptionBlocksDriftCorrection(t *testing.T) {
+	// Arrange — every line in the tail is malformed, so the scan can name no
+	// model at all: corruption has genuinely blocked drift correction. That
+	// is the one case worth a log line despite the 30s reconcile cadence.
+	dir := writeTranscript(t, "/w", "uuid",
+		`{"type":"assistant","message":{"id":"m","mod`,
+		`not json at all`)
+	shim := newFakeShim()
+	defer shim.end()
+	lc := &logCapture{}
+	sess := New(Config{
+		ID:        "s_test",
+		Shim:      shim,
+		CWD:       "/w",
+		ConfigDir: dir,
+		Logf:      lc.logf,
+	})
+	sess.translator.ClaudeSessionID = "uuid"
+	sess.translator.Model = "opus"
+	// Act
+	sess.ReconcileModel()
+	// Assert — exactly one line, carrying session id, cwd, transcript path,
+	// and the skip count.
+	got := lc.containing("drift correction blocked")
+	if len(got) != 1 {
+		t.Fatalf("corruption log lines = %v, want exactly one", got)
+	}
+	line := got[0]
+	for _, want := range []string{"s_test", "cwd /w", "uuid.jsonl", "skipped 2"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line %q missing %q", line, want)
+		}
+	}
+	// The mirror stays put: an empty model is never adopted.
+	if got := sess.Info().Model; got != "opus" {
+		t.Errorf("mirror = %q, want opus (untouched by an unresolvable reconcile)", got)
+	}
+}
+
+func TestReconcileModelStaysSilentWhenATrailingCorruptLineStillResolves(t *testing.T) {
+	// Arrange — a half-flushed final write with a resolvable model earlier
+	// in the tail. Corruption skipped a line, but it did NOT cost the
+	// reconciler its answer, so this must not trip the rare-failure log.
+	dir := writeTranscript(t, "/w", "uuid",
+		assistantLine("haiku"),
+		`{"type":"assistant","message":{"id":"m","mod`)
+	shim := newFakeShim()
+	defer shim.end()
+	lc := &logCapture{}
+	sess := New(Config{
+		ID:        "s_test",
+		Shim:      shim,
+		CWD:       "/w",
+		ConfigDir: dir,
+		Logf:      lc.logf,
+	})
+	sess.translator.ClaudeSessionID = "uuid"
+	sess.translator.Model = "haiku" // mirror already agrees: pure steady state
+	// Act
+	sess.ReconcileModel()
+	// Assert — no drift, no corruption: total silence.
+	if got := lc.containing("drift correction blocked"); len(got) != 0 {
+		t.Errorf("corruption log lines = %v, want none", got)
+	}
+	if len(lc.lines) != 0 {
+		t.Errorf("logged = %v, want no lines at all", lc.lines)
 	}
 }
 
