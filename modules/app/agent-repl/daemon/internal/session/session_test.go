@@ -2026,3 +2026,134 @@ func TestRetractedTurnIsWithdrawnForReplayingClients(t *testing.T) {
 		t.Errorf("replayed request_id = %v, want r1", frame["request_id"])
 	}
 }
+
+// --- delivery-path logging -----------------------------------------------------
+
+// logCapture collects Logf lines for assertions, safely across the
+// session's goroutines.
+type logCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (lc *logCapture) logf(format string, args ...any) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.lines = append(lc.lines, fmt.Sprintf(format, args...))
+}
+
+// containing returns the captured lines that contain SUB.
+func (lc *logCapture) containing(sub string) []string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	var out []string
+	for _, l := range lc.lines {
+		if strings.Contains(l, sub) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// newLoggedHarness is newHarness with Logf captured for assertions.
+func newLoggedHarness(t *testing.T, retention int) (*harness, *logCapture) {
+	t.Helper()
+	lc := &logCapture{}
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     retention,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          lc.logf,
+	})
+	go sess.Run()
+	cleanupSession(t, shim, sess)
+	return &harness{shim: shim, sess: sess}, lc
+}
+
+func TestAttachLogsClientCountAndHelloWatermarks(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	// Act
+	h.sess.Attach(c)
+	// Assert
+	got := lc.containing("client attached (1 attached); hello resume_from_seq=0 seq=0")
+	if len(got) != 1 {
+		t.Fatalf("attach log lines = %v, want exactly one", got)
+	}
+}
+
+func TestDetachLogsRemainingClientCount(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	// Act
+	h.sess.Detach(c)
+	// Assert
+	got := lc.containing("client detached (0 attached)")
+	if len(got) != 1 {
+		t.Fatalf("detach log lines = %v, want exactly one", got)
+	}
+}
+
+func TestReplayRequestLogsServedFrameCount(t *testing.T) {
+	// Arrange — one retained frame in the ring.
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	h.shim.pushEvent(t, `{"type":"system","session_id":"sess-1","uuid":"u","subtype":"init","data":{}}`)
+	recvFrame(t, c)
+	// Act
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	// Assert
+	got := lc.containing("replay-request from_seq=1 served 1 frames (ring [1..1])")
+	if len(got) != 1 {
+		t.Fatalf("replay log lines = %v, want exactly one", got)
+	}
+}
+
+func TestReplayRequestBeforeRingLogsTheFreshHelloFallback(t *testing.T) {
+	// Arrange — an empty ring cannot serve any from_seq.
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"replay-request","from_seq":1}`)); err != nil {
+		t.Fatalf("replay-request: %v", err)
+	}
+	// Assert — the fallback hello went out and the fallback was logged.
+	hello := recvFrame(t, c)
+	if hello["type"] != "hello" {
+		t.Fatalf("fallback frame type = %v, want hello", hello["type"])
+	}
+	got := lc.containing("replay-request from_seq=1 predates ring [0..0] — answering with a fresh hello")
+	if len(got) != 1 {
+		t.Fatalf("fallback log lines = %v, want exactly one", got)
+	}
+}
+
+func TestSendToDetachedClientLogsTheSkip(t *testing.T) {
+	// Arrange — a client that was never attached.
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	// Act
+	h.sess.mu.Lock()
+	sent := h.sess.sendToClientLocked(c, []byte(`{}`))
+	h.sess.mu.Unlock()
+	// Assert
+	if sent {
+		t.Fatal("send to a detached client reported success")
+	}
+	got := lc.containing("send skipped — client already detached")
+	if len(got) != 1 {
+		t.Fatalf("skip log lines = %v, want exactly one", got)
+	}
+}

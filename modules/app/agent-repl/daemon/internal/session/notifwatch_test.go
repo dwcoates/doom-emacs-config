@@ -296,3 +296,84 @@ func TestNotifWatchDropsAnOversizedCarryAndResyncs(t *testing.T) {
 		t.Fatal("the watch failed to resync after dropping an oversized carry")
 	}
 }
+
+// notifSessionLogged is notifSession with Logf captured for assertions.
+func notifSessionLogged(t *testing.T) (*Session, string, *logCapture) {
+	t.Helper()
+	root := t.TempDir()
+	lc := &logCapture{}
+	s := New(Config{
+		ID:                     "s1",
+		Shim:                   newFakeShim(),
+		ModelReconcileInterval: -1,
+		NotifWatchInterval:     -1,
+		ConfigDir:              root,
+		Logf:                   lc.logf,
+	})
+	s.translator.ClaudeSessionID = "c1"
+	s.translator.CWD = "/w"
+	path := TranscriptPath(root, "/w", "c1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The first tick tails the file; growth from here on is watched.
+	s.notifWatchTick()
+	return s, path, lc
+}
+
+func TestNotifWatchLogsATailFailureOncePerError(t *testing.T) {
+	// Arrange — the tailed transcript vanishes.
+	s, path, lc := notifSessionLogged(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	// Act — the same failure across two ticks.
+	s.notifWatchTick()
+	s.notifWatchTick()
+	// Assert — one line, not one per tick.
+	got := lc.containing("notifwatch open transcript")
+	if len(got) != 1 {
+		t.Fatalf("open-failure log lines = %v, want exactly one", got)
+	}
+}
+
+func TestNotifWatchLogsADistinctErrorAgain(t *testing.T) {
+	// Arrange — a missing transcript, then an unreadable one.
+	s, path, lc := notifSessionLogged(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	s.notifWatchTick()
+	if err := os.WriteFile(path, nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	// Act — a different open error than the tick before.
+	s.notifWatchTick()
+	// Assert — both distinct failures logged once each.
+	got := lc.containing("notifwatch open transcript")
+	if len(got) != 2 {
+		t.Fatalf("open-failure log lines = %v, want exactly two distinct", got)
+	}
+}
+
+func TestNotifWatchLogsRecoveryWhenTheTailReturns(t *testing.T) {
+	// Arrange — a failing tail, then the transcript reappears.
+	s, path, lc := notifSessionLogged(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	s.notifWatchTick()
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Act
+	s.notifWatchTick()
+	// Assert — the failure window closes visibly, exactly once.
+	got := lc.containing("notifwatch recovered from open transcript")
+	if len(got) != 1 {
+		t.Fatalf("recovery log lines = %v, want exactly one", got)
+	}
+}
