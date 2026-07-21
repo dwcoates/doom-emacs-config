@@ -11,7 +11,7 @@
  * the top level, and the renderer recurses on one representation
  * instead of growing a bespoke one per depth.
  */
-import { ParsedTranscript, STREAM_ITEM_CAP, parseTranscript } from "./async-stream.js";
+import { ParsedTranscript, STREAM_ITEM_CAP, asyncShape, parseTranscript } from "./async-stream.js";
 import { partitionFeed, spawnedTaskIds } from "./partition.js";
 import { AsyncSource } from "./protocol.js";
 import { ConversationItem, ToolItem } from "./store.js";
@@ -57,35 +57,23 @@ export function mergeChildren(
   return merged;
 }
 
-/** The stream shape a spawn's tool implies, mirroring the daemon's classifier. */
-function syntheticShape(toolName: string): {
-  kind: AsyncSource["kind"];
-  format: "jsonl-transcript" | "jsonl-journal" | "text";
-} {
-  switch (toolName) {
-    case "Agent":
-      return { kind: "agent", format: "jsonl-transcript" };
-    case "Workflow":
-      return { kind: "workflow", format: "jsonl-journal" };
-    default:
-      return { kind: "shell", format: "text" };
-  }
-}
-
 /**
  * The async source ITEM effectively owns: the daemon-classified one when
  * present, else one SYNTHESIZED from the spawn announcement in the
- * item's own result. Live store cards always carry the classification
- * (the async-source frame lands on them), so synthesis is the
- * depth-two-and-deeper case — a transcript-parsed spawn card the daemon's
- * frames never reach. Undefined when the item announced nothing
- * detached, which is what "renders no fold at all" keys off.
+ * item's own result. Live store cards carry the classification (the
+ * async-source frame) and parsed cards carry the sidecar's, so synthesis
+ * is the pre-structured-history case — a spawn the notification or
+ * paired-prose tier proved but nothing ever classified. The shape comes
+ * from the classifier's own tool table (asyncShape), so the synthetic
+ * source cannot drift from the classified one. Undefined when the item
+ * announced nothing detached, which is what "renders no fold at all"
+ * keys off.
  */
 export function effectiveAsyncSource(item: ToolItem): AsyncSource | undefined {
   if (item.asyncSource) return item.asyncSource;
   const ids = spawnedTaskIds(item);
   if (ids.length === 0) return undefined;
-  const { kind, format } = syntheticShape(item.toolName);
+  const { kind, format } = asyncShape(item.toolName);
   const description = item.input?.description;
   return {
     source_id: item.notification?.taskId ?? ids[0],
