@@ -104,6 +104,10 @@
   /* The rule a /clear draws under its prompt: red, the loudest thing in the
      palette, because everything above it is context the session no longer has. */
   --clear-divider: #dc2626;
+  /* The rule a /compact draws above its "context compacted" stamp: orange, the
+     softer sibling of the --clear-divider red, because a compaction summarizes
+     the context above rather than dropping it the way a /clear does. */
+  --compact-rule: #ea580c;
   /* The border around a turn's final response: green, the palette's success
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
@@ -231,6 +235,7 @@
     --remediation: #facc15;
     --interrupted: #facc15;
     --clear-divider: #ef4444;
+    --compact-rule: #f97316;
     --final-response: #4ade80;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
@@ -1517,22 +1522,37 @@ pre {
   border-radius: 2px;
   background: var(--clear-divider);
 }
+/* The orange rule a /compact draws, mirroring the red /clear rule above but in
+   the softer --compact-rule orange. It is drawn ABOVE the "context compacted"
+   label so it sits between the /compact prompt bubble and that label, the way
+   the /clear rule sits under its own prompt. Same 4px bar geometry as
+   `.clear-divider`; the shared confinement rule below spans it across the
+   central column. */
+.compact-rule {
+  height: 4px;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+  border-radius: 2px;
+  background: var(--compact-rule);
+}
 /* The /compact boundary label ("— context compacted … —") centers within that
    same central column so its framing em-dashes read as a symmetric separator
    rather than a run of text hugging the column's left rail. */
 .compact-divider {
   text-align: center;
 }
-/* Both context-boundary separators — the red rule a /clear draws and the
-   "— context compacted —" label a /compact drops — are confined to the CENTRAL
-   COLUMN (the `--agent-bubble-cap` width the bubbles and tool cards are framed
-   in), NOT the full feed width. A plain block child of `.feed-item` would
-   stretch edge to edge inside `#feed`'s padding, spilling past the column's
-   rails toward the window; pinning the width to the cap and centering with
-   equal auto margins lands each separator's ends on the same rails the bubbles
-   hug, so a boundary reads as cutting the conversation column, not the window. */
+/* The three context-boundary separators — the red rule a /clear draws, the
+   orange rule a /compact draws, and the "— context compacted —" label under it
+   — are confined to the CENTRAL COLUMN (the `--agent-bubble-cap` width the
+   bubbles and tool cards are framed in), NOT the full feed width. A plain block
+   child of `.feed-item` would stretch edge to edge inside `#feed`'s padding,
+   spilling past the column's rails toward the window; pinning the width to the
+   cap and centering with equal auto margins lands each separator's ends on the
+   same rails the bubbles hug, so a boundary reads as cutting the conversation
+   column, not the window. */
 .clear-divider,
-.compact-divider {
+.compact-divider,
+.compact-rule {
   width: var(--agent-bubble-cap);
   margin-left: auto;
   margin-right: auto;

@@ -2124,7 +2124,13 @@ function ResultChip(
 }
 
 function CompactDivider(item: CompactBoundaryItem): string {
-  return `<div class="compact-divider">— context compacted (${escapeHtml(item.trigger)}, ${item.preTokens} tokens before) —</div>`;
+  // The orange rule sits BEFORE the label, so it lands between the /compact
+  // prompt bubble above and the "context compacted" stamp, mirroring the red
+  // rule a /clear draws under its own prompt (see `UserTurn`).
+  return (
+    `<div class="compact-rule" role="separator" aria-label="context compacted"></div>` +
+    `<div class="compact-divider">— context compacted (${escapeHtml(item.trigger)}, ${item.preTokens} tokens before) —</div>`
+  );
 }
 
 function ErrorBanner(item: ErrorItem): string {
