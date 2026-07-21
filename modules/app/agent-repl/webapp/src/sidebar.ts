@@ -12,6 +12,7 @@
  */
 import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
+import { log } from "./wslog.js";
 
 /** A workspace's lifecycle, as the Emacs side classifies it. */
 export type WorkspaceStatus =
@@ -118,7 +119,22 @@ export type WorkspaceCommand =
   | { type: "switch"; dir: string }
   | { type: "fold"; repo_key: string; folded: boolean };
 
+/** Cap on the payload snippet a breach log line carries: the daemon
+ * clamps per-message size anyway, and a full roster/row dump would drown
+ * the line the operator actually needs to spot the bug in. */
+const BREACH_PAYLOAD_MAX = 300;
+
+/** A JSON rendering of V for a breach log line, truncated to a sane length. */
+function describeBreach(v: unknown): string {
+  const s = JSON.stringify(v) ?? String(v);
+  return s.length > BREACH_PAYLOAD_MAX ? `${s.slice(0, BREACH_PAYLOAD_MAX)}…` : s;
+}
+
 function fail(path: string, want: string, got: unknown): never {
+  // A malformed push only throws inside Emacs's script eval, which the
+  // operator reading the daemon log never sees — so the breach is logged
+  // here too, immediately before the throw that stays the enforcement.
+  log("error", `workspace roster: ${path} must be ${want}, got ${describeBreach(got)}`);
   throw new Error(
     `workspace roster: ${path} must be ${want}, got ${JSON.stringify(got) ?? String(got)}`,
   );
@@ -155,6 +171,10 @@ function validateRow(value: unknown, path: string): WorkspaceRow {
   // new Emacs-side lifecycle state must be taught here, not silently
   // painted as something it is not.
   if (!WORKSPACE_STATUSES.has(status)) {
+    log(
+      "error",
+      `workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status — row: ${describeBreach(value)}`,
+    );
     throw new Error(`workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status`);
   }
   if (!Array.isArray(value.children)) fail(`${path}.children`, "an array", value.children);
