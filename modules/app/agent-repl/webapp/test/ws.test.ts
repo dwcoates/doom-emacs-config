@@ -228,4 +228,26 @@ describe("WsClient", () => {
     // Assert
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it("logs a reply it could not send because the socket is not open", () => {
+    // Arrange — onMessage generates a replay-request while the socket
+    // is already closing (readyState past OPEN).
+    const logged: string[] = [];
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => ({ type: "replay-request", from_seq: 4 }) as const,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      log: (m) => logged.push(m),
+    });
+    client.connect();
+    const sock = FakeWebSocket.instances[0];
+    sock.open();
+    sock.readyState = 3; // closing under us, onclose not yet delivered
+    // Act
+    sock.receive(`{"type":"text-delta","seq":9}`);
+    // Assert — the drop left a trace naming the lost command.
+    expect(sock.sent).toHaveLength(0);
+    expect(logged).toEqual(["ws: dropped outbound replay-request — socket not open"]);
+  });
 });
