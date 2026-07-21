@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { parseJournal } from "./async-stream.js";
-import { logDedup } from "./wslog.js";
+import { clearDedup, logDedup } from "./wslog.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -3226,8 +3226,26 @@ export class FeedRenderer {
    * frames — the latest message is visible immediately with no
    * top-down build crawl and no scroll animation. Scroll position is
    * compensated per chunk so the view never moves off the tail.
+   *
+   * Invoked bare from the rAF coalescer (see coalesce.ts), so a
+   * deterministic throw mid-build would otherwise re-throw every frame
+   * with no evidence beyond the console — a silent feed-freeze. Logged
+   * (deduped so a steady throw logs once, not every frame) then
+   * rethrown unchanged: the caller's behavior is untouched, but the
+   * failure now reaches the daemon log. clearDedup on a clean run
+   * re-arms the key so a later recurrence logs again.
    */
   renderRestored(state: StoreState): void {
+    try {
+      this.renderRestoredImpl(state);
+    } catch (err) {
+      logDedup("feed-render-restored", "error", String(err));
+      throw err;
+    }
+    clearDedup("feed-render-restored");
+  }
+
+  private renderRestoredImpl(state: StoreState): void {
     this.lastState = state;
     // Replayed history's newest prompt is old news: banking it here keeps
     // the next render from reading it as a fresh send and yanking a feed
@@ -3390,7 +3408,27 @@ export class FeedRenderer {
     return this.monitoring;
   }
 
+  /**
+   * Invoked bare from the rAF coalescer (see coalesce.ts), so a
+   * deterministic throw mid-reconcile would otherwise re-throw every
+   * frame with no evidence beyond the console — a silent feed-freeze
+   * leaving the feed half-painted forever. Logged (deduped so a steady
+   * throw logs once, not every frame) then rethrown unchanged: the
+   * caller's behavior is untouched, but the failure now reaches the
+   * daemon log. clearDedup on a clean run re-arms the key so a later
+   * recurrence logs again.
+   */
   render(state: StoreState): void {
+    try {
+      this.renderImpl(state);
+    } catch (err) {
+      logDedup("feed-render", "error", String(err));
+      throw err;
+    }
+    clearDedup("feed-render");
+  }
+
+  private renderImpl(state: StoreState): void {
     this.flushBackfill();
     this.lastState = state;
     // A refused `/status` turns this feed into the status panel's host: kick
