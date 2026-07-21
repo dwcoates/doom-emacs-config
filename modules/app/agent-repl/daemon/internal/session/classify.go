@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"claude-repld/internal/dlog"
 )
 
 // classifierVerdict is one decision about a queued message: whether it
@@ -44,35 +46,61 @@ const (
 )
 
 // classifierRunner executes the classifier subprocess with stdin and
-// returns its raw stdout. Separated from the fail-closed wrapper so tests
-// exercise parsing and fallback without spawning claude.
-type classifierRunner func(ctx context.Context, model, configDir, stdin string) ([]byte, error)
+// returns its raw stdout plus a bounded tail of its stderr. Separated
+// from the fail-closed wrapper so tests exercise parsing and fallback
+// without spawning claude.
+type classifierRunner func(ctx context.Context, model, configDir, stdin string) (stdout, stderr []byte, err error)
 
 // newClassifier builds the real subprocess-backed classifier bound to
 // model and configDir (the session's account dir; empty leaves the
 // daemon's own environment inherited).
-func newClassifier(model, configDir string, logf func(string, ...any)) classifyFn {
+func newClassifier(model, configDir string, logf dlog.Logf) classifyFn {
 	return classifyWith(spawnClassifier, model, configDir, logf)
 }
 
-// classifyWith builds a classifier over an injectable runner, applying
-// the fail-closed contract around it.
-func classifyWith(run classifierRunner, model, configDir string, logf func(string, ...any)) classifyFn {
+// classifyWith builds a classifier over an injectable runner, applying the
+// fail-closed contract around it. Each call is logged via dlog.Call (a
+// start line, then a success or failure line) so a fail-closed wait is
+// attributable rather than a bare, contextless "classifier: fail-closed to
+// wait" line, and the child's stderr (discarded before this change) shows
+// up in the failure log instead of vanishing.
+//
+// Session id and the session's working directory are NOT among the tags:
+// newClassifier's call site (session.go, out of scope for this change)
+// only passes model and configDir (the CLAUDE_CONFIG_DIR account root, a
+// coarser identifier than the session's cwd/workspace) through to here, so
+// config_dir is the closest attribution reachable without threading more
+// context through session.go.
+func classifyWith(run classifierRunner, model, configDir string, logf dlog.Logf) classifyFn {
 	return func(runningTask, newMessage string) classifierVerdict {
 		ctx, cancel := context.WithTimeout(context.Background(), classifierTimeout)
 		defer cancel()
-		out, err := run(ctx, model, configDir, classifierPrompt(runningTask, newMessage))
+		done := dlog.Call(logf, "classifier",
+			"config_dir", configDir, "model", model, "action", "classify queued message")
+		out, stderr, err := run(ctx, model, configDir, classifierPrompt(runningTask, newMessage))
 		if err != nil {
-			logf("classifier: fail-closed to wait: %v", err)
+			done(string(stderr), err)
 			return classifierVerdict{verdict: "wait", reason: fallbackReason, source: "fallback"}
 		}
 		v, perr := parseClassifierOutput(out)
 		if perr != nil {
-			logf("classifier: fail-closed to wait: %v", perr)
+			done(diagOutput(out, stderr), perr)
 			return classifierVerdict{verdict: "wait", reason: fallbackReason, source: "fallback"}
 		}
+		done(fmt.Sprintf("verdict=%s reason=%q raw=%s", v.verdict, v.reason, out), nil)
 		return v
 	}
+}
+
+// diagOutput combines the model's raw stdout with any child stderr tail
+// for a parse-failure log line, so it shows both what the classifier
+// returned and (if the child also wrote to stderr) why it may have
+// misbehaved.
+func diagOutput(out, stderr []byte) string {
+	if len(stderr) == 0 {
+		return string(out)
+	}
+	return fmt.Sprintf("%s (stderr: %s)", out, stderr)
 }
 
 // classifierArgv is the CLI invocation: a single-turn headless run that
@@ -107,8 +135,11 @@ func classifierEnv(configDir string) []string {
 
 // spawnClassifier runs the real CLI. cwd is a neutral temp dir so the
 // headless run's SessionStart/Stop hooks never resolve to a registered
-// workspace (mirrors prompt-summary.el).
-func spawnClassifier(ctx context.Context, model, configDir, stdin string) ([]byte, error) {
+// workspace (mirrors prompt-summary.el). Stderr is captured (bounded by
+// stderrCap, shared with the summarizer's spawn) rather than discarded, so
+// a fail-closed log can show why the child died instead of only that it
+// did.
+func spawnClassifier(ctx context.Context, model, configDir, stdin string) (stdout, stderr []byte, err error) {
 	argv := classifierArgv(model)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = os.TempDir()
@@ -116,10 +147,12 @@ func spawnClassifier(ctx context.Context, model, configDir, stdin string) ([]byt
 	cmd.Env = classifierEnv(configDir)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	errBuf := &boundedWriter{cap: stderrCap}
+	cmd.Stderr = errBuf
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude classifier run: %w", err)
+		return nil, errBuf.Bytes(), fmt.Errorf("claude classifier run: %w", err)
 	}
-	return out.Bytes(), nil
+	return out.Bytes(), errBuf.Bytes(), nil
 }
 
 // parseClassifierOutput extracts the verdict from the CLI's
