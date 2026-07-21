@@ -762,6 +762,23 @@ func TestSessionShimDeathWithoutClosedEmitsShimDied(t *testing.T) {
 	expectClosed(t, c)
 }
 
+func TestSessionShimDeathLogsADaemonSideLine(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c)
+	// Act — stdout closes with no closed event (hard crash).
+	h.endShim()
+	<-h.sess.Done()
+	// Assert — the death is named in the log, not only in the broadcast
+	// error frame and the sentinel side-channel.
+	got := lc.containing("shim exited without a closed event (reason=shim_died)")
+	if len(got) != 1 {
+		t.Fatalf("shim-death log lines = %v, want exactly one", got)
+	}
+}
+
 func TestSessionHardShimDeathCancelsPendingPermissions(t *testing.T) {
 	// Arrange — a permission prompt is pending when the shim hard-dies.
 	h := newHarness(t, 16)
