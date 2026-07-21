@@ -17,6 +17,7 @@
  */
 
 import { animatedEllipsis, escapeHtml } from "./highlight.js";
+import { log, logDedup } from "./wslog.js";
 
 /** Line prefix the skill emits; everything after it is the file path. */
 export const CHESS_GAME_MARKER = "---> agent-repl-chess-game-file: ";
@@ -319,7 +320,15 @@ export function hydrateChessGames(root: ChessGameRoot): void {
     if (el.dataset.chessHydrated) return;
     el.dataset.chessHydrated = "1";
     const path = el.dataset.gameFile;
-    if (!path) return;
+    if (!path) {
+      // The CSS selector already requires the attribute's presence, so this
+      // is a defensive fallback for an empty value — without a log the
+      // container is left showing its "processing" spinner forever with no
+      // evidence anywhere of why hydration never continued.
+      const feedKey = el.closest(".feed-item")?.getAttribute("data-key") ?? "";
+      log("warn", `chess-game container missing its game-file path (feedKey=${feedKey}, idx=${idx})`);
+      return;
+    }
     if (config === null) {
       throw new Error("chess-game hydrator is not configured");
     }
@@ -342,7 +351,19 @@ export function hydrateChessGames(root: ChessGameRoot): void {
         ]);
         // The container may have been replaced by a newer re-render while
         // the payload loaded; mounting into a detached node would leak.
-        if (!el.isConnected) return;
+        if (!el.isConnected) {
+          // A fast-streaming bubble re-renders repeatedly, each pass minting
+          // a fresh container for the same logical board (see the "passes
+          // the previously serialized state to a re-mount" test) — a slow
+          // load can lose this race on several of them in a row for the
+          // same board, so dedup by stateKey rather than flooding the log.
+          logDedup(
+            `chess-game-detached:${stateKey}`,
+            "warn",
+            `chess-game payload loaded but its container detached before mount (path=${path}, session=${cfg.session()})`,
+          );
+          return;
+        }
         opts.onStateChange = (s) => gameStates.set(stateKey, s);
         const handle = mount(el, opts);
         gameHandles.set(el, handle);
@@ -351,6 +372,15 @@ export function hydrateChessGames(root: ChessGameRoot): void {
         // this mount just added beneath the parked position.
         if (pinned) cfg.parkFeed?.();
       } catch (err) {
+        // Logged unconditionally, unlike the DOM fallback below: a detached
+        // container still deserves evidence that hydration failed, even
+        // though there is no frame left to show the error in.
+        log(
+          "error",
+          `chess-game hydration failed (path=${path}, session=${cfg.session()}): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
         if (el.isConnected) {
           el.innerHTML = errorHtml(err instanceof Error ? err.message : String(err));
         }
