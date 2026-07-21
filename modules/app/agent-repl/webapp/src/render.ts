@@ -1178,6 +1178,15 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
   });
 }
 
+/**
+ * The dot hue a member status wears, on every surface that draws one (the
+ * catalog badge, the group tab chip): killed reads the error hue, since
+ * the dot palette has no third settled color.
+ */
+function statusDot(status: MemberStatus): "running" | "done" | "error" {
+  return status === "running" ? "running" : status === "done" ? "done" : "error";
+}
+
 /** A member's badge label: its tool name and its one watcher id, capped. */
 function asyncBadgeLabel(item: ToolItem): string {
   const ref = watcherRef(item);
@@ -1203,11 +1212,7 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
   const id = `member:${hostId}:${item.toolUseId}`;
   const member = resolveMember(item, memberCtx(panels));
   const settled = member?.settled ?? false;
-  const status = member?.status ?? "done";
-  // The dot speaks the same one-status vocabulary as every face badge; a
-  // killed member reads the error hue, since the dot palette has no
-  // third settled color.
-  const dot = status === "running" ? "running" : status === "done" ? "done" : "error";
+  const dot = statusDot(member?.status ?? "done");
   const open = panels?.isOpen(id) ?? false;
   // The spend rides the badge whenever the stream meters one (see
   // transcriptStats): live it ticks with the tail, settled it is the
@@ -2361,7 +2366,19 @@ export function groupHtml(
   const failed = members.filter((m) => m.result?.isError).length;
   const tabs = members
     .map((m, i) => {
-      const status = m.result ? (m.result.isError ? "error" : "done") : "running";
+      // The chip resolves the SAME member record every other streaming
+      // surface reads (stream-member.ts), so a background agent's chip
+      // tracks its detached work rather than going green at spawn time —
+      // the call's own result decides only for members with nothing
+      // detached, which is what the resolver's fallback already encodes.
+      const member = resolveMember(m, memberCtx(panels));
+      const status = member
+        ? statusDot(member.status)
+        : m.result
+          ? m.result.isError
+            ? "error"
+            : "done"
+          : "running";
       return `<button type="button" class="tab-chip${
         m.toolUseId === activeId ? " active" : ""
       }" data-tab-group="${escapeHtml(groupKey)}" data-tab-member="${escapeHtml(
