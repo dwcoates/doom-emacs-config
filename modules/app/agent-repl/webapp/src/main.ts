@@ -67,7 +67,7 @@ import {
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
-import { ForwardingLogger } from "./wslog.js";
+import { ForwardingLogger, setLogger } from "./wslog.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
 
@@ -123,6 +123,9 @@ async function boot(): Promise<void> {
   // guard behind the cast), and the line stays console-only.
   const wslog = new ForwardingLogger((cmd) => (ws as WsClient | undefined)?.send(cmd) ?? false);
   const clog = wslog.log.bind(wslog);
+  // Deep modules (render walk, pollers) log through the module-level
+  // singleton; install the real forwarder before anything renders.
+  setLogger(wslog);
 
   const store = new ConversationStore((level, message) => clog(level, message));
   const feedEl = must("feed");

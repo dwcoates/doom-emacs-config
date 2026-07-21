@@ -69,3 +69,53 @@ function defaultConsole(level: ClientLogLevel, line: string): void {
   else if (level === "warn") console.warn(line);
   else console.log(line);
 }
+
+// ---------------------------------------------------------------------------
+// Module-level singleton, so modules deep in the render walk (partition,
+// stream-member, chess-game, the WatcherPoller constructed inside
+// FeedRenderer) can log without threading a logger through every
+// constructor. main.ts installs the real ForwardingLogger at boot; until
+// then lines fall back to the console so nothing is ever dropped.
+// wslog imports only the protocol leaf, so importing { log } from here
+// can never create an import cycle.
+// ---------------------------------------------------------------------------
+
+let active: ForwardingLogger | null = null;
+
+/** Install (or clear, with null) the app-wide logger. */
+export function setLogger(logger: ForwardingLogger | null): void {
+  active = logger;
+}
+
+/** Log through the installed logger, or console-only before boot. */
+export function log(level: ClientLogLevel, message: string): void {
+  if (active !== null) active.log(level, message);
+  else defaultConsole(level, message);
+}
+
+/**
+ * Per-key dedup for hot paths (per-frame render guards, per-tick
+ * pollers): a repeat of the SAME message under a key is suppressed
+ * entirely — console included — because the caller fires every frame
+ * and the first line already carries the evidence. A different message
+ * under the key logs again (the error changed); clearDedup re-arms the
+ * key (the caller observed recovery).
+ */
+const dedupLast = new Map<string, string>();
+
+export function logDedup(key: string, level: ClientLogLevel, message: string): void {
+  if (dedupLast.get(key) === message) return;
+  dedupLast.set(key, message);
+  log(level, message);
+}
+
+/** Re-arm KEY so its next logDedup fires even with an identical message. */
+export function clearDedup(key: string): void {
+  dedupLast.delete(key);
+}
+
+/** Test hook: drop the installed logger and all dedup state. */
+export function resetLoggingForTests(): void {
+  active = null;
+  dedupLast.clear();
+}
