@@ -197,12 +197,59 @@ func tailBytes(s string, n int) string {
 // route needs beyond the bytes: when the task was armed (for a live
 // elapsed the SDK heartbeat stops feeding once the spawning call settles)
 // and whether its completion notification has landed. scanCarry is the
-// unscanned tail of the last served chunk (see scanChunkSpawns).
+// unscanned tail of the last served chunk (see scanChunkSpawns). readErr
+// is the last distinct read failure a tail of this path hit, or "" while
+// it reads cleanly — shared by both the live tailer and the on-demand
+// TaskOutput poll, so a failure logged from one silences the other's
+// repeat of the SAME error (see tailFailLocked/tailOKLocked).
 type taskPathRec struct {
 	path      string
 	spawnedAt time.Time
 	done      bool
 	scanCarry string
+	readErr   string
+}
+
+// tailFailLocked surfaces a tailed path's read failure for TASKID. A live
+// tail ticks every ~500ms (DefaultTaskTailInterval) and the poll route can
+// be hit far more often than that, so a persistent failure (permission
+// denied, a seek/read error) logs once per DISTINCT error, not once per
+// call — mirrors notifWatchFailLocked. ERR is nil for the ordinary "not
+// written yet" case readTailChunk itself absorbs, which stays silent: a
+// freshly spawned task's output file taking a few ticks to appear is
+// expected, not a diagnostic. A task id this session never recorded (a
+// defensive check; recordTaskPathLocked always runs before a tail starts)
+// is a no-op. Callers hold s.mu.
+func (s *Session) tailFailLocked(taskID string, err error) {
+	if err == nil {
+		return
+	}
+	rec, ok := s.taskPaths[taskID]
+	if !ok {
+		return
+	}
+	msg := err.Error()
+	if rec.readErr == msg {
+		return
+	}
+	rec.readErr = msg
+	s.taskPaths[taskID] = rec
+	s.logf("session %s: tailer read failed task=%s cwd=%s path=%s: %s (logged once until the error changes)",
+		s.ID, taskID, s.translator.CWD, rec.path, msg)
+}
+
+// tailOKLocked marks TASKID's tailed path healthy again, logging the
+// recovery so a failure window has a visible close. A no-op when the tail
+// was never in a failed state. Callers hold s.mu.
+func (s *Session) tailOKLocked(taskID string) {
+	rec, ok := s.taskPaths[taskID]
+	if !ok || rec.readErr == "" {
+		return
+	}
+	s.logf("session %s: tailer recovered task=%s cwd=%s path=%s from: %s",
+		s.ID, taskID, s.translator.CWD, rec.path, rec.readErr)
+	rec.readErr = ""
+	s.taskPaths[taskID] = rec
 }
 
 // recordTaskPathLocked durably records a detached task's output path (see
@@ -329,7 +376,15 @@ func (s *Session) TaskOutput(taskID string, offset int64) (text string, next int
 	if !allowedTaskOutputPath(rec.path) && !allowedJournalPath(rec.path, root) {
 		return "", offset, rec.done, elapsedMs, false
 	}
-	text, next = readTailChunk(rec.path, offset)
+	var readErr error
+	text, next, readErr = readTailChunk(rec.path, offset)
+	s.mu.Lock()
+	if readErr != nil {
+		s.tailFailLocked(taskID, readErr)
+	} else {
+		s.tailOKLocked(taskID)
+	}
+	s.mu.Unlock()
 	if text != "" {
 		// Record-on-read: a grandchild spawn announced inside THIS task's
 		// stream gets its path recorded the moment its bytes are served,
@@ -367,7 +422,14 @@ func (s *Session) tailTaskOutput(ann spawnAnnouncement, stop <-chan struct{}) {
 	defer ticker.Stop()
 	var offset, total int64
 	emit := func() bool {
-		text, next := readTailChunk(ann.Path, offset)
+		text, next, readErr := readTailChunk(ann.Path, offset)
+		s.mu.Lock()
+		if readErr != nil {
+			s.tailFailLocked(ann.TaskID, readErr)
+		} else {
+			s.tailOKLocked(ann.TaskID)
+		}
+		s.mu.Unlock()
 		if text == "" {
 			return true
 		}
@@ -412,21 +474,29 @@ func (s *Session) tailTaskOutput(ann spawnAnnouncement, stop <-chan struct{}) {
 // readTailChunk reads up to taskTailChunkMax appended bytes from PATH
 // at OFFSET, trimming a trailing incomplete UTF-8 rune back into the
 // next read so multi-byte characters never split across frames. An
-// unreadable file yields no text and no offset movement — the file may
-// simply not exist yet on the first ticks.
-func readTailChunk(path string, offset int64) (string, int64) {
+// unreadable file yields no text and no offset movement.
+//
+// The returned error distinguishes a genuine read failure (permission,
+// I/O, a seek error) from the expected "not written yet" case: a freshly
+// spawned task's output file legitimately does not exist for the first
+// few ticks, so os.IsNotExist yields a nil error and stays silent, while
+// every other failure is surfaced for tailFailLocked to log once.
+func readTailChunk(path string, offset int64) (string, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", offset
+		if os.IsNotExist(err) {
+			return "", offset, nil
+		}
+		return "", offset, err
 	}
 	defer f.Close()
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return "", offset
+		return "", offset, err
 	}
 	buf := make([]byte, taskTailChunkMax)
 	n, _ := f.Read(buf)
 	if n <= 0 {
-		return "", offset
+		return "", offset, nil
 	}
 	// Back a split rune out of the chunk (at most 3 bytes); genuinely
 	// non-UTF-8 content passes through sanitized instead of truncated.
@@ -435,7 +505,7 @@ func readTailChunk(path string, offset int64) (string, int64) {
 		trimmed--
 	}
 	if trimmed == 0 || !utf8.Valid(buf[:trimmed]) {
-		return strings.ToValidUTF8(string(buf[:n]), "�"), offset + int64(n)
+		return strings.ToValidUTF8(string(buf[:n]), "�"), offset + int64(n), nil
 	}
-	return string(buf[:trimmed]), offset + int64(trimmed)
+	return string(buf[:trimmed]), offset + int64(trimmed), nil
 }
