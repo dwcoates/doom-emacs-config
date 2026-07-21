@@ -35,6 +35,7 @@ import {
   showsMonitoringRow,
   tailLineHtml,
   tailStatusRow,
+  thinkingRowHtml,
   turnStatsRowHtml,
   wakeRemainingLabel,
   workingRowHtml,
@@ -360,6 +361,50 @@ describe("workingRowHtml", () => {
   it("marks the row as a live status region for assistive tech", () => {
     // Arrange / Act
     const html = workingRowHtml(true);
+    // Assert
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("thinkingRowHtml", () => {
+  it("renders nothing when not thinking", () => {
+    // Arrange / Act / Assert — an empty string drops the tail node.
+    expect(thinkingRowHtml(false)).toBe("");
+  });
+
+  it("names the thinking state in progress", () => {
+    // Arrange / Act
+    const html = thinkingRowHtml(true);
+    // Assert
+    expect(html).toContain("thinking");
+  });
+
+  it("reuses the orange textless-thinking spinner arc", () => {
+    // Arrange / Act — the same arc the working row reuses, since the hue matches.
+    const html = thinkingRowHtml(true);
+    // Assert
+    expect(html).toContain("thinking-spinner");
+  });
+
+  it("wears the shared tail-row pending class so it seats in the bottom slot", () => {
+    // Arrange / Act — the class the tail-status rows share for their geometry.
+    const html = thinkingRowHtml(true);
+    // Assert
+    expect(html).toContain("thinking-pending");
+  });
+
+  it("trails the status word with the animated ellipsis rather than a static one", () => {
+    // Arrange / Act — the dots cycle beside the arc, so the row reads live.
+    const html = thinkingRowHtml(true);
+    // Assert — the animated span replaced the literal "…" glyph.
+    expect(html).toContain("animated-ellipsis");
+    expect(html).not.toContain("thinking…");
+  });
+
+  it("marks the row as a live status region for assistive tech", () => {
+    // Arrange / Act — aria-live like its working/retrying/interrupting siblings.
+    const html = thinkingRowHtml(true);
     // Assert
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-live="polite"');
@@ -1095,8 +1140,23 @@ describe("renderItem", () => {
     expect(html).not.toContain("thinking-spinner");
   });
 
-  it("shows a pending indicator instead of an empty card while a textless thinking block streams", () => {
-    // Arrange — adaptive thinking: signature only, no thinking text.
+  it("draws no inline card while a textless thinking block streams, ceding to the tail slot", () => {
+    // Arrange — adaptive thinking: signature only, no thinking text. Its
+    // `thinking…` beat lives in the bottom-pinned tail slot now (see
+    // thinkingRowHtml / pulseTarget), not as a card just under the feed.
+    const item: ConversationItem = {
+      kind: "thinking",
+      blockId: "b1",
+      messageId: "m1",
+      text: "",
+      done: false,
+    };
+    // Act + Assert
+    expect(renderItem(item)).toBe("");
+  });
+
+  it("keeps a live textless thinking block from opening a disclosure card", () => {
+    // Arrange
     const item: ConversationItem = {
       kind: "thinking",
       blockId: "b1",
@@ -1106,54 +1166,9 @@ describe("renderItem", () => {
     };
     // Act
     const html = renderItem(item);
-    // Assert
-    expect(html).toContain("thinking-pending");
+    // Assert — no inline spinner, no <details>: the tail slot speaks for it.
+    expect(html).not.toContain("thinking-spinner");
     expect(html).not.toContain("<details");
-  });
-
-  it("marks the streaming textless thinking indicator with the circular spinner", () => {
-    // Arrange
-    const item: ConversationItem = {
-      kind: "thinking",
-      blockId: "b1",
-      messageId: "m1",
-      text: "",
-      done: false,
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`<span class="thinking-spinner" aria-hidden="true">`);
-  });
-
-  it("trails the textless thinking indicator's word with the animated ellipsis", () => {
-    // Arrange — adaptive thinking: signature only, no thinking text.
-    const item: ConversationItem = {
-      kind: "thinking",
-      blockId: "b1",
-      messageId: "m1",
-      text: "",
-      done: false,
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert — the pending row cycles dots beside the arc, so it reads live.
-    expect(html).toContain("animated-ellipsis");
-  });
-
-  it("drops the ••• pulse from the streaming textless thinking indicator", () => {
-    // Arrange
-    const item: ConversationItem = {
-      kind: "thinking",
-      blockId: "b1",
-      messageId: "m1",
-      text: "",
-      done: false,
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).not.toContain("•••");
   });
 
   it("drops a textless thinking block once it closes", () => {
@@ -2717,13 +2732,23 @@ describe("pulseTarget: the working and retrying states", () => {
     expect(pulse).toBeNull();
   });
 
-  it("yields null while the thinking indicator renders", () => {
-    // Arrange — the thinking spinner is the live signal.
+  it("yields null while a TEXTED thinking disclosure streams, its own arc the signal", () => {
+    // Arrange — a summarized block carries its inline `(thinking…)` arc itself.
     const items = [userTurnAt(9, 0), thinking("k1", false)];
     // Act
     const pulse = pulseTarget(items, true);
     // Assert
     expect(pulse).toBeNull();
+  });
+
+  it("names the thinking tail row while a TEXTLESS thinking block streams", () => {
+    // Arrange — an adaptive-thinking block draws no inline card, so its beat
+    // moves to the bottom-pinned tail slot beside working/retrying.
+    const items = [userTurnAt(9, 0), thinking("k1", false, "")];
+    // Act
+    const pulse = pulseTarget(items, true);
+    // Assert
+    expect(pulse).toEqual({ kind: "thinking" });
   });
 
   it("yields null (dead air) when a running tool card takes the tail", () => {
@@ -2875,8 +2900,9 @@ describe("rendersEmpty", () => {
     expect(rendersEmpty(thinking("k1", true, ""))).toBe(true);
   });
 
-  it("counts an OPEN textless thinking block as drawn, since its spinner shows", () => {
-    // Arrange + Act + Assert
+  it("counts an OPEN textless thinking block as drawn, so the tail scan can name it", () => {
+    // Arrange + Act + Assert — it renders no inline card, but staying non-empty
+    // lets pulseTarget reach it and route its `thinking…` beat to the tail slot.
     expect(rendersEmpty(thinking("k1", false, ""))).toBe(false);
   });
 
@@ -3110,6 +3136,28 @@ describe("tailStatusRow", () => {
     expect(row?.html).toContain("working");
   });
 
+  it("shows the thinking row while a textless thinking block streams", () => {
+    // Arrange — the tail slot carries the `thinking…` beat now, not an inline card.
+    const row = tailStatusRow(false, false, { kind: "thinking" });
+    // Assert
+    expect(row?.key).toBe("thinking");
+    expect(row?.html).toContain("thinking-pending");
+  });
+
+  it("suppresses the thinking row while compacting, like every other pulse row", () => {
+    // Arrange — a compaction shows no feed-tail row at all.
+    const row = tailStatusRow(false, true, { kind: "thinking" });
+    // Assert
+    expect(row).toBeNull();
+  });
+
+  it("shows the interrupting row over a thinking one at the tail", () => {
+    // Arrange — an abort outranks a live thought.
+    const row = tailStatusRow(true, false, { kind: "thinking" });
+    // Assert
+    expect(row?.key).toBe("interrupting");
+  });
+
   it("shows no tail row for the frontier breath, a bubble accent not a row", () => {
     // Arrange — the `text` pulse breathes a bubble, it is not a tail row.
     const row = tailStatusRow(false, false, { kind: "text", blockId: "b1" });
@@ -3148,6 +3196,15 @@ describe("tailLineHtml (the shared indicator + turn-stats line)", () => {
     const html = tailLineHtml(lineState(), { kind: "working" }, "5s") ?? "";
     // Assert — the indicator's markup precedes the stats' in source order.
     expect(html.indexOf("working-pending")).toBeLessThan(html.indexOf("turn-stats-live"));
+  });
+
+  it("seats a textless thinking beat in the bottom slot line, not just under the feed", () => {
+    // Arrange — a live textless thinking block routes its beat here now.
+    const html = tailLineHtml(lineState(), { kind: "thinking" }, "5s");
+    // Assert — the `thinking…` row rides the same tail line the working row does.
+    expect(html).toContain(`<div class="tail-line">`);
+    expect(html).toContain("thinking-pending");
+    expect(html).toContain("turn-stats-live");
   });
 
   it("shows the stats alone on the line when a streaming bubble carries the beat", () => {
