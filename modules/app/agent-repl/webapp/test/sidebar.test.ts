@@ -101,6 +101,13 @@ describe("validateWorkspaceRoster", () => {
     expect(() => validateWorkspaceRoster(r)).toThrow(/unknown status "exploded"/);
   });
 
+  it("accepts the inactive status a perspective-less row carries", () => {
+    // Arrange
+    const r = roster({ repos: [group({ rows: [row({ status: "inactive" })] })] });
+    // Act + Assert
+    expect(() => validateWorkspaceRoster(r)).not.toThrow();
+  });
+
   it("throws on an unknown status buried in a child row", () => {
     // Arrange
     const child = row({ dir: "/tmp/kid", status: "exploded" as never });
@@ -198,6 +205,16 @@ describe("statusDotHtml", () => {
   it("keys a none dot to the invisible placeholder class", () => {
     // Arrange + Act + Assert
     expect(statusDotHtml("none")).toContain(`class="st st-none"`);
+  });
+
+  it("keys an inactive dot to its own question-mark class", () => {
+    // Arrange + Act + Assert — the sidebar-but-not-tab-bar marker.
+    expect(statusDotHtml("inactive")).toContain(`class="st st-inactive"`);
+  });
+
+  it("carries the question-mark glyph on an inactive dot", () => {
+    // Arrange + Act + Assert — a perspective-less row shows ❓, not a disc.
+    expect(statusDotHtml("inactive")).toContain(">❓<");
   });
 
   it("carries the recycle glyph on a merging dot", () => {

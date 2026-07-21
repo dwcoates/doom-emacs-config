@@ -84,12 +84,22 @@ stay in sync.  Two states coarsen deliberately because the sidebar's
 dot palette draws no distinct visual for them: `:idle-async' rides the
 idle hollow ring (the topbar already carries the async signal), and
 `:stop-failed' rides the dead grey dot (both mean \"session needs
-attention, not running\").  \"done-viewed\" is absent here because it
-is not a render-status keyword — `agent-repl--sidebar-wire-status'
-derives it from `:done' + `:done-acked'.")
+attention, not running\").  \"done-viewed\" and \"inactive\" are absent
+here because neither is a render-status keyword —
+`agent-repl--sidebar-wire-status' derives \"done-viewed\" from `:done' +
+`:done-acked' and \"inactive\" from `agent-repl--ws-open-p'.")
 
 (defun agent-repl--sidebar-wire-status (name)
   "Return the wire status string for known workspace NAME.
+\"inactive\" when NAME has no open perspective (`agent-repl--ws-open-p'
+nil): a workspace registered in the roster but absent from the tab-bar
+has no live session whose lifecycle a status dot could report, so the
+webapp draws a question mark in place of the dot.  This
+perspective-membership check dominates every render state — a merged,
+dead, or idle registration that is perspective-less still serializes
+\"inactive\" — because being in the sidebar yet not the tab-bar is the
+fact the row is conveying.
+
 \"done-viewed\" when the :done state has been acked (`:done-acked' —
 the same viewed semantics the tab-bar renders); \"none\" when
 `agent-repl--ws-render-status' reports nil (tombstoned / unborn).
@@ -97,13 +107,15 @@ Signals on an unmapped keyword: a render state missing from
 `agent-repl--sidebar-status-wire' means a new state was added without
 extending the sidebar contract — a violated invariant, never a silent
 default dot."
-  (let ((kw (agent-repl--ws-render-status name)))
-    (cond
-     ((null kw) "none")
-     ((and (eq kw :done) (agent-repl--ws-get name :done-acked)) "done-viewed")
-     (t (or (alist-get kw agent-repl--sidebar-status-wire)
-            (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
-                   kw name))))))
+  (if (not (agent-repl--ws-open-p name))
+      "inactive"
+    (let ((kw (agent-repl--ws-render-status name)))
+      (cond
+       ((null kw) "none")
+       ((and (eq kw :done) (agent-repl--ws-get name :done-acked)) "done-viewed")
+       (t (or (alist-get kw agent-repl--sidebar-status-wire)
+              (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
+                     kw name)))))))
 
 (defun agent-repl--sidebar-closed-p (name)
   "Return non-nil when live workspace NAME renders greyed (closed).

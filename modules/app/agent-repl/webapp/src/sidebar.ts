@@ -27,7 +27,11 @@ export type WorkspaceStatus =
   | "merge-conflict"
   | "merge-failed"
   | "merged"
-  | "none";
+  | "none"
+  // A registered workspace with no open perspective: it shows in the sidebar
+  // roster but not the tab-bar. No live session backs it, so it carries a
+  // question mark rather than a lifecycle dot (see `statusDotHtml`).
+  | "inactive";
 
 /** Every status the roster may carry; anything else is a contract breach. */
 const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
@@ -44,6 +48,7 @@ const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "merge-failed",
   "merged",
   "none",
+  "inactive",
 ]);
 
 /** The statuses whose dot is the recycle glyph rather than a disc.
@@ -224,6 +229,11 @@ export function formatRecency(lastViewedAt: number | null, nowMs: number): strin
 export function statusDotHtml(status: WorkspaceStatus, monitoring = false): string {
   if (monitoring && MONITORABLE_STATUSES.has(status)) {
     return `<span class="st st-monitoring" title="monitoring"></span>`;
+  }
+  // A perspective-less workspace (in the sidebar, not the tab-bar) has no live
+  // session whose status a disc could report, so it shows a question mark.
+  if (status === "inactive") {
+    return `<span class="st st-inactive" title="inactive">❓</span>`;
   }
   const glyph = MERGE_GLYPH_STATUSES.has(status) ? "⟳" : "";
   return `<span class="st st-${status}" title="${status}">${glyph}</span>`;
