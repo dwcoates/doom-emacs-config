@@ -23,6 +23,13 @@
      dark theme deepens it, since a faint shadow all but vanishes on a dark
      ground. */
   --sidebar-shadow: 0 2px 12px color-mix(in srgb, #000000 14%, transparent);
+  /* The subtle depth under a response/prompt bubble (.bubble): a soft drop
+     shadow far fainter than the sidebar's floating dock (--sidebar-shadow) —
+     a hint of lift, not a detached overlay — paired with an inset top-edge
+     highlight so the bubble reads as a gently raised, top-lit surface rather
+     than a flat fill. The black stays well under the sidebar's, and the light
+     theme carries the highlight brighter, so the effect is a quiet 3D hint. */
+  --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 7%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent);
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -180,6 +187,12 @@
        nothing against the dark feed, so the rail's lift needs a heavier black
        to still register. */
     --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
+    /* Deeper than the light theme's bubble shadow: a faint shadow all but
+       vanishes on the dark feed, so the lift needs more black to still read.
+       The inset top highlight drops to a whisper of white, since a bright edge
+       would glow rather than hint at depth on the dark washes. Still kept well
+       under the dark sidebar's black, so the bubble stays the subtler lift. */
+    --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -828,6 +841,13 @@ pre {
   padding: 0.6rem 0.9rem;
   border-radius: 8px;
   border: 0.3px solid transparent;
+  /* A quiet hint of depth: a soft drop shadow lifts the bubble off the feed
+     while an inset top-edge highlight catches light, so a prompt or response
+     reads as a gently raised, top-lit card rather than a flat fill. The token
+     stays far subtler than the sidebar's floating-dock lift (see
+     --bubble-shadow). box-shadow is untouched by the .bubble.pulsing breath
+     (it animates background only), so the depth holds while a bubble breathes. */
+  box-shadow: var(--bubble-shadow);
   display: flex;
   align-items: flex-start;
   gap: 0.9rem;

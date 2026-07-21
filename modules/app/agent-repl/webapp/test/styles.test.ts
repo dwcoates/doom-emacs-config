@@ -298,6 +298,73 @@ describe("sidebar overlay (floating dock)", () => {
   });
 });
 
+describe("bubble depth shading", () => {
+  const bubbleRule = blockAfter(css, "\n.bubble {");
+  /** The black-mix opacity percentage of a shadow token's drop-shadow layer. */
+  const shadowPct = (block: string, name: string): number => {
+    const m = cssVar(block, name).match(/#000000\s+(\d+)%/);
+    if (m === null) throw new Error(`${name} is not a #000000 color-mix`);
+    return Number(m[1]);
+  };
+
+  it("lifts every bubble off the feed with the --bubble-shadow depth token", () => {
+    // Arrange / Act — the shared .bubble rule, so prompt and response alike lift.
+    // Assert
+    expect(bubbleRule).toMatch(/box-shadow:\s*var\(--bubble-shadow\)/);
+  });
+
+  it("defines a bubble depth token for the light theme", () => {
+    // Arrange / Act — a shadow needs at least one length (offset/blur).
+    // Assert
+    expect(cssVar(lightTheme, "--bubble-shadow")).toMatch(/px/);
+  });
+
+  it("defines a bubble depth token for the dark theme", () => {
+    // Arrange / Act — the dark-scheme override carries its own bubble shadow.
+    // Assert
+    expect(cssVar(darkTheme, "--bubble-shadow")).toMatch(/px/);
+  });
+
+  it("keeps the light-theme bubble lift more subtle than the sidebar dock's", () => {
+    // Arrange — the bubble is a hint of depth, not a detached overlay, so its
+    // drop shadow carries less black than the sidebar's floating dock.
+    // Act / Assert
+    expect(shadowPct(lightTheme, "--bubble-shadow")).toBeLessThan(
+      shadowPct(lightTheme, "--sidebar-shadow"),
+    );
+  });
+
+  it("keeps the dark-theme bubble lift more subtle than the sidebar dock's", () => {
+    // Arrange — the same subtler-than-sidebar contract holds on the dark feed.
+    // Act / Assert
+    expect(shadowPct(darkTheme, "--bubble-shadow")).toBeLessThan(
+      shadowPct(darkTheme, "--sidebar-shadow"),
+    );
+  });
+
+  it("deepens the dark-theme bubble shadow so the lift registers on the dark feed", () => {
+    // Arrange / Act — a faint shadow vanishes on the dark ground, so dark carries
+    // more black than light, mirroring the sidebar's own theme split.
+    // Assert
+    expect(shadowPct(darkTheme, "--bubble-shadow")).toBeGreaterThan(
+      shadowPct(lightTheme, "--bubble-shadow"),
+    );
+  });
+
+  it("catches light on the light-theme bubble's top edge with an inset highlight", () => {
+    // Arrange / Act — the inset top-edge highlight is the "3D shading" itself:
+    // a raised, top-lit surface rather than just a floating card.
+    // Assert — an inset layer offset down the top edge only.
+    expect(cssVar(lightTheme, "--bubble-shadow")).toMatch(/inset\s+0\s+1px\s+0/);
+  });
+
+  it("catches light on the dark-theme bubble's top edge with an inset highlight", () => {
+    // Arrange / Act — the dark theme keeps the same top-lit read, just quieter.
+    // Assert
+    expect(cssVar(darkTheme, "--bubble-shadow")).toMatch(/inset\s+0\s+1px\s+0/);
+  });
+});
+
 describe("sidebar merge glyph on-axis spin", () => {
   // The merge-family recycle glyph (`⟳`) spun by ws-spin: its ink sits
   // off-center in its line box, so it must be centered inside a fixed square
