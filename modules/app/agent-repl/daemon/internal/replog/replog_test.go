@@ -1,6 +1,7 @@
 package replog
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,152 @@ func TestOpenDisambiguatesASameStampRotation(t *testing.T) {
 	}
 	if string(data) != "newer\n" {
 		t.Fatalf("disambiguated backup content = %q, want the newer run's bytes", data)
+	}
+}
+
+func TestCappedWriterWritesBelowCapWithoutRotating(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	f, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	w := NewCappedWriter(dir, f, 100)
+	// Act
+	if _, err := w.Write([]byte("hello\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	// Assert — no backup created, content lands in the (only) current file.
+	if got := backups(t, dir); len(got) != 0 {
+		t.Fatalf("backups = %v, want none below the cap", got)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello\n" {
+		t.Fatalf("current log content = %q, want %q", data, "hello\n")
+	}
+}
+
+func TestCappedWriterRotatesAtCapBoundary(t *testing.T) {
+	// Arrange — a tiny cap that the first write already exceeds, but the
+	// second write (post-rotation) stays under, so exactly one rotation
+	// happens.
+	dir := t.TempDir()
+	f, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	w := NewCappedWriter(dir, f, 8)
+	// Act
+	preRotation := []byte("123456789\n")
+	if _, err := w.Write(preRotation); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	postRotation := []byte("ok\n")
+	if _, err := w.Write(postRotation); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Assert — exactly one backup, holding the pre-rotation bytes.
+	got := backups(t, dir)
+	if len(got) != 1 {
+		t.Fatalf("backups = %v, want exactly one", got)
+	}
+	backupData, err := os.ReadFile(filepath.Join(dir, got[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backupData) != string(preRotation) {
+		t.Fatalf("backup content = %q, want the pre-rotation bytes %q", backupData, preRotation)
+	}
+	// Assert — the new current file holds the post-rotation bytes plus
+	// the mid-run rotation note, not the pre-rotation bytes.
+	currentData, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(currentData), "123456789") {
+		t.Fatalf("current log %q must not contain pre-rotation bytes", currentData)
+	}
+	if !strings.Contains(string(currentData), "ok\n") {
+		t.Fatalf("current log %q missing post-rotation bytes", currentData)
+	}
+	if !strings.Contains(string(currentData), "mid-run rotation") {
+		t.Fatalf("current log %q missing the mid-run rotation note", currentData)
+	}
+}
+
+func TestCappedWriterMidRunRotationPrunesBackups(t *testing.T) {
+	// Arrange — KeepBackups existing backups plus a fresh current file
+	// whose cap the first write already exceeds, so the mid-run rotation
+	// itself must push the backup count over KeepBackups and prune.
+	dir := t.TempDir()
+	for i, stamp := range []string{
+		"20260701-000000", "20260702-000000", "20260703-000000",
+		"20260704-000000", "20260705-000000",
+	} {
+		name := filepath.Join(dir, fmt.Sprintf("%s.%s", FileName, stamp))
+		if err := os.WriteFile(name, []byte(fmt.Sprintf("backup %d", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(backups(t, dir)) != KeepBackups {
+		t.Fatalf("setup: want %d pre-existing backups", KeepBackups)
+	}
+	f, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	w := NewCappedWriter(dir, f, 5)
+	// Act
+	if _, err := w.Write([]byte("over the cap\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Assert — still bounded at KeepBackups, oldest pruned first.
+	got := backups(t, dir)
+	if len(got) != KeepBackups {
+		t.Fatalf("backups = %v (%d), want %d", got, len(got), KeepBackups)
+	}
+	for _, name := range got {
+		if strings.Contains(name, "20260701") {
+			t.Fatalf("oldest backup %s should have been pruned, got %v", name, got)
+		}
+	}
+}
+
+func TestCappedWriterResetsCountAfterRotation(t *testing.T) {
+	// Arrange — cap high enough that only the SECOND write should trip
+	// it once the first write's bytes are counted.
+	dir := t.TempDir()
+	f, _, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	w := NewCappedWriter(dir, f, 10)
+	// Act — first write (8 bytes) stays under the cap.
+	if _, err := w.Write([]byte("12345678")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := backups(t, dir); len(got) != 0 {
+		t.Fatalf("backups after first write = %v, want none yet", got)
+	}
+	// Second write (8 more bytes) crosses the cap (16 >= 10).
+	if _, err := w.Write([]byte("87654321")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Assert — exactly one rotation happened, not two.
+	if got := backups(t, dir); len(got) != 1 {
+		t.Fatalf("backups = %v, want exactly one rotation", got)
 	}
 }
 
