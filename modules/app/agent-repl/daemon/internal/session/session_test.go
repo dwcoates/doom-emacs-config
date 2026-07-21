@@ -2259,3 +2259,175 @@ func TestSendToDetachedClientLogsTheSkip(t *testing.T) {
 		t.Fatalf("skip log lines = %v, want exactly one", got)
 	}
 }
+
+// --- queue lifecycle / classify / summarize dispatch logging ----------------
+
+// newLoggedClassifyHarness is newClassifyHarness with Logf captured for
+// assertions.
+func newLoggedClassifyHarness(t *testing.T, fn classifyFn) (*harness, *logCapture) {
+	t.Helper()
+	lc := &logCapture{}
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     64,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          lc.logf,
+		ClassifyFn:    fn,
+	})
+	go sess.Run()
+	cleanupSession(t, shim, sess)
+	return &harness{shim: shim, sess: sess}, lc
+}
+
+// newLoggedSummaryHarness is newSummaryHarness with Logf captured for
+// assertions.
+func newLoggedSummaryHarness(t *testing.T, fn summarizeFn) (*harness, *logCapture) {
+	t.Helper()
+	lc := &logCapture{}
+	shim := newFakeShim()
+	sess := New(Config{
+		ID:            "sess-1",
+		DaemonVersion: "0.1.0-test",
+		Shim:          shim,
+		Retention:     64,
+		Now:           func() time.Time { return time.Date(2026, 5, 24, 12, 34, 56, 789e6, time.UTC) },
+		Logf:          lc.logf,
+		SummarizeFn:   fn,
+	})
+	go sess.Run()
+	cleanupSession(t, shim, sess)
+	return &harness{shim: shim, sess: sess}, lc
+}
+
+func TestEnqueueLogsFailClosedPathWhenClassificationDisabled(t *testing.T) {
+	// Arrange — classifyFn nil (classification disabled): a busy submit
+	// must take the fail-closed-wait path, not the classifying path.
+	h, lc := newLoggedHarness(t, 64)
+	c := startTurn(t, h)
+	// Act
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"rB","content":"second"}`)); err != nil {
+		t.Fatalf("busy submit: %v", err)
+	}
+	added := waitForFrameType(t, c, "queue-added")
+	qid := added["queue_id"].(string)
+	// Assert
+	got := lc.containing(fmt.Sprintf("queue-add %s: path=fail-closed-wait", qid))
+	if len(got) != 1 {
+		t.Fatalf("queue-add log lines = %v, want exactly one", got)
+	}
+}
+
+func TestEnqueueLogsClassifyingPathWhenClassifierEnabled(t *testing.T) {
+	// Arrange — a live classifyFn: a busy submit must take the classifying
+	// path, not the fail-closed-wait path.
+	g := newGatedClassifier()
+	h, lc := newLoggedClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	// Act
+	qid := enqueueBusy(t, h, c, g, "rB", "second")
+	// Assert
+	got := lc.containing(fmt.Sprintf("queue-add %s: path=classifying", qid))
+	if len(got) != 1 {
+		t.Fatalf("queue-add log lines = %v, want exactly one", got)
+	}
+	g.release(classifierVerdict{verdict: "wait", reason: "r", source: "classifier"})
+	waitForFrameType(t, c, "queue-classified")
+}
+
+func TestClassifyDispatchLogsQueueIDAndRunningTask(t *testing.T) {
+	// Arrange — the async classify goroutine's kickoff must be attributable
+	// to the queue item it classifies and the running task it is judged
+	// against.
+	g := newGatedClassifier()
+	h, lc := newLoggedClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	// Act
+	qid := enqueueBusy(t, h, c, g, "rB", "second")
+	// Assert
+	got := lc.containing(fmt.Sprintf("classify dispatch %s: action=classify queued message, running task=first task", qid))
+	if len(got) != 1 {
+		t.Fatalf("classify dispatch log lines = %v, want exactly one", got)
+	}
+	g.release(classifierVerdict{verdict: "wait", reason: "r", source: "classifier"})
+	waitForFrameType(t, c, "queue-classified")
+}
+
+func TestApplyVerdictLogsVerdictSourceAndReason(t *testing.T) {
+	// Arrange — a verdict's application/broadcast must be attributable to
+	// its queue item and carry the verdict, source, and reason.
+	g := newGatedClassifier()
+	h, lc := newLoggedClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueBusy(t, h, c, g, "rB", "second")
+	// Act
+	g.release(classifierVerdict{verdict: "interrupt", reason: "countermands the running task", source: "classifier"})
+	waitForFrameType(t, c, "queue-classified")
+	// Assert
+	got := lc.containing(fmt.Sprintf(
+		"queue-classified %s: verdict=interrupt source=classifier reason=\"countermands the running task\"", qid))
+	if len(got) != 1 {
+		t.Fatalf("queue-classified log lines = %v, want exactly one", got)
+	}
+}
+
+func TestDrainQueueLogsPromotedRequestID(t *testing.T) {
+	// Arrange — a queued item behind a running turn.
+	g := newGatedClassifier()
+	h, lc := newLoggedClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	qid := enqueueWait(t, h, c, g, "rB", "second")
+	// Act — the running turn ends; the front item drains onto the shim.
+	pushResult(t, h)
+	waitForFrameType(t, c, "user-turn")
+	// Assert
+	got := lc.containing(fmt.Sprintf("queue-drain %s: promoted to live turn (request_id=rB)", qid))
+	if len(got) != 1 {
+		t.Fatalf("queue-drain log lines = %v, want exactly one", got)
+	}
+}
+
+func TestClearQueueLogsReasonAndDroppedCount(t *testing.T) {
+	// Arrange — two items parked behind a running turn.
+	g := newGatedClassifier()
+	h, lc := newLoggedClassifyHarness(t, g.fn)
+	c := startTurn(t, h)
+	enqueueWait(t, h, c, g, "rB", "second")
+	enqueueWait(t, h, c, g, "rC", "third")
+	// Act — a user interrupt clears the whole queue at once.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"interrupt","request_id":"x"}`)); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	waitForFrameType(t, c, "queue-removed")
+	// Assert
+	got := lc.containing("queue-clear reason=interrupted dropped=2")
+	if len(got) != 1 {
+		t.Fatalf("queue-clear log lines = %v, want exactly one", got)
+	}
+}
+
+func TestSummarizeDispatchLogsEpochAndPrompt(t *testing.T) {
+	// Arrange — an injected summarizer; the SESSION-side dispatch log (not
+	// the subprocess-side call log summarize.go already writes) must be
+	// attributable to the epoch and the driving prompt.
+	h, lc := newLoggedSummaryHarness(t, func(string, string) string { return "Objective X." })
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act — a full turn: prompt, streamed answer, result.
+	if err := h.sess.HandleClientFrame(c, []byte(`{"type":"user-message","request_id":"r1","content":"build the thing"}`)); err != nil {
+		t.Fatalf("HandleClientFrame: %v", err)
+	}
+	recvSent(t, h.shim)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`)
+	h.shim.pushEvent(t, `{"type":"stream-event","session_id":"sess-1","uuid":"u","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"building the widget"}}}`)
+	h.shim.pushEvent(t, `{"type":"result","session_id":"sess-1","uuid":"u2","subtype":"success","duration_ms":1,"num_turns":1}`)
+	recvFrameOfType(t, c, "task-summary")
+	// Assert
+	got := lc.containing("summarize dispatch epoch=1: action=summarize completed turn, prompt=build the thing")
+	if len(got) != 1 {
+		t.Fatalf("summarize dispatch log lines = %v, want exactly one", got)
+	}
+}

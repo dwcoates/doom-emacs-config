@@ -562,6 +562,9 @@ func (s *Session) Run() {
 		// here.
 		if summarizeTurn && !s.terminal {
 			s.summaryEpoch++
+			dlog.Tag(s.logf, "cwd", s.translator.CWD)(
+				"session %s: summarize dispatch epoch=%d: action=summarize completed turn, prompt=%s",
+				s.ID, s.summaryEpoch, dlog.Clamp(summaryPrompt, 200))
 			go s.summarize(s.summaryEpoch, summaryPrompt, summaryResponses)
 		}
 		s.notifyRegistrarLocked()
@@ -1000,18 +1003,23 @@ func (s *Session) enqueueLocked(cmd *protocol.L1Command, raw []byte) error {
 		Content:   item.content,
 		Status:    "classifying",
 	}})
+	tagged := dlog.Tag(s.logf, "cwd", s.translator.CWD)
 	if s.classifyFn == nil {
 		// Classification disabled: an immediate defaulted wait, no spawn.
 		// Source "fallback" marks it as a default rather than a model
 		// verdict, the same way a classifier failure is marked.
+		tagged("session %s: queue-add %s: path=fail-closed-wait (classification disabled)", s.ID, item.queueID)
 		return s.applyVerdictLocked(item.queueID, classifierVerdict{
 			verdict: "wait",
 			reason:  "classification disabled; message parked to run after the current turn",
 			source:  "fallback",
 		})
 	}
+	tagged("session %s: queue-add %s: path=classifying", s.ID, item.queueID)
 	// The classifier runs OFF the lock (it may spawn a subprocess); it
 	// captures the running-task text as it stands now.
+	tagged("session %s: classify dispatch %s: action=classify queued message, running task=%s",
+		s.ID, item.queueID, dlog.Clamp(s.activeTurnText, 200))
 	go s.classify(item.queueID, s.activeTurnText, commandText(item.content))
 	return nil
 }
@@ -1069,6 +1077,8 @@ func (s *Session) applyVerdictLocked(queueID string, v classifierVerdict) error 
 	} else {
 		item.status = "waiting"
 	}
+	dlog.Tag(s.logf, "cwd", s.translator.CWD)(
+		"session %s: queue-classified %s: verdict=%s source=%s reason=%q", s.ID, queueID, v.verdict, v.source, v.reason)
 	s.broadcastLocked([]protocol.L2Frame{&protocol.QueueClassifiedFrame{
 		Envelope: protocol.Envelope{Type: "queue-classified"},
 		QueueID:  queueID,
@@ -1129,6 +1139,8 @@ func (s *Session) drainQueueLocked() error {
 		return nil
 	}
 	item := s.queue.popFront()
+	dlog.Tag(s.logf, "cwd", s.translator.CWD)(
+		"session %s: queue-drain %s: promoted to live turn (request_id=%s)", s.ID, item.queueID, item.cmd.RequestID)
 	s.activeTurnText = commandText(item.content)
 	s.activeTurnRequestID = item.cmd.RequestID
 	// OnUserMessageCmd broadcasts the item's user-turn and sets turnActive.
@@ -1145,7 +1157,10 @@ func (s *Session) drainQueueLocked() error {
 // clearQueueLocked drops every queued item with queue-removed(reason),
 // front-to-back (session-end teardown and user interrupt).
 func (s *Session) clearQueueLocked(reason string) {
-	for _, item := range s.queue.drainAll() {
+	items := s.queue.drainAll()
+	dlog.Tag(s.logf, "cwd", s.translator.CWD)(
+		"session %s: queue-clear reason=%s dropped=%d", s.ID, reason, len(items))
+	for _, item := range items {
 		s.broadcastLocked([]protocol.L2Frame{&protocol.QueueRemovedFrame{
 			Envelope: protocol.Envelope{Type: "queue-removed"},
 			QueueID:  item.queueID,
