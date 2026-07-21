@@ -47,6 +47,9 @@ const transcriptTailBytes = 32768
 
 // LastTranscriptModel returns the model of the last MAIN-CHAIN assistant
 // message in the transcript at PATH, or "" when the tail holds none.
+// SKIPPED counts the malformed lines the scan discarded, so a caller can
+// tell "no model in a clean tail" apart from "no model because the tail
+// was corrupt".
 //
 // Main-chain only: a sidechain entry is a subagent's message and names
 // the SUBAGENT's model (a Haiku Explore under an Opus session), so
@@ -56,10 +59,10 @@ const transcriptTailBytes = 32768
 // -only and its final line can be a half-flushed write.
 // Named returns are load-bearing: they are what lets the deferred Close
 // actually SURFACE a close failure instead of dropping it on the floor.
-func LastTranscriptModel(path string) (model string, err error) {
+func LastTranscriptModel(path string) (model string, skipped int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer func() {
 		cerr := f.Close()
@@ -76,15 +79,15 @@ func LastTranscriptModel(path string) (model string, err error) {
 
 	info, err := f.Stat()
 	if err != nil {
-		return "", fmt.Errorf("stat transcript %s: %w", path, err)
+		return "", 0, fmt.Errorf("stat transcript %s: %w", path, err)
 	}
 	offset := max(info.Size()-transcriptTailBytes, 0)
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return "", fmt.Errorf("seek transcript %s: %w", path, err)
+		return "", 0, fmt.Errorf("seek transcript %s: %w", path, err)
 	}
 	tail, err := io.ReadAll(f)
 	if err != nil {
-		return "", fmt.Errorf("read transcript %s: %w", path, err)
+		return "", 0, fmt.Errorf("read transcript %s: %w", path, err)
 	}
 	// A non-zero offset almost certainly lands mid-line; that first
 	// fragment is not a JSON object and must not be parsed as one.
@@ -95,18 +98,23 @@ func LastTranscriptModel(path string) (model string, err error) {
 			tail = nil
 		}
 	}
-	return lastAssistantModel(tail), nil
+	model, skipped = lastAssistantModel(tail)
+	return model, skipped, nil
 }
 
 // lastAssistantModel scans NDJSON transcript lines and returns the model
-// of the last main-chain assistant entry.
-func lastAssistantModel(tail []byte) string {
-	model := ""
+// of the last main-chain assistant entry. SKIPPED counts lines discarded
+// for being malformed JSON — either the outer entry or its embedded
+// message payload — as opposed to lines that parsed fine but were simply
+// not a main-chain assistant entry (those are a normal, expected shape,
+// not corruption).
+func lastAssistantModel(tail []byte) (model string, skipped int) {
 	scanner := bufio.NewScanner(bytes.NewReader(tail))
 	scanner.Buffer(make([]byte, 0, 64*1024), transcriptTailBytes)
 	for scanner.Scan() {
 		var entry transcriptEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			skipped++
 			continue
 		}
 		if entry.Type != "assistant" || entry.IsSidechain || entry.IsMeta {
@@ -114,6 +122,7 @@ func lastAssistantModel(tail []byte) string {
 		}
 		var meta transcriptAssistantMeta
 		if err := json.Unmarshal(entry.Message, &meta); err != nil {
+			skipped++
 			continue
 		}
 		// A locally synthesized entry names the CLI's placeholder, not a
@@ -123,7 +132,7 @@ func lastAssistantModel(tail []byte) string {
 			model = meta.Model
 		}
 	}
-	return model
+	return model, skipped
 }
 
 // ReconcileModel re-derives the session's model from its transcript and
@@ -143,13 +152,21 @@ func (s *Session) ReconcileModel() {
 		s.translator.CWD,
 		s.translator.ClaudeSessionID,
 	)
-	model, err := LastTranscriptModel(path)
+	model, skipped, err := LastTranscriptModel(path)
 	if err != nil {
 		// Never swallowed: a transcript the daemon cannot read is a
 		// reconciler that cannot do its job, and the session is running
 		// without its safety net until this is fixed.
 		s.logf("session %s: model reconcile could not read %s: %v", s.ID, path, err)
 		return
+	}
+	if skipped > 0 && model == "" {
+		// Skipped lines alone are unremarkable (an append-only file's tail
+		// can be mid-write on every tick); this only logs when corruption
+		// actually cost the reconciler its answer, so a healthy session
+		// still pays no per-tick log spam.
+		s.logf("session %s: model reconcile skipped %d malformed line(s) in %s (cwd %s) and found no model — drift correction blocked",
+			s.ID, skipped, path, s.translator.CWD)
 	}
 	was := s.translator.Model
 	frame := s.translator.SetModel(model, "reconcile")
