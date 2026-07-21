@@ -14,6 +14,8 @@
  * have both failed.
  */
 
+import { log } from "./wslog.js";
+
 /** What a rebind needs to re-create the conversation's session. */
 export interface ResumeKeys {
   claudeSessionId: string;
@@ -35,18 +37,31 @@ export function rememberResumeKeys(storage: Storage, sessionId: string, keys: Re
 /** Recall sessionId's resume keys; null when absent or unusable. */
 export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKeys | null {
   const raw = storage.getItem(KEY_PREFIX + sessionId);
-  if (raw === null) return null;
+  if (raw === null) {
+    // Normal/expected: nothing was ever stored for this id (or it was
+    // never a resumable session). The caller escalates straight to
+    // remediation — this is just a breadcrumb for WHY.
+    log("info", `rebind: no resume record for ${sessionId} — nothing to rebind with`);
+    return null;
+  }
   let parsed: Partial<ResumeKeys>;
   try {
     parsed = JSON.parse(raw) as Partial<ResumeKeys>;
   } catch (err) {
     // Unusable is as good as absent for the recovery path, but never
-    // silent: a corrupt record means something wrote garbage here.
-    console.error(`corrupt resume record for ${sessionId}`, err);
+    // silent: a corrupt record means something wrote garbage here, and
+    // that garbage now blocks rebind for sessionId.
+    log(
+      "error",
+      `rebind: corrupt resume record for ${sessionId} (${String(err)}) — falling through to remediation`,
+    );
     return null;
   }
   if (typeof parsed.claudeSessionId !== "string" || parsed.claudeSessionId === "") {
-    console.error(`resume record for ${sessionId} lacks claudeSessionId`, parsed);
+    log(
+      "error",
+      `rebind: resume record for ${sessionId} lacks claudeSessionId (parsed=${JSON.stringify(parsed)}) — falling through to remediation`,
+    );
     return null;
   }
   return {
