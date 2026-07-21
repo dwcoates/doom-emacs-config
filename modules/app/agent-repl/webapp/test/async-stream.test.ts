@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   classifyAsyncSource,
   parseJournal,
@@ -7,6 +7,7 @@ import {
   transcriptStatsCached,
 } from "../src/async-stream.js";
 import { TextItem, ToolItem } from "../src/store.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 
 /** One JSONL line of a subagent transcript. */
 function line(o: unknown): string {
@@ -190,6 +191,47 @@ describe("parseJournal", () => {
     const { rows } = parseJournal(raw);
     // Assert
     expect(rows).toEqual([]);
+  });
+});
+
+describe("jsonlObjects interior-skip logging (via parseJournal)", () => {
+  function spyLines(): string[] {
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, l) => lines.push(`${level}: ${l}`)));
+    return lines;
+  }
+  afterEach(() => resetLoggingForTests());
+
+  it("logs a summary when an interior line fails to parse", () => {
+    // Arrange — a corrupt line between two valid ones is not explained by
+    // a truncated head or tail.
+    const lines = spyLines();
+    const raw = [line({ label: "a" }), "{not json", line({ label: "b" })].join("\n");
+    // Act
+    parseJournal(raw);
+    // Assert
+    expect(lines.some((l) => l.startsWith("warn:") && l.includes("interior"))).toBe(true);
+  });
+
+  it("stays silent when only the edge lines are truncated", () => {
+    // Arrange — head and tail truncation is the normal tail-read case.
+    const lines = spyLines();
+    const raw = ["{trunc head", line({ label: "a" }), "trunc tail"].join("\n");
+    // Act
+    parseJournal(raw);
+    // Assert
+    expect(lines).toEqual([]);
+  });
+
+  it("dedups the summary across repeated calls with the same shape", () => {
+    // Arrange
+    const lines = spyLines();
+    const raw = [line({ label: "a" }), "{not json", line({ label: "b" })].join("\n");
+    // Act
+    parseJournal(raw);
+    parseJournal(raw);
+    // Assert — one summary, not one per call (hot poll path).
+    expect(lines.filter((l) => l.includes("interior"))).toHaveLength(1);
   });
 });
 
