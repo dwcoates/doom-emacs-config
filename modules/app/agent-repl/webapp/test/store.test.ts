@@ -444,7 +444,7 @@ describe("ConversationStore tool cards", () => {
       frame("tool-use-result", {
         tool_use_id: "t1",
         is_error: false,
-        content: "Command running in background with ID: bg1",
+        content: "Command running in background with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output",
       }),
     );
     // Act — the notification's tag names a call the feed never saw.

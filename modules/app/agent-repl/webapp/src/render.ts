@@ -26,7 +26,7 @@ import {
   sectionsIn,
 } from "./expand.js";
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
-import { partitionFeed, spawnedTaskIds } from "./partition.js";
+import { partitionFeed } from "./partition.js";
 import {
   mayNest,
   mergeChildren,
@@ -57,7 +57,7 @@ import { navTokensForItem } from "./nav.js";
 import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
 import { gnsFolds } from "./gns.js";
-import { asyncByBubble, isWatcher } from "./watchers.js";
+import { asyncByBubble, isWatcher, watcherRef } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   CompactBoundaryItem,
@@ -1178,10 +1178,10 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
   });
 }
 
-/** A member's badge label: its tool name and first announced id, capped. */
+/** A member's badge label: its tool name and its one watcher id, capped. */
 function asyncBadgeLabel(item: ToolItem): string {
-  const ids = spawnedTaskIds(item);
-  const label = ids.length > 0 ? `${item.toolName} · ${ids[0]}` : item.toolName;
+  const ref = watcherRef(item);
+  const label = ref !== null ? `${item.toolName} · ${ref.id}` : item.toolName;
   return capLabel(label, 24);
 }
 

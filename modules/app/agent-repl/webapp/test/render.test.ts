@@ -4525,7 +4525,7 @@ describe("task stop control", () => {
       inputJson: "{}",
       input: { command: "make", run_in_background: true },
       inputDone: true,
-      result: { isError: false, content: "Command running in background with ID: bg7." },
+      result: { isError: false, content: "Command running in background with ID: bg7. Output is being written to: /tmp/claude-1/s/tasks/bg7.output" },
       ...(notified
         ? { notification: { taskId: "bg7", status: "completed", text: "<task-notification/>" } }
         : {}),
@@ -4563,7 +4563,8 @@ describe("task stop control", () => {
       ...bgSpawn(),
       result: {
         isError: false,
-        content: "Running with ID: bg7. Also running with ID: bg8.",
+        content:
+          "Running with ID: bg7. Output is being written to: /tmp/claude-1/s/tasks/bg7.output. Also running with ID: bg8. Output is being written to: /tmp/claude-1/s/tasks/bg8.output",
       },
     };
     // Act
@@ -4621,7 +4622,7 @@ describe("dual-body stacking (Shape A)", () => {
       inputJson: "{}",
       input: { description: "spawner" },
       inputDone: true,
-      result: { isError: false, content: "Command running in background with ID: bg1" },
+      result: { isError: false, content: "Command running in background with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output" },
       asyncSource: { source_id: "bg1", kind: "shell", status: "running" },
     };
     const child: ToolItem = { ...item, toolUseId: "c1", toolName: "Read", result: undefined, asyncSource: undefined };
@@ -4720,7 +4721,7 @@ describe("agent message composer", () => {
       inputDone: true,
       result: {
         isError: false,
-        content: "Async agent launched successfully. agentId: abc9 (internal ID)",
+        content: "Async agent launched successfully. agentId: abc9, output_file: /tmp/claude-1/s/tasks/abc9.output",
       },
       ...(notified
         ? { notification: { taskId: "abc9", status: "completed", text: "<task-notification/>" } }
@@ -4896,7 +4897,7 @@ describe("async fold", () => {
         type: "user",
         message: {
           id: "m7",
-          content: [{ type: "tool_result", tool_use_id: "ag1", content: `Async agent launched. agentId: ${announcedId}` }],
+          content: [{ type: "tool_result", tool_use_id: "ag1", content: `Async agent launched. agentId: ${announcedId}, output_file: /tmp/claude-1/s/tasks/${announcedId}.output` }],
         },
       }),
     ].join("\n");
@@ -5022,7 +5023,7 @@ function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
     inputJson: "{}",
     input: { command: "poll.sh" },
     inputDone: true,
-    result: { isError: false, content: `Command running in background with ID: ${taskId}.` },
+    result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
     ...over,
   };
 }
@@ -5193,7 +5194,7 @@ describe("async catalog", () => {
     // Arrange — a detached agent whose polled transcript meters 12,340 tokens.
     const agent = watcher("ag1", {
       toolName: "Agent",
-      result: { isError: false, content: "Async agent launched. agentId: ag1" },
+      result: { isError: false, content: "Async agent launched. agentId: ag1, output_file: /tmp/claude-1/s/tasks/ag1.output" },
       asyncSource: {
         source_id: "ag1",
         kind: "agent",

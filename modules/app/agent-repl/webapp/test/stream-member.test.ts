@@ -28,7 +28,10 @@ function ctx(opts: {
 }
 
 /** A spawning result announcing task id BG1. */
-const SPAWN_RESULT = { isError: false, content: "Command running in background with ID: bg1" };
+const SPAWN_RESULT = {
+  isError: false,
+  content: "Command running in background with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output",
+};
 
 function stopChild(taskId: string, ok: boolean): ToolItem {
   return tool({
@@ -161,7 +164,11 @@ describe("resolveMember", () => {
     const m = resolveMember(
       tool({
         toolName: "Workflow",
-        result: { isError: false, content: "Workflow running in background with ID: wf1" },
+        result: {
+          isError: false,
+          content:
+            "Workflow started. Task ID: wf1. Transcript dir: /cfg/projects/-s/subagents/workflows/wf1",
+        },
         asyncSource: {
           source_id: "wf1",
           kind: "workflow",
@@ -202,7 +209,10 @@ describe("resolveMember", () => {
     const m = resolveMember(
       tool({
         toolName: "Agent",
-        result: { isError: false, content: "Async agent launched. agentId: ag9" },
+        result: {
+          isError: false,
+          content: "Async agent launched. agentId: ag9, output_file: /tmp/claude-1/s/tasks/ag9.output",
+        },
       }),
       ctx({ tails: { ag9: { text: "{}", offset: 2, done: false, elapsedMs: 7 } } }),
     );

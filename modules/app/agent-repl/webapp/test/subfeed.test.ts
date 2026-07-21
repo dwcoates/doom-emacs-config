@@ -140,7 +140,7 @@ describe("effectiveAsyncSource", () => {
 
   it("synthesizes a poll transcript source for an Agent spawn", () => {
     // Act
-    const source = effectiveAsyncSource(spawnCard("Agent", "Async agent launched. agentId: a7"));
+    const source = effectiveAsyncSource(spawnCard("Agent", "Async agent launched. agentId: a7, output_file: /tmp/claude-1/s/tasks/a7.output"));
     // Assert
     expect(source).toMatchObject({
       source_id: "a7",
@@ -152,7 +152,7 @@ describe("effectiveAsyncSource", () => {
 
   it("synthesizes a journal source for a Workflow spawn", () => {
     // Act
-    const source = effectiveAsyncSource(spawnCard("Workflow", "Workflow started. Task ID: wf1"));
+    const source = effectiveAsyncSource(spawnCard("Workflow", "Workflow started. Task ID: wf1. Transcript dir: /cfg/projects/-s/subagents/workflows/wf1"));
     // Assert
     expect(source).toMatchObject({
       source_id: "wf1",
@@ -164,7 +164,7 @@ describe("effectiveAsyncSource", () => {
   it("synthesizes a raw text source for a backgrounded shell", () => {
     // Act
     const source = effectiveAsyncSource(
-      spawnCard("Bash", "Command running in background with ID: bg1"),
+      spawnCard("Bash", "Command running in background with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output"),
     );
     // Assert
     expect(source).toMatchObject({
@@ -181,14 +181,14 @@ describe("effectiveAsyncSource", () => {
 
   it("labels the synthetic source with the call's description", () => {
     // Arrange
-    const card = spawnCard("Agent", "agentId: a7", { input: { description: "watch the queue" } });
+    const card = spawnCard("Agent", "agentId: a7, output_file: /tmp/claude-1/s/tasks/a7.output", { input: { description: "watch the queue" } });
     // Act + Assert
     expect(effectiveAsyncSource(card)?.label).toBe("watch the queue");
   });
 
   it("settles the synthetic status once the completion notification lands", () => {
     // Arrange
-    const card = spawnCard("Bash", "with ID: bg1", {
+    const card = spawnCard("Bash", "with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output", {
       notification: { taskId: "bg1", text: "done" },
     });
     // Act + Assert
@@ -226,7 +226,7 @@ describe("openSubfeedSourceIds", () => {
         type: "user",
         message: {
           id: "m2",
-          content: [{ type: "tool_result", tool_use_id: toolUseId, content: `agentId: ${agentId}` }],
+          content: [{ type: "tool_result", tool_use_id: toolUseId, content: `agentId: ${agentId}, output_file: /tmp/claude-1/s/tasks/${agentId}.output` }],
         },
       }),
     ].join("\n");
@@ -234,7 +234,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("polls the source of an open async fold", () => {
     // Arrange / Act
-    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1")] });
+    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output")] });
     // Assert
     expect([...ids]).toEqual(["bg1"]);
   });
@@ -266,14 +266,14 @@ describe("openSubfeedSourceIds", () => {
 
   it("polls nothing while every fold is shut", () => {
     // Arrange / Act
-    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1")], isOpen: () => false });
+    const ids = collect({ items: [spawnCard("Bash", "with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output")], isOpen: () => false });
     // Assert
     expect(ids.size).toBe(0);
   });
 
   it("never polls a ws source, whose tail already arrives as frames", () => {
     // Arrange
-    const shell = spawnCard("Bash", "with ID: bg1", {
+    const shell = spawnCard("Bash", "with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output", {
       asyncSource: {
         source_id: "bg1",
         kind: "shell",
@@ -287,7 +287,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("collects an open catalog badge's announced ids", () => {
     // Arrange — the member's badge is keyed member:<host>:<toolUseId>.
-    const watchers = new Map([["b1", [spawnCard("Bash", "with ID: bg1")]]]);
+    const watchers = new Map([["b1", [spawnCard("Bash", "with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output")]]]);
     // Act — only b1's member badge is open.
     const ids = collect({ watchers, isOpen: (id) => id === "member:b1:t1" });
     // Assert
@@ -296,7 +296,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("reaches a grandchild through an open fold chain", () => {
     // Arrange — the watcher agent's polled tail reveals a nested spawn.
-    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9, output_file: /tmp/claude-1/s/tasks/a9.output")]]]);
     const tails = new Map([["a9", spawnTranscript("ag1", "a7")]]);
     // Act — the watcher fold AND the nested card's fold are open.
     const ids = collect({ watchers, tailText: (id) => tails.get(id) });
@@ -306,7 +306,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("keeps a grandchild out while its own fold stays shut", () => {
     // Arrange
-    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9, output_file: /tmp/claude-1/s/tasks/a9.output")]]]);
     const tails = new Map([["a9", spawnTranscript("ag1", "a7")]]);
     // Act — everything open except the nested card's fold.
     const ids = collect({ watchers, tailText: (id) => tails.get(id), isOpen: (id) => id !== "async:ag1" });
@@ -316,7 +316,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("terminates on a self-announcing tail instead of recursing forever", () => {
     // Arrange — a9's tail announces a9 again: a cycle.
-    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9")]]]);
+    const watchers = new Map([["b1", [spawnCard("Agent", "agentId: a9, output_file: /tmp/claude-1/s/tasks/a9.output")]]]);
     // Act
     const ids = collect({ watchers, tailText: () => spawnTranscript("ag1", "a9") });
     // Assert
@@ -325,7 +325,7 @@ describe("openSubfeedSourceIds", () => {
 
   it("stops descending at the depth cap", () => {
     // Arrange — every level's tail announces one deeper spawn, forever.
-    const card = spawnCard("Agent", "agentId: s0", { toolUseId: "t-s0" });
+    const card = spawnCard("Agent", "agentId: s0, output_file: /tmp/claude-1/s/tasks/s0.output", { toolUseId: "t-s0" });
     const tailText = (id: string): string => spawnTranscript(`t-${id}x`, `${id}x`);
     // Act
     const ids = collect({ items: [card], tailText });

@@ -20,9 +20,37 @@
 import { spawnedTaskIds } from "./partition.js";
 import { ConversationItem, ToolItem } from "./store.js";
 
-/** A tool call is an async member when it announced detached work of its own. */
+/** Which evidence tier established a watcher's identity, for bookkeeping. */
+export type WatcherOrigin = "classified" | "notification" | "announced";
+
+/** A watcher's single authoritative task id, plus the tier that proved it. */
+export interface WatcherRef {
+  id: string;
+  origin: WatcherOrigin;
+}
+
+/**
+ * The detached work ITEM owns, as ONE id with its evidence tier — or null
+ * when the call spawned nothing detached, which is the membership verdict
+ * every async surface keys off. The ladder is most-structural-first: the
+ * classification (a live card's async-source frame, a parsed card's
+ * toolUseResult sidecar), then a landed notification's id, then the
+ * paired-prose announcement tier that survives only for pre-structured
+ * history (see spawnedTaskIds). A bare id-like token in result prose sits
+ * on NO tier, so a finished sync agent's `agentId:` completion handle can
+ * no longer manufacture a live-forever member.
+ */
+export function watcherRef(item: ConversationItem): WatcherRef | null {
+  if (item.kind !== "tool") return null;
+  if (item.asyncSource) return { id: item.asyncSource.source_id, origin: "classified" };
+  if (item.notification?.taskId) return { id: item.notification.taskId, origin: "notification" };
+  const ids = spawnedTaskIds(item);
+  return ids.length > 0 ? { id: ids[0], origin: "announced" } : null;
+}
+
+/** A tool call is an async member when some evidence tier proved detached work. */
 export function isWatcher(item: ConversationItem): item is ToolItem {
-  return item.kind === "tool" && spawnedTaskIds(item).length > 0;
+  return watcherRef(item) !== null;
 }
 
 /**

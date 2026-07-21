@@ -30,12 +30,19 @@ export interface FeedPartition {
 const TASK_POLL_TOOLS = new Set(["TaskOutput", "TaskStop", "TaskGet"]);
 
 /**
- * The ids a spawning call announces its detached work under: "running in
- * background with ID: bg1" for shells, "agentId: abc1" for background
- * agents. Task notifications carry the id verbatim, so the notification
- * field is the authoritative source when it has landed.
+ * PAIRED spawn announcements, the prose fallback tier of detection: an id
+ * counts only next to the stream location the real announcements always
+ * carry — a shell's spool file, an agent's output_file in the task spool,
+ * a workflow's transcript dir. A bare `ID:`/`agentId:` token proves
+ * nothing (a subagent's completion handle says `agentId:` on EVERY sync
+ * result, which is how a finished foreground agent once became a
+ * live-forever amber badge), so unpaired mentions match nothing here.
  */
-const SPAWNED_ID_RE = /\b(?:ID|agentId):\s*([A-Za-z0-9_-]+)/g;
+const PAIRED_SPAWN_RES = [
+  /\b(?:with|Task) ID:\s*([A-Za-z0-9_-]+)[\s\S]{0,300}?Output is being written to:\s*\S+\.output/g,
+  /\bTask ID:\s*([A-Za-z0-9_-]+)[\s\S]{0,300}?Transcript dir:\s*\S*\/workflows\//g,
+  /\bagentId:\s*([A-Za-z0-9_-]+)[\s\S]{0,300}?output_file:\s*(?:\/private)?\/tmp\/claude-\d+\/\S*\/tasks\/\S+\.output/g,
+];
 
 function resultText(item: ToolItem): string {
   const content = item.result?.content;
@@ -44,11 +51,26 @@ function resultText(item: ToolItem): string {
   return content.map((b) => b.text ?? "").join("\n");
 }
 
-/** Every task id ITEM's spawn result or notification announced. */
+/**
+ * Every task id ITEM's spawn announced, most authoritative first: the
+ * structural classification (the daemon's async-source frame on a live
+ * card, the toolUseResult sidecar on a transcript-parsed one), then the
+ * landed notification's id, then the paired-prose announcements — a tier
+ * that survives only for pre-structured history, since a classified card
+ * needs no prose and an unclassified one under a classifying daemon has
+ * been RULED not-a-spawn. Empty means the call spawned nothing detached.
+ */
 export function spawnedTaskIds(item: ToolItem): string[] {
-  const ids = [...resultText(item).matchAll(SPAWNED_ID_RE)].map((m) => m[1]);
+  const ids: string[] = [];
+  if (item.asyncSource) ids.push(item.asyncSource.source_id);
   if (item.notification?.taskId) ids.push(item.notification.taskId);
-  return ids;
+  if (item.asyncSource === undefined) {
+    const text = resultText(item);
+    for (const re of PAIRED_SPAWN_RES) {
+      for (const m of text.matchAll(re)) ids.push(m[1]);
+    }
+  }
+  return [...new Set(ids)];
 }
 
 /**

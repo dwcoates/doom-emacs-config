@@ -195,7 +195,10 @@ const MIGRATION_TRANSCRIPT = [
     name: "Bash",
     input: { command: "./scripts/watch-migration.sh", run_in_background: true },
   }),
-  toolResultLine("s5-t4", "Command running in background with ID: bg-nested-9"),
+  toolResultLine(
+    "s5-t4",
+    "Command running in background with ID: bg-nested-9. Output is being written to: /tmp/claude-1/s/tasks/bg-nested-9.output",
+  ),
   assistantLine({ type: "text", text: "First batch migrated; the watcher is armed." }),
 ].join("\n");
 
@@ -382,7 +385,7 @@ export const scenarios: Scenario[] = [
         "Agent",
         { description: "migrate oldApi call sites", run_in_background: true },
         {
-          result: ok("Async agent launched. agentId: ag-42"),
+          result: ok("Async agent launched. agentId: ag-42, output_file: /tmp/claude-1/s/tasks/ag-42.output"),
           asyncSource: {
             source_id: "ag-42",
             kind: "agent",
@@ -433,7 +436,7 @@ export const scenarios: Scenario[] = [
         "Agent",
         { description: "migrate oldApi call sites", run_in_background: true },
         {
-          result: ok("Async agent launched. agentId: ag-9"),
+          result: ok("Async agent launched. agentId: ag-9, output_file: /tmp/claude-1/s/tasks/ag-9.output"),
           asyncSource: {
             source_id: "ag-9",
             kind: "agent",
@@ -507,7 +510,7 @@ export const scenarios: Scenario[] = [
         "cat-br-1",
         "Agent",
         { description: "respawn the slack bridge", subagent_type: "sockets-listener" },
-        { result: ok("Async agent launched. agentId: br-1") },
+        { result: ok("Async agent launched. agentId: br-1, output_file: /tmp/claude-1/s/tasks/br-1.output") },
       ),
       text("s8-ack", "Bridge listener respawned for the quiet window."),
       successResult(),

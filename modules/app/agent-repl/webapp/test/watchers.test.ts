@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConversationItem, ToolItem } from "../src/store.js";
-import { asyncByBubble, isWatcher } from "../src/watchers.js";
+import { asyncByBubble, isWatcher, watcherRef } from "../src/watchers.js";
 
 function userTurn(requestId = "u1"): ConversationItem {
   return {
@@ -41,13 +41,61 @@ function tool(id: string, name = "Bash", parent?: string): ToolItem {
 function bgSpawner(id: string, taskId: string): ToolItem {
   return {
     ...tool(id),
-    result: { isError: false, content: `Command running in background with ID: ${taskId}.` },
+    result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
   };
 }
 
 function result(subtype = "success"): ConversationItem {
   return { kind: "result", subtype } as unknown as ConversationItem;
 }
+
+describe("watcherRef", () => {
+  it("keys off the classification first, as the most structural tier", () => {
+    // Arrange — classified AND announced: the classification wins.
+    const item: ToolItem = {
+      ...bgSpawner("t1", "bg1"),
+      asyncSource: { source_id: "src-1", kind: "shell", status: "running" },
+    };
+    // Act / Assert
+    expect(watcherRef(item)).toEqual({ id: "src-1", origin: "classified" });
+  });
+
+  it("falls back to a landed notification's task id", () => {
+    // Arrange — no classification, but the harness correlated a completion.
+    const item: ToolItem = {
+      ...tool("t1"),
+      notification: { taskId: "bg9", text: "<task-notification/>" },
+    };
+    // Act / Assert
+    expect(watcherRef(item)).toEqual({ id: "bg9", origin: "notification" });
+  });
+
+  it("accepts a PAIRED prose announcement as the last tier", () => {
+    // Arrange — pre-structured history: id next to its spool path.
+    const item = bgSpawner("t1", "bg1");
+    // Act / Assert
+    expect(watcherRef(item)).toEqual({ id: "bg1", origin: "announced" });
+  });
+
+  it("refuses a sync agent's bare completion handle — the phantom-member regression", () => {
+    // Arrange — every finished foreground agent's result carries this
+    // handle, which once made the settled call an amber-forever member.
+    const item: ToolItem = {
+      ...tool("t1", "Agent"),
+      result: {
+        isError: false,
+        content: "agentId: a36ef865012a4672a (use SendMessage with to: 'a36ef865012a4672a')",
+      },
+    };
+    // Act / Assert
+    expect(watcherRef(item)).toBeNull();
+  });
+
+  it("returns null for a plain call that spawned nothing", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef(tool("t1"))).toBeNull();
+  });
+});
 
 describe("isWatcher", () => {
   it("is true for a tool that announced a background id", () => {
@@ -81,7 +129,7 @@ describe("asyncByBubble", () => {
     // Arrange
     const agent: ToolItem = {
       ...tool("t1", "Agent"),
-      result: { isError: false, content: "Launched. agentId: abc1" },
+      result: { isError: false, content: "Async agent launched. agentId: abc1, output_file: /tmp/claude-1/s/tasks/abc1.output" },
     };
     const items = [userTurn(), agent, text("b1"), result()];
     // Act
