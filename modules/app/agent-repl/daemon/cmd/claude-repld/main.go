@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/login"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
@@ -123,9 +124,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("claude-repld: %v", err)
 	}
-	defer logFile.Close()
-	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
-	log.Printf("claude-repld: booted (pid %d); logging to %s", os.Getpid(), logFile.Name())
+	// CappedWriter, not the bare file: a long-lived run that logs
+	// unexpectedly heavily would otherwise grow claude-repld.log without
+	// bound between restarts.
+	cappedLog := replog.NewCappedWriter(logRoot, logFile, replog.CapBytes)
+	defer cappedLog.Close()
+	log.SetOutput(io.MultiWriter(os.Stderr, cappedLog))
+	log.Printf("claude-repld: booted (pid %d); logging to %s", os.Getpid(), cappedLog.Name())
 	for _, w := range logWarnings {
 		log.Printf("claude-repld: %s", w)
 	}
@@ -154,12 +159,12 @@ func main() {
 
 	accounts, err := parseAccounts(*accountsFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "claude-repld: -accounts: %v\n", err)
+		log.Printf("claude-repld: -accounts: %v", err)
 		os.Exit(2)
 	}
 
 	if *shimScript == "" {
-		fmt.Fprintln(os.Stderr, "claude-repld: --shim is required (path to shim/dist/main.js)")
+		log.Printf("claude-repld: --shim is required (path to shim/dist/main.js)")
 		os.Exit(2)
 	}
 
@@ -168,6 +173,14 @@ func main() {
 		if *claudeBin != "" {
 			argv = append(argv, "--claude-bin", *claudeBin)
 		}
+		// This is the primary Claude-driving process: log its start
+		// (dlog.Call, per the "the shim itself" example in dlog.go) so a
+		// session's launch parameters are on record, and pair every shim
+		// stderr/stdout-pump line (via Options.Logf) with the same
+		// session+cwd context.
+		done := dlog.Call(log.Printf, "shim spawn",
+			"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
+			"config_dir", opts.ConfigDir, "fake", *fake || opts.Fake)
 		proc, err := shim.Spawn(shim.Options{
 			Argv: argv,
 			Dir:  opts.CWD,
@@ -177,10 +190,13 @@ func main() {
 			// session's CLAUDE_CONFIG_DIR (which account it runs as), and
 			// this daemon's own addr (so a session's tools can probe it).
 			ExtraEnv: server.ShimEnv(opts, *addr),
+			Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
 		})
 		if err != nil {
+			done("", err)
 			return nil, err
 		}
+		done(strings.Join(argv, " "), nil)
 		go func() {
 			if err := proc.Wait(); err != nil {
 				log.Printf("claude-repld: shim for session %s exited: %v", sessionID, err)
