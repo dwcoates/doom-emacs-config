@@ -2258,3 +2258,75 @@ describe("task-summary (current objective label)", () => {
     expect(store.state.taskSummary).toBeNull();
   });
 });
+
+describe("delivery-path logging", () => {
+  /** A store whose log sink is a spy; the hello is applied like newStore. */
+  function newLoggedStore(): { store: ConversationStore; lines: string[] } {
+    autoSeq = 0;
+    const lines: string[] = [];
+    const store = new ConversationStore((level, message) => lines.push(`${level}: ${message}`));
+    store.applyRaw(hello());
+    return { store, lines };
+  }
+
+  it("logs a seq gap with both watermarks", () => {
+    // Arrange
+    const { store, lines } = newLoggedStore();
+    store.applyRaw(frame("text-start", { block_id: "b1" }, 1));
+    // Act — seq 3 lands with 2 missing.
+    store.applyRaw(frame("text-delta", { block_id: "b1", text: "x" }, 3));
+    // Assert
+    expect(lines).toContain("warn: seq gap: have 1, got 3 (text-delta) — requesting replay from 2");
+  });
+
+  it("logs a gap-fill hello with the replay span", () => {
+    // Arrange — history up to seq 2, then a reconnect hello at seq 6.
+    const { store, lines } = newLoggedStore();
+    store.applyRaw(frame("text-start", { block_id: "b1" }, 1));
+    store.applyRaw(frame("text-delta", { block_id: "b1", text: "x" }, 2));
+    // Act
+    store.applyRaw(hello({ seq: 6, resume_from_seq: 1 }));
+    // Assert
+    expect(lines).toContain("info: hello: gap-fill replay 3..6");
+  });
+
+  it("logs a reconnect hello that missed nothing", () => {
+    // Arrange
+    const { store, lines } = newLoggedStore();
+    store.applyRaw(frame("text-start", { block_id: "b1" }, 1));
+    // Act — the daemon's watermark equals ours.
+    store.applyRaw(hello({ seq: 1, resume_from_seq: 1 }));
+    // Assert
+    expect(lines).toContain("info: hello: already current at seq 1");
+  });
+
+  it("logs a fresh-join hello with the replay span", () => {
+    // Arrange
+    const { store, lines } = newLoggedStore();
+    // Act
+    store.applyRaw(hello({ seq: 9, resume_from_seq: 5 }));
+    // Assert
+    expect(lines).toContain("info: hello: fresh-join replay 5..9");
+  });
+
+  it("logs replay completion when the watermark is reached", () => {
+    // Arrange — a fresh join expecting frames 5..6.
+    const { store, lines } = newLoggedStore();
+    store.applyRaw(hello({ seq: 6, resume_from_seq: 5 }));
+    store.applyRaw(frame("text-start", { block_id: "b1" }, 5));
+    // Act
+    store.applyRaw(frame("text-delta", { block_id: "b1", text: "x" }, 6));
+    // Assert
+    expect(lines).toContain("info: replay complete (fresh) at seq 6");
+  });
+
+  it("a store without a log sink stays silent and functional", () => {
+    // Arrange — the default no-op sink.
+    const store = newStore();
+    store.applyRaw(frame("text-start", { block_id: "b1" }, 1));
+    // Act — a gap with no logger attached must still request replay.
+    const result = store.applyRaw(frame("text-delta", { block_id: "b1", text: "x" }, 3));
+    // Assert
+    expect(result.send).toEqual({ type: "replay-request", from_seq: 2 });
+  });
+});

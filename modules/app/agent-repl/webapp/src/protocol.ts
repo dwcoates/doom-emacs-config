@@ -3,7 +3,7 @@
  *
  * Source of truth: ../../shared/protocol.md (§2). Frames flow
  * daemon→webapp; webapp→daemon traffic reuses the Layer-1 command shapes
- * plus `replay-request` (§2.10).
+ * plus `replay-request` (§2.10) and `client-log` (§2.15).
  */
 
 export type PermissionMode =
@@ -730,6 +730,19 @@ export interface ReplayRequestCmd {
 }
 
 /**
+ * Mirror a webapp-side diagnostic line into the daemon's log (§2.15),
+ * where it reaches disk. Fire-and-forget observation like
+ * `replay-request`: no request_id, honored on hibernated and terminal
+ * sessions, never revives one. This is how a wedged webview — whose
+ * console nobody can see — leaves evidence.
+ */
+export interface ClientLogCmd {
+  type: "client-log";
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+/**
  * Escalate a queued item to preempt the running turn — the manual
  * counterpart to a classifier `interrupt` verdict (§2.13). Daemon-handled,
  * never forwarded to the shim; a stale `queue_id` is a no-op ack.
@@ -757,5 +770,6 @@ export type ClientCommand =
   | SetPermissionModeCmd
   | SetModelCmd
   | ReplayRequestCmd
+  | ClientLogCmd
   | QueueRunNowCmd
   | QueueCancelCmd;

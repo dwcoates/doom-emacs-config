@@ -580,8 +580,9 @@ messages — one JSON object per frame, never split across frames. The
 direction is bi-directional but webapp→daemon traffic is limited to
 UI-originated commands (`user-message`, `permission-decision`,
 `interrupt`, `set-permission-mode`) which re-use the Layer-1 command
-shapes verbatim, plus the `replay-request` frame (§2.10), so this
-section otherwise enumerates only **daemon → webapp** frames. A
+shapes verbatim, plus the `replay-request` frame (§2.10) and the
+`client-log` diagnostic frame (§2.15), so this section otherwise
+enumerates only **daemon → webapp** frames. A
 client-sent `shutdown` is out of contract: session teardown is
 daemon-owned (`DELETE /sessions/{id}`). The daemon decodes a `shutdown`
 frame (it is a known Layer-1 command shape) but deliberately drops it
@@ -1596,6 +1597,33 @@ treating it as live, or their reconnect/reattach logic would resurrect it
 into a fresh session. Unlike a `rehydratable` cross-restart record, a
 hibernated session is a real in-memory session that has simply shed its
 process pair.
+
+### 2.15 Client diagnostics (`client-log`)
+
+The webapp runs inside an Emacs webview whose JS console nobody can see
+and nothing persists, so a delivery-path failure there (a seq-gap loop,
+a lost replay-request, a stalled rAF scheduler) previously left no
+evidence anywhere. `client-log` mirrors one webapp-side diagnostic line
+into the daemon's log, which reaches disk:
+
+```ts
+interface ClientLogCmd {
+  type: "client-log";
+  level: "info" | "warn" | "error";
+  message: string;
+}
+```
+
+- Fire-and-forget observation, exactly like `replay-request`: it
+  carries no `request_id`, is honored on HIBERNATED and TERMINAL
+  sessions, and MUST never revive one — the stalls it reports happen
+  precisely on wedged/observing clients.
+- The daemon logs it as `session <id>: webapp <level>: <message>` and
+  clamps the message (4000 bytes) so one frame cannot balloon the disk
+  log; the webapp additionally rate-limits how many lines it forwards
+  per minute, emitting one suppression notice when the budget is hit.
+- Best-effort by design: a line that cannot be sent (socket not OPEN)
+  stays console-only, and the sender does not retry.
 
 ---
 
