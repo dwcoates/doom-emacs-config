@@ -24,6 +24,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/addsupport"
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
@@ -745,7 +746,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := s.logins.Open(configDir)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Sprintf("opening the login terminal: %v", err))
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: opening the login terminal: %v", id, err)
 		return
 	}
 	s.logf("session %s: login terminal open for account %q", id, sess.Account())
@@ -847,7 +848,7 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.logins.Close(configDir); err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Sprintf("closing the login terminal: %v", err))
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: closing the login terminal: %v", id, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -870,9 +871,10 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	// Read-only introspection, and pollable: it serves the cached menu
 	// (which survives hibernation) and must never resurrect a session.
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -897,9 +899,10 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 // polls; the response carries the next cursor, whether the task has
 // completed, and a live elapsed the frozen SDK heartbeat no longer feeds.
 func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -944,9 +947,10 @@ func (s *Server) handleRefreshCommands(w http.ResponseWriter, r *http.Request) {
 	// session on any skill change. A hibernated session needs no refresh
 	// now — it re-resolves the menu from a fresh init handshake when it is
 	// next revived — so the refresh is a no-op for it.
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -961,7 +965,7 @@ func (s *Server) handleRefreshCommands(w http.ResponseWriter, r *http.Request) {
 		"type":       "refresh-commands",
 		"request_id": newRequestID(),
 	}); err != nil {
-		httpError(w, http.StatusConflict, err.Error())
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): refresh-commands: %v", id, sess.Info().CWD, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -977,9 +981,10 @@ func (s *Server) handleRefreshCommands(w http.ResponseWriter, r *http.Request) {
 // folded in here because the webapp already tracks them live from their own
 // frames, so the panel overlays the fresher ones it holds.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -991,7 +996,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// session's config dir here, exactly as GET /sessions/{id}/account does.
 	identity, err := account.Read(sess.Info().ConfigDir)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): read account identity: %v", id, sess.Info().CWD, err)
 		return
 	}
 	snapshot := sess.Status()
@@ -1014,9 +1019,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // to probe and re-resolves from a fresh init when next revived, so the
 // refresh is a no-op for it. Mirrors handleRefreshCommands.
 func (s *Server) handleRefreshStatus(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -1031,7 +1037,7 @@ func (s *Server) handleRefreshStatus(w http.ResponseWriter, r *http.Request) {
 		"type":       "refresh-status",
 		"request_id": newRequestID(),
 	}); err != nil {
-		httpError(w, http.StatusConflict, err.Error())
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): refresh-status: %v", id, sess.Info().CWD, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -1046,7 +1052,7 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := account.Read(configDir)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: read account identity: %v", id, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1236,7 +1242,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		src := session.TranscriptPath(session.ClaudeConfigDir(rec.ConfigDir), rec.CWD, csid)
 		dst := session.TranscriptPath(session.ClaudeConfigDir(target.ConfigDir), rec.CWD, csid)
 		if err := migrateTranscript(src, dst); err != nil {
-			httpError(w, http.StatusConflict, fmt.Sprintf("transcript migration: %v", err))
+			s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): transcript migration: %v", id, rec.CWD, err)
 			return
 		}
 	}
@@ -1248,7 +1254,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		s.setSwitching(id, true)
 		defer s.setSwitching(id, false)
 		if err := sess.Shutdown("account switch"); err != nil {
-			httpError(w, http.StatusInternalServerError, fmt.Sprintf("shutdown for account switch: %v", err))
+			s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): shutdown for account switch: %v", id, sess.Info().CWD, err)
 			return
 		}
 		select {
@@ -1281,7 +1287,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	fresh, err := s.launchSession(id, opts, true)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Sprintf("relaunch under %q: %v", target.ConfigDir, err))
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): relaunch under %q: %v", id, rec.CWD, target.ConfigDir, err)
 		return
 	}
 	s.mu.Lock()
@@ -1373,7 +1379,7 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 	}
 	started, err := s.remediator.Start(body.SessionID)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: remediation start: %v", body.SessionID, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1388,9 +1394,10 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 // retention sees it.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// An ACT: this is the prompt, so it is exactly what earns a CLI back.
-	sess, err := s.resolveForAct(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAct(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for act: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -1427,7 +1434,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		cmd["origin"] = body.Origin
 	}
 	if err := sess.InjectCommand(cmd); err != nil {
-		httpError(w, http.StatusConflict, err.Error())
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): user-message: %v", id, sess.Info().CWD, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1447,9 +1454,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // interrupt keeps its original no-body contract.
 func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 	// An ACT: it reaches the CLI, so the CLI has to exist.
-	sess, err := s.resolveForAct(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAct(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for act: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -1469,7 +1477,7 @@ func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
 		"type":       "interrupt",
 		"request_id": newRequestID(),
 	}); err != nil {
-		httpError(w, http.StatusConflict, err.Error())
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): interrupt: %v", id, sess.Info().CWD, err)
 		return
 	}
 	// Strictly after the interrupt: retracting a turn still streaming toward
@@ -1501,9 +1509,10 @@ func (s *Server) queueOverride(w http.ResponseWriter, r *http.Request, cmdType s
 	// An explicit user act (the Emacs Cancel / run-now control) that runs
 	// through the client-command pipeline, so it needs a live shim: revive
 	// a hibernated session rather than reject the override.
-	sess, err := s.resolveForAct(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAct(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for act: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -1520,7 +1529,7 @@ func (s *Server) queueOverride(w http.ResponseWriter, r *http.Request, cmdType s
 		"request_id": newRequestID(),
 		"queue_id":   queueID,
 	}); err != nil {
-		httpError(w, http.StatusConflict, err.Error())
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): %s: %v", id, sess.Info().CWD, cmdType, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -1538,6 +1547,16 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode))
 		return
 	}
+	// A fresh create (no resume) is the bulk of day-to-day traffic and
+	// otherwise leaves no trace until the shim's first event lands, so log
+	// the request's shape up front — a rejected or failed create then has
+	// it on record too.
+	resumeLabel := opts.Resume
+	if resumeLabel == "" {
+		resumeLabel = "fresh"
+	}
+	dlog.Tag(s.logf, "cwd", opts.CWD, "model", opts.Model, "config_dir", opts.ConfigDir)(
+		"session create requested (resume=%s)", resumeLabel)
 	// Resume viability gate: the CLI hard-exits (fatal_error) when asked
 	// to --resume a session id with no transcript in this daemon's
 	// config dir — e.g. an id minted inside the Docker sandbox, under
@@ -1586,13 +1605,14 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := s.launchSession(id, opts, registrable)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Sprintf("spawn shim: %v", err))
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): spawn shim: %v", id, opts.CWD, err)
 		return
 	}
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
 	go sess.Run()
+	dlog.Tag(s.logf, "cwd", opts.CWD)("session %s: created", id)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -1774,11 +1794,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	// Deleting a dormant session needs no shim: drop the record so the
 	// id stops resolving and never rehydrates again.
 	s.mu.Lock()
-	if _, ok := s.dormant[id]; ok {
+	if rec, ok := s.dormant[id]; ok {
 		delete(s.dormant, id)
 		s.mu.Unlock()
 		if err := s.registry.Delete(id); err != nil {
-			httpError(w, http.StatusInternalServerError, fmt.Sprintf("registry delete: %v", err))
+			s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): registry delete: %v", id, rec.CWD, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -1791,7 +1811,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sess.Shutdown("DELETE /sessions"); err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Sprintf("shutdown: %v", err))
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): shutdown: %v", id, sess.Info().CWD, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1802,9 +1822,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// instant a workspace appears on screen. It must stay free — a
 	// hibernated session serves its whole history from the ring, and only
 	// a command arriving on this socket (below) can spawn a CLI.
-	sess, err := s.resolveForAttach(r.PathValue("id"))
+	id := r.PathValue("id")
+	sess, err := s.resolveForAttach(id)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		s.httpFail(w, r, http.StatusInternalServerError, "session %s: resolve for attach: %v", id, err)
 		return
 	}
 	if sess == nil {
@@ -2090,6 +2111,19 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 	w.WriteHeader(status)
 	// Encoding a map[string]string cannot fail; ignore is unreachable.
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// httpFail is httpError plus a log line: every server-fault response (5xx,
+// or a 409 that signals a real conflict rather than a routine precondition)
+// otherwise vanishes from the daemon log, which is how a shim-spawn failure
+// on POST /sessions used to return a 500 with zero trace. Logs method, path,
+// status, and the error text; callers fold a session id (and cwd, when a
+// resolved session is cheaply in scope) into FORMAT/ARGS themselves rather
+// than this helper reaching for it.
+func (s *Server) httpFail(w http.ResponseWriter, r *http.Request, status int, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	s.logf("server: %s %s -> %d: %s", r.Method, r.URL.Path, status, msg)
+	httpError(w, status, msg)
 }
 
 // writeResumeTranscriptMissing hard-fails a create whose --resume target

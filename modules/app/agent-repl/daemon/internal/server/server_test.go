@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,6 +132,54 @@ func newHarness(t *testing.T) *harness {
 	return newHarnessWith(t, nil)
 }
 
+// logCapture collects Logf lines for assertions, safely across the
+// server's goroutines (mirrors internal/session's helper of the same name).
+type logCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (lc *logCapture) logf(format string, args ...any) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.lines = append(lc.lines, fmt.Sprintf(format, args...))
+}
+
+// containing returns the captured lines that contain sub.
+func (lc *logCapture) containing(sub string) []string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	var out []string
+	for _, l := range lc.lines {
+		if strings.Contains(l, sub) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// newLoggedHarness is newHarnessWith with Logf captured for assertions on
+// the lines the daemon logs, rather than only the HTTP responses it writes.
+func newLoggedHarness(t *testing.T, remediator Remediator) (*harness, *logCapture) {
+	t.Helper()
+	lc := &logCapture{}
+	shims := make(chan *fakeShim, 8)
+	srv := New(Config{
+		DaemonVersion: "0.1.0-test",
+		Retention:     64,
+		Logf:          lc.logf,
+		Spawn: func(sessionID string, opts CreateOpts) (session.ShimHandle, error) {
+			shim := newFakeShim()
+			shims <- shim
+			return shim, nil
+		},
+		Remediator: remediator,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &harness{ts: ts, srv: srv, shims: shims}, lc
+}
+
 // newHarnessWith builds a harness whose daemon dispatches "session gone"
 // remediation through remediator (nil = the capability is unconfigured).
 func newHarnessWith(t *testing.T, remediator Remediator) *harness {
@@ -255,6 +304,45 @@ func TestCreateSessionReturnsIDAndStreamURL(t *testing.T) {
 	// Assert
 	if id == "" {
 		t.Fatal("empty session id")
+	}
+}
+
+// TestCreateSessionLogsRequestAndSuccess covers the create path's own
+// logging: previously a plain (non-resume) create logged nothing at all, so
+// there was no record of it having been requested or of which id it was
+// assigned once the spawn succeeded.
+func TestCreateSessionLogsRequestAndSuccess(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, nil)
+	// Act
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
+		bytes.NewBufferString(`{"cwd":"/req/cwd","model":"haiku"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	shim := <-h.shims
+	t.Cleanup(shim.end)
+	// Assert — the start line names the request's shape...
+	requested := lc.containing("session create requested")
+	if len(requested) != 1 {
+		t.Fatalf("'session create requested' lines = %v, want exactly 1", requested)
+	}
+	if !strings.Contains(requested[0], "resume=fresh") ||
+		!strings.Contains(requested[0], "cwd=/req/cwd") ||
+		!strings.Contains(requested[0], "model=haiku") {
+		t.Errorf("requested line = %q, want resume=fresh, cwd=/req/cwd, model=haiku", requested[0])
+	}
+	// ...and the success line names the id the create was assigned.
+	created := lc.containing(fmt.Sprintf("session %s: created", body.SessionID))
+	if len(created) != 1 {
+		t.Fatalf("'session %s: created' lines = %v, want exactly 1", body.SessionID, created)
 	}
 }
 
@@ -1073,6 +1161,28 @@ func TestRemediationSurfacesADispatchFailure(t *testing.T) {
 	// Assert
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// TestServerFaultLogsMethodPathAndStatus covers httpFail: a 5xx response
+// (here, the remediator failing to dispatch) must log method, path, status,
+// and the error text, not just write the HTTP response — the gap that let a
+// shim-spawn failure on POST /sessions vanish from the daemon log entirely.
+func TestServerFaultLogsMethodPathAndStatus(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, &fakeRemediator{err: errors.New("claude not on PATH")})
+	// Act
+	resp := h.postRemediation(t, "s_ghost")
+	// Assert
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	lines := lc.containing("POST /remediation -> 500")
+	if len(lines) != 1 {
+		t.Fatalf("log lines containing %q = %v, want exactly 1", "POST /remediation -> 500", lines)
+	}
+	if !strings.Contains(lines[0], "claude not on PATH") {
+		t.Errorf("log line = %q, want it to carry the error text", lines[0])
 	}
 }
 
