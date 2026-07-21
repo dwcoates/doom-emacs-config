@@ -18,6 +18,7 @@
  */
 import { AsyncSource } from "./protocol.js";
 import { ConversationItem, TextItem, ThinkingItem, ToolItem } from "./store.js";
+import { logDedup } from "./wslog.js";
 
 /**
  * Most items rendered from one parsed stream. A settled agent's transcript
@@ -46,22 +47,39 @@ export interface JournalRow {
  *
  * A tail read starts and ends mid-file, so the first and last lines are
  * routinely truncated — a partial line is the normal case here, not a
- * failure worth surfacing.
+ * failure worth surfacing. A skip anywhere else in the stream is NOT
+ * explained by truncation: a mostly-corrupt tail would otherwise render as
+ * a short or empty fold with zero signal, so an interior skip logs one
+ * dedup'd summary naming CONTEXT (the call site) with the count.
  */
-function jsonlObjects(text: string): Record<string, unknown>[] {
+function jsonlObjects(text: string, context: string): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  let skipped = 0;
+  let interiorSkipped = 0;
+  lines.forEach((trimmed, i) => {
     try {
       const parsed: unknown = JSON.parse(trimmed);
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
         out.push(parsed as Record<string, unknown>);
       }
     } catch {
-      // A truncated head or tail line; the next poll re-reads from the
-      // same offset, so nothing is lost by skipping it here.
+      // A truncated head or tail line is the normal case and stays
+      // silent; the next poll re-reads from the same offset, so nothing
+      // is lost by skipping it here.
+      skipped++;
+      if (i !== 0 && i !== lines.length - 1) interiorSkipped++;
     }
+  });
+  if (interiorSkipped > 0) {
+    logDedup(
+      `jsonlObjects:${context}`,
+      "warn",
+      `${context}: ${skipped}/${lines.length} JSONL line(s) failed to parse (${interiorSkipped} interior) — more than a truncated edge explains`,
+    );
   }
   return out;
 }
@@ -223,7 +241,7 @@ export function parseTranscript(text: string, cap = STREAM_ITEM_CAP): ParsedTran
   const tools = new Map<string, ToolItem>();
   let n = 0;
 
-  for (const entry of jsonlObjects(text)) {
+  for (const entry of jsonlObjects(text, "parseTranscript")) {
     const kind = str(entry, "type");
     const message = obj(entry, "message");
     if (message === undefined) continue;
@@ -323,7 +341,7 @@ export function transcriptStats(text: string): TranscriptStats {
   let error = false;
   let summed: number | undefined;
   let terminal: number | undefined;
-  for (const entry of jsonlObjects(text)) {
+  for (const entry of jsonlObjects(text, "transcriptStats")) {
     if (str(entry, "type") === "result") {
       finished = true;
       const subtype = str(entry, "subtype");
@@ -362,7 +380,7 @@ export function transcriptStatsCached(sourceId: string, text: string): Transcrip
  */
 export function parseJournal(text: string, cap = STREAM_ITEM_CAP): { rows: JournalRow[]; dropped: number } {
   const rows: JournalRow[] = [];
-  for (const entry of jsonlObjects(text)) {
+  for (const entry of jsonlObjects(text, "parseJournal")) {
     const label = str(entry, "label") || str(entry, "agent") || str(entry, "phase");
     if (label === "") continue;
     const error = str(entry, "error");
