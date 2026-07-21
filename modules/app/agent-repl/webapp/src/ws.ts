@@ -98,15 +98,19 @@ export class WsClient {
       let exists = true;
       try {
         exists = await this.opts.sessionExists();
-      } catch {
+      } catch (err) {
         // Probe unreachable (daemon briefly down?): treat as unknown
         // and keep retrying — only a definitive "not listed" stops us.
+        this.opts.log?.(
+          `ws: session-exists probe failed: ${String(err)} — treating as unknown, will retry`,
+        );
       }
       // Re-check after the await: a close()/connect() during the probe
       // moves the epoch, and acting on the stale result would open a
       // duplicate socket (or fire onGone against a fresh connection).
       if (this.epoch !== epoch || this.closedByUser) return;
       if (!exists) {
+        this.opts.log?.("ws: session gone — stopping reconnect");
         this.opts.onGone?.();
         return;
       }
