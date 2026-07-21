@@ -4341,6 +4341,59 @@ describe("planToolReveal", () => {
 });
 
 describe("groupHtml", () => {
+  it("keeps a background agent's chip running until its detached work settles", () => {
+    // Arrange — the spawn's own result landed at launch, but the WORK runs on.
+    const launched: ToolItem = {
+      kind: "tool",
+      ts: "2026-05-24T10:00:00.000Z",
+      toolUseId: "g1",
+      messageId: "m1",
+      toolName: "Agent",
+      inputJson: "{}",
+      input: {},
+      inputDone: true,
+      result: { isError: false, content: "Async agent launched. agentId: gag1" },
+      asyncSource: {
+        source_id: "gag1",
+        kind: "agent",
+        status: "running",
+        stream: { transport: "poll", format: "jsonl-transcript" },
+      },
+    };
+    // Act
+    const html = groupHtml([launched], "g1");
+    // Assert — before the resolver, this chip lied green at spawn time.
+    expect(html).toContain("agent-running");
+    expect(html).not.toContain("agent-done");
+  });
+
+  it("settles a background agent's chip once its notification lands", () => {
+    // Arrange
+    const settled: ToolItem = {
+      kind: "tool",
+      ts: "2026-05-24T10:00:00.000Z",
+      toolUseId: "g1",
+      messageId: "m1",
+      toolName: "Agent",
+      inputJson: "{}",
+      input: {},
+      inputDone: true,
+      result: { isError: false, content: "Async agent launched. agentId: gag1" },
+      asyncSource: {
+        source_id: "gag1",
+        kind: "agent",
+        status: "running",
+        stream: { transport: "poll", format: "jsonl-transcript" },
+      },
+      notification: { taskId: "gag1", status: "completed", text: "<t/>" },
+    };
+    // Act
+    const html = groupHtml([settled], "g1");
+    // Assert
+    expect(html).toContain("agent-done");
+    expect(html).not.toContain("agent-running");
+  });
+
   it("renders one status-dotted chip per member", () => {
     // Arrange
     const members = [bash("t1", "a", { isError: false }), bash("t2", "b")];
