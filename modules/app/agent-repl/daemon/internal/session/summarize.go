@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"claude-repld/internal/dlog"
 )
 
 // summarizeFn produces a one-line "current objective" label for a turn
@@ -36,33 +38,52 @@ const (
 	// what the model returns, so a misbehaving model cannot put an
 	// unbounded blob on the wire and into every client's topbar.
 	summaryHardCap = 200
+	// stderrCap bounds the child's captured stderr, so a noisy or looping
+	// process — notably one that runs past summarizerTimeout and is killed
+	// — cannot balloon daemon memory; only a diagnostic tail is kept for
+	// the failure log.
+	stderrCap = 4096
 )
 
 // summarizerRunner executes the summarizer subprocess with stdin and
-// returns its raw stdout. Separated from the cleaning wrapper so tests
-// exercise cleaning and the empty-on-failure contract without spawning
-// claude.
-type summarizerRunner func(ctx context.Context, model, configDir, stdin string) ([]byte, error)
+// returns its raw stdout plus a bounded tail of its stderr. Separated
+// from the cleaning wrapper so tests exercise cleaning and the
+// empty-on-failure contract without spawning claude.
+type summarizerRunner func(ctx context.Context, model, configDir, stdin string) (stdout, stderr []byte, err error)
 
 // newSummarizer builds the real subprocess-backed summarizer bound to
 // model and configDir (the session's account dir; empty leaves the
 // daemon's own environment inherited).
-func newSummarizer(model, configDir string, logf func(string, ...any)) summarizeFn {
+func newSummarizer(model, configDir string, logf dlog.Logf) summarizeFn {
 	return summarizeWith(spawnSummarizer, model, configDir, logf)
 }
 
 // summarizeWith builds a summarizer over an injectable runner, applying
-// the best-effort contract (empty string on any failure) around it.
-func summarizeWith(run summarizerRunner, model, configDir string, logf func(string, ...any)) summarizeFn {
+// the best-effort contract (empty string on any failure) around it. Each
+// call is logged via dlog.Call (a start line, then a success or failure
+// line) so the recurring "signal: killed" line from summarizerTimeout
+// firing is attributable rather than a bare, contextless failure.
+//
+// Session id and the session's working directory are NOT among the tags:
+// newSummarizer's call site (session.go, out of scope for this change)
+// only passes model and configDir (the CLAUDE_CONFIG_DIR account root, a
+// coarser identifier than the session's cwd/workspace) through to here,
+// so config_dir is the closest attribution reachable without threading
+// more context through session.go.
+func summarizeWith(run summarizerRunner, model, configDir string, logf dlog.Logf) summarizeFn {
 	return func(prompt, responses string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), summarizerTimeout)
 		defer cancel()
-		out, err := run(ctx, model, configDir, summarizerPrompt(prompt, responses))
+		done := dlog.Call(logf, "summarizer",
+			"config_dir", configDir, "model", model, "action", "summarize completed turn")
+		out, stderr, err := run(ctx, model, configDir, summarizerPrompt(prompt, responses))
 		if err != nil {
-			logf("summarizer: no summary this turn: %v", err)
+			done(string(stderr), err)
 			return ""
 		}
-		return cleanSummary(out)
+		summary := cleanSummary(out)
+		done(summary, nil)
+		return summary
 	}
 }
 
@@ -80,8 +101,10 @@ func summarizerArgv(model string) []string {
 // headless run's SessionStart/Stop hooks never resolve to a registered
 // workspace (mirrors the classifier and prompt-summary.el). It reuses
 // classifierEnv for the CLAUDE_CONFIG_DIR override, so the summary
-// authenticates as the session's own account.
-func spawnSummarizer(ctx context.Context, model, configDir, stdin string) ([]byte, error) {
+// authenticates as the session's own account. Stderr is captured (bounded
+// by stderrCap) rather than discarded, so a failure log can show why the
+// child died instead of only that it did.
+func spawnSummarizer(ctx context.Context, model, configDir, stdin string) (stdout, stderr []byte, err error) {
 	argv := summarizerArgv(model)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = os.TempDir()
@@ -89,10 +112,38 @@ func spawnSummarizer(ctx context.Context, model, configDir, stdin string) ([]byt
 	cmd.Env = classifierEnv(configDir)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	errBuf := &boundedWriter{cap: stderrCap}
+	cmd.Stderr = errBuf
 	if err := cmd.Run(); err != nil {
-		return nil, err
+		return nil, errBuf.Bytes(), err
 	}
-	return out.Bytes(), nil
+	return out.Bytes(), errBuf.Bytes(), nil
+}
+
+// boundedWriter retains at most cap bytes written to it, silently
+// discarding the remainder. It always reports the full length written
+// (never a short write), so capping never surfaces as an io.ErrShortWrite
+// out of exec.Cmd's internal stderr-copy goroutine on an otherwise
+// successful run — only the leading diagnostic tail is dropped, and only
+// for logging.
+type boundedWriter struct {
+	buf bytes.Buffer
+	cap int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if room := w.cap - w.buf.Len(); room > 0 {
+		if room > len(p) {
+			room = len(p)
+		}
+		w.buf.Write(p[:room])
+	}
+	return len(p), nil
+}
+
+// Bytes returns the retained (possibly truncated) tail.
+func (w *boundedWriter) Bytes() []byte {
+	return w.buf.Bytes()
 }
 
 // summaryPreambleRE strips a leading "Title:"/"Summary:" label the model
