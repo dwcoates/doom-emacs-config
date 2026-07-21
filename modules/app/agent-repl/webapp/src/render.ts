@@ -780,7 +780,9 @@ function childLine(item: ConversationItem): string {
     case "permission":
       return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
     default:
-      logDedup("child-line-kind", "warn", `childLine: unhandled item kind ${item.kind}`);
+      // Deliberately partial: every other kind (user-turn, result, system,
+      // error, retry, compact-boundary) legitimately contributes no ticker
+      // line, so the default is the common case, not a drift signal.
       return "";
   }
 }
@@ -1831,7 +1833,10 @@ export function rendersEmpty(
     case "system":
       return item.subtype === "init";
     default:
-      logDedup("renders-empty-kind", "warn", `rendersEmpty: unhandled item kind ${item.kind}`);
+      // Deliberately partial: only the kinds that CAN be empty are cased.
+      // Every other kind (permission, result-with-button, error, retry,
+      // compact-boundary) always renders something, so the default is the
+      // common answer, not a drift signal worth logging.
       return false;
   }
 }
