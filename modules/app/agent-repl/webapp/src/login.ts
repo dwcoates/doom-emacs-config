@@ -132,3 +132,20 @@ export function decodeTerminalChunk(data: unknown): Uint8Array | string | null {
   if (typeof data === "string") return data;
   return null;
 }
+
+/**
+ * Names the runtime type of a payload `decodeTerminalChunk` could not
+ * render, for the caller's log line.
+ *
+ * A dropped screen chunk is otherwise invisible: the OAuth screen just stops
+ * updating with no error anywhere, so the log line needs enough detail
+ * (constructor name, or `typeof` for primitives) to point at what actually
+ * arrived over the socket.
+ */
+export function describeChunkType(data: unknown): string {
+  if (data === null) return "null";
+  if (data === undefined) return "undefined";
+  const ctorName = (data as { constructor?: { name?: string } }).constructor
+    ?.name;
+  return ctorName ?? typeof data;
+}

@@ -20,10 +20,12 @@ import "@xterm/xterm/css/xterm.css";
 
 import {
   decodeTerminalChunk,
+  describeChunkType,
   encodeKeystrokes,
   loginTerminalUrl,
   resizeFrame,
 } from "./login.js";
+import { logDedup } from "./wslog.js";
 
 /** A live login terminal. */
 export interface LoginTerminal {
@@ -72,7 +74,19 @@ export function attachLoginTerminal(
     // Only once the socket is up: sending into a CONNECTING socket throws.
     // The daemon starts the child wide enough to keep the URL on one line
     // until the first real report lands, so nothing is lost by waiting.
-    if (socket.readyState !== WebSocket.OPEN) return;
+    if (socket.readyState !== WebSocket.OPEN) {
+      // Dropped (not fatal): a resize that lands before "open" fires is
+      // superseded by the reportSize() the "open" handler makes right
+      // after, so the daemon still learns the real geometry. But a window
+      // resize firing while the socket is still CONNECTING is real signal
+      // worth a trace if the geometry ever looks wrong downstream.
+      logDedup(
+        "login-terminal:resize-not-open",
+        "warn",
+        "login terminal: dropped a resize report — socket not open",
+      );
+      return;
+    }
     socket.send(resizeFrame(term.rows, term.cols));
   };
 
@@ -83,13 +97,46 @@ export function attachLoginTerminal(
 
   socket.addEventListener("message", (e: MessageEvent) => {
     const chunk = decodeTerminalChunk(e.data);
-    if (chunk !== null) term.write(chunk);
+    if (chunk !== null) {
+      term.write(chunk);
+      return;
+    }
+    // Dropped screen bytes leave a half-drawn OAuth screen with no other
+    // hint anything went wrong — this is the hint. Deduped per observed
+    // type so a burst of the same unexpected frame logs once.
+    const kind = describeChunkType(e.data);
+    logDedup(
+      `login-terminal:drop-chunk:${kind}`,
+      "warn",
+      `login terminal: dropped a screen chunk of unexpected type (${kind}) — the OAuth screen may be stuck half-drawn`,
+    );
   });
 
   socket.addEventListener("close", () => deps.onClosed?.());
 
+  socket.addEventListener("error", () => {
+    // The WS spec carries no detail on an "error" event; the "close" that
+    // follows is what tells the caller (onClosed) the child is gone. This
+    // is the only trace of WHY, so it must not be silently dropped.
+    logDedup(
+      "login-terminal:socket-error",
+      "warn",
+      "login terminal: socket error",
+    );
+  });
+
   term.onData((chunk) => {
-    if (socket.readyState !== WebSocket.OPEN) return;
+    if (socket.readyState !== WebSocket.OPEN) {
+      // A keystroke typed before the socket opens (or after it starts
+      // closing) never reaches the pty — surfaced rather than eaten, since
+      // the user would otherwise wonder why their input did nothing.
+      logDedup(
+        "login-terminal:input-not-open",
+        "warn",
+        "login terminal: dropped keyboard input — socket not open",
+      );
+      return;
+    }
     socket.send(encodeKeystrokes(chunk));
   });
 
