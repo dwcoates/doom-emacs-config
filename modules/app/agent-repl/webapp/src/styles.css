@@ -37,7 +37,7 @@
      dock (--sidebar-shadow) — its black sits just under the sidebar's — since
      this is a quiet seam cue, not a lifted overlay. The dark theme deepens it,
      since a faint wash all but vanishes on a dark ground. */
-  --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 10%, transparent), transparent);
+  --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
   --user: #e0ecff;
   /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
      the same blue one shade deeper, on the same terms as --assistant-pulse. */
@@ -205,7 +205,7 @@
        nothing against the dark feed, so the seam cue needs a heavier black to
        still register. Still kept just under the dark sidebar's black, so the
        bottom edge stays the subtler shade. */
-    --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 38%, transparent), transparent);
+    --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
     --user: #1e2a44;
     --user-pulse: #31456e;
     --assistant: #292040;
@@ -274,7 +274,7 @@ body::after {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 12px;
+  height: 6px;
   background: var(--bottom-shadow);
   pointer-events: none;
   z-index: 45;
