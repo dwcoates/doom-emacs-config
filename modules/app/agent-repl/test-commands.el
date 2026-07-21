@@ -2631,6 +2631,55 @@ that fallback, but the entries themselves must not be dropped."
       (should (assoc "alpha" entries))
       (should (assoc "bravo" entries)))))
 
+(ert-deftest agent-repl-cmd-test-worktree-snapshot-fields/both-set ()
+  "Both `:worktree-p' and `:source-ws-dir' are emitted when set on the ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :worktree-p t)
+    (agent-repl--ws-put "w" :source-ws-dir "/src/repo")
+    (should (equal (agent-repl--worktree-snapshot-fields "w")
+                   '(:worktree-p t :source-ws-dir "/src/repo")))))
+
+(ert-deftest agent-repl-cmd-test-worktree-snapshot-fields/neither-set ()
+  "A plain (non-worktree) workspace yields no worktree fields at all."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :project-dir "/tmp/plain")
+    (should-not (agent-repl--worktree-snapshot-fields "w"))))
+
+(ert-deftest agent-repl-cmd-test-worktree-snapshot-fields/source-omitted-when-unset ()
+  "`:source-ws-dir' is omitted when only `:worktree-p' is set."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :worktree-p t)
+    (should (equal (agent-repl--worktree-snapshot-fields "w") '(:worktree-p t)))))
+
+(ert-deftest agent-repl-cmd-test-worktree-snapshot-fields/worktree-p-omitted-when-unset ()
+  "`:worktree-p' is omitted when only `:source-ws-dir' is set."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "w" :source-ws-dir "/src/repo")
+    (should (equal (agent-repl--worktree-snapshot-fields "w")
+                   '(:source-ws-dir "/src/repo")))))
+
+(ert-deftest agent-repl-cmd-test-collect-snapshot-entries/carries-worktree-fields ()
+  "A worktree workspace's snapshot entry carries `:worktree-p'/`:source-ws-dir'
+so a later revival can rebuild the worktree after its in-worktree state.el
+was destroyed along with the deleted worktree directory."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "wt" :project-dir "/tmp/wt")
+    (agent-repl--ws-put "wt" :worktree-p t)
+    (agent-repl--ws-put "wt" :source-ws-dir "/src/repo")
+    (let* ((entries (agent-repl--collect-snapshot-entries))
+           (plist (cdr (assoc "wt" entries))))
+      (should (eq (plist-get plist :worktree-p) t))
+      (should (equal (plist-get plist :source-ws-dir) "/src/repo")))))
+
+(ert-deftest agent-repl-cmd-test-collect-snapshot-entries/plain-omits-worktree-fields ()
+  "A plain (non-worktree) workspace's entry omits the worktree fields entirely."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "plain" :project-dir "/tmp/plain")
+    (let* ((entries (agent-repl--collect-snapshot-entries))
+           (plist (cdr (assoc "plain" entries))))
+      (should-not (plist-member plist :worktree-p))
+      (should-not (plist-member plist :source-ws-dir)))))
+
 (ert-deftest agent-repl-cmd-test-save-workspace-snapshot/persists-tab-bar-order ()
   "End-to-end: `save-workspace-snapshot' writes entries in the on-disk file
 in the same order as `persp-names-cache', so a subsequent `read' returns
@@ -5977,6 +6026,47 @@ candidates named instead of guessing one."
     (agent-repl--ws-put "w" :project-dir "/tmp/wt-nosrc")
     (agent-repl--ws-put "w" :worktree-p t)
     (should-error (agent-repl--picker-recreate-directory "w" "/tmp/wt-nosrc"))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-roster-plist-for/returns-matching-entry ()
+  "The roster plist for a name carries that entry's persisted fields."
+  (agent-repl-test--with-clean-state
+    (agent-repl--write-sexp-file
+     agent-repl-workspace-snapshot-file
+     '(:workspaces (("w" :project-dir "/tmp/w" :worktree-p t :source-ws-dir "/src"))))
+    (let ((plist (agent-repl--snapshot-roster-plist-for "w")))
+      (should (eq (plist-get plist :worktree-p) t))
+      (should (equal (plist-get plist :source-ws-dir) "/src")))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-roster-plist-for/nil-when-absent ()
+  "A name with no matching roster entry returns nil."
+  (agent-repl-test--with-clean-state
+    (agent-repl--write-sexp-file
+     agent-repl-workspace-snapshot-file
+     '(:workspaces (("other" :project-dir "/tmp/other"))))
+    (should-not (agent-repl--snapshot-roster-plist-for "w"))))
+
+(ert-deftest agent-repl-cmd-test-recreate-directory/recovers-worktree-fields-from-roster ()
+  "With no live entry and no in-worktree state.el (worktree deleted), the
+worktree-ness and source repo are recovered from the durable roster, so the
+deleted worktree is re-added via `git worktree add' rather than degrading to
+a plain make-directory (which magit would then offer to init as a repo)."
+  (agent-repl-test--with-clean-state
+    (let ((source (make-temp-file "picker-roster-src-" t)) git-calls)
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-exit-code)
+                     (lambda (root &rest args) (push (cons root args) git-calls) 0))
+                    ((symbol-function 'agent-repl--picker-worktree-branch)
+                     (lambda (&rest _) "DWC/w")))
+            ;; No hash entry (known=nil) and no in-worktree state.el: the
+            ;; ONLY surviving record of worktree-ness + source is the roster.
+            (agent-repl--write-sexp-file
+             agent-repl-workspace-snapshot-file
+             `(:workspaces (("w" :project-dir "/tmp/wt-roster"
+                             :worktree-p t :source-ws-dir ,source))))
+            (agent-repl--picker-recreate-directory "w" "/tmp/wt-roster")
+            (should (member (list source "worktree" "add" "/tmp/wt-roster" "DWC/w")
+                            git-calls)))
+        (delete-directory source t)))))
 
 (ert-deftest agent-repl-cmd-test-worktree-branch/parses-porcelain ()
   "Reads the branch for the matching worktree path from git porcelain output."

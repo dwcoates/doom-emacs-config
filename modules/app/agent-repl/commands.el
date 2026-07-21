@@ -1148,14 +1148,38 @@ current `(NAME :project-dir DIR)' plist shape."
            ((listp payload) payload)
            (t (error "agent-repl: malformed snapshot entry: %S" entry))))))
 
+(defun agent-repl--worktree-snapshot-fields (ws)
+  "Return the durable worktree-identity plist fragment for workspace WS.
+Carries `:worktree-p' and `:source-ws-dir' (each only when set) so the
+roster snapshot (`agent-repl--collect-snapshot-entries') preserves what
+`agent-repl--picker-recreate-directory' needs to rebuild a DELETED
+worktree.  These two fields normally live in the per-project
+`<root>/.claude/emacs/state.el', but that file is destroyed along with
+the worktree directory, so the roster is the only place they survive a
+worktree deletion — without them revival degrades to a plain,
+repo-less directory instead of a re-added worktree."
+  (let ((worktree-p (agent-repl--ws-get ws :worktree-p))
+        (source (agent-repl--ws-get ws :source-ws-dir)))
+    (append (when worktree-p (list :worktree-p worktree-p))
+            (when source (list :source-ws-dir source)))))
+
 (defun agent-repl--collect-snapshot-entries ()
   "Return a list of workspace snapshot entries.
 Each entry has the shape
-\(NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]).
+\(NAME :project-dir DIR [:nuked-at TIME] [:hidden-project-dir t]
+      [:worktree-p t] [:source-ws-dir DIR]).
 Sourced from `agent-repl--workspaces'.  Includes every workspace
 whose plist has a non-nil `:project-dir'.  `:priority' is deliberately
 NOT included — it lives in each project's `<root>/.claude/emacs/state.el'
 so the roster doesn't become a second source of truth.
+
+`:worktree-p'/`:source-ws-dir' ARE the deliberate exception to that
+state.el-is-authoritative rule (appended via
+`agent-repl--worktree-snapshot-fields'): a deleted worktree takes its
+in-worktree state.el with it, so without a durable roster copy the
+revival path (`agent-repl--picker-recreate-directory') loses the source
+repo and can only make a plain empty directory rather than re-add the
+worktree.  Each is emitted only when set.
 
 Tombstoned entries (`:nuked-at' set) ARE included so the tombstone
 survives across Emacs restart — otherwise a nuked workspace's identity
@@ -1202,10 +1226,12 @@ restarts."
                    (when-let ((dir (plist-get plist :project-dir)))
                      (let ((tomb (plist-get plist :nuked-at))
                            (hidden (plist-get plist :hidden-project-dir)))
-                       (push (cons ws (if tomb
-                                          (append (list :project-dir dir :nuked-at tomb)
-                                                  (when hidden (list :hidden-project-dir t)))
-                                        (list :project-dir dir)))
+                       (push (cons ws (append
+                                       (if tomb
+                                           (append (list :project-dir dir :nuked-at tomb)
+                                                   (when hidden (list :hidden-project-dir t)))
+                                         (list :project-dir dir))
+                                       (agent-repl--worktree-snapshot-fields ws)))
                              result))))
                  agent-repl--workspaces)
         result)
@@ -1218,7 +1244,8 @@ restarts."
              #'identity
              (mapcar (lambda (ws)
                        (when-let ((dir (agent-repl--ws-get ws :project-dir)))
-                         (cons ws (list :project-dir dir))))
+                         (cons ws (append (list :project-dir dir)
+                                          (agent-repl--worktree-snapshot-fields ws)))))
                      (agent-repl--ws-list-names))))
            ;; Tombstones via --ws-tombstoned-names.  Tombstones have no
            ;; persp/cache presence so they never appear in --ws-list-names
@@ -1231,7 +1258,8 @@ restarts."
                          (let ((tomb (agent-repl--ws-get ws :nuked-at))
                                (hidden (agent-repl--ws-get ws :hidden-project-dir)))
                            (cons ws (append (list :project-dir dir :nuked-at tomb)
-                                            (when hidden (list :hidden-project-dir t)))))))
+                                            (when hidden (list :hidden-project-dir t))
+                                            (agent-repl--worktree-snapshot-fields ws))))))
                      (agent-repl--ws-tombstoned-names)))))
       (append live-entries tomb-entries))))
 
@@ -2714,12 +2742,36 @@ branch is sitting right there.  These are the reattach candidates for
        (lambda (b) (equal (file-name-nondirectory b) name))
        (and out (split-string out "\n" t))))))
 
+(defun agent-repl--snapshot-roster-plist-for (name)
+  "Return the persisted roster plist for workspace NAME, or nil.
+Reads the on-disk snapshot roster (via
+`agent-repl--workspace-snapshot-file-for-read'), normalizes each entry,
+and returns the plist of the entry whose name equals NAME.
+
+The durable fallback for `:worktree-p'/`:source-ws-dir' in
+`agent-repl--picker-recreate-directory': when a workspace's worktree
+was deleted its in-worktree `state.el' died with it, but the roster
+still carries these fields (persisted by
+`agent-repl--worktree-snapshot-fields'), so revival can rebuild the
+worktree instead of degrading to a plain, repo-less directory."
+  (let* ((file (agent-repl--workspace-snapshot-file-for-read))
+         (raw (and file (ignore-errors
+                          (agent-repl--read-sexp-file-if-exists file))))
+         (entries (agent-repl--snapshot-entries-from-raw raw)))
+    (cl-loop for entry in entries
+             for norm = (ignore-errors
+                          (agent-repl--snapshot-entry-normalize entry))
+             when (and norm (equal (car norm) name))
+             return (cdr norm))))
+
 (defun agent-repl--picker-recreate-directory (name dir)
   "Recreate the missing DIR for workspace NAME before revival.
 For a git-worktree workspace, resolves the source repo (`:source-ws-dir'
-on the live plist or in the persisted state file), prunes stale
-worktree admin entries (safe — prune only drops records for
-already-missing worktrees), then reattaches DIR by trying, in order:
+on the live plist, in the in-worktree state file, or — once the worktree
+and its state file are gone — in the durable roster via
+`agent-repl--snapshot-roster-plist-for'), prunes stale worktree admin
+entries (safe — prune only drops records for already-missing
+worktrees), then reattaches DIR by trying, in order:
 
   1. the branch git still has REGISTERED for DIR (crash /
      manually-deleted-dir case — `agent-repl--picker-worktree-branch');
@@ -2739,9 +2791,15 @@ For a plain (non-worktree) project dir, recreates the directory with
 output (re-captured via `agent-repl--git-string'), never a bare exit
 code, so revival failures are diagnosable from the error alone."
   (let* ((known (agent-repl--ws-known-p name))
-         (saved (let ((f (agent-repl--state-file-for-read dir)))
-                  (and f (ignore-errors
-                           (agent-repl--read-sexp-file-if-exists f)))))
+         ;; Prefer the in-worktree state.el; fall back to the durable
+         ;; roster when the worktree (and thus that state.el) is gone.
+         ;; The roster still carries :worktree-p/:source-ws-dir, so a
+         ;; deleted worktree is rebuilt rather than recreated as a plain
+         ;; repo-less directory (which magit would then offer to init).
+         (saved (or (let ((f (agent-repl--state-file-for-read dir)))
+                      (and f (ignore-errors
+                               (agent-repl--read-sexp-file-if-exists f))))
+                    (agent-repl--snapshot-roster-plist-for name)))
          (worktree-p (or (and known (agent-repl--ws-get name :worktree-p))
                          (plist-get saved :worktree-p)))
          (source (or (and known (agent-repl--ws-get name :source-ws-dir))
