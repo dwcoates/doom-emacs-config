@@ -147,6 +147,7 @@ describe("WsClient", () => {
   it("stops reconnecting and fires onGone when the session is gone", async () => {
     // Arrange — the pre-reconnect probe reports the session vanished.
     let gone = 0;
+    const logged: string[] = [];
     const client = new WsClient({
       url: "ws://x/sessions/s1/stream",
       onMessage: () => undefined,
@@ -156,15 +157,18 @@ describe("WsClient", () => {
       onGone: () => {
         gone++;
       },
+      log: (m) => logged.push(m),
     });
     client.connect();
     FakeWebSocket.instances[0].open();
     // Act
     FakeWebSocket.instances[0].close();
     await vi.advanceTimersByTimeAsync(10);
-    // Assert — no second socket, onGone fired exactly once.
+    // Assert — no second socket, onGone fired exactly once, and the
+    // terminal transition left a trace in the log.
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(gone).toBe(1);
+    expect(logged).toEqual(["ws: session gone — stopping reconnect"]);
   });
 
   it("ignores a stale in-flight probe after close() then connect()", async () => {
@@ -195,6 +199,7 @@ describe("WsClient", () => {
   it("keeps reconnecting when the existence probe itself fails", async () => {
     // Arrange — an unreachable probe counts as unknown, not gone.
     let gone = 0;
+    const logged: string[] = [];
     const client = new WsClient({
       url: "ws://x/sessions/s1/stream",
       onMessage: () => undefined,
@@ -206,15 +211,20 @@ describe("WsClient", () => {
       onGone: () => {
         gone++;
       },
+      log: (m) => logged.push(m),
     });
     client.connect();
     FakeWebSocket.instances[0].open();
     // Act
     FakeWebSocket.instances[0].close();
     await vi.advanceTimersByTimeAsync(10);
-    // Assert — reconnect proceeded despite the probe error.
+    // Assert — reconnect proceeded despite the probe error, and the
+    // failure was logged rather than swallowed silently.
     expect(FakeWebSocket.instances).toHaveLength(2);
     expect(gone).toBe(0);
+    expect(logged).toEqual([
+      "ws: session-exists probe failed: Error: daemon briefly down — treating as unknown, will retry",
+    ]);
   });
 
   it("does not reconnect after a user-initiated close", () => {
