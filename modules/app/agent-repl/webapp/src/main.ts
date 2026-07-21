@@ -507,7 +507,7 @@ async function boot(): Promise<void> {
         // leaving "devising remediation plan" up would claim a recovery
         // effort that does not exist.
         remediationEl.textContent = remediationNotice("failed");
-        console.error("remediation dispatch failed", err);
+        clog("error", `remediation dispatch failed: ${String(err)}`);
       });
   };
 
@@ -533,10 +533,15 @@ async function boot(): Promise<void> {
           // The hello supplied (or updated) the durable CLI uuid: persist
           // it so a future "session gone" can rebind this conversation.
           rememberedClaudeId = store.state.claudeSessionId;
-          rememberResumeKeys(localStorage, sessionId, {
-            claudeSessionId: store.state.claudeSessionId,
-            cwd: store.state.cwd,
-          });
+          try {
+            rememberResumeKeys(localStorage, sessionId, {
+              claudeSessionId: store.state.claudeSessionId,
+              cwd: store.state.cwd,
+            });
+          } catch (err) {
+            clog("error", `rememberResumeKeys failed: ${String(err)}`);
+            throw err;
+          }
         }
         if (result.restored) {
           // A session stopped mid-task auto-resumes here: the mid-task
@@ -582,7 +587,12 @@ async function boot(): Promise<void> {
           store.state.turnInFlight !== midTaskActive
         ) {
           midTaskActive = store.state.turnInFlight;
-          rememberMidTask(localStorage, store.state.claudeSessionId, store.state.turnInFlight);
+          try {
+            rememberMidTask(localStorage, store.state.claudeSessionId, store.state.turnInFlight);
+          } catch (err) {
+            clog("error", `rememberMidTask failed: ${String(err)}`);
+            throw err;
+          }
         }
         return result.send;
       },
@@ -611,7 +621,7 @@ async function boot(): Promise<void> {
             remediate(sessionId);
           })
           .catch((err: unknown) => {
-            console.error("session rebind failed", err);
+            clog("error", `session rebind failed: ${String(err)}`);
             remediate(sessionId);
           });
       },
@@ -704,7 +714,7 @@ async function boot(): Promise<void> {
       // that annotation but must not blank the account, so it degrades to the
       // last-known roster rather than rejecting the pair.
       fetchAccounts(httpBase).catch((err: unknown) => {
-        console.error("account roster lookup failed", err);
+        clog("warn", `account roster lookup failed: ${String(err)}`);
         return roster;
       }),
     ])
@@ -718,7 +728,7 @@ async function boot(): Promise<void> {
         // blank rather than assert an account we failed to read.
         account = null;
         renderAccountChip();
-        console.error("account lookup failed", err);
+        clog("warn", `account lookup failed: ${String(err)}`);
       });
   void refreshAccount();
 
@@ -762,7 +772,7 @@ async function boot(): Promise<void> {
         // A login that never opened must say so: leaving the topbar silent
         // would send the user off to look for a terminal that is not coming.
         remediationEl.textContent = loginNotice("failed");
-        console.error("login request failed", err);
+        clog("warn", `login request failed: ${String(err)}`);
       })
       .finally(() => {
         accountEl.disabled = false;
@@ -788,7 +798,7 @@ async function boot(): Promise<void> {
         // A switch that did not happen must say so: the user is about to
         // spend tokens as whichever account they BELIEVE is active.
         remediationEl.textContent = "account switch failed";
-        console.error("account switch failed", err);
+        clog("error", `account switch failed: ${String(err)}`);
       })
       .finally(() => {
         accountEl.disabled = false;
@@ -819,7 +829,7 @@ async function boot(): Promise<void> {
     } catch (err: unknown) {
       // A failed live read must still leave re-auth reachable: fall back to
       // the last account known and a roster-less menu rather than an empty one.
-      console.error("account menu lookup failed", err);
+      clog("warn", `account menu lookup failed: ${String(err)}`);
       entries = accountMenuEntries(account, []);
     }
     accountMenuEl.replaceChildren(
@@ -859,7 +869,7 @@ async function boot(): Promise<void> {
     // Kill the child too, not just the view. A login left running on a pty
     // nobody is reading is an orphaned OAuth flow.
     void closeLogin(httpBase, activeSessionId).catch((err: unknown) => {
-      console.error("closing the login terminal failed", err);
+      clog("error", `closing the login terminal failed: ${String(err)}`);
     });
     closeOverlay();
   });
