@@ -23,6 +23,7 @@ import {
   validateWorkspaceRoster,
 } from "../src/sidebar.js";
 import css from "../src/styles.css?raw";
+import { ForwardingLogger, setLogger } from "../src/wslog.js";
 
 const NOW_MS = 1_700_000_000_000;
 const NOW_S = NOW_MS / 1000;
@@ -126,6 +127,26 @@ describe("validateWorkspaceRoster", () => {
     const r = roster({ repos: [group({ rows: [row({ lastViewedAt: "5m" as never })] })] });
     // Act + Assert
     expect(() => validateWorkspaceRoster(r)).toThrow(/lastViewedAt/);
+  });
+
+  it("logs the breach before throwing on an unknown status", () => {
+    // Arrange — the throw surfaces only in Emacs's script eval, so the
+    // breach must also reach the daemon log the operator reads.
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    const r = roster({ repos: [group({ rows: [row({ status: "exploded" as never })] })] });
+    // Act + Assert
+    expect(() => validateWorkspaceRoster(r)).toThrow(/unknown status "exploded"/);
+    expect(lines.some((l) => l.startsWith("error:") && l.includes("unknown status"))).toBe(true);
+  });
+
+  it("logs the breach before throwing on a malformed shape", () => {
+    // Arrange
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    // Act + Assert
+    expect(() => validateWorkspaceRoster({ repos: {}, navDir: null })).toThrow(/repos/);
+    expect(lines.some((l) => l.startsWith("error:") && l.includes("repos"))).toBe(true);
   });
 
   it("throws when navDir is neither string nor null", () => {
