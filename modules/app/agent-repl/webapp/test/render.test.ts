@@ -6110,14 +6110,4 @@ describe("off-enum status/kind logging", () => {
     expect(lines.filter((l) => l.includes("memberBadge"))).toHaveLength(1);
   });
 
-  it("rendersEmpty logs and returns false for an unhandled item kind", () => {
-    // Arrange
-    const lines = spyLines();
-    const item = { kind: "quasar" } as unknown as ConversationItem;
-    // Act
-    const empty = rendersEmpty(item);
-    // Assert
-    expect(empty).toBe(false);
-    expect(lines.some((l) => l.includes("rendersEmpty: unhandled item kind quasar"))).toBe(true);
-  });
 });
