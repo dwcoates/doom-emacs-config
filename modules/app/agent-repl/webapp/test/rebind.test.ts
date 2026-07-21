@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { rebindSession, recallResumeKeys, rememberResumeKeys } from "../src/rebind.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { ClientLogCmd } from "../src/protocol.js";
 
 /** Minimal in-memory Storage for the localStorage seam. */
 class FakeStorage implements Storage {
@@ -48,7 +50,28 @@ function fakeFetch(
   return { fetchFn, calls };
 }
 
+/** A logger wired to spies: captured forwards, captured console lines. */
+function spyLogger(): { logger: ForwardingLogger; forwarded: ClientLogCmd[]; consoleLines: string[] } {
+  const forwarded: ClientLogCmd[] = [];
+  const consoleLines: string[] = [];
+  const logger = new ForwardingLogger(
+    (cmd) => {
+      forwarded.push(cmd);
+      return true;
+    },
+    (level, line) => consoleLines.push(`${level}: ${line}`),
+    () => 0,
+  );
+  return { logger, forwarded, consoleLines };
+}
+
 describe("resume key persistence", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+    vi.restoreAllMocks();
+  });
+
+
   it("round-trips resume keys per session id", () => {
     // Arrange
     const storage = new FakeStorage();
@@ -68,27 +91,52 @@ describe("resume key persistence", () => {
     expect(recallResumeKeys(storage, "s_1")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
   });
 
-  it("recalls null for a session id that was never stored", () => {
+  it("recalls null for a session id that was never stored, logging an info breadcrumb", () => {
     // Arrange
     const storage = new FakeStorage();
-    // Act / Assert
-    expect(recallResumeKeys(storage, "s_unknown")).toBeNull();
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act
+    const result = recallResumeKeys(storage, "s_unknown");
+    // Assert
+    expect(result).toBeNull();
+    expect(spy.consoleLines).toHaveLength(1);
+    expect(spy.consoleLines[0]).toContain("info:");
+    expect(spy.consoleLines[0]).toContain("s_unknown");
   });
 
-  it("recalls null for a corrupt record", () => {
+  it("recalls null for a corrupt record, logging an error naming the session id", () => {
     // Arrange
     const storage = new FakeStorage();
     storage.setItem("agent-repl.resume.s_1", "{not json");
-    // Act / Assert
-    expect(recallResumeKeys(storage, "s_1")).toBeNull();
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act
+    const result = recallResumeKeys(storage, "s_1");
+    // Assert
+    expect(result).toBeNull();
+    expect(spy.consoleLines).toHaveLength(1);
+    expect(spy.consoleLines[0]).toContain("error:");
+    expect(spy.consoleLines[0]).toContain("s_1");
+    expect(spy.consoleLines[0]).toContain("corrupt");
+    expect(spy.consoleLines[0]).toContain("remediation");
   });
 
-  it("recalls null for a record missing claudeSessionId", () => {
+  it("recalls null for a record missing claudeSessionId, logging an error naming the session id", () => {
     // Arrange
     const storage = new FakeStorage();
     storage.setItem("agent-repl.resume.s_1", JSON.stringify({ cwd: "/w" }));
-    // Act / Assert
-    expect(recallResumeKeys(storage, "s_1")).toBeNull();
+    const spy = spyLogger();
+    setLogger(spy.logger);
+    // Act
+    const result = recallResumeKeys(storage, "s_1");
+    // Assert
+    expect(result).toBeNull();
+    expect(spy.consoleLines).toHaveLength(1);
+    expect(spy.consoleLines[0]).toContain("error:");
+    expect(spy.consoleLines[0]).toContain("s_1");
+    expect(spy.consoleLines[0]).toContain("claudeSessionId");
+    expect(spy.consoleLines[0]).toContain("remediation");
   });
 });
 
