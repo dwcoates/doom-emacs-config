@@ -9,6 +9,7 @@
 (declare-function agent-repl-frontend-running-p-fn "frontends" (frontend))
 (declare-function agent-repl--frontend-dispatch-show "frontends" (ws))
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
+(declare-function agent-repl--emacs-focused-p "notifications" ())
 
 ;; Defined in worktree.el, which may load after this file; referenced only
 ;; at call time by `agent-repl--doom-config-tree-p'.
@@ -658,13 +659,15 @@ delivered on the process's stdin by the caller."
 
 (defun agent-repl--maybe-notify-finished (ws)
   "Send a desktop notification that the agent finished in WS.
-Only fires when the frame is unfocused.  Debounces per-workspace to
+Only fires when Emacs is not the focused desktop application (any-frame
+focus, see `agent-repl--emacs-focused-p'), so a banner never appears
+while the user is already looking at Emacs.  Debounces per-workspace to
 avoid duplicate notifications when both the hook and title-change
 paths fire for the same turn completion."
-  (agent-repl--log ws "maybe-notify-finished ws=%s focused=%s" ws (if (frame-focus-state) "yes" "no"))
+  (agent-repl--log ws "maybe-notify-finished ws=%s focused=%s" ws (if (agent-repl--emacs-focused-p) "yes" "no"))
   (let ((last (agent-repl--ws-get ws :last-notify-time))
         (now  (float-time)))
-    (if (and (not (frame-focus-state))
+    (if (and (not (agent-repl--emacs-focused-p))
              (or (null last) (> (- now last) agent-repl-notify-debounce-seconds)))
         (progn
           (agent-repl--ws-put ws :last-notify-time now)

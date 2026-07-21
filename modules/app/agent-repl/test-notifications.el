@@ -714,6 +714,68 @@ load-bearing."
     (let ((noninteractive t))
       (agent-repl--ensure-server))))
 
+;;;; ---- Tests: agent-repl--emacs-focused-p ----
+
+(ert-deftest agent-repl-test-emacs-focused-p-nil-in-batch ()
+  "Under `noninteractive', emacs-focused-p returns nil without scanning frames."
+  (cl-letf (((symbol-function 'frame-list)
+             (lambda () (error "frame-list must not run under noninteractive"))))
+    (let ((noninteractive t))
+      (should-not (agent-repl--emacs-focused-p)))))
+
+(ert-deftest agent-repl-test-emacs-focused-p-true-when-frame-focused ()
+  "emacs-focused-p is non-nil when a frame holds OS focus."
+  (cl-letf (((symbol-function 'frame-list) (lambda () (list 'f1)))
+            ((symbol-function 'frame-focus-state) (lambda (_frame) t)))
+    (let ((noninteractive nil))
+      (should (agent-repl--emacs-focused-p)))))
+
+(ert-deftest agent-repl-test-emacs-focused-p-false-when-no-frame-focused ()
+  "emacs-focused-p is nil when every frame reports no focus."
+  (cl-letf (((symbol-function 'frame-list) (lambda () (list 'f1 'f2)))
+            ((symbol-function 'frame-focus-state) (lambda (_frame) nil)))
+    (let ((noninteractive nil))
+      (should-not (agent-repl--emacs-focused-p)))))
+
+(ert-deftest agent-repl-test-emacs-focused-p-scans-all-frames ()
+  "emacs-focused-p is non-nil when a non-selected background frame is focused."
+  (cl-letf (((symbol-function 'frame-list) (lambda () (list 'f1 'f2)))
+            ((symbol-function 'frame-focus-state)
+             (lambda (frame) (when (eq frame 'f2) t))))
+    (let ((noninteractive nil))
+      (should (agent-repl--emacs-focused-p)))))
+
+(ert-deftest agent-repl-test-emacs-focused-p-unknown-counts-as-focused ()
+  "A frame whose focus is `unknown' counts as focused (conservative suppress)."
+  (cl-letf (((symbol-function 'frame-list) (lambda () (list 'f1)))
+            ((symbol-function 'frame-focus-state) (lambda (_frame) 'unknown)))
+    (let ((noninteractive nil))
+      (should (agent-repl--emacs-focused-p)))))
+
+;;;; ---- Tests: agent-repl--notify focus gating ----
+
+(ert-deftest agent-repl-test-notify-suppressed-when-emacs-focused ()
+  "agent-repl--notify must NOT dispatch to the backend when Emacs is focused."
+  (let ((dispatched nil))
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () t))
+              (agent-repl--notification-backend
+               (lambda (&rest _) (setq dispatched t)))
+              (agent-repl-debug nil)
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--notify "ws-a" "Title" "Message")
+      (should-not dispatched))))
+
+(ert-deftest agent-repl-test-notify-dispatches-when-emacs-unfocused ()
+  "agent-repl--notify must dispatch to the backend when Emacs is not focused."
+  (let ((dispatched nil))
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
+              (agent-repl--notification-backend
+               (lambda (&rest _) (setq dispatched t)))
+              (agent-repl-debug nil)
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--notify "ws-a" "Title" "Message")
+      (should dispatched))))
+
 (provide 'test-notifications)
 
 ;;; test-notifications.el ends here

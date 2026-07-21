@@ -368,8 +368,28 @@ Signals an error if no supported notification tool is found."
   "Desktop notification backend function, selected at load time
 based on available platform tools.")
 
+(defun agent-repl--emacs-focused-p ()
+  "Return non-nil when Emacs is the focused desktop application.
+Emacs owns desktop focus when ANY of its live frames holds OS input
+focus, so this scans `frame-focus-state' across every frame rather than
+only the selected one — a focused-but-not-selected frame still means
+Emacs is frontmost.  A frame whose focus is `unknown' counts as focused
+too, matching the conservative \"suppress when possibly focused\" stance
+the desktop-notification gate relies on (see `agent-repl--notify').
+Returns nil under `noninteractive' (batch/ERT), where no window-system
+frame can hold focus."
+  (and (not noninteractive)
+       (seq-some #'frame-focus-state (frame-list))))
+
 (defun agent-repl--notify (ws title message)
   "Send a desktop notification with TITLE and MESSAGE.
-WS is the workspace name string, or nil for workspace-free contexts."
-  (agent-repl--log ws "notify title=%s msg=%s" title message)
-  (funcall agent-repl--notification-backend ws title message))
+WS is the workspace name string, or nil for workspace-free contexts.
+A desktop banner is only useful when the user is looking elsewhere, so
+the notification is suppressed when Emacs is the focused desktop
+application (see `agent-repl--emacs-focused-p').  The focus check runs
+here at emit time, so focus regained during `agent-repl-notify-delay'
+between scheduling and firing still suppresses the banner."
+  (if (agent-repl--emacs-focused-p)
+      (agent-repl--log ws "notify SKIPPED (emacs focused) title=%s msg=%s" title message)
+    (agent-repl--log ws "notify title=%s msg=%s" title message)
+    (funcall agent-repl--notification-backend ws title message)))
