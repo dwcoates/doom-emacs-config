@@ -51,43 +51,60 @@ PLIST key/value pairs are applied after it and may override it."
 ;;;; ---- Wire status mapping ----------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-wire-status-table ()
-  "Each mapped render-state keyword serializes to its contract string."
+  "Each mapped render-state keyword serializes to its contract string.
+Perspective is held open so the render-state mapping is exercised rather
+than the perspective-less short-circuit."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (dolist (case '((:thinking . "thinking") (:permission . "permission")
-                    (:init . "init") (:idle . "idle") (:idle-async . "idle")
-                    (:stop-failed . "dead") (:dead . "dead")
-                    (:merging . "merging") (:merge-queued . "merge-queued")
-                    (:merge-conflict . "merge-conflict")
-                    (:merge-failed . "merge-failed") (:merged . "merged")))
-      (cl-letf (((symbol-function 'agent-repl--ws-render-status)
-                 (lambda (_ws) (car case))))
-        (should (equal (agent-repl--sidebar-wire-status "ws") (cdr case)))))))
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (dolist (case '((:thinking . "thinking") (:permission . "permission")
+                      (:init . "init") (:idle . "idle") (:idle-async . "idle")
+                      (:stop-failed . "dead") (:dead . "dead")
+                      (:merging . "merging") (:merge-queued . "merge-queued")
+                      (:merge-conflict . "merge-conflict")
+                      (:merge-failed . "merge-failed") (:merged . "merged")))
+        (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                   (lambda (_ws) (car case))))
+          (should (equal (agent-repl--sidebar-wire-status "ws") (cdr case))))))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-done-unacked ()
   "An unacked :done serializes as plain \"done\"."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :agent-state :done)
-    (should (equal (agent-repl--sidebar-wire-status "ws") "done"))))
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "done")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-done-acked-is-viewed ()
   "An acked :done serializes as \"done-viewed\" (tab-bar viewed semantics)."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
                                  :agent-state :done :done-acked t)
-    (should (equal (agent-repl--sidebar-wire-status "ws") "done-viewed"))))
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "done-viewed")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-nil-is-none ()
   "A nil render status (unborn workspace) serializes as \"none\"."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (should (equal (agent-repl--sidebar-wire-status "ws") "none"))))
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "none")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-is-inactive ()
+  "A perspective-less workspace serializes as \"inactive\", overriding its state.
+The `agent-repl--ws-open-p' nil branch dominates even a live `:merged'
+render state, since sidebar-but-not-tab-bar is the fact being conveyed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "inactive")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-unmapped-errors ()
   "An unmapped render-state keyword signals instead of defaulting."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-render-status)
                (lambda (_ws) :not-a-state)))
       (should-error (agent-repl--sidebar-wire-status "ws")))))
 
@@ -267,19 +284,22 @@ PLIST key/value pairs are applied after it and may override it."
                                  :agent-state :thinking
                                  :branch-name "DWC/ws"
                                  :last-viewed-at 1000.5)
-    (let* ((json (json-serialize (car (agent-repl--sidebar-build))))
-           (parsed (json-parse-string json :object-type 'alist
-                                      :null-object :null
-                                      :false-object :false))
-           (repo (aref (alist-get 'repos parsed) 0))
-           (row (aref (alist-get 'rows repo) 0)))
-      (should (eq (alist-get 'navDir parsed) :null))
-      (should (eq (alist-get 'folded repo) :false))
-      (should (equal (alist-get 'label repo) "doom"))
-      (should (equal (alist-get 'status row) "thinking"))
-      (should (equal (alist-get 'branch row) "DWC/ws"))
-      (should (= (alist-get 'lastViewedAt row) 1000.5))
-      (should (equal (append (alist-get 'children row) nil) nil)))))
+    ;; Hold the perspective open so the row carries its live "thinking"
+    ;; status rather than the perspective-less "inactive" short-circuit.
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (let* ((json (json-serialize (car (agent-repl--sidebar-build))))
+             (parsed (json-parse-string json :object-type 'alist
+                                        :null-object :null
+                                        :false-object :false))
+             (repo (aref (alist-get 'repos parsed) 0))
+             (row (aref (alist-get 'rows repo) 0)))
+        (should (eq (alist-get 'navDir parsed) :null))
+        (should (eq (alist-get 'folded repo) :false))
+        (should (equal (alist-get 'label repo) "doom"))
+        (should (equal (alist-get 'status row) "thinking"))
+        (should (equal (alist-get 'branch row) "DWC/ws"))
+        (should (= (alist-get 'lastViewedAt row) 1000.5))
+        (should (equal (append (alist-get 'children row) nil) nil))))))
 
 ;;;; ---- Pushing ------------------------------------------------------------
 

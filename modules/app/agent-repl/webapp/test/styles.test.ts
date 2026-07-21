@@ -2163,12 +2163,13 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the five unrelated
+    // Act / Assert — one shared ticker rule, plus the six unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
-    // face's .face-side, and the sidebar merge glyph that centers itself
-    // for an on-axis spin).
+    // face's .face-side, the sidebar merge glyph that centers itself for an
+    // on-axis spin, and the sidebar inactive question-mark glyph that centers
+    // its emoji).
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(6);
+    expect(bodies.length).toBe(7);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
@@ -2990,5 +2991,24 @@ describe("sidebar merge glyph size", () => {
     // Arrange + Act + Assert
     expect(disc).toMatch(/width:\s*9px/);
     expect(disc).toMatch(/height:\s*9px/);
+  });
+});
+
+describe("sidebar inactive (perspective-less) glyph", () => {
+  // A registered workspace with no open perspective shows a question-mark glyph
+  // in place of a lifecycle disc. It is boxed like the merge glyph (no disc
+  // fill) so the emoji sits centered rather than clipped inside the 9px disc.
+  const inactive = blockAfter(css, "#ws-sidebar .st-inactive {");
+
+  it("drops the disc fill so the question-mark emoji is not clipped", () => {
+    // Arrange + Act + Assert
+    expect(inactive).toContain("background: none");
+    expect(inactive).toMatch(/border-radius:\s*0/);
+  });
+
+  it("centers the glyph in a flex box like the merge glyph", () => {
+    // Arrange + Act + Assert
+    expect(inactive).toContain("display: inline-flex");
+    expect(inactive).toContain("justify-content: center");
   });
 });
