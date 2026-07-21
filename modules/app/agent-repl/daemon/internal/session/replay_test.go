@@ -373,8 +373,13 @@ func buildFramesWithAgents(t *testing.T, mainLines []string, agents map[string][
 		}
 	}
 	tr := NewTranslator()
-	return BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(mainLines, "\n")), sub), tr
+	frames, _ := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(mainLines, "\n")), sub, noopLogf)
+	return frames, tr
 }
+
+// noopLogf discards log lines, for replay-building test helpers that
+// don't assert on logging.
+func noopLogf(string, ...any) {}
 
 // The main-transcript shape every sidechain test starts from: an Agent
 // call whose result announces the sidechain's agentId.
@@ -508,12 +513,68 @@ func TestSidechainReplayMissingDirMatchesPlainReplay(t *testing.T) {
 	// Arrange
 	tr := NewTranslator()
 	// Act — a session that never spawned agents has no subagents dir.
-	frames := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(sidechainMain, "\n")),
-		filepath.Join(t.TempDir(), "subagents"))
-	// Assert — exactly the main chain's frames, nothing dropped or added.
+	frames, counts := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(sidechainMain, "\n")),
+		filepath.Join(t.TempDir(), "subagents"), noopLogf)
+	// Assert — exactly the main chain's frames, nothing dropped or added,
+	// and a missing dir is the ordinary case: no skip counted or logged.
+	if !counts.empty() {
+		t.Fatalf("counts = %+v, want empty for an ordinary missing dir", counts)
+	}
 	plain := BuildReplayFrames(NewTranslator(), strings.NewReader(strings.Join(sidechainMain, "\n")))
 	if len(frames) != len(plain) {
 		t.Fatalf("len = %d, want %d", len(frames), len(plain))
+	}
+}
+
+func TestSidechainReplayLogsUnreadableSubagentsDir(t *testing.T) {
+	// Arrange — a real read failure, not the ordinary "never spawned a
+	// subagent" missing-dir case exercised above: a plain file sits where
+	// the dir should be, so os.ReadDir fails with something other than
+	// IsNotExist.
+	subagentsPath := filepath.Join(t.TempDir(), "subagents")
+	if err := os.WriteFile(subagentsPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lc := &logCapture{}
+	tr := NewTranslator()
+	// Act
+	_, counts := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(sidechainMain, "\n")),
+		subagentsPath, lc.logf)
+	// Assert — logged individually, unlike the missing-dir case, and tallied
+	// so an unreadable dir does not vanish wholesale and unnoticed.
+	if counts.unreadableFiles != 1 {
+		t.Fatalf("counts.unreadableFiles = %d, want 1", counts.unreadableFiles)
+	}
+	got := lc.containing("sidechain subagents dir unreadable: " + subagentsPath)
+	if len(got) != 1 {
+		t.Fatalf("dir-unreadable log lines = %v, want exactly one", got)
+	}
+}
+
+func TestSidechainReplayLogsUnreadableFile(t *testing.T) {
+	// Arrange — agent-abc1.jsonl is a directory, not a file, so
+	// os.ReadFile fails on it specifically while a real sibling still
+	// replays normally.
+	sub := filepath.Join(t.TempDir(), "subagents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	badFile := filepath.Join(sub, "agent-abc1.jsonl")
+	if err := os.MkdirAll(badFile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lc := &logCapture{}
+	tr := NewTranslator()
+	// Act
+	_, counts := BuildReplayFramesWithAgents(tr, strings.NewReader(strings.Join(sidechainMain, "\n")),
+		sub, lc.logf)
+	// Assert
+	if counts.unreadableFiles != 1 {
+		t.Fatalf("counts.unreadableFiles = %d, want 1", counts.unreadableFiles)
+	}
+	got := lc.containing("sidechain file unreadable: " + badFile)
+	if len(got) != 1 {
+		t.Fatalf("file-unreadable log lines = %v, want exactly one", got)
 	}
 }
 
@@ -1081,6 +1142,62 @@ func TestSeedFromTranscriptSetsModelInHello(t *testing.T) {
 	// Assert
 	if got := sess.Info().Model; got != "claude-fable-5" {
 		t.Fatalf("Model = %q, want claude-fable-5", got)
+	}
+}
+
+func TestSeedFromTranscriptLogsSkipSummaryForMalformedLines(t *testing.T) {
+	// Arrange — one malformed line and one undecodable user entry (content
+	// is a bare number, neither a string nor a block array) alongside two
+	// entries that decode fine, so the seed still succeeds but would
+	// otherwise drop this history without a trace.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uuid-1.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":"hello"}}`,
+		`not json`,
+		`{"type":"user","message":{"role":"user","content":42}}`,
+		`{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"hi"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lc := &logCapture{}
+	shim := newFakeShim()
+	sess := New(Config{ID: "s_test", Shim: shim, CWD: dir, Logf: lc.logf})
+	// Act
+	if err := sess.SeedFromTranscript(path, "uuid-1"); err != nil {
+		t.Fatalf("SeedFromTranscript: %v", err)
+	}
+	// Assert
+	got := lc.containing("transcript seed skipped: malformed_lines=1 undecodable_user=1 sidechain_decode=0 unreadable_sidechain_files=0")
+	if len(got) != 1 {
+		t.Fatalf("skip-summary log lines = %v, want exactly one with the malformed/undecodable counts", got)
+	}
+	if !strings.Contains(got[0], "session=s_test") || !strings.Contains(got[0], "transcript="+path) {
+		t.Fatalf("skip-summary log line = %q, want session id and transcript path", got[0])
+	}
+}
+
+func TestSeedFromTranscriptLogsNoSkipSummaryWhenNothingSkipped(t *testing.T) {
+	// Arrange — a perfectly well-formed transcript.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uuid-1.jsonl")
+	transcript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lc := &logCapture{}
+	shim := newFakeShim()
+	sess := New(Config{ID: "s_test", Shim: shim, CWD: dir, Logf: lc.logf})
+	// Act
+	if err := sess.SeedFromTranscript(path, "uuid-1"); err != nil {
+		t.Fatalf("SeedFromTranscript: %v", err)
+	}
+	// Assert — nothing was skipped, so no summary line, matching a
+	// genuinely short conversation's own silence.
+	got := lc.containing("transcript seed skipped:")
+	if len(got) != 0 {
+		t.Fatalf("skip-summary log lines = %v, want none for a clean transcript", got)
 	}
 }
 
