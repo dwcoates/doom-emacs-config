@@ -543,6 +543,17 @@ export class ConversationStore {
   state: StoreState = initialState();
 
   /**
+   * Diagnostic sink for the seq/replay decisions this store makes —
+   * the machinery that, when it wedges, reads as "cards stopped
+   * arriving". Injected (a client-log forwarder in the app, a spy in
+   * tests) because the store itself is transport-agnostic; the no-op
+   * default keeps every existing call site unchanged.
+   */
+  constructor(
+    private readonly log: (level: "info" | "warn", message: string) => void = () => {},
+  ) {}
+
+  /**
    * Discard all state, as if freshly constructed. Used when the live
    * view is rebound onto a DIFFERENT daemon session (the "session
    * gone" rebind): the successor's hello must be treated as a fresh
@@ -614,6 +625,10 @@ export class ConversationStore {
       return { changed: false };
     }
     if (envelope.seq > this.state.lastSeq + 1) {
+      this.log(
+        "warn",
+        `seq gap: have ${this.state.lastSeq}, got ${envelope.seq} (${envelope.type}) — requesting replay from ${this.state.lastSeq + 1}`,
+      );
       return {
         changed: false,
         send: { type: "replay-request", from_seq: this.state.lastSeq + 1 },
@@ -622,7 +637,10 @@ export class ConversationStore {
     this.state.lastSeq = envelope.seq;
     const caughtUp =
       this.replayTarget !== null && envelope.seq >= this.replayTarget;
-    if (caughtUp) this.replayTarget = null;
+    if (caughtUp) {
+      this.replayTarget = null;
+      this.log("info", `replay complete (${this.replayKind}) at seq ${envelope.seq}`);
+    }
     // Only a fresh join's completion renders restored; a gap-fill's is a
     // plain `changed` (see `replayKind`). An unknown last frame still leaves
     // a backlog to show, so it advances the cursor without applying.
@@ -674,11 +692,13 @@ export class ConversationStore {
       if (hello.seq > s.lastSeq) {
         this.replayTarget = hello.seq;
         this.replayKind = "gap";
+        this.log("info", `hello: gap-fill replay ${s.lastSeq + 1}..${hello.seq}`);
         return {
           changed: true,
           send: { type: "replay-request", from_seq: s.lastSeq + 1 },
         };
       }
+      this.log("info", `hello: already current at seq ${s.lastSeq}`);
       return { changed: true };
     }
     // Fresh join, or §2.10 eviction rebuild: discard local state and
@@ -709,12 +729,17 @@ export class ConversationStore {
       // restore (tail-first) once lastSeq reaches the hello watermark.
       this.replayTarget = hello.seq;
       this.replayKind = "fresh";
+      this.log(
+        "info",
+        `hello: fresh-join replay ${hello.resume_from_seq}..${hello.seq}`,
+      );
       return {
         changed: true,
         send: { type: "replay-request", from_seq: hello.resume_from_seq },
       };
     }
     this.replayTarget = null;
+    this.log("info", `hello: fresh join, nothing to replay (seq ${hello.seq})`);
     return { changed: true };
   }
 

@@ -270,6 +270,13 @@ type L1Command struct {
 	// queue-run-now / queue-cancel (Layer 2 only, daemon-handled: never
 	// forwarded to the shim). Names the queued item the override targets.
 	QueueID string `json:"queue_id,omitempty"`
+
+	// client-log (Layer 2 only, daemon-handled, §2.15): a webapp-side
+	// diagnostic line mirrored into the daemon's log, so a webview
+	// stall leaves on-disk evidence. Observation, like replay-request —
+	// it never revives a hibernated session.
+	Level   string `json:"level,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // PermissionDecision mirrors PermissionDecisionCmd.decision.
@@ -294,6 +301,8 @@ var l1CommandKnownTypes = map[string]bool{
 	// §2.13 in-flight queue overrides: Layer-2 only, daemon-handled.
 	"queue-run-now": true,
 	"queue-cancel":  true,
+	// §2.15 webapp diagnostics: Layer-2 only, daemon-handled.
+	"client-log": true,
 }
 
 // l1CommandActs lists the command types that must reach a LIVE CLI. A
@@ -343,7 +352,10 @@ func DecodeCommand(line []byte) (*L1Command, error) {
 	if err := json.Unmarshal(line, &cmd); err != nil {
 		return nil, fmt.Errorf("layer1: malformed %s command: %w", probe.Type, err)
 	}
-	if cmd.Type != "replay-request" && cmd.RequestID == "" {
+	// replay-request and client-log are fire-and-forget observation
+	// frames: nothing ever correlates a response to them, so they carry
+	// no request_id.
+	if cmd.Type != "replay-request" && cmd.Type != "client-log" && cmd.RequestID == "" {
 		return nil, fmt.Errorf("layer1: %s command missing request_id", cmd.Type)
 	}
 	switch cmd.Type {

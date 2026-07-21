@@ -889,6 +889,15 @@ func (s *Session) HandleClientFrame(c *Client, raw []byte) error {
 		s.replayLocked(c, cmd.FromSeq)
 		return nil
 	}
+	// client-log (§2.15) mirrors a webapp-side diagnostic line into the
+	// daemon's log, where it reaches disk (replog). Handled before the
+	// terminal/hibernated gates for the same reason replay-request is:
+	// the stalls it reports happen precisely on observing clients, and
+	// logging must never revive a session or error a wedged one.
+	if cmd.Type == "client-log" {
+		s.logf("session %s: webapp %s: %s", s.ID, cmd.Level, clampClientLog(cmd.Message))
+		return nil
+	}
 	if s.terminal {
 		return fmt.Errorf("session %s: command %s on terminal session", s.ID, cmd.Type)
 	}
@@ -1348,6 +1357,19 @@ func (s *Session) sendToClientLocked(c *Client, data []byte) bool {
 
 func (s *Session) timestamp() string {
 	return s.now().UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// clampClientLog caps a §2.15 client-log message so a pathological
+// client cannot balloon the daemon's disk log with one frame. The
+// webapp also rate-limits forwarding; this is the daemon-side belt to
+// that suspender.
+const clientLogMaxLen = 4000
+
+func clampClientLog(msg string) string {
+	if len(msg) <= clientLogMaxLen {
+		return msg
+	}
+	return msg[:clientLogMaxLen] + " …[clamped]"
 }
 
 func ndjson(raw []byte) []byte {

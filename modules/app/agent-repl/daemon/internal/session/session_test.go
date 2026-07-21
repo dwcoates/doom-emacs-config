@@ -2140,6 +2140,91 @@ func TestReplayRequestBeforeRingLogsTheFreshHelloFallback(t *testing.T) {
 	}
 }
 
+func TestClientLogLandsInTheDaemonLog(t *testing.T) {
+	// Arrange
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	// Act
+	err := h.sess.HandleClientFrame(c, []byte(`{"type":"client-log","level":"warn","message":"render stall: rAF pending 2000ms"}`))
+	// Assert
+	if err != nil {
+		t.Fatalf("client-log: %v", err)
+	}
+	got := lc.containing("webapp warn: render stall: rAF pending 2000ms")
+	if len(got) != 1 {
+		t.Fatalf("client-log lines = %v, want exactly one", got)
+	}
+}
+
+func TestClientLogWorksOnAHibernatedSessionWithoutReviving(t *testing.T) {
+	// Arrange — a hibernated session; observation must stay free.
+	h, lc := newLoggedHarness(t, 16)
+	initEvent(t, h)
+	hibernateNow(t, h)
+	late := NewClient()
+	h.sess.Attach(late)
+	recvFrame(t, late) // hello
+	// Act
+	err := h.sess.HandleClientFrame(late, []byte(`{"type":"client-log","level":"info","message":"m"}`))
+	// Assert
+	if err != nil {
+		t.Fatalf("client-log on hibernated session: %v", err)
+	}
+	if !h.sess.Hibernated() {
+		t.Fatal("client-log revived the session; diagnostics must stay free")
+	}
+	if got := lc.containing("webapp info: m"); len(got) != 1 {
+		t.Fatalf("client-log lines = %v, want exactly one", got)
+	}
+}
+
+func TestClientLogWorksOnATerminalSession(t *testing.T) {
+	// Arrange — the session ends, then a wedged client reports in.
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	h.shim.pushEvent(t, `{"type":"closed","session_id":"sess-1","exit_code":0,"reason":"sdk_end"}`)
+	h.endShim()
+	<-h.sess.Done()
+	late := NewClient()
+	h.sess.Attach(late)
+	recvFrame(t, late) // hello
+	// Act
+	err := h.sess.HandleClientFrame(late, []byte(`{"type":"client-log","level":"error","message":"m"}`))
+	// Assert
+	if err != nil {
+		t.Fatalf("client-log on terminal session: %v", err)
+	}
+	if got := lc.containing("webapp error: m"); len(got) != 1 {
+		t.Fatalf("client-log lines = %v, want exactly one", got)
+	}
+}
+
+func TestClientLogClampsAnOversizedMessage(t *testing.T) {
+	// Arrange — one frame larger than the daemon is willing to mirror.
+	h, lc := newLoggedHarness(t, 16)
+	c := NewClient()
+	h.sess.Attach(c)
+	recvFrame(t, c) // hello
+	huge := strings.Repeat("x", clientLogMaxLen+100)
+	// Act
+	err := h.sess.HandleClientFrame(c, []byte(`{"type":"client-log","level":"info","message":"`+huge+`"}`))
+	// Assert
+	if err != nil {
+		t.Fatalf("client-log: %v", err)
+	}
+	got := lc.containing("…[clamped]")
+	if len(got) != 1 {
+		t.Fatal("oversized client-log was not clamped")
+	}
+	if len(got[0]) > clientLogMaxLen+100 {
+		t.Fatalf("clamped line still %d bytes", len(got[0]))
+	}
+}
+
 func TestSendToDetachedClientLogsTheSkip(t *testing.T) {
 	// Arrange — a client that was never attached.
 	h, lc := newLoggedHarness(t, 16)

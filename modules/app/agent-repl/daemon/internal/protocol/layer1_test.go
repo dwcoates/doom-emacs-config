@@ -307,6 +307,7 @@ func TestCommandActs(t *testing.T) {
 		{"set-permission-mode acts", `{"type":"set-permission-mode","request_id":"r","mode":"plan"}`, true},
 		{"set-model acts", `{"type":"set-model","request_id":"r","model":"m"}`, true},
 		{"replay-request does not act", `{"type":"replay-request","from_seq":0}`, false},
+		{"client-log does not act", `{"type":"client-log","level":"warn","message":"m"}`, false},
 		{"shutdown does not act", `{"type":"shutdown","request_id":"r"}`, false},
 		{"unknown type does not act", `{"type":"who-knows"}`, false},
 		{"malformed json does not act", `{not json`, false},
@@ -332,6 +333,22 @@ func TestDecodeCommandSetModel(t *testing.T) {
 	}
 	if cmd.Type != "set-model" || cmd.Model != "claude-opus-4-5" {
 		t.Errorf("cmd = %+v, want set-model claude-opus-4-5", cmd)
+	}
+}
+
+func TestDecodeCommandClientLog(t *testing.T) {
+	// Arrange — client-log must be in the known-command allowlist, or
+	// DecodeCommand returns (nil, nil) and the webapp's diagnostics
+	// vanish exactly when they are needed.
+	line := `{"type":"client-log","level":"warn","message":"render stall: rAF pending 2000ms"}`
+	// Act
+	cmd, err := DecodeCommand([]byte(line))
+	// Assert
+	if err != nil {
+		t.Fatalf("DecodeCommand: %v", err)
+	}
+	if cmd == nil || cmd.Type != "client-log" || cmd.Level != "warn" || cmd.Message != "render stall: rAF pending 2000ms" {
+		t.Errorf("cmd = %+v, want the decoded client-log", cmd)
 	}
 }
 

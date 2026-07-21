@@ -130,6 +130,127 @@ describe("RenderCoalescer", () => {
   });
 });
 
+describe("RenderCoalescer stall watchdog", () => {
+  it("reports a stall when the host never services the pending frame", () => {
+    // Arrange — a frozen clockless host, frames keep being asked for.
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const stalls: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStall: (ms) => stalls.push(ms),
+    });
+    coalescer.schedule();
+    // Act — the next ask lands after the threshold with the frame unserviced.
+    clock = 1500;
+    coalescer.schedule();
+    // Assert
+    expect(stalls).toEqual([1500]);
+  });
+
+  it("stays quiet while the pending frame is younger than the threshold", () => {
+    // Arrange
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const stalls: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStall: (ms) => stalls.push(ms),
+    });
+    coalescer.schedule();
+    // Act
+    clock = 999;
+    coalescer.schedule();
+    // Assert
+    expect(stalls).toEqual([]);
+  });
+
+  it("reports one stall per episode, not one per schedule", () => {
+    // Arrange
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const stalls: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStall: (ms) => stalls.push(ms),
+    });
+    coalescer.schedule();
+    clock = 1500;
+    coalescer.schedule();
+    // Act — the wedge persists through more frames.
+    clock = 2500;
+    coalescer.schedule();
+    clock = 3500;
+    coalescer.schedule();
+    // Assert
+    expect(stalls).toHaveLength(1);
+  });
+
+  it("reports recovery with the stalled frame's total age when it finally fires", () => {
+    // Arrange — a detected stall, then the host wakes up.
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const recoveries: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStall: () => {},
+      onStallRecover: (ms) => recoveries.push(ms),
+    });
+    coalescer.schedule();
+    clock = 1500;
+    coalescer.schedule();
+    // Act
+    clock = 2000;
+    fake.firePending();
+    // Assert
+    expect(recoveries).toEqual([2000]);
+  });
+
+  it("does not report recovery for a frame that was never stalled", () => {
+    // Arrange
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const recoveries: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStallRecover: (ms) => recoveries.push(ms),
+    });
+    coalescer.schedule();
+    // Act
+    clock = 20;
+    fake.firePending();
+    // Assert
+    expect(recoveries).toEqual([]);
+  });
+
+  it("cancel clears the stall episode", () => {
+    // Arrange — a stalled frame is cancelled (e.g. a session rebind).
+    const fake = fakeFrameHost();
+    let clock = 0;
+    const recoveries: number[] = [];
+    const coalescer = new RenderCoalescer(fake.host, () => {}, {
+      now: () => clock,
+      stallAfterMs: 1000,
+      onStall: () => {},
+      onStallRecover: (ms) => recoveries.push(ms),
+    });
+    coalescer.schedule();
+    clock = 1500;
+    coalescer.schedule();
+    // Act — cancel, then a healthy schedule/fire cycle.
+    coalescer.cancel();
+    coalescer.schedule();
+    fake.firePending();
+    // Assert — the cancelled episode never reports a recovery.
+    expect(recoveries).toEqual([]);
+  });
+});
+
 describe("windowFrameHost", () => {
   it("delegates to the window's own scheduler", () => {
     // Arrange

@@ -67,6 +67,7 @@ import {
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
+import { ForwardingLogger } from "./wslog.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
 
@@ -116,7 +117,14 @@ async function boot(): Promise<void> {
   let midTaskActive: boolean | null = null;
   let ws: WsClient;
 
-  const store = new ConversationStore();
+  // Delivery-path diagnostics (§2.15): console always, mirrored to the
+  // daemon's disk log best-effort. Reads `ws` at call time — before the
+  // first connect the binding is still undefined (hence the runtime
+  // guard behind the cast), and the line stays console-only.
+  const wslog = new ForwardingLogger((cmd) => (ws as WsClient | undefined)?.send(cmd) ?? false);
+  const clog = wslog.log.bind(wslog);
+
+  const store = new ConversationStore((level, message) => clog(level, message));
   const feedEl = must("feed");
   // The search's echo area: isearch keeps its query out of the text being
   // searched, and so does this — the composer's draft stays untouched while
@@ -420,13 +428,30 @@ async function boot(): Promise<void> {
   // paint decides chrome-only vs full feed when it FIRES, not when it was
   // asked for: a replay that completes between the two must paint the feed,
   // not just the chrome.
-  const frames = new RenderCoalescer(windowFrameHost(window), () => {
-    if (store.replaying) {
-      renderChrome();
-    } else {
-      rerender();
-    }
-  });
+  const frames = new RenderCoalescer(
+    windowFrameHost(window),
+    () => {
+      if (store.replaying) {
+        renderChrome();
+      } else {
+        rerender();
+      }
+    },
+    {
+      // Stall watchdog: a webview whose WebKit process wrongly believes
+      // it is occluded (xwidget reparenting) suspends rAF while CSS
+      // animations keep breathing — the feed freezes with no error
+      // anywhere. The visibility/focus snapshot is the evidence that
+      // distinguishes that state from a genuinely hidden page.
+      now: () => performance.now(),
+      onStall: (ms) =>
+        clog(
+          "warn",
+          `render stall: rAF pending ${Math.round(ms)}ms while frames keep arriving (visibility=${document.visibilityState} focus=${document.hasFocus()})`,
+        ),
+      onStallRecover: (ms) => clog("warn", `render stall recovered after ${Math.round(ms)}ms`),
+    },
+  );
   // The wake anchors' countdowns tick on wall-clock time, not on frames,
   // so nothing would re-render them between deltas. A slow heartbeat
   // ask keeps them honest through the same coalescer every other render
@@ -437,7 +462,9 @@ async function boot(): Promise<void> {
   // client-side twin of the Emacs sync-webview rebind): fresh store,
   // fresh socket, URL param updated so a reload lands on the successor.
   const swapTo = (next: string): void => {
-    console.warn(`session rebind: ${activeSessionId} -> ${next}`);
+    // Forwarded on the OLD socket in the instant before it closes; when
+    // that loses the race the line still reaches the console.
+    clog("warn", `session rebind: ${activeSessionId} -> ${next}`);
     ws.close();
     activeSessionId = next;
     rememberedClaudeId = "";
@@ -484,8 +511,21 @@ async function boot(): Promise<void> {
   const makeClient = (sessionId: string): WsClient =>
     new WsClient({
       url: `${wsBase}/sessions/${sessionId}/stream`,
+      log: (message) => clog("warn", message),
       onMessage: (data) => {
-        const result = store.applyRaw(data);
+        let result;
+        try {
+          result = store.applyRaw(data);
+        } catch (err) {
+          // A frame that throws before lastSeq advances re-throws on
+          // every replay of the same bytes — a permanent, previously
+          // silent feed stall. Evidence first, then the same throw.
+          clog(
+            "error",
+            `applyRaw threw: ${String(err)} — frame head: ${data.slice(0, 200)}`,
+          );
+          throw err;
+        }
         if (store.state.claudeSessionId !== "" && store.state.claudeSessionId !== rememberedClaudeId) {
           // The hello supplied (or updated) the durable CLI uuid: persist
           // it so a future "session gone" can rebind this conversation.
@@ -546,6 +586,9 @@ async function boot(): Promise<void> {
       onStatusChange: (connected) => {
         statusEl.textContent = connected ? "connected" : "disconnected";
         statusEl.classList.toggle("ok", connected);
+        // Socket lifecycle in the daemon log: pairs with the daemon's
+        // own attach/detach lines to show WHICH side went quiet.
+        clog(connected ? "info" : "warn", `ws: ${connected ? "connected" : "disconnected"}`);
       },
       sessionExists: makeSessionExistsProbe(httpBase, sessionId),
       onGone: () => {

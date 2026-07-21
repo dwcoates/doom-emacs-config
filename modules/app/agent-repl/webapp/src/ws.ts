@@ -23,6 +23,14 @@ export interface WsClientOptions {
   sessionExists?: () => Promise<boolean>;
   /** Fired once when sessionExists reports the session is gone. */
   onGone?: () => void;
+  /**
+   * Diagnostic sink. The one caller today is the dropped-reply branch:
+   * a store-generated command (typically a gap's replay-request) that
+   * could not be sent because the socket was not OPEN previously
+   * vanished without a trace — and an unsent replay-request is a feed
+   * that never un-wedges.
+   */
+  log?: (message: string) => void;
 }
 
 const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
@@ -61,7 +69,9 @@ export class WsClient {
     };
     ws.onmessage = (event: MessageEvent) => {
       const reply = this.opts.onMessage(String(event.data));
-      if (reply) this.send(reply);
+      if (reply && !this.send(reply)) {
+        this.opts.log?.(`ws: dropped outbound ${reply.type} — socket not open`);
+      }
     };
     ws.onclose = () => {
       this.opts.onStatusChange?.(false);
