@@ -56,8 +56,8 @@ func TestCleanSummaryCapsOverlongOutput(t *testing.T) {
 
 func TestSummarizeWithReturnsCleanedSummaryOnSuccess(t *testing.T) {
 	// Arrange — a runner that yields plain text; the wrapper cleans it.
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return []byte("Widget cache is being built"), nil
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte("Widget cache is being built"), nil, nil
 	}
 	fn := summarizeWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -71,8 +71,8 @@ func TestSummarizeWithReturnsCleanedSummaryOnSuccess(t *testing.T) {
 func TestSummarizeWithReturnsEmptyOnRunnerError(t *testing.T) {
 	// Arrange — a failing runner. The summary is best-effort, so a failure
 	// yields "" (broadcast nothing, last good label stands), never an error.
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return nil, errors.New("claude exploded")
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, nil, errors.New("claude exploded")
 	}
 	fn := summarizeWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -85,8 +85,8 @@ func TestSummarizeWithReturnsEmptyOnRunnerError(t *testing.T) {
 
 func TestSummarizeWithReturnsEmptyOnBlankOutput(t *testing.T) {
 	// Arrange — a runner whose output cleans down to nothing.
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return []byte("   \n  "), nil
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte("   \n  "), nil, nil
 	}
 	fn := summarizeWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -101,9 +101,9 @@ func TestSummarizeWithFeedsPromptAndResponsesToRunner(t *testing.T) {
 	// Arrange — capture the stdin the runner receives so the prompt and the
 	// responses both reach the model as data.
 	var gotStdin string
-	run := func(_ context.Context, _, _, stdin string) ([]byte, error) {
+	run := func(_ context.Context, _, _, stdin string) ([]byte, []byte, error) {
 		gotStdin = stdin
-		return []byte("ok"), nil
+		return []byte("ok"), nil, nil
 	}
 	fn := summarizeWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -111,6 +111,129 @@ func TestSummarizeWithFeedsPromptAndResponsesToRunner(t *testing.T) {
 	// Assert
 	if !strings.Contains(gotStdin, "BUILD THE THING") || !strings.Contains(gotStdin, "I AM BUILDING IT") {
 		t.Errorf("stdin did not carry both blocks: %q", gotStdin)
+	}
+}
+
+func TestSummarizeWithLogsCallStartWithConfigDirModelAndAction(t *testing.T) {
+	// Arrange — a runner that never returns, so a start line must already
+	// be on record before the call resolves; use a slow runner instead
+	// and only assert the start line the wrapper logs unconditionally.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte("ok"), nil, nil
+	}
+	lc := &logCapture{}
+	fn := summarizeWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("prompt", "responses")
+	// Assert
+	got := lc.containing("summarizer: call start")
+	if len(got) != 1 {
+		t.Fatalf("start lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"config_dir=/cfg/dir", "model=haiku", "action=summarize completed turn"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("start line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestSummarizeWithLogsCleanedSummaryOnSuccess(t *testing.T) {
+	// Arrange — a successful run's produced summary must be on record, not
+	// just silently returned to the caller.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte("Widget cache is being built"), nil, nil
+	}
+	lc := &logCapture{}
+	fn := summarizeWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("prompt", "responses")
+	// Assert
+	got := lc.containing("summarizer: call ok")
+	if len(got) != 1 {
+		t.Fatalf("success lines = %v, want exactly one", got)
+	}
+	if !strings.Contains(got[0], "Widget cache is being built.") {
+		t.Errorf("success line %q missing the produced summary", got[0])
+	}
+}
+
+func TestSummarizeWithLogsTimeoutKillWithConfigDirAndModelTags(t *testing.T) {
+	// Arrange — the recurring live-log complaint: a runner that fails the
+	// way a summarizerTimeout kill does ("signal: killed"), which must
+	// come out attributable rather than as a bare, contextless line.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, nil, errors.New("signal: killed")
+	}
+	lc := &logCapture{}
+	fn := summarizeWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("prompt", "responses")
+	// Assert
+	got := lc.containing("summarizer: call FAILED")
+	if len(got) != 1 {
+		t.Fatalf("failure lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"config_dir=/cfg/dir", "model=haiku", "signal: killed"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("failure line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestSummarizeWithLogsStderrTailOnFailure(t *testing.T) {
+	// Arrange — a runner surfacing the child's stderr, previously
+	// discarded entirely; the failure log must carry it so a crash's
+	// cause is visible without reproducing it.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, []byte("fatal: model unavailable"), errors.New("exit status 1")
+	}
+	lc := &logCapture{}
+	fn := summarizeWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("prompt", "responses")
+	// Assert
+	got := lc.containing("summarizer: call FAILED")
+	if len(got) != 1 {
+		t.Fatalf("failure lines = %v, want exactly one", got)
+	}
+	if !strings.Contains(got[0], "fatal: model unavailable") {
+		t.Errorf("failure line %q missing stderr tail", got[0])
+	}
+}
+
+func TestBoundedWriterRetainsOnlyLeadingCapBytes(t *testing.T) {
+	// Arrange — a writer capped well below what a noisy child could emit.
+	w := &boundedWriter{cap: 5}
+	// Act
+	n, err := w.Write([]byte("hello world"))
+	// Assert — the full length is reported (never a short write, so a
+	// successful child's exec.Cmd.Run never fails because of stderr
+	// capping), but only the leading cap bytes are retained.
+	if err != nil {
+		t.Fatalf("Write err = %v, want nil", err)
+	}
+	if n != len("hello world") {
+		t.Errorf("Write n = %d, want %d (full length reported)", n, len("hello world"))
+	}
+	if got := string(w.Bytes()); got != "hello" {
+		t.Errorf("Bytes() = %q, want %q", got, "hello")
+	}
+}
+
+func TestBoundedWriterAccumulatesAcrossWritesUntilCap(t *testing.T) {
+	// Arrange — a cap spanning multiple writes, mirroring how exec.Cmd
+	// streams a subprocess's stderr in chunks.
+	w := &boundedWriter{cap: 8}
+	// Act
+	if _, err := w.Write([]byte("abcd")); err != nil {
+		t.Fatalf("first Write err = %v", err)
+	}
+	if _, err := w.Write([]byte("efghij")); err != nil {
+		t.Fatalf("second Write err = %v", err)
+	}
+	// Assert
+	if got := string(w.Bytes()); got != "abcdefgh" {
+		t.Errorf("Bytes() = %q, want %q", got, "abcdefgh")
 	}
 }
 
