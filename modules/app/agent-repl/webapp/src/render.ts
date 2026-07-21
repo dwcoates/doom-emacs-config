@@ -282,6 +282,27 @@ export function interruptingIndicatorHtml(interrupting: boolean): string {
 }
 
 /**
+ * The "thinking…" indicator: the orange tail row shown while a TEXTLESS
+ * thinking block is live at the tail — an adaptive-thinking model that streams
+ * a signature but no summary, so there is no disclosure card to carry the arc
+ * inline. It stands in the same bottom-pinned slot as the working/retrying rows
+ * (see `tailStatusRow`) rather than as its own card just under the feed, so
+ * every dead-air progress signal reads from the one place. Reuses the same
+ * `.thinking-pending` markup the row has always worn, now aria-live like its
+ * tail-row siblings.
+ *
+ * Returns "" when not thinking, so the caller can drop the tail node.
+ */
+export function thinkingRowHtml(thinking: boolean): string {
+  if (!thinking) return "";
+  return (
+    `<div class="thinking-pending" role="status" aria-live="polite">` +
+    `<span class="thinking-spinner" aria-hidden="true"></span> thinking${animatedEllipsis()}` +
+    `</div>`
+  );
+}
+
+/**
  * The "working…" indicator: the orange dead-air row shown at the feed tail
  * while the main agent chain is in flight but nothing else is live — no
  * streaming cursor, no thinking spinner, no running-tool arc, and no frontier
@@ -647,11 +668,12 @@ function Thinking(item: ThinkingItem): string {
   // Adaptive-thinking models withhold the thinking text: the block streams
   // a signature and no thinking_delta, so item.text stays empty. A
   // disclosure triangle over an empty <pre> unfolds to nothing, so a
-  // textless block gets a spinner while it is open and, once it closes,
-  // disappears entirely (`rendersEmpty`).
-  if (item.text === "") {
-    return `<div class="thinking-pending"><span class="thinking-spinner" aria-hidden="true"></span> thinking${animatedEllipsis()}</div>`;
-  }
+  // textless block draws NO inline card at all: while it is open its
+  // `thinking…` beat moves to the bottom-pinned tail slot beside the
+  // working/retrying rows (see `pulseTarget`/`thinkingRowHtml`), and once it
+  // closes it disappears entirely (`rendersEmpty`). It stays non-empty here
+  // while live so the tail scan can still name it for that slot.
+  if (item.text === "") return "";
   // While the summary still streams, the disclosure carries the same orange
   // arc the textless indicator spins, beside the `(thinking…)` label — so a
   // texted thinking block reads as live rather than as a finished card that
@@ -1813,13 +1835,18 @@ export function rendersEmpty(
  *   orange `working…` tail row stands in for the silent feed.
  * - `retrying` — the SDK is auto-retrying a failed request, so the purple
  *   `retrying…` tail row supersedes the working one.
- * - `null` — a streaming cursor, a live thinking spinner, a running-tool arc,
- *   or a pending permission is itself the live signal, so nothing extra shows.
+ * - `thinking` — a TEXTLESS thinking block is live at the tail, so the orange
+ *   `thinking…` row stands in the same bottom-pinned slot the working row uses,
+ *   rather than as its own card just under the feed.
+ * - `null` — a streaming cursor, a live TEXTED thinking disclosure (its own
+ *   inline arc), a running-tool arc, or a pending permission is itself the live
+ *   signal, so nothing extra shows.
  */
 export type PulseTarget =
   | { kind: "text"; blockId: string }
   | { kind: "working" }
   | { kind: "retrying" }
+  | { kind: "thinking" }
   | null;
 
 /**
@@ -1839,7 +1866,8 @@ export type PulseTarget =
  * beat (or because there is no beat to carry):
  * - the turn is not in flight, so nothing more is coming at all;
  * - a response is streaming, and its own cursor is the live signal;
- * - a thinking indicator is running, and its spinner is the live signal;
+ * - a TEXTED thinking disclosure is streaming, and its own inline `(thinking…)`
+ *   arc is the live signal (a TEXTLESS one yields `thinking` for the tail slot);
  * - a tool call is running at the tail, and its own run badge (the arc in
  *   `.badge.run`) is the live signal, so the feed shows brief dead air;
  * - a pending permission is at the tail, and the agent is blocked on the USER
@@ -1879,7 +1907,13 @@ export function pulseTarget(
     // The prompt no longer breathes: a turn that has drawn no visible content
     // is simply WORKING, and the orange tail row speaks for it now.
     if (item.kind === "user-turn") return { kind: "working" };
-    if (item.kind === "thinking" && !item.done) return null;
+    // A live thinking block at the tail: a TEXTLESS one draws no inline card,
+    // so its `thinking…` signal moves to the bottom-pinned tail slot beside
+    // working/retrying (`thinking`). A TEXTED one IS a disclosure card carrying
+    // its own inline `(thinking…)` arc, so it keeps the beat itself (null).
+    if (item.kind === "thinking" && !item.done) {
+      return item.text === "" ? { kind: "thinking" } : null;
+    }
     if (item.kind === "text") {
       return item.done ? { kind: "text", blockId: item.blockId } : null;
     }
@@ -1912,11 +1946,14 @@ export function isPulsed(item: ConversationItem, pulse: PulseTarget): boolean {
 /**
  * The single force-appended tail status row to show, or null when none. This
  * is the one home of the tail-row precedence — interrupting (red) > compacting
- * > retrying (purple) > working (orange) — shared by the incremental render
- * and the fresh-join restore so the two never drift. The compaction banner is
- * the topbar's own element (see main.ts), so a compaction shows NO feed-tail
- * row; it only suppresses the two pulse-driven rows beneath it. The `text`
- * pulse is a bubble breath, not a tail row, so it never reaches here.
+ * > retrying (purple) > thinking (orange) > working (orange) — shared by the
+ * incremental render and the fresh-join restore so the two never drift. The
+ * compaction banner is the topbar's own element (see main.ts), so a compaction
+ * shows NO feed-tail row; it only suppresses the pulse-driven rows beneath it.
+ * The `thinking`/`retrying`/`working` pulse kinds are mutually exclusive (the
+ * tail scan names exactly one), so their order among themselves only reads as
+ * intent. The `text` pulse is a bubble breath, not a tail row, so it never
+ * reaches here.
  */
 export function tailStatusRow(
   interrupting: boolean,
@@ -1929,6 +1966,9 @@ export function tailStatusRow(
   if (compacting) return null;
   if (pulse?.kind === "retrying") {
     return { key: "retrying", html: retryingRowHtml(true) };
+  }
+  if (pulse?.kind === "thinking") {
+    return { key: "thinking", html: thinkingRowHtml(true) };
   }
   if (pulse?.kind === "working") {
     return { key: "working", html: workingRowHtml(true) };
