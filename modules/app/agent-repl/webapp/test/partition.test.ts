@@ -221,7 +221,7 @@ describe("partitionFeed", () => {
     // Arrange — a backgrounded Bash announcing bg1, then its poll.
     const spawn = {
       ...tool("t1"),
-      result: { isError: false, content: "Command running in background with ID: bg1." },
+      result: { isError: false, content: "Command running in background with ID: bg1. Output is being written to: /tmp/claude-1/s/tasks/bg1.output" },
     } as ConversationItem;
     const poll = { ...tool("t2", "TaskOutput"), input: { task_id: "bg1" } } as ConversationItem;
     // Act
