@@ -131,8 +131,8 @@ func TestClassifierPromptStillMarksDataBlocksAsData(t *testing.T) {
 
 func TestClassifyWithReturnsClassifierVerdictOnSuccess(t *testing.T) {
 	// Arrange — a runner that yields a valid interrupt object.
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return []byte(`{"structured_output":{"verdict":"interrupt","reason":"redirect"}}`), nil
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte(`{"structured_output":{"verdict":"interrupt","reason":"redirect"}}`), nil, nil
 	}
 	fn := classifyWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -145,8 +145,8 @@ func TestClassifyWithReturnsClassifierVerdictOnSuccess(t *testing.T) {
 
 func TestClassifyWithFailsClosedOnRunnerError(t *testing.T) {
 	// Arrange — a runner that fails (non-zero exit, spawn error, timeout).
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return nil, errors.New("boom")
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, []byte("child stderr"), errors.New("boom")
 	}
 	fn := classifyWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -159,8 +159,8 @@ func TestClassifyWithFailsClosedOnRunnerError(t *testing.T) {
 
 func TestClassifyWithFailsClosedOnUnparseableOutput(t *testing.T) {
 	// Arrange — the runner succeeds but the output is garbage.
-	run := func(_ context.Context, _, _, _ string) ([]byte, error) {
-		return []byte(`{"type":"result"}`), nil
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte(`{"type":"result"}`), nil, nil
 	}
 	fn := classifyWith(run, "haiku", "", func(string, ...any) {})
 	// Act
@@ -174,9 +174,9 @@ func TestClassifyWithFailsClosedOnUnparseableOutput(t *testing.T) {
 func TestClassifyWithPassesPromptToRunner(t *testing.T) {
 	// Arrange — capture what the runner receives on stdin.
 	var gotStdin, gotModel, gotConfigDir string
-	run := func(_ context.Context, model, configDir, stdin string) ([]byte, error) {
+	run := func(_ context.Context, model, configDir, stdin string) ([]byte, []byte, error) {
 		gotStdin, gotModel, gotConfigDir = stdin, model, configDir
-		return []byte(`{"structured_output":{"verdict":"wait","reason":"ok"}}`), nil
+		return []byte(`{"structured_output":{"verdict":"wait","reason":"ok"}}`), nil, nil
 	}
 	fn := classifyWith(run, "sonnet", "/acct", func(string, ...any) {})
 	// Act
@@ -190,6 +190,118 @@ func TestClassifyWithPassesPromptToRunner(t *testing.T) {
 	}
 	if gotModel != "sonnet" || gotConfigDir != "/acct" {
 		t.Errorf("model/configDir = %q/%q", gotModel, gotConfigDir)
+	}
+}
+
+func TestClassifyWithLogsCallStartWithConfigDirModelAndAction(t *testing.T) {
+	// Arrange — a start line must be on record unconditionally, before the
+	// call resolves, so an unattributable "classifier: fail-closed to
+	// wait" line is never the only trace of an invocation.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte(`{"structured_output":{"verdict":"wait","reason":"ok"}}`), nil, nil
+	}
+	lc := &logCapture{}
+	fn := classifyWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("running task", "new message")
+	// Assert
+	got := lc.containing("classifier: call start")
+	if len(got) != 1 {
+		t.Fatalf("start lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"config_dir=/cfg/dir", "model=haiku", "action=classify queued message"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("start line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestClassifyWithLogsVerdictAndRawOutputOnSuccess(t *testing.T) {
+	// Arrange — a real classifier decision must be on record, not just
+	// silently returned to the caller.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte(`{"structured_output":{"verdict":"interrupt","reason":"stop now"}}`), nil, nil
+	}
+	lc := &logCapture{}
+	fn := classifyWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("running task", "new message")
+	// Assert
+	got := lc.containing("classifier: call ok")
+	if len(got) != 1 {
+		t.Fatalf("success lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"verdict=interrupt", "reason=\"stop now\"", "structured_output"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("success line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestClassifyWithLogsFailClosedWithConfigDirAndModelTags(t *testing.T) {
+	// Arrange — a runner failure (non-zero exit, spawn error, timeout kill)
+	// must fail closed AND log the failure attributably, not as a bare,
+	// contextless line.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, nil, errors.New("signal: killed")
+	}
+	lc := &logCapture{}
+	fn := classifyWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("task", "msg")
+	// Assert
+	got := lc.containing("classifier: call FAILED")
+	if len(got) != 1 {
+		t.Fatalf("failure lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"config_dir=/cfg/dir", "model=haiku", "signal: killed"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("failure line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestClassifyWithLogsStderrTailOnRunnerFailure(t *testing.T) {
+	// Arrange — the child's stderr, previously discarded entirely by
+	// spawnClassifier, must reach the failure log so a crash's cause is
+	// visible without reproducing it.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return nil, []byte("fatal: model unavailable"), errors.New("exit status 1")
+	}
+	lc := &logCapture{}
+	fn := classifyWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("task", "msg")
+	// Assert
+	got := lc.containing("classifier: call FAILED")
+	if len(got) != 1 {
+		t.Fatalf("failure lines = %v, want exactly one", got)
+	}
+	if !strings.Contains(got[0], "fatal: model unavailable") {
+		t.Errorf("failure line %q missing the stderr tail", got[0])
+	}
+}
+
+func TestClassifyWithLogsParseFailureWithRawOutputAndTags(t *testing.T) {
+	// Arrange — the runner succeeds but returns unparseable output; the
+	// failure log must still carry the context tags and show the raw
+	// output that failed to parse.
+	run := func(_ context.Context, _, _, _ string) ([]byte, []byte, error) {
+		return []byte(`not json at all`), nil, nil
+	}
+	lc := &logCapture{}
+	fn := classifyWith(run, "haiku", "/cfg/dir", lc.logf)
+	// Act
+	fn("task", "msg")
+	// Assert
+	got := lc.containing("classifier: call FAILED")
+	if len(got) != 1 {
+		t.Fatalf("failure lines = %v, want exactly one", got)
+	}
+	for _, want := range []string{"config_dir=/cfg/dir", "model=haiku", "not json at all"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("failure line %q missing %q", got[0], want)
+		}
 	}
 }
 
