@@ -46,6 +46,7 @@ const clearDivider = blockAfter(css, ".clear-divider");
 // comma so it resolves to the multi-selector rule, not the standalone one.
 const dividerColumn = blockAfter(css, ".clear-divider,");
 const compactDivider = blockAfter(css, "\n.compact-divider {");
+const compactRule = blockAfter(css, "\n.compact-rule {");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
@@ -104,6 +105,17 @@ function isTurquoise(hex: string): boolean {
 function isYellow(hex: string): boolean {
   const [r, g, b] = channels(hex);
   return r > 2 * b && g > 2 * b && Math.abs(r - g) < 0.4 * r;
+}
+
+/**
+ * Whether a `#rrggbb` literal reads as orange: its hue sits in the amber-orange
+ * band between the red a /clear draws (hue ~0) and the yellow of a warning, so
+ * a channel-dominance check (orange is red-dominant, like red) cannot tell it
+ * from red where the hue plainly can.
+ */
+function isOrange(hex: string): boolean {
+  const h = hue(hex);
+  return h >= 15 && h <= 35;
 }
 
 /** Perceived lightness (0-255) of a `#rrggbb` literal, for darker-than checks. */
@@ -697,6 +709,52 @@ describe("compact divider", () => {
     // rail with its trailing dash stranded far to the right.
     // Assert
     expect(compactDivider).toMatch(/text-align:\s*center/);
+  });
+});
+
+describe("compact rule", () => {
+  it("paints the /compact boundary bar with its own token", () => {
+    // Arrange / Act — the .compact-rule rule.
+    // Assert
+    expect(compactRule).toMatch(/background:\s*var\(--compact-rule\)/);
+  });
+
+  it("draws the boundary bar thick enough to read as a break", () => {
+    // Arrange
+    const height = compactRule.match(/height:\s*(\d+)px/);
+    // Act / Assert
+    expect(Number(height?.[1])).toBeGreaterThanOrEqual(3);
+  });
+
+  it("rides the same central-column confinement as the /clear rule", () => {
+    // Arrange / Act — the shared selector names the compact bar alongside the
+    // clear one, so the orange bar is capped to the same column the label is.
+    const dividerSelector = css.slice(
+      css.indexOf(".clear-divider,"),
+      css.indexOf("{", css.indexOf(".clear-divider,")),
+    );
+    // Assert
+    expect(dividerSelector).toContain(".compact-rule");
+  });
+
+  it("keeps the boundary bar inside the feed column's padding", () => {
+    // Arrange / Act — no negative margin bleeds the bar out to the window edges.
+    // Assert
+    expect(compactRule).not.toMatch(/margin[^:]*:[^;]*-\d/);
+  });
+
+  it("defines an orange boundary token for the light theme", () => {
+    // Arrange / Act
+    const orange = isOrange(token(lightTheme, "--compact-rule"));
+    // Assert
+    expect(orange).toBe(true);
+  });
+
+  it("defines an orange boundary token for the dark theme", () => {
+    // Arrange / Act
+    const orange = isOrange(token(darkTheme, "--compact-rule"));
+    // Assert
+    expect(orange).toBe(true);
   });
 });
 

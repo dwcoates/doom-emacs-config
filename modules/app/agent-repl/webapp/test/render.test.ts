@@ -719,6 +719,38 @@ describe("diffHtml", () => {
   });
 });
 
+describe("compact boundary", () => {
+  const boundary: ConversationItem = {
+    kind: "compact-boundary",
+    trigger: "manual",
+    preTokens: 287028,
+    postTokens: 0,
+  };
+
+  it("draws the orange rule as a separator", () => {
+    // Act
+    const html = renderItem(boundary);
+    // Assert — the bar is a separator element the stylesheet paints orange.
+    expect(html).toContain(`<div class="compact-rule" role="separator"`);
+  });
+
+  it("seats the orange rule above the context-compacted stamp", () => {
+    // Arrange
+    const html = renderItem(boundary);
+    // Act — the rule must precede the label so it lands between the /compact
+    // prompt bubble above and the stamp below.
+    // Assert
+    expect(html.indexOf("compact-rule")).toBeLessThan(html.indexOf("compact-divider"));
+  });
+
+  it("keeps the context-compacted stamp with its trigger and pre-count", () => {
+    // Act
+    const html = renderItem(boundary);
+    // Assert
+    expect(html).toContain("context compacted (manual, 287028 tokens before)");
+  });
+});
+
 describe("renderItem", () => {
   it("stamps a user prompt bubble with its relative age", () => {
     // Arrange — a send time firmly in the past, so the age reads `… ago`
