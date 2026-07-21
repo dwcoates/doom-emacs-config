@@ -365,6 +365,95 @@ describe("bubble depth shading", () => {
   });
 });
 
+describe("window bottom-edge depth shading", () => {
+  // Line-leading anchor, not the bare `body::after`, since the --bottom-shadow
+  // token comment references the selector by name earlier in the file.
+  const bottomEdge = blockAfter(css, "\nbody::after");
+  /** The black-mix opacity percentage of a shadow/wash token. */
+  const shadowPct = (block: string, name: string): number => {
+    const m = cssVar(block, name).match(/#000000\s+(\d+)%/);
+    if (m === null) throw new Error(`${name} is not a #000000 color-mix`);
+    return Number(m[1]);
+  };
+
+  it("paints the bottom edge with the --bottom-shadow depth token", () => {
+    // Arrange / Act — the body::after wash pulls its fill from the token.
+    // Assert
+    expect(bottomEdge).toMatch(/background:\s*var\(--bottom-shadow\)/);
+  });
+
+  it("pins the wash to the very bottom of the window", () => {
+    // Arrange / Act — fixed to the viewport bottom, so it holds through scroll.
+    // Assert
+    expect(bottomEdge).toMatch(/position:\s*fixed/);
+    expect(bottomEdge).toMatch(/bottom:\s*0/);
+  });
+
+  it("spans the wash fully from left to right", () => {
+    // Arrange / Act — both edges pinned to 0 so the seam cue runs the full width.
+    // Assert
+    expect(bottomEdge).toMatch(/left:\s*0/);
+    expect(bottomEdge).toMatch(/right:\s*0/);
+  });
+
+  it("keeps the wash inert so it never intercepts clicks on the composer it overlays", () => {
+    // Arrange / Act — pointer-events:none lets the composer beneath stay clickable.
+    // Assert
+    expect(bottomEdge).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("sits below the modal login overlay so a login still fully covers the page", () => {
+    // Arrange — the login overlay owns z-index 50 as a full-window modal.
+    const z = Number(bottomEdge.match(/z-index:\s*(\d+)/)?.[1]);
+    // Act / Assert — the bottom wash stacks under it.
+    expect(z).toBeLessThan(50);
+  });
+
+  it("fades the wash upward from the bottom edge rather than filling flat", () => {
+    // Arrange / Act — a to-top gradient darkens the seam and fades to nothing.
+    // Assert
+    expect(cssVar(lightTheme, "--bottom-shadow")).toMatch(/linear-gradient\(\s*to top/);
+  });
+
+  it("defines a bottom-edge depth token for the light theme", () => {
+    // Arrange / Act — a wash needs a black-mix layer to read as depth.
+    // Assert
+    expect(cssVar(lightTheme, "--bottom-shadow")).toMatch(/#000000\s+\d+%/);
+  });
+
+  it("defines a bottom-edge depth token for the dark theme", () => {
+    // Arrange / Act — the dark-scheme override carries its own bottom wash.
+    // Assert
+    expect(cssVar(darkTheme, "--bottom-shadow")).toMatch(/#000000\s+\d+%/);
+  });
+
+  it("keeps the light-theme bottom wash more subtle than the sidebar dock's", () => {
+    // Arrange — the seam cue is a quiet hint, so its black stays under the
+    // sidebar's floating dock (--sidebar-shadow).
+    // Act / Assert
+    expect(shadowPct(lightTheme, "--bottom-shadow")).toBeLessThan(
+      shadowPct(lightTheme, "--sidebar-shadow"),
+    );
+  });
+
+  it("keeps the dark-theme bottom wash more subtle than the sidebar dock's", () => {
+    // Arrange — the same subtler-than-sidebar contract holds on the dark feed.
+    // Act / Assert
+    expect(shadowPct(darkTheme, "--bottom-shadow")).toBeLessThan(
+      shadowPct(darkTheme, "--sidebar-shadow"),
+    );
+  });
+
+  it("deepens the dark-theme bottom wash so the seam still registers on the dark feed", () => {
+    // Arrange / Act — a faint wash vanishes on the dark ground, so dark carries
+    // more black than light, mirroring the sidebar's own theme split.
+    // Assert
+    expect(shadowPct(darkTheme, "--bottom-shadow")).toBeGreaterThan(
+      shadowPct(lightTheme, "--bottom-shadow"),
+    );
+  });
+});
+
 describe("sidebar merge glyph on-axis spin", () => {
   // The merge-family recycle glyph (`⟳`) spun by ws-spin: its ink sits
   // off-center in its line box, so it must be centered inside a fixed square
