@@ -412,6 +412,22 @@ body::after {
 #ws-sidebar .st-idle { background: none; border: 1.5px solid var(--muted); }
 #ws-sidebar .st-dead { background: var(--muted); }
 #ws-sidebar .st-none { visibility: hidden; }
+/* A perspective-less workspace — registered in the roster but with no open
+   perspective, so it shows in the sidebar yet not the tab-bar.  No live session
+   backs it, so its lifecycle disc is replaced by a question-mark glyph.  Boxed
+   like the merge glyph (no disc fill, radius 0) so the emoji sits centered
+   rather than clipped inside the 9px disc. */
+#ws-sidebar .st-inactive {
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background: none;
+  font-size: 0.8rem;
+  line-height: 1;
+}
 
 /* Merge lifecycle: the recycle glyph — spinning while the merge is in
    flight, still while queued, error-red when a conflict or failure needs a
