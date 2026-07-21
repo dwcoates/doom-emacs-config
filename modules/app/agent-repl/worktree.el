@@ -1321,7 +1321,7 @@ priority placement it is due."
 (defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
                                                        priority fork-session-id
                                                        callback &optional source-dir no-agent model
-                                                       postprocessing-prompt)
+                                                       postprocessing-prompt before-ws-merge-prompt)
   "Finalize a new worktree workspace at PATH with directory name DIRNAME.
 Registers the project with projectile, creates a Doom workspace, applies
 optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
@@ -1366,7 +1366,16 @@ POSTPROCESSING-PROMPT, when non-nil, is a prompt (from the dispatch
 JSON's `postprocessing_prompt' field) stored under `:postprocessing-prompt';
 `agent-repl--maybe-run-postprocessing-prompt' delivers it to this
 workspace's source after this workspace's merge is fully finished.  It
-survives the merge tombstone (not a runtime key)."
+survives the merge tombstone (not a runtime key).
+
+BEFORE-WS-MERGE-PROMPT, when non-nil, is an action (from the dispatch
+JSON's `before_ws_merge' field) stored under `:before-ws-merge-prompt';
+`agent-repl--maybe-run-before-ws-merge-prompt' delivers it to THIS
+workspace's OWN session — before it merges — the moment its
+`/create-or-update-workspace merge' command arrives, deferring the merge
+until the action completes.  Unlike POSTPROCESSING-PROMPT (which runs in
+the SOURCE after the merge finishes), this runs in the child itself
+BEFORE the merge."
   (agent-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s source-dir=%s model=%s"
                     path dirname priority fork-session-id (or source-dir "nil") (or model "nil"))
   (agent-repl--with-preserved-focus
@@ -1400,7 +1409,8 @@ survives the merge tombstone (not a runtime key)."
         :fork-session-id fork-session-id
         :source-ws-dir source-dir
         :model model
-        :postprocessing-prompt postprocessing-prompt)
+        :postprocessing-prompt postprocessing-prompt
+        :before-ws-merge-prompt before-ws-merge-prompt)
       (agent-repl--inherit-config-dir-override ws source-dir)
       ;; Cache branch names at construction time so --merge-base-ancestor-args
       ;; can skip the per-tick synchronous rev-parse calls on the warm path.
@@ -1427,14 +1437,17 @@ survives the merge tombstone (not a runtime key)."
 (defun agent-repl--worktree-add-callback (path dirname preemptive-prompt
                                                priority fork-session-id
                                                callback source-dir no-agent model
-                                               postprocessing-prompt ok output)
+                                               postprocessing-prompt before-ws-merge-prompt
+                                               ok output)
   "Handle the result of an async git-worktree-add operation.
 OK and OUTPUT are the success flag and git output.  The remaining arguments
 describe the workspace being created and are forwarded to
 `agent-repl--finalize-worktree-workspace' (including SOURCE-DIR, the
 project-dir of the workspace this worktree was created from, NO-AGENT,
-which suppresses booting the agent for the new worktree, and MODEL, the
-per-workspace agent model alias)."
+which suppresses booting the agent for the new worktree, MODEL, the
+per-workspace agent model alias, POSTPROCESSING-PROMPT, the after-merge
+prompt run in the source, and BEFORE-WS-MERGE-PROMPT, the pre-merge
+action run in the child itself)."
   (agent-repl--log dirname "worktree git result: %s" output)
   (if ok
       (progn
@@ -1442,7 +1455,7 @@ per-workspace agent model alias)."
         (agent-repl--finalize-worktree-workspace
          path dirname preemptive-prompt
          priority fork-session-id callback source-dir no-agent model
-         postprocessing-prompt))
+         postprocessing-prompt before-ws-merge-prompt))
     (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
     (agent-repl--warn dirname "git worktree add failed: %s" output)))
 
@@ -1451,7 +1464,7 @@ per-workspace agent model alias)."
                                               dirname preemptive-prompt
                                               priority callback
                                               &optional source-dir no-agent model
-                                              postprocessing-prompt)
+                                              postprocessing-prompt before-ws-merge-prompt)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
 On success, also creates the companion start tag at BASE-COMMIT (see
@@ -1463,7 +1476,9 @@ this worktree was created from; threaded through to be persisted as
 `:source-ws-dir' on the new workspace.  NO-AGENT, when non-nil, is
 forwarded so the new worktree is registered without booting the agent.
 MODEL, when non-nil, is the per-workspace agent model alias forwarded
-so the booted session runs under `--model MODEL'."
+so the booted session runs under `--model MODEL'.  POSTPROCESSING-PROMPT
+and BEFORE-WS-MERGE-PROMPT are the two passthrough merge-lifecycle
+prompts threaded through to `agent-repl--finalize-worktree-workspace'."
   (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
          (after-add (lambda (ok output)
                       (when ok
@@ -1472,7 +1487,8 @@ so the booted session runs under `--model MODEL'."
                       (agent-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id callback source-dir
-                       no-agent model postprocessing-prompt ok output))))
+                       no-agent model postprocessing-prompt before-ws-merge-prompt
+                       ok output))))
     (agent-repl--log dirname "worktree async git add: %S" add-args)
     (agent-repl--async-git "worktree-add" git-root add-args after-add)))
 
@@ -1518,7 +1534,7 @@ report the new path as an existing project."
       (agent-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
       (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
 
-(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model postprocessing-prompt)
+(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model postprocessing-prompt before-ws-merge-prompt)
   "Create a git worktree and Doom workspace for NAME.
 Git fetch and worktree-add run asynchronously so Emacs is not blocked.
 When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
@@ -1573,7 +1589,8 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
                                    fork-session-id
                                    dirname preemptive-prompt
                                    priority callback source-dir
-                                   no-agent model postprocessing-prompt)))
+                                   no-agent model postprocessing-prompt
+                                   before-ws-merge-prompt)))
       (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
@@ -2172,6 +2189,56 @@ reading so it fires once, and a nil/blank prompt is a no-op."
                         target-ws current-ws)
       (agent-repl--dispatch-prompt-command current-ws pp))))
 
+(defconst agent-repl--before-ws-merge-reinvoke-instruction
+  (concat
+   "\n\n"
+   "The instruction above is a pre-merge action to perform BEFORE this "
+   "workspace merges back into its source.  Its "
+   "`/create-or-update-workspace merge` has been deferred until you finish "
+   "it.  Once the action is complete, invoke the "
+   "`/create-or-update-workspace merge` skill again to merge this workspace "
+   "back into its source.")
+  "Resume directive appended to a delivered `before_ws_merge' action.
+The action itself carries no sequencing text — the producer strips it —
+so the editor supplies this directive at delivery time, telling the
+child to re-invoke `/create-or-update-workspace merge' once the pre-merge
+action finishes (the first invocation is intercepted and deferred by
+`agent-repl--handle-merge-command').")
+
+(defun agent-repl--before-ws-merge-turn (action)
+  "Compose the turn delivered to a child for its before_ws_merge ACTION.
+ACTION is the verbatim `before_ws_merge' field; the resume directive
+`agent-repl--before-ws-merge-reinvoke-instruction' is appended so the
+child re-invokes `/create-or-update-workspace merge' after completing
+ACTION."
+  (concat action agent-repl--before-ws-merge-reinvoke-instruction))
+
+(defun agent-repl--maybe-run-before-ws-merge-prompt (target-ws)
+  "Deliver TARGET-WS's `:before-ws-merge-prompt' to TARGET-WS itself, once.
+Called from `agent-repl--handle-merge-command' BEFORE the merge action
+tears TARGET-WS down, so a workspace dispatched with a `before_ws_merge'
+field runs that action as a new turn in its OWN session before it merges
+— the mirror of `agent-repl--maybe-run-postprocessing-prompt', which
+runs in the SOURCE after the merge is fully finished.
+
+Returns non-nil when an action was delivered, signalling the caller to
+DEFER the merge: the child re-invokes `/create-or-update-workspace merge'
+once the action completes (see
+`agent-repl--before-ws-merge-reinvoke-instruction'), and that second
+command — finding the key cleared — proceeds with the merge.  Returns
+nil when nothing was pending, so the caller merges immediately.  The key
+is cleared before delivery so it fires exactly once and the re-invoked
+merge is never deferred again; a nil/blank action is a no-op."
+  (let ((bwm (agent-repl--ws-get target-ws :before-ws-merge-prompt)))
+    (when (and (stringp bwm) (not (string-empty-p bwm)))
+      (agent-repl--ws-put target-ws :before-ws-merge-prompt nil)
+      (agent-repl--log target-ws
+                        "before-ws-merge: delivering pre-merge action to %s and deferring its merge"
+                        target-ws)
+      (agent-repl--dispatch-prompt-command
+       target-ws (agent-repl--before-ws-merge-turn bwm))
+      t)))
+
 (defun agent-repl--merge-finalize-on-main (current-ws target-ws t0-do)
   "Defer the post-cherry-pick finalization steps to the MAIN thread.
 Reloads the config (`load-file'), clears TARGET-WS's in-flight merge
@@ -2637,7 +2704,7 @@ silently degrade to the default base when forking was explicitly requested."
         (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
       sid)))
 
-(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model postprocessing-prompt)
+(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model postprocessing-prompt before-ws-merge-prompt)
   "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
 GIT-ROOT is the repository captured at enqueue time (in
 `agent-repl--handle-create-command'); it is threaded through so the
@@ -2676,7 +2743,8 @@ The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
     (agent-repl--do-create-worktree-workspace
      name fork-session-id prompt
      #'agent-repl--worktree-generation-eager-open-callback
-     priority base-commit git-root source-dir nil model postprocessing-prompt)))
+     priority base-commit git-root source-dir nil model postprocessing-prompt
+     before-ws-merge-prompt)))
 
 (defcustom agent-repl-worktree-stagger-seconds 5
   "Seconds between staggered worktree creation timers.
@@ -2938,7 +3006,18 @@ empty, the default applies (HEAD for forks,
 CMD may contain an optional \"model\" field naming the agent model alias
 (e.g. \"opus\", \"sonnet\", \"haiku\") the new workspace's initial agent
 session is launched under via `--model'.  When absent or empty, the
-session falls back to `agent-repl-interactive-model' (default \"opus\")."
+session falls back to `agent-repl-interactive-model' (default \"opus\").
+
+CMD may contain two optional passthrough merge-lifecycle fields, each a
+verbatim string that leaves \"prompt\" untouched:
+  - `postprocessing_prompt' — run by the editor in the SOURCE workspace
+    AFTER this workspace's merge is fully finished (stored under
+    `:postprocessing-prompt').
+  - `before_ws_merge' — delivered by the editor to this workspace's OWN
+    session BEFORE its merge, the moment its
+    `/create-or-update-workspace merge' command arrives (stored under
+    `:before-ws-merge-prompt', delivered by
+    `agent-repl--maybe-run-before-ws-merge-prompt')."
   (let* ((name (alist-get 'name cmd))
          (prompt (alist-get 'prompt cmd nil))
          (priority (alist-get 'priority cmd nil))
@@ -2956,6 +3035,10 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
          (postprocessing-prompt (and (stringp cmd-postprocessing)
                                      (not (string-empty-p cmd-postprocessing))
                                      cmd-postprocessing))
+         (cmd-before-ws-merge (alist-get 'before_ws_merge cmd nil))
+         (before-ws-merge-prompt (and (stringp cmd-before-ws-merge)
+                                      (not (string-empty-p cmd-before-ws-merge))
+                                      cmd-before-ws-merge))
          (nil-name (agent-repl--ws-nil-name))
          (bare-name (and (stringp name)
                          (not (string-empty-p name))
@@ -3023,7 +3106,7 @@ session falls back to `agent-repl-interactive-model' (default \"opus\")."
           (run-with-timer delay nil
                           #'agent-repl--create-worktree-from-command
                           git-root effective-name prompt priority fork-session-id base-commit model
-                          postprocessing-prompt)))))))
+                          postprocessing-prompt before-ws-merge-prompt)))))))
 
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
@@ -3524,7 +3607,17 @@ is raised, since a missing workspace is not actionable here."
                           "workspace-commands-file merge: ws=%s project_dir=%s pr_was_merged=%s resolved=%s repo-root=%s"
                           ws (or project-dir "nil") (if onto-master "t" "nil")
                           resolved (or repo-root "nil"))
-        (agent-repl--workspace-merge-async resolved repo-root onto-master)))
+        ;; If RESOLVED carries a `before_ws_merge' action, deliver it to
+        ;; RESOLVED's own session and DEFER the merge — the child performs
+        ;; the action and re-invokes `/create-or-update-workspace merge',
+        ;; whose second command (key now cleared) actually merges.  Must
+        ;; run BEFORE `--workspace-merge-async', which tears the child's
+        ;; session down at its very top (worktree.el `--workspace-merge-async').
+        (if (agent-repl--maybe-run-before-ws-merge-prompt resolved)
+            (agent-repl--log ws
+                              "workspace-commands-file merge: deferring merge of %s until its before-ws-merge action completes"
+                              resolved)
+          (agent-repl--workspace-merge-async resolved repo-root onto-master))))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (agent-repl--bare-workspace-name ws))))
