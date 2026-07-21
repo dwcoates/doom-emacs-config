@@ -6111,3 +6111,100 @@ describe("off-enum status/kind logging", () => {
   });
 
 });
+
+describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile throw", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+  };
+
+  function spyLines(): string[] {
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    return lines;
+  }
+  afterEach(() => resetLoggingForTests());
+
+  // A chess-game marker with a supported extension: hydrateChessGames reaches
+  // its "config === null" throw (this suite never calls configureChessGames)
+  // instead of the earlier "unsupported game file type" one — the same
+  // synchronous throw source the coalescer sees in production.
+  const CHESS_MARKER =
+    "---> agent-repl-chess-game-file: /ws/.claude/emacs/cee-web-widget/chess-game-ab.pgn <---";
+  const THROW_MSG = "Error: chess-game hydrator is not configured";
+
+  /** A session whose only response is an unconfigured chess-game marker. */
+  function throwingState(): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [
+      userTurnAt(9, 0),
+      { kind: "text", blockId: "b1", messageId: "m1", text: CHESS_MARKER, done: true, ts: TEXT_TS },
+    ];
+    return state;
+  }
+
+  /** A session with nothing that trips hydrateChessGames. */
+  function cleanState(): StoreState {
+    const state = new ConversationStore().state;
+    state.items = [userTurnAt(9, 0), text("b1")];
+    return state;
+  }
+
+  it("render() logs once via feed-render and still throws", () => {
+    // Arrange
+    const lines = spyLines();
+    const feed = new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+    // Act / Assert — the throw propagates unchanged...
+    expect(() => feed.render(throwingState())).toThrow("chess-game hydrator is not configured");
+    // ...and the daemon-log evidence is there too.
+    expect(lines).toContain(`error: ${THROW_MSG}`);
+  });
+
+  it("render() dedups a repeated identical throw (hot rAF path)", () => {
+    // Arrange — the coalescer calls render() again next frame with no fix in between.
+    const lines = spyLines();
+    const feed = new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+    // Act
+    expect(() => feed.render(throwingState())).toThrow();
+    expect(() => feed.render(throwingState())).toThrow();
+    // Assert — one line despite two throws.
+    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(1);
+  });
+
+  it("render() re-arms feed-render after a clean render, so a later recurrence logs again", () => {
+    // Arrange
+    const lines = spyLines();
+    const feed = new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+    // Act
+    expect(() => feed.render(throwingState())).toThrow();
+    feed.render(cleanState()); // completes without throwing — clears the dedup key
+    expect(() => feed.render(throwingState())).toThrow();
+    // Assert — both throws logged, since the clean render re-armed the key.
+    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(2);
+  });
+
+  it("renderRestored() logs once via feed-render-restored and still throws", () => {
+    // Arrange
+    const lines = spyLines();
+    const feed = new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+    // Act / Assert
+    expect(() => feed.renderRestored(throwingState())).toThrow(
+      "chess-game hydrator is not configured",
+    );
+    expect(lines).toContain(`error: ${THROW_MSG}`);
+  });
+
+  it("renderRestored() re-arms feed-render-restored after a clean render", () => {
+    // Arrange
+    const lines = spyLines();
+    const feed = new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+    // Act
+    expect(() => feed.renderRestored(throwingState())).toThrow();
+    feed.renderRestored(cleanState());
+    expect(() => feed.renderRestored(throwingState())).toThrow();
+    // Assert
+    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(2);
+  });
+});
