@@ -18,7 +18,7 @@
   "maybe-notify-finished should debounce within 2 seconds."
   (agent-repl-test--with-clean-state
     (let ((notify-count 0))
-      (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
                 ((symbol-function 'run-at-time)
                  (lambda (_delay _repeat _fn &rest _args)
                    (cl-incf notify-count))))
@@ -34,10 +34,10 @@
         (should (= notify-count 2))))))
 
 (ert-deftest agent-repl-test-maybe-notify-skips-when-focused ()
-  "maybe-notify-finished should NOT send desktop notification when frame is focused."
+  "maybe-notify-finished should NOT send desktop notification when Emacs is focused."
   (agent-repl-test--with-clean-state
     (let ((notify-count 0))
-      (cl-letf (((symbol-function 'frame-focus-state) (lambda () t))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () t))
                 ((symbol-function 'run-at-time)
                  (lambda (_delay _repeat _fn &rest _args)
                    (cl-incf notify-count))))
@@ -972,7 +972,7 @@ directory-keyed primitive."
   "maybe-notify-finished should notify on first call (no :last-notify-time set)."
   (agent-repl-test--with-clean-state
     (let ((notify-count 0))
-      (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
                 ((symbol-function 'run-at-time)
                  (lambda (_delay _repeat _fn &rest _args)
                    (cl-incf notify-count))))
@@ -982,7 +982,7 @@ directory-keyed primitive."
 (ert-deftest agent-repl-test-maybe-notify-stores-time ()
   "maybe-notify-finished should store :last-notify-time after notifying."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'frame-focus-state) (lambda () nil))
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
               ((symbol-function 'run-at-time) #'ignore))
       (agent-repl--maybe-notify-finished "ws1")
       (should (numberp (agent-repl--ws-get "ws1" :last-notify-time))))))
@@ -1800,7 +1800,7 @@ guard, the kill-before-workspace-delete advice, and the status poll."
       (agent-repl--ws-put "ws1" :project-dir "/tmp/fake")
       (cl-letf (((symbol-function 'agent-repl--notify)
                  (lambda (&rest _) (cl-incf notify-count)))
-                ((symbol-function 'frame-focus-state) (lambda () nil))
+                ((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
                 ((symbol-function 'run-at-time)
                  (lambda (_delay _repeat fn &rest args)
                    (apply fn args)))
