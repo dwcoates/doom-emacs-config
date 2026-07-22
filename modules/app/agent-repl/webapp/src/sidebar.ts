@@ -386,6 +386,24 @@ export interface WorkspaceSidebarOptions {
   fetchFn?: typeof fetch;
   /** Wall clock for the recency stamps, injectable for tests. */
   now?: () => number;
+  /**
+   * Host feed pinning probe: true when the feed sits at its tail. Read
+   * synchronously at the reveal, BEFORE the rail's first appearance
+   * reflows the feed — the reveal flips the rail into the flex row and
+   * narrows the feed, so a feed the user had scrolled up must be left
+   * where they put it rather than yanked back down.
+   */
+  isPinned?: () => boolean;
+  /**
+   * Host feed re-park, invoked after the reveal narrowed a pinned feed.
+   * The boot render already parked the feed at its tail, but the rail's
+   * first appearance reflows it and strands that park a rail-width above
+   * the bottom — so the gui's two halves (output + sidebar) finish
+   * appearing together at the newest message. Injected (like
+   * configureChessGames' parkFeed) so the sidebar never reaches for the
+   * feed element itself.
+   */
+  parkFeed?: () => void;
 }
 
 export class WorkspaceSidebar {
@@ -393,6 +411,8 @@ export class WorkspaceSidebar {
   private readonly httpBase: string;
   private readonly fetchFn: typeof fetch;
   private readonly now: () => number;
+  private readonly isPinned: () => boolean;
+  private readonly parkFeed: () => void;
   private roster: WorkspaceRoster | null = null;
   /**
    * Dirs whose detail panel is open. Sidebar-owned (like the feed's open
@@ -409,6 +429,11 @@ export class WorkspaceSidebar {
     this.httpBase = opts.httpBase;
     this.fetchFn = opts.fetchFn ?? fetch;
     this.now = opts.now ?? Date.now;
+    // Default to a no-op park: a bare-builder test (or a bare-browser
+    // session with no feed handle wired) reveals the rail without a feed
+    // to re-park, and the reveal must stay a plain paint there.
+    this.isPinned = opts.isPinned ?? ((): boolean => false);
+    this.parkFeed = opts.parkFeed ?? ((): void => {});
     // One delegated listener: every render rewrites the mount's children,
     // so per-row bindings would die with the first push after them.
     this.mount.addEventListener("click", (e) => {
@@ -417,11 +442,24 @@ export class WorkspaceSidebar {
   }
 
   /** Adopt a pushed roster (validated — a malformed push throws) and
-   * paint. The first push is what reveals the rail. */
+   * paint. The first push is what reveals the rail.
+   *
+   * The reveal is the gui's other half arriving: while the rail is hidden
+   * it sits out of the flex row and the feed fills the frame, so flipping
+   * it visible narrows the feed and reflows it. The boot render already
+   * parked the feed at its tail, and that reflow strands the park a
+   * rail-width above the bottom — the "sidebar pops in and the output is
+   * no longer at the newest message" symptom. So on the reveal (and only
+   * then, since later pushes leave the layout untouched) the feed's pin is
+   * read BEFORE the reflow and re-parked AFTER, forcing the intended
+   * sequencing: output + sidebar rendered, then scroll to the bottom. */
   update(roster: unknown): void {
+    const revealing = this.mount.hidden;
+    const wasPinned = revealing && this.isPinned();
     this.roster = validateWorkspaceRoster(roster);
     this.mount.hidden = false;
     this.render();
+    if (wasPinned) this.parkFeed();
   }
 
   private render(): void {
