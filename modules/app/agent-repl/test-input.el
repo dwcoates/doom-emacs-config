@@ -562,17 +562,17 @@ processes have their results streamed back concurrently."
            "forcing uniform depth across siblings defeats the purpose of using depth as a salience signal"
            agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-command-prefix-tldr-brief-ten-node-hard-limit ()
-  "TLDR spec must mandate brevity with a hard cap of 10 total nodes."
+(ert-deftest agent-repl-test-command-prefix-tldr-concise-sixteen-node-soft-cap ()
+  "TLDR spec must keep verbosity bounded with a soft cap of about 16 total nodes."
   (should (string-match-p
-           "MUST be BRIEF: no more than 10 nodes in total"
+           "SHOULD be concise: no more than about 16 nodes in total"
            agent-repl-command-prefix))
   (should (string-match-p
-           "10-node cap is a HARD limit that may NEVER be exceeded for any reason"
+           "16-node cap is a soft limit that should rarely be exceeded"
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-tldr-node-cap-counts-all-nodes ()
-  "TLDR spec must state the 10-node cap counts ALL nodes, not just leaf nodes."
+  "TLDR spec must state the 16-node cap counts ALL nodes, not just leaf nodes."
   (should (string-match-p
            "counts ALL nodes in the tree (internal and leaf alike), not just leaf nodes"
            agent-repl-command-prefix)))
@@ -583,13 +583,13 @@ processes have their results streamed back concurrently."
                "only going larger when absolutely necessary"
                agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-command-prefix-tldr-defaults-to-minimal-detail ()
-  "TLDR spec must direct the tree to default to minimal detail, covering only critical points."
+(ert-deftest agent-repl-test-command-prefix-tldr-defaults-to-moderate-detail ()
+  "TLDR spec must direct the tree to default to moderate detail, covering the critical points plus brief context."
   (should (string-match-p
-           "tree MUST default to minimal detail"
+           "tree SHOULD default to moderate detail"
            agent-repl-command-prefix))
   (should (string-match-p
-           "covering only the critical points"
+           "covering the critical points"
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-tldr-broad-tree-can-be-expanded ()
@@ -598,13 +598,13 @@ processes have their results streamed back concurrently."
            "A broad tree can always be expanded by the user asking for further explanation"
            agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-command-prefix-tldr-err-toward-omission ()
-  "TLDR spec must direct erring toward omission when in doubt whether a detail warrants inclusion."
+(ert-deftest agent-repl-test-command-prefix-tldr-doubt-allows-brief-inclusion ()
+  "TLDR spec must allow a brief inclusion rather than automatic omission when genuinely in doubt about a detail."
   (should (string-match-p
-           "Err toward omission"
+           "a brief inclusion is acceptable rather than automatic omission"
            agent-repl-command-prefix))
   (should (string-match-p
-           "when in doubt whether a detail warrants inclusion"
+           "When genuinely in doubt whether a detail earns its place"
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-tldr-per-level-concision ()
@@ -734,12 +734,12 @@ processes have their results streamed back concurrently."
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-bullet-text-brevity ()
-  "The metaprompt must require each bullet's text to be as brief as possible."
+  "The metaprompt must require each bullet's text to be concise."
   (should (string-match-p
-           "The text on each bullet MUST be as brief as possible"
+           "The text on each bullet SHOULD be concise"
            agent-repl-command-prefix))
   (should (string-match-p
-           "Brevity of the bullet text is king"
+           "Concise bullet text is preferred"
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-bullet-brevity-not-branch-count ()
@@ -906,13 +906,13 @@ work after a proposed change, or how they work now after a change just made."
            "promoted to a (recursively-nested) subbullet"
            agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-command-prefix-tldr-subbullets-only-attachment-mechanism ()
-  "TLDR spec must declare recursive subbullets the only permitted way to attach additional/qualifying info to a TLDR bullet, and forbid second sentences within a single bullet."
+(ert-deftest agent-repl-test-command-prefix-tldr-subbullets-preferred-attachment-mechanism ()
+  "TLDR spec must make recursive subbullets the preferred way to attach additional/qualifying info to a TLDR bullet, permitting a second short sentence but not a third."
   (should (string-match-p
-           "ONLY permissible way to attach additional or qualifying information"
+           "preferred way to attach additional or qualifying information"
            agent-repl-command-prefix))
   (should (string-match-p
-           "second sentences inside a single bullet are never allowed"
+           "A second short sentence inside a single bullet is permitted where it aids clarity, but a third is not"
            agent-repl-command-prefix)))
 
 (ert-deftest agent-repl-test-command-prefix-omits-main-body-emoji-restriction ()
