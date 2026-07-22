@@ -457,11 +457,14 @@ describe("sidebarHtml", () => {
   });
 });
 
-/** A mounted sidebar over a recording fetch, at the fixed clock. */
-function harness(opts: { ok?: boolean; reject?: boolean } = {}): {
+/** A mounted sidebar over a recording fetch, at the fixed clock.
+ * `isPinned` seeds the feed-pin probe the reveal consults; `parkCalls`
+ * counts every re-park the reveal fired. */
+function harness(opts: { ok?: boolean; reject?: boolean; isPinned?: () => boolean } = {}): {
   mount: HTMLElement;
   sidebar: WorkspaceSidebar;
   calls: Array<{ url: string; body: unknown }>;
+  parkCalls: () => number;
 } {
   const calls: Array<{ url: string; body: unknown }> = [];
   const fetchFn = ((url: string, init?: RequestInit) => {
@@ -471,12 +474,17 @@ function harness(opts: { ok?: boolean; reject?: boolean } = {}): {
   }) as unknown as typeof fetch;
   const mount = document.createElement("nav");
   mount.hidden = true;
+  let parks = 0;
   const sidebar = new WorkspaceSidebar(mount, {
     httpBase: "http://daemon",
     fetchFn,
     now: () => NOW_MS,
+    isPinned: opts.isPinned ?? ((): boolean => false),
+    parkFeed: () => {
+      parks += 1;
+    },
   });
-  return { mount, sidebar, calls };
+  return { mount, sidebar, calls, parkCalls: () => parks };
 }
 
 function click(el: Element): void {
@@ -516,6 +524,54 @@ describe("WorkspaceSidebar", () => {
     sidebar.update(roster());
     // Assert
     expect(mount.hidden).toBe(false);
+  });
+
+  it("re-parks the feed on the reveal when it was pinned to its tail", () => {
+    // Arrange — a feed sitting at its tail when the first push arrives.
+    const { sidebar, parkCalls } = harness({ isPinned: () => true });
+    // Act — the first push reveals the rail and reflows the feed.
+    sidebar.update(roster());
+    // Assert — the reveal snapped the reflowed feed back to its tail.
+    expect(parkCalls()).toBe(1);
+  });
+
+  it("leaves the feed alone on the reveal when the user had scrolled up", () => {
+    // Arrange — a feed the user scrolled off its tail before the first push.
+    const { sidebar, parkCalls } = harness({ isPinned: () => false });
+    // Act
+    sidebar.update(roster());
+    // Assert — no re-park, so the user's place survives the reveal.
+    expect(parkCalls()).toBe(0);
+  });
+
+  it("does not re-park on a later push once the rail is already revealed", () => {
+    // Arrange — a pinned feed whose rail is already revealed by a first push.
+    const { sidebar, parkCalls } = harness({ isPinned: () => true });
+    sidebar.update(roster());
+    // Act — a second push repaints the already-visible rail (no reflow).
+    sidebar.update(roster());
+    // Assert — only the reveal re-parked; the later push left the feed alone.
+    expect(parkCalls()).toBe(1);
+  });
+
+  it("reads the feed's pin before the reveal flips the rail visible", () => {
+    // Arrange — a probe that records the rail's hidden state at read time.
+    let hiddenWhenProbed: boolean | null = null;
+    const mount = document.createElement("nav");
+    mount.hidden = true;
+    const sidebar = new WorkspaceSidebar(mount, {
+      httpBase: "http://daemon",
+      now: () => NOW_MS,
+      isPinned: () => {
+        hiddenWhenProbed = mount.hidden;
+        return true;
+      },
+      parkFeed: () => {},
+    });
+    // Act
+    sidebar.update(roster());
+    // Assert — the pin was read while the rail was still hidden (pre-reflow).
+    expect(hiddenWhenProbed).toBe(true);
   });
 
   it("rejects a malformed push loudly instead of painting it", () => {

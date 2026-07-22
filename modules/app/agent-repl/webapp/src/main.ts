@@ -164,8 +164,16 @@ async function boot(): Promise<void> {
   // every workspace-state change; the rail stays collapsed until the first
   // push, so a bare-browser session keeps the single-column layout. Roster
   // state is global to the editor, not per-session, so it lives beside the
-  // store rather than in it.
-  const sidebar = new WorkspaceSidebar(must("ws-sidebar"), { httpBase });
+  // store rather than in it. The pin/park pair lets the rail's first
+  // reveal re-park the feed: the reveal narrows and reflows the feed, so a
+  // feed the boot render parked at its tail is snapped back down once the
+  // rail is on screen — the gui's two halves land at the newest message
+  // together (same pattern as the async chess mount above).
+  const sidebar = new WorkspaceSidebar(must("ws-sidebar"), {
+    httpBase,
+    isPinned: () => isPinnedToBottom(feedEl),
+    parkFeed: () => parkAtTail(feedEl),
+  });
   installWorkspaceRosterHook(window as unknown as HostGlobal, sidebar);
   // C-S-RET in the input window fires the expand hook to unfold the
   // cursor row's detail panel (openDirs is client-owned, off the roster).
