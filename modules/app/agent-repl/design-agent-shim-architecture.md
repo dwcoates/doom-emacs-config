@@ -632,6 +632,11 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │       └── frontend/v1/frontend.proto                   A ✓
     ├── agent-shim/
     │   ├── AGENTS.md                                        A ✓
+    │   ├── wire/                                              (shared Go framing, pre-built)
+    │   │   ├── AGENTS.md                                    A ✓
+    │   │   ├── go.mod                                       A ✓
+    │   │   ├── wire.go                                      A ✓
+    │   │   └── wire_test.go                                 A ✓
     │   ├── claude-shim/                                       (relocated here ✓; G4+G5)
     │   │   ├── AGENTS.md                                    A ✓
     │   │   ├── package.json                                 M   (protobuf-es dep)
@@ -672,8 +677,9 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │           ├── server/fanout.go (+_test)                A
     │           └── dedup/dedup.go (+_test)                  A
     ├── daemon/
-    │   ├── go.mod                                           M   (protobuf deps)
+    │   ├── go.mod                                           M ✓ (agentrepl/proto, agentrepl/wire, protobuf, sqlite)
     │   └── internal/
+    │       ├── protodeps/protodeps.go                       A ✓ (temporary dep pin; DELETED at stitch)
     │       ├── ssm/                                           (G6)
     │       │   ├── AGENTS.md                                A ✓
     │       │   ├── ssm.go (+_test)                          A
