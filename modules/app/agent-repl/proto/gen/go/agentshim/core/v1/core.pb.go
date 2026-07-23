@@ -2311,6 +2311,96 @@ func (x *CursorState) GetCarry() []byte {
 	return nil
 }
 
+// Cursor recovery over the socket (§7.3): the sidecar asks the store for its
+// persisted cursors at startup. Empty file_id = all cursors.
+type CursorQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CursorQuery) Reset() {
+	*x = CursorQuery{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CursorQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CursorQuery) ProtoMessage() {}
+
+func (x *CursorQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
+func (*CursorQuery) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *CursorQuery) GetFileId() string {
+	if x != nil {
+		return x.FileId
+	}
+	return ""
+}
+
+type CursorList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cursors       []*CursorState         `protobuf:"bytes,1,rep,name=cursors,proto3" json:"cursors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CursorList) Reset() {
+	*x = CursorList{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CursorList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CursorList) ProtoMessage() {}
+
+func (x *CursorList) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
+func (*CursorList) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *CursorList) GetCursors() []*CursorState {
+	if x != nil {
+		return x.Cursors
+	}
+	return nil
+}
+
 var File_agentshim_core_v1_core_proto protoreflect.FileDescriptor
 
 const file_agentshim_core_v1_core_proto_rawDesc = "" +
@@ -2469,7 +2559,12 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
-	"\x05carry\x18\x04 \x01(\fR\x05carry*U\n" +
+	"\x05carry\x18\x04 \x01(\fR\x05carry\"&\n" +
+	"\vCursorQuery\x12\x17\n" +
+	"\afile_id\x18\x01 \x01(\tR\x06fileId\"F\n" +
+	"\n" +
+	"CursorList\x128\n" +
+	"\acursors\x18\x01 \x03(\v2\x1e.agentshim.core.v1.CursorStateR\acursors*U\n" +
 	"\x05Plane\x12\x15\n" +
 	"\x11PLANE_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fPLANE_STREAM\x10\x01\x12\x0e\n" +
@@ -2516,7 +2611,7 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                 // 0: agentshim.core.v1.Plane
 	(EventClass)(0),            // 1: agentshim.core.v1.EventClass
@@ -2550,8 +2645,10 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(*StoreWrite)(nil),         // 29: agentshim.core.v1.StoreWrite
 	(*StoreWriteAck)(nil),      // 30: agentshim.core.v1.StoreWriteAck
 	(*CursorState)(nil),        // 31: agentshim.core.v1.CursorState
-	(*anypb.Any)(nil),          // 32: google.protobuf.Any
-	(*structpb.Struct)(nil),    // 33: google.protobuf.Struct
+	(*CursorQuery)(nil),        // 32: agentshim.core.v1.CursorQuery
+	(*CursorList)(nil),         // 33: agentshim.core.v1.CursorList
+	(*anypb.Any)(nil),          // 34: google.protobuf.Any
+	(*structpb.Struct)(nil),    // 35: google.protobuf.Struct
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
@@ -2567,8 +2664,8 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	17, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
 	18, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
 	8,  // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
-	32, // 13: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	33, // 14: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	34, // 13: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	35, // 14: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
 	6,  // 15: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
 	31, // 16: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 17: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
@@ -2576,15 +2673,16 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	2,  // 19: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 20: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
 	3,  // 21: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
-	33, // 22: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	35, // 22: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
 	5,  // 23: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	33, // 24: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	35, // 24: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
 	7,  // 25: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	31, // 26: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_core_v1_core_proto_init() }
@@ -2618,7 +2716,7 @@ func file_agentshim_core_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
