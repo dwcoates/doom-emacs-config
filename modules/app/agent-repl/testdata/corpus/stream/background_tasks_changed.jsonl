@@ -1,0 +1,1 @@
+{"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "b86pl7ir1", "task_type": "local_bash", "description": "Sleep 120 then echo finished"}, {"task_id": "b3d4h09px", "task_type": "local_bash", "description": "Echo error and exit with code 3"}], "uuid": "b9b7b2e2-8db9-4c57-b9be-a62f2f7778e3", "session_id": "ac4dd48c-a847-49d7-94bc-5ae6e7cc087d"}
