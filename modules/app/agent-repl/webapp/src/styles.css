@@ -362,7 +362,90 @@ body::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* View selector: a two-button segmented control switching the rail
+   between repo grouping and task grouping, plus (in the Task view) the
+   new-task +. */
+#ws-sidebar .sb-views {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+#ws-sidebar .sb-view-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.55rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-view-btn:hover { background: var(--card); }
+#ws-sidebar .sb-view-btn.active { background: var(--info-ws); color: var(--bg); }
+#ws-sidebar .sb-add {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--info-ws);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.4rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-add:hover { background: var(--card); }
+/* A transient failure note that follows the view selector must not push
+   the selector off the row, so it stops claiming the auto margin. */
+#ws-sidebar .sb-views ~ .sb-err { margin-left: 0.5rem; }
+
 #ws-sidebar .sb-scroll { flex: 1 1 auto; overflow-y: auto; padding: 0.35rem 0 1rem; }
+
+/* Task section header: checkbox + label (opens the org notes) + count +
+   add-workspace +. A done task greys and strikes through. Mirrors the
+   .repo-head spacing so task and repo sections read as one system. */
+#ws-sidebar .task-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.7rem 0.25rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--info-ws);
+  font-weight: 700;
+}
+#ws-sidebar .task-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;
+  height: 1.05em;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ok, #5ac37a);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+#ws-sidebar .task-check.done { border-color: var(--ok, #5ac37a); }
+#ws-sidebar .task-label { cursor: pointer; }
+#ws-sidebar .task-label:hover { text-decoration: underline; }
+#ws-sidebar .task-label.no-task { cursor: default; color: var(--muted); }
+#ws-sidebar .task-label.no-task:hover { text-decoration: none; }
+#ws-sidebar .task-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
+#ws-sidebar .task-add {
+  margin-left: auto;
+  color: var(--info-ws);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+#ws-sidebar .task-add:hover { color: var(--fg); }
+/* A completed task recedes: grey, struck-through label. */
+#ws-sidebar .task-section.done .task-label { color: var(--muted); text-decoration: line-through; }
 
 /* Repo section header: fold triangle + repo label in the --info-ws hue the
    topbar already uses for the workspace datapoint. */

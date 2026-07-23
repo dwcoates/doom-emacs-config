@@ -10,6 +10,7 @@ import {
   COMMAND_FAILED_NOTICE,
   COMMAND_FAILED_NOTICE_MS,
   EXPAND_HOOK,
+  NO_TASK_KEY,
   ROSTER_HOOK,
   RepoGroup,
   WorkspaceRoster,
@@ -20,6 +21,7 @@ import {
   installWorkspaceRosterHook,
   sidebarHtml,
   statusDotHtml,
+  taskSectionHtml,
   validateWorkspaceRoster,
 } from "../src/sidebar.js";
 import css from "../src/styles.css?raw";
@@ -47,11 +49,18 @@ function row(over: Partial<WorkspaceRow> = {}): WorkspaceRow {
 }
 
 function group(over: Partial<RepoGroup> = {}): RepoGroup {
-  return { key: "doom", label: "doom", folded: false, rows: [row()], ...over };
+  return { key: "doom", label: "doom", folded: false, done: false, rows: [row()], ...over };
 }
 
 function roster(over: Partial<WorkspaceRoster> = {}): WorkspaceRoster {
-  return { repos: [group()], recentlyMerged: null, navDir: null, ...over };
+  return {
+    view: "repository",
+    repos: [group()],
+    tasks: [],
+    recentlyMerged: null,
+    navDir: null,
+    ...over,
+  };
 }
 
 /** Render with no panels open, at the fixed clock, with no error note. */
@@ -152,6 +161,33 @@ describe("validateWorkspaceRoster", () => {
   it("throws when navDir is neither string nor null", () => {
     // Arrange + Act + Assert
     expect(() => validateWorkspaceRoster(roster({ navDir: 7 as never }))).toThrow(/navDir/);
+  });
+
+  it("carries the view and task sections through intact", () => {
+    // Arrange
+    const r = roster({ view: "task", tasks: [group({ key: "t1", label: "T", done: true })] });
+    // Act + Assert
+    expect(validateWorkspaceRoster(r)).toEqual(r);
+  });
+
+  it("throws on an unknown view rather than defaulting it", () => {
+    // Arrange
+    const r = roster({ view: "kanban" as never });
+    // Act + Assert
+    expect(() => validateWorkspaceRoster(r)).toThrow(/unknown view "kanban"/);
+  });
+
+  it("throws when tasks is not an array", () => {
+    // Arrange + Act + Assert
+    expect(() => validateWorkspaceRoster(roster({ tasks: {} as never }))).toThrow(/tasks/);
+  });
+
+  it("throws when a group's done flag is missing", () => {
+    // Arrange — a group object with no `done` key.
+    const bad = { key: "doom", label: "doom", folded: false, rows: [] };
+    const r = { ...roster(), repos: [bad] };
+    // Act + Assert
+    expect(() => validateWorkspaceRoster(r)).toThrow(/done/);
   });
 });
 
@@ -455,6 +491,75 @@ describe("sidebarHtml", () => {
     // Arrange + Act + Assert
     expect(html(roster())).not.toContain("sb-err");
   });
+
+  it("marks the active view button in the selector", () => {
+    // Arrange + Act
+    const out = html(roster({ view: "repository" }));
+    // Assert
+    expect(out).toContain(`class="sb-view-btn active" data-set-view="repository"`);
+    expect(out).toContain(`class="sb-view-btn" data-set-view="task"`);
+  });
+
+  it("titles the header Workspaces in the repository view", () => {
+    expect(html(roster())).toContain(`<span class="sb-title">Workspaces</span>`);
+  });
+
+  it("titles the header Tasks and shows the add button in the task view", () => {
+    // Arrange + Act
+    const out = html(roster({ view: "task", tasks: [] }));
+    // Assert
+    expect(out).toContain(`<span class="sb-title">Tasks</span>`);
+    expect(out).toContain(`data-add-task`);
+  });
+
+  it("hides the add-task button outside the task view", () => {
+    expect(html(roster())).not.toContain("data-add-task");
+  });
+
+  it("renders task sections instead of repos in the task view", () => {
+    // Arrange
+    const r = roster({
+      view: "task",
+      repos: [],
+      tasks: [group({ key: "t1", label: "Ship it", rows: [row({ name: "ws" })] })],
+    });
+    // Act
+    const out = html(r);
+    // Assert
+    expect(out).toContain("Ship it");
+    expect(out).toContain(`data-task-open data-task-id="t1"`);
+    expect(out).toContain(`data-task-check data-task-id="t1"`);
+    expect(out).toContain(`data-task-add data-task-id="t1"`);
+  });
+
+  it("strikes through and checks a done task section", () => {
+    // Arrange + Act
+    const out = taskSectionHtml(
+      group({ key: "t1", label: "Done", done: true, rows: [] }),
+      null,
+      new Set(),
+      NOW_MS,
+    );
+    // Assert
+    expect(out).toContain("task-section done");
+    expect(out).toContain(`class="task-check done"`);
+    expect(out).toContain("✓");
+  });
+
+  it("gives the No task bucket no checkbox, open, or add controls", () => {
+    // Arrange + Act
+    const out = taskSectionHtml(
+      group({ key: NO_TASK_KEY, label: "No task", rows: [row()] }),
+      null,
+      new Set(),
+      NOW_MS,
+    );
+    // Assert
+    expect(out).toContain("No task");
+    expect(out).not.toContain("data-task-check");
+    expect(out).not.toContain("data-task-open");
+    expect(out).not.toContain("data-task-add");
+  });
 });
 
 /** A mounted sidebar over a recording fetch, at the fixed clock.
@@ -633,6 +738,78 @@ describe("WorkspaceSidebar", () => {
     click(mount.querySelector(".repo-head")!);
     // Assert
     expect(mount.querySelector("section")!.className).toBe("repo");
+  });
+
+  it("POSTs a set-view command when a view button is clicked", () => {
+    // Arrange
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(roster());
+    // Act
+    click(mount.querySelector(`[data-set-view="task"]`)!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "set-view", view: "task" }]);
+  });
+
+  it("POSTs a task-create command when the add-task button is clicked", () => {
+    // Arrange
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(roster({ view: "task", repos: [], tasks: [] }));
+    // Act
+    click(mount.querySelector("[data-add-task]")!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "task-create" }]);
+  });
+
+  it("POSTs a task-toggle-done command when a task checkbox is clicked", () => {
+    // Arrange
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(
+      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
+    );
+    // Act
+    click(mount.querySelector("[data-task-check]")!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "task-toggle-done", id: "t1" }]);
+  });
+
+  it("POSTs a task-open command when a task label is clicked", () => {
+    // Arrange
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(
+      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
+    );
+    // Act
+    click(mount.querySelector("[data-task-open]")!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "task-open", id: "t1" }]);
+  });
+
+  it("POSTs a task-add-workspace command when a task add button is clicked", () => {
+    // Arrange
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(
+      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
+    );
+    // Act
+    click(mount.querySelector("[data-task-add]")!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "task-add-workspace", id: "t1" }]);
+  });
+
+  it("switches a workspace row inside a task section, not the task", () => {
+    // Arrange — a task section whose row must still post a plain switch.
+    const { mount, sidebar, calls } = harness();
+    sidebar.update(
+      roster({
+        view: "task",
+        repos: [],
+        tasks: [group({ key: "t1", label: "T", rows: [row({ dir: "/tmp/inside" })] })],
+      }),
+    );
+    // Act
+    click(mount.querySelector(".row")!);
+    // Assert
+    expect(calls[0]?.body).toEqual([{ type: "switch", dir: "/tmp/inside" }]);
   });
 
   it("opens a row's detail panel from its chevron", () => {
