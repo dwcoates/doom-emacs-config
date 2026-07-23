@@ -741,6 +741,56 @@ session (`:frontend-session-id' bound) and fails against that old body."
                     '((type . "bogus")) 10)))
     (should (= new-delay 10))))
 
+(ert-deftest agent-repl-test-dispatch-workspace-command-set-view ()
+  "Set-view commands route to the set-view handler and do not change delay."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-set-view-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((new-delay (agent-repl--dispatch-workspace-command
+                        '((type . "set-view") (view . "task")) 10)))
+        (should (= new-delay 10))
+        (should (= (length handled) 1))))))
+
+(ert-deftest agent-repl-test-dispatch-workspace-command-task-create ()
+  "Task-create commands route to the task-create handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-task-create-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((new-delay (agent-repl--dispatch-workspace-command
+                        '((type . "task-create")) 10)))
+        (should (= new-delay 10))
+        (should (= (length handled) 1))))))
+
+(ert-deftest agent-repl-test-dispatch-workspace-command-task-toggle-done ()
+  "Task-toggle-done commands route to their handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-task-toggle-done-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((new-delay (agent-repl--dispatch-workspace-command
+                        '((type . "task-toggle-done") (id . "t1")) 10)))
+        (should (= new-delay 10))
+        (should (= (length handled) 1))))))
+
+(ert-deftest agent-repl-test-dispatch-workspace-command-task-open ()
+  "Task-open commands route to their handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-task-open-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((new-delay (agent-repl--dispatch-workspace-command
+                        '((type . "task-open") (id . "t1")) 10)))
+        (should (= new-delay 10))
+        (should (= (length handled) 1))))))
+
+(ert-deftest agent-repl-test-dispatch-workspace-command-task-add-workspace ()
+  "Task-add-workspace commands route to their handler."
+  (let ((handled nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-task-add-workspace-command)
+               (lambda (cmd) (push cmd handled))))
+      (let ((new-delay (agent-repl--dispatch-workspace-command
+                        '((type . "task-add-workspace") (id . "t1")) 10)))
+        (should (= new-delay 10))
+        (should (= (length handled) 1))))))
+
 (ert-deftest agent-repl-test-dispatch-workspace-command-clipboard ()
   "Clipboard commands do not change delay and route to the handler."
   (let ((handled nil))

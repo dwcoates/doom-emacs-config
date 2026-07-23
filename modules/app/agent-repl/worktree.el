@@ -3813,7 +3813,15 @@ affect another agent's commands in the same JSON array."
     ;; click -> fold, both arriving via the daemon's
     ;; POST /workspace-command front door.
     ("switch"    . (agent-repl--handle-switch-command      . nil))
-    ("fold"      . (agent-repl--handle-fold-command        . nil)))
+    ("fold"      . (agent-repl--handle-fold-command        . nil))
+    ;; Task-view actions (sidebar.el): the view selector, the + add-task
+    ;; button, a task checkbox / label / add-workspace button — all
+    ;; arriving via the same POST /workspace-command front door.
+    ("set-view"          . (agent-repl--handle-set-view-command          . nil))
+    ("task-create"       . (agent-repl--handle-task-create-command       . nil))
+    ("task-toggle-done"  . (agent-repl--handle-task-toggle-done-command  . nil))
+    ("task-open"         . (agent-repl--handle-task-open-command         . nil))
+    ("task-add-workspace" . (agent-repl--handle-task-add-workspace-command . nil)))
   "Maps a workspace-command `type' string to (HANDLER . STAGGERS).
 HANDLER is the function `agent-repl--dispatch-workspace-command'
 invokes for that `type'.  STAGGERS non-nil marks a `create'-style

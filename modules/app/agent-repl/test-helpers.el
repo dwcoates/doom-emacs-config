@@ -661,7 +661,14 @@ re-routes their frontend resolution instead."
          ;; later test's push behavior depend on suite order.
          (agent-repl--sidebar-nav-dir nil)
          (agent-repl--sidebar-flat-dirs nil)
-         (agent-repl--sidebar-last-signature nil))
+         (agent-repl--sidebar-last-signature nil)
+         ;; Active sidebar view (sidebar.el): a test that flips to the
+         ;; Task view would otherwise leak that choice into every later
+         ;; test's roster build.  Task hash state is rebound alongside so
+         ;; a task created mid-test can't bleed across the suite.
+         (agent-repl--sidebar-view :repository)
+         (agent-repl--tasks (make-hash-table :test 'equal))
+         (agent-repl--tasks-loaded t))
      (unwind-protect
          (progn ,@body)
        (when (file-exists-p agent-repl-workspace-snapshot-file)

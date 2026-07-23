@@ -43,6 +43,41 @@
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 (declare-function agent-repl--frontend-boot-session "frontends"
                   (ws &optional project-dir-hint active-env-hint))
+(declare-function agent-repl--task-get "tasks" (id))
+(declare-function agent-repl--task-create "tasks" (title))
+(declare-function agent-repl--task-toggle-done "tasks" (id))
+(declare-function agent-repl--task-open "tasks" (id))
+(declare-function agent-repl--task-assign-workspace "tasks" (name id))
+(declare-function agent-repl--ws-effective-task-id "tasks" (name))
+(declare-function agent-repl--tasks-sorted "tasks" ())
+(declare-function agent-repl--tasks-signature "tasks" ())
+
+;;;; ---- The view selector -----------------------------------------------
+
+(defvar agent-repl--sidebar-view :repository
+  "Which sidebar view is active: `:repository' or `:task'.
+`:repository' (the default) groups workspaces by their git repo; `:task'
+groups them under the user-defined tasks (tasks.el) they belong to.
+Session-scoped like the repo-fold set — a view preference the user
+re-picks per session rather than persisted state.")
+
+(defconst agent-repl--sidebar-view-wire
+  '((:repository . "repository")
+    (:task       . "task"))
+  "Maps `agent-repl--sidebar-view' keywords onto the webapp's wire strings.
+The value set is the webapp's WorkspaceRoster.view union
+\(webapp/src/sidebar.ts) — the two sides are one contract and MUST match.")
+
+(defconst agent-repl--sidebar-no-task-key "__no_task__"
+  "Section key and fold key of the catch-all \"No task\" section.
+Shaped like a task id without being one so the section renders through
+the same group path; workspaces belonging to no task collect here.")
+
+(defun agent-repl--sidebar-view-wire ()
+  "Return the wire string for the active view, signalling on an unknown one."
+  (or (alist-get agent-repl--sidebar-view agent-repl--sidebar-view-wire)
+      (error "agent-repl--sidebar-view-wire: unknown view %S"
+             agent-repl--sidebar-view)))
 
 ;;;; ---- The host-hook contract ------------------------------------------
 
@@ -257,6 +292,10 @@ that tree."
             :label "Recently Merged"
             :folded (if (agent-repl--repo-folded-p agent-repl--sidebar-merged-key)
                         t :false)
+            ;; Uniform group shape: `:done' is meaningful only for task
+            ;; sections, but every group carries it so the webapp's
+            ;; validateGroup stays one code path.
+            :done :false
             :rows (vconcat
                    (mapcar (lambda (e)
                              (agent-repl--sidebar-row-plist
@@ -338,70 +377,66 @@ absent optionals, epoch-seconds float for lastViewedAt."
           :summary (or (agent-repl--ws-get name :last-prompt-summary) :null)
           :children children)))
 
-(defun agent-repl--sidebar-build ()
-  "Build the roster from every live workspace.
-Returns (ROSTER . FLAT-DIRS): ROSTER is the `json-serialize'-ready
-plist, FLAT-DIRS the visible row dirs in render order (see
-`agent-repl--sidebar-flat-dirs').
+(defun agent-repl--sidebar-build-sections (entries current key-fn label-fn done-fn key-sort extra-keys)
+  "Group ENTRIES into folded sections; return (SECTIONS-VECTOR . FLAT-DIRS).
+SECTIONS-VECTOR is a vector of `{:key :label :folded :done :rows}' group
+plists; FLAT-DIRS the visible row dirs in render order.
 
-Family shape: an entry whose `:source-ws-dir' canonically matches
-another LIVE entry's project dir nests under it; everything else
-\(including a child whose parent workspace is tombstoned) roots in
-its repo's section.  A child renders under its parent even if git resolves
-their repo keys differently (children are worktrees cut from the
-parent, and the family line is the sidebar's organizing claim) — the
-section a family renders in is its ROOT's repo.  Repos sort by label
-with the `(no repo)' sentinel last; siblings sort by creation time
-\(`agent-repl--sidebar-sibling-sort').
+KEY-FN maps a workspace NAME to its ROOT section key — a TOTAL function,
+so every root lands in exactly one section.  LABEL-FN maps a key to its
+display label, DONE-FN maps a key to a JSON boolean (`t' / `:false') for
+the section's done state, and KEY-SORT orders the resulting key list.
+EXTRA-KEYS lists keys that must render even with zero rows (an empty
+task section for a brand-new task).
 
-Merged workspaces are partitioned out of ENTRIES BEFORE NODES is built,
-so they never enter the repo tree and the emitted-vs-node-count
-invariant below still compares two exact counts rather than being
-loosened to tolerate a second bucket.  They render instead in the
-`:recentlyMerged' group, and only while they sit inside the window
-`agent-repl--sidebar-refresh-merged-window' maintains — a merge older
-than the current epoch renders nowhere."
-  (let* ((all-entries (agent-repl--sidebar-entries))
-         (merged-entries (cl-remove-if-not
-                          (lambda (e) (agent-repl--sidebar-merged-p (car e)))
-                          all-entries))
-         (entries (cl-remove-if
-                   (lambda (e) (agent-repl--sidebar-merged-p (car e)))
-                   all-entries))
-         (current (ignore-errors (agent-repl--ws-current-name)))
-         (nodes (mapcar (lambda (e)
+Family shape is view-independent and lives here: an entry whose
+`:source-ws-dir' canonically matches another entry's project dir nests
+under it; everything else roots in its own section via KEY-FN.  A child
+renders under its parent regardless of how KEY-FN would classify the
+child alone — the family line is the sidebar's organizing claim — so
+the section a family renders in is its ROOT's key.  Siblings sort by
+creation time (`agent-repl--sidebar-sibling-sort').
+
+EMITTED counts every serialized row; a count short of the entry total
+means a `:source-ws-dir' cycle orphaned a family from every root — rows
+silently missing from the sidebar would be a debugging tarpit, so fail
+loudly instead."
+  (let* ((nodes (mapcar (lambda (e)
                           (list :name (car e)
                                 :dir (agent-repl--path-canonical (cdr e))))
                         entries))
          (by-dir (make-hash-table :test 'equal))
          (children (make-hash-table :test 'equal))
-         (roots-by-repo (make-hash-table :test 'equal))
+         (roots-by-key (make-hash-table :test 'equal))
          (emitted 0)
-         repo-keys)
+         keys)
     (dolist (n nodes) (puthash (plist-get n :dir) n by-dir))
     ;; Attach each node under its parent when the parent is itself an
-    ;; open entry; self-parenting is a corrupted plist, not a family.
+    ;; entry; self-parenting is a corrupted plist, not a family.
     (dolist (n nodes)
       (let* ((name (plist-get n :name))
              (dir (plist-get n :dir))
              (src (agent-repl--ws-get name :source-ws-dir))
              (parent-dir (and src (agent-repl--path-canonical src))))
         (when (equal parent-dir dir)
-          (error "agent-repl--sidebar-build: ws=%s is its own parent (dir=%s)"
+          (error "agent-repl--sidebar-build-sections: ws=%s is its own parent (dir=%s)"
                  name dir))
         (if (and parent-dir (gethash parent-dir by-dir))
             (push n (gethash parent-dir children))
-          (let ((key (agent-repl--ws-repo-group name)))
-            (unless (gethash key roots-by-repo)
-              (push key repo-keys))
-            (push n (gethash key roots-by-repo))))))
-    ;; Depth-first emit.  EMITTED counts every serialized row; a count
-    ;; short of the entry total means a `:source-ws-dir' cycle orphaned
-    ;; a family from every root — rows silently missing from the
-    ;; sidebar would be a debugging tarpit, so fail loudly instead.
+          (let ((key (funcall key-fn name)))
+            (unless (gethash key roots-by-key)
+              (push key keys))
+            (push n (gethash key roots-by-key))))))
+    ;; A key that must render even empty (e.g. a fresh task) joins the
+    ;; key set with a nil root list, so it becomes a zero-row section
+    ;; without disturbing the emitted-vs-node-count invariant.
+    (dolist (key extra-keys)
+      (unless (gethash key roots-by-key)
+        (push key keys)
+        (puthash key nil roots-by-key)))
     (let* ((flat nil)
            (emit-node nil)
-           (repos
+           (sections
             (vconcat
              (mapcar
               (lambda (key)
@@ -418,35 +453,125 @@ than the current epoch renders nowhere."
                              (vconcat (mapcar (lambda (k) (funcall emit-node k))
                                               kids))))))
                   (list :key key
-                        :label (agent-repl--repo-label key)
+                        :label (funcall label-fn key)
                         :folded (if folded t :false)
+                        :done (funcall done-fn key)
                         :rows (vconcat
                                (mapcar (lambda (n) (funcall emit-node n))
                                        (agent-repl--sidebar-sibling-sort
-                                        (gethash key roots-by-repo)))))))
-              (sort repo-keys
-                    (lambda (a b)
-                      ;; The `(no repo)' sentinel always sections last —
-                      ;; it is the catch-all, not a repo peer.
-                      (cond
-                       ((equal a agent-repl--repo-key-unknown) nil)
-                       ((equal b agent-repl--repo-key-unknown) t)
-                       (t (string< (agent-repl--repo-label a)
-                                   (agent-repl--repo-label b))))))))))
+                                        (gethash key roots-by-key)))))))
+              (funcall key-sort keys)))))
       (unless (= emitted (length nodes))
-        (error "agent-repl--sidebar-build: emitted %d of %d rows — :source-ws-dir cycle orphaned a family"
+        (error "agent-repl--sidebar-build-sections: emitted %d of %d rows — :source-ws-dir cycle orphaned a family"
                emitted (length nodes)))
-      (let* ((recent (agent-repl--sidebar-merged-group merged-entries current))
-             (recent-folded (agent-repl--repo-folded-p agent-repl--sidebar-merged-key))
-             (recent-dirs (and recent (not recent-folded)
-                               (mapcar (lambda (e)
-                                         (agent-repl--path-canonical (cdr e)))
-                                       (agent-repl--sidebar-merged-sorted
-                                        merged-entries)))))
-        (cons (list :repos repos
-                    :recentlyMerged (or recent :null)
-                    :navDir (or agent-repl--sidebar-nav-dir :null))
-              (append (nreverse flat) recent-dirs))))))
+      (cons sections (nreverse flat)))))
+
+(defun agent-repl--sidebar-repo-key-sort (keys)
+  "Sort repo KEYS by label with the `(no repo)' sentinel forced last."
+  (sort (copy-sequence keys)
+        (lambda (a b)
+          (cond
+           ((equal a agent-repl--repo-key-unknown) nil)
+           ((equal b agent-repl--repo-key-unknown) t)
+           (t (string< (agent-repl--repo-label a)
+                       (agent-repl--repo-label b)))))))
+
+(defun agent-repl--sidebar-task-key (name)
+  "Return the section key for workspace NAME under the task view.
+Its effective task id (direct or inherited), or the no-task catch-all."
+  (or (agent-repl--ws-effective-task-id name)
+      agent-repl--sidebar-no-task-key))
+
+(defun agent-repl--sidebar-task-label (key)
+  "Return the task-section label for KEY.
+\"No task\" for the catch-all; otherwise the task's title, falling back
+to the bare id only when the task somehow no longer exists."
+  (if (equal key agent-repl--sidebar-no-task-key)
+      "No task"
+    (let ((task (agent-repl--task-get key)))
+      (if task (plist-get task :title) key))))
+
+(defun agent-repl--sidebar-task-done (key)
+  "Return the JSON boolean done state for task-section KEY.
+`:false' for the catch-all and for any task not marked done."
+  (if (equal key agent-repl--sidebar-no-task-key)
+      :false
+    (let ((task (agent-repl--task-get key)))
+      (if (and task (plist-get task :done)) t :false))))
+
+(defun agent-repl--sidebar-task-key-sort (keys)
+  "Sort task-section KEYS by task creation order, the catch-all last."
+  (let ((order (make-hash-table :test 'equal))
+        (i 0))
+    (dolist (task (agent-repl--tasks-sorted))
+      (puthash (plist-get task :id) i order)
+      (setq i (1+ i)))
+    (sort (copy-sequence keys)
+          (lambda (a b)
+            (cond
+             ((equal a agent-repl--sidebar-no-task-key) nil)
+             ((equal b agent-repl--sidebar-no-task-key) t)
+             (t (< (gethash a order most-positive-fixnum)
+                   (gethash b order most-positive-fixnum))))))))
+
+(defun agent-repl--sidebar-build ()
+  "Build the roster from every live workspace, per the active view.
+Returns (ROSTER . FLAT-DIRS): ROSTER is the `json-serialize'-ready
+plist, FLAT-DIRS the visible row dirs in render order (see
+`agent-repl--sidebar-flat-dirs').
+
+The roster always carries both `:repos' and `:tasks'; the inactive
+view's array is empty, so the webapp switches on `:view' and renders
+exactly one grouping.  Repository view groups by git repo (repos sort by
+label, `(no repo)' last); task view groups by the task each family's
+ROOT belongs to (tasks in creation order, \"No task\" last) and always
+renders every task, empty ones included.
+
+Merged workspaces are partitioned out BEFORE the sections are built, so
+they never enter the active grouping and the emitted-vs-node-count
+invariant compares two exact counts.  They render instead in the
+`:recentlyMerged' group while they sit inside the window
+`agent-repl--sidebar-refresh-merged-window' maintains."
+  (let* ((all-entries (agent-repl--sidebar-entries))
+         (merged-entries (cl-remove-if-not
+                          (lambda (e) (agent-repl--sidebar-merged-p (car e)))
+                          all-entries))
+         (entries (cl-remove-if
+                   (lambda (e) (agent-repl--sidebar-merged-p (car e)))
+                   all-entries))
+         (current (ignore-errors (agent-repl--ws-current-name)))
+         (task-view (eq agent-repl--sidebar-view :task))
+         (built (if task-view
+                    (agent-repl--sidebar-build-sections
+                     entries current
+                     #'agent-repl--sidebar-task-key
+                     #'agent-repl--sidebar-task-label
+                     #'agent-repl--sidebar-task-done
+                     #'agent-repl--sidebar-task-key-sort
+                     (mapcar (lambda (task) (plist-get task :id))
+                             (agent-repl--tasks-sorted)))
+                  (agent-repl--sidebar-build-sections
+                   entries current
+                   #'agent-repl--ws-repo-group
+                   #'agent-repl--repo-label
+                   (lambda (_key) :false)
+                   #'agent-repl--sidebar-repo-key-sort
+                   nil)))
+         (sections (car built))
+         (flat (cdr built))
+         (recent (agent-repl--sidebar-merged-group merged-entries current))
+         (recent-folded (agent-repl--repo-folded-p agent-repl--sidebar-merged-key))
+         (recent-dirs (and recent (not recent-folded)
+                           (mapcar (lambda (e)
+                                     (agent-repl--path-canonical (cdr e)))
+                                   (agent-repl--sidebar-merged-sorted
+                                    merged-entries)))))
+    (cons (list :view (agent-repl--sidebar-view-wire)
+                :repos (if task-view [] sections)
+                :tasks (if task-view sections [])
+                :recentlyMerged (or recent :null)
+                :navDir (or agent-repl--sidebar-nav-dir :null))
+          (append flat recent-dirs))))
 
 ;;;; ---- Pushing into the webviews ----------------------------------------
 
@@ -530,11 +655,20 @@ itself changed."
                         (and (agent-repl--ws-get name :done-acked) t)
                         (agent-repl--ws-get name :repl-state)
                         (and (agent-repl--ws-open-p name) t)
-                        (agent-repl--ws-get name :last-viewed-at)))
+                        (agent-repl--ws-get name :last-viewed-at)
+                        ;; Task membership: assigning a workspace to a
+                        ;; task changes which section it renders under
+                        ;; without touching any lifecycle field above.
+                        (agent-repl--ws-get name :task-id)))
                 (agent-repl--live-ws-names))
         (ignore-errors (agent-repl--ws-current-name))
         (agent-repl--folded-repo-keys)
         agent-repl--sidebar-nav-dir
+        ;; The active view and the task list are their own axes: a view
+        ;; switch, task create, rename, or done-toggle changes the
+        ;; roster without moving any per-workspace lifecycle field.
+        agent-repl--sidebar-view
+        (agent-repl--tasks-signature)
         ;; The epoch is its own axis: wiping the Recently Merged section
         ;; drops rows without changing any per-workspace render state, so
         ;; without this the gate would skip the push that clears them.
@@ -714,6 +848,89 @@ same fold set, so forcing the tab-bar redraw is the whole sync."
       (agent-repl--log nil "workspace-commands-file fold: key=%s folded=%s" key desired)
       (agent-repl--force-tab-bar-redraw)
       (agent-repl--sidebar-push))))
+
+;;;; ---- View + task command handlers (webview clicks, via the daemon) -----
+
+(defun agent-repl--sidebar-set-view (view)
+  "Set the active sidebar VIEW (`:repository' / `:task') and push the roster.
+Signals on an unknown VIEW rather than defaulting — the caller is the
+webapp's view selector, whose value set is the same contract."
+  (unless (memq view '(:repository :task))
+    (error "agent-repl--sidebar-set-view: unknown view %S" view))
+  (setq agent-repl--sidebar-view view)
+  (agent-repl--log nil "sidebar-set-view: view=%s" view)
+  (agent-repl--sidebar-push))
+
+(defun agent-repl--handle-set-view-command (cmd)
+  "Handle a \"set-view\" command CMD (the sidebar's view selector).
+CMD carries `view', one of the wire strings in
+`agent-repl--sidebar-view-wire'."
+  (let ((view (alist-get 'view cmd)))
+    (unless (member view '("repository" "task"))
+      (error "agent-repl set-view command: bad view in %S" cmd))
+    (agent-repl--log nil "workspace-commands-file set-view: view=%s" view)
+    (agent-repl--sidebar-set-view (if (equal view "task") :task :repository))))
+
+(defun agent-repl--handle-task-create-command (_cmd)
+  "Handle a \"task-create\" command (the Task view's + button).
+Prompts for the title in the minibuffer — Emacs owns the task model, so
+the webapp asks Emacs to create rather than carrying a title itself.  An
+empty title is a cancelled prompt and creates nothing."
+  (let ((title (read-string "Task title: ")))
+    (if (string-empty-p (string-trim title))
+        (agent-repl--log nil "workspace-commands-file task-create: empty title, skipping")
+      (agent-repl--task-create title)
+      (agent-repl--sidebar-push))))
+
+(defun agent-repl--handle-task-toggle-done-command (cmd)
+  "Handle a \"task-toggle-done\" command CMD (a task checkbox click).
+CMD carries the task `id'."
+  (let ((id (alist-get 'id cmd)))
+    (unless (and (stringp id) (not (string-empty-p id)))
+      (error "agent-repl task-toggle-done command: missing id in %S" cmd))
+    (agent-repl--log nil "workspace-commands-file task-toggle-done: id=%s" id)
+    (agent-repl--task-toggle-done id)
+    (agent-repl--sidebar-push)))
+
+(defun agent-repl--handle-task-open-command (cmd)
+  "Handle a \"task-open\" command CMD (a task label click).
+Opens the task's org notes file in a popup (`agent-repl--task-open')."
+  (let ((id (alist-get 'id cmd)))
+    (unless (and (stringp id) (not (string-empty-p id)))
+      (error "agent-repl task-open command: missing id in %S" cmd))
+    (agent-repl--log nil "workspace-commands-file task-open: id=%s" id)
+    (agent-repl--task-open id)))
+
+(defun agent-repl--task-add-workspace-interactive (id)
+  "Prompt for a live workspace and assign it to task ID.
+Offers every live workspace not already effectively in this task; the
+chosen workspace's `:task-id' is set so it and its future children
+render under the task.  A workspace already inheriting the task through
+its parent is omitted — it needs no assignment.  A brand-new workspace
+for a task is made the ordinary way (or cut as a child of one already in
+the task, which inherits it), then added here."
+  (unless (agent-repl--task-get id)
+    (error "agent-repl--task-add-workspace-interactive: unknown task %s" id))
+  (let* ((candidates
+          (cl-remove-if
+           (lambda (e) (equal (agent-repl--ws-effective-task-id (car e)) id))
+           (agent-repl--sidebar-entries)))
+         (names (mapcar #'car candidates)))
+    (if (null names)
+        (message "agent-repl: no workspaces available to add to this task")
+      (let ((name (completing-read "Add workspace to task: " names nil t)))
+        (when (and name (not (string-empty-p name)))
+          (agent-repl--task-assign-workspace name id)
+          (agent-repl--sidebar-push))))))
+
+(defun agent-repl--handle-task-add-workspace-command (cmd)
+  "Handle a \"task-add-workspace\" command CMD (a task section + button).
+CMD carries the task `id'; the workspace is chosen in the minibuffer."
+  (let ((id (alist-get 'id cmd)))
+    (unless (and (stringp id) (not (string-empty-p id)))
+      (error "agent-repl task-add-workspace command: missing id in %S" cmd))
+    (agent-repl--log nil "workspace-commands-file task-add-workspace: id=%s" id)
+    (agent-repl--task-add-workspace-interactive id)))
 
 (provide 'agent-repl-sidebar)
 ;;; sidebar.el ends here

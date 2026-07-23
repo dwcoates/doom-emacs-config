@@ -116,6 +116,35 @@ workspace hash so membership tests seed live workspaces cleanly."
     (should (string-match-p "task-notes-abc123\\.org\\'"
                             (agent-repl--task-org-file "abc123")))))
 
+;;;; ---- Opening the org popup ---------------------------------------------
+
+(ert-deftest agent-repl-test-tasks-open-unknown-errors ()
+  "`--task-open' signals on an unknown id."
+  (agent-repl-test--with-tasks-state
+    (should-error (agent-repl--task-open "nope"))))
+
+(ert-deftest agent-repl-test-tasks-open-pops-notes-buffer ()
+  "`--task-open' pops to the task's org notes buffer."
+  (agent-repl-test--with-tasks-state
+    (let ((id (agent-repl--task-create "open me"))
+          (popped nil))
+      (cl-letf (((symbol-function 'pop-to-buffer)
+                 (lambda (buf &rest _) (setq popped buf) buf)))
+        (agent-repl--task-open id))
+      (should (bufferp popped))
+      (should (equal (buffer-file-name popped) (agent-repl--task-org-file id)))
+      (kill-buffer popped))))
+
+(ert-deftest agent-repl-test-tasks-open-installs-save-on-kill-hook ()
+  "`--task-open' installs a buffer-local save-on-kill hook on the notes buffer."
+  (agent-repl-test--with-tasks-state
+    (let ((id (agent-repl--task-create "hooked")))
+      (cl-letf (((symbol-function 'pop-to-buffer) (lambda (buf &rest _) buf)))
+        (let ((buf (agent-repl--task-open id)))
+          (with-current-buffer buf
+            (should (local-variable-p 'kill-buffer-hook)))
+          (kill-buffer buf))))))
+
 ;;;; ---- Persistence -------------------------------------------------------
 
 (ert-deftest agent-repl-test-tasks-persist-round-trip ()
