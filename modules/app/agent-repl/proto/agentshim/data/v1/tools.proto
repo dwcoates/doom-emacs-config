@@ -51,7 +51,19 @@ message ContentBlock {
     ToolResultBlock tool_result = 4;
     ImageBlock image = 5;
     ToolReferenceBlock tool_reference = 6;
+    FallbackBlock fallback = 7;  // [corpus] model-fallback marker block
   }
+}
+
+// [corpus] content block type:"fallback" — records a mid-message model
+// fallback (e.g. safeguards refusal → retry on another model).
+message FallbackModelRef {
+  string model = 1;
+}
+
+message FallbackBlock {
+  FallbackModelRef from = 1;
+  FallbackModelRef to = 2;
 }
 
 message TextBlock {
