@@ -1,0 +1,183 @@
+// agentshim.frontend.v1 — the daemon→frontend resolved surface.
+//
+// TRANSPORT: canonical proto3 JSON (protojson) frames — UDS to Emacs, WS/TCP
+// to the webapp. Both frontends consume literally these messages; neither
+// derives state independently (the whole point of the redesign).
+//
+// SEMANTICS:
+// - On (re)connect the daemon sends StateSnapshot first, then deltas.
+// - WorkspaceState is THE resolved render-state; frontends map .state to
+//   their display vocabulary and never re-derive from raw facts.
+// - TypingDelta is ephemeral (mirrors core.ContentDelta); consumers reconcile
+//   per uuid, replacing previews when the ConversationDelta carrying the
+//   complete message arrives.
+// - DegradedNotice is honest sad-path reporting (store/sidecar/shim outage);
+//   frontends display it, they do not work around it.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// The closed render-state vocabulary (SSM-resolved).
+enum RenderState {
+  RENDER_STATE_UNSPECIFIED = 0;
+  RENDER_STATE_INIT = 1;
+  RENDER_STATE_IDLE = 2;
+  RENDER_STATE_IDLE_ASYNC = 3;
+  RENDER_STATE_THINKING = 4;
+  RENDER_STATE_PERMISSION = 5;
+  RENDER_STATE_DONE = 6;
+  RENDER_STATE_STOP_FAILED = 7;
+  RENDER_STATE_MERGING = 8;
+  RENDER_STATE_MERGE_QUEUED = 9;
+  RENDER_STATE_MERGE_CONFLICT = 10;
+  RENDER_STATE_MERGE_FAILED = 11;
+  RENDER_STATE_MERGED = 12;
+  RENDER_STATE_DEAD = 13;
+  RENDER_STATE_DEGRADED = 14;
+}
+
+message FrontendFrame {
+  oneof frame {
+    StateSnapshot snapshot = 1;
+    WorkspaceState workspace_state = 2;
+    SessionView session_view = 3;
+    ConversationDelta conversation_delta = 4;
+    TypingDelta typing_delta = 5;
+    TaskCatalog task_catalog = 6;
+    CommandAck command_ack = 7;
+    DegradedNotice degraded_notice = 8;
+  }
+}
+
+// THE resolved per-workspace state, plus the inputs snapshot that produced
+// it (for debuggability: a frontend can show WHY a state was resolved).
+message WorkspaceState {
+  string workspace = 1;
+  string session_id = 2;
+  RenderState state = 3;
+  // Resolution inputs (SSM):
+  bool turn_active = 4;
+  int64 live_task_count = 5;
+  string merge_phase = 6;
+  string cause_kind = 7;  // event kind that caused this transition
+  uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
+  int64 at_ms = 9;
+}
+
+message SessionView {
+  string workspace = 1;
+  string session_id = 2;
+  string model = 3;
+  string slug = 4;
+  string title = 5;
+  int64 total_tokens = 6;
+  double total_cost_usd = 7;
+  int64 context_window = 8;
+  string permission_mode = 9;
+  bool shim_attached = 10;
+}
+
+// Complete (store-round-tripped) conversation additions, pre-rendered into
+// the frontend vocabulary. items are protojson-friendly Structs shaped by
+// daemon/internal/frontend/translate.go — frontends render, never interpret.
+message ConversationDelta {
+  string workspace = 1;
+  string session_id = 2;
+  repeated google.protobuf.Struct items = 3;
+  uint64 through_seq = 4;  // frontends persist this for reconnect resync
+}
+
+// Ephemeral live-typing relay (never persisted, never in snapshots).
+message TypingDelta {
+  string workspace = 1;
+  string session_id = 2;
+  string uuid = 3;
+  uint32 block_index = 4;
+  string kind = 5;   // "text" | "thinking" | "input_json"
+  string delta = 6;
+}
+
+message TaskEntry {
+  string task_id = 1;
+  string kind = 2;         // "agent" | "shell" | "workflow"
+  string description = 3;
+  string status = 4;       // running | done | error | killed | stopped | lost
+  string output_path = 5;
+  int64 started_at_ms = 6;
+  int64 ended_at_ms = 7;   // 0 = still open
+}
+
+message TaskCatalog {
+  string workspace = 1;
+  string session_id = 2;
+  repeated TaskEntry tasks = 3;
+}
+
+// Frontend→daemon commands (the ONLY inbound frame).
+message FrontendCommand {
+  string request_id = 1;
+  string workspace = 2;
+  oneof command {
+    SubmitPromptCmd submit_prompt = 3;
+    InterruptCmd interrupt = 4;
+    PermissionAnswerCmd permission_answer = 5;
+    MergeWorkspaceCmd merge_workspace = 6;
+    CloseWorkspaceCmd close_workspace = 7;
+    OpenWorkspaceCmd open_workspace = 8;
+    ResyncCmd resync = 9;
+  }
+}
+
+message SubmitPromptCmd {
+  string text = 1;
+  string permission_mode = 2;
+}
+
+message InterruptCmd {
+  bool hard = 1;
+}
+
+message PermissionAnswerCmd {
+  string permission_request_id = 1;
+  bool allow = 2;
+  google.protobuf.Struct updated_input = 3;
+  string deny_message = 4;
+}
+
+message MergeWorkspaceCmd {
+  string handler = 1;  // e.g. "cherry-pick"
+  bool conflict_resolved_continue = 2;  // the resolve-and-continue handoff
+}
+
+message CloseWorkspaceCmd {}
+
+message OpenWorkspaceCmd {}
+
+message ResyncCmd {
+  uint64 from_seq = 1;
+}
+
+message CommandAck {
+  string request_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message DegradedNotice {
+  string component = 1;  // "shim-store" | "shim-sidecar" | "claude-shim:<id>"
+  string reason = 2;
+  bool recovered = 3;
+  int64 at_ms = 4;
+}
+
+// Full resync on (re)connect: current state of every workspace + open tasks.
+message StateSnapshot {
+  repeated WorkspaceState workspaces = 1;
+  repeated SessionView sessions = 2;
+  repeated TaskCatalog catalogs = 3;
+}

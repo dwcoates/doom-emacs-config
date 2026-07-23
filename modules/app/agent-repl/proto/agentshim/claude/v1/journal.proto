@@ -1,0 +1,39 @@
+// agentshim.claude.v1 journal — workflow journal records
+// (…/subagents/workflows/<runId>/journal.jsonl).
+//
+// Census (D): exactly two record types across the corpus, zero deviation,
+// no timestamps, no status field, no failure variant, NO terminal record —
+// a journal simply ends on its last result line. Workflow completion truth
+// therefore comes from the stream plane (task_notification) or sidecar
+// inference, never from the journal itself.
+
+syntax = "proto3";
+
+package agentshim.claude.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+
+message JournalRecord {
+  oneof record {
+    JournalStarted started = 1;
+    JournalResult result = 2;
+  }
+}
+
+message JournalStarted {
+  string key = 1;       // content-addressed work key, "v2:<sha256hex>"
+  string agent_id = 2;
+}
+
+message JournalResult {
+  string key = 1;
+  string agent_id = 2;
+  // The workflow-step agent's return value; schema is entirely
+  // workflow-defined (census: object 330, string 64). Struct-or-string.
+  oneof result {
+    google.protobuf.Struct result_object = 3;
+    string result_string = 4;
+  }
+}
