@@ -1,0 +1,1 @@
+{"type": "tool_use", "id": "toolu_01325SVQccLy6SfyfjPWHR4D", "name": "Edit", "input": {"replace_all": false, "file_path": "/home/claude/.claude/settings.json", "old_string": "  \"model\": \"sonnet\",", "new_string": "  \"model\": \"opus\","}, "caller": {"type": "direct"}}
