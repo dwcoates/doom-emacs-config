@@ -318,3 +318,13 @@ message CursorState {
   int64 offset = 3;
   bytes carry = 4;     // bounded partial-line carry
 }
+
+// Cursor recovery over the socket (§7.3): the sidecar asks the store for its
+// persisted cursors at startup. Empty file_id = all cursors.
+message CursorQuery {
+  string file_id = 1;
+}
+
+message CursorList {
+  repeated CursorState cursors = 1;
+}
