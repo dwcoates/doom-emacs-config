@@ -136,6 +136,15 @@ slightly blue by `agent-repl-input-background-blue-boost'."
   ;; Widen the fill column in the composer so wrapped prose and `fill-paragraph'
   ;; reflow to 150 columns rather than the 70-column default.
   (setq-local fill-column 150)
+  ;; Soft-wrap long input lines at word boundaries so a long prompt stays
+  ;; fully visible instead of running off the window edge or breaking
+  ;; mid-word.  Set the two underlying variables directly rather than
+  ;; enabling `visual-line-mode': that minor mode was deliberately dropped
+  ;; here (commit 7dfef0d2) because it also remapped Evil's line motions to
+  ;; screen lines, which is unwanted.  `word-wrap' plus a nil `truncate-lines'
+  ;; gives the wrapping without touching cursor-motion semantics.
+  (setq-local truncate-lines nil)
+  (setq-local word-wrap t)
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t))
 
 (defun agent-repl-discard-input ()
