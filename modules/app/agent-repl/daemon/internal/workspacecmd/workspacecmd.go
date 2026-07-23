@@ -131,6 +131,116 @@ func (f Fold) Validate() error {
 	return nil
 }
 
+// SetView is one "set-view" entry: switch the sidebar between its
+// grouping views. View is mandatory and must name a view Emacs knows
+// (agent-repl--sidebar-view-wire); anything else is refused here rather
+// than warned about after the file is drained.
+type SetView struct {
+	Type string `json:"type"`
+	View string `json:"view"`
+}
+
+// NewSetView builds a set-view entry with the type tag already set.
+func NewSetView(view string) SetView {
+	return SetView{Type: "set-view", View: view}
+}
+
+func (s SetView) Validate() error {
+	if s.Type != "set-view" {
+		return fmt.Errorf("workspacecmd: type must be %q, got %q", "set-view", s.Type)
+	}
+	if s.View != "repository" && s.View != "task" {
+		return fmt.Errorf("workspacecmd: view must be %q or %q, got %q", "repository", "task", s.View)
+	}
+	return nil
+}
+
+// TaskCreate is one "task-create" entry: ask Emacs to create a task. It
+// carries no fields beyond the tag — Emacs prompts for the title itself,
+// since it owns the task model.
+type TaskCreate struct {
+	Type string `json:"type"`
+}
+
+// NewTaskCreate builds a task-create entry with the type tag already set.
+func NewTaskCreate() TaskCreate {
+	return TaskCreate{Type: "task-create"}
+}
+
+func (t TaskCreate) Validate() error {
+	if t.Type != "task-create" {
+		return fmt.Errorf("workspacecmd: type must be %q, got %q", "task-create", t.Type)
+	}
+	return nil
+}
+
+// TaskToggleDone is one "task-toggle-done" entry: flip task ID's done
+// flag. ID is mandatory — a toggle names no task without it.
+type TaskToggleDone struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// NewTaskToggleDone builds a task-toggle-done entry with the tag set.
+func NewTaskToggleDone(id string) TaskToggleDone {
+	return TaskToggleDone{Type: "task-toggle-done", ID: id}
+}
+
+func (t TaskToggleDone) Validate() error {
+	if t.Type != "task-toggle-done" {
+		return fmt.Errorf("workspacecmd: type must be %q, got %q", "task-toggle-done", t.Type)
+	}
+	if t.ID == "" {
+		return fmt.Errorf("workspacecmd: id is required")
+	}
+	return nil
+}
+
+// TaskOpen is one "task-open" entry: open task ID's org notes popup. ID
+// is mandatory for the same reason TaskToggleDone's is.
+type TaskOpen struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// NewTaskOpen builds a task-open entry with the type tag already set.
+func NewTaskOpen(id string) TaskOpen {
+	return TaskOpen{Type: "task-open", ID: id}
+}
+
+func (t TaskOpen) Validate() error {
+	if t.Type != "task-open" {
+		return fmt.Errorf("workspacecmd: type must be %q, got %q", "task-open", t.Type)
+	}
+	if t.ID == "" {
+		return fmt.Errorf("workspacecmd: id is required")
+	}
+	return nil
+}
+
+// TaskAddWorkspace is one "task-add-workspace" entry: prompt in Emacs for
+// a workspace to add to task ID. ID is mandatory; the workspace is chosen
+// on the Emacs side, so it is not carried here.
+type TaskAddWorkspace struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// NewTaskAddWorkspace builds a task-add-workspace entry with the tag set.
+func NewTaskAddWorkspace(id string) TaskAddWorkspace {
+	return TaskAddWorkspace{Type: "task-add-workspace", ID: id}
+}
+
+func (t TaskAddWorkspace) Validate() error {
+	if t.Type != "task-add-workspace" {
+		return fmt.Errorf("workspacecmd: type must be %q, got %q", "task-add-workspace", t.Type)
+	}
+	if t.ID == "" {
+		return fmt.Errorf("workspacecmd: id is required")
+	}
+	return nil
+}
+
 // Dir returns the directory Emacs watches for workspace commands.
 func Dir() (string, error) {
 	root, err := stateroot.Root()
