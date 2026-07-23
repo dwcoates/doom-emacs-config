@@ -31,6 +31,7 @@
 (declare-function agent-repl--ws-get "workspace" (name key))
 (declare-function agent-repl--ws-put "workspace" (name key value))
 (declare-function agent-repl--path-canonical "workspace" (path))
+(declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws))
 
 (defvar agent-repl-workspace-id-length)
 
@@ -155,6 +156,31 @@ Returns the file path.  Idempotent: an existing file is left untouched."
         (insert (format "#+TITLE: %s\n#+CREATED: %s\n\n"
                         title (format-time-string "%Y-%m-%d %H:%M")))))
     file))
+
+;;;; ---- Opening the org notes popup -------------------------------------
+
+(defun agent-repl--task-open (id)
+  "Open task ID's org notes file in a popup, saving it on exit.
+Signals on an unknown ID: an open request for a task that does not exist
+means the click and the roster disagree.  `pop-to-buffer' routes the
+file through the task-notes popup rule (config.el) — a right-side split
+that leaves the agent-repl panels the left two thirds of the frame.  The
+buffer gets a buffer-local `kill-buffer-hook' that saves it when
+modified, so dismissing the popup persists the user's notes regardless
+of how it closes."
+  (let ((task (agent-repl--task-get id)))
+    (unless task
+      (error "agent-repl--task-open: unknown task %s" id))
+    (let* ((file (agent-repl--task-org-ensure id (plist-get task :title)))
+           (buf (find-file-noselect file)))
+      (with-current-buffer buf
+        (add-hook 'kill-buffer-hook
+                  (lambda ()
+                    (agent-repl--save-buffer-if-modified (current-buffer)))
+                  nil t))
+      (agent-repl--log nil "task-open: id=%s file=%s" id file)
+      (pop-to-buffer buf)
+      buf)))
 
 ;;;; ---- Workspace membership --------------------------------------------
 
