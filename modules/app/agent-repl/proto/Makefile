@@ -1,17 +1,17 @@
 # Codegen for the agent-shim protobuf protocol.
 #
 # Outputs:
-#   Go  → gen/go/...   (consumed by daemon/, shim-store/, shim-sidecar/)
-#   TS  → gen/ts/...   (consumed by shim/, webapp/)
+#   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/shim-claude-sidecar/)
+#   TS  → gen/ts/...   (consumed by agent-shim/claude-shim/, webapp/)
 #
 # Requires: protoc, protoc-gen-go, and @bufbuild/protoc-gen-es (via npx).
 
 PROTOS := \
   agentshim/core/v1/core.proto \
-  agentshim/claude/v1/tools.proto \
-  agentshim/claude/v1/stream.proto \
-  agentshim/claude/v1/transcript.proto \
-  agentshim/claude/v1/journal.proto \
+  agentshim/data/v1/tools.proto \
+  agentshim/data/v1/stream.proto \
+  agentshim/data/v1/transcript.proto \
+  agentshim/data/v1/journal.proto \
   agentshim/frontend/v1/frontend.proto
 
 .PHONY: all go ts lint clean
