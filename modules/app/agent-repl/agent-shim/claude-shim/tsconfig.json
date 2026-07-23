@@ -6,7 +6,23 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "outDir": "dist",
-    "rootDir": "src",
+    // rootDir spans agent-repl/ so the committed protobuf TS stubs at
+    // proto/gen/ts (imported relatively by src/uds and src/proto) are legal
+    // program inputs. The stubs live outside this package by design (one
+    // generated set shared by claude-shim + webapp), so a src-only rootDir
+    // rejects them (TS6059). Emit layout shifts accordingly; the runtime
+    // build wiring (main.ts entry, dist path) is a stitch-phase concern.
+    "rootDir": "../..",
+    "baseUrl": ".",
+    // The generated stubs import @bufbuild/protobuf and its subpath exports.
+    // They resolve those from THIS package's node_modules, but NodeNext walks
+    // up from the stub's own directory (proto/gen/ts) where no node_modules
+    // exists, so map the subpaths explicitly to the installed ESM typings.
+    "paths": {
+      "@bufbuild/protobuf": ["./node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
+      "@bufbuild/protobuf/codegenv2": ["./node_modules/@bufbuild/protobuf/dist/esm/codegenv2/index.d.ts"],
+      "@bufbuild/protobuf/wkt": ["./node_modules/@bufbuild/protobuf/dist/esm/wkt/index.d.ts"]
+    },
     "strict": true,
     "noUncheckedIndexedAccess": false,
     "declaration": true,
@@ -14,5 +30,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../../proto/gen/ts/**/*.ts"]
 }
