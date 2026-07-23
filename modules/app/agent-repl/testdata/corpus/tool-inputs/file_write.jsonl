@@ -1,0 +1,1 @@
+{"type": "tool_use", "id": "toolu_01FXKDiN2TmZbxnojYMVhqho", "name": "Write", "input": {"file_path": "/Users/dodgecoates/workspace/dexter/dexter-1/.agents-sandbox/mounts.sample", "content": "[]\n"}, "caller": {"type": "direct"}}

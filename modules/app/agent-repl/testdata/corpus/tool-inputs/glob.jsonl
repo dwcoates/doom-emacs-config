@@ -1,0 +1,1 @@
+{"type": "tool_use", "id": "toolu_01RBacRwdyYE1VRCy2Pf6dRi", "name": "Glob", "input": {"pattern": "**/AGENTS.md"}, "caller": {"type": "direct"}}

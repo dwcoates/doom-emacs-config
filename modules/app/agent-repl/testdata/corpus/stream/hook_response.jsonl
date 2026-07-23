@@ -1,0 +1,1 @@
+{"type": "system", "subtype": "hook_response", "hook_id": "ae30d417-85d5-49e9-b0d3-f4435a4723b3", "hook_name": "SessionStart:startup", "hook_event": "SessionStart", "output": "", "stdout": "", "stderr": "", "exit_code": 0, "outcome": "success", "uuid": "86cb7d69-eb04-48b6-a0f2-0de3a3f4d1e6", "session_id": "f7b59684-e29e-469c-a7e7-47bbc1828fb6"}

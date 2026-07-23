@@ -1,0 +1,1 @@
+{"type": "tool_use", "id": "toolu_01MRtwDQvL3NPgoxpPcEpeja", "name": "WebFetch", "input": {"url": "https://docs.slack.dev/reference/objects/file-object/", "prompt": "Does the file object have a type or subtype for huddle transcripts, recordings, call transcripts, or AI recap? List any transcript/huddle/call-related file types mentioned."}, "caller": {"type": "direct"}}

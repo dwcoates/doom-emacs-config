@@ -1,0 +1,6 @@
+{
+  "agentType": "general-purpose",
+  "description": "Run /check-cicd on branch",
+  "toolUseId": "toolu_019w534yMVsDAc3KqJYLGhP8",
+  "spawnDepth": 1
+}
