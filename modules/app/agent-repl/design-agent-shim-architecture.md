@@ -639,17 +639,23 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   │   └── wire_test.go                                 A ✓
     │   ├── claude-shim/                                       (relocated here ✓; G4+G5)
     │   │   ├── AGENTS.md                                    A ✓
-    │   │   ├── package.json                                 M   (protobuf-es dep)
+    │   │   ├── package.json                                 M ✓ (G5: @bufbuild/protobuf dep)
+    │   │   ├── package-lock.json                            M ✓ (G5: @bufbuild/protobuf lock)
+    │   │   ├── tsconfig.json                                M ✓ (G5: rootDir=../.., @bufbuild paths, gen/ts include)
+    │   │   ├── vitest.config.ts                             A ✓ (G5: server.fs.allow the proto/gen subtree)
     │   │   ├── src/main.ts                                  M   (stdio→UDS rewiring)
     │   │   ├── src/session.ts                               M   (reattach: stdin-EOF no longer ends input)
     │   │   ├── src/proto/convert.ts                         A
     │   │   ├── src/proto/extras.ts                          A
     │   │   ├── src/proto/delta.ts                           A
-    │   │   ├── src/uds/server.ts                            A
-    │   │   ├── src/uds/store-client.ts                      A
-    │   │   ├── src/uds/control.ts                           A
-    │   │   ├── src/uds/framing.ts                           A
-    │   │   └── test/{convert,delta,framing,control,reattach}.test.ts  A
+    │   │   ├── src/uds/proto.ts                             A ✓ (G5: single import site for gen/ts core stubs)
+    │   │   ├── src/uds/log.ts                               A ✓ (G5: §12 loud structured logging)
+    │   │   ├── src/uds/framing.ts                           A ✓ (G5: wire.go twin + Any-envelope + MessageConn)
+    │   │   ├── src/uds/server.ts                            A ✓ (G5)
+    │   │   ├── src/uds/store-client.ts                      A ✓ (G5)
+    │   │   ├── src/uds/control.ts                           A ✓ (G5)
+    │   │   ├── test/uds-harness.ts                          A ✓ (G5: framed-peer test helper, not a suite)
+    │   │   └── test/{framing,server,store-client,control,reattach}.test.ts  A ✓ (G5)
     │   ├── shim-claude-sidecar/                               (G3)
     │   │   ├── AGENTS.md                                    A ✓
     │   │   ├── go.mod                                       A
@@ -822,17 +828,34 @@ corpus.
   (every message type at least once; every union arm).
 
 **G5 `agent-shim/claude-shim/` transport layer (TS):**
+- `agent-shim/claude-shim/src/uds/framing.ts` — the `agentrepl/wire` twin
+  (4-byte BE length prefix, 32MiB `MAX_FRAME`, clean-EOF only at a boundary,
+  loud errors + decoder-poison on truncation/oversize, no resync) PLUS the
+  message-multiplexing envelope: each frame payload is a serialized
+  `google.protobuf.Any` (typeUrl `type.googleapis.com/agentshim.core.v1.<Msg>`)
+  so several message types share one connection. This is the SAME convention
+  the daemon-side shimclient (G7) uses; `MessageConn` binds a socket to it.
 - `agent-shim/claude-shim/src/uds/server.ts` — `session-<id>.sock` listener; daemon
-  connection lifecycle; disconnect-tolerant turn survival; handshake
-  (`ShimHello`/`DaemonHello`); heartbeats.
-- `agent-shim/claude-shim/src/uds/store-client.ts` — store connection: `StoreWrite`,
-  `Subscribe` + forward loop, degraded-state reporting (no spill).
-- `agent-shim/claude-shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch into the
-  SDK session; `canUseTool`→`PermissionRequest` round-trip.
-- `agent-shim/claude-shim/src/uds/framing.ts` — length-prefixed protobuf framing shared by
-  both connections.
-- Tests: framing round-trip, control dispatch with a mocked SDK session,
-  reattach (drop daemon conn mid-turn, reconnect, `Subscribe{from_seq}`).
+  connection lifecycle; disconnect-tolerant turn survival + reattach (a new
+  connection re-handshakes; unsent events are dropped, not spilled — the store
+  replays them on the next Subscribe); handshake (`ShimHello` first, then
+  `DaemonHello`); heartbeats; Ack/Nack receipts.
+- `agent-shim/claude-shim/src/uds/store-client.ts` — store connection: `StoreWrite`
+  with `StoreWriteAck` accounting, `Subscribe{from_seq}` + continuous forward
+  loop to an injected sink, honest sad path (drop + loud-log every event +
+  `DegradedState` to an injected reporter; NO spill, NO retry-forever).
+- `agent-shim/claude-shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch onto an
+  injected `SdkControlTarget` (does NOT import src/session.ts); `canUseTool`→
+  `PermissionRequest` round-trip blocking on a pending-request map keyed by
+  `request_id`.
+- Support: `src/uds/proto.ts` (single import site for the gen/ts core stubs),
+  `src/uds/log.ts` (§12 loud structured logging), `vitest.config.ts`
+  (`server.fs.allow` the proto subtree), `tsconfig.json` (rootDir widened to
+  `../..`, `@bufbuild` path mappings, gen/ts added to `include`).
+- Tests: `test/{framing,server,store-client,control,reattach}.test.ts` +
+  `test/uds-harness.ts`; framing round-trip + typeUrl assertions, control
+  dispatch with a mocked SDK session, reattach (drop daemon conn mid-stream,
+  reconnect, `Subscribe{from_seq}`, verify continuation w/o loss or dup).
 
 **G6 `daemon/internal/ssm/` — session-state manager:**
 - `ssm/ssm.go` — module API (Go-channel fed): `Apply(event)`,
