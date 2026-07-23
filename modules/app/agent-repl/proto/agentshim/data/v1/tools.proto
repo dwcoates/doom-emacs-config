@@ -1,4 +1,4 @@
-// agentshim.claude.v1 tools — content blocks, tool inputs, and per-tool
+// agentshim.data.v1 tools — content blocks, tool inputs, and per-tool
 // result shapes, grounded in sdk-tools.d.ts (v0.1.77) and the on-disk
 // toolUseResult census. Total fidelity: every shape found in the
 // investigation is typed here; nothing is folded into a generic passthrough.
@@ -10,11 +10,11 @@
 
 syntax = "proto3";
 
-package agentshim.claude.v1;
+package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
 // ---------------------------------------------------------------------------
 // Enums

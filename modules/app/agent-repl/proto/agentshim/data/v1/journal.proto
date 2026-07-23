@@ -1,4 +1,4 @@
-// agentshim.claude.v1 journal — workflow journal records
+// agentshim.data.v1 journal — workflow journal records
 // (…/subagents/workflows/<runId>/journal.jsonl).
 //
 // Census (D): exactly two record types across the corpus, zero deviation,
@@ -9,11 +9,11 @@
 
 syntax = "proto3";
 
-package agentshim.claude.v1;
+package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
 message JournalRecord {
   oneof record {

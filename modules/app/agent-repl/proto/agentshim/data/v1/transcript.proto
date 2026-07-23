@@ -1,4 +1,4 @@
-// agentshim.claude.v1 transcript — TOTAL-FIDELITY models of the on-disk
+// agentshim.data.v1 transcript — TOTAL-FIDELITY models of the on-disk
 // JSONL lines the harness writes (session transcripts, agent sidechain
 // transcripts, and their metadata line types), grounded in a census of
 // ~1,540 real transcripts (CLI 2.1.168–2.1.215).
@@ -12,12 +12,12 @@
 
 syntax = "proto3";
 
-package agentshim.claude.v1;
+package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
-import "agentshim/claude/v1/tools.proto";
+import "agentshim/data/v1/tools.proto";
 
-option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
 // ---------------------------------------------------------------------------
 // Enums (envelope vocabularies, census B2/B4)
