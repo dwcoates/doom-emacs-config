@@ -739,9 +739,14 @@ M = modification, D = deletion; ✓ = already landed on `master`.
         └── <fixtures per the corpus contract>               A
 ```
 
-Notes: `proto/gen/` (generated Go/TS) is build output via `proto/Makefile`,
-not source. Exact fixture filenames under `testdata/corpus/` are chosen by
-the G13 agent from the real corpus.
+Notes: `proto/gen/` (generated Go/TS stubs via `proto/Makefile`, plus
+`gen/go/go.mod` as module `agentrepl/proto`) IS COMMITTED (A ✓) so every
+group compiles against identical stubs; regenerate with `make` after any
+`.proto` change. Consumers import Go stubs via a
+`replace agentrepl/proto => <relative>/proto/gen/go` directive and TS stubs
+via relative imports plus the `@bufbuild/protobuf` runtime. Exact fixture
+filenames under `testdata/corpus/` are chosen by the G13 agent from the real
+corpus.
 
 ### 14.1 NEW files (by farm-out group)
 
