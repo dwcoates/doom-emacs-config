@@ -3,7 +3,8 @@
 // immediately.
 //
 // The CLI restores context on --resume but re-emits NOTHING through the
-// stream (empirically verified; see shim/src/fake-query.ts), and a new
+// stream (empirically verified; see
+// agent-shim/claude-shim/src/fake-query.ts), and a new
 // session's §2.10 replay window starts empty — without this seeding, a
 // resumed session renders as a blank conversation (and a zero token
 // counter) until its first live turn. That bites every binding
