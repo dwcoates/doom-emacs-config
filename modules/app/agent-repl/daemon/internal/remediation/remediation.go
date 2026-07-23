@@ -110,7 +110,7 @@ func Prompt(sessionID string, uptime time.Duration) string {
 		fmt.Sprintf("The claude-repl frontend has lost session %s.", sessionID),
 		fmt.Sprintf("Its webapp reconnected, probed GET /sessions, and the claude-repld daemon (up %s at the time of the probe) no longer listed that id, so the topbar now reads \"session gone\" and the conversation is unreachable.", uptime.Round(time.Second)),
 		"",
-		"You are the automated remediation for that failure. Work in this checkout (modules/app/agent-repl is the frontend: webapp/ is the browser client, daemon/ is claude-repld, shim/ is the per-session SDK subprocess).",
+		"You are the automated remediation for that failure. Work in this checkout (modules/app/agent-repl is the frontend: webapp/ is the browser client, daemon/ is claude-repld, agent-shim/claude-shim/ is the per-session SDK subprocess).",
 		"",
 		"Do all of the following, in order:",
 		"",

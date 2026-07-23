@@ -35,7 +35,7 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$THIS_DIR/.." && pwd)"
 
-SHIM_DIR="$ROOT/shim"
+SHIM_DIR="$ROOT/agent-shim/claude-shim"
 WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
 
