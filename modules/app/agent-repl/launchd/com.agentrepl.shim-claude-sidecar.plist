@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.agentrepl.shim-claude-sidecar — launchd user agent for the
+  shim-claude-sidecar service (§7.1, §13 of design-agent-shim-architecture.md).
+
+  TEMPLATE: this checked-in copy uses ~-relative paths so it reads portably
+  and resolves on any machine. launchd does NOT expand `~`, so
+  .claude/install.sh (install_agent_shim_services) rewrites every leading `~/`
+  to the invoking user's absolute $HOME when copying this file into
+  ~/Library/LaunchAgents/. Do not load this template file directly.
+
+  Flag contract (must match agent-shim/shim-claude-sidecar/main.go, §14.1 G3):
+    --store-socket   shim-store UDS        (~/.cache/agent-repl/sock/store.sock)
+    --config-roots   comma-separated Claude config roots whose projects/*
+                     transcripts + subagent spools are observed (§7.1)
+    --spool-root     base dir under which /tmp/claude-<uid>/ task spools live
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentrepl.shim-claude-sidecar</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>~/.cache/agent-repl/bin/shim-claude-sidecar</string>
+        <string>--store-socket</string>
+        <string>~/.cache/agent-repl/sock/store.sock</string>
+        <string>--config-roots</string>
+        <string>~/.claude,~/.claude-chesscom</string>
+        <string>--spool-root</string>
+        <string>/tmp</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Do not respawn faster than once per 10s if the binary crash-loops. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>~/.cache/agent-repl/log/shim-claude-sidecar.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>~/.cache/agent-repl/log/shim-claude-sidecar.err.log</string>
+</dict>
+</plist>
