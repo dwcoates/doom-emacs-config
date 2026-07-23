@@ -1,4 +1,4 @@
-// agentshim.claude.v1 stream — TOTAL-FIDELITY models of the Claude Agent SDK
+// agentshim.data.v1 stream — TOTAL-FIDELITY models of the Claude Agent SDK
 // live stream (`query()` iterator), grounded in @anthropic-ai/claude-agent-sdk
 // v0.1.77 typings plus empirically observed stream-only families (CLI 2.1.215
 // probes). Field comments cite the source: [sdk coreTypes.d.ts:NNN] for typed
@@ -10,12 +10,12 @@
 
 syntax = "proto3";
 
-package agentshim.claude.v1;
+package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
-import "agentshim/claude/v1/tools.proto";
+import "agentshim/data/v1/tools.proto";
 
-option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
 // The full stream union [sdk coreTypes.d.ts:553] plus observed-only members.
 message ClaudeStreamMessage {
