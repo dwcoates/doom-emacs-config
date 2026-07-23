@@ -125,6 +125,89 @@ func TestWorkspaceCommandEmitsAMixedArrayAsOneFile(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCommandEmitsASetViewForEmacs(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	t.Setenv("AGENT_REPL_STATE_DIR", root)
+	h := newHarness(t)
+
+	// Act.
+	resp := postWorkspaceCommand(t, h, `[{"type":"set-view","view":"task"}]`)
+
+	// Assert.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := emittedCommands(t, root)
+	want := []map[string]any{{"type": "set-view", "view": "task"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("emitted %v, want %v", got, want)
+	}
+}
+
+func TestWorkspaceCommandEmitsTheTaskGesturesForEmacs(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	t.Setenv("AGENT_REPL_STATE_DIR", root)
+	h := newHarness(t)
+
+	// Act — the Task view's four id-bearing (or id-less) gestures.
+	resp := postWorkspaceCommand(t, h,
+		`[{"type":"task-create"},{"type":"task-toggle-done","id":"t1"},`+
+			`{"type":"task-open","id":"t1"},{"type":"task-add-workspace","id":"t1"}]`)
+
+	// Assert.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := emittedCommands(t, root)
+	want := []map[string]any{
+		{"type": "task-create"},
+		{"type": "task-toggle-done", "id": "t1"},
+		{"type": "task-open", "id": "t1"},
+		{"type": "task-add-workspace", "id": "t1"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("emitted %v, want %v", got, want)
+	}
+}
+
+func TestWorkspaceCommandRefusesABadView(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	t.Setenv("AGENT_REPL_STATE_DIR", root)
+	h := newHarness(t)
+
+	// Act.
+	resp := postWorkspaceCommand(t, h, `[{"type":"set-view","view":"kanban"}]`)
+
+	// Assert.
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := emittedCommands(t, root); len(got) != 0 {
+		t.Errorf("emitted %d entries for a bad view, want 0", len(got))
+	}
+}
+
+func TestWorkspaceCommandRefusesATaskToggleMissingID(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	t.Setenv("AGENT_REPL_STATE_DIR", root)
+	h := newHarness(t)
+
+	// Act.
+	resp := postWorkspaceCommand(t, h, `[{"type":"task-toggle-done"}]`)
+
+	// Assert.
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if body := responseBody(t, resp); !strings.Contains(body, "id is required") {
+		t.Errorf("body = %q, want it to name the missing id", body)
+	}
+}
+
 func TestWorkspaceCommandRefusesAnEmptyArray(t *testing.T) {
 	// Arrange.
 	root := t.TempDir()
