@@ -24,10 +24,17 @@
 # Backs up ~/.claude/settings.json to settings.json.bak.<unix-ts> before
 # any mutation.
 #
-# Usage:
-#   bash .claude/install.sh [install|uninstall|reinstall|help]
+# Opt-in agent-shim services (OFF by default):
+#   --with-agent-shim-services  Also build + launchd-install the shim-store
+#              and shim-claude-sidecar services.  Never runs in the default
+#              install path; a not-yet-landed service is skipped loudly, not
+#              failed.  See install_agent_shim_services below.
 #
-# Requires: jq, bash 4+.
+# Usage:
+#   bash .claude/install.sh [install|uninstall|reinstall|help] \
+#        [--with-agent-shim-services]
+#
+# Requires: jq, bash 4+.  (--with-agent-shim-services also needs go + launchctl.)
 set -euo pipefail
 
 # --- Shared constants + helpers (needed by both the sandbox repair path
@@ -151,7 +158,8 @@ link_skill_to_impl() {
 # environment surfaces loudly instead of silently serving stale code.
 # Hooks/settings setup is still skipped — only skills are repaired.
 if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
-   && [ "${INSTALL_SH_SKIP_SANDBOX_DETECT:-}" != "1" ]; then
+   && [ "${INSTALL_SH_SKIP_SANDBOX_DETECT:-}" != "1" ] \
+   && [ "${INSTALL_SH_LIB:-}" != "1" ]; then
   echo "[install.sh] Detected sandbox environment — running skill symlink repair only."
   mkdir -p "$SKILLS_DIR"
   missing=0
@@ -223,7 +231,7 @@ _is_managed_precommit() {
 
 show_help() {
   cat <<USAGE
-Usage: bash $0 [install|uninstall|reinstall|help]
+Usage: bash $0 [install|uninstall|reinstall|help] [--with-agent-shim-services]
 
   install    (default) Copy managed hook scripts and register them in
              ~/.claude/settings.json.  Idempotent.
@@ -231,6 +239,14 @@ Usage: bash $0 [install|uninstall|reinstall|help]
              and delete the managed hook scripts.
   reinstall  uninstall then install.
   help       Show this message.
+
+  --with-agent-shim-services
+             OPT-IN, OFF BY DEFAULT.  Also build the shim-store and
+             shim-claude-sidecar Go binaries into ~/.cache/agent-repl/bin/,
+             install their launchd user-agent plists, and bootstrap/kickstart
+             them (or, with uninstall, boot them out and remove them).  A
+             service whose code has not landed yet is skipped with a loud
+             notice instead of failing the install.
 USAGE
 }
 
@@ -456,16 +472,201 @@ do_uninstall() {
   echo "[uninstall] Done."
 }
 
+# --- agent-shim supervision services (OPT-IN, OFF BY DEFAULT) ---
+#
+# The shim ecosystem's two OS-managed services (shim-store,
+# shim-claude-sidecar; §6.1/§7.1/§13 of design-agent-shim-architecture.md).
+# This step is NEVER part of the default install path: it runs ONLY when an
+# action is invoked WITH the explicit `--with-agent-shim-services` flag.
+#
+# It is idempotent (safe to re-run): it rebuilds the binaries, refreshes the
+# plists, and re-bootstraps the launchd user agents.  Each service is
+# INDEPENDENTLY skipped-with-loud-notice when its module dir has no buildable
+# `main` package yet (the two services are landed by parallel workstreams
+# G2/G3).  A skip never fails the install and never pretends success — it
+# prints exactly what was skipped and why.
+
+# Where the shim-ecosystem runtime state lives (matches agent-shim-doctor.sh
+# and the plist templates).
+AGENT_SHIM_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
+LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+LAUNCHD_SRC_DIR="$SCRIPT_DIR/../modules/app/agent-repl/launchd"
+AGENT_SHIM_SRC_DIR="$SCRIPT_DIR/../modules/app/agent-repl/agent-shim"
+
+# Each entry: MODULE_SUBDIR|BINARY_NAME|LAUNCHD_LABEL
+AGENT_SHIM_SERVICES=(
+  "shim-store|shim-store|com.agentrepl.shim-store"
+  "shim-claude-sidecar|shim-claude-sidecar|com.agentrepl.shim-claude-sidecar"
+)
+
+# Return 0 iff SRC_DIR is a Go module carrying a buildable `package main`.
+# The two service dirs currently hold only an AGENTS.md charter; until a
+# parallel workstream lands their code, this returns non-zero and the caller
+# skips the service loudly rather than failing the whole install.
+_service_buildable() {
+  local src="$1"
+  [ -f "$src/go.mod" ] || return 1
+  local f
+  for f in "$src"/*.go; do
+    [ -f "$f" ] || continue
+    # A `main` package = a top-level .go file whose package clause is `main`.
+    if grep -Eq '^package main([[:space:]]|$)' "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Install one service's launchd plist: rewrite the ~-relative template paths
+# to absolute $HOME paths (launchd does NOT expand `~`) and write it into
+# ~/Library/LaunchAgents/.  '|' is a safe sed delimiter here: $HOME never
+# contains '|'.
+_install_shim_plist() {
+  local plist_src="$1" plist_dest="$2"
+  sed "s|~/|$HOME/|g" "$plist_src" > "$plist_dest"
+}
+
+install_agent_shim_services() {
+  echo "[install/services] Opt-in agent-shim services requested (--with-agent-shim-services)."
+
+  if ! command -v go >/dev/null 2>&1; then
+    # The caller opted in, so a missing toolchain is a hard failure — not a
+    # skip.  (Skips are reserved for not-yet-landed service code.)
+    echo "[install/services] ERROR: 'go' toolchain not found — cannot build the shim services." >&2
+    echo "[install/services]        Install Go, then re-run with --with-agent-shim-services." >&2
+    return 1
+  fi
+  if ! command -v launchctl >/dev/null 2>&1; then
+    echo "[install/services] ERROR: 'launchctl' not found — these services are macOS launchd user agents." >&2
+    return 1
+  fi
+
+  local bin_dir="$AGENT_SHIM_CACHE_ROOT/bin"
+  local log_dir="$AGENT_SHIM_CACHE_ROOT/log"
+  local sock_dir="$AGENT_SHIM_CACHE_ROOT/sock"
+  local store_dir="$AGENT_SHIM_CACHE_ROOT/store"
+  # launchd will not create these; they must exist before the services bind
+  # their sockets / open their logs / DBs.
+  mkdir -p "$bin_dir" "$log_dir" "$sock_dir" "$store_dir" "$LAUNCH_AGENTS_DIR"
+
+  local uid installed=0 skipped=0
+  uid="$(id -u)"
+
+  local entry subdir bin label src_dir plist_src plist_dest
+  for entry in "${AGENT_SHIM_SERVICES[@]}"; do
+    IFS='|' read -r subdir bin label <<< "$entry"
+    src_dir="$AGENT_SHIM_SRC_DIR/$subdir"
+    plist_src="$LAUNCHD_SRC_DIR/$label.plist"
+    plist_dest="$LAUNCH_AGENTS_DIR/$label.plist"
+
+    if [ ! -f "$plist_src" ]; then
+      echo "[install/services] ERROR: launchd plist missing at $plist_src" >&2
+      return 1
+    fi
+
+    if ! _service_buildable "$src_dir"; then
+      echo "[install/services] SKIP: $label — no buildable 'main' package under $src_dir yet."
+      echo "[install/services]       (Its code is landed by a parallel workstream; nothing was built,"
+      echo "[install/services]        no plist was installed, and the service is NOT running.)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    echo "[install/services] Building $bin from $src_dir ..."
+    ( cd "$src_dir" && go build -o "$bin_dir/$bin" . )
+    echo "[install/services] Built -> $bin_dir/$bin"
+
+    _install_shim_plist "$plist_src" "$plist_dest"
+    echo "[install/services] Installed plist -> $plist_dest"
+
+    # Idempotent (re)load: bootout any prior instance (ignore when absent),
+    # then bootstrap the refreshed plist and kickstart it now.
+    launchctl bootout "gui/$uid" "$plist_dest" 2>/dev/null || true
+    launchctl bootstrap "gui/$uid" "$plist_dest"
+    launchctl kickstart -k "gui/$uid/$label"
+    echo "[install/services] Bootstrapped + kickstarted $label"
+    installed=$((installed + 1))
+  done
+
+  echo "[install/services] Done: $installed installed, $skipped skipped."
+  if [ "$skipped" -gt 0 ]; then
+    echo "[install/services] NOTE: skipped service(s) are NOT running. Re-run with"
+    echo "[install/services]       --with-agent-shim-services once their code lands."
+  fi
+  return 0
+}
+
+# Symmetric teardown: bootout the launchd agents and remove the installed
+# plists + built binaries.  Only ever invoked WITH --with-agent-shim-services.
+uninstall_agent_shim_services() {
+  echo "[uninstall/services] Removing agent-shim services (--with-agent-shim-services)."
+  local uid bin_dir label plist_dest
+  uid="$(id -u)"
+  bin_dir="$AGENT_SHIM_CACHE_ROOT/bin"
+  local entry subdir bin
+  for entry in "${AGENT_SHIM_SERVICES[@]}"; do
+    IFS='|' read -r subdir bin label <<< "$entry"
+    plist_dest="$LAUNCH_AGENTS_DIR/$label.plist"
+    if command -v launchctl >/dev/null 2>&1 && [ -f "$plist_dest" ]; then
+      launchctl bootout "gui/$uid" "$plist_dest" 2>/dev/null || true
+      echo "[uninstall/services] Booted out $label"
+    fi
+    if [ -f "$plist_dest" ]; then
+      rm -f "$plist_dest"
+      echo "[uninstall/services] Removed $plist_dest"
+    fi
+    if [ -f "$bin_dir/$bin" ]; then
+      rm -f "$bin_dir/$bin"
+      echo "[uninstall/services] Removed $bin_dir/$bin"
+    fi
+  done
+  echo "[uninstall/services] Done."
+}
+
 # --- Dispatch ---
 
-ACTION="${1:-install}"
-case "$ACTION" in
-  install)        do_install ;;
-  uninstall)      do_uninstall ;;
-  reinstall)      do_uninstall; do_install ;;
-  -h|--help|help) show_help; exit 0 ;;
-  *)              echo "[install.sh] Unknown action: $ACTION" >&2
-                  show_help
-                  exit 2
-                  ;;
-esac
+if [ "${INSTALL_SH_LIB:-}" != "1" ]; then
+  # Parse args: exactly one optional action word plus optional flags. The
+  # --with-agent-shim-services flag is OFF unless explicitly passed, and NEVER
+  # engages the services step on its own — it only augments install/reinstall/
+  # uninstall.
+  ACTION=""
+  WITH_SERVICES=0
+  for arg in "$@"; do
+    case "$arg" in
+      --with-agent-shim-services) WITH_SERVICES=1 ;;
+      -h|--help|help)             show_help; exit 0 ;;
+      install|uninstall|reinstall)
+        if [ -n "$ACTION" ]; then
+          echo "[install.sh] Multiple actions given: '$ACTION' and '$arg'" >&2
+          show_help
+          exit 2
+        fi
+        ACTION="$arg"
+        ;;
+      *)
+        echo "[install.sh] Unknown argument: $arg" >&2
+        show_help
+        exit 2
+        ;;
+    esac
+  done
+  ACTION="${ACTION:-install}"
+
+  case "$ACTION" in
+    install)
+      do_install
+      [ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services
+      ;;
+    uninstall)
+      do_uninstall
+      [ "$WITH_SERVICES" -eq 1 ] && uninstall_agent_shim_services
+      ;;
+    reinstall)
+      do_uninstall
+      [ "$WITH_SERVICES" -eq 1 ] && uninstall_agent_shim_services
+      do_install
+      [ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services
+      ;;
+  esac
+fi
