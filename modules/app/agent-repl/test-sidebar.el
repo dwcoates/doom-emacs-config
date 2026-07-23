@@ -48,6 +48,21 @@ PLIST key/value pairs are applied after it and may override it."
   (cl-find-if (lambda (r) (equal (plist-get r :name) name))
               (append rows nil)))
 
+(defun agent-repl-test--sidebar-task-group (roster key)
+  "Return ROSTER's task group plist with KEY, or nil."
+  (cl-find-if (lambda (g) (equal (plist-get g :key) key))
+              (append (plist-get roster :tasks) nil)))
+
+(defun agent-repl-test--sidebar-task (id title &rest plist)
+  "Register a task ID titled TITLE directly in the task hash, return ID.
+PLIST key/value pairs (e.g. `:done t') are merged onto the task; the
+suite's `agent-repl--tasks-loaded' is already t (test-helpers.el), so
+this never touches disk."
+  (puthash id (append plist
+                      (list :id id :title title :done nil :created-at 0.0))
+           agent-repl--tasks)
+  id)
+
 ;;;; ---- Wire status mapping ----------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-wire-status-table ()
@@ -233,6 +248,108 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
     (should (equal (cdr (agent-repl--sidebar-build))
                    (mapcar #'agent-repl--path-canonical
                            '("/tmp/parent" "/tmp/child" "/tmp/uncle"))))))
+
+;;;; ---- View selector + task view ------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-build-default-view-is-repository ()
+  "The default build reports the repository view with an empty task array."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "a" "/tmp/a")
+    (let ((roster (car (agent-repl--sidebar-build))))
+      (should (equal (plist-get roster :view) "repository"))
+      (should (equal (append (plist-get roster :tasks) nil) nil))
+      (should (= 1 (length (plist-get roster :repos)))))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-reports-view ()
+  "The task view reports view=task with an empty repo array."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (agent-repl-test--sidebar-ws "a" "/tmp/a")
+    (let ((roster (car (agent-repl--sidebar-build))))
+      (should (equal (plist-get roster :view) "task"))
+      (should (equal (append (plist-get roster :repos) nil) nil)))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-groups-under-task ()
+  "A workspace assigned to a task roots under that task's section."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((id (agent-repl-test--sidebar-task "t1" "Ship it")))
+      (agent-repl-test--sidebar-ws "a" "/tmp/a" :task-id id)
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (group (agent-repl-test--sidebar-task-group roster id)))
+        (should (equal (plist-get group :label) "Ship it"))
+        (should (agent-repl-test--sidebar-row (plist-get group :rows) "a"))))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-empty-task-renders ()
+  "A task with no workspaces still renders as a zero-row section."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((id (agent-repl-test--sidebar-task "t1" "Empty")))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (group (agent-repl-test--sidebar-task-group roster id)))
+        (should group)
+        (should (= 0 (length (plist-get group :rows))))))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-unassigned-under-no-task ()
+  "A workspace in no task collects under the No task catch-all section."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (agent-repl-test--sidebar-ws "loner" "/tmp/loner")
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (group (agent-repl-test--sidebar-task-group
+                   roster agent-repl--sidebar-no-task-key)))
+      (should (equal (plist-get group :label) "No task"))
+      (should (agent-repl-test--sidebar-row (plist-get group :rows) "loner")))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-no-task-sections-last ()
+  "The No task catch-all section sorts after every real task."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((id (agent-repl-test--sidebar-task "t1" "Real" :created-at 1.0)))
+      (agent-repl-test--sidebar-ws "a" "/tmp/a" :task-id id)
+      (agent-repl-test--sidebar-ws "loner" "/tmp/loner")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (keys (mapcar (lambda (g) (plist-get g :key))
+                           (append (plist-get roster :tasks) nil))))
+        (should (equal keys (list id agent-repl--sidebar-no-task-key)))))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-done-flag ()
+  "A done task's section serializes done=true; an open one done=false."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((done-id (agent-repl-test--sidebar-task "d" "Done" :done t))
+          (open-id (agent-repl-test--sidebar-task "o" "Open")))
+      (agent-repl-test--sidebar-ws "a" "/tmp/a" :task-id done-id)
+      (agent-repl-test--sidebar-ws "b" "/tmp/b" :task-id open-id)
+      (let* ((roster (car (agent-repl--sidebar-build))))
+        (should (eq (plist-get (agent-repl-test--sidebar-task-group roster done-id)
+                               :done)
+                    t))
+        (should (eq (plist-get (agent-repl-test--sidebar-task-group roster open-id)
+                               :done)
+                    :false))))))
+
+(ert-deftest agent-repl-test-sidebar-build-task-view-child-inherits-parent-task ()
+  "A child workspace nests under its parent's task section, inheriting it."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((id (agent-repl-test--sidebar-task "t1" "Family")))
+      (agent-repl-test--sidebar-ws "parent" "/tmp/parent" :task-id id)
+      (agent-repl-test--sidebar-ws "child" "/tmp/child"
+                                   :source-ws-dir "/tmp/parent")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (group (agent-repl-test--sidebar-task-group roster id))
+             (parent (agent-repl-test--sidebar-row (plist-get group :rows) "parent")))
+        (should (agent-repl-test--sidebar-row (plist-get parent :children)
+                                              "child"))))))
+
+(ert-deftest agent-repl-test-sidebar-build-repo-groups-carry-done-false ()
+  "Every repo section carries done=false for the uniform group contract."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "a" "/tmp/a")
+    (let* ((roster (car (agent-repl--sidebar-build)))
+           (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git")))
+      (should (eq (plist-get repo :done) :false)))))
 
 ;;;; ---- Row serialization --------------------------------------------------
 
@@ -687,6 +804,118 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
       (agent-repl--handle-fold-command
        '((type . "fold") (repo_key . "/repos/doom/.git") (folded . t))))
     (should (agent-repl--repo-folded-p "/repos/doom/.git"))))
+
+;;;; ---- View + task command handlers ---------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-set-view-command-bad-view-errors ()
+  "A set-view command with an unrecognized view signals."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-set-view-command
+                   '((type . "set-view") (view . "bogus"))))))
+
+(ert-deftest agent-repl-test-sidebar-set-view-command-switches-and-pushes ()
+  "A set-view command flips the active view and pushes a fresh roster."
+  (agent-repl-test--with-clean-state
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-set-view-command
+         '((type . "set-view") (view . "task"))))
+      (should (eq agent-repl--sidebar-view :task))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-command-empty-title-noops ()
+  "A task-create command whose prompt returns empty creates nothing."
+  (agent-repl-test--with-clean-state
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  "))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-task-create-command '((type . "task-create"))))
+      (should (= 0 (hash-table-count agent-repl--tasks)))
+      (should (= pushes 0)))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-command-creates-and-pushes ()
+  "A task-create command creates the prompted task and pushes."
+  (agent-repl-test--with-clean-state
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "New task"))
+                ;; Keep the created task in-memory only — no disk write.
+                ((symbol-function 'agent-repl--tasks-save) (lambda ()))
+                ((symbol-function 'agent-repl--task-org-ensure)
+                 (lambda (&rest _) "/tmp/notes.org"))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-task-create-command '((type . "task-create"))))
+      (should (= 1 (hash-table-count agent-repl--tasks)))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-toggle-done-command-missing-id-errors ()
+  "A task-toggle-done command with no id signals."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-task-toggle-done-command
+                   '((type . "task-toggle-done"))))))
+
+(ert-deftest agent-repl-test-sidebar-task-toggle-done-command-toggles ()
+  "A task-toggle-done command flips the task and pushes."
+  (agent-repl-test--with-clean-state
+    (let ((id (agent-repl-test--sidebar-task "t1" "toggle"))
+          (pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--tasks-save) (lambda ()))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-task-toggle-done-command
+         `((type . "task-toggle-done") (id . ,id))))
+      (should (plist-get (gethash id agent-repl--tasks) :done))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-open-command-missing-id-errors ()
+  "A task-open command with no id signals."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-task-open-command
+                   '((type . "task-open"))))))
+
+(ert-deftest agent-repl-test-sidebar-task-open-command-opens ()
+  "A task-open command routes the task id to `agent-repl--task-open'."
+  (agent-repl-test--with-clean-state
+    (let ((id (agent-repl-test--sidebar-task "t1" "open")) opened)
+      (cl-letf (((symbol-function 'agent-repl--task-open)
+                 (lambda (i) (setq opened i))))
+        (agent-repl--handle-task-open-command
+         `((type . "task-open") (id . ,id))))
+      (should (equal opened id)))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-missing-id-errors ()
+  "A task-add-workspace command with no id signals."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--handle-task-add-workspace-command
+                   '((type . "task-add-workspace"))))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-assigns-choice ()
+  "The interactive add assigns the chosen workspace's `:task-id' and pushes."
+  (agent-repl-test--with-clean-state
+    (let ((id (agent-repl-test--sidebar-task "t1" "target"))
+          (pushes 0))
+      (agent-repl-test--sidebar-ws "free" "/tmp/free")
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "free"))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--handle-task-add-workspace-command
+         `((type . "task-add-workspace") (id . ,id))))
+      (should (equal (agent-repl--ws-get "free" :task-id) id))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-none-available ()
+  "The interactive add is a no-op when every workspace is already in the task."
+  (agent-repl-test--with-clean-state
+    (let ((id (agent-repl-test--sidebar-task "t1" "full"))
+          (chosen nil))
+      (agent-repl-test--sidebar-ws "member" "/tmp/member" :task-id id)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) (setq chosen t) "member"))
+                ((symbol-function 'agent-repl--sidebar-push) (lambda ())))
+        (agent-repl--task-add-workspace-interactive id))
+      (should-not chosen))))
 
 (provide 'test-sidebar)
 ;;; test-sidebar.el ends here

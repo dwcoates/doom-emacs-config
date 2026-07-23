@@ -380,6 +380,18 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "close-panels-on-open")
 (agent-repl--load-module "caffeinate")
 
+;; Task notes popup: the sidebar's Task view opens each task's org notes
+;; file (`agent-repl--task-open', tasks.el) in a right-side popup that
+;; leaves the agent-repl panels the left two thirds of the frame.
+;; `:autosave t' persists the notes when the popup is dismissed, matching
+;; the buffer-local save-on-kill hook the opener also installs.  Guarded
+;; because the Doom popup module (and its `set-popup-rule!' macro) is
+;; absent under `emacs -Q' — the batch ERT suite loads this file but has
+;; no popup system to configure.
+(when (fboundp 'set-popup-rule!)
+  (set-popup-rule! "^task-notes-.*\\.org\\'"
+    :side 'right :size 0.33 :select t :quit t :autosave t))
+
 (if agent-repl--load-errors
     (progn
       ;; `agent-repl--boot-warn', not `agent-repl--warn': this branch is
