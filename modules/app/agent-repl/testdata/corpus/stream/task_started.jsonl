@@ -1,0 +1,1 @@
+{"type": "system", "subtype": "task_started", "task_id": "b86pl7ir1", "tool_use_id": "toolu_01NAhMjPqtoGgwtSib9zFL9N", "description": "Sleep 120 then echo finished", "task_type": "local_bash", "uuid": "e16aa098-11ca-409a-b5f6-4f376bd69967", "session_id": "ac4dd48c-a847-49d7-94bc-5ae6e7cc087d"}

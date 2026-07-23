@@ -1,0 +1,1 @@
+{"type": "rate_limit_event", "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1785542400, "rateLimitType": "overage", "utilization": 0.79, "isUsingOverage": false, "overageInUse": true, "surpassedThreshold": 0.75}, "uuid": "ab28e44d-ad42-42d0-9a4e-bcdfdb4abb7d", "session_id": "f7b59684-e29e-469c-a7e7-47bbc1828fb6"}
