@@ -2082,6 +2082,24 @@ The buffer's screen-line editing tuning was removed, so the mode leaves
       (agent-repl-input-mode))
     (should-not visual-line-mode)))
 
+(ert-deftest agent-repl-test-agent-repl-input-mode-word-wrap-enabled ()
+  "`agent-repl-input-mode' enables word-boundary soft wrapping.
+Pins `word-wrap' to t so a long prompt wraps at word boundaries rather
+than mid-word, achieved without re-enabling `visual-line-mode'."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-word-wrap*"
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
+      (agent-repl-input-mode))
+    (should word-wrap)))
+
+(ert-deftest agent-repl-test-agent-repl-input-mode-truncate-lines-nil ()
+  "`agent-repl-input-mode' leaves `truncate-lines' nil so lines wrap.
+Word wrapping only takes effect when lines are continued rather than
+truncated, so the mode pins `truncate-lines' to nil."
+  (agent-repl-test--with-temp-buffer " *test-input-mode-truncate*"
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background) #'ignore))
+      (agent-repl-input-mode))
+    (should-not truncate-lines)))
+
 (ert-deftest agent-repl-test-agent-repl-input-mode-header-omits-direct-send ()
   "The header line no longer advertises the direct-send chords.
 The `(ins) <slash>/<digit>/<up>/<down>: direct send' segment, and the
