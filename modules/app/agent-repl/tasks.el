@@ -27,11 +27,10 @@
 (declare-function agent-repl--global-state-file "core" (relative))
 (declare-function agent-repl--read-sexp-file-if-exists "history" (file))
 (declare-function agent-repl--write-sexp-file "history" (file data))
-(declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-get "workspace" (name key))
 (declare-function agent-repl--ws-put "workspace" (name key value))
-(declare-function agent-repl--path-canonical "workspace" (path))
 (declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws))
+(declare-function agent-repl--ws-name-for-dir "worktree" (dir))
 
 (defvar agent-repl-workspace-id-length)
 
@@ -183,16 +182,6 @@ of how it closes."
       buf)))
 
 ;;;; ---- Workspace membership --------------------------------------------
-
-(defun agent-repl--ws-name-for-dir (dir)
-  "Return the live workspace NAME whose canonical `:project-dir' matches DIR.
-Nil when DIR is nil or matches no live workspace."
-  (when dir
-    (let ((canon (agent-repl--path-canonical dir)))
-      (cl-find-if (lambda (name)
-                    (let ((pd (agent-repl--ws-get name :project-dir)))
-                      (and pd (equal (agent-repl--path-canonical pd) canon))))
-                  (agent-repl--live-ws-names)))))
 
 (defun agent-repl--ws-effective-task-id (name)
   "Return the id of the task workspace NAME belongs to, or nil.
