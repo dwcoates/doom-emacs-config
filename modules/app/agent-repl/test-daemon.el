@@ -4,8 +4,9 @@
 
 ;; Tests for the lazy, build-if-stale frontend daemon launcher.
 ;;
-;; The two external-boundary wrappers
+;; The three external-boundary wrappers
 ;; (`agent-repl--frontend-run-build-script' and
+;; `agent-repl--frontend-artifact-exists-p' and
 ;; `agent-repl--frontend-spawn-daemon') are shadowed via `cl-letf' in
 ;; every test that reaches them, so no real subprocess is ever spawned.
 ;; A `agent-repl-test--fake-daemon' struct stands in for the process
@@ -78,6 +79,8 @@ exercising the one-shot itself re-bind it nil in their own `let'."
          (agent-repl--frontend-startup-staleness-checked t))
      (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                 (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-artifact-exists-p)
+                (lambda (_path) t))
                ((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
                ((symbol-function 'process-live-p)
@@ -316,11 +319,8 @@ exercising the one-shot itself re-bind it nil in their own `let'."
   "Ensure builds-if-stale then spawns when no daemon is running."
   ;; Arrange
   (agent-repl-test--with-daemon-env
-   ;; Bind the daemon-bin to a path that genuinely exists (the build script)
-   ;; so `start-daemon's existence check passes without shadowing primitives.
    (let ((built nil)
-         (fresh (agent-repl-test--make-live-daemon 777))
-         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+         (fresh (agent-repl-test--make-live-daemon 777)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
@@ -339,8 +339,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let* ((old (agent-repl-test--make-live-daemon 1))
-          (new (agent-repl-test--make-live-daemon 2))
-          (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+          (new (agent-repl-test--make-live-daemon 2)))
      (setq agent-repl--frontend-daemon-process old)
      (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
@@ -363,8 +362,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
    (let ((old (agent-repl-test--make-live-daemon 1))
          (new (agent-repl-test--make-live-daemon 2))
          (built nil)
-         (agent-repl--frontend-startup-staleness-checked nil)
-         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+         (agent-repl--frontend-startup-staleness-checked nil))
      (setq agent-repl--frontend-daemon-process old)
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
                 (lambda () t))
@@ -432,8 +430,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
    (let ((foreign-alive t)
          (shutdown-called nil)
          (spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil)
-         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+         (agent-repl--frontend-startup-staleness-checked nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
                 (lambda () foreign-alive))
                ((symbol-function 'agent-repl--frontend-daemon-stale-p)
@@ -536,8 +533,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((built nil)
-         (fresh (agent-repl-test--make-live-daemon 9))
-         (agent-repl--frontend-daemon-bin agent-repl--frontend-build-script))
+         (fresh (agent-repl-test--make-live-daemon 9)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
@@ -597,12 +593,38 @@ exercising the one-shot itself re-bind it nil in their own `let'."
 
 ;;;; ---- start-daemon: guard --------------------------------------------------
 
+(ert-deftest agent-repl-test-daemon-shim-entry-follows-relocated-layout ()
+  "The launch path names the Claude shim's relocated artifact exactly."
+  (should
+   (equal agent-repl--frontend-shim-entry
+          (expand-file-name "agent-shim/claude-shim/dist/main.js"
+                            agent-repl--frontend-root))))
+
 (ert-deftest agent-repl-test-daemon-start-errors-when-binary-missing ()
-  "Starting errors when the built daemon binary is absent."
-  ;; Arrange — bind the bin to an absent path (no `file-exists-p' shadow).
-  (let ((agent-repl--frontend-daemon-bin "/agent-repl-nonexistent/claude-repld"))
-    ;; Act / Assert
-    (should-error (agent-repl--frontend-start-daemon))))
+  "Starting errors before process creation when the daemon binary is absent."
+  (let ((spawned nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (_path) nil))
+              ((symbol-function 'agent-repl--frontend-spawn-daemon)
+               (lambda () (setq spawned t))))
+      (should-error (agent-repl--frontend-start-daemon))
+      (should-not spawned))))
+
+(ert-deftest agent-repl-test-daemon-start-errors-when-shim-missing ()
+  "Starting errors before process creation when the relocated shim is absent."
+  (let ((spawned nil)
+        (agent-repl--frontend-daemon-bin "/artifacts/claude-repld")
+        (agent-repl--frontend-shim-entry "/artifacts/claude-shim/main.js"))
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (path)
+                 (equal path agent-repl--frontend-daemon-bin)))
+              ((symbol-function 'agent-repl--frontend-spawn-daemon)
+               (lambda () (setq spawned t))))
+      (let ((err (should-error (agent-repl--frontend-start-daemon))))
+        (should (string-match-p
+                 (regexp-quote agent-repl--frontend-shim-entry)
+                 (error-message-string err))))
+      (should-not spawned))))
 
 ;;;; ---- daemon-command shape ------------------------------------------------
 
@@ -615,8 +637,10 @@ exercising the one-shot itself re-bind it nil in their own `let'."
       ;; Assert
       (should (member "-addr" cmd))
       (should (member "127.0.0.1:9999" cmd))
-      (should (member agent-repl--frontend-shim-entry
-                      (cdr (member "-shim" cmd))))
+      (should
+       (equal (cadr (member "-shim" cmd))
+              (expand-file-name "agent-shim/claude-shim/dist/main.js"
+                                agent-repl--frontend-root)))
       (should (member agent-repl--frontend-webapp-dir
                       (cdr (member "-webapp" cmd)))))))
 

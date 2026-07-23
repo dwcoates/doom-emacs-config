@@ -28,6 +28,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-api "agent-repl-frontend-client" (method path &optional payload-alist))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
@@ -54,7 +55,8 @@ Anchors the frontend build script and artifact locations.")
   "Absolute path to the build-if-stale orchestrator script.")
 
 (defconst agent-repl--frontend-shim-entry
-  (expand-file-name "shim/dist/main.js" agent-repl--frontend-root)
+  (expand-file-name "agent-shim/claude-shim/dist/main.js"
+                    agent-repl--frontend-root)
   "Built shim entrypoint handed to `claude-repld' via --shim.")
 
 (defconst agent-repl--frontend-webapp-dir
@@ -363,18 +365,42 @@ registered in `agent-repl--external-boundary-functions'."
    :noquery t
    :sentinel #'agent-repl--frontend-daemon-sentinel))
 
+(defun agent-repl--frontend-artifact-exists-p (path)
+  "External-boundary wrapper: return non-nil when artifact PATH exists.
+Body does nothing but query PATH.  Tests mock it via `cl-letf';
+registered in `agent-repl--external-boundary-functions'."
+  (file-exists-p path)) ; ALLOW-EXTERNAL-BOUNDARY
+
 (defun agent-repl--frontend-start-daemon ()
   "Start the `claude-repld' process and track it, returning the process.
 Assumes the artifacts are already built; call
 `agent-repl--frontend-build-if-stale' first."
-  (unless (file-exists-p agent-repl--frontend-daemon-bin)
-    (error "agent-repl: daemon binary missing after build: %s"
-           agent-repl--frontend-daemon-bin))
-  (let ((proc (agent-repl--frontend-spawn-daemon)))
-    (setq agent-repl--frontend-daemon-process proc)
-    (agent-repl--log nil "claude-repld started (pid %s) on %s"
-                      (process-id proc) agent-repl-frontend-daemon-addr)
-    proc))
+  (let ((daemon-exists
+         (agent-repl--frontend-artifact-exists-p
+          agent-repl--frontend-daemon-bin))
+        (shim-exists
+         (agent-repl--frontend-artifact-exists-p
+          agent-repl--frontend-shim-entry)))
+    (agent-repl--log
+     nil
+     (concat "claude-repld launch preflight: daemon-bin=%s daemon-exists=%s "
+             "shim-entry=%s shim-exists=%s webapp-dir=%s")
+     agent-repl--frontend-daemon-bin daemon-exists
+     agent-repl--frontend-shim-entry shim-exists
+     agent-repl--frontend-webapp-dir)
+    (unless daemon-exists
+      (agent-repl--error
+       nil "daemon binary missing after build: %s"
+       agent-repl--frontend-daemon-bin))
+    (unless shim-exists
+      (agent-repl--error
+       nil "Claude shim entrypoint missing after build: %s"
+       agent-repl--frontend-shim-entry))
+    (let ((proc (agent-repl--frontend-spawn-daemon)))
+      (setq agent-repl--frontend-daemon-process proc)
+      (agent-repl--log nil "claude-repld started (pid %s) on %s"
+                        (process-id proc) agent-repl-frontend-daemon-addr)
+      proc)))
 
 (defun agent-repl--frontend-daemon-sentinel (proc event)
   "Clear the tracked process when PROC dies; EVENT is the status change."
