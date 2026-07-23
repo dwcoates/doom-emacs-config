@@ -1,0 +1,399 @@
+package shimclient
+
+import (
+	"context"
+	"errors"
+	"net"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+)
+
+// ---------------------------------------------------------------------------
+// Test doubles for the injected sinks.
+// ---------------------------------------------------------------------------
+
+type memSeqStore struct {
+	mu sync.Mutex
+	m  map[string]uint64
+}
+
+func newMemSeqStore() *memSeqStore { return &memSeqStore{m: map[string]uint64{}} }
+
+func (s *memSeqStore) LastSeq(id string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[id]
+}
+
+func (s *memSeqStore) SetLastSeq(id string, seq uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[id] = seq
+}
+
+// chanState / chanFrame capture routed events on buffered channels so tests
+// synchronize on delivery instead of sleeping.
+type chanState struct{ ch chan *corev1.Event }
+
+func newChanState() *chanState              { return &chanState{ch: make(chan *corev1.Event, 256)} }
+func (s *chanState) Apply(ev *corev1.Event) { s.ch <- ev }
+
+type chanFrame struct{ ch chan *corev1.Event }
+
+func newChanFrame() *chanFrame                { return &chanFrame{ch: make(chan *corev1.Event, 256)} }
+func (f *chanFrame) Consume(ev *corev1.Event) { f.ch <- ev }
+
+type chanDegraded struct {
+	ds        chan *corev1.DegradedState
+	degraded  chan string
+	recovered chan struct{}
+}
+
+func newChanDegraded() *chanDegraded {
+	return &chanDegraded{
+		ds:        make(chan *corev1.DegradedState, 16),
+		degraded:  make(chan string, 16),
+		recovered: make(chan struct{}, 16),
+	}
+}
+
+func (d *chanDegraded) Degraded(_ string, ds *corev1.DegradedState) { d.ds <- ds }
+func (d *chanDegraded) ConnectionDegraded(_, reason string)         { d.degraded <- reason }
+func (d *chanDegraded) ConnectionRecovered(_ string)                { d.recovered <- struct{}{} }
+
+// funcPerm adapts a func to PermissionHandler.
+type funcPerm func(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse
+
+func (f funcPerm) HandlePermission(id string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
+	return f(id, req)
+}
+
+// harness bundles the doubles and builds a Config with test-friendly tunables.
+type harness struct {
+	seq   *memSeqStore
+	state *chanState
+	frame *chanFrame
+	deg   *chanDegraded
+	perm  PermissionHandler
+}
+
+func newHarness() *harness {
+	return &harness{
+		seq:   newMemSeqStore(),
+		state: newChanState(),
+		frame: newChanFrame(),
+		deg:   newChanDegraded(),
+		perm: funcPerm(func(_ string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
+			return &corev1.PermissionResponse{RequestId: req.GetRequestId(), Decision: corev1.PermissionDecision_PERMISSION_DECISION_ALLOW}
+		}),
+	}
+}
+
+func (h *harness) config(t *testing.T, sessionID, path string) Config {
+	t.Helper()
+	return Config{
+		SessionID:         sessionID,
+		SocketPath:        func(string) string { return path },
+		DaemonVersion:     "test-daemon",
+		ProtocolVersion:   "1",
+		SeqStore:          h.seq,
+		StateSink:         h.state,
+		FrameSink:         h.frame,
+		Degraded:          h.deg,
+		Permissions:       h.perm,
+		Logf:              func(f string, a ...any) { t.Logf("[shimclient] "+f, a...) },
+		HeartbeatInterval: time.Hour, // no spurious heartbeats unless a test wants them
+		HeartbeatTimeout:  time.Hour,
+		AckTimeout:        2 * time.Second,
+		BackoffMin:        5 * time.Millisecond,
+		BackoffMax:        20 * time.Millisecond,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fake shim peer: an in-test UDS listener speaking the protocol.
+// ---------------------------------------------------------------------------
+
+func startFakeShim(t *testing.T, handler func(conn net.Conn)) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "s")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", path, err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go handler(conn)
+		}
+	}()
+	return path
+}
+
+func mustWriteMsg(t *testing.T, conn net.Conn, msg proto.Message) {
+	t.Helper()
+	env, err := anypb.New(msg)
+	if err != nil {
+		t.Fatalf("anypb.New(%T): %v", msg, err)
+	}
+	b, err := proto.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	if err := wire.WriteFrame(conn, b); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+}
+
+// fakeServerHandshake performs the shim side of the handshake and returns the
+// daemon's Subscribe. The listener speaks first (ShimHello).
+func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *corev1.Subscribe {
+	t.Helper()
+	mustWriteMsg(t, conn, &corev1.ShimHello{
+		SessionId:       sessionID,
+		Vendor:          "claude",
+		ShimVersion:     "test-shim",
+		ProtocolVersion: protoVer,
+		TurnInFlight:    turnInFlight,
+	})
+	m, err := readMsg(conn)
+	if err != nil {
+		t.Fatalf("shim reading DaemonHello: %v", err)
+	}
+	if _, ok := m.(*corev1.DaemonHello); !ok {
+		t.Fatalf("shim expected DaemonHello, got %T", m)
+	}
+	m2, err := readMsg(conn)
+	if err != nil {
+		t.Fatalf("shim reading Subscribe: %v", err)
+	}
+	sub, ok := m2.(*corev1.Subscribe)
+	if !ok {
+		t.Fatalf("shim expected Subscribe, got %T", m2)
+	}
+	return sub
+}
+
+// recvEvent waits for one event on ch or fails.
+func recvEvent(t *testing.T, ch chan *corev1.Event) *corev1.Event {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		return ev
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for an event")
+		return nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+func TestHandshakeHappyPath(t *testing.T) {
+	// Arrange
+	h := newHarness()
+	gotHello := make(chan *corev1.DaemonHello, 1)
+	gotSub := make(chan *corev1.Subscribe, 1)
+	path := startFakeShim(t, func(conn net.Conn) {
+		mustWriteMsg(t, conn, &corev1.ShimHello{
+			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
+			ProtocolVersion: "1", TurnInFlight: true,
+		})
+		m, err := readMsg(conn)
+		if err != nil {
+			t.Errorf("read DaemonHello: %v", err)
+			return
+		}
+		dh, ok := m.(*corev1.DaemonHello)
+		if !ok {
+			t.Errorf("expected DaemonHello, got %T", m)
+			return
+		}
+		gotHello <- dh
+		m2, err := readMsg(conn)
+		if err != nil {
+			t.Errorf("read Subscribe: %v", err)
+			return
+		}
+		gotSub <- m2.(*corev1.Subscribe)
+		// Hold the connection open.
+		_, _ = readMsg(conn)
+	})
+
+	cfg := h.config(t, "sess-1", path)
+	connected := make(chan *corev1.ShimHello, 1)
+	cfg.OnConnected = func(hello *corev1.ShimHello) { connected <- hello }
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+
+	// Act
+	var hello *corev1.ShimHello
+	select {
+	case hello = <-connected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("never connected")
+	}
+
+	// Assert
+	dh := <-gotHello
+	if dh.GetProtocolVersion() != "1" || dh.GetDaemonVersion() != "test-daemon" {
+		t.Fatalf("DaemonHello mismatch: %+v", dh)
+	}
+	sub := <-gotSub
+	if sub.GetSessionId() != "sess-1" || sub.GetFromSeq() != 0 {
+		t.Fatalf("Subscribe mismatch: %+v", sub)
+	}
+	if !hello.GetTurnInFlight() {
+		t.Fatal("OnConnected should carry turn_in_flight=true")
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil on cancel: %v", err)
+	}
+}
+
+func TestHandshakeVersionMismatchIsTerminal(t *testing.T) {
+	// Arrange: shim announces an incompatible protocol version.
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		mustWriteMsg(t, conn, &corev1.ShimHello{
+			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
+			ProtocolVersion: "99",
+		})
+		_, _ = readMsg(conn)
+	})
+	cfg := h.config(t, "sess-1", path)
+	c := New(cfg)
+
+	// Act: Run returns quickly because a version mismatch is not retryable.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := c.Run(ctx)
+
+	// Assert
+	if !errors.Is(err, ErrVersionMismatch) {
+		t.Fatalf("want ErrVersionMismatch, got %v", err)
+	}
+}
+
+func TestReconnectAndResumeMidStream(t *testing.T) {
+	// Arrange: first connection serves seq 1..3 then drops; the daemon must
+	// reconnect to the LIVE shim and resume Subscribe from_seq=3.
+	h := newHarness()
+	var attempt int
+	var mu sync.Mutex
+	secondSubFrom := make(chan uint64, 1)
+	path := startFakeShim(t, func(conn net.Conn) {
+		mu.Lock()
+		attempt++
+		n := attempt
+		mu.Unlock()
+		sub := fakeServerHandshake(t, conn, "sess-1", "1", false)
+		if n == 1 {
+			for seq := uint64(1); seq <= 3; seq++ {
+				mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
+			}
+			// Drop the connection; the unix stream delivers the three frames
+			// before EOF, so the daemon consumes them and then reconnects.
+			conn.Close()
+			return
+		}
+		// Second connection: report the resumed from_seq and serve 4..5.
+		secondSubFrom <- sub.GetFromSeq()
+		for seq := uint64(4); seq <= 5; seq++ {
+			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
+		}
+		_, _ = readMsg(conn)
+	})
+
+	c := New(h.config(t, "sess-1", path))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+
+	// Act / Assert: five TurnEnded events arrive in order across the reconnect.
+	for want := uint64(1); want <= 3; want++ {
+		if got := recvEvent(t, h.state.ch).GetSeq(); got != want {
+			t.Fatalf("pre-drop seq: got %d want %d", got, want)
+		}
+	}
+	select {
+	case from := <-secondSubFrom:
+		if from != 3 {
+			t.Fatalf("resume from_seq: got %d want 3", from)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("never reconnected")
+	}
+	for want := uint64(4); want <= 5; want++ {
+		if got := recvEvent(t, h.state.ch).GetSeq(); got != want {
+			t.Fatalf("post-reconnect seq: got %d want %d", got, want)
+		}
+	}
+	if last := h.seq.LastSeq("sess-1"); last != 5 {
+		t.Fatalf("seq store: got %d want 5", last)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil: %v", err)
+	}
+}
+
+func TestHeartbeatMissSurfacesDegraded(t *testing.T) {
+	// Arrange: shim completes the handshake then goes silent (no heartbeats).
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		_, _ = readMsg(conn) // block; never send anything else
+	})
+	cfg := h.config(t, "sess-1", path)
+	cfg.HeartbeatInterval = time.Hour
+	cfg.HeartbeatTimeout = 40 * time.Millisecond
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+
+	// Act / Assert: the missed-heartbeat window opens a degraded report.
+	select {
+	case reason := <-h.deg.degraded:
+		if reason == "" {
+			t.Fatal("degraded reason should be non-empty")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("never surfaced connection-degraded")
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil: %v", err)
+	}
+}
+
+// persistentTurnEnd builds a PERSISTENT TurnEnded event at seq.
+func persistentTurnEnd(session string, seq uint64) *corev1.Event {
+	return &corev1.Event{
+		SessionId: session,
+		Seq:       seq,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "end_turn"}},
+	}
+}
