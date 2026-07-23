@@ -2240,13 +2240,14 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the six unrelated
+    // Act / Assert — one shared ticker rule, plus the eight unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
     // face's .face-side, the sidebar merge glyph that centers itself for an
-    // on-axis spin, and the sidebar inactive question-mark glyph that centers
-    // its emoji).
+    // on-axis spin, the sidebar inactive question-mark glyph that centers
+    // its emoji, the sidebar view-selector segmented control, and the task
+    // checkbox that centers its check mark).
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(7);
+    expect(bodies.length).toBe(9);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
