@@ -1,0 +1,1 @@
+{"type": "tool_use", "id": "toolu_01Y1owexwPRE43C613bryNB9", "name": "WebSearch", "input": {"query": "Slack API huddle transcript access Web API methods"}, "caller": {"type": "direct"}}
