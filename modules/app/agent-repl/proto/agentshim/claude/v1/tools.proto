@@ -1,0 +1,555 @@
+// agentshim.claude.v1 tools — content blocks, tool inputs, and per-tool
+// result shapes, grounded in sdk-tools.d.ts (v0.1.77) and the on-disk
+// toolUseResult census. Total fidelity: every shape found in the
+// investigation is typed here; nothing is folded into a generic passthrough.
+//
+// UNIVERSAL CAVEAT (verified): every tool's toolUseResult can be a plain
+// string on error/rejection ("Error: …", "User rejected tool use",
+// "InputValidationError: […]"). ToolUseResult models that as the raw_string
+// arm — converters MUST route non-object results there, never error on them.
+
+syntax = "proto3";
+
+package agentshim.claude.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+// The complete raw detached-task status vocabulary (census C4).
+enum RawTaskStatus {
+  RAW_TASK_STATUS_UNSPECIFIED = 0;
+  RAW_TASK_STATUS_ASYNC_LAUNCHED = 1;  // Agent/Workflow launch results
+  RAW_TASK_STATUS_RUNNING = 2;         // TaskOutput task.status while alive
+  RAW_TASK_STATUS_COMPLETED = 3;
+  RAW_TASK_STATUS_FAILED = 4;
+  RAW_TASK_STATUS_KILLED = 5;          // task record after stop
+  RAW_TASK_STATUS_STOPPED = 6;         // task_notification after TaskStop
+}
+
+// TaskOutput retrieval_status.
+enum RetrievalStatus {
+  RETRIEVAL_STATUS_UNSPECIFIED = 0;
+  RETRIEVAL_STATUS_SUCCESS = 1;
+  RETRIEVAL_STATUS_TIMEOUT = 2;
+  RETRIEVAL_STATUS_NOT_READY = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Content blocks (census C2)
+// ---------------------------------------------------------------------------
+
+message ContentBlock {
+  oneof block {
+    TextBlock text = 1;
+    ThinkingBlock thinking = 2;
+    ToolUseBlock tool_use = 3;
+    ToolResultBlock tool_result = 4;
+    ImageBlock image = 5;
+    ToolReferenceBlock tool_reference = 6;
+  }
+}
+
+message TextBlock {
+  string text = 1;
+}
+
+// signature may be "" mid-stream.
+message ThinkingBlock {
+  string thinking = 1;
+  string signature = 2;
+}
+
+// caller: {type:"direct"} is a transcript-writer extra on 100% of disk
+// tool_use blocks (not in API typings) — modeled, per total fidelity.
+message Caller {
+  string type = 1;
+}
+
+message ToolUseBlock {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Struct input = 3;  // typed twins in ToolInput below
+  Caller caller = 4;
+}
+
+// content union: string (98% of disk occurrences) | blocks.
+message ToolResultBlock {
+  string tool_use_id = 1;
+  oneof content {
+    string content_string = 2;
+    ToolResultBlockList content_blocks = 3;
+  }
+  bool is_error = 4;
+  bool is_error_set = 5;
+}
+
+message ToolResultBlockList {
+  repeated ContentBlock blocks = 1;
+}
+
+message ImageSource {
+  string type = 1;        // "base64"
+  string media_type = 2;
+  bytes data = 3;
+}
+
+message ImageBlock {
+  ImageSource source = 1;
+}
+
+message ToolReferenceBlock {
+  google.protobuf.Struct reference = 1;  // shape varies; captured verbatim
+}
+
+// ---------------------------------------------------------------------------
+// API messages (shared by stream + transcript planes)
+// ---------------------------------------------------------------------------
+
+// {role:"user", content: string | Block[]} — both forms common on disk.
+message ApiUserMessage {
+  oneof content {
+    string content_string = 1;
+    ApiContentBlocks content_blocks = 2;
+  }
+}
+
+message ApiContentBlocks {
+  repeated ContentBlock blocks = 1;
+}
+
+// The assistant API message envelope. stop_details/diagnostics/
+// context_management are version-dependent (absent on old CC lines).
+message ApiAssistantMessage {
+  string id = 1;
+  string model = 2;
+  repeated ContentBlock content = 3;
+  string stop_reason = 4;   // nullable: "" = null
+  string stop_sequence = 5; // nullable: "" = null
+  google.protobuf.Struct stop_details = 6;
+  ApiUsage usage = 7;
+  google.protobuf.Struct diagnostics = 8;
+  google.protobuf.Struct context_management = 9;
+  google.protobuf.Struct container = 10;
+}
+
+// The per-message API usage object (distinct from stream.proto Usage in that
+// disk lines carry the raw API shape; kept Struct-free and explicit).
+message ApiUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_read_input_tokens = 3;
+  int64 cache_creation_input_tokens = 4;
+  google.protobuf.Struct cache_creation = 5;
+  google.protobuf.Struct server_tool_use = 6;
+  string service_tier = 7;
+}
+
+// ---------------------------------------------------------------------------
+// toolUseResult (census C3) — string-or-object at the top, typed per tool
+// ---------------------------------------------------------------------------
+
+message ToolUseResult {
+  oneof result {
+    // Error/rejection strings (universal caveat above).
+    string raw_string = 1;
+    BashResult bash = 2;
+    AgentResult agent = 3;
+    AgentAsyncLaunch agent_async_launch = 4;
+    TaskOutputResult task_output = 5;
+    TaskStopResult task_stop = 6;
+    WorkflowLaunchResult workflow_launch = 7;
+    MonitorResult monitor = 8;
+    ReadResult read = 9;
+    EditResult edit = 10;
+    WriteResult write = 11;
+    SkillResult skill = 12;
+    ToolSearchResult tool_search = 13;
+    TaskCreateResult task_create = 14;
+    TaskUpdateResult task_update = 15;
+    TaskListResult task_list = 16;
+    SendMessageResult send_message = 17;
+    WebFetchResult web_fetch = 18;
+    WebSearchResult web_search = 19;
+    AskUserQuestionResult ask_user_question = 20;
+    ScheduleWakeupResult schedule_wakeup = 21;
+    // A result object whose tool could not be identified: preserved verbatim
+    // and loud-logged (this is capture, not classification — an unknown
+    // object NEVER silently becomes a known type).
+    google.protobuf.Struct unclassified = 30;
+  }
+}
+
+// Bash sync + background-launch fold. A background launch is the same base
+// with empty stdout/stderr + background_task_id set.
+message BashResult {
+  string stdout = 1;
+  string stderr = 2;
+  bool interrupted = 3;
+  bool is_image = 4;
+  bool no_output_expected = 5;
+  // Optionals (census):
+  string return_code_interpretation = 6;
+  string git_operation = 7;
+  string persisted_output_path = 8;
+  int64 persisted_output_size = 9;
+  int64 timed_out_after_ms = 10;
+  string stale_read_file_state_hint = 11;
+  string background_task_id = 12;  // set = background launch
+  string background_cwd_hint = 13;
+}
+
+message AgentToolStats {
+  int64 read_count = 1;
+  int64 search_count = 2;
+  int64 bash_count = 3;
+  int64 edit_file_count = 4;
+  int64 lines_added = 5;
+  int64 lines_removed = 6;
+  int64 other_tool_count = 7;
+}
+
+// Agent/Task synchronous completion.
+message AgentResult {
+  RawTaskStatus status = 1;
+  string prompt = 2;
+  string agent_id = 3;
+  string agent_type = 4;
+  repeated ContentBlock content = 5;  // final message blocks
+  string resolved_model = 6;          // optional
+  int64 total_duration_ms = 7;
+  int64 total_tokens = 8;
+  int64 total_tool_use_count = 9;
+  ApiUsage usage = 10;
+  AgentToolStats tool_stats = 11;     // optional
+}
+
+// Agent/Task background launch (run_in_background).
+message AgentAsyncLaunch {
+  bool is_async = 1;              // always true
+  RawTaskStatus status = 2;       // async_launched
+  string agent_id = 3;
+  string description = 4;
+  string resolved_model = 5;
+  string prompt = 6;
+  string output_file = 7;
+  bool can_read_output_file = 8;
+}
+
+message LocalBashTask {
+  string task_id = 1;
+  string task_type = 2;  // "local_bash"
+  RawTaskStatus status = 3;
+  string description = 4;
+  string output = 5;
+  int32 exit_code = 6;
+  bool exit_code_set = 7;  // exitCode: number|null
+}
+
+message LocalAgentTask {
+  string task_id = 1;
+  string task_type = 2;  // "local_agent"
+  RawTaskStatus status = 3;
+  string description = 4;
+  string output = 5;
+  string prompt = 6;
+  string result = 7;
+  bool is_raw_transcript = 8;      // absent while running
+  bool is_raw_transcript_set = 9;
+}
+
+message TaskOutputResult {
+  RetrievalStatus retrieval_status = 1;
+  oneof task {
+    LocalBashTask local_bash = 2;
+    LocalAgentTask local_agent = 3;
+  }
+}
+
+message TaskStopResult {
+  string message = 1;  // "Successfully stopped task: <id> (<cmd>)"
+  string task_id = 2;
+  string task_type = 3;
+  string command = 4;
+}
+
+message WorkflowLaunchResult {
+  RawTaskStatus status = 1;   // async_launched (only value observed)
+  string task_id = 2;
+  string task_type = 3;       // "local_workflow"
+  string workflow_name = 4;
+  string run_id = 5;          // "wf_…" (differs from task_id)
+  string summary = 6;
+  string transcript_dir = 7;  // journal at transcript_dir + "/journal.jsonl"
+  string script_path = 8;
+}
+
+message MonitorResult {
+  string task_id = 1;
+  int64 timeout_ms = 2;
+  bool persistent = 3;
+}
+
+message ReadResult {
+  string type = 1;  // "text"
+  google.protobuf.Struct file = 2;  // {filePath, content, numLines, …}
+}
+
+message EditResult {
+  string file_path = 1;
+  string old_string = 2;
+  string new_string = 3;
+  string original_file = 4;
+  bool replace_all = 5;
+  google.protobuf.Struct structured_patch = 6;
+  bool user_modified = 7;
+  bool stale_recovered = 8;
+  bool memdir_stamped = 9;
+}
+
+message WriteResult {
+  string type = 1;
+  string file_path = 2;
+  string content = 3;
+  string original_file = 4;
+  google.protobuf.Struct structured_patch = 5;
+  bool user_modified = 6;
+}
+
+message SkillResult {
+  string command_name = 1;
+  bool success = 2;
+  repeated string allowed_tools = 3;
+}
+
+message ToolSearchResult {
+  repeated string matches = 1;
+  string query = 2;
+  int64 total_deferred_tools = 3;
+}
+
+message TaskCreateResult {
+  google.protobuf.Struct task = 1;
+}
+
+message TaskUpdateResult {
+  string task_id = 1;
+  string status_change = 2;
+  bool success = 3;
+  google.protobuf.Struct updated_fields = 4;
+}
+
+message TaskListResult {
+  google.protobuf.Struct tasks = 1;  // list payload verbatim
+}
+
+message SendMessageResult {
+  string message = 1;
+  bool pin = 2;
+  bool success = 3;
+  string resumed_agent_id = 4;
+}
+
+message WebFetchResult {
+  int64 bytes = 1;
+  int64 code = 2;
+  string code_text = 3;
+  int64 duration_ms = 4;
+  string result = 5;
+  string url = 6;
+}
+
+message WebSearchResult {
+  double duration_seconds = 1;
+  string query = 2;
+  google.protobuf.Struct results = 3;
+  int64 search_count = 4;
+}
+
+message AskUserQuestionResult {
+  google.protobuf.Struct questions = 1;
+  google.protobuf.Struct answers = 2;
+  google.protobuf.Struct annotations = 3;
+}
+
+message ScheduleWakeupResult {
+  int64 clamped_delay_seconds = 1;
+  string scheduled_for = 2;
+  bool was_clamped = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Tool inputs (sdk-tools.d.ts census C1) — typed twins of tool_use.input
+// ---------------------------------------------------------------------------
+
+message ToolInput {
+  oneof input {
+    AgentInput agent = 1;
+    BashInput bash = 2;
+    TaskOutputInput task_output = 3;
+    KillShellInput kill_shell = 4;  // in typings; zero disk occurrences
+    FileEditInput file_edit = 5;
+    FileReadInput file_read = 6;
+    FileWriteInput file_write = 7;
+    GlobInput glob = 8;
+    GrepInput grep = 9;
+    NotebookEditInput notebook_edit = 10;
+    TodoWriteInput todo_write = 11;
+    WebFetchInput web_fetch = 12;
+    WebSearchInput web_search = 13;
+    AskUserQuestionInput ask_user_question = 14;
+    ConfigInput config = 15;
+    ExitPlanModeInput exit_plan_mode = 16;
+    McpInput mcp = 17;
+    ListMcpResourcesInput list_mcp_resources = 18;
+    ReadMcpResourceInput read_mcp_resource = 19;
+    google.protobuf.Struct unclassified = 30;
+  }
+}
+
+// [sdk sdk-tools.d.ts:32-57].
+message AgentInput {
+  string description = 1;
+  string prompt = 2;
+  string subagent_type = 3;
+  string model = 4;   // 'sonnet'|'opus'|'haiku', optional
+  string resume = 5;
+  bool run_in_background = 6;
+}
+
+// [sdk sdk-tools.d.ts:58-90].
+message BashInput {
+  string command = 1;
+  int64 timeout = 2;
+  string description = 3;
+  bool run_in_background = 4;
+  bool dangerously_disable_sandbox = 5;
+}
+
+// [sdk sdk-tools.d.ts:91-104] — all required.
+message TaskOutputInput {
+  string task_id = 1;
+  bool block = 2;
+  int64 timeout = 3;
+}
+
+// [sdk sdk-tools.d.ts:214].
+message KillShellInput {
+  string shell_id = 1;
+}
+
+message FileEditInput {
+  string file_path = 1;
+  string old_string = 2;
+  string new_string = 3;
+  bool replace_all = 4;
+}
+
+message FileReadInput {
+  string file_path = 1;
+  int64 offset = 2;
+  int64 limit = 3;
+  string pages = 4;
+}
+
+message FileWriteInput {
+  string file_path = 1;
+  string content = 2;
+}
+
+message GlobInput {
+  string pattern = 1;
+  string path = 2;
+}
+
+message GrepInput {
+  string pattern = 1;
+  string path = 2;
+  string glob = 3;
+  string type = 4;
+  string output_mode = 5;
+  bool case_insensitive = 6;  // -i
+  bool line_numbers = 7;      // -n
+  int64 after_context = 8;    // -A
+  int64 before_context = 9;   // -B
+  int64 context = 10;         // -C
+  bool multiline = 11;
+  int64 head_limit = 12;
+  int64 offset = 13;
+}
+
+message NotebookEditInput {
+  string notebook_path = 1;
+  string cell_id = 2;
+  string new_source = 3;
+  string cell_type = 4;
+  string edit_mode = 5;
+}
+
+message TodoItem {
+  string content = 1;
+  string status = 2;  // pending | in_progress | completed
+  string active_form = 3;
+}
+
+message TodoWriteInput {
+  repeated TodoItem todos = 1;
+}
+
+message WebFetchInput {
+  string url = 1;
+  string prompt = 2;
+}
+
+message WebSearchInput {
+  string query = 1;
+  repeated string allowed_domains = 2;
+  repeated string blocked_domains = 3;
+}
+
+message QuestionOption {
+  string label = 1;
+  string description = 2;
+  string preview = 3;
+}
+
+message Question {
+  string question = 1;
+  string header = 2;
+  repeated QuestionOption options = 3;
+  bool multi_select = 4;
+}
+
+message AskUserQuestionInput {
+  repeated Question questions = 1;
+  google.protobuf.Struct answers = 2;
+  google.protobuf.Struct metadata = 3;
+  google.protobuf.Struct annotations = 4;
+}
+
+message ConfigInput {
+  string setting = 1;
+  string value = 2;
+}
+
+message ExitPlanModeInput {
+  string plan = 1;
+  bool push_to_remote = 2;
+}
+
+message McpInput {
+  google.protobuf.Struct input = 1;  // schema is per-MCP-tool by definition
+}
+
+message ListMcpResourcesInput {
+  string server = 1;
+}
+
+message ReadMcpResourceInput {
+  string server = 1;
+  string uri = 2;
+}

@@ -1,0 +1,320 @@
+// agentshim.core.v1 — the vendor-neutral core of the agent-shim protocol.
+//
+// SEMANTICS (normative):
+//
+// - Every UDS hop in the system carries length-prefixed binary messages from
+//   this schema set (frontends receive the frontend.v1 package as protojson).
+// - The store round-trip: producers (agent-shim stream plane, shim-sidecar
+//   file plane) write PERSISTENT Events to the shim-store via StoreWrite; the
+//   store assigns Event.seq per session in arrival order, dedups on
+//   Event.dedup_key, persists, and fans out to subscribers. The daemon only
+//   ever consumes the store-merged stream forwarded by the shim — everything
+//   the daemon sees (except EPHEMERAL class) is already durable.
+// - EPHEMERAL class (ContentDelta, HeartbeatProgress) bypasses the store:
+//   shim → daemon directly. Consumers reconcile per claude uuid, REPLACING a
+//   streamed preview with the store-delivered final message. Cross-path
+//   ordering is therefore irrelevant. Ephemeral events are never persisted
+//   and never replayed.
+// - Replay handshake: the connecting side (daemon→shim, shim→store) sends
+//   Subscribe{session_id, from_seq}; the serving side replays persisted
+//   events with seq > from_seq, then live-tails. Same message both hops.
+// - Correlation: any control message carries request_id; asynchronous
+//   consequences echo it in Event.request_id where attributable. Ack/Nack is
+//   the synchronous receipt on the connection the request arrived on.
+// - Sad path: a producer that cannot reach the store hard-fails the write,
+//   loud-logs every dropped event, and reports DegradedState. No spill
+//   buffers, no fallbacks (metaprompt no-fallbacks rule).
+//
+// Evolution: proto3, field numbers never reused. Breaking changes require
+// explicit user approval (AGENTS.md).
+
+syntax = "proto3";
+
+package agentshim.core.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/core/v1;corev1";
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+// Which observation plane produced an event.
+enum Plane {
+  PLANE_UNSPECIFIED = 0;
+  PLANE_STREAM = 1;     // the vendor SDK live stream (via the agent-shim)
+  PLANE_FILE = 2;       // harness files on disk (via the shim-sidecar)
+  PLANE_SYNTHETIC = 3;  // producer-inferred (e.g. staleness LOST transitions)
+}
+
+// Persistence class. PERSISTENT events take the store round-trip; EPHEMERAL
+// events bypass it (delta bypass) and are never persisted nor replayed.
+enum EventClass {
+  EVENT_CLASS_UNSPECIFIED = 0;
+  EVENT_CLASS_PERSISTENT = 1;
+  EVENT_CLASS_EPHEMERAL = 2;
+}
+
+// Detached-work kind, matching the harness task-id prefixes (a/b/w).
+enum TaskKind {
+  TASK_KIND_UNSPECIFIED = 0;
+  TASK_KIND_AGENT = 1;
+  TASK_KIND_SHELL = 2;
+  TASK_KIND_WORKFLOW = 3;
+}
+
+// Closed terminal-status vocabulary. LOST is a shim-sidecar inference
+// (vanished file, silence timeout, boot sweep) and is NEVER conflated with
+// DONE: a lost task stopped, but nothing says it succeeded.
+enum TerminalStatus {
+  TERMINAL_STATUS_UNSPECIFIED = 0;
+  TERMINAL_STATUS_DONE = 1;
+  TERMINAL_STATUS_ERROR = 2;
+  TERMINAL_STATUS_KILLED = 3;
+  TERMINAL_STATUS_STOPPED = 4;  // TaskStop/prompt-mediated stop
+  TERMINAL_STATUS_LOST = 5;     // inferred; loud-logged at transition
+}
+
+// How a session came to exist.
+enum SessionSource {
+  SESSION_SOURCE_UNSPECIFIED = 0;
+  SESSION_SOURCE_FRESH = 1;
+  SESSION_SOURCE_RESUME = 2;
+  SESSION_SOURCE_COMPACT_CONTINUE = 3;
+}
+
+// canUseTool decision.
+enum PermissionDecision {
+  PERMISSION_DECISION_UNSPECIFIED = 0;
+  PERMISSION_DECISION_ALLOW = 1;
+  PERMISSION_DECISION_DENY = 2;
+}
+
+// ---------------------------------------------------------------------------
+// The envelope
+// ---------------------------------------------------------------------------
+
+// Event is THE envelope every observation travels in.
+message Event {
+  string session_id = 1;
+  // Store-assigned per-session sequence number. 0 before ingest (producer →
+  // store); authoritative and gapless per session after ingest.
+  uint64 seq = 2;
+  Plane plane = 3;
+  EventClass class = 4;
+  // Correlates asynchronous consequences back to the control request that
+  // caused them, when attributable. Empty otherwise.
+  string request_id = 5;
+  // Producer wall-clock, unix millis.
+  int64 produced_at_ms = 6;
+  // Store dedup key (see shim-store §6.4 derivation). Empty = never deduped.
+  string dedup_key = 7;
+
+  oneof payload {
+    // Vendor-neutral lifecycle payloads:
+    SessionStarted session_started = 10;
+    SessionEnded session_ended = 11;
+    TurnStarted turn_started = 12;
+    TurnEnded turn_ended = 13;
+    TaskStarted task_started = 14;
+    TaskProgress task_progress = 15;
+    TaskEnded task_ended = 16;
+    ContentDelta content_delta = 17;
+    HeartbeatProgress heartbeat_progress = 18;
+    DegradedState degraded_state = 19;
+    UnparsedEvent unparsed = 20;
+    // Vendor extension payload (e.g. agentshim.claude.v1.* messages). The
+    // daemon treats it opaquely except for frontend translation; the store
+    // treats it fully opaquely apart from dedup-key extraction.
+    google.protobuf.Any vendor = 30;
+  }
+
+  // Unknown-field capture from the §5.1 validation contract: values present
+  // in source data that the schema does not model. Loud-logged once per
+  // distinct field name by the producing converter. Never silently dropped.
+  google.protobuf.Struct extras = 40;
+}
+
+// Ordered batch of events, optionally advancing a file cursor atomically
+// with the batch (shim-sidecar exactly-once contract).
+message EventBatch {
+  repeated Event events = 1;
+  CursorState cursor_advance = 2;  // unset for stream-plane producers
+}
+
+// A record that failed conversion. The §5.1 contract: missing EXPECTED
+// fields hard-error into one of these; the raw evidence is preserved.
+message UnparsedEvent {
+  string source_path = 1;  // file plane: absolute path; stream plane: ""
+  int64 byte_offset = 2;   // file plane: offset of the failed record
+  bytes raw = 3;           // bounded (producers cap at 64KiB)
+  string error = 4;        // the conversion error, verbatim
+  string producer = 5;     // "claude-shim" | "shim-sidecar"
+}
+
+// ---------------------------------------------------------------------------
+// Vendor-neutral lifecycle payloads
+// ---------------------------------------------------------------------------
+
+message SessionStarted {
+  SessionSource source = 1;
+  string model = 2;
+  string cwd = 3;
+  string vendor_session_id = 4;  // e.g. the claude session uuid
+}
+
+message SessionEnded {
+  string reason = 1;
+}
+
+message TurnStarted {
+  string prompt_preview = 1;  // first line, bounded
+}
+
+message TurnEnded {
+  string stop_reason = 1;
+  int64 duration_ms = 2;
+  bool is_error = 3;
+}
+
+message TaskStarted {
+  string task_id = 1;
+  TaskKind kind = 2;
+  string tool_use_id = 3;
+  string description = 4;
+  string output_path = 5;  // constructed for shells; announced for agents/workflows
+}
+
+message TaskProgress {
+  string task_id = 1;
+  TaskKind kind = 2;
+  int64 bytes_observed = 3;   // shell spool growth
+  int64 records_observed = 4; // JSONL lines / journal records
+}
+
+message TaskEnded {
+  string task_id = 1;
+  TaskKind kind = 2;
+  TerminalStatus status = 3;
+  string summary = 4;
+  string output_path = 5;
+  // For LOST: which inference fired (vanished-file | silence-timeout |
+  // boot-sweep), for the loud transition log and frontend display.
+  string inference = 6;
+}
+
+// EPHEMERAL live-typing delta (delta bypass; see file-top semantics).
+message ContentDelta {
+  string uuid = 1;         // the claude message uuid consumers reconcile on
+  uint32 block_index = 2;
+  oneof delta {
+    string text = 3;
+    string thinking = 4;
+    string input_json = 5;  // tool-input streaming (input_json_delta)
+    string signature = 6;
+  }
+  int64 estimated_tokens = 7;  // thinking deltas carry this (may be 0)
+}
+
+// EPHEMERAL tool_progress relay.
+message HeartbeatProgress {
+  string tool_use_id = 1;
+  string tool_name = 2;
+  string parent_tool_use_id = 3;
+  double elapsed_seconds = 4;
+}
+
+// Honest sad-path report (store unreachable, converter storm, …).
+message DegradedState {
+  string component = 1;   // "store-client" | "converter" | ...
+  string reason = 2;
+  uint64 dropped_count = 3;
+  bool recovered = 4;     // true on the closing report of a degraded window
+}
+
+// ---------------------------------------------------------------------------
+// Control plane (daemon↔shim; Subscribe/StoreWrite also shim↔store)
+// ---------------------------------------------------------------------------
+
+// Connection handshakes. The listener speaks first with its Hello.
+message ShimHello {
+  string session_id = 1;
+  string vendor = 2;          // "claude"
+  string shim_version = 3;
+  string protocol_version = 4;
+  bool turn_in_flight = 5;    // true when the daemon reattaches mid-turn
+}
+
+message DaemonHello {
+  string daemon_version = 1;
+  string protocol_version = 2;
+}
+
+message SubmitPrompt {
+  string request_id = 1;
+  string text = 2;
+  string origin = 3;           // "human" | "coordinator" | ...
+  string permission_mode = 4;  // optional override
+}
+
+message Interrupt {
+  string request_id = 1;
+  bool hard = 2;  // hard: SDK interrupt(); soft: end after current message
+}
+
+message Ack {
+  string request_id = 1;
+}
+
+message Nack {
+  string request_id = 1;
+  string reason = 2;
+}
+
+// Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
+message Subscribe {
+  string session_id = 1;
+  uint64 from_seq = 2;
+}
+
+// canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
+message PermissionRequest {
+  string request_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct input = 3;
+}
+
+message PermissionResponse {
+  string request_id = 1;
+  PermissionDecision decision = 2;
+  google.protobuf.Struct updated_input = 3;  // optional allow-with-edits
+  string deny_message = 4;
+}
+
+message Heartbeat {
+  int64 sent_at_ms = 1;
+}
+
+// Producer→store append. The store commits events + cursor_advance in one
+// transaction and acks with dedup accounting.
+message StoreWrite {
+  string producer = 1;  // "claude-shim:<session>" | "shim-sidecar"
+  EventBatch batch = 2;
+}
+
+message StoreWriteAck {
+  uint64 accepted = 1;
+  uint64 deduped = 2;
+  uint64 last_seq = 3;  // highest seq assigned in this batch's session
+  string error = 4;     // non-empty = the whole batch was rejected (loudly)
+}
+
+// shim-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
+message CursorState {
+  string file_id = 1;  // "dev:inode"
+  string path = 2;
+  int64 offset = 3;
+  bytes carry = 4;     // bounded partial-line carry
+}
