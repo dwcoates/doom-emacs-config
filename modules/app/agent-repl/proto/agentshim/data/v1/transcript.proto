@@ -77,6 +77,7 @@ message TranscriptLine {
     PrLinkLine pr_link = 10;
     FileHistorySnapshotLine file_history_snapshot = 11;
     FileHistoryDeltaLine file_history_delta = 12;
+    FrameLinkLine frame_link = 13;  // [corpus] observed post-census
   }
 }
 
@@ -158,6 +159,8 @@ message SystemLine {
     ScheduledTaskFireLine scheduled_task_fire = 8;
     ModelRefusalNoFallbackLine model_refusal_no_fallback = 9;
     ApiErrorLine api_error = 10;
+    ModelRefusalFallbackLine model_refusal_fallback = 11;  // [corpus]
+    AwaySummaryLine away_summary = 12;                     // [corpus]
   }
 }
 
@@ -259,6 +262,27 @@ message ApiErrorLine {
   int64 max_retries = 5;
 }
 
+// [corpus] system/model_refusal_fallback — the refusal-with-fallback twin of
+// ModelRefusalNoFallbackLine: a safeguards refusal that switched models and
+// retried rather than surfacing an error.
+message ModelRefusalFallbackLine {
+  string direction = 1;  // "retry"
+  string content = 2;
+  string level = 3;      // "warning"
+  string trigger = 4;    // "refusal"
+  string original_model = 5;
+  string fallback_model = 6;
+  string request_id = 7;
+  string api_refusal_category = 8;
+  string api_refusal_explanation = 9;  // nullable: "" = null
+  string refused_user_message_uuid = 10;
+}
+
+// [corpus] system/away_summary — the periodic away-recap line.
+message AwaySummaryLine {
+  string content = 1;
+}
+
 // ---------------------------------------------------------------------------
 // Metadata line types (no common envelope; census B4)
 // ---------------------------------------------------------------------------
@@ -319,6 +343,14 @@ message FileHistoryDeltaLine {
   string timestamp = 5;
 }
 
+// [corpus] top-level type:"frame-link" — an artifact/frame reference line.
+message FrameLinkLine {
+  string session_id = 1;
+  string path = 2;
+  string frame_url = 3;
+  string timestamp = 4;
+}
+
 // ---------------------------------------------------------------------------
 // attachment lines — every observed attachment.type (census B5)
 // ---------------------------------------------------------------------------
@@ -350,6 +382,8 @@ message AttachmentLine {
     UltraEffortEnterAttachment ultra_effort_enter = 23;
     UltraEffortExitAttachment ultra_effort_exit = 24;
     PlanModeExitAttachment plan_mode_exit = 25;
+    HookCancelledAttachment hook_cancelled = 26;   // [corpus]
+    InvokedSkillsAttachment invoked_skills = 27;   // [corpus]
   }
 }
 
@@ -478,6 +512,24 @@ message UltraEffortExitAttachment {
 
 message PlanModeExitAttachment {
   google.protobuf.Struct payload = 1;
+}
+
+// [corpus] attachment.type:"hook_cancelled".
+message HookCancelledAttachment {
+  string hook_name = 1;
+  string tool_use_id = 2;  // disk key `toolUseID`
+  string hook_event = 3;
+}
+
+// [corpus] attachment.type:"invoked_skills".
+message InvokedSkill {
+  string name = 1;
+  string path = 2;     // e.g. "userSettings:create-or-update-workspace"
+  string content = 3;
+}
+
+message InvokedSkillsAttachment {
+  repeated InvokedSkill skills = 1;
 }
 
 // ---------------------------------------------------------------------------
