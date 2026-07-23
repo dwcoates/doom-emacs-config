@@ -5,8 +5,8 @@ Status: **APPROVED DESIGN, IMPLEMENTATION PENDING.** This document supersedes
 It is the single design doc for the system; there is no other.
 
 Scope: `modules/app/agent-repl/` — the daemon (`daemon/`), the shim ecosystem
-(`shim/` plus the new `shim-sidecar/` and `shim-store/`), the protobuf protocol
-(`proto/`), the Emacs elisp, and the webapp (`webapp/`).
+(`agent-shim/`: `claude-shim/`, `shim-claude-sidecar/`, `shim-store/`), the
+protobuf protocol (`proto/`), the Emacs elisp, and the webapp (`webapp/`).
 
 Grounding: all Claude JSON shapes referenced in §5 were enumerated in a
 clean-room investigation of `@anthropic-ai/claude-agent-sdk@0.1.77` typings,
@@ -50,13 +50,13 @@ Non-goals:
 | Component | Process model | Language | Responsibility (exclusive) |
 |---|---|---|---|
 | `claude-shim` | one per session, spawned by daemon | TypeScript (Node) | Drive the Claude Agent SDK; convert SDK stream ↔ protobuf; forward file-plane events; delta bypass |
-| `shim-sidecar` | singleton, launchd-managed | Go | Read/parse harness JSONL + spool files into protobuf events; write them to the `shim-store` |
+| `shim-claude-sidecar` | singleton, launchd-managed | Go | Read/parse harness JSONL + spool files into protobuf events; write them to the `shim-store` |
 | `shim-store` | singleton, launchd-managed | Go | Sole owner of the event DB (SQLite); assign per-session seq; merge+dedup producers; serve subscriptions |
 | daemon (`claude-repld`) | singleton (existing) | Go | Fleet supervision; consume shim streams; session-state manager; merge execution; frontend serving |
 | Emacs elisp | in-editor (existing) | elisp | Dumb frontend: render daemon-pushed state; workspace UX |
 | webapp | per-workspace webview (existing) | TypeScript | Dumb frontend: render daemon-pushed conversation + state |
 
-**The shim ecosystem (`claude-shim`, `shim-sidecar`, `shim-store`) exists
+**The shim ecosystem (`claude-shim`, `shim-claude-sidecar`, `shim-store`) exists
 exclusively to facilitate agent-backend interaction** (AGENTS.md rule). It
 never serves frontends, never holds merge/workspace state, never derives
 render-state.
@@ -79,7 +79,7 @@ state (`:done`, `:thinking`, `:merged`, …). See §9.2.
                                     ▲          │   ▲
                           SDK stream│          │   │ store subscription (session-filtered, from seq)
                                     │          ▼   │
-                              Claude SDK    shim-store ◄──UDS (protobuf events + cursor batches)── shim-sidecar
+                              Claude SDK    shim-store ◄──UDS (protobuf events + cursor batches)── shim-claude-sidecar
                                                  │                                                    ▲
                                                  ▼                                                    │ reads
                                             SQLite (events)                harness files: transcripts, agent spools,
@@ -114,9 +114,9 @@ state (`:done`, `:thinking`, `:merged`, …). See §9.2.
 
 ### 4.2 Event path (agent/files → daemon), the store round-trip
 
-1. claude-shim converts each SDK stream message to its claude-extension proto
+1. claude-shim converts each SDK stream message to its `data.v1` proto
    (§5.3) wrapped in a core `Event` envelope, and writes it to the shim-store.
-2. shim-sidecar independently converts file-plane records (transcript lines,
+2. shim-claude-sidecar independently converts file-plane records (transcript lines,
    agent-spool lines, journal records, shell-spool bytes) into the same
    `Event` envelope shapes and writes them to the shim-store with cursor
    batches (§7.3).
@@ -190,8 +190,11 @@ contract, including behavioral semantics as comments (delta reconciliation,
 replay handshake, who initiates). Three packages:
 
 - `agentshim.core.v1` — vendor-neutral envelope, control plane, lifecycle.
-- `agentshim.claude.v1` — the claude extension: TOTAL-FIDELITY typed models of
-  every shape found in the investigation.
+- `agentshim.data.v1` — the full-fidelity data vocabulary: typed models of
+  every shape found in the investigation. Derived from the Claude harness but
+  TREATED as vendor-agnostic (doctrine in `proto/AGENTS.md`): no consumer
+  special-cases a vendor, and a new vendor's incongruities are resolved by
+  revising the API (breaking changes allowed, gated on user approval).
 - `agentshim.frontend.v1` — the daemon→frontend resolved surface (protojson
   on the wire).
 
@@ -246,7 +249,7 @@ Control plane (daemon↔shim, both directions):
 Enums: `Plane`, `EventClass`, `TaskKind`, `TerminalStatus`, `SessionSource`,
 `PermissionDecision`.
 
-### 5.3 `agentshim.claude.v1` inventory (~95 messages/enums, total fidelity)
+### 5.3 `agentshim.data.v1` inventory (~95 messages/enums, total fidelity)
 
 `stream.proto` — SDK stream messages (typed union members + observed-only):
 
@@ -401,7 +404,7 @@ arrival position but never persisted and never replayed.
 
 ---
 
-## 7. shim-sidecar specification
+## 7. shim-claude-sidecar specification
 
 ### 7.1 Process & discovery
 
@@ -471,7 +474,8 @@ no SDK/stream knowledge (shim's), no frontend anything.
 
 ## 8. claude-shim specification
 
-The existing `shim/` evolves in place (same spawn/`--resume` model) with:
+The existing shim at `agent-shim/claude-shim/` evolves in place (same
+spawn/`--resume` model) with:
 
 1. **UDS server** replacing stdio: listens on `session-<id>.sock`; daemon
    connects; disconnect does NOT end the turn (reattach, §4.4).
@@ -529,7 +533,7 @@ CREATE TABLE workspace_state (
 ### 9.3 Merge port
 
 Port `merge-handlers.el` producer logic (cherry-pick driver, finalize,
-conflict detection) to `daemon/internal/merge/`. Emacs keeps only the
+conflict detection) to `daemon/internal/workspace/merge/`. Emacs keeps only the
 reactive conflict UX. The resolve-and-continue handoff: Emacs signals
 "conflict resolved, continue" via a `FrontendCommand`; the daemon resumes the
 cherry-pick and writes the resulting transition into the SSM.
@@ -574,7 +578,7 @@ cherry-pick and writes the resulting transition into the SSM.
 
 ## 13. Lifecycle & supervision
 
-- `shim-store` and `shim-sidecar`: launchd user agents (`KeepAlive`,
+- `shim-store` and `shim-claude-sidecar`: launchd user agents (`KeepAlive`,
   `RunAtLoad`), installed by `.claude/install.sh`; plists under
   `modules/app/agent-repl/launchd/`.
 - claude-shims: spawned/supervised by the daemon (existing model), except
@@ -593,82 +597,220 @@ before the agent resolves. Test commands: Go groups run `go test ./...`
 within their module; webapp runs `npm test` + `npm run typecheck` from
 `webapp/`; elisp runs the ert suite per repo CLAUDE.md.
 
+### 14.0 The directory tree (MIRROR RULE)
+
+**Mirror rule: every subsequent change to the planned filesystem layout MUST
+be reflected in this tree in the same change.** Legend: A = addition,
+M = modification, D = deletion; ✓ = already landed on `master`.
+
+```
+~/.config/doom/
+├── AGENTS.md                                                M ✓ (protocol gate, doctrine, shim scope)
+├── .claude/
+│   └── install.sh                                           M   (build + launchctl bootstrap both services)
+└── modules/app/agent-repl/
+    ├── design-agent-shim-architecture.md                    A ✓
+    ├── metaprompt.md                                        M ✓ (no-fallbacks rule)
+    ├── bin/build-frontend.sh                                M ✓ (SHIM_DIR → agent-shim/claude-shim)
+    ├── proto/                                                 ✓ (G1)
+    │   ├── AGENTS.md                                        A ✓
+    │   ├── Makefile                                         A ✓
+    │   └── agentshim/
+    │       ├── core/v1/core.proto                           A ✓
+    │       ├── data/v1/stream.proto                         A ✓
+    │       ├── data/v1/transcript.proto                     A ✓
+    │       ├── data/v1/tools.proto                          A ✓
+    │       ├── data/v1/journal.proto                        A ✓
+    │       └── frontend/v1/frontend.proto                   A ✓
+    ├── agent-shim/
+    │   ├── AGENTS.md                                        A ✓
+    │   ├── claude-shim/                                       (relocated from shim/ ✓; G4+G5)
+    │   │   ├── AGENTS.md                                    A ✓
+    │   │   ├── package.json                                 M   (protobuf-es dep)
+    │   │   ├── src/main.ts                                  M   (stdio→UDS rewiring)
+    │   │   ├── src/session.ts                               M   (reattach: stdin-EOF no longer ends input)
+    │   │   ├── src/proto/convert.ts                         A
+    │   │   ├── src/proto/extras.ts                          A
+    │   │   ├── src/proto/delta.ts                           A
+    │   │   ├── src/uds/server.ts                            A
+    │   │   ├── src/uds/store-client.ts                      A
+    │   │   ├── src/uds/control.ts                           A
+    │   │   ├── src/uds/framing.ts                           A
+    │   │   └── test/{convert,delta,framing,control,reattach}.test.ts  A
+    │   ├── shim-claude-sidecar/                               (G3)
+    │   │   ├── AGENTS.md                                    A ✓
+    │   │   ├── go.mod                                       A
+    │   │   ├── main.go                                      A
+    │   │   └── internal/
+    │   │       ├── discover/discover.go (+_test)            A
+    │   │       ├── tail/tailer.go (+_test)                  A
+    │   │       ├── tail/codec.go (+_test)                   A
+    │   │       ├── handler/transcript.go (+_test)           A
+    │   │       ├── handler/agent.go (+_test)                A
+    │   │       ├── handler/journal.go (+_test)              A
+    │   │       ├── handler/shell.go (+_test)                A
+    │   │       ├── convert/convert.go (+_test)              A
+    │   │       ├── stale/stale.go (+_test)                  A
+    │   │       └── storeclient/client.go (+_test)           A
+    │   └── shim-store/                                        (G2)
+    │       ├── AGENTS.md                                    A ✓
+    │       ├── go.mod                                       A
+    │       ├── main.go                                      A
+    │       └── internal/
+    │           ├── db/db.go                                 A
+    │           ├── db/ingest.go (+_test)                    A
+    │           ├── db/query.go (+_test)                     A
+    │           ├── server/server.go                         A
+    │           ├── server/fanout.go (+_test)                A
+    │           └── dedup/dedup.go (+_test)                  A
+    ├── daemon/
+    │   ├── go.mod                                           M   (protobuf deps)
+    │   └── internal/
+    │       ├── ssm/                                           (G6)
+    │       │   ├── AGENTS.md                                A ✓
+    │       │   ├── ssm.go (+_test)                          A
+    │       │   ├── db.go                                    A
+    │       │   └── resolve.go (+_test)                      A
+    │       ├── shimclient/                                    (G7)
+    │       │   ├── AGENTS.md                                A ✓
+    │       │   ├── client.go (+_test)                       A
+    │       │   ├── control.go (+_test)                      A
+    │       │   └── events.go (+_test)                       A
+    │       ├── workspace/
+    │       │   ├── AGENTS.md                                A ✓
+    │       │   └── merge/                                     (G8)
+    │       │       ├── AGENTS.md                            A ✓
+    │       │       ├── merge.go (+_test)                    A
+    │       │       └── state.go (+_test)                    A
+    │       ├── frontend/                                      (G9)
+    │       │   ├── AGENTS.md                                A ✓
+    │       │   ├── server.go                                A
+    │       │   ├── translate.go (+_test)                    A
+    │       │   └── commands.go (+_test)                     A
+    │       ├── server/server.go                             M   (drop HTTP frontend + async_live; wire new modules)
+    │       ├── session/tailer.go                            D
+    │       ├── session/asyncsource.go                       M   (prose-regex spawn parsing deleted)
+    │       ├── session/registry.go                          M   (shim-socket reattach fields)
+    │       ├── remediation/remediation.go                   M ✓ (prose path)
+    │       └── workspacecmd/workspacecmd.go                 M   (route via SSM + frontend push)
+    ├── frontend-uds.el                                      A   (G10)
+    ├── frontend-state.el                                    A
+    ├── test-frontend-uds.el                                 A
+    ├── test-frontend-state.el                               A
+    ├── sentinel.el                                          M   (status-hook dispatch deleted; may die entirely)
+    ├── test-sentinel.el                                     M
+    ├── status.el                                            M   (counter + fully-stopped-p deleted)
+    ├── test-status.el                                       M
+    ├── workspace.el                                         M   (render-status becomes pushed-state lookup)
+    ├── test-workspace.el                                    M
+    ├── frontend-client.el                                   M   (HTTP poller deleted; delegates to frontend-uds.el)
+    ├── test-frontend-client.el                              M
+    ├── merge-handlers.el                                    M   (producers deleted; conflict UX kept)
+    ├── test-merge-handlers.el                               M
+    ├── install.el                                           M   (managed settings hooks deleted)
+    ├── test-install.el                                      M
+    ├── webapp/                                                (G11)
+    │   ├── package.json                                     M   (protojson types dep)
+    │   ├── src/frontend-proto.ts                            A
+    │   ├── src/state-adapter.ts                             A
+    │   ├── src/wslog.ts                                     M   (frontend.v1 frames)
+    │   ├── src/store.ts                                     M   (frame consumer)
+    │   ├── src/render.ts                                    M   (status rows read WorkspaceState/TaskCatalog)
+    │   ├── test/frontend-proto.test.ts                      A
+    │   └── test/state-adapter.test.ts                       A
+    ├── launchd/                                               (G12)
+    │   ├── AGENTS.md                                        A ✓
+    │   ├── com.agentrepl.shim-store.plist                   A
+    │   └── com.agentrepl.shim-claude-sidecar.plist          A
+    ├── scripts/
+    │   ├── AGENTS.md                                        A ✓
+    │   └── agent-shim-doctor.sh                             A
+    └── testdata/corpus/                                       (G13)
+        ├── AGENTS.md                                        A ✓
+        ├── MANIFEST.md                                      A
+        └── <fixtures per the corpus contract>               A
+```
+
+Notes: `proto/gen/` (generated Go/TS) is build output via `proto/Makefile`,
+not source. Exact fixture filenames under `testdata/corpus/` are chosen by
+the G13 agent from the real corpus.
+
 ### 14.1 NEW files (by farm-out group)
 
 **G1 `proto/` — schema (authored with this doc, not farmed):**
 - `proto/agentshim/core/v1/core.proto` — §5.2 inventory.
-- `proto/agentshim/claude/v1/stream.proto` — §5.3 stream table.
-- `proto/agentshim/claude/v1/transcript.proto` — §5.3 transcript table.
-- `proto/agentshim/claude/v1/tools.proto` — §5.3 tools table.
-- `proto/agentshim/claude/v1/journal.proto` — §5.3 journal table.
+- `proto/agentshim/data/v1/stream.proto` — §5.3 stream table.
+- `proto/agentshim/data/v1/transcript.proto` — §5.3 transcript table.
+- `proto/agentshim/data/v1/tools.proto` — §5.3 tools table.
+- `proto/agentshim/data/v1/journal.proto` — §5.3 journal table.
 - `proto/agentshim/frontend/v1/frontend.proto` — §5.4 inventory.
-- `proto/Makefile` — `protoc` codegen: Go (`daemon/`, `shim-store/`,
-  `shim-sidecar/`), TS (`shim/`, `webapp/`).
+- `proto/Makefile` — `protoc` codegen: Go (`daemon/`, `agent-shim/shim-store/`,
+  `agent-shim/shim-claude-sidecar/`), TS (`shim/`, `webapp/`).
 
-**G2 `shim-store/` — the store service (Go module):**
-- `shim-store/main.go` — flags (socket path, db path), launchd entry,
+**G2 `agent-shim/shim-store/` — the store service (Go module):**
+- `agent-shim/shim-store/main.go` — flags (socket path, db path), launchd entry,
   signal handling, logging setup.
-- `shim-store/internal/db/db.go` — §6.2 schema, migrations via
+- `agent-shim/shim-store/internal/db/db.go` — §6.2 schema, migrations via
   `schema_meta`, open/close, WAL config.
-- `shim-store/internal/db/ingest.go` — §6.3 transactional
+- `agent-shim/shim-store/internal/db/ingest.go` — §6.3 transactional
   events+cursor append, seq assignment, dedup (`INSERT OR IGNORE`), ack
   accounting.
-- `shim-store/internal/db/query.go` — replay-from-seq reads, cursor
+- `agent-shim/shim-store/internal/db/query.go` — replay-from-seq reads, cursor
   recovery reads, extracted-column queries.
-- `shim-store/internal/server/server.go` — UDS listener, connection
+- `agent-shim/shim-store/internal/server/server.go` — UDS listener, connection
   lifecycle, `StoreWrite`/`Subscribe`/`CursorState`/`Heartbeat` dispatch.
-- `shim-store/internal/server/fanout.go` — §6.5 subscriber registry,
+- `agent-shim/shim-store/internal/server/fanout.go` — §6.5 subscriber registry,
   live-tail broadcast, EPHEMERAL pass-through, slow-consumer disconnect.
-- `shim-store/internal/dedup/dedup.go` — §6.4 dedup-key derivation from
+- `agent-shim/shim-store/internal/dedup/dedup.go` — §6.4 dedup-key derivation from
   `Event` payloads (type-URL switch; uuid/tool_use_id/journal/turn keys).
 - Tests: `db/ingest_test.go`, `db/query_test.go`, `server/fanout_test.go`,
   `dedup/dedup_test.go` (table-driven, AAA; in-memory SQLite; golden
   events from G13 fixtures).
 
-**G3 `shim-sidecar/` — the file-plane reader (Go module):**
-- `shim-sidecar/main.go` — flags (config roots, spool root, store socket),
+**G3 `agent-shim/shim-claude-sidecar/` — the file-plane reader (Go module):**
+- `agent-shim/shim-claude-sidecar/main.go` — flags (config roots, spool root, store socket),
   launchd entry, boot sweep trigger.
-- `shim-sidecar/internal/discover/discover.go` — §7.1 globs + fsnotify +
+- `agent-shim/shim-claude-sidecar/internal/discover/discover.go` — §7.1 globs + fsnotify +
   rescan; path→(session, file-type) classification (incl. `a*`/`b*`/`w*`
   task-id prefixes and the `<session>` path segment).
-- `shim-sidecar/internal/tail/tailer.go` — §7.2 Layer-1 core: cursor loop,
+- `agent-shim/shim-claude-sidecar/internal/tail/tailer.go` — §7.2 Layer-1 core: cursor loop,
   truncation/rotation detection, bounded reads, batch assembly.
-- `shim-sidecar/internal/tail/codec.go` — `JSONLCodec` + `RawTextCodec`.
-- `shim-sidecar/internal/handler/transcript.go` — `SessionTranscriptHandler`
+- `agent-shim/shim-claude-sidecar/internal/tail/codec.go` — `JSONLCodec` + `RawTextCodec`.
+- `agent-shim/shim-claude-sidecar/internal/handler/transcript.go` — `SessionTranscriptHandler`
   (+ the shared line/envelope parser used by agent.go).
-- `shim-sidecar/internal/handler/agent.go` — `AgentTranscriptHandler`.
-- `shim-sidecar/internal/handler/journal.go` — `WorkflowJournalHandler`.
-- `shim-sidecar/internal/handler/shell.go` — `ShellOutputHandler`.
-- `shim-sidecar/internal/convert/convert.go` — JSON→proto mapping with the
+- `agent-shim/shim-claude-sidecar/internal/handler/agent.go` — `AgentTranscriptHandler`.
+- `agent-shim/shim-claude-sidecar/internal/handler/journal.go` — `WorkflowJournalHandler`.
+- `agent-shim/shim-claude-sidecar/internal/handler/shell.go` — `ShellOutputHandler`.
+- `agent-shim/shim-claude-sidecar/internal/convert/convert.go` — JSON→proto mapping with the
   §5.1 validation contract (missing-expected hard error → `UnparsedEvent`;
   unknown-field capture into `extras` + once-per-name loud log).
-- `shim-sidecar/internal/stale/stale.go` — §7.4 vanish grace, per-kind
+- `agent-shim/shim-claude-sidecar/internal/stale/stale.go` — §7.4 vanish grace, per-kind
   silence timeouts, boot sweep, `LOST` transitions.
-- `shim-sidecar/internal/storeclient/client.go` — UDS client:
+- `agent-shim/shim-claude-sidecar/internal/storeclient/client.go` — UDS client:
   `StoreWrite` batches, cursor recovery, heartbeats.
 - Tests: one `_test.go` per file above; conversion tests are golden-file
   driven from G13.
 
-**G4 `shim/` converter layer (TS, inside existing shim):**
-- `shim/src/proto/convert.ts` — SDK message→`claude.v1` proto with §5.1
+**G4 `agent-shim/claude-shim/` converter layer (TS, inside existing shim):**
+- `agent-shim/claude-shim/src/proto/convert.ts` — SDK message→`claude.v1` proto with §5.1
   validation; the complete `SDKMessage` union switch incl. observed-only
   families.
-- `shim/src/proto/extras.ts` — unknown-field capture + once-per-name
+- `agent-shim/claude-shim/src/proto/extras.ts` — unknown-field capture + once-per-name
   loud-log helper.
-- `shim/src/proto/delta.ts` — `stream_event`/`tool_progress` →
+- `agent-shim/claude-shim/src/proto/delta.ts` — `stream_event`/`tool_progress` →
   `ContentDelta`/`HeartbeatProgress` (EPHEMERAL) mapping.
-- Tests: `webapp`-style vitest in `shim/test/` over G13 stream fixtures
+- Tests: `webapp`-style vitest in `agent-shim/claude-shim/test/` over G13 stream fixtures
   (every message type at least once; every union arm).
 
-**G5 `shim/` transport layer (TS):**
-- `shim/src/uds/server.ts` — `session-<id>.sock` listener; daemon
+**G5 `agent-shim/claude-shim/` transport layer (TS):**
+- `agent-shim/claude-shim/src/uds/server.ts` — `session-<id>.sock` listener; daemon
   connection lifecycle; disconnect-tolerant turn survival; handshake
   (`ShimHello`/`DaemonHello`); heartbeats.
-- `shim/src/uds/store-client.ts` — store connection: `StoreWrite`,
+- `agent-shim/claude-shim/src/uds/store-client.ts` — store connection: `StoreWrite`,
   `Subscribe` + forward loop, degraded-state reporting (no spill).
-- `shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch into the
+- `agent-shim/claude-shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch into the
   SDK session; `canUseTool`→`PermissionRequest` round-trip.
-- `shim/src/uds/framing.ts` — length-prefixed protobuf framing shared by
+- `agent-shim/claude-shim/src/uds/framing.ts` — length-prefixed protobuf framing shared by
   both connections.
 - Tests: framing round-trip, control dispatch with a mocked SDK session,
   reattach (drop daemon conn mid-turn, reconnect, `Subscribe{from_seq}`).
@@ -691,7 +833,7 @@ within their module; webapp runs `npm test` + `npm run typecheck` from
   frontend translation, `DegradedState`→`DegradedNotice`.
 - Tests: mocked UDS peer, replay/reattach, correlation.
 
-**G8 `daemon/internal/merge/` — merge port:**
+**G8 `daemon/internal/workspace/merge/` — merge port:**
 - `merge/merge.go` — cherry-pick driver ported from
   `merge-handlers.el:227-236` (`git -C` via existing exec wrappers),
   conflict detection, finalize (port of `:349-372`), resume-after-resolve.
@@ -728,7 +870,7 @@ within their module; webapp runs `npm test` + `npm run typecheck` from
 
 **G12 supervision + install:**
 - `launchd/com.agentrepl.shim-store.plist`,
-  `launchd/com.agentrepl.shim-sidecar.plist` — KeepAlive user agents.
+  `launchd/com.agentrepl.shim-claude-sidecar.plist` — KeepAlive user agents.
 - `.claude/install.sh` additions — build + `launchctl bootstrap` both
   services; idempotent re-install.
 - `scripts/agent-shim-doctor.sh` — connectivity/liveness check across all
@@ -745,7 +887,7 @@ within their module; webapp runs `npm test` + `npm run typecheck` from
 
 | File | Change |
 |---|---|
-| `shim/src/main.ts`, `shim/src/session.ts` | stdio→UDS rewiring; converter/transport integration; stdin-EOF no longer ends input (reattach) |
+| `agent-shim/claude-shim/src/main.ts`, `agent-shim/claude-shim/src/session.ts` | stdio→UDS rewiring; converter/transport integration; stdin-EOF no longer ends input (reattach) |
 | `daemon/internal/server/server.go` | delete HTTP frontend surface + `async_live`; wire shimclient/frontend/ssm/merge modules |
 | `daemon/internal/session/*` | delete `tailer.go`; delete prose-regex spawn parsing from `asyncsource.go` (typed events replace it); session registry gains shim-socket reattach fields |
 | `daemon/internal/workspacecmd/*` | route results through SSM + frontend push instead of Emacs sentinels |
