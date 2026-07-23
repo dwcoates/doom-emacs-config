@@ -38,7 +38,7 @@ and rendering it in place** — not moving new data across the wire.
   - `TaskNotificationFrame` — terminal completion, `ToolUseID` + `TaskID` + `Status` + `Summary` + `OutputFile` + `Text` (`daemon/internal/protocol/layer2.go:269-277`; spec `shared/protocol.md:881-900`).
   - `parent_tool_use_id` subagent attribution on `text/thinking/tool-use` start frames (`daemon/internal/protocol/layer2.go:144,166,189`).
 - The daemon already detects spawns and tails their output files: `parseSpawnAnnouncement` extracts `task_id` + output path + spawning `tool_use_id` (`daemon/internal/session/tailer.go:53-92`), and `superviseTailersLocked` starts/stops a tailer per `TaskID` (`daemon/internal/session/tailer.go:121-133`), broadcasting `task-output-delta` (`daemon/internal/session/tailer.go:157-173`).
-- The shim forwards it: `tool_progress` SDK messages → `tool_use_progress` (`shim/src/session.ts:473-481`), `<task-notification>` text → `task_notification` (`shim/src/session.ts:506-517`), and `includePartialMessages: true` streams subagent internals (`shim/src/main.ts:128`).
+- The shim forwards it: `tool_progress` SDK messages → `tool_use_progress` (`agent-shim/claude-shim/src/session.ts:473-481`), `<task-notification>` text → `task_notification` (`agent-shim/claude-shim/src/session.ts:506-517`), and `includePartialMessages: true` streams subagent internals (`agent-shim/claude-shim/src/main.ts:128`).
 
 ### 2.2 Store model already holds it
 

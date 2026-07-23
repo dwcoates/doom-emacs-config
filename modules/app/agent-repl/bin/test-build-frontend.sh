@@ -22,32 +22,36 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 # Layout mirrors what build-frontend.sh expects relative to its parent dir.
 make_tree() {
     local root="$1"
-    mkdir -p "$root/bin" "$root/shim/src" "$root/shim/dist" \
+    mkdir -p "$root/bin" \
+             "$root/agent-shim/claude-shim/src" \
+             "$root/agent-shim/claude-shim/dist" \
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
 
     # Sources.
-    echo "export const x = 1" > "$root/shim/src/main.ts"
+    echo "export const x = 1" > "$root/agent-shim/claude-shim/src/main.ts"
     echo "export const y = 1" > "$root/webapp/src/main.ts"
     echo "package main" > "$root/daemon/cmd/claude-repld/main.go"
-    echo '{"scripts":{"build":"true"}}' > "$root/shim/package.json"
+    echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude-shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
     echo "module x" > "$root/daemon/go.mod"
 
     # node_modules present so the stubs are never asked to `npm install`.
-    mkdir -p "$root/shim/node_modules" "$root/webapp/node_modules"
+    mkdir -p "$root/agent-shim/claude-shim/node_modules" \
+             "$root/webapp/node_modules"
 }
 
 # Fresh artifacts: newer than every source so nothing is stale.
 make_fresh_artifacts() {
     local root="$1"
-    echo built > "$root/shim/dist/main.js"
+    echo built > "$root/agent-shim/claude-shim/dist/main.js"
     echo built > "$root/webapp/dist/index.html"
     echo built > "$root/daemon/bin/claude-repld"
     # Bump artifact mtimes strictly past the sources.
     sleep 1
-    touch "$root/shim/dist/main.js" "$root/webapp/dist/index.html" \
+    touch "$root/agent-shim/claude-shim/dist/main.js" \
+          "$root/webapp/dist/index.html" \
           "$root/daemon/bin/claude-repld"
 }
 
@@ -119,7 +123,8 @@ t_one_stale() {
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     sleep 1
-    touch "$root/shim/src/main.ts"   # shim now stale, others fresh
+    touch "$root/agent-shim/claude-shim/src/main.ts"
+    # Shim is now stale; the other artifacts remain fresh.
     run_script "$root" >/dev/null
     local log; log="$(cat "$root/stub.log")"
     if grep -q "npm" <<<"$log" && ! grep -q "^go " <<<"$log"; then

@@ -2,9 +2,10 @@
 // claude-repld server spawning the real TS shim subprocess (in --fake
 // offline mode), driven by a real WebSocket client.
 //
-// Prerequisite: the shim must be built (`npm run build` in shim/). The
-// tests skip with an explicit message when node or shim/dist/main.js is
-// unavailable, since they cannot run at all without them.
+// Prerequisite: the shim must be built (`npm run build` in
+// agent-shim/claude-shim/). The tests skip with an explicit message when
+// node or agent-shim/claude-shim/dist/main.js is unavailable, since they
+// cannot run at all without them.
 package e2e
 
 import (
@@ -33,12 +34,17 @@ var frameTimeout = 15 * time.Second
 
 func shimScriptPath(t *testing.T) string {
 	t.Helper()
-	path, err := filepath.Abs(filepath.Join("..", "..", "shim", "dist", "main.js"))
+	path, err := filepath.Abs(filepath.Join(
+		"..", "..", "agent-shim", "claude-shim", "dist", "main.js",
+	))
 	if err != nil {
 		t.Fatalf("resolve shim path: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf("shim not built (%s missing): run `npm run build` in shim/", path)
+		t.Skipf(
+			"shim not built (%s missing): run `npm run build` in agent-shim/claude-shim/",
+			path,
+		)
 	}
 	return path
 }

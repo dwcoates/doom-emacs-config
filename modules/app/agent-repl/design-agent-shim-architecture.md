@@ -632,7 +632,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │       └── frontend/v1/frontend.proto                   A ✓
     ├── agent-shim/
     │   ├── AGENTS.md                                        A ✓
-    │   ├── claude-shim/                                       (relocated from shim/ ✓; G4+G5)
+    │   ├── claude-shim/                                       (relocated here ✓; G4+G5)
     │   │   ├── AGENTS.md                                    A ✓
     │   │   ├── package.json                                 M   (protobuf-es dep)
     │   │   ├── src/main.ts                                  M   (stdio→UDS rewiring)
@@ -753,7 +753,7 @@ the G13 agent from the real corpus.
 - `proto/agentshim/data/v1/journal.proto` — §5.3 journal table.
 - `proto/agentshim/frontend/v1/frontend.proto` — §5.4 inventory.
 - `proto/Makefile` — `protoc` codegen: Go (`daemon/`, `agent-shim/shim-store/`,
-  `agent-shim/shim-claude-sidecar/`), TS (`shim/`, `webapp/`).
+  `agent-shim/shim-claude-sidecar/`), TS (`agent-shim/claude-shim/`, `webapp/`).
 
 **G2 `agent-shim/shim-store/` — the store service (Go module):**
 - `agent-shim/shim-store/main.go` — flags (socket path, db path), launchd entry,
@@ -932,4 +932,3 @@ branch lands the new system AND deletes every superseded mechanism (§9.1,
 §10 deletions) together. If something breaks after the cutover, we fix
 forward. The `metaprompt.md` no-fallbacks rule and the AGENTS.md
 no-redundant-mechanisms rule are the governing policies.
-

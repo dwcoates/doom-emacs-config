@@ -3,7 +3,8 @@
 # when they are out of date ("build-if-stale").
 #
 # Three artifacts are managed, each independently:
-#   1. shim    — TypeScript, built with `npm run build` -> shim/dist/main.js
+#   1. shim    — TypeScript, built with `npm run build` ->
+#               agent-shim/claude-shim/dist/main.js
 #   2. webapp  — TypeScript + Vite, built with `npm run build` -> webapp/dist/index.html
 #   3. daemon  — Go, built with `go build` -> daemon/bin/claude-repld
 #

@@ -9,7 +9,7 @@ engine or to regression-check the feed's look.
 
 ```bash
 # from webapp/, after building shim + webapp + the daemon binary:
-#   (cd ../shim && npm run build)
+#   (cd ../agent-shim/claude-shim && npm run build)
 #   npm run build
 #   (cd ../daemon && go build -o /tmp/claude-repld ./cmd/claude-repld)
 
