@@ -216,7 +216,7 @@ does."
 ;;;; ---- Change signature ------------------------------------------------
 
 (defun agent-repl--tasks-signature ()
-  "Return a cheap value that changes whenever the task list would render differently.
+  "Return a cheap value that moves whenever the task list would render anew.
 Feeds `agent-repl--sidebar-signature' (sidebar.el) so a task create,
 rename, or done-toggle wakes the 1Hz roster push."
   (mapcar (lambda (task)
