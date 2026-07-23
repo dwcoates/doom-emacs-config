@@ -427,6 +427,10 @@ Prefer adding a new entry under an existing relevant section over creating a new
 
 # Agent Guidelines for agent-repl Development
 
+## Wire-protocol breaking changes require user approval
+
+The protobuf protocol shared by the agent-repl daemon, shims, reader, and store (the vendor-agnostic event/control contract) may evolve freely in backward-compatible ways, but any BREAKING change to message shapes or semantics requires explicit user approval first — never break the contract silently, even though there are no external consumers.
+
 ## GUI nomenclature: tail status rows
 
 The animated `thinking…`/`working…`/`retrying…`/`interrupting…`/`monitoring…` indicators at the bottom of the webapp feed are **tail status rows** (`webapp/src/render.ts`); the in-flight precedence set (interrupting > compacting > retrying > working) is the **bucket-1 tail** (`tailStatusRow`), `monitoring…` is its idle-but-async-live fallback, and each animates via `animatedEllipsis()`.
