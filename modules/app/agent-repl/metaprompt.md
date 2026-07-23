@@ -89,6 +89,17 @@
   - An invariant is something the code itself guarantees, so a violation of it is never an expected condition.
   - Expected, recoverable conditions (a missing file, a network failure, bad user input) are surfaced as errors rather than asserted on, but are still never swallowed.
 
+### Never work around anticipated broken mechanisms with fallbacks
+
+- When a mechanism is reasonably expected to be reliable, NEVER add fallback machinery that works around its anticipated failure.
+  - Downtime of such a mechanism is the correct, honest behavior for everything that depends on it.
+  - A fallback that papers over the broken mechanism hides the breakage and adds complexity that itself breaks.
+- Instead, ensure the necessary instrumentation and reporting is available for the sad path.
+  - The failure is surfaced loudly (logs, an explicit degraded/error state) the instant it happens.
+  - Recovery comes from fixing or restarting the mechanism, never from a shadow path that masks its failure.
+- This rule is the design-level sibling of the invariants rule above.
+  - Deliberate design features (an event classification, a replay protocol) are not fallbacks; the rule targets machinery whose only purpose is absorbing an anticipated failure.
+
 ## Process execution
 
 ### Never background a process without a foreground process alongside it
