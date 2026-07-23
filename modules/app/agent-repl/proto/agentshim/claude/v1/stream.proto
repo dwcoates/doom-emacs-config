@@ -1,0 +1,457 @@
+// agentshim.claude.v1 stream — TOTAL-FIDELITY models of the Claude Agent SDK
+// live stream (`query()` iterator), grounded in @anthropic-ai/claude-agent-sdk
+// v0.1.77 typings plus empirically observed stream-only families (CLI 2.1.215
+// probes). Field comments cite the source: [sdk coreTypes.d.ts:NNN] for typed
+// members, [observed] for shapes absent from the typings.
+//
+// Conversion contract (§5.1 of the design doc): the claude-shim converter
+// hard-errors (→ core.UnparsedEvent) on missing expected fields, captures
+// unknown NEW fields into the containing Event.extras, and never drops data.
+
+syntax = "proto3";
+
+package agentshim.claude.v1;
+
+import "google/protobuf/struct.proto";
+import "agentshim/claude/v1/tools.proto";
+
+option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+
+// The full stream union [sdk coreTypes.d.ts:553] plus observed-only members.
+message ClaudeStreamMessage {
+  oneof msg {
+    UserMessage user = 1;
+    AssistantMessage assistant = 2;
+    ResultMessage result = 3;
+    SystemInit system_init = 4;
+    StreamEvent stream_event = 5;
+    CompactBoundary compact_boundary = 6;
+    StatusMessage status = 7;
+    HookResponse hook_response = 8;
+    ToolProgress tool_progress = 9;
+    AuthStatus auth_status = 10;
+    // Observed-only stream families (not in SDK typings):
+    RateLimitEvent rate_limit_event = 11;
+    HookStarted hook_started = 12;
+    ThinkingTokens thinking_tokens = 13;
+    SystemNotification notification = 14;
+    TaskStartedMsg task_started = 15;
+    TaskUpdatedMsg task_updated = 16;
+    TaskNotificationMsg task_notification = 17;
+    BackgroundTasksChanged background_tasks_changed = 18;
+    // Control-channel wire types [sdk controlTypes.d.ts:86-114]:
+    ControlRequest control_request = 19;
+    ControlResponse control_response = 20;
+    ControlCancelRequest control_cancel_request = 21;
+    KeepAlive keep_alive = 22;
+  }
+}
+
+// --- user / assistant ------------------------------------------------------
+
+// [sdk coreTypes.d.ts:396-426] SDKUserMessage + SDKUserMessageReplay folded
+// (is_replay=true for the replay variant, whose uuid is required).
+message UserMessage {
+  ApiUserMessage message = 1;
+  // string|null in TS; empty = null.
+  string parent_tool_use_id = 2;
+  bool is_synthetic = 3;
+  // `tool_use_result?: unknown` — the structured result. String-or-object
+  // union modeled exactly like the disk twin.
+  ToolUseResult tool_use_result = 4;
+  string uuid = 5;  // optional in typings, always present on disk
+  string session_id = 6;
+  bool is_replay = 7;
+}
+
+// [sdk coreTypes.d.ts:427] SDKAssistantMessageError.
+enum AssistantMessageError {
+  ASSISTANT_MESSAGE_ERROR_UNSPECIFIED = 0;
+  ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED = 1;
+  ASSISTANT_MESSAGE_ERROR_BILLING_ERROR = 2;
+  ASSISTANT_MESSAGE_ERROR_RATE_LIMIT = 3;
+  ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST = 4;
+  ASSISTANT_MESSAGE_ERROR_SERVER_ERROR = 5;
+  ASSISTANT_MESSAGE_ERROR_UNKNOWN = 6;
+}
+
+// [sdk coreTypes.d.ts:428-435] SDKAssistantMessage.
+message AssistantMessage {
+  ApiAssistantMessage message = 1;
+  string parent_tool_use_id = 2;
+  AssistantMessageError error = 3;  // unset when absent
+  bool has_error = 4;               // disambiguates unset vs UNKNOWN
+  string uuid = 5;
+  string session_id = 6;
+}
+
+// [sdk coreTypes.d.ts:441-474] SDKResultMessage, both variants, plus
+// [observed] stream-only extras.
+enum ResultSubtype {
+  RESULT_SUBTYPE_UNSPECIFIED = 0;
+  RESULT_SUBTYPE_SUCCESS = 1;
+  RESULT_SUBTYPE_ERROR_DURING_EXECUTION = 2;
+  RESULT_SUBTYPE_ERROR_MAX_TURNS = 3;
+  RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD = 4;
+  RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES = 5;
+}
+
+message ResultMessage {
+  ResultSubtype subtype = 1;
+  int64 duration_ms = 2;
+  int64 duration_api_ms = 3;
+  bool is_error = 4;
+  int32 num_turns = 5;
+  string result = 6;                       // success only
+  double total_cost_usd = 7;
+  Usage usage = 8;
+  map<string, ModelUsage> model_usage = 9;
+  repeated PermissionDenial permission_denials = 10;
+  google.protobuf.Struct structured_output = 11;  // success only, optional
+  repeated string errors = 12;             // error variants only
+  string uuid = 13;
+  string session_id = 14;
+  // [observed] stream-only extras beyond the typings:
+  int64 api_error_status = 15;   // number|null; 0 = null
+  bool api_error_status_set = 16;
+  int64 ttft_ms = 17;
+  int64 ttft_stream_ms = 18;
+  int64 time_to_request_ms = 19;
+  string stop_reason = 20;       // e.g. "end_turn"
+  string terminal_reason = 21;   // e.g. "completed"
+  string fast_mode_state = 22;   // e.g. "off"
+}
+
+// Anthropic API usage block (NonNullableUsage).
+message Usage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_read_input_tokens = 3;
+  int64 cache_creation_input_tokens = 4;
+  google.protobuf.Struct cache_creation = 5;   // nested breakdown when present
+  google.protobuf.Struct server_tool_use = 6;  // web-search counters when present
+  string service_tier = 7;
+}
+
+// [sdk coreTypes.d.ts:8-16] ModelUsage + [observed] max_output_tokens.
+message ModelUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_read_input_tokens = 3;
+  int64 cache_creation_input_tokens = 4;
+  int64 web_search_requests = 5;
+  double cost_usd = 6;
+  int64 context_window = 7;
+  int64 max_output_tokens = 8;  // [observed]
+}
+
+// [sdk coreTypes.d.ts:436-440].
+message PermissionDenial {
+  string tool_name = 1;
+  string tool_use_id = 2;
+  google.protobuf.Struct tool_input = 3;
+}
+
+// --- system: init ----------------------------------------------------------
+
+// [sdk coreTypes.d.ts:64] MCP server status vocabulary.
+enum McpServerState {
+  MCP_SERVER_STATE_UNSPECIFIED = 0;
+  MCP_SERVER_STATE_CONNECTED = 1;
+  MCP_SERVER_STATE_FAILED = 2;
+  MCP_SERVER_STATE_NEEDS_AUTH = 3;
+  MCP_SERVER_STATE_PENDING = 4;
+}
+
+message McpServerStatus {
+  string name = 1;
+  McpServerState status = 2;
+}
+
+message PluginRef {
+  string name = 1;
+  string path = 2;
+}
+
+enum ApiKeySource {
+  API_KEY_SOURCE_UNSPECIFIED = 0;
+  API_KEY_SOURCE_USER = 1;
+  API_KEY_SOURCE_PROJECT = 2;
+  API_KEY_SOURCE_ORG = 3;
+  API_KEY_SOURCE_TEMPORARY = 4;
+}
+
+// [sdk coreTypes.d.ts:475-499] SDKSystemMessage subtype "init"
+// + [observed] fast_mode_state.
+message SystemInit {
+  repeated string agents = 1;
+  ApiKeySource api_key_source = 2;
+  repeated string betas = 3;
+  string claude_code_version = 4;
+  string cwd = 5;
+  repeated string tools = 6;
+  repeated McpServerStatus mcp_servers = 7;
+  string model = 8;
+  string permission_mode = 9;  // [sdk coreTypes.d.ts:173] vocabulary
+  repeated string slash_commands = 10;
+  string output_style = 11;
+  repeated string skills = 12;
+  repeated PluginRef plugins = 13;
+  string uuid = 14;
+  string session_id = 15;
+  string fast_mode_state = 16;  // [observed]
+}
+
+// --- stream_event (partial messages) ----------------------------------------
+
+// [sdk coreTypes.d.ts:500-506] SDKPartialAssistantMessage wrapping the raw
+// Anthropic API RawMessageStreamEvent. NOTE: in live operation these become
+// EPHEMERAL core.ContentDelta via the delta bypass; the full typed model
+// below exists for total fidelity (probes, tests, diagnostics).
+message StreamEvent {
+  RawMessageStreamEvent event = 1;
+  string parent_tool_use_id = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+message RawMessageStreamEvent {
+  oneof event {
+    MessageStartEvent message_start = 1;
+    ContentBlockStartEvent content_block_start = 2;
+    ContentBlockDeltaEvent content_block_delta = 3;
+    ContentBlockStopEvent content_block_stop = 4;
+    MessageDeltaEvent message_delta = 5;
+    MessageStopEvent message_stop = 6;
+  }
+}
+
+message MessageStartEvent {
+  google.protobuf.Struct message = 1;  // the API message skeleton, verbatim
+}
+
+message ContentBlockStartEvent {
+  uint32 index = 1;
+  google.protobuf.Struct content_block = 2;
+}
+
+message ContentBlockDeltaEvent {
+  uint32 index = 1;
+  oneof delta {
+    TextDelta text_delta = 2;
+    ThinkingDelta thinking_delta = 3;
+    InputJsonDelta input_json_delta = 4;
+    SignatureDelta signature_delta = 5;
+  }
+}
+
+message TextDelta {
+  string text = 1;
+}
+
+// [observed] estimated_tokens: number|null on thinking deltas.
+message ThinkingDelta {
+  string thinking = 1;
+  int64 estimated_tokens = 2;
+  bool estimated_tokens_set = 3;
+}
+
+message InputJsonDelta {
+  string partial_json = 1;
+}
+
+message SignatureDelta {
+  string signature = 1;
+}
+
+message ContentBlockStopEvent {
+  uint32 index = 1;
+}
+
+message MessageDeltaEvent {
+  google.protobuf.Struct delta = 1;  // stop_reason/stop_sequence updates
+  Usage usage = 2;
+}
+
+message MessageStopEvent {}
+
+// --- system: other typed subtypes -------------------------------------------
+
+enum CompactTrigger {
+  COMPACT_TRIGGER_UNSPECIFIED = 0;
+  COMPACT_TRIGGER_MANUAL = 1;
+  COMPACT_TRIGGER_AUTO = 2;
+}
+
+// [sdk coreTypes.d.ts:507-516] compact_boundary (stream variant, snake_case).
+message CompactBoundary {
+  CompactTrigger trigger = 1;
+  int64 pre_tokens = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [sdk coreTypes.d.ts:517-524] subtype "status"; status: 'compacting'|null.
+message StatusMessage {
+  string status = 1;  // "" = null
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk coreTypes.d.ts:525-535] subtype "hook_response" + [observed] extras.
+message HookResponse {
+  string hook_name = 1;
+  string hook_event = 2;
+  string stdout = 3;
+  string stderr = 4;
+  int32 exit_code = 5;
+  bool exit_code_set = 6;
+  string hook_id = 7;   // [observed]
+  string output = 8;    // [observed]
+  string outcome = 9;   // [observed] e.g. "error"
+  string uuid = 10;
+  string session_id = 11;
+}
+
+// [sdk coreTypes.d.ts:536-544].
+message ToolProgress {
+  string tool_use_id = 1;
+  string tool_name = 2;
+  string parent_tool_use_id = 3;
+  double elapsed_time_seconds = 4;
+  string uuid = 5;
+  string session_id = 6;
+}
+
+// [sdk coreTypes.d.ts:545-552].
+message AuthStatus {
+  bool is_authenticating = 1;
+  repeated string output = 2;
+  string error = 3;
+  string uuid = 4;
+  string session_id = 5;
+}
+
+// --- observed-only stream families ------------------------------------------
+
+// [observed] type:"rate_limit_event".
+message RateLimitInfo {
+  string status = 1;           // e.g. "allowed_warning"
+  int64 resets_at = 2;         // epoch seconds
+  string rate_limit_type = 3;  // e.g. "overage"
+  double utilization = 4;
+  bool is_using_overage = 5;
+  bool overage_in_use = 6;
+  double surpassed_threshold = 7;
+}
+
+message RateLimitEvent {
+  RateLimitInfo rate_limit_info = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [observed] system/hook_started.
+message HookStarted {
+  string hook_id = 1;
+  string hook_name = 2;   // e.g. "SessionStart:startup"
+  string hook_event = 3;
+  string uuid = 4;
+  string session_id = 5;
+}
+
+// [observed] system/thinking_tokens.
+message ThinkingTokens {
+  int64 estimated_tokens = 1;
+  int64 estimated_tokens_delta = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [observed] system/notification.
+message SystemNotification {
+  string key = 1;       // e.g. "stop-hook-error"
+  string text = 2;
+  string priority = 3;  // e.g. "immediate"
+  string uuid = 4;
+  string session_id = 5;
+}
+
+// [observed] system/task_started. task_type: "local_bash" | "local_agent"
+// (workflows announce via tool results instead).
+message TaskStartedMsg {
+  string task_id = 1;
+  string tool_use_id = 2;
+  string description = 3;
+  string task_type = 4;
+  string subagent_type = 5;  // agent tasks only
+  string prompt = 6;         // agent tasks only
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [observed] system/task_updated.
+message TaskPatch {
+  string status = 1;    // "completed" | "failed" | "killed"
+  int64 end_time = 2;   // epoch millis
+}
+
+message TaskUpdatedMsg {
+  string task_id = 1;
+  TaskPatch patch = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [observed] system/task_notification — the authoritative detached-task
+// completion signal, which exists ONLY in the stream (never persisted by the
+// harness; the store round-trip is what makes it durable).
+message TaskUsage {
+  int64 total_tokens = 1;
+  int64 tool_uses = 2;
+  int64 duration_ms = 3;
+}
+
+message TaskNotificationMsg {
+  string task_id = 1;
+  string tool_use_id = 2;
+  string status = 3;       // "completed" | "failed" | "stopped"
+  string output_file = 4;
+  string summary = 5;
+  TaskUsage usage = 6;     // agent tasks only
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [observed] system/background_tasks_changed — full current list each time.
+message BackgroundTaskRef {
+  string task_id = 1;
+  string task_type = 2;
+  string description = 3;
+}
+
+message BackgroundTasksChanged {
+  repeated BackgroundTaskRef tasks = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// --- control-channel wire types ----------------------------------------------
+
+// [sdk controlTypes.d.ts:86-114] Payloads kept as Struct: the control channel
+// is shim-internal plumbing; total fidelity here is shape-level.
+message ControlRequest {
+  string request_id = 1;
+  google.protobuf.Struct request = 2;
+}
+
+message ControlResponse {
+  string request_id = 1;
+  google.protobuf.Struct response = 2;
+}
+
+message ControlCancelRequest {
+  string request_id = 1;
+}
+
+message KeepAlive {}

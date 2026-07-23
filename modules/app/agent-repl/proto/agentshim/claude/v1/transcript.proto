@@ -1,0 +1,493 @@
+// agentshim.claude.v1 transcript — TOTAL-FIDELITY models of the on-disk
+// JSONL lines the harness writes (session transcripts, agent sidechain
+// transcripts, and their metadata line types), grounded in a census of
+// ~1,540 real transcripts (CLI 2.1.168–2.1.215).
+//
+// Casing note: disk lines are camelCase (sessionId, toolUseResult,
+// compactMetadata.preTokens) where the stream is snake_case; the converter
+// normalizes into these messages and records the plane on the core Event.
+//
+// Nullable/optional conventions: proto3 scalar "" / 0 = JSON null or absent;
+// where absent-vs-false matters a *_set bool accompanies the field.
+
+syntax = "proto3";
+
+package agentshim.claude.v1;
+
+import "google/protobuf/struct.proto";
+import "agentshim/claude/v1/tools.proto";
+
+option go_package = "agentrepl/proto/agentshim/claude/v1;claudev1";
+
+// ---------------------------------------------------------------------------
+// Enums (envelope vocabularies, census B2/B4)
+// ---------------------------------------------------------------------------
+
+enum Entrypoint {
+  ENTRYPOINT_UNSPECIFIED = 0;  // absent on a small tail of old lines
+  ENTRYPOINT_CLI = 1;
+  ENTRYPOINT_SDK_CLI = 2;
+}
+
+enum PromptSource {
+  PROMPT_SOURCE_UNSPECIFIED = 0;
+  PROMPT_SOURCE_SDK = 1;
+  PROMPT_SOURCE_TYPED = 2;
+  PROMPT_SOURCE_SYSTEM = 3;
+  PROMPT_SOURCE_QUEUED = 4;
+}
+
+enum ToolDenialKind {
+  TOOL_DENIAL_KIND_UNSPECIFIED = 0;
+  TOOL_DENIAL_KIND_AUTOMODE_BLOCKED = 1;
+  TOOL_DENIAL_KIND_USER_REJECTED = 2;
+}
+
+enum QueueOp {
+  QUEUE_OP_UNSPECIFIED = 0;
+  QUEUE_OP_ENQUEUE = 1;
+  QUEUE_OP_DEQUEUE = 2;
+  QUEUE_OP_REMOVE = 3;
+}
+
+// origin.kind on user lines.
+enum OriginKind {
+  ORIGIN_KIND_UNSPECIFIED = 0;
+  ORIGIN_KIND_HUMAN = 1;
+  ORIGIN_KIND_TASK_NOTIFICATION = 2;
+  ORIGIN_KIND_COORDINATOR = 3;
+}
+
+// ---------------------------------------------------------------------------
+// The line union and envelope
+// ---------------------------------------------------------------------------
+
+// Every top-level line `type` observed on disk (census B1).
+message TranscriptLine {
+  oneof line {
+    UserLine user = 1;
+    AssistantLine assistant = 2;
+    SystemLine system = 3;
+    AttachmentLine attachment = 4;
+    ModeLine mode = 5;
+    PermissionModeLine permission_mode = 6;
+    QueueOperationLine queue_operation = 7;
+    LastPromptLine last_prompt = 8;
+    AiTitleLine ai_title = 9;
+    PrLinkLine pr_link = 10;
+    FileHistorySnapshotLine file_history_snapshot = 11;
+    FileHistoryDeltaLine file_history_delta = 12;
+  }
+}
+
+message Origin {
+  OriginKind kind = 1;
+}
+
+// Common envelope on user/assistant/system/attachment lines (census B2):
+// ~10 always-present fields plus every optional extra observed.
+message LineEnvelope {
+  // Always present:
+  string parent_uuid = 1;  // "" = null (first line)
+  bool is_sidechain = 2;
+  string uuid = 3;
+  string timestamp = 4;    // ISO-8601
+  string user_type = 5;    // only "external" observed
+  string cwd = 6;
+  string session_id = 7;
+  string version = 8;      // CC version
+  string git_branch = 9;   // may be ""
+  Entrypoint entrypoint = 10;
+
+  // Optional extras (occurrence counts in the census):
+  string request_id = 11;                  // assistant only
+  string prompt_id = 12;                   // user only
+  string agent_id = 13;                    // sidechain + some main lines
+  string source_tool_assistant_uuid = 14;  // every tool_result user line
+  string snake_session_id = 15;            // vestigial duplicate `session_id`
+  string effort = 16;                      // "high" | "xhigh"
+  string attribution_agent = 17;
+  string attribution_skill = 18;
+  string attribution_plugin = 19;
+  string slug = 20;                        // e.g. "lucky-spinning-glacier"
+  PromptSource prompt_source = 21;
+  string permission_mode = 22;             // user prompt lines
+  Origin origin = 23;
+  bool is_meta = 24;
+  string source_tool_use_id = 25;
+  bool tool_ends_turn = 26;
+  bool is_api_error_message = 27;
+  string error = 28;                       // with is_api_error_message
+  int64 api_error_status = 29;
+  google.protobuf.Struct error_details = 30;
+  ToolDenialKind tool_denial_kind = 31;
+  google.protobuf.Struct classifier_meta_lines = 32;
+  string interrupted_message_id = 33;
+  int64 queue_priority = 34;
+  bool is_visible_in_transcript_only = 35;
+  bool is_compact_summary = 36;
+  string logical_parent_uuid = 37;         // compact_boundary lines
+}
+
+message UserLine {
+  LineEnvelope envelope = 1;
+  ApiUserMessage message = 2;
+  // Disk key `toolUseResult` (string-or-object; tools.proto union).
+  ToolUseResult tool_use_result = 3;
+  bool has_tool_use_result = 4;
+}
+
+message AssistantLine {
+  LineEnvelope envelope = 1;
+  ApiAssistantMessage message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// system lines — every observed subtype (census B3)
+// ---------------------------------------------------------------------------
+
+message SystemLine {
+  LineEnvelope envelope = 1;
+  oneof subtype {
+    StopHookSummaryLine stop_hook_summary = 2;
+    TurnDurationLine turn_duration = 3;
+    LocalCommandLine local_command = 4;
+    AgentsKilledLine agents_killed = 5;
+    CompactBoundaryLine compact_boundary = 6;
+    InformationalLine informational = 7;
+    ScheduledTaskFireLine scheduled_task_fire = 8;
+    ModelRefusalNoFallbackLine model_refusal_no_fallback = 9;
+    ApiErrorLine api_error = 10;
+  }
+}
+
+message HookInfo {
+  string command = 1;
+  int64 duration_ms = 2;
+}
+
+// THE durable turn-end boundary on disk.
+message StopHookSummaryLine {
+  int64 hook_count = 1;
+  repeated HookInfo hook_infos = 2;
+  repeated string hook_errors = 3;
+  repeated string hook_additional_context = 4;
+  bool prevented_continuation = 5;
+  string stop_reason = 6;
+  bool has_output = 7;
+  string level = 8;  // "suggestion" | …
+  string tool_use_id = 9;  // disk key `toolUseID`
+}
+
+message TurnDurationLine {
+  int64 duration_ms = 1;
+  int64 message_count = 2;
+  int64 pending_background_agent_count = 3;
+  bool is_meta = 4;
+}
+
+message LocalCommandLine {
+  string content = 1;  // "<local-command-stdout>…"
+  string level = 2;
+}
+
+message AgentsKilledLine {}
+
+message PreservedSegment {
+  string head_uuid = 1;
+  string anchor_uuid = 2;
+  string tail_uuid = 3;
+}
+
+message PreservedMessages {
+  string anchor_uuid = 1;
+  repeated string uuids = 2;
+  repeated string all_uuids = 3;
+}
+
+// Disk compact metadata: camelCase, RICHER than the SDK stream type
+// (durationMs, preservedSegment, preservedMessages, postTokens).
+message DiskCompactMetadata {
+  string trigger = 1;  // "manual" | "auto"
+  int64 pre_tokens = 2;
+  int64 duration_ms = 3;
+  PreservedSegment preserved_segment = 4;
+  PreservedMessages preserved_messages = 5;
+  int64 post_tokens = 6;
+}
+
+message CompactBoundaryLine {
+  string content = 1;  // "Conversation compacted"
+  string level = 2;
+  DiskCompactMetadata compact_metadata = 3;
+}
+
+message InformationalLine {
+  string content = 1;
+  string level = 2;  // "warning" | …
+}
+
+message ScheduledTaskFireLine {
+  string content = 1;
+}
+
+message ModelRefusalNoFallbackLine {
+  string content = 1;
+  string original_model = 2;
+  string request_id = 3;
+  string api_refusal_category = 4;
+  string api_refusal_explanation = 5;
+  string refused_user_message_uuid = 6;
+  string level = 7;
+}
+
+message ApiErrorDetail {
+  string message = 1;
+  int64 status = 2;
+  string request_id = 3;
+  string formatted = 4;
+  google.protobuf.Struct connection = 5;  // null | object
+  bool is_network_down = 6;
+  google.protobuf.Struct rate_limits = 7; // null | object
+}
+
+message ApiErrorLine {
+  string level = 1;  // "error"
+  ApiErrorDetail error = 2;
+  double retry_in_ms = 3;
+  int64 retry_attempt = 4;
+  int64 max_retries = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata line types (no common envelope; census B4)
+// ---------------------------------------------------------------------------
+
+message ModeLine {
+  string mode = 1;  // only "normal" observed
+  string session_id = 2;
+}
+
+message PermissionModeLine {
+  string permission_mode = 1;  // "auto" | "bypassPermissions" | "default"
+  string session_id = 2;
+}
+
+message QueueOperationLine {
+  QueueOp operation = 1;
+  string timestamp = 2;
+  string session_id = 3;
+  string content = 4;  // dequeue/remove only
+}
+
+message LastPromptLine {
+  string last_prompt = 1;  // truncated with "…"; occasionally absent
+  string leaf_uuid = 2;
+  string session_id = 3;
+}
+
+message AiTitleLine {
+  string ai_title = 1;
+  string session_id = 2;
+}
+
+message PrLinkLine {
+  string session_id = 1;
+  int64 pr_number = 2;
+  string pr_url = 3;
+  string pr_repository = 4;
+  string timestamp = 5;
+}
+
+message FileHistorySnapshotLine {
+  string message_id = 1;
+  google.protobuf.Struct snapshot = 2;  // {messageId, timestamp, trackedFileBackups}
+  bool is_snapshot_update = 3;
+}
+
+message FileBackup {
+  string backup_file_name = 1;  // "hash@vN"
+  int64 version = 2;
+  string backup_time = 3;
+}
+
+message FileHistoryDeltaLine {
+  string message_id = 1;
+  string snapshot_message_id = 2;
+  string tracking_path = 3;
+  FileBackup backup = 4;
+  string timestamp = 5;
+}
+
+// ---------------------------------------------------------------------------
+// attachment lines — every observed attachment.type (census B5)
+// ---------------------------------------------------------------------------
+
+message AttachmentLine {
+  LineEnvelope envelope = 1;
+  oneof attachment {
+    HookSuccessAttachment hook_success = 2;
+    HookNonBlockingErrorAttachment hook_non_blocking_error = 3;
+    HookBlockingErrorAttachment hook_blocking_error = 4;
+    DeferredToolsDeltaAttachment deferred_tools_delta = 5;
+    SkillListingAttachment skill_listing = 6;
+    AgentListingDeltaAttachment agent_listing_delta = 7;
+    TaskReminderAttachment task_reminder = 8;
+    AutoModeAttachment auto_mode = 9;
+    EditedTextFileAttachment edited_text_file = 10;
+    DiagnosticsAttachment diagnostics = 11;
+    CommandPermissionsAttachment command_permissions = 12;
+    QueuedCommandAttachment queued_command = 13;
+    ReadTruncationNoticeAttachment read_truncation_notice = 14;
+    StructuredOutputAttachment structured_output = 15;
+    CompactFileReferenceAttachment compact_file_reference = 16;
+    ContextTipAttachment context_tip = 17;
+    DateChangeAttachment date_change = 18;
+    NestedMemoryAttachment nested_memory = 19;
+    FileAttachment file = 20;
+    UltrathinkEffortAttachment ultrathink_effort = 21;
+    DynamicSkillAttachment dynamic_skill = 22;
+    UltraEffortEnterAttachment ultra_effort_enter = 23;
+    UltraEffortExitAttachment ultra_effort_exit = 24;
+    PlanModeExitAttachment plan_mode_exit = 25;
+  }
+}
+
+// hook_success / hook_non_blocking_error / hook_blocking_error share one
+// field set (census).
+message HookSuccessAttachment {
+  string command = 1;
+  string content = 2;
+  int64 duration_ms = 3;
+  int64 exit_code = 4;
+  string hook_event = 5;
+  string hook_name = 6;
+  string stderr = 7;
+  string stdout = 8;
+  string tool_use_id = 9;  // disk key `toolUseID`
+}
+
+message HookNonBlockingErrorAttachment {
+  HookSuccessAttachment fields = 1;
+}
+
+message HookBlockingErrorAttachment {
+  HookSuccessAttachment fields = 1;
+}
+
+message DeferredToolsDeltaAttachment {
+  repeated string added_lines = 1;
+  repeated string added_names = 2;
+  repeated string readded_names = 3;
+  repeated string removed_names = 4;
+  repeated string needs_auth_mcp_servers = 5;
+  repeated string pending_mcp_servers = 6;
+}
+
+message SkillListingAttachment {
+  string content = 1;
+  bool is_initial = 2;
+  repeated string names = 3;
+  int64 skill_count = 4;
+}
+
+message AgentListingDeltaAttachment {
+  repeated string added_lines = 1;
+  repeated string added_types = 2;
+  bool is_initial = 3;
+  repeated string removed_types = 4;
+  bool show_concurrency_note = 5;
+}
+
+message TaskReminderAttachment {
+  string content = 1;
+  int64 item_count = 2;
+}
+
+message AutoModeAttachment {
+  google.protobuf.Struct auto_mode_consent_flow = 1;
+}
+
+message EditedTextFileAttachment {
+  string filename = 1;
+  string snippet = 2;
+}
+
+message DiagnosticsAttachment {
+  google.protobuf.Struct files = 1;
+  bool is_new = 2;
+}
+
+message CommandPermissionsAttachment {
+  repeated string allowed_tools = 1;
+}
+
+message QueuedCommandAttachment {
+  string command_mode = 1;
+  string prompt = 2;
+  string timestamp = 3;
+  Origin origin = 4;
+}
+
+message ReadTruncationNoticeAttachment {
+  google.protobuf.Struct payload = 1;  // shape sparse/variable in census
+}
+
+message StructuredOutputAttachment {
+  google.protobuf.Struct data = 1;
+  string tool_use_id = 2;  // disk key `toolUseID`
+}
+
+message CompactFileReferenceAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message ContextTipAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message DateChangeAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message NestedMemoryAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message FileAttachment {
+  string content = 1;
+  string display_path = 2;
+  string filename = 3;
+}
+
+message UltrathinkEffortAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message DynamicSkillAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message UltraEffortEnterAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message UltraEffortExitAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+message PlanModeExitAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Sidechain companion metadata (agent-<id>.meta.json)
+// ---------------------------------------------------------------------------
+
+message AgentMetaJson {
+  string agent_type = 1;
+  string description = 2;
+  string tool_use_id = 3;
+  int64 spawn_depth = 4;
+  string model = 5;
+}
