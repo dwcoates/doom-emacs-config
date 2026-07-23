@@ -562,6 +562,14 @@ cherry-pick and writes the resulting transition into the SSM.
 - Status/tail rows read `WorkspaceState`/`TaskCatalog` instead of deriving
   from raw frames; typing keeps flowing via `TypingDelta` into the existing
   `smooth.ts` reveal.
+- **Scope: protobuf adoption for the ALREADY-supported shapes only.** No new
+  visual support is added for shapes the webapp does not currently render;
+  unsupported shapes are ignored explicitly (typed, logged at debug, never
+  crashed on).
+- **Coverage-enumeration deliverable:** the cutover's final report MUST
+  enumerate every protobuf shape the web frontend does not support visually
+  (even where visual support would make little sense), so unsupported
+  coverage is a known, listed quantity rather than an unknown.
 
 ## 12. Logging & instrumentation contract
 
@@ -867,6 +875,9 @@ the G13 agent from the real corpus.
   unchanged).
 - Tests: vitest over frame fixtures; adapter parity with catalogue
   scenarios.
+- Deliverable beyond code: the complete enumeration of protobuf shapes the
+  web frontend does NOT support visually (§11), handed to the stitch phase
+  for the final report.
 
 **G12 supervision + install:**
 - `launchd/com.agentrepl.shim-store.plist`,
