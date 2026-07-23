@@ -698,7 +698,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │       │       └── state.go (+_test)                    A
     │       ├── frontend/                                      (G9)
     │       │   ├── AGENTS.md                                A ✓
-    │       │   ├── server.go                                A
+    │       │   ├── server.go (+_test)                       A
     │       │   ├── translate.go (+_test)                    A
     │       │   └── commands.go (+_test)                     A
     │       ├── server/server.go                             M   (drop HTTP frontend + async_live; wire new modules)
