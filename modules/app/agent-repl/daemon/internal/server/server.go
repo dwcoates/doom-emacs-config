@@ -616,7 +616,9 @@ func (s *Server) handleWorkspaceCommand(w http.ResponseWriter, r *http.Request) 
 }
 
 // decodeWorkspaceCommand decodes one POST /workspace-command array entry
-// by its "type" tag. Only the sidebar's entry kinds are accepted:
+// by its "type" tag. Only the sidebar's own gestures are accepted — the
+// repo actions ("switch", "fold") and the Task view's ("set-view",
+// "task-create", "task-toggle-done", "task-open", "task-add-workspace").
 // "create" stays on its purpose-built routes (add-support), which own
 // the composition of what gets created.
 func decodeWorkspaceCommand(raw json.RawMessage) (workspacecmd.Entry, error) {
@@ -640,8 +642,38 @@ func decodeWorkspaceCommand(raw json.RawMessage) (workspacecmd.Entry, error) {
 			return nil, fmt.Errorf("invalid fold entry: %v", err)
 		}
 		entry = e
+	case "set-view":
+		var e workspacecmd.SetView
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid set-view entry: %v", err)
+		}
+		entry = e
+	case "task-create":
+		var e workspacecmd.TaskCreate
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid task-create entry: %v", err)
+		}
+		entry = e
+	case "task-toggle-done":
+		var e workspacecmd.TaskToggleDone
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid task-toggle-done entry: %v", err)
+		}
+		entry = e
+	case "task-open":
+		var e workspacecmd.TaskOpen
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid task-open entry: %v", err)
+		}
+		entry = e
+	case "task-add-workspace":
+		var e workspacecmd.TaskAddWorkspace
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid task-add-workspace entry: %v", err)
+		}
+		entry = e
 	default:
-		return nil, fmt.Errorf("unsupported type %q (want %q or %q)", head.Type, "switch", "fold")
+		return nil, fmt.Errorf("unsupported type %q", head.Type)
 	}
 	if err := entry.Validate(); err != nil {
 		return nil, err

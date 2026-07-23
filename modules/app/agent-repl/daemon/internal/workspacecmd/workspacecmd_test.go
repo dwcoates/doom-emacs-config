@@ -202,6 +202,36 @@ func TestEmitRejectsInvalidCommands(t *testing.T) {
 			cmds:    []Entry{Fold{Type: "switch", RepoKey: "repo-key"}},
 			wantErr: `type must be "fold"`,
 		},
+		{
+			name:    "bad view on set-view",
+			cmds:    []Entry{NewSetView("kanban")},
+			wantErr: `view must be "repository" or "task"`,
+		},
+		{
+			name:    "wrong type tag on set-view",
+			cmds:    []Entry{SetView{Type: "fold", View: "task"}},
+			wantErr: `type must be "set-view"`,
+		},
+		{
+			name:    "wrong type tag on task-create",
+			cmds:    []Entry{TaskCreate{Type: "fold"}},
+			wantErr: `type must be "task-create"`,
+		},
+		{
+			name:    "missing id on task-toggle-done",
+			cmds:    []Entry{NewTaskToggleDone("")},
+			wantErr: "id is required",
+		},
+		{
+			name:    "missing id on task-open",
+			cmds:    []Entry{NewTaskOpen("")},
+			wantErr: "id is required",
+		},
+		{
+			name:    "missing id on task-add-workspace",
+			cmds:    []Entry{NewTaskAddWorkspace("")},
+			wantErr: "id is required",
+		},
 	}
 
 	for _, tc := range tests {
