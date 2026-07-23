@@ -101,11 +101,32 @@ export interface RepoGroup {
   key: string;
   label: string;
   folded: boolean;
+  /** The section's done state. Meaningful only for task sections (the Task
+   * view); repo and Recently-Merged sections always carry `false`. Emacs
+   * sends it on every group so validation stays one code path. */
+  done: boolean;
   rows: WorkspaceRow[];
 }
 
+/** Which grouping the rail shows: repositories (default) or user tasks. */
+export type SidebarView = "repository" | "task";
+
+/** Every view the roster may carry; anything else is a contract breach. */
+const SIDEBAR_VIEWS: ReadonlySet<string> = new Set(["repository", "task"]);
+
+/** Section key of the catch-all "No task" group (matches the Emacs
+ * `agent-repl--sidebar-no-task-key`): workspaces in no task collect here,
+ * and it carries no checkbox / open / add affordances. */
+export const NO_TASK_KEY = "__no_task__";
+
 export interface WorkspaceRoster {
+  /** The active grouping; the webapp renders `repos` or `tasks` per this. */
+  view: SidebarView;
   repos: RepoGroup[];
+  /** Task sections when `view === "task"`, otherwise empty. Shaped as
+   * RepoGroups (plus the `done` flag) so they validate and render through
+   * the same group path the repos use. */
+  tasks: RepoGroup[];
   /** Workspaces merged inside the current activity window, newest first, or
    * null when none qualify. Shaped as a RepoGroup so it folds and validates
    * through the repo path; Emacs wipes it after a 6h inactivity gap. */
@@ -117,7 +138,12 @@ export interface WorkspaceRoster {
 /** A gesture relayed to Emacs via POST /workspace-command (a JSON array). */
 export type WorkspaceCommand =
   | { type: "switch"; dir: string }
-  | { type: "fold"; repo_key: string; folded: boolean };
+  | { type: "fold"; repo_key: string; folded: boolean }
+  | { type: "set-view"; view: SidebarView }
+  | { type: "task-create" }
+  | { type: "task-toggle-done"; id: string }
+  | { type: "task-open"; id: string }
+  | { type: "task-add-workspace"; id: string };
 
 /** Cap on the payload snippet a breach log line carries: the daemon
  * clamps per-message size anyway, and a full roster/row dump would drown
@@ -200,6 +226,7 @@ function validateGroup(value: unknown, path: string): RepoGroup {
     key: asString(value.key, `${path}.key`),
     label: asString(value.label, `${path}.label`),
     folded: asBoolean(value.folded, `${path}.folded`),
+    done: asBoolean(value.done, `${path}.done`),
     rows: value.rows.map((r, i) => validateRow(r, `${path}.rows[${i}]`)),
   };
 }
@@ -210,8 +237,19 @@ function validateGroup(value: unknown, path: string): RepoGroup {
 export function validateWorkspaceRoster(value: unknown): WorkspaceRoster {
   if (!isRecord(value)) fail("roster", "an object", value);
   if (!Array.isArray(value.repos)) fail("roster.repos", "an array", value.repos);
+  if (!Array.isArray(value.tasks)) fail("roster.tasks", "an array", value.tasks);
+  const view = asString(value.view, "roster.view");
+  // An unrecognized view is an invariant violation, never a default: a new
+  // Emacs-side grouping must be taught here, not silently painted as one
+  // the webapp already knows.
+  if (!SIDEBAR_VIEWS.has(view)) {
+    log("error", `workspace roster: unknown view ${JSON.stringify(view)} — roster: ${describeBreach(value)}`);
+    throw new Error(`workspace roster: unknown view ${JSON.stringify(view)} at roster.view`);
+  }
   return {
+    view: view as SidebarView,
     repos: value.repos.map((g, i) => validateGroup(g, `roster.repos[${i}]`)),
+    tasks: value.tasks.map((g, i) => validateGroup(g, `roster.tasks[${i}]`)),
     // Explicit null is the "no recent merges" signal Emacs sends; anything
     // else must be a well-formed group, so an absent key falls through to
     // validateGroup and fails loudly rather than defaulting to empty.
@@ -342,10 +380,65 @@ function repoSectionHtml(
 }
 
 /**
- * The whole rail: header (title, total count, any transient command-failure
- * note) over the scrolling repo sections. Pure so the render is testable
- * without a DOM; OPEN is the caller-owned expansion state that must survive
- * every roster push.
+ * A task section: a checkbox + label (the label opens the task's org notes,
+ * the checkbox toggles done), a row count, and an add-workspace `+`. A done
+ * task greys and strikes through. The catch-all "No task" group carries none
+ * of those affordances — it is a bucket, not a task. Reuses the `.repo`
+ * section shell (and thus the shared `.rows` / `.ws` styling) but its header
+ * is `.task-head`, not the fold-toggling `.repo-head`: tasks do not fold.
+ */
+export function taskSectionHtml(
+  group: RepoGroup,
+  navDir: string | null,
+  open: ReadonlySet<string>,
+  nowMs: number,
+  monitoring = false,
+): string {
+  const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring)).join("");
+  const isNoTask = group.key === NO_TASK_KEY;
+  const doneCls = group.done ? " done" : "";
+  const id = escapeHtml(group.key);
+  const label = escapeHtml(group.label);
+  // The catch-all bucket is inert: no checkbox, no notes to open, nothing
+  // to add a workspace to (a workspace "in no task" is the absence of a
+  // membership, not a task with an org file).
+  const head = isNoTask
+    ? `<span class="task-label no-task">${label}</span><span class="n">(${countRows(group.rows)})</span>`
+    : `<span class="task-check${doneCls}" data-task-check data-task-id="${id}" title="toggle done">${
+        group.done ? "✓" : ""
+      }</span><span class="task-label${doneCls}" data-task-open data-task-id="${id}" title="open notes">${label}</span><span class="n">(${countRows(
+        group.rows,
+      )})</span><span class="task-add" data-task-add data-task-id="${id}" title="add workspace to task">+</span>`;
+  return `<section class="repo task-section${doneCls}">
+    <div class="task-head">${head}</div>
+    <div class="rows">${rows}</div>
+  </section>`;
+}
+
+/** The header's view selector: a two-button segmented control plus, in the
+ * Task view, the `+` that creates a new task. Emacs owns the view and the
+ * task model, so each control POSTs a command rather than mutating locally. */
+function viewSelectorHtml(view: SidebarView): string {
+  const btn = (v: SidebarView, text: string, title: string): string =>
+    `<button class="sb-view-btn${view === v ? " active" : ""}" data-set-view="${v}" title="${title}">${text}</button>`;
+  const add =
+    view === "task"
+      ? `<button class="sb-add" data-add-task title="New task">+</button>`
+      : "";
+  return `<span class="sb-views">${btn("repository", "Repos", "Group by repository")}${btn(
+    "task",
+    "Tasks",
+    "Group by task",
+  )}</span>${add}`;
+}
+
+/**
+ * The whole rail: header (title, total count, view selector, any transient
+ * command-failure note) over the scrolling sections. The active view
+ * (`roster.view`) picks the grouping — repo sections or task sections —
+ * while the Recently-Merged section renders under both. Pure so the render
+ * is testable without a DOM; OPEN is the caller-owned expansion state that
+ * must survive every roster push.
  */
 export function sidebarHtml(
   roster: WorkspaceRoster,
@@ -354,11 +447,15 @@ export function sidebarHtml(
   errorNote: string | null,
   monitoring = false,
 ): string {
-  const total = roster.repos.reduce((n, g) => n + countRows(g.rows), 0);
+  const taskView = roster.view === "task";
+  const groups = taskView ? roster.tasks : roster.repos;
+  const total = groups.reduce((n, g) => n + countRows(g.rows), 0);
   const err = errorNote === null ? "" : `<span class="sb-err">${escapeHtml(errorNote)}</span>`;
-  const repos = roster.repos
-    .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring))
-    .join("");
+  const sections = taskView
+    ? roster.tasks.map((g) => taskSectionHtml(g, roster.navDir, open, nowMs, monitoring)).join("")
+    : roster.repos
+        .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring))
+        .join("");
   // Settled merges render last, in their own section, so they read as
   // history rather than as live work sitting in the repo they came from.
   const merged =
@@ -366,11 +463,12 @@ export function sidebarHtml(
       ? ""
       : repoSectionHtml(roster.recentlyMerged, roster.navDir, open, nowMs, "merged-section");
   return `<div class="sb-head">
-      <span class="sb-title">Workspaces</span>
+      <span class="sb-title">${taskView ? "Tasks" : "Workspaces"}</span>
       <span class="sb-count">${total}</span>
+      ${viewSelectorHtml(roster.view)}
       ${err}
     </div>
-    <div class="sb-scroll">${repos}${merged}</div>`;
+    <div class="sb-scroll">${sections}${merged}</div>`;
 }
 
 /** The header note shown when a POSTed command did not land. */
@@ -500,7 +598,47 @@ export class WorkspaceSidebar {
     this.render();
   }
 
+  /** The task id an ancestor element addresses, or throw — a task control
+   * without its id means the render and the handler disagree. */
+  private taskId(el: Element): string {
+    const id = el.getAttribute("data-task-id");
+    if (id === null) throw new Error("workspace sidebar: task control without an id");
+    return id;
+  }
+
   private onClick(target: HTMLElement): void {
+    // View selector + task controls sit in the header, outside any row, so
+    // they are classified first and each POSTs its command to Emacs — the
+    // roster (view, task list, membership) is Emacs-owned, never mutated
+    // optimistically here.
+    const viewBtn = target.closest("[data-set-view]");
+    if (viewBtn) {
+      const view = viewBtn.getAttribute("data-set-view");
+      if (view !== "repository" && view !== "task") {
+        throw new Error(`workspace sidebar: bad view ${JSON.stringify(view)}`);
+      }
+      this.post([{ type: "set-view", view }]);
+      return;
+    }
+    if (target.closest("[data-add-task]")) {
+      this.post([{ type: "task-create" }]);
+      return;
+    }
+    const check = target.closest("[data-task-check]");
+    if (check) {
+      this.post([{ type: "task-toggle-done", id: this.taskId(check) }]);
+      return;
+    }
+    const add = target.closest("[data-task-add]");
+    if (add) {
+      this.post([{ type: "task-add-workspace", id: this.taskId(add) }]);
+      return;
+    }
+    const openTask = target.closest("[data-task-open]");
+    if (openTask) {
+      this.post([{ type: "task-open", id: this.taskId(openTask) }]);
+      return;
+    }
     // The chevron sits inside the row, so it must claim the click first
     // or every expansion would also switch workspaces.
     if (target.closest("[data-chev]")) {
