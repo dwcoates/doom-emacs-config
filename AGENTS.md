@@ -429,11 +429,15 @@ Prefer adding a new entry under an existing relevant section over creating a new
 
 ## Wire-protocol breaking changes require user approval
 
-The agent-shim protobuf protocol shared by the agent-repl daemon and the shim ecosystem (the per-vendor agent-shim such as `claude-shim`, its `shim-sidecar` JSONL reader, and the `shim-store`) may evolve freely in backward-compatible ways, but any BREAKING change to message shapes or semantics requires explicit user approval first — never break the contract silently, even though there are no external consumers.
+The agent-shim protobuf protocol shared by the agent-repl daemon and the shim ecosystem (the per-vendor agent-shim such as `claude-shim`, its `shim-claude-sidecar` JSONL reader, and the `shim-store`) may evolve freely in backward-compatible ways, but any BREAKING change to message shapes or semantics requires explicit user approval first — never break the contract silently, even though there are no external consumers.
+
+## The protocol schema is TREATED as vendor-agnostic
+
+The `agentshim.data.v1` shapes were derived from the Claude harness, so the schema is not factually vendor-agnostic — but it is BELIEVED and TREATED as vendor-agnostic everywhere: no consumer special-cases a vendor. When adding a new vendor (e.g. a `codex-shim`), RESOLVE any incongruity by revising the API (a breaking change is the expected remedy, gated on the approval rule above) — never by bolting vendor side-channels onto the protocol. See `modules/app/agent-repl/proto/AGENTS.md`.
 
 ## The shim ecosystem exclusively facilitates agent-backend interaction
 
-The agent-shim (per vendor: `claude-shim`, a future `codex-shim`, …), the `shim-sidecar`, and the `shim-store` exist for exactly one purpose: facilitating interaction with the agent vendor's backend and surfacing it as agent-shim protobuf messages. Frontend serving, merge/workspace state, and render-state derivation never live in the shim ecosystem — those belong to the daemon.
+The agent-shim (per vendor: `claude-shim`, a future `codex-shim`, …), the `shim-claude-sidecar`, and the `shim-store` exist for exactly one purpose: facilitating interaction with the agent vendor's backend and surfacing it as agent-shim protobuf messages. Frontend serving, merge/workspace state, and render-state derivation never live in the shim ecosystem — those belong to the daemon.
 
 ## GUI nomenclature: tail status rows
 
