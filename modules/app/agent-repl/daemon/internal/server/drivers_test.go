@@ -222,3 +222,6 @@ func (nopHandler) CreateSession(context.Context, string, string, *frontendv1.Cre
 func (nopHandler) DeleteSession(context.Context, string, string, *frontendv1.DeleteSessionCmd) error {
 	return nil
 }
+func (nopHandler) Shutdown(context.Context, string, string, *frontendv1.ShutdownCmd) error {
+	return nil
+}

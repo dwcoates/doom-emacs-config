@@ -54,6 +54,10 @@ func (m *mockHandler) DeleteSession(_ context.Context, ws, rid string, _ *fronte
 	m.called, m.lastWorkspace, m.lastRequestID = "delete_session", ws, rid
 	return m.err
 }
+func (m *mockHandler) Shutdown(_ context.Context, ws, rid string, _ *frontendv1.ShutdownCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "shutdown", ws, rid
+	return m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -105,6 +109,11 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "delete session",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r9", Workspace: "ws9", Command: &frontendv1.FrontendCommand_DeleteSession{DeleteSession: &frontendv1.DeleteSessionCmd{SessionId: "s_9"}}},
 			wantHit: "delete_session",
+		},
+		{
+			name:    "shutdown",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r10", Command: &frontendv1.FrontendCommand_Shutdown{Shutdown: &frontendv1.ShutdownCmd{}}},
+			wantHit: "shutdown",
 		},
 	}
 	for _, tc := range tests {

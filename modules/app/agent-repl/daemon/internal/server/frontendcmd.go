@@ -150,15 +150,20 @@ type commandHandler struct {
 	resyncer Resyncer
 	// sessions backs the createSession/deleteSession commands. Required.
 	sessions SessionCreateDeleter
+	// shutdown begins the daemon's graceful teardown (the same func POST
+	// /shutdown drives). Nil makes the shutdown command a loud failing ack (the
+	// capability is unconfigured), never a silent no-op.
+	shutdown func()
 	logf     func(string, ...any)
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
 
 // newCommandHandler validates its dependencies and returns the handler. The
-// resyncer is optional (nil-safe); the three routers and the session-lifecycle
-// binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, logf func(string, ...any)) (*commandHandler, error) {
+// resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
+// shutdown fails the command loudly); the three routers and the
+// session-lifecycle binding are required.
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), logf func(string, ...any)) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -172,7 +177,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, logf: logf}, nil
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, logf: logf}, nil
 }
 
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
@@ -253,6 +258,19 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error {
 	h.logf("frontend cmd: delete_session ws=%s request_id=%s session=%s", workspace, requestID, cmd.GetSessionId())
 	return h.sessions.DeleteSession(cmd.GetSessionId())
+}
+
+// Shutdown begins the daemon's graceful teardown — the same func POST /shutdown
+// drives — asynchronously, so the ok CommandAck is delivered before the process
+// exits. An unconfigured shutdown is a loud failing ack (the capability is
+// absent), never a silent no-op.
+func (h *commandHandler) Shutdown(_ context.Context, workspace, requestID string, _ *frontendv1.ShutdownCmd) error {
+	h.logf("frontend cmd: shutdown ws=%s request_id=%s", workspace, requestID)
+	if h.shutdown == nil {
+		return fmt.Errorf("server: shutdown not supported by this daemon")
+	}
+	go h.shutdown()
+	return nil
 }
 
 // ssmSnapshotProvider implements frontend.StateProvider from the SSM's
