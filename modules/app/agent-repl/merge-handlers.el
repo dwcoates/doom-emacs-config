@@ -40,6 +40,17 @@
 
 (require 'cl-lib)
 
+;; Geometry + transport helpers used by the daemon-routed cherry-pick path.
+;; Defined in worktree.el / frontend-uds.el; resolved at call time (all part
+;; of the same module).
+(declare-function agent-repl--merge-target-dir-for-ws "worktree" (source-ws))
+(declare-function agent-repl--workspace-branch "worktree" (ws))
+(declare-function agent-repl--cherry-pick-base "worktree" (root target-branch))
+(declare-function agent-repl--uds-send-command "frontend-uds"
+                  (field payload &optional workspace process))
+(declare-function agent-repl--uds-track-command "frontend-uds"
+                  (request-id field workspace &optional on-failure))
+
 (defvar agent-repl--merge-handler-registry nil
   "Alist mapping handler symbol → handler function.
 Each function is called with `(TARGET-WS &optional ARGS)' where
@@ -198,44 +209,153 @@ the caller-supplied REPO-ROOT as-is so the legacy behaviour
 remains the safety net.
 
 Logs both the caller-supplied REPO-ROOT and the resolved root so
-failure modes are easy to trace.  Signals `user-error' if the
-resolved symbol has no entry in the registry — defensive: the
-resolver guarantees a valid symbol, but an unloaded handler file
-could leave the registry short an entry."
-  (let* ((resolved-root (or (and repo-root
-                                 (agent-repl--main-worktree-path repo-root))
-                            repo-root))
-         (descriptor (if onto-master
-                         (cons 'onto-master nil)
-                       (agent-repl--resolve-merge-handler resolved-root)))
-         (symbol (car descriptor))
-         (args (cdr descriptor))
-         (entry (assq symbol agent-repl--merge-handler-registry))
-         (fn (and entry (cdr entry))))
+failure modes are easy to trace.
+
+The `cherry-pick' resolution is DAEMON-ROUTED (design §4.6/§9.3): rather
+than invoking a local handler, it sends a `mergeWorkspace' command over
+the frontend UDS via `agent-repl--merge-dispatch-cherry-pick-over-uds' —
+the daemon runs the cherry-pick and publishes the merge state, which
+Emacs reacts to via the pushed-state hook.  Every OTHER handler
+\(onto-master / refresh-master-from-origin / …) is DAEMON-PORT PENDING and
+still runs locally through the registry.  Signals `user-error' if a
+non-cherry-pick resolved symbol has no registry entry — defensive: the
+resolver guarantees a registered symbol, but a forced `onto-master' (or
+an unloaded handler file) could leave the registry short an entry."
+  (let ((symbol (agent-repl--resolve-merge-handler-symbol repo-root onto-master)))
     (when (fboundp 'agent-repl--log)
       (agent-repl--log target-ws
-                        "dispatch-merge-handler: ws=%s repo-root=%s resolved-root=%s onto-master=%s handler=%S args=%S"
+                        "dispatch-merge-handler: ws=%s repo-root=%s onto-master=%s handler=%S"
                         target-ws (or repo-root "nil")
-                        (or resolved-root "nil") (if onto-master "t" "nil")
-                        symbol args))
-    (unless fn
-      (user-error "No merge handler registered for symbol '%s'" symbol))
-    (funcall fn target-ws args)))
+                        (if onto-master "t" "nil") symbol))
+    (if (eq symbol 'cherry-pick)
+        ;; DAEMON-ROUTED: send the merge command; the daemon owns execution
+        ;; and state.  No local git, no registry fn.
+        (agent-repl--merge-dispatch-cherry-pick-over-uds target-ws)
+      ;; DAEMON-PORT PENDING local handler — re-resolve for its ARGS.
+      (let* ((resolved-root (or (and repo-root
+                                     (agent-repl--main-worktree-path repo-root))
+                                repo-root))
+             (descriptor (if onto-master
+                             (cons 'onto-master nil)
+                           (agent-repl--resolve-merge-handler resolved-root)))
+             (args (cdr descriptor))
+             (entry (assq symbol agent-repl--merge-handler-registry))
+             (fn (and entry (cdr entry))))
+        (unless fn
+          (user-error "No merge handler registered for symbol '%s'" symbol))
+        (funcall fn target-ws args)))))
 
-;;; Built-in handlers
+(defun agent-repl--resolve-merge-handler-symbol (repo-root &optional onto-master)
+  "Resolve REPO-ROOT to the merge-handler SYMBOL (no args), honoring ONTO-MASTER.
+Normalises REPO-ROOT to the repo's MAIN worktree before resolving (the
+`.eld'/override lookups are keyed there — see `--dispatch-merge-handler').
+When ONTO-MASTER is non-nil the symbol is unconditionally `onto-master'.
+Shared by `agent-repl--workspace-merge-async' (to branch the daemon-routed
+cherry-pick path off the local worker path) and
+`agent-repl--dispatch-merge-handler'."
+  (if onto-master
+      'onto-master
+    (car (agent-repl--resolve-merge-handler
+          (or (and repo-root (agent-repl--main-worktree-path repo-root))
+              repo-root)))))
 
-(defun agent-repl--merge-handler-cherry-pick (target-ws &optional _args)
-  "Cherry-pick TARGET-WS's commits into its source workspace.
-Default handler — wraps `agent-repl--workspace-merge-into-source'
-with the same silent + auto-resolve semantics that
-`agent-repl--handle-merge-command' has always used for skill-invoked
-merges.  Ignores ARGS (none defined for this handler)."
-  (agent-repl--workspace-merge-into-source target-ws t t))
+;;; Daemon-routed cherry-pick dispatch (design §4.6/§9.3)
+;;
+;; The cherry-pick driver moved to the daemon (daemon/internal/workspace/
+;; merge/).  Emacs no longer runs the merge; it owns the workspace->worktree
+;; geometry (the daemon has none) and supplies it with the command, then
+;; reacts to the pushed merge state (see the reactor + hook in worktree.el).
 
-(agent-repl--register-merge-handler 'cherry-pick
-                                     #'agent-repl--merge-handler-cherry-pick)
+(defun agent-repl--merge-cherry-pick-geometry (ws)
+  "Resolve WS's cherry-pick merge geometry as a plist.
+Returns (:source-branch B :source-dir S :target-dir T).  SIGNALS
+`user-error' (loud, after a log) when any component is missing/blank — the
+daemon has no workspace->worktree map, so an incomplete geometry would be a
+merge command it cannot act on (No-Silent-Fallbacks: never send a partial
+geometry)."
+  (let ((source-dir (agent-repl--ws-get ws :project-dir))
+        (target-dir (agent-repl--merge-target-dir-for-ws ws))
+        (source-branch (agent-repl--workspace-branch ws)))
+    (when (or (null source-dir) (and (stringp source-dir) (string-empty-p source-dir)))
+      (agent-repl--log ws "merge-cherry-pick-geometry: ws=%s MISSING source-dir — aborting" ws)
+      (user-error "Cannot merge '%s': no source worktree (:project-dir) recorded" ws))
+    (when (or (null target-dir) (and (stringp target-dir) (string-empty-p target-dir)))
+      (agent-repl--log ws "merge-cherry-pick-geometry: ws=%s MISSING target-dir — aborting" ws)
+      (user-error "Cannot merge '%s': could not resolve a merge target directory" ws))
+    (when (or (null source-branch) (and (stringp source-branch) (string-empty-p source-branch)))
+      (agent-repl--log ws "merge-cherry-pick-geometry: ws=%s MISSING source-branch — aborting" ws)
+      (user-error "Cannot merge '%s': could not resolve the source branch" ws))
+    (list :source-branch source-branch :source-dir source-dir :target-dir target-dir)))
 
-;;; PR merge-queue polling
+(defun agent-repl--merge-dispatch-cherry-pick-over-uds (ws)
+  "Send the daemon a `mergeWorkspace' cherry-pick command for WS.
+Resolves the geometry (`agent-repl--merge-cherry-pick-geometry'), stashes it
+plus the PRE-merge cherry-pick base (the reactive phone-home needs the
+base..branch range before the daemon advances the target) on WS's plist,
+marks WS `:daemon-merge-dispatched' so the pushed-state reactor knows this
+Emacs initiated the merge, and sends + tracks the command.  A rejected
+CommandAck surfaces loudly (frontend-uds) and its tracked on-failure
+callback clears the dispatch marker.  Returns the request-id."
+  (let* ((geom (agent-repl--merge-cherry-pick-geometry ws))
+         (source-branch (plist-get geom :source-branch))
+         (source-dir (plist-get geom :source-dir))
+         (target-dir (plist-get geom :target-dir))
+         (base (agent-repl--cherry-pick-base target-dir source-branch)))
+    (agent-repl--ws-put ws :resolved-target-dir target-dir)
+    (agent-repl--ws-put ws :merge-target-branch source-branch)
+    (agent-repl--ws-put ws :merge-base base)
+    (agent-repl--ws-put ws :daemon-merge-dispatched t)
+    (agent-repl--log ws
+                      "merge-dispatch-cherry-pick-over-uds: ws=%s source-branch=%s source-dir=%s target-dir=%s base=%s"
+                      ws source-branch source-dir target-dir (or base "nil"))
+    (let ((req (agent-repl--uds-send-command
+                "mergeWorkspace"
+                (list :handler "cherry-pick"
+                      :sourceBranch source-branch
+                      :sourceDir source-dir
+                      :targetDir target-dir)
+                ws)))
+      (agent-repl--uds-track-command
+       req "mergeWorkspace" ws
+       (lambda (err)
+         (agent-repl--ws-put ws :daemon-merge-dispatched nil)
+         (agent-repl--log ws
+                           "merge-dispatch-cherry-pick-over-uds: ws=%s command REJECTED err=%s — cleared dispatch marker"
+                           ws err)))
+      req)))
+
+(defun agent-repl--merge-resume-over-uds (ws)
+  "Send the daemon a `mergeWorkspace' resume for WS (resolve-and-continue).
+The design §9.3 handoff: after a human resolves the in-tree conflict the
+daemon left, this sets `conflict_resolved_continue' so the daemon runs
+`git add -u' + `cherry-pick --continue'.  Re-supplies the SAME geometry
+\(the daemon is stateless per call) via `agent-repl--merge-cherry-pick-geometry',
+which SIGNALS `user-error' if it cannot be resolved (No-Silent-Fallbacks).
+Returns the request-id."
+  (let* ((geom (agent-repl--merge-cherry-pick-geometry ws))
+         (source-branch (plist-get geom :source-branch))
+         (source-dir (plist-get geom :source-dir))
+         (target-dir (plist-get geom :target-dir)))
+    (agent-repl--log ws
+                      "merge-resume-over-uds: ws=%s source-branch=%s source-dir=%s target-dir=%s"
+                      ws source-branch source-dir target-dir)
+    (let ((req (agent-repl--uds-send-command
+                "mergeWorkspace"
+                (list :handler "cherry-pick"
+                      :conflictResolvedContinue t
+                      :sourceBranch source-branch
+                      :sourceDir source-dir
+                      :targetDir target-dir)
+                ws)))
+      (agent-repl--uds-track-command req "mergeWorkspace" ws)
+      req)))
+
+;;; DAEMON-PORT PENDING: PR merge-queue polling
+;;
+;; The following handlers (refresh-master-from-origin, onto-master, and the
+;; cee-agent reinstall-and-bounce) were deliberately NOT ported to the daemon
+;; in this cutover.  They still run locally through the registry; only the
+;; cherry-pick driver moved.  Do not delete — port later.
 
 (defcustom agent-repl-pr-poll-interval 60
   "Seconds between successive `gh pr view' polls when waiting for a PR
@@ -480,7 +600,7 @@ SIGNALS `user-error' on a dirty main worktree (step 2)."
  'refresh-master-from-origin
  #'agent-repl--merge-handler-refresh-master-from-origin)
 
-;;; cee-agent reinstall-and-bounce (onto-master post-advance hook)
+;;; DAEMON-PORT PENDING: cee-agent reinstall-and-bounce (onto-master post-advance hook)
 
 (defconst agent-repl--cee-agent-dir-prefix "apps/cee-agent/"
   "Repo-relative directory whose changes trigger the reinstall-and-bounce.
