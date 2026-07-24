@@ -51,8 +51,9 @@ import {
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
-import { rebindSession, rememberResumeKeys } from "./rebind.js";
-import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
+import { decodeFrontendFrame } from "./frontend-proto.js";
+import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
+import { rebindSession } from "./rebind.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { fetchStatus, refreshStatus } from "./status.js";
@@ -107,14 +108,6 @@ async function boot(): Promise<void> {
   // onto a successor session id; every closure below reads the current
   // binding.
   let activeSessionId: string = joined;
-  // The claude_session_id already persisted for activeSessionId, so the
-  // per-frame hook below only touches localStorage on actual change.
-  let rememberedClaudeId = "";
-  // The last mid-task marker value written for the live session, so the
-  // per-frame sync below only touches localStorage when a turn actually
-  // starts or ends rather than on every streaming delta. Reset by swapTo
-  // alongside rememberedClaudeId when the view rebinds to a successor.
-  let midTaskActive: boolean | null = null;
   let ws: WsClient;
 
   // Delivery-path diagnostics (§2.15): console always, mirrored to the
@@ -128,7 +121,28 @@ async function boot(): Promise<void> {
   setLogger(wslog);
 
   const store = new ConversationStore((level, message) => clog(level, message));
+  // The one-change cutover seam: the daemon pushes `agentshim.frontend.v1`
+  // protojson frames, which decode (frontend-proto.ts) into effects
+  // (state-adapter.ts) the store ingests. The adapter's explicit-ignore path
+  // logs once per unsupported shape at debug — mapped to `info` here since the
+  // client-log channel has no debug level.
+  const adapter = new StateAdapter((level, message) =>
+    wslog.log(level === "debug" ? "info" : level, message),
+  );
   const feedEl = must("feed");
+  // The store/sidecar/shim degraded-state banner (design §11): a simple line
+  // pinned above the feed, styled as a warning, shown while a component is
+  // degraded and cleared on its recovery notice.
+  const degradedBannerEl = must("degraded-banner");
+  const showDegraded = (dn: DegradedBanner): void => {
+    if (dn.recovered) {
+      degradedBannerEl.hidden = true;
+      degradedBannerEl.textContent = "";
+      return;
+    }
+    degradedBannerEl.textContent = `degraded: ${dn.component} — ${dn.reason}`;
+    degradedBannerEl.hidden = false;
+  };
   // The search's echo area: isearch keeps its query out of the text being
   // searched, and so does this — the composer's draft stays untouched while
   // a search runs, and the query shows up here instead.
@@ -301,7 +315,7 @@ async function boot(): Promise<void> {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
     // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, store.taskRoster), {
       agentsOpen: counterMenu === "agents",
       tasksOpen: counterMenu === "tasks",
       tokensOpen: counterMenu === "tokens",
@@ -432,21 +446,15 @@ async function boot(): Promise<void> {
     if (shown.pending) frames.schedule();
   };
 
-  // Renders are coalesced onto animation frames: a message burst — the
-  // backlog draining when this webview's hidden workspace is switched back
-  // to, a reconnect's replay, a fast delta stream — otherwise runs a full
-  // feed render per message, and that churn is the switch-in jitter. The
-  // paint decides chrome-only vs full feed when it FIRES, not when it was
-  // asked for: a replay that completes between the two must paint the feed,
-  // not just the chrome.
+  // Renders are coalesced onto animation frames: a burst of ingested effects
+  // — the backlog draining when this webview's hidden workspace is switched
+  // back to, a reconnect's snapshot, a fast delta stream — otherwise runs a
+  // full feed render per effect, and that churn is the switch-in jitter. One
+  // paint drains however many effects landed since it was scheduled.
   const frames = new RenderCoalescer(
     windowFrameHost(window),
     () => {
-      if (store.replaying) {
-        renderChrome();
-      } else {
-        rerender();
-      }
+      rerender();
     },
     {
       // Stall watchdog: a webview whose WebKit process wrongly believes
@@ -478,8 +486,6 @@ async function boot(): Promise<void> {
     clog("warn", `session rebind: ${activeSessionId} -> ${next}`);
     ws.close();
     activeSessionId = next;
-    rememberedClaudeId = "";
-    midTaskActive = null;
     // A paint scheduled against the dead session would render the
     // just-reset (empty) store; the successor's hello drives the next one.
     frames.cancel();
@@ -497,6 +503,10 @@ async function boot(): Promise<void> {
     history.replaceState(null, "", url.toString());
     spinnerEl.classList.remove("alarm");
     remediationEl.textContent = "";
+    // The successor is a fresh component set: any degraded banner belonged to
+    // the dead session and must not carry over.
+    degradedBannerEl.hidden = true;
+    degradedBannerEl.textContent = "";
     ws = makeClient(next);
     ws.connect();
   };
@@ -524,85 +534,33 @@ async function boot(): Promise<void> {
       url: `${wsBase}/sessions/${sessionId}/stream`,
       log: (message) => clog("warn", message),
       onMessage: (data) => {
-        let result;
+        // The one path: decode the protojson `frontend.v1` frame, map it to
+        // typed adapter effects, surface any degraded banner, then ingest the
+        // effects into the store. A malformed/unknown frame hard-errors (the
+        // decoder and adapter never degrade) — evidence first, then re-throw,
+        // exactly as the old raw path did.
+        let effects;
         try {
-          result = store.applyRaw(data);
+          effects = adapter.apply(decodeFrontendFrame(data));
         } catch (err) {
-          // A frame that throws before lastSeq advances re-throws on
-          // every replay of the same bytes — a permanent, previously
-          // silent feed stall. Evidence first, then the same throw.
           clog(
             "error",
-            `applyRaw threw: ${String(err)} — frame head: ${data.slice(0, 200)}`,
+            `frontend frame decode/adapt threw: ${String(err)} — frame head: ${data.slice(0, 200)}`,
           );
           throw err;
         }
-        if (store.state.claudeSessionId !== "" && store.state.claudeSessionId !== rememberedClaudeId) {
-          // The hello supplied (or updated) the durable CLI uuid: persist
-          // it so a future "session gone" can rebind this conversation.
-          rememberedClaudeId = store.state.claudeSessionId;
-          try {
-            rememberResumeKeys(localStorage, sessionId, {
-              claudeSessionId: store.state.claudeSessionId,
-              cwd: store.state.cwd,
-            });
-          } catch (err) {
-            clog("error", `rememberResumeKeys failed: ${String(err)}`);
-            throw err;
-          }
+        for (const effect of effects) {
+          if (effect.kind === "degraded") showDegraded(effect.value);
         }
-        if (result.restored) {
-          // A session stopped mid-task auto-resumes here: the mid-task
-          // marker outlived the killed turn, and the rehydrated turn is not
-          // live, so nudge the agent to continue without drawing a bubble
-          // (the nudge is meta-wrapped). Checked before the sync below so it
-          // reads the pre-boot marker, not the one this frame would write.
-          if (shouldAutoContinue(localStorage, store.state.claudeSessionId, store.state.turnInFlight)) {
-            ws.send({
-              type: "user-message",
-              request_id: crypto.randomUUID(),
-              content: hiddenContinueMessage(),
-            });
-          }
-          // Fresh-join replay complete: tail-first backfill render, so
-          // the newest message is on screen immediately with no scroll.
-          // Supersedes any coalesced paint — left pending, its rAF would
-          // fire next and flush the staged backfill in one gulp.
-          frames.cancel();
-          feed.renderRestored(store.state);
-          nav.reconcile(lastUserTurnId(store.state.items));
-          renderChrome();
-          // The restored render drew every block in full: mark them shown so
-          // a reconnect mid-stream types out only the growth that arrives
-          // AFTER the join, never re-typing prose already on screen.
-          smooth.markShown(store.state);
-        } else if (result.changed) {
-          // One paint per animation frame, however many messages land
-          // before it. During a replay the paint keeps the chrome live
-          // and leaves the feed to the completion render.
+        const result = store.ingest(effects);
+        if (result.changed) {
+          // One paint per animation frame, however many effects land before
+          // it. The coalescer decides chrome-only vs full feed when it fires.
           frames.schedule();
         }
-        // Track whether a turn is running so a kill mid-task leaves the
-        // marker set for the next boot's auto-resume above. The restored
-        // frame is skipped so its reconciled turnInFlight cannot clear the
-        // marker the auto-resume just consulted; replay frames are skipped
-        // so a transcript's turn toggles never thrash it. The guard writes
-        // localStorage only at a turn boundary, not on every delta.
-        if (
-          !result.restored &&
-          !store.replaying &&
-          store.state.claudeSessionId !== "" &&
-          store.state.turnInFlight !== midTaskActive
-        ) {
-          midTaskActive = store.state.turnInFlight;
-          try {
-            rememberMidTask(localStorage, store.state.claudeSessionId, store.state.turnInFlight);
-          } catch (err) {
-            clog("error", `rememberMidTask failed: ${String(err)}`);
-            throw err;
-          }
-        }
-        return result.send;
+        // The push channel carries no client-command replies now; the daemon
+        // resyncs via `StateSnapshot`, not a client replay-request.
+        return undefined;
       },
       onStatusChange: (connected) => {
         statusEl.textContent = connected ? "connected" : "disconnected";

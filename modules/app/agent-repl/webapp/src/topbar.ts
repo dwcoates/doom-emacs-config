@@ -32,7 +32,7 @@ import { CounterEntry } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
 import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.js";
-import { agentTasks, sessionTasks, tasksMenuHtml } from "./tasks.js";
+import { agentTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
 import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
 
@@ -143,6 +143,7 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
 export function sessionTopbarDatapoints(
   state: StoreState,
   parentWs: string | null,
+  tasks: readonly CounterEntry[],
 ): TopbarDatapoints {
   return {
     parentWs,
@@ -158,7 +159,10 @@ export function sessionTopbarDatapoints(
       models: state.modelUsage,
     },
     agents: sessionSubagents(state.items),
-    tasks: sessionTasks(state.items),
+    // The session's task roster is the daemon-resolved `TaskCatalog`, ingested
+    // as `ConversationStore.taskRoster` and handed in here — the webapp no
+    // longer derives it from tool cards (design §11).
+    tasks,
   };
 }
 
