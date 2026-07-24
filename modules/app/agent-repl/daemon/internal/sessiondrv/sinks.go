@@ -1,0 +1,233 @@
+package sessiondrv
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/frontend"
+)
+
+// Pusher is the slice of the frontend server the driver pushes to. Satisfied by
+// *frontend.Server; an interface so the sink translation is unit-testable with
+// a recording fake.
+type Pusher interface {
+	PushConversationDelta(*frontendv1.ConversationDelta)
+	PushTypingDelta(*frontendv1.TypingDelta)
+	PushTaskCatalog(*frontendv1.TaskCatalog)
+	PushDegradedNotice(*frontendv1.DegradedNotice)
+	PushWorkspaceState(*frontendv1.WorkspaceState)
+}
+
+// StateApplier is the slice of the SSM the driver feeds lifecycle events to.
+// Satisfied by *ssm.Manager.
+type StateApplier interface {
+	Apply(ev *corev1.Event) error
+}
+
+// ringCap bounds the per-session retained event ring the daemon keeps for the
+// live TaskCatalog rebuild and for resync replay. It is a bounded window: older
+// history is served by the store-backed replay on the next Subscribe (the store
+// is the durable record), so dropping the oldest here loses nothing durable.
+const ringCap = 4096
+
+// consumer is one session's translation of the merged shim event stream into
+// frontend pushes and SSM state. It implements shimclient's StateSink,
+// FrameSink and DegradedReporter for a single session bound to one workspace.
+// All three sink methods run on the shimclient demux goroutine in strict
+// arrival order; the ring mutex guards only the retained-events slice (touched
+// by both the demux and a concurrent resync).
+type consumer struct {
+	workspace string
+	sessionID string
+	push      Pusher
+	ssm       StateApplier
+	logf      func(string, ...any)
+	now       func() int64
+	// onSessionStarted fires when a SessionStarted event arrives, letting the
+	// driver arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
+	onSessionStarted func(*corev1.SessionStarted)
+
+	mu   sync.Mutex
+	ring []*corev1.Event
+}
+
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted)) *consumer {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return &consumer{
+		workspace:        workspace,
+		sessionID:        sessionID,
+		push:             push,
+		ssm:              applier,
+		logf:             logf,
+		now:              func() int64 { return time.Now().UnixMilli() },
+		onSessionStarted: onSessionStarted,
+	}
+}
+
+// retain appends ev to the bounded ring, dropping the oldest past ringCap.
+func (c *consumer) retain(ev *corev1.Event) {
+	c.mu.Lock()
+	c.ring = append(c.ring, ev)
+	if len(c.ring) > ringCap {
+		// Drop the oldest quarter in one shift so the trim is amortized O(1).
+		drop := ringCap / 4
+		c.ring = append(c.ring[:0], c.ring[drop:]...)
+	}
+	c.mu.Unlock()
+}
+
+// snapshotRing returns a shallow copy of the retained events for catalog
+// rebuilds and resync, taken under the lock so a concurrent retain cannot race
+// the read.
+func (c *consumer) snapshotRing() []*corev1.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*corev1.Event, len(c.ring))
+	copy(out, c.ring)
+	return out
+}
+
+// Apply feeds a lifecycle event to the SSM and refreshes the TaskCatalog on
+// task-lifecycle transitions (design step 1). It also fires onSessionStarted so
+// the driver can arm the metaprompt re-fire. An SSM apply error is loud-logged,
+// never swallowed — but it does not stop the stream (the SSM has already logged
+// its own cause).
+func (c *consumer) Apply(ev *corev1.Event) {
+	c.retain(ev)
+	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
+		c.onSessionStarted(ss)
+	}
+	if err := c.ssm.Apply(ev); err != nil {
+		c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",
+			c.sessionID, ev.GetSeq(), stateKind(ev), err)
+	}
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_TaskStarted, *corev1.Event_TaskProgress, *corev1.Event_TaskEnded:
+		c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
+	}
+}
+
+// Consume translates a data/ephemeral event into a frontend push (design step
+// 1): complete vendor messages become a ConversationDelta stamped with
+// through_seq; ContentDelta and HeartbeatProgress become ephemeral TypingDelta
+// relays. A vendor payload that cannot be translated is a loud error, never a
+// silent drop.
+func (c *consumer) Consume(ev *corev1.Event) {
+	c.retain(ev)
+	switch p := ev.GetPayload().(type) {
+	case *corev1.Event_ContentDelta:
+		if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, p.ContentDelta); td != nil {
+			c.push.PushTypingDelta(td)
+		}
+	case *corev1.Event_HeartbeatProgress:
+		c.push.PushTypingDelta(heartbeatTypingDelta(c.workspace, c.sessionID, p.HeartbeatProgress))
+	case *corev1.Event_Vendor:
+		c.pushConversation(ev)
+	default:
+		// UnparsedEvent / empty payloads carry no conversation content of their
+		// own; the demux already loud-logged them. Nothing to push.
+	}
+}
+
+// pushConversation converts a vendor event to a ConversationDelta and pushes it,
+// loud-logging (never swallowing) a translation failure.
+func (c *consumer) pushConversation(ev *corev1.Event) {
+	cd, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
+	if err != nil {
+		c.logf("sessiondrv: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
+		return
+	}
+	if cd == nil {
+		return // known-but-non-conversational vendor payload
+	}
+	c.push.PushConversationDelta(cd)
+}
+
+// Degraded surfaces a shim-sourced DegradedState as a frontend DegradedNotice.
+func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
+	if n := frontend.DegradedNoticeFromState(ds, c.now()); n != nil {
+		c.push.PushDegradedNotice(n)
+	}
+}
+
+// ConnectionDegraded surfaces a transport-level missed-heartbeat window as a
+// DegradedNotice (component shim-connection), honest reporting of a stale
+// display — not a fallback.
+func (c *consumer) ConnectionDegraded(_ string, reason string) {
+	c.push.PushDegradedNotice(&frontendv1.DegradedNotice{
+		Component: "shim-connection",
+		Reason:    reason,
+		Recovered: false,
+		AtMs:      c.now(),
+	})
+}
+
+// ConnectionRecovered clears the shim-connection degraded notice.
+func (c *consumer) ConnectionRecovered(_ string) {
+	c.push.PushDegradedNotice(&frontendv1.DegradedNotice{
+		Component: "shim-connection",
+		Recovered: true,
+		AtMs:      c.now(),
+	})
+}
+
+// resync replays the retained conversation deltas from fromSeq (0 = from the
+// start of the retained window) via the normal PushConversationDelta path. It
+// is idempotent by construction: the frontends reconcile by through_seq/uuid,
+// so re-pushing already-seen items REPLACES rather than duplicates them. This
+// is the simplest honest mechanism (task step 5): the daemon replays its
+// bounded retained ring; history older than the window is recovered by the
+// store-backed Subscribe replay on reconnect.
+func (c *consumer) resync(fromSeq uint64) {
+	for _, ev := range c.snapshotRing() {
+		if ev.GetSeq() < fromSeq {
+			continue
+		}
+		if ev.GetVendor() != nil {
+			c.pushConversation(ev)
+		}
+	}
+}
+
+// heartbeatTypingDelta relays a tool-progress heartbeat as an ephemeral
+// TypingDelta of kind "progress" (task step 1: HeartbeatProgress -> typing). It
+// carries the tool_use_id as the uuid and the elapsed seconds as the delta so a
+// frontend that renders progress can, while one that does not ignores the
+// unknown kind (never crashes on it).
+func heartbeatTypingDelta(workspace, sessionID string, hp *corev1.HeartbeatProgress) *frontendv1.TypingDelta {
+	return &frontendv1.TypingDelta{
+		Workspace: workspace,
+		SessionId: sessionID,
+		Uuid:      hp.GetToolUseId(),
+		Kind:      "progress",
+		Delta:     fmt.Sprintf("%.0fs", hp.GetElapsedSeconds()),
+	}
+}
+
+// stateKind names a lifecycle event's payload for logging.
+func stateKind(ev *corev1.Event) string {
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_SessionStarted:
+		return "session_started"
+	case *corev1.Event_SessionEnded:
+		return "session_ended"
+	case *corev1.Event_TurnStarted:
+		return "turn_started"
+	case *corev1.Event_TurnEnded:
+		return "turn_ended"
+	case *corev1.Event_TaskStarted:
+		return "task_started"
+	case *corev1.Event_TaskProgress:
+		return "task_progress"
+	case *corev1.Event_TaskEnded:
+		return "task_ended"
+	default:
+		return "other"
+	}
+}
