@@ -32,24 +32,6 @@ class FakeStorage implements Storage {
   }
 }
 
-/** fetch fake capturing the request and returning a canned response. */
-function fakeFetch(
-  status: number,
-  body: unknown,
-): { fetchFn: typeof fetch; calls: Array<{ url: string; init?: RequestInit }> } {
-  const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const fetchFn = ((url: string, init?: RequestInit) => {
-    calls.push({ url, init });
-    return Promise.resolve({
-      ok: status >= 200 && status < 300,
-      status,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(JSON.stringify(body)),
-    } as Response);
-  }) as typeof fetch;
-  return { fetchFn, calls };
-}
-
 /** A logger wired to spies: captured forwards, captured console lines. */
 function spyLogger(): { logger: ForwardingLogger; forwarded: ClientLogCmd[]; consoleLines: string[] } {
   const forwarded: ClientLogCmd[] = [];
@@ -141,49 +123,82 @@ describe("resume key persistence", () => {
 });
 
 describe("rebindSession", () => {
+  /** A session creator recording the args it was asked to create with. */
+  function fakeCreator(result: string | Error): {
+    create: (args: { cwd: string; resumeClaudeSessionId: string }) => Promise<string>;
+    calls: Array<{ cwd: string; resumeClaudeSessionId: string }>;
+  } {
+    const calls: Array<{ cwd: string; resumeClaudeSessionId: string }> = [];
+    const create = async (args: { cwd: string; resumeClaudeSessionId: string }) => {
+      calls.push(args);
+      if (result instanceof Error) throw result;
+      return result;
+    };
+    return { create, calls };
+  }
+
   it("trades the stored keys for a successor session id", async () => {
     // Arrange
     const storage = new FakeStorage();
     rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
-    const { fetchFn, calls } = fakeFetch(201, { session_id: "s_new" });
+    const { create } = fakeCreator("s_new");
     // Act
-    const next = await rebindSession("http://d", "s_old", storage, fetchFn);
+    const next = await rebindSession("s_old", storage, create);
     // Assert
     expect(next).toBe("s_new");
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("http://d/sessions");
-    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ cwd: "/w", resume: "uuid-1" });
+  });
+
+  it("creates the successor with the stored resume keys", async () => {
+    // Arrange
+    const storage = new FakeStorage();
+    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    const { create, calls } = fakeCreator("s_new");
+    // Act
+    await rebindSession("s_old", storage, create);
+    // Assert — the CreateSessionCmd resumes the SAME claude session.
+    expect(calls).toEqual([{ cwd: "/w", resumeClaudeSessionId: "uuid-1" }]);
   });
 
   it("migrates the resume keys onto the successor id", async () => {
     // Arrange
     const storage = new FakeStorage();
     rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
-    const { fetchFn } = fakeFetch(201, { session_id: "s_new" });
+    const { create } = fakeCreator("s_new");
     // Act
-    await rebindSession("http://d", "s_old", storage, fetchFn);
+    await rebindSession("s_old", storage, create);
     // Assert — a SECOND loss can rebind too; the old key is gone.
     expect(recallResumeKeys(storage, "s_new")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
     expect(recallResumeKeys(storage, "s_old")).toBeNull();
   });
 
-  it("returns null without fetching when nothing was ever stored", async () => {
+  it("returns null without creating when nothing was ever stored", async () => {
     // Arrange
     const storage = new FakeStorage();
-    const { fetchFn, calls } = fakeFetch(201, { session_id: "s_new" });
+    const { create, calls } = fakeCreator("s_new");
     // Act
-    const next = await rebindSession("http://d", "s_old", storage, fetchFn);
+    const next = await rebindSession("s_old", storage, create);
     // Assert — the caller escalates to remediation instead.
     expect(next).toBeNull();
     expect(calls).toHaveLength(0);
   });
 
-  it("throws on a failed POST rather than reading it as rebound", async () => {
+  it("rejects on a failed create rather than reading it as rebound", async () => {
     // Arrange
     const storage = new FakeStorage();
     rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
-    const { fetchFn } = fakeFetch(500, { error: "boom" });
+    const { create } = fakeCreator(new Error("createSession rejected: no such cwd"));
     // Act / Assert
-    await expect(rebindSession("http://d", "s_old", storage, fetchFn)).rejects.toThrow("500");
+    await expect(rebindSession("s_old", storage, create)).rejects.toThrow("no such cwd");
+  });
+
+  it("leaves the old keys in place when the create failed", async () => {
+    // Arrange
+    const storage = new FakeStorage();
+    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    const { create } = fakeCreator(new Error("boom"));
+    // Act
+    await expect(rebindSession("s_old", storage, create)).rejects.toThrow();
+    // Assert — a retry can still rebind; the keys were not spent.
+    expect(recallResumeKeys(storage, "s_old")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
   });
 });
