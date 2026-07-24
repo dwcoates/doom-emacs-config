@@ -165,25 +165,28 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	return &harness{ts: ts, srv: srv, reg: reg, driver: driver, spawner: spawner, ssm: mgr, fe: fe}
 }
 
-// postCreate POSTs body to /sessions and returns the new session id.
-func postCreate(t *testing.T, h *harness, body string) string {
+// createSession brings a session up through the create CORE, the same entry
+// the createSession FrontendCommand routes to now that POST /sessions is gone.
+// body is the historical JSON request shape, kept because it reads compactly at
+// the call sites; it decodes straight into CreateOpts.
+func createSession(t *testing.T, h *harness, body string) string {
 	t.Helper()
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(body))
+	id, err := createSessionErr(t, h, body)
 	if err != nil {
-		t.Fatalf("POST /sessions: %v", err)
+		t.Fatalf("CreateSession(%s): %v", body, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /sessions status = %d, want 201", resp.StatusCode)
+	return id
+}
+
+// createSessionErr is createSession without the fatal, for the tests that
+// assert on a typed create failure.
+func createSessionErr(t *testing.T, h *harness, body string) (string, error) {
+	t.Helper()
+	var opts CreateOpts
+	if err := json.Unmarshal([]byte(body), &opts); err != nil {
+		t.Fatalf("decode create opts %s: %v", body, err)
 	}
-	var out struct {
-		SessionID string `json:"session_id"`
-		StreamURL string `json:"stream_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	return out.SessionID
+	return h.srv.CreateSession(context.Background(), opts)
 }
 
 // writeTranscript writes an empty transcript for uuid under cfg, at the fixed
@@ -201,31 +204,14 @@ func writeTranscript(t *testing.T, cfg, uuid string) {
 
 // --- Create ---------------------------------------------------------------
 
-func TestCreateSessionReturnsIDAndStreamURL(t *testing.T) {
+func TestCreateSessionReturnsAnSPrefixedID(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(`{"cwd":"/w"}`))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer resp.Body.Close()
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	// Assert
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
-	var out struct {
-		SessionID string `json:"session_id"`
-		StreamURL string `json:"stream_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !strings.HasPrefix(out.SessionID, "s_") {
-		t.Errorf("session_id = %q, want an s_ id", out.SessionID)
-	}
-	if out.StreamURL != "/sessions/"+out.SessionID+"/stream" {
-		t.Errorf("stream_url = %q", out.StreamURL)
+	if !strings.HasPrefix(id, "s_") {
+		t.Errorf("session id = %q, want an s_ id", id)
 	}
 }
 
@@ -233,7 +219,7 @@ func TestCreateSessionRegistersARecord(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	id := postCreate(t, h, `{"cwd":"/w","model":"haiku","config_dir":"/cfg"}`)
+	id := createSession(t, h, `{"cwd":"/w","model":"haiku","config_dir":"/cfg"}`)
 	// Assert — the record is the driver's source of truth for this session.
 	rec, ok := h.reg.Get(id)
 	if !ok {
@@ -249,7 +235,7 @@ func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 	h := newHarness(t)
 	// Act — create resolves the workspace to the just-registered record and
 	// asks the driver to bring its shim up.
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	// Assert — the driver's spawner was asked to ensure exactly this session.
 	if !slices.Contains(h.spawner.ensuredIDs(), id) {
 		t.Fatalf("spawner ensured %v, want it to include %s", h.spawner.ensuredIDs(), id)
@@ -260,15 +246,11 @@ func TestCreateSessionRejectsInvalidPermissionMode(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
-		bytes.NewBufferString(`{"cwd":"/w","permission_mode":"nonsense"}`))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer resp.Body.Close()
-	// Assert
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
+	_, err := createSessionErr(t, h, `{"cwd":"/w","permission_mode":"nonsense"}`)
+	// Assert — the typed rejection the command ack surfaces to the frontend.
+	var invalid *InvalidCreateError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("err = %v, want an *InvalidCreateError", err)
 	}
 }
 
@@ -277,24 +259,18 @@ func TestCreateSessionHardFailsUnresumableResume(t *testing.T) {
 	h := newHarness(t)
 	cfg := t.TempDir()
 	// Act
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
-		bytes.NewBufferString(fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"gone-uuid"}`, cfg)))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
+	_, err := createSessionErr(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"gone-uuid"}`, cfg))
+	// Assert — a typed hard failure naming the resume target, not a silent
+	// fresh start.
+	var missing *ResumeTranscriptMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %v, want a *ResumeTranscriptMissingError", err)
 	}
-	defer resp.Body.Close()
-	// Assert — 422 with the machine-detectable code, not a silent fresh start.
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	if missing.ResumeID != "gone-uuid" {
+		t.Errorf("ResumeID = %q, want gone-uuid", missing.ResumeID)
 	}
-	var out struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out.Code != "resume_transcript_missing" {
-		t.Errorf("code = %q, want resume_transcript_missing", out.Code)
+	if len(missing.SearchedPaths) == 0 {
+		t.Error("SearchedPaths is empty, want every path stat'd")
 	}
 }
 
@@ -304,7 +280,7 @@ func TestCreateSessionKeepsResumableResume(t *testing.T) {
 	cfg := t.TempDir()
 	writeTranscript(t, cfg, "uuid-1")
 	// Act
-	id := postCreate(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"uuid-1"}`, cfg))
+	id := createSession(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"uuid-1"}`, cfg))
 	// Assert — the record carries the resume id as its claude_session_id.
 	rec, _ := h.reg.Get(id)
 	if rec.ClaudeSessionID != "uuid-1" {
@@ -349,7 +325,7 @@ func TestListSessionsEnvelopeCarriesBootIdentityAndVersion(t *testing.T) {
 func TestListSessionsIncludesCreatedSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	// Act
 	out := getList(t, h)
 	// Assert — the created session appears, non-terminal.
@@ -464,7 +440,7 @@ func postAccountSwitch(t *testing.T, h *harness, id, configDir string) *http.Res
 func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 	// Arrange — a session with a turn in flight (the SSM guard).
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	if err := h.ssm.Apply(&corev1.Event{SessionId: id, Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{PromptPreview: "go"}}}); err != nil {
 		t.Fatalf("apply turn started: %v", err)
 	}
@@ -487,7 +463,7 @@ func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 func TestAccountSwitchUpdatesConfigDirAndRespawns(t *testing.T) {
 	// Arrange — an idle session under the default account.
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 
 	// Act.
 	resp := postAccountSwitch(t, h, id, "/cfg-work")
@@ -511,7 +487,7 @@ func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
 	// Arrange — a session created under the default account, plus a frontend
 	// client connected AFTER create so it only observes the switch's push.
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	feSrv := httptest.NewServer(http.HandlerFunc(h.fe.ServeWS))
 	defer feSrv.Close()
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(feSrv.URL, "http"), nil)
@@ -572,7 +548,7 @@ func readServerWSFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendF
 func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	// Act
 	if err := h.srv.DeleteSession(id); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
@@ -739,7 +715,7 @@ func postRemediation(t *testing.T, h *harness, body string) *http.Response {
 func TestRemediationRefusesALiveSession(t *testing.T) {
 	// Arrange
 	h := newHarnessWith(t, Config{Remediator: &fakeRemediator{started: true}})
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 	// Act
 	resp := postRemediation(t, h, fmt.Sprintf(`{"session_id":%q}`, id))
 	// Assert — a session with a non-terminal record is alive; nothing to do.
