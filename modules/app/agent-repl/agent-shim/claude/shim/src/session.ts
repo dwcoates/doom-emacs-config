@@ -1,8 +1,8 @@
 /**
  * ShimSession — the Layer-1 protocol engine.
  *
- * Owns the command→SDK and SDK→event mappings defined in
- * shared/protocol.md §1. The SDK itself is injected through
+ * Owns the command→SDK and SDK→event mappings declared in
+ * ./protocol.ts. The SDK itself is injected through
  * {@link SessionDeps.createQuery} so tests can drive the session with a
  * scripted fake query.
  */

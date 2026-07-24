@@ -1207,7 +1207,7 @@ COLOR is any Emacs color spec, e.g. a #rrggbb hex string."
 (defconst agent-repl--meta-open "<!--agent-repl:meta-->"
   "Opening marker bracketing a harness-injected span of a sent prompt.
 Paired with `agent-repl--meta-close'.  Kept in sync with the webapp's
-`META_OPEN' (webapp/src/meta.ts) and documented in shared/protocol.md.")
+`META_OPEN' (webapp/src/meta.ts).")
 
 (defconst agent-repl--meta-close "<!--/agent-repl:meta-->"
   "Closing marker bracketing a harness-injected span of a sent prompt.

@@ -1,5 +1,11 @@
 # Output navigation — design assessment
 
+> **Citation note.** This document cites `shared/protocol.md`, the
+> pre-cutover NDJSON prose spec, which has since been **deleted**. The
+> live wire contracts are the protobuf schemas under `proto/agentshim/`
+> (see `proto/AGENTS.md`). Every `shared/protocol.md` reference below is
+> a historical citation, not a live pointer.
+
 > **Superseded — kept for its architecture survey, not its recommendation.**
 > Feed navigation now ships: `webapp/src/nav.ts` (the cycle), `output-nav.el`
 > (the elisp commands), bound in `agent-repl-input-mode-map`. Sections (a),

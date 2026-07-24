@@ -4,8 +4,7 @@
 
 ;; Mounts the claude-repld webapp inside Emacs as an xwidget-webkit
 ;; buffer placed in the workspace's agent output window — the in-Emacs
-;; browser rendering of the session that protocol.md's top diagram
-;; calls the "Emacs (xwidget WS client)" layer.
+;; browser rendering of the session.
 ;;
 ;; The command `agent-repl-frontend-open-panel' is the user entry point
 ;; AND the lazy initialization trigger: it ensures the daemon (built

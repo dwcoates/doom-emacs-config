@@ -1,6 +1,7 @@
 // Command claude-repld is the Go daemon between the Emacs/webapp
-// WebSocket clients (Layer 2) and per-session TS shim subprocesses
-// (Layer 1). Wire formats: modules/app/agent-repl/shared/protocol.md.
+// frontend clients and per-session TS shim subprocesses. Wire formats:
+// modules/app/agent-repl/proto/agentshim/ for the protobuf planes, and
+// internal/protocol for the pre-cutover stdio/WebSocket NDJSON planes.
 package main
 
 import (
