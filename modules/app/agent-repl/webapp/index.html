@@ -43,6 +43,11 @@
            "Compacting conversation…" bar while a /compact runs, empty (and so
            collapsed) otherwise. -->
       <div id="compact-progress-slot"></div>
+      <!-- The agent-shim degraded-state banner (design §11): shown while the
+           store/sidecar/shim reports a component degraded (honest downtime,
+           not a fallback), cleared on its recovery notice. Hidden (and so
+           collapsed) otherwise. -->
+      <div id="degraded-banner" hidden></div>
       <main id="feed"></main>
       <!-- The live tail line's bottom-pinned slot: the progress indicator
            (thinking/working/retrying/interrupting) and the running turn-stats
