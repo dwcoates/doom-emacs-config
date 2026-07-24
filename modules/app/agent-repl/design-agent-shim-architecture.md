@@ -729,15 +729,22 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     ├── test-merge-handlers.el                               M
     ├── install.el                                           M   (managed settings hooks deleted)
     ├── test-install.el                                      M
-    ├── webapp/                                                (G11)
-    │   ├── package.json                                     M   (protojson types dep)
-    │   ├── src/frontend-proto.ts                            A
-    │   ├── src/state-adapter.ts                             A
-    │   ├── src/wslog.ts                                     M   (frontend.v1 frames)
-    │   ├── src/store.ts                                     M   (frame consumer)
-    │   ├── src/render.ts                                    M   (status rows read WorkspaceState/TaskCatalog)
-    │   ├── test/frontend-proto.test.ts                      A
-    │   └── test/state-adapter.test.ts                       A
+    ├── webapp/                                                (G11 + stitch S3)
+    │   ├── index.html                                       M ✓ (degraded-state banner element)
+    │   ├── src/frontend-proto.ts                            A ✓ (hand-typed protojson; no new dep)
+    │   ├── src/state-adapter.ts                             A ✓
+    │   ├── src/protocol.ts                                  M ✓ (daemon→webapp frame vocab DELETED; data types + commands kept)
+    │   ├── src/store.ts                                     M ✓ (applyRaw/parseFrame path DELETED; typed ingest(effects))
+    │   ├── src/main.ts                                      M ✓ (onMessage: decode→adapt→ingest; degraded banner)
+    │   ├── src/tasks.ts                                     M ✓ (sessionTasks DELETED; roster now from TaskCatalog)
+    │   ├── src/topbar.ts                                    M ✓ (session roster passed in, not item-derived)
+    │   ├── src/styles.css                                   M ✓ (degraded-banner style)
+    │   ├── test/frontend-proto.test.ts                      A ✓ (LOCKED; unchanged at stitch)
+    │   ├── test/state-adapter.test.ts                       A ✓ (LOCKED; unchanged at stitch)
+    │   ├── test/store.test.ts                               M ✓ (rewritten to the ingest path)
+    │   ├── test/protocol.test.ts                            D ✓ (parseFrame gone)
+    │   ├── test/{tasks,topbar,queue,ws}.test.ts             M ✓ (old-vocab assertions rewritten/removed)
+    │   └── (src/render.ts, src/wslog.ts, package.json)          (unchanged: render consumes the store model as before; wslog keeps only ClientLogCmd; frontend-proto is hand-typed so no protojson dep)
     ├── launchd/                                               (G12)
     │   ├── AGENTS.md                                        A ✓
     │   ├── com.agentrepl.shim-store.plist                   A
@@ -942,7 +949,7 @@ corpus.
 | `frontend-client.el` | delete HTTP poller; delegate to `frontend-uds.el` |
 | `merge-handlers.el` | delete producers; keep conflict-UX consumer reacting to pushed state |
 | `install.el` | delete managed settings hooks |
-| `webapp/src/wslog.ts` + frame consumers | consume `frontend.v1` frames via `state-adapter.ts` |
+| `webapp/src/{main,store,protocol,tasks,topbar}.ts` + `index.html` + `styles.css` | one-change cutover: `main.ts` onMessage decodes `frontend.v1` (`frontend-proto.ts`) → `state-adapter.ts` effects → `store.ingest`; `protocol.ts` drops the daemon→webapp frame vocab (keeps data types + commands); `store.ts` replaces `applyRaw`/reducers with `ingest(effects)`; session task roster comes from `TaskCatalog`; degraded banner added. `wslog.ts` unchanged (keeps only `ClientLogCmd`); `render.ts` unchanged (still consumes the store item/state model) |
 | `.claude/install.sh` | G12 additions |
 | `AGENTS.md` | post-implementation: component docs, debugging pointers for the new logs |
 

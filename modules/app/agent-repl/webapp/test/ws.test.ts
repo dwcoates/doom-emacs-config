@@ -240,12 +240,13 @@ describe("WsClient", () => {
   });
 
   it("logs a reply it could not send because the socket is not open", () => {
-    // Arrange — onMessage generates a replay-request while the socket
-    // is already closing (readyState past OPEN).
+    // Arrange — onMessage generates a command while the socket is already
+    // closing (readyState past OPEN).
     const logged: string[] = [];
     const client = new WsClient({
       url: "ws://x/sessions/s1/stream",
-      onMessage: () => ({ type: "replay-request", from_seq: 4 }) as const,
+      onMessage: () =>
+        ({ type: "queue-cancel", request_id: "r1", queue_id: "q1" }) as const,
       wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
       backoffMs: [10],
       log: (m) => logged.push(m),
@@ -255,9 +256,9 @@ describe("WsClient", () => {
     sock.open();
     sock.readyState = 3; // closing under us, onclose not yet delivered
     // Act
-    sock.receive(`{"type":"text-delta","seq":9}`);
+    sock.receive(`{"type":"workspaceState"}`);
     // Assert — the drop left a trace naming the lost command.
     expect(sock.sent).toHaveLength(0);
-    expect(logged).toEqual(["ws: dropped outbound replay-request — socket not open"]);
+    expect(logged).toEqual(["ws: dropped outbound queue-cancel — socket not open"]);
   });
 });
