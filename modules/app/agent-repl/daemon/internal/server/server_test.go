@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -421,42 +422,30 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 	}
 }
 
-// --- Delete ---------------------------------------------------------------
+// --- Delete (S7: the DELETE /sessions/{id} HTTP route was removed; the
+// deleteSession UDS command drives s.DeleteSession, tested directly here) -----
 
 func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	id := postCreate(t, h, `{"cwd":"/w"}`)
 	// Act
-	req, _ := http.NewRequest(http.MethodDelete, h.ts.URL+"/sessions/"+id, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("DELETE: %v", err)
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
 	}
-	defer resp.Body.Close()
 	// Assert
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
 	rec, _ := h.reg.Get(id)
 	if !rec.Terminal || rec.DeathReason != "delete session" {
 		t.Errorf("record = %+v, want terminal with the delete death reason", rec)
 	}
 }
 
-func TestDeleteUnknownSessionIs404(t *testing.T) {
+func TestDeleteUnknownSessionErrors(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	// Act
-	req, _ := http.NewRequest(http.MethodDelete, h.ts.URL+"/sessions/s_nope", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("DELETE: %v", err)
-	}
-	defer resp.Body.Close()
-	// Assert
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", resp.StatusCode)
+	// Act / Assert — an unknown id reports the sentinel not-found error.
+	if err := h.srv.DeleteSession("s_nope"); !errors.Is(err, errSessionNotFound) {
+		t.Errorf("err = %v, want errSessionNotFound", err)
 	}
 }
 
