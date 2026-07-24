@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// A fixed producer stamp so item `ts` fields are deterministic across goldens.
+// A fixed producer stamp so item ts_ms fields are deterministic across goldens.
 const producedMs int64 = 1700000000000
 
 // mustAny wraps a proto message in an Any or fails the test.
@@ -36,180 +36,160 @@ func mustStructT(t *testing.T, m map[string]any) *structpb.Struct {
 	return s
 }
 
-// --- ConversationDeltaFromEvent: the webapp contract kinds ------------------
+// --- ConversationDeltaFromEvent: the typed ConversationItem contract --------
 
 func TestConversationDeltaFromEvent(t *testing.T) {
-	ts := tsFromMs(producedMs)
+	// Reusable typed payloads so want/event share the exact same sub-message.
+	assistantMsg := &datav1.ApiAssistantMessage{
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}},
+		},
+	}
+	toolUseMsg := &datav1.ApiAssistantMessage{
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{
+				Id: "tu_1", Name: "Bash",
+				Input: mustStructHelper(t, map[string]any{"command": "ls"}),
+			}}},
+		},
+	}
+	toolResultMsg := &datav1.ApiUserMessage{
+		Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
+			Blocks: []*datav1.ContentBlock{
+				{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{
+					ToolUseId: "tu_1",
+					Content:   &datav1.ToolResultBlock_ContentString{ContentString: "boom"},
+					IsError:   true, IsErrorSet: true,
+				}}},
+			},
+		}},
+	}
+	promptMsg := &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "hi there"}}
+	resultMsg := &datav1.ResultMessage{
+		Subtype:    datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS,
+		DurationMs: 1200, NumTurns: 3, TotalCostUsd: 0.5, Result: "done",
+		Usage: &datav1.Usage{InputTokens: 10, OutputTokens: 5},
+	}
+	compact := &datav1.CompactBoundary{Trigger: datav1.CompactTrigger_COMPACT_TRIGGER_AUTO, PreTokens: 5000}
+
 	tests := []struct {
 		name  string
 		event *corev1.Event
 		want  *frontendv1.ConversationDelta
 	}{
 		{
-			name: "assistant text block",
+			name: "assistant text block passes the ApiAssistantMessage through",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 7, ProducedAtMs: producedMs,
 				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ClaudeStreamMessage{
 					Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
-						Uuid: "u1",
-						Message: &datav1.ApiAssistantMessage{
-							Content: []*datav1.ContentBlock{
-								{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}},
-							},
-						},
+						Uuid: "u1", Message: assistantMsg,
 					}},
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 7,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "text", "blockId": "u1:0", "messageId": "u1",
-						"text": "hello", "done": true, "ts": ts,
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					Uuid: "u1", TsMs: producedMs,
+					Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: assistantMsg},
+				}},
 			},
 		},
 		{
-			name: "assistant thinking block with signature",
-			event: &corev1.Event{
-				SessionId: "s1", Seq: 3, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
-					Uuid: "u2",
-					Message: &datav1.ApiAssistantMessage{
-						Content: []*datav1.ContentBlock{
-							{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "ponder", Signature: "sig"}}},
-						},
-					},
-				})},
-			},
-			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 3,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "thinking", "blockId": "u2:0", "messageId": "u2",
-						"text": "ponder", "done": true, "signature": "sig",
-					}),
-				},
-			},
-		},
-		{
-			name: "assistant tool_use with input",
+			name: "assistant tool_use rides inside the assistant_message item",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 9, ProducedAtMs: producedMs,
 				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
-					Uuid: "u3",
-					Message: &datav1.ApiAssistantMessage{
-						Content: []*datav1.ContentBlock{
-							{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{
-								Id: "tu_1", Name: "Bash",
-								Input: mustStructHelper(t, map[string]any{"command": "ls"}),
-							}}},
-						},
-					},
+					Uuid: "u3", Message: toolUseMsg,
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 9,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "tool", "toolUseId": "tu_1", "toolName": "Bash",
-						"messageId": "u3", "ts": ts, "inputDone": true,
-						"input": map[string]any{"command": "ls"},
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					Uuid: "u3", TsMs: producedMs,
+					Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: toolUseMsg},
+				}},
 			},
 		},
 		{
-			name: "user tool_result string content pairs as a tool item, is_error set",
+			name: "user tool_result rides inside the user_message item",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 10, ProducedAtMs: producedMs,
 				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
-					Uuid: "u4",
-					Message: &datav1.ApiUserMessage{
-						Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
-							Blocks: []*datav1.ContentBlock{
-								{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{
-									ToolUseId: "tu_1",
-									Content:   &datav1.ToolResultBlock_ContentString{ContentString: "boom"},
-									IsError:   true, IsErrorSet: true,
-								}}},
-							},
-						}},
-					},
+					Uuid: "u4", Message: toolResultMsg,
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 10,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "tool", "toolUseId": "tu_1", "toolName": "",
-						"messageId": "u4", "ts": ts, "inputDone": true, "resultTs": ts,
-						"result": map[string]any{"isError": true, "content": "boom"},
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					Uuid: "u4", TsMs: producedMs,
+					Item: &frontendv1.ConversationItem_UserMessage{UserMessage: toolResultMsg},
+				}},
 			},
 		},
 		{
-			name: "user plain-text prompt becomes a user-turn",
+			name: "user plain-text prompt carries the request_id envelope",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 2, ProducedAtMs: producedMs, RequestId: "req-5",
 				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
-					Uuid:    "u5",
-					Message: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "hi there"}},
+					Uuid: "u5", Message: promptMsg,
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 2,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "user-turn", "requestId": "req-5", "ts": ts,
-						"content": []any{map[string]any{"type": "text", "text": "hi there"}},
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
+					Item: &frontendv1.ConversationItem_UserMessage{UserMessage: promptMsg},
+				}},
 			},
 		},
 		{
-			name: "result message",
+			name: "result message passes through into the result arm",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.ResultMessage{
-					Subtype:    datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS,
-					DurationMs: 1200, NumTurns: 3, TotalCostUsd: 0.5, IsError: false,
-					Result: "done",
-					Usage:  &datav1.Usage{InputTokens: 10, OutputTokens: 5},
-				})},
+				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, resultMsg)},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 12,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "result", "subtype": "success",
-						"durationMs": float64(1200), "sincePrevFinalMs": float64(0),
-						"numTurns": float64(3), "totalCostUsd": 0.5, "isError": false,
-						"resultText": "done",
-						"usage":      map[string]any{"input_tokens": float64(10), "output_tokens": float64(5)},
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					TsMs: producedMs,
+					Item: &frontendv1.ConversationItem_Result{Result: resultMsg},
+				}},
 			},
 		},
 		{
-			name: "stream compact boundary (no post-tokens)",
+			name: "stream compact boundary passes through into the compact_boundary arm",
 			event: &corev1.Event{
 				SessionId: "s1", Seq: 13, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.CompactBoundary{
-					Trigger: datav1.CompactTrigger_COMPACT_TRIGGER_AUTO, PreTokens: 5000,
-				})},
+				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, compact)},
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 13,
-				Items: []*structpb.Struct{
-					mustStructHelper(t, map[string]any{
-						"kind": "compact-boundary", "trigger": "auto",
-						"preTokens": float64(5000), "postTokens": float64(0),
-					}),
-				},
+				Items: []*frontendv1.ConversationItem{{
+					TsMs: producedMs,
+					Item: &frontendv1.ConversationItem_CompactBoundary{CompactBoundary: compact},
+				}},
 			},
+		},
+		{
+			name: "empty assistant message has no visual value and is dropped",
+			event: &corev1.Event{
+				SessionId: "s1", Seq: 14, ProducedAtMs: producedMs,
+				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+					Uuid: "u7", Message: &datav1.ApiAssistantMessage{},
+				})},
+			},
+			want: nil,
+		},
+		{
+			name: "empty user message has no visual value and is dropped",
+			event: &corev1.Event{
+				SessionId: "s1", Seq: 15, ProducedAtMs: producedMs,
+				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+					Uuid: "u8", Message: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: ""}},
+				})},
+			},
+			want: nil,
 		},
 		{
 			name: "non-conversational payload yields nil",
@@ -246,55 +226,6 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 	}
 }
 
-func TestConversationDeltaFromEventToolResultBlocks(t *testing.T) {
-	// Arrange: a tool_result whose content is nested blocks (a text block).
-	ev := &corev1.Event{
-		SessionId: "s1", Seq: 11, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
-			Uuid: "u6",
-			Message: &datav1.ApiUserMessage{
-				Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
-					Blocks: []*datav1.ContentBlock{
-						{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{
-							ToolUseId: "tu_9",
-							Content: &datav1.ToolResultBlock_ContentBlocks{ContentBlocks: &datav1.ToolResultBlockList{
-								Blocks: []*datav1.ContentBlock{
-									{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "nested"}}},
-								},
-							}},
-						}}},
-					},
-				}},
-			},
-		})},
-	}
-	ts := tsFromMs(producedMs)
-	want := &frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 11,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "tool", "toolUseId": "tu_9", "toolName": "",
-				"messageId": "u6", "ts": ts, "inputDone": true, "resultTs": ts,
-				"result": map[string]any{
-					"isError": false,
-					"content": []any{map[string]any{"type": "text", "text": "nested"}},
-				},
-			}),
-		},
-	}
-
-	// Act.
-	got, err := ConversationDeltaFromEvent("ws", ev)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
-	}
-}
-
 func TestConversationDeltaFromEventCorruptVendorErrors(t *testing.T) {
 	// Arrange: an Any with a type URL absent from the compiled schema set.
 	ev := &corev1.Event{
@@ -318,28 +249,29 @@ func TestConversationDeltaFromEventCorruptVendorErrors(t *testing.T) {
 
 func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.T) {
 	// Arrange: a transcript AssistantLine carries its own on-disk timestamp,
-	// which takes precedence over the Event's producer stamp.
+	// which takes precedence over the Event's producer stamp (parsed to millis).
+	msg := &datav1.ApiAssistantMessage{
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "disk text"}}},
+		},
+	}
 	ev := &corev1.Event{
 		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
 		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "au1", Timestamp: "2026-01-02T03:04:05Z"},
-				Message: &datav1.ApiAssistantMessage{
-					Content: []*datav1.ContentBlock{
-						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "disk text"}}},
-					},
-				},
+				Message:  msg,
 			}},
 		})},
 	}
+	// 2026-01-02T03:04:05Z in unix millis.
+	const wantTsMs int64 = 1767323045000
 	want := &frontendv1.ConversationDelta{
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 20,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "text", "blockId": "au1:0", "messageId": "au1",
-				"text": "disk text", "done": true, "ts": "2026-01-02T03:04:05Z",
-			}),
-		},
+		Items: []*frontendv1.ConversationItem{{
+			Uuid: "au1", TsMs: wantTsMs,
+			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
+		}},
 	}
 
 	// Act.
@@ -354,27 +286,26 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	}
 }
 
-func TestConversationDeltaFromEventTranscriptCompactBoundary(t *testing.T) {
-	// Arrange: the on-disk compact boundary carries pre- AND post-tokens.
+func TestConversationDeltaFromEventTranscriptCompactBoundaryLine(t *testing.T) {
+	// Arrange: the on-disk compact boundary passes through the compact_boundary_line arm.
+	line := &datav1.CompactBoundaryLine{
+		CompactMetadata: &datav1.DiskCompactMetadata{Trigger: "manual", PreTokens: 100, PostTokens: 40},
+	}
 	ev := &corev1.Event{
-		SessionId: "s1", Seq: 21,
+		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
 		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "sy1"},
-				Subtype: &datav1.SystemLine_CompactBoundary{CompactBoundary: &datav1.CompactBoundaryLine{
-					CompactMetadata: &datav1.DiskCompactMetadata{Trigger: "manual", PreTokens: 100, PostTokens: 40},
-				}},
+				Subtype:  &datav1.SystemLine_CompactBoundary{CompactBoundary: line},
 			}},
 		})},
 	}
 	want := &frontendv1.ConversationDelta{
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 21,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "compact-boundary", "trigger": "manual",
-				"preTokens": float64(100), "postTokens": float64(40),
-			}),
-		},
+		Items: []*frontendv1.ConversationItem{{
+			Uuid: "sy1", TsMs: producedMs,
+			Item: &frontendv1.ConversationItem_CompactBoundaryLine{CompactBoundaryLine: line},
+		}},
 	}
 
 	// Act.
@@ -389,62 +320,28 @@ func TestConversationDeltaFromEventTranscriptCompactBoundary(t *testing.T) {
 	}
 }
 
-func TestConversationDeltaFromEventApiErrorRetry(t *testing.T) {
-	// Arrange: an api_error line mid-backoff (retry_attempt set) → retry item.
+func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
+	// Arrange: an api_error line passes through the api_error arm; the webapp
+	// derives retry-vs-terminal from the typed ApiErrorLine, not the daemon.
+	line := &datav1.ApiErrorLine{
+		Error:     &datav1.ApiErrorDetail{Message: "overloaded"},
+		RetryInMs: 2000, RetryAttempt: 2, MaxRetries: 5,
+	}
 	ev := &corev1.Event{
-		SessionId: "s1", Seq: 22,
+		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
 		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
 			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
 				Envelope: &datav1.LineEnvelope{Uuid: "sy2"},
-				Subtype: &datav1.SystemLine_ApiError{ApiError: &datav1.ApiErrorLine{
-					Error:     &datav1.ApiErrorDetail{Message: "overloaded"},
-					RetryInMs: 2000, RetryAttempt: 2, MaxRetries: 5,
-				}},
+				Subtype:  &datav1.SystemLine_ApiError{ApiError: line},
 			}},
 		})},
 	}
 	want := &frontendv1.ConversationDelta{
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 22,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "retry", "attempt": float64(2), "reason": "overloaded", "fatal": false,
-			}),
-		},
-	}
-
-	// Act.
-	got, err := ConversationDeltaFromEvent("ws", ev)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
-	}
-}
-
-func TestConversationDeltaFromEventApiErrorTerminal(t *testing.T) {
-	// Arrange: an api_error line with no retry (network down) → error item.
-	ev := &corev1.Event{
-		SessionId: "s1", Seq: 23,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
-			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
-				Envelope: &datav1.LineEnvelope{Uuid: "sy3"},
-				Subtype: &datav1.SystemLine_ApiError{ApiError: &datav1.ApiErrorLine{
-					Error: &datav1.ApiErrorDetail{Message: "connection refused", IsNetworkDown: true},
-				}},
-			}},
-		})},
-	}
-	want := &frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 23,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "error", "code": "api_error",
-				"message": "connection refused", "recoverable": false,
-			}),
-		},
+		Items: []*frontendv1.ConversationItem{{
+			Uuid: "sy2", TsMs: producedMs,
+			Item: &frontendv1.ConversationItem_ApiError{ApiError: line},
+		}},
 	}
 
 	// Act.
@@ -461,17 +358,20 @@ func TestConversationDeltaFromEventApiErrorTerminal(t *testing.T) {
 
 // --- protojson serialization uses default lowerCamelCase names --------------
 
-func TestMarshalFrameLowerCamelCase(t *testing.T) {
-	// Arrange: a ConversationDelta frame carrying a text item, whose interior
-	// fields are authored camelCase, wrapped so the frame keys are exercised too.
+func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
+	// Arrange: a ConversationDelta carrying an assistant_message whose content
+	// holds a tool_use block, so both the item arm key and the nested block
+	// oneof arm key are exercised.
 	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 5,
-		Items: []*structpb.Struct{
-			mustStructHelper(t, map[string]any{
-				"kind": "text", "blockId": "u1:0", "messageId": "u1",
-				"text": "hi", "done": true, "ts": "2026-01-01T00:00:00Z",
-			}),
-		},
+		Items: []*frontendv1.ConversationItem{{
+			Uuid: "u1", TsMs: producedMs,
+			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{
+				Content: []*datav1.ContentBlock{
+					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_1", Name: "Bash"}}},
+				},
+			}},
+		}},
 	})
 
 	// Act.
@@ -481,20 +381,45 @@ func TestMarshalFrameLowerCamelCase(t *testing.T) {
 	}
 	out := string(b)
 
-	// Assert: the oneof arm and message fields are lowerCamelCase (no
-	// UseProtoNames snake_case), and the camelCase item interior survives.
+	// Assert: the frame arm, item arm, and nested block arm are lowerCamelCase.
 	for _, want := range []string{
 		`"conversationDelta"`, `"sessionId"`, `"throughSeq"`,
-		`"blockId"`, `"messageId"`,
+		`"assistantMessage"`, `"toolUse"`, `"tsMs"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("serialized frame missing %s\n%s", want, out)
 		}
 	}
-	for _, notWant := range []string{`"session_id"`, `"through_seq"`, `"block_id"`} {
+	for _, notWant := range []string{`"session_id"`, `"through_seq"`, `"assistant_message"`, `"tool_use"`} {
 		if strings.Contains(out, notWant) {
 			t.Errorf("serialized frame has snake_case %s (want lowerCamelCase)\n%s", notWant, out)
 		}
+	}
+}
+
+func TestMarshalTypingDeltaLowerCamelCase(t *testing.T) {
+	// Arrange: a TypingDelta embedding a ContentDelta, so the embedded
+	// block_index serializes as delta.blockIndex.
+	frame := TypingDeltaFrame(&frontendv1.TypingDelta{
+		Workspace: "ws", SessionId: "s1",
+		Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}},
+	})
+
+	// Act.
+	b, err := marshalFrame(frame)
+	if err != nil {
+		t.Fatalf("marshalFrame: %v", err)
+	}
+	out := string(b)
+
+	// Assert: the frame arm and the embedded delta's blockIndex are lowerCamelCase.
+	for _, want := range []string{`"typingDelta"`, `"delta"`, `"blockIndex"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("serialized frame missing %s\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, `"block_index"`) {
+		t.Errorf("serialized frame has snake_case \"block_index\"\n%s", out)
 	}
 }
 
@@ -514,7 +439,7 @@ func TestMarshalWorkspaceStateFrameLowerCamelCase(t *testing.T) {
 	}
 }
 
-// --- TypingDeltaFromContentDelta -------------------------------------------
+// --- TypingDeltaFromContentDelta embeds the ContentDelta as-is --------------
 
 func TestTypingDeltaFromContentDelta(t *testing.T) {
 	tests := []struct {
@@ -523,23 +448,18 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 		want *frontendv1.TypingDelta
 	}{
 		{
-			name: "text",
+			name: "text delta embedded unchanged",
 			cd:   &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Uuid: "u1", BlockIndex: 2, Kind: "text", Delta: "abc"},
+			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}}},
 		},
 		{
-			name: "thinking",
-			cd:   &corev1.ContentDelta{Uuid: "u1", BlockIndex: 0, Delta: &corev1.ContentDelta_Thinking{Thinking: "hm"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Uuid: "u1", Kind: "thinking", Delta: "hm"},
-		},
-		{
-			name: "input_json",
-			cd:   &corev1.ContentDelta{Uuid: "u1", BlockIndex: 1, Delta: &corev1.ContentDelta_InputJson{InputJson: "{\"a\":1}"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Uuid: "u1", BlockIndex: 1, Kind: "input_json", Delta: "{\"a\":1}"},
-		},
-		{
-			name: "signature yields nil (no visible preview)",
+			name: "signature delta forwarded as-is (no daemon curation of arms)",
 			cd:   &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}},
+			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}}},
+		},
+		{
+			name: "nil content delta yields nil",
+			cd:   nil,
 			want: nil,
 		},
 	}
@@ -643,6 +563,9 @@ func TestFrameWrappers(t *testing.T) {
 	}
 	if got := DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "c"}); got.GetDegradedNotice().GetComponent() != "c" {
 		t.Error("DegradedNoticeFrame did not set degraded_notice arm")
+	}
+	if got := SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "w"}); got.GetSessionInit().GetWorkspace() != "w" {
+		t.Error("SessionInitViewFrame did not set session_init arm")
 	}
 }
 
