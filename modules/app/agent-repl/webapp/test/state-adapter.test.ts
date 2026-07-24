@@ -95,6 +95,8 @@ describe("SessionView mapping", () => {
         contextWindow: "200000",
         permissionMode: "default",
         shimAttached: true,
+        claudeSessionId: "cli-uuid-1",
+        cwd: "/work/ws",
       },
     });
     expect(effects).toEqual([
@@ -111,9 +113,20 @@ describe("SessionView mapping", () => {
           contextWindow: 200000,
           permissionMode: "default",
           shimAttached: true,
+          claudeSessionId: "cli-uuid-1",
+          cwd: "/work/ws",
         },
       },
     ]);
+  });
+
+  it("carries the resume keys (claudeSessionId + cwd) onto the effect", () => {
+    const effects = applyOne({
+      sessionView: { sessionId: "s1", claudeSessionId: "cli-uuid-2", cwd: "/w" },
+    });
+    const value = effects[0]!.kind === "session-view" ? effects[0]!.value : undefined;
+    expect(value?.claudeSessionId).toBe("cli-uuid-2");
+    expect(value?.cwd).toBe("/w");
   });
 });
 

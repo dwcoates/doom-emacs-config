@@ -73,6 +73,22 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
   });
 });
 
+describe("decodeFrontendFrame — SessionView resume keys", () => {
+  it("decodes claudeSessionId + cwd (protojson camelCase)", () => {
+    const frame = decode({ sessionView: { ...SESSION_VIEW, claudeSessionId: "cli-uuid", cwd: "/work" } });
+    if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
+    expect(frame.frame.value.claudeSessionId).toBe("cli-uuid");
+    expect(frame.frame.value.cwd).toBe("/work");
+  });
+
+  it("defaults the resume keys to empty strings when absent (optional)", () => {
+    const frame = decode({ sessionView: SESSION_VIEW });
+    if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
+    expect(frame.frame.value.claudeSessionId).toBe("");
+    expect(frame.frame.value.cwd).toBe("");
+  });
+});
+
 describe("decodeFrontendFrame — unknown / empty variants hard-error", () => {
   it("throws on an unknown frame variant key", () => {
     expect(() => decode({ bogusVariant: {} })).toThrow(/unrecognized field/);
