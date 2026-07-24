@@ -6,7 +6,6 @@
 
 (declare-function agent-repl--do-log "core")
 (declare-function agent-repl--mark-ws-thinking "input")
-(declare-function agent-repl--fire-metaprompt-read "input")
 (declare-function agent-repl--mark-dead "status")
 (declare-function agent-repl--frontend-api "frontend-client")
 (declare-function agent-repl--state-save "history")
@@ -315,11 +314,10 @@ failed \(nil return), does nothing further.  If the workspace is
 nil, logs the :warning message with the directory interpolated via %s.
 Otherwise updates the workspace's session ID (if provided), logs a standard
 entry using :name, then calls :callback with the workspace name and the
-directory.  A callback whose arity accepts a third argument (currently only
-`agent-repl--on-session-start-event') additionally receives the SessionStart
-`:source' so it can act on the session's origin (e.g. re-fire the metaprompt
-after a /compact); every other handler keeps its two-argument (ws dir)
-contract untouched."
+directory.  Every handler uses the two-argument (ws dir) contract; the
+SessionStart `:source' is consumed only by
+`agent-repl--update-session-id-from-sentinel' (the three-argument
+session-start callback was deleted in the agent-shim cutover, design §10)."
   (let* ((sentinel-data (agent-repl--read-sentinel-file file))
          (dir (plist-get sentinel-data :dir))
          (session-id (plist-get sentinel-data :session-id))
@@ -367,17 +365,12 @@ contract untouched."
                               (plist-get handler :name)
                               (file-name-nondirectory file) dir ws
                               (agent-repl--ws-get ws :agent-state))
-            ;; Pass SOURCE only to callbacks whose arity accepts a third
-            ;; argument.  `--on-session-start-event' consumes it (to re-fire
-            ;; the metaprompt after a /compact); every other event handler
-            ;; keeps its two-argument (ws dir) contract, so calling it with a
-            ;; third arg would signal `wrong-number-of-arguments'.
-            (let* ((cb (plist-get handler :callback))
-                   (max-arity (cdr (func-arity cb))))
-              (if (or (eq max-arity 'many)
-                      (and (integerp max-arity) (>= max-arity 3)))
-                  (funcall cb ws dir source)
-                (funcall cb ws dir))))
+            ;; Every surviving handler keeps the two-argument (ws dir)
+            ;; contract.  The SOURCE-consuming three-argument callback
+            ;; (`--on-session-start-event', re-firing the metaprompt after a
+            ;; /compact) was deleted in the agent-shim cutover; SOURCE is
+            ;; still read above for `--update-session-id-from-sentinel'.
+            (funcall (plist-get handler :callback) ws dir))
         (error
          (agent-repl--do-log ws "process-sentinel-file: handler=%s ERRORED file=%s dir=%s ws=%s err=%S"
                               (list (plist-get handler :name)
@@ -487,151 +480,33 @@ prevent."
         (error
          (agent-repl--warn ws "account-changed: config-dir fetch failed for ws=%s: %S" ws err))))))
 
-(defun agent-repl--maybe-finalize-stop (ws)
-  "If WS is fully stopped (Stop fired AND no pending subagents), finalize it.
-Drives the `:thinking → :done' transition via
-`agent-repl--handle-agent-finished' and clears the Stop / SubagentStop
-tracking so the next turn starts fresh.  No-op when not fully stopped."
-  (when (agent-repl--fully-stopped-p ws)
-    (agent-repl--log ws "maybe-finalize-stop: ws=%s fully stopped, finalizing" ws)
-    (agent-repl--ws-clear-stop-tracking ws)
-    (agent-repl--handle-agent-finished ws)))
-
-(defun agent-repl--on-stop-event (ws dir)
-  "Handle a Stop event for workspace WS with directory DIR.
-Records that Stop has fired and finalizes the turn iff no subagents
-are pending.  When subagents are still in flight, the finalization is
-deferred to whichever SubagentStop arrives last (see
-`agent-repl--maybe-finalize-stop')."
-  (agent-repl--log ws "on-stop-event: ws=%s dir=%S pending-subagents=%d"
-                    ws dir (agent-repl--ws-pending-subagents ws))
-  (agent-repl--ws-set-stop-received ws t)
-  (agent-repl--maybe-finalize-stop ws))
-
-(defun agent-repl--on-subagent-start-event (ws dir)
-  "Handle a SubagentStart event for workspace WS with directory DIR.
-Increments the pending-subagent counter so the workspace stays in
-`:thinking' until every spawned subagent reports back via SubagentStop."
-  (agent-repl--log ws "on-subagent-start-event: ws=%s dir=%S" ws dir)
-  (agent-repl--ws-incf-pending-subagents ws))
-
-(defun agent-repl--on-subagent-stop-event (ws dir)
-  "Handle a SubagentStop event for workspace WS with directory DIR.
-Decrements the pending-subagent counter.  If this was the last
-outstanding subagent and the Stop hook has already fired, finalize
-the turn."
-  (agent-repl--log ws "on-subagent-stop-event: ws=%s dir=%S" ws dir)
-  (agent-repl--ws-decf-pending-subagents ws)
-  (agent-repl--maybe-finalize-stop ws))
-
-(defun agent-repl--on-stop-failure-event (ws dir)
-  "Handle a StopFailure event for workspace WS with directory DIR.
-Sets `:agent-state' to `:stop-failed' (visually distinct from `:dead'
-since the agent session is still alive and re-promptable) and clears
-the Stop / SubagentStop tracking so a subsequent successful turn isn't
-gated on a stale pending-subagent counter from this aborted turn.
-
-No automatic `try again' retry is fired: the StopFailure hook is not
-guaranteed to fire only on genuine API errors (server-returned error
-codes) — it also fires on non-error turn endings such as context
-compaction — and Claude Code exposes no payload field that lets us
-reliably distinguish the two.  Auto-re-prompting on those false
-positives double-prompts and interferes with the session, so the
-failure is surfaced (the ⚠ `:stop-failed' tab plus the log entry) and
-recovery is left to the user."
-  (agent-repl--log ws "on-stop-failure-event: ws=%s dir=%S" ws dir)
-  (agent-repl--ws-clear-stop-tracking ws)
-  (agent-repl--ws-set-agent-state ws :stop-failed))
-
-(defun agent-repl--on-prompt-submit-event (ws _dir)
-  "Mark workspace WS as thinking after a prompt submission."
-  (let ((before (agent-repl--ws-get ws :agent-state)))
-    (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-BEFORE=%s" ws before)
-    (agent-repl--mark-ws-thinking ws)
-    (agent-repl--log-verbose ws "on-prompt-submit-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :agent-state))))
-
-(defun agent-repl--on-session-start-event (ws _dir &optional source)
-  "Handle a session_start event for workspace WS.
-This is the agent becoming ready.  Flips `:agent-state' from nil/`:init'
-to `:idle' (guarded so a lagging/re-fired session_start never clobbers
-an in-flight turn), drains any prompts queued before the session came
-up (the workspace-generation dispatch enqueues a new workspace's
-initial prompt as `:pending-prompts'; the drain is frontend-aware, so
-delivery goes through WS's send path), then fires the frontend-agnostic
-after-ready hook and flips the agent-side bit on the ws-fully-loaded
-latch.
-
-Hook firing (after-ready and the ws-fully-loaded latch flip) runs
-UNCONDITIONALLY on every observed `session_start' for WS — duplicate
-or stale events still flip the latch and fire the narrow hook so
-observers waiting on them are never stalled by a swallowed duplicate.
-
-SOURCE is the SessionStart hook's origin field (see
-`agent-repl--read-sentinel-file'): \"startup\", \"resume\", \"clear\",
-or \"compact\".  A \"compact\" origin means Claude Code replaced the
-conversation context with a summary — dropping the previously-injected
-metaprompt guidelines — while continuing the same session mid-work, so
-the read-directive is re-fired via `agent-repl--fire-metaprompt-read'
-to re-establish them in the fresh context."
-  (agent-repl--log ws "on-session-start-event: ENTER ws=%s agent-state=%s"
-                    ws (agent-repl--ws-get ws :agent-state))
-  (when (memq (agent-repl--ws-get ws :agent-state) '(nil :init))
-    (agent-repl--ws-set-agent-state ws :idle))
-  ;; Flush prompts queued before the session was up (the
-  ;; workspace-generation dispatch enqueues the new workspace's
-  ;; initial prompt as `:pending-prompts').  The drain is
-  ;; frontend-aware, so delivery goes through the gui send path.
-  (agent-repl--drain-pending-prompts ws)
-  ;; Fire narrow after-ready hook (every observed session_start).
-  (agent-repl--run-after-ready-hooks ws)
-  ;; Flip the agent-side bit on the fully-loaded latch.  If
-  ;; --on-workspace-switch has also fired, this fires the ws-fully-loaded
-  ;; hook; otherwise we just record the bit and wait for switch settle.
-  (agent-repl--latch-and-maybe-fire-loaded ws :agent-ready)
-  ;; A compaction summary replaces the context that carried the metaprompt
-  ;; guidelines, so re-fire the read-directive to re-establish them.  Runs
-  ;; last, after the ws is marked ready and pending prompts have drained, so
-  ;; the re-read lands cleanly on the compacted session.
-  (when (equal source "compact")
-    (agent-repl--fire-metaprompt-read ws)))
-
-(defun agent-repl--run-after-ready-hooks (ws)
-  "Run `agent-repl-after-ready-functions' for WS, isolating hook errors.
-Each erroring hook is logged and skipped rather than rethrown — this
-runs from a file-notify callback where a hard error would kill the
-sentinel watcher.  Called from `agent-repl--on-session-start-event'."
-  (run-hook-wrapped 'agent-repl-after-ready-functions
-                    (lambda (fn ws)
-                      (condition-case err
-                          (funcall fn ws)
-                        (error
-                         (agent-repl--log ws
-                                           "after-ready-hook fn=%s err=%S"
-                                           fn err)))
-                      nil)
-                    ws))
-
-(defvar agent-repl-after-ready-functions nil
-  "Hook run when a `session_start' event is observed for a workspace.
-Each function is called with one argument: the workspace name (string)
-whose agent process printed `session_start'.
-
-Unlike `agent-repl-ws-fully-loaded-functions', this hook is the
-NARROW signal — it fires on every observed `session_start' event,
-including duplicates that arrive after WS's `:agent-state' has
-already left `:init'.  Use this only when you specifically need the
-agent-side ready event; prefer `agent-repl-ws-fully-loaded-functions'
-for anything that needs the workspace to also be settled on the
-Emacs side.
-
-Handlers run via `run-hook-wrapped' wrapped in `condition-case', so a
-broken handler cannot prevent later handlers from completing.")
+;; The status-hook dispatch handlers for stop_ / stop_failure_ /
+;; subagent_start_ / subagent_stop_ / prompt_submit_ / session_start_ were
+;; DELETED in the agent-shim cutover (design §10).  Render-state is now
+;; resolved by the daemon's SSM and pushed as `frontend.v1' WorkspaceState
+;; frames (see `frontend-state.el' / `agent-repl--ws-render-status'); the
+;; managed Claude Code hooks that wrote those sentinels are removed from
+;; `agent-repl--managed-hooks' in `install.el', so the sentinels are no
+;; longer written at all.  The non-status daemon-written sentinels
+;; (permission_request/prompt/resolved, session_dead_, account_changed_)
+;; are kept above.  The prior session_start orchestration (pending-prompt
+;; drain, the `:agent-ready' half of the ws-fully-loaded latch,
+;; after-ready hooks, and the compaction metaprompt re-fire) moved to the
+;; daemon, which now owns prompt submission and session-ready reporting.
 
 (defvar agent-repl-ws-fully-loaded-functions nil
   "Hook run when a Agent REPL workspace is fully loaded.
 A workspace is fully loaded when BOTH:
-  1. `--on-session-start-event' has fired (`:agent-ready' bit set),
+  1. the `:agent-ready' bit is set, AND
   2. `--on-workspace-switch' has completed (`:ws-loaded' bit set).
+
+CUTOVER GAP (design §10): the `:agent-ready' bit was previously set by
+`--on-session-start-event', deleted in the agent-shim cutover along with
+the SessionStart managed hook.  The daemon now owns session-ready
+reporting (it pushes state and owns prompt submission), so the
+`:agent-ready' half of this latch has no producer in Emacs until a
+daemon-pushed frame is wired to set it.  `--latch-and-maybe-fire-loaded'
+and the `:ws-loaded' callers (commands.el / panels.el) are retained.
 
 Each handler is called with two arguments: (WS &optional MARKER).
 WS is the workspace name string.  MARKER is `:timed-out' when the
@@ -690,12 +565,11 @@ running but its load cycle has logically ended)."
 (defconst agent-repl--sentinel-dispatch-alist
   ;; ORDER MATTERS: prefixes are matched via `string-prefix-p' in the
   ;; order they appear here, so a longer entry must come before a shorter
-  ;; one whenever the longer is itself prefixed by the shorter.  Concretely:
-  ;; `stop_failure_*' filenames are also prefixed by `stop_', so the
-  ;; `stop_failure_' entry must appear before the bare `stop_' entry —
-  ;; otherwise stop-failure files would dispatch to the regular Stop
-  ;; handler.  (`subagent_start_' / `subagent_stop_' do not collide with
-  ;; `stop_' since their filenames start with `subagent_'.)
+  ;; one whenever the longer is itself prefixed by the shorter.  All the
+  ;; status prefixes (stop_ / stop_failure_ / subagent_start_ /
+  ;; subagent_stop_ / prompt_submit_ / session_start_) were deleted in the
+  ;; agent-shim cutover (design §10); every surviving entry is a
+  ;; daemon-written NON-status channel and no two collide by prefix.
   '(;; ORDER MATTERS for this pair too: `permission_request' is itself
     ;; prefixed by `permission_' just like `permission_prompt' is, but
     ;; since neither prefix is a prefix of the other (they diverge at
@@ -737,24 +611,7 @@ running but its load cycle has logically ended)."
     ;; older shim may still emit `login_request_' files, so the prefix is
     ;; listed in `agent-repl--deprecated-sentinel-prefixes' below and drained
     ;; rather than left to spam the log every poll cycle.
-    ("subagent_start_"    . (:callback agent-repl--on-subagent-start-event
-                             :warning  "[agent-repl] WARNING: subagent-start sentinel dir=%s matched no workspace"
-                             :name     "handle-subagent-start"))
-    ("subagent_stop_"     . (:callback agent-repl--on-subagent-stop-event
-                             :warning  "[agent-repl] WARNING: subagent-stop sentinel dir=%s matched no workspace"
-                             :name     "handle-subagent-stop"))
-    ("stop_failure_"      . (:callback agent-repl--on-stop-failure-event
-                             :warning  "[agent-repl] WARNING: stop-failure sentinel dir=%s matched no workspace"
-                             :name     "handle-stop-failure"))
-    ("stop_"              . (:callback agent-repl--on-stop-event
-                             :warning  "[agent-repl] WARNING: stop sentinel dir=%s matched no workspace (tab may be stuck red)"
-                             :name     "handle-stop"))
-    ("prompt_submit_"     . (:callback agent-repl--on-prompt-submit-event
-                             :warning  "[agent-repl] WARNING: prompt-submit dir=%s matched no workspace"
-                             :name     "handle-prompt-submit"))
-    ("session_start_"     . (:callback agent-repl--on-session-start-event
-                             :warning  "[agent-repl] WARNING: session-start dir=%s matched no workspace"
-                             :name     "handle-session-start")))
+    )
   "Alist mapping filename prefixes to handler plists.
 Each entry is (PREFIX . PLIST) where PLIST has keys:
   :callback  - function called with (WS DIR) on match
@@ -762,11 +619,25 @@ Each entry is (PREFIX . PLIST) where PLIST has keys:
                (interpolates DIR via %s)
   :name      - handler name for debug logging
 
-Order matters: see the leading comment in the source for the prefix
-overlap between `stop_' and `stop_failure_'.")
+Every entry is a daemon-written NON-status channel; the status
+channels (stop_ / stop_failure_ / subagent_* / prompt_submit_ /
+session_start_) were deleted in the agent-shim cutover (design §10)
+and no surviving prefix collides with another.")
 
 (defconst agent-repl--deprecated-sentinel-prefixes
-  '("login_request_")
+  '("login_request_"
+    ;; Retired STATUS channels (agent-shim cutover, design §10).  Their
+    ;; managed Claude Code hooks are removed from `install.el', so these
+    ;; sentinels should never be written again — but a stale `~/.claude'
+    ;; hook install or an older shim could still emit them, so drain them
+    ;; rather than let the dispatch path re-warn "no handler" every poll.
+    ;; `stop_' covers `stop_failure_'; `subagent_' covers both subagent
+    ;; variants.  `session_start_' does NOT match the kept `session_dead_'
+    ;; handler (which is checked first anyway).
+    "stop_"
+    "subagent_"
+    "prompt_submit_"
+    "session_start_")
   "Filename prefixes for sentinel channels Emacs no longer acts on.
 A file matching one of these is DRAINED (deleted and dropped) rather than
 warned about.  It is deliberately NOT in `agent-repl--sentinel-dispatch-alist':

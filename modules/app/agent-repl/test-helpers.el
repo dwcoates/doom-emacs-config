@@ -639,7 +639,6 @@ re-routes their frontend resolution instead."
          ;; tab-bar render.
          (agent-repl--folded-repos (make-hash-table :test 'equal))
          (agent-repl--snapshot-load-state nil)
-         (agent-repl-after-ready-functions nil)
          (agent-repl--sync-timer nil)
          (agent-repl-debug nil)
          (agent-repl-default-frontend agent-repl-default-frontend)
