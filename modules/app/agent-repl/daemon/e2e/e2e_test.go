@@ -15,7 +15,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -239,29 +238,77 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		Logf:          t.Logf,
 	})
 	binding.SetTarget(srv)
-	ts := httptest.NewServer(srv.Handler())
+	// Mirror main.go's mux: the session routes plus the UNFILTERED /frontend
+	// socket, which is where session-creation commands ride now that
+	// POST /sessions is gone.
+	mux := http.NewServeMux()
+	mux.Handle("/sessions", srv.Handler())
+	mux.Handle("/sessions/", srv.Handler())
+	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
+	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &e2eHarness{ts: ts}
 }
 
+// createSession brings a session up over the STRICT command path — the same
+// one the webapp uses (webapp/src/main.ts createSessionViaWs), since the
+// POST /sessions route no longer exists. It dials the unfiltered /frontend
+// socket, waits for the connect StateSnapshot so the known-session set is
+// populated FIRST (a pre-existing session on the same cwd must not be able to
+// masquerade as the new one), sends CreateSessionCmd, and correlates the new
+// id off the pushed SessionView whose cwd matches.
+//
+// A failing CommandAck for the create request is a hard failure, never a
+// silent retry: the session genuinely did not come up.
 func (h *e2eHarness) createSession(t *testing.T, cwd string) string {
 	t.Helper()
-	body := fmt.Sprintf(`{"fake":true,"cwd":%q}`, cwd)
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(body))
+	conn := h.dialFrontend(t)
+	defer conn.Close()
+
+	known := map[string]bool{}
+	snap := readFrame(t, conn)
+	if snap.GetSnapshot() == nil {
+		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", snap.GetFrame())
+	}
+	for _, sv := range snap.GetSnapshot().GetSessions() {
+		known[sv.GetSessionId()] = true
+	}
+
+	const requestID = "e2e-create-1"
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"fake":true}}`, requestID, cwd))
+
+	deadline := time.Now().Add(frameTimeout)
+	for time.Now().Before(deadline) {
+		frame := readFrame(t, conn)
+		switch f := frame.GetFrame().(type) {
+		case *frontendv1.FrontendFrame_CommandAck:
+			if f.CommandAck.GetRequestId() == requestID && !f.CommandAck.GetOk() {
+				t.Fatalf("createSession nacked: %s", f.CommandAck.GetError())
+			}
+		case *frontendv1.FrontendFrame_SessionView:
+			sv := f.SessionView
+			if sv.GetCwd() == cwd && !known[sv.GetSessionId()] && sv.GetSessionId() != "" {
+				return sv.GetSessionId()
+			}
+		}
+	}
+	t.Fatalf("no SessionView for a new session at cwd %s arrived before the deadline", cwd)
+	return ""
+}
+
+// dialFrontend opens the UNFILTERED /frontend socket (every workspace's
+// frames), the surface session-creation commands ride.
+func (h *e2eHarness) dialFrontend(t *testing.T) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(h.ts.URL, "http") + "/frontend"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		t.Fatalf("POST /sessions: %v", err)
+		t.Fatalf("dial /frontend: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /sessions status = %d", resp.StatusCode)
+	if resp != nil {
+		defer resp.Body.Close()
 	}
-	var created struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create: %v", err)
-	}
-	return created.SessionID
+	return conn
 }
 
 func (h *e2eHarness) dial(t *testing.T, sessionID string) *websocket.Conn {
