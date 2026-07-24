@@ -19,6 +19,7 @@ type fakePusher struct {
 	catalog  []*frontendv1.TaskCatalog
 	degraded []*frontendv1.DegradedNotice
 	state    []*frontendv1.WorkspaceState
+	inits    []*frontendv1.SessionInitView
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
@@ -44,6 +45,11 @@ func (p *fakePusher) PushDegradedNotice(n *frontendv1.DegradedNotice) {
 func (p *fakePusher) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	p.mu.Lock()
 	p.state = append(p.state, w)
+	p.mu.Unlock()
+}
+func (p *fakePusher) PushSessionInitView(v *frontendv1.SessionInitView) {
+	p.mu.Lock()
+	p.inits = append(p.inits, v)
 	p.mu.Unlock()
 }
 

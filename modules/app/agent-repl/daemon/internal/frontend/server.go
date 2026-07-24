@@ -291,6 +291,9 @@ func (s *Server) PushTaskCatalog(c *frontendv1.TaskCatalog) { s.Broadcast(TaskCa
 func (s *Server) PushDegradedNotice(n *frontendv1.DegradedNotice) {
 	s.Broadcast(DegradedNoticeFrame(n))
 }
+func (s *Server) PushSessionInitView(v *frontendv1.SessionInitView) {
+	s.Broadcast(SessionInitViewFrame(v))
+}
 
 // ---------------------------------------------------------------------------
 // Per-connection lifecycle

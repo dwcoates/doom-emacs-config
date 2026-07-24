@@ -35,6 +35,10 @@ type AgentShimConfig struct {
 	Lifecycle WorkspaceLifecycle
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
+	// Inits supplies the retained SystemInit of every live session as
+	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
+	// leaves snapshot.inits empty. Satisfied by *sessiondrv.Manager.
+	Inits SessionInitSource
 	// SessionCommands is the late-bound daemon-core surface (session
 	// create/delete + DaemonView) the command handler and snapshot provider
 	// need. Required: main injects a *SessionCommandBinding and calls SetTarget
@@ -135,7 +139,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	srv := frontend.New(frontend.Config{
 		Logf:    logf,
-		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, daemon: cfg.SessionCommands},
+		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, daemon: cfg.SessionCommands},
 		Handler: handler,
 	})
 
