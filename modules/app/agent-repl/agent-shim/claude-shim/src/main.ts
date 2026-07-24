@@ -14,11 +14,20 @@
  *   --resume <session>        resume an on-disk claude session
  *   --claude-bin <path>       claude CLI for the SDK to drive (system
  *                             binary for vterm parity; default: bundled)
+ *   --uds-socket <path>       enable UDS mode: listen on <path> for the daemon
+ *                             instead of speaking Layer-1 NDJSON over stdio
+ *   --store-socket <path>     shim-store socket (UDS mode; default
+ *                             ~/.cache/agent-repl/sock/store.sock)
+ *   --version                 print the shim version and exit
  */
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import os from "node:os";
+import path from "node:path";
+import { UdsSession } from "./uds/uds-session.js";
+import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, FAKE_STATUS, createFakeQuery } from "./fake-query.js";
 import {
   ModelInfo,
@@ -47,6 +56,18 @@ interface CliArgs {
    *  version parity with vterm sessions and CLI-era permission modes
    *  like `auto` that the SDK's bundled cli.js predates). */
   claudeBin?: string;
+  /** UDS-mode listener path (session-<id>.sock). Present => UDS mode. */
+  udsSocket?: string;
+  /** shim-store socket path (UDS mode only). Defaults under ~/.cache. */
+  storeSocket?: string;
+  /** Print the version and exit (a node-runnable smoke of the bundle). */
+  version?: boolean;
+}
+
+/** The default shim-store socket, honoring XDG_CACHE_HOME (design §3). */
+export function defaultStoreSocket(): string {
+  const cache = process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache");
+  return path.join(cache, "agent-repl", "sock", "store.sock");
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -88,6 +109,15 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       case "--claude-bin":
         args.claudeBin = next();
+        break;
+      case "--uds-socket":
+        args.udsSocket = next();
+        break;
+      case "--store-socket":
+        args.storeSocket = next();
+        break;
+      case "--version":
+        args.version = true;
         break;
       default:
         throw new Error(`unknown argument: ${arg}`);
@@ -246,8 +276,36 @@ async function realProbeStatus(args: CliArgs): Promise<unknown> {
   }
 }
 
+/**
+ * Build the SDK-query factory shared by both transports: a fake scripted query
+ * under `--fake`, else the lazily-resolved real SDK query. The factory surface
+ * ({@link SessionDeps.createQuery}) is identical to
+ * {@link import("./uds/uds-session.js").UdsSessionDeps.createQuery}, so both
+ * modes drive the SDK the same way.
+ */
+function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
+  return (prompt, canUseTool): QueryLike => {
+    if (args.fake) {
+      return createFakeQuery(prompt, canUseTool, {
+        sessionId: args.sessionId,
+        newUuid: randomUUID,
+        ...(args.resume !== undefined ? { resume: args.resume } : {}),
+      });
+    }
+    return lazyQuery(realQueryFactory(args, prompt, canUseTool));
+  };
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  // `--version` is a node-runnable smoke of the bundle: it loads every static
+  // import (including the proto stubs and their bundled @bufbuild/protobuf) and
+  // exits before touching a socket or the SDK. It must stay dependency-free.
+  if (args.version) {
+    process.stdout.write(`claude-shim ${packageVersion("../package.json")}\n`);
+    return;
+  }
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
   // module (dynamic import) before constructing the session.
@@ -256,6 +314,24 @@ export async function main(): Promise<void> {
     : import("@anthropic-ai/claude-agent-sdk");
   if (sdkModulePromise) await sdkModulePromise;
 
+  const createQuery = makeCreateQuery(args);
+
+  // ── UDS mode (design §8, §4.4) ────────────────────────────────────────────
+  // The daemon spawns the shim with `--uds-socket <path>` and CONNECTS to that
+  // listener; the shim OWNS lifetime and OUTLIVES the daemon (reattach). This
+  // is the path that supersedes stdio once the daemon flips to ShimUDSArgv.
+  if (args.udsSocket !== undefined) {
+    await runUdsMode(args, createQuery);
+    return;
+  }
+
+  // ── SUPERSEDED: stdio Layer-1 NDJSON transport ─────────────────────────────
+  // This entire branch DIES when the daemon flips its spawn contract from
+  // ShimArgv to ShimUDSArgv (daemon/internal/server/agentshim.go): the daemon's
+  // consumption cutover is a separate final-assembly task that deletes the
+  // stdio path wholesale. It is retained ONLY because the resident daemon and
+  // the daemon e2e harness still spawn the shim over stdio; do not remove it
+  // until that cutover lands. New behavior belongs in UDS mode above.
   const deps: SessionDeps = {
     sessionId: args.sessionId,
     shimVersion: packageVersion("../package.json"),
@@ -263,16 +339,7 @@ export async function main(): Promise<void> {
       ? "fake"
       : packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
     initialPermissionMode: args.permissionMode,
-    createQuery: (prompt, canUseTool): QueryLike => {
-      if (args.fake) {
-        return createFakeQuery(prompt, canUseTool, {
-          sessionId: args.sessionId,
-          newUuid: randomUUID,
-          ...(args.resume !== undefined ? { resume: args.resume } : {}),
-        });
-      }
-      return lazyQuery(realQueryFactory(args, prompt, canUseTool));
-    },
+    createQuery,
     probeCommands: (): Promise<SlashCommand[]> =>
       args.fake ? Promise.resolve(FAKE_COMMANDS) : realProbeCommands(args),
     probeStatus: (): Promise<unknown> =>
@@ -290,6 +357,36 @@ export async function main(): Promise<void> {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   rl.on("line", (line) => session.handleLine(line));
   rl.on("close", () => session.handleStdinEnd());
+  await session.start();
+}
+
+/**
+ * Drive one UDS-mode session (design §8). The UDS server owns lifetime: a
+ * daemon disconnect does NOT stop the session or the in-flight turn (reattach,
+ * §4.4), and there is no stdin, so stdin-EOF is not a stop path. The explicit
+ * stop path is SIGTERM/SIGINT, which cleanly shuts the session down.
+ */
+async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]): Promise<void> {
+  const session = new UdsSession({
+    sessionId: args.sessionId,
+    shimVersion: packageVersion("../package.json"),
+    protocolVersion: "1",
+    udsSocketPath: args.udsSocket!,
+    storeSocketPath: args.storeSocket ?? defaultStoreSocket(),
+    // SessionStarted.source: RESUME when respawned to resume an on-disk
+    // session, FRESH for a brand-new one (design §5.2 SessionSource).
+    sessionSource: args.resume !== undefined ? SessionSource.RESUME : SessionSource.FRESH,
+    createQuery,
+    newRequestId: randomUUID,
+  });
+  let stopping = false;
+  const stop = (sig: string): void => {
+    if (stopping) return;
+    stopping = true;
+    void session.shutdown(sig).finally(() => process.exit(0));
+  };
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  process.on("SIGINT", () => stop("SIGINT"));
   await session.start();
 }
 
