@@ -67,7 +67,7 @@ func TestSessionHandlerAgentLaunchTwin(t *testing.T) {
 	h := NewSessionTranscriptHandler(quietLog)
 	f := frameFor(t, "tool-results/agent_async_launch.jsonl")
 	// Act
-	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "s1", Kind: KindSessionTranscript})
+	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "s1", Kind: tail.KindSessionTranscript})
 	// Assert: a vendor line twin AND an AGENT TaskStarted.
 	ts := findTaskStarted(evs)
 	if ts == nil {
@@ -192,7 +192,7 @@ func TestAgentHandlerEmitsProgress(t *testing.T) {
 	h := NewAgentTranscriptHandler(quietLog)
 	f := frameFor(t, "sidechain/agent-aef975b7bc3422d4b.jsonl")
 	// Act
-	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "s1", TaskID: "agent-x", RecordsObserved: 7, Kind: KindAgentTranscript})
+	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "s1", TaskID: "agent-x", RecordsObserved: 7, Kind: tail.KindAgentTranscript})
 	// Assert: at least one AGENT TaskProgress carrying the running record count.
 	var tp *corev1.TaskProgress
 	for _, e := range evs {
@@ -225,7 +225,7 @@ func TestJournalHandlerDedupKeys(t *testing.T) {
 		frames = append(frames, tail.Frame{Obj: obj})
 	}
 	// Act
-	evs := h.Handle(frames, &Context{SessionID: "s1", RunID: "wf_abc", Kind: KindWorkflowJournal})
+	evs := h.Handle(frames, &Context{SessionID: "s1", RunID: "wf_abc", Kind: tail.KindWorkflowJournal})
 	// Assert: two vendor journal events with wf:<run>:<key>:<type> dedup keys.
 	if len(evs) != 2 {
 		t.Fatalf("events = %d, want 2", len(evs))
@@ -243,7 +243,7 @@ func TestShellHandlerByteProgress(t *testing.T) {
 	h := NewShellOutputHandler(quietLog)
 	frames := []tail.Frame{{Raw: []byte("some output bytes")}}
 	// Act
-	evs := h.Handle(frames, &Context{SessionID: "s1", TaskID: "b123", BytesObserved: 4096, Kind: KindShellSpool})
+	evs := h.Handle(frames, &Context{SessionID: "s1", TaskID: "b123", BytesObserved: 4096, Kind: tail.KindShellSpool})
 	// Assert
 	if len(evs) != 1 {
 		t.Fatalf("events = %d, want 1", len(evs))
