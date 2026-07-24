@@ -23,41 +23,9 @@ const Producer = "shim-claude-sidecar"
 // Logf is the loud-logging sink (§12).
 type Logf = func(format string, args ...any)
 
-// Kind classifies a watched file (mirrors discover classification).
-type Kind int
-
-const (
-	KindSessionTranscript Kind = iota // projects/*/<session>.jsonl
-	KindAgentTranscript               // .../subagents/agent-*.jsonl (+ a*.output spool)
-	KindWorkflowJournal               // .../workflows/wf_*/journal.jsonl (+ w*.output spool)
-	KindShellSpool                    // /tmp .../tasks/b*.output
-)
-
-// Context carries per-file attribution and the tailer-owned cumulative counters
-// a handler needs. It is populated fresh for each batch (counters reflect totals
-// THROUGH the current batch).
-type Context struct {
-	SessionID string // attribution from the file PATH
-	Path      string // absolute file path (UnparsedEvent evidence + logging)
-	Kind      Kind
-
-	// TaskID identifies the detached task for agent/shell/workflow files.
-	TaskID string
-	// SpoolDir is the session's /tmp task spool directory, used to construct a
-	// background shell task's output_path from its backgroundTaskId.
-	SpoolDir string
-	// RunID is the workflow run id (from the journal PATH), the wf dedup-key root.
-	RunID string
-
-	// RecordsObserved / BytesObserved are cumulative totals through this batch.
-	RecordsObserved int64
-	BytesObserved   int64
-}
-
-// Handler converts a batch of framed records into events (pure; no IO).
-type Handler interface {
-	Handle(frames []tail.Frame, ctx *Context) []*corev1.Event
-}
+// Context / Kind live in the tail package (tailer-owned attribution); aliased
+// here so handler code reads naturally.
+type Context = tail.Context
 
 // nowMillis is the producer wall clock in unix millis (Event.produced_at_ms).
 var nowMillis = func() int64 { return time.Now().UnixMilli() }
