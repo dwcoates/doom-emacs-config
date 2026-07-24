@@ -15,6 +15,7 @@ import {
 import type {
   AdapterEffect,
   SessionViewInput,
+  ToolProgressInput,
   TypingReveal,
   WorkspaceStatusInput,
 } from "../src/state-adapter.js";
@@ -668,5 +669,99 @@ describe("stringField", () => {
     const item = toolItem({ input: { count: 3 }, inputDone: true });
     // Act + Assert
     expect(stringField(item, "count")).toBe("");
+  });
+});
+
+// --- tool-progress (E4 heartbeat relay) -------------------------------------
+
+function progressEffect(over: Partial<ToolProgressInput> = {}): AdapterEffect {
+  return {
+    kind: "tool-progress",
+    value: {
+      workspace: "ws",
+      sessionId: "s1",
+      toolUseId: "tu1",
+      toolName: "Bash",
+      parentToolUseId: "",
+      elapsedSeconds: 12.5,
+      ...over,
+    },
+  };
+}
+
+describe("ingest tool-progress", () => {
+  it("ticks the open call's elapsed clock", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ inputDone: true })])]);
+    // Act
+    store.ingest([progressEffect()]);
+    // Assert
+    expect((store.state.items[0] as ToolItem).progressElapsedS).toBe(12.5);
+  });
+
+  it("reports a change so the caller re-renders the chip", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ inputDone: true })])]);
+    // Act
+    const res = store.ingest([progressEffect()]);
+    // Assert
+    expect(res.changed).toBe(true);
+  });
+
+  it("reports no change when the elapsed value is unmoved", () => {
+    // Arrange — a repeated heartbeat at the same clock must not churn a render.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ inputDone: true })])]);
+    store.ingest([progressEffect()]);
+    // Act
+    const res = store.ingest([progressEffect()]);
+    // Assert
+    expect(res.changed).toBe(false);
+  });
+
+  it("ignores a heartbeat for a call that already settled", () => {
+    // Arrange — a late heartbeat must not revive a frozen elapsed clock.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ inputDone: true, resultTs: TS })])]);
+    // Act
+    store.ingest([progressEffect({ elapsedSeconds: 99 })]);
+    // Assert
+    expect((store.state.items[0] as ToolItem).progressElapsedS).toBeUndefined();
+  });
+
+  it("invents no item for a heartbeat naming an unknown call", () => {
+    // Arrange — legitimate after a reconnect: heartbeats are never replayed.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([progressEffect({ toolUseId: "nope" })]);
+    // Assert
+    expect(store.state.items).toHaveLength(0);
+  });
+
+  it("reports an unattributable heartbeat on the diagnostics channel", () => {
+    // Arrange
+    const logs: string[] = [];
+    const store = new ConversationStore((_lvl, msg) => logs.push(msg));
+    // Act
+    store.ingest([progressEffect({ toolUseId: "nope" })]);
+    // Assert — surfaced, not silently swallowed.
+    expect(logs.some((m) => m.includes("heartbeat for unknown tool call nope"))).toBe(true);
+  });
+
+  it("attributes the heartbeat to the named call, not the newest one", () => {
+    // Arrange — two open calls; only the named one may tick.
+    const store = new ConversationStore();
+    store.ingest([
+      itemsEffect([
+        toolItem({ toolUseId: "tu1", inputDone: true }),
+        toolItem({ toolUseId: "tu2", inputDone: true }),
+      ]),
+    ]);
+    // Act
+    store.ingest([progressEffect({ toolUseId: "tu1" })]);
+    // Assert
+    expect((store.state.items[1] as ToolItem).progressElapsedS).toBeUndefined();
   });
 });

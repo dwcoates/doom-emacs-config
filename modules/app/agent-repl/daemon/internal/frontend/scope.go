@@ -50,6 +50,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matches(f.TaskCatalog.GetSessionId(), f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
 		return frame, sc.matches(f.SessionInit.GetSessionId(), f.SessionInit.GetWorkspace())
+	case *frontendv1.FrontendFrame_Heartbeat:
+		return frame, sc.matches(f.Heartbeat.GetSessionId(), f.Heartbeat.GetWorkspace())
 	default:
 		// DegradedNotice / CommandAck / unknown: connection-global, pass through.
 		return frame, true

@@ -57,6 +57,7 @@ message FrontendFrame {
     DegradedNotice degraded_notice = 8;
     DaemonView daemon_view = 9;   // Additive (S7)
     SessionInitView session_init = 10;  // Additive (S9)
+    HeartbeatView heartbeat = 11;       // Additive (E4)
   }
 }
 
@@ -146,6 +147,24 @@ message TypingDelta {
   string workspace = 1;
   string session_id = 2;
   agentshim.core.v1.ContentDelta delta = 3;
+}
+
+// Additive (E4): EPHEMERAL long-tool liveness relay. The shim already emits
+// core.v1.HeartbeatProgress over its UDS while a tool runs; before this arm
+// existed the daemon had nowhere to put it and dropped it (a schema-forced
+// drop). This is the arm.
+//
+// The embedded HeartbeatProgress is carried UNCHANGED, exactly as TypingDelta
+// carries ContentDelta: the daemon relays, it does not re-type. Consumers key
+// on progress.tool_use_id to find the running tool and use
+// progress.elapsed_seconds to tick its liveness, so a long-running tool stops
+// looking hung. Like TypingDelta it is never persisted and never appears in a
+// StateSnapshot — a frontend that reconnects simply waits for the next
+// heartbeat.
+message HeartbeatView {
+  string workspace = 1;
+  string session_id = 2;
+  agentshim.core.v1.HeartbeatProgress progress = 3;
 }
 
 // The session's retained SystemInit (slash commands, tools, skills, model
