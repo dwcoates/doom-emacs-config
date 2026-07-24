@@ -18,9 +18,11 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -271,6 +273,69 @@ func (h *commandHandler) Shutdown(_ context.Context, workspace, requestID string
 	}
 	go h.shutdown()
 	return nil
+}
+
+// clientLogMessageCap bounds ONE mirrored client-log line's message text. The
+// frontend already caps how MANY lines it forwards per window; this caps how
+// big each one may be, so neither dimension of a pathological log loop can run
+// away with the daemon's disk.
+const clientLogMessageCap = 4000
+
+// clientLogContextCap bounds the rendered structured context of one line.
+const clientLogContextCap = 2000
+
+// ClientLog mirrors a frontend-side diagnostic line into the daemon's own log.
+//
+// The line is EVIDENCE, never a control signal: this records it and touches no
+// daemon state. It is tagged `frontend client-log` so a line that originated in
+// a webview can never be misread as one the daemon produced itself — the whole
+// point is to make an invisible webview's failures greppable next to the daemon
+// events around them.
+//
+// A log with no message carries no evidence and is a caller bug, so it fails
+// loudly rather than writing a blank line. An UNSPECIFIED level, by contrast,
+// is recorded AS unspecified: the level is metadata, and discarding real
+// evidence over missing metadata would defeat the purpose.
+func (h *commandHandler) ClientLog(_ context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
+	if cmd.GetMessage() == "" {
+		return fmt.Errorf("server: client log carries no message (ws=%q request_id=%q)", workspace, requestID)
+	}
+	h.logf("frontend client-log: level=%s ws=%s request_id=%s message=%s%s",
+		clientLogLevelName(cmd.GetLevel()), workspace, requestID,
+		dlog.Clamp(cmd.GetMessage(), clientLogMessageCap),
+		clientLogContextSuffix(cmd.GetContext()))
+	return nil
+}
+
+// clientLogLevelName renders a level for the log. An unrecognized or unset
+// level is rendered honestly rather than defaulted to info, so a frontend that
+// forgets to set one is visible in the log instead of masquerading as info.
+func clientLogLevelName(l frontendv1.ClientLogLevel) string {
+	switch l {
+	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO:
+		return "info"
+	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN:
+		return "warn"
+	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_ERROR:
+		return "error"
+	default:
+		return fmt.Sprintf("unspecified(%d)", int32(l))
+	}
+}
+
+// clientLogContextSuffix renders the optional structured context as compact
+// JSON. An absent context contributes nothing; a context that cannot be
+// rendered is reported inline rather than dropped, since the failure is itself
+// diagnostic information about the reporting frontend.
+func clientLogContextSuffix(ctx *structpb.Struct) string {
+	if ctx == nil || len(ctx.GetFields()) == 0 {
+		return ""
+	}
+	raw, err := protojson.Marshal(ctx)
+	if err != nil {
+		return fmt.Sprintf(" context=<unrenderable: %v>", err)
+	}
+	return " context=" + dlog.Clamp(string(raw), clientLogContextCap)
 }
 
 // ssmSnapshotProvider implements frontend.StateProvider from the SSM's

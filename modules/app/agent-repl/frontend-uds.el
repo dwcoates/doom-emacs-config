@@ -123,13 +123,20 @@ webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.")
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
-    "shutdown")
+    "shutdown" "clientLog")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
 
 `shutdown' (S9) is the graceful-daemon-shutdown command (`ShutdownCmd')
-that replaces the Emacs POST /shutdown HTTP call.")
+that replaces the Emacs POST /shutdown HTTP call.
+
+`clientLog' (E4) mirrors a frontend diagnostic line into the daemon's
+log.  It is listed so this stays a faithful mirror of the proto oneof,
+but Emacs does not use it: Emacs already writes its own log file
+directly (`agent-repl--log'), so routing its diagnostics through the
+daemon would move them FURTHER from the reader, not closer.  The webapp
+needs it because its console is invisible and unpersisted.")
 
 (defvar agent-repl--uds-frame-handlers nil
   "Alist mapping a `FrontendFrame' oneof field name (string) to a handler fn.

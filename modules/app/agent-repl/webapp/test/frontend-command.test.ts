@@ -128,3 +128,41 @@ describe("encodeFrontendCommand — resync", () => {
     expect(w.resync).toEqual({ fromSeq: "42" });
   });
 });
+
+describe("encodeFrontendCommand — clientLog (E4)", () => {
+  it("renders the level as its canonical protojson enum name", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "clientLog", level: "warn", message: "seq gap" },
+    });
+    expect(w.clientLog).toEqual({ level: "CLIENT_LOG_LEVEL_WARN", message: "seq gap" });
+  });
+
+  it("renders the error level", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "clientLog", level: "error", message: "boom" },
+    });
+    expect((w.clientLog as Record<string, unknown>).level).toBe("CLIENT_LOG_LEVEL_ERROR");
+  });
+
+  it("carries a structured context as a plain JSON object", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "clientLog", level: "info", message: "m", context: { seq: 42 } },
+    });
+    expect((w.clientLog as Record<string, unknown>).context).toEqual({ seq: 42 });
+  });
+
+  it("omits an absent context rather than fabricating an empty Struct", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "clientLog", level: "info", message: "m" },
+    });
+    expect("context" in (w.clientLog as Record<string, unknown>)).toBe(false);
+  });
+});

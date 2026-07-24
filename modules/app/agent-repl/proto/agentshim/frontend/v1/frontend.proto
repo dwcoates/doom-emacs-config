@@ -207,7 +207,40 @@ message FrontendCommand {
     CreateSessionCmd create_session = 10;  // Additive (S7)
     DeleteSessionCmd delete_session = 11;  // Additive (S7)
     ShutdownCmd shutdown = 12;             // Additive (S9)
+    ClientLogCmd client_log = 13;          // Additive (E4)
   }
+}
+
+// The severity of a ClientLogCmd. A closed vocabulary rather than a free
+// string, so a frontend cannot invent a level the daemon has no policy for.
+enum ClientLogLevel {
+  CLIENT_LOG_LEVEL_UNSPECIFIED = 0;
+  CLIENT_LOG_LEVEL_INFO = 1;
+  CLIENT_LOG_LEVEL_WARN = 2;
+  CLIENT_LOG_LEVEL_ERROR = 3;
+}
+
+// Additive (E4): a frontend-side diagnostic line, mirrored into the daemon's
+// own on-disk log.
+//
+// WHY THIS EXISTS: the webapp runs inside an Emacs xwidget whose JS console
+// nobody can see and nothing persists, so a delivery-path failure there (a
+// seq-gap loop, a lost replay request, a stalled rAF) left no evidence
+// anywhere at all. A pre-cutover HTTP route carried these; it was deleted with
+// the rest of the legacy plane, and this arm restores the capability on the
+// protobuf channel instead of reviving a second transport.
+//
+// The daemon WRITES these, it does not act on them: a client log is evidence,
+// never a control signal, and is tagged in the log so a line originating in a
+// frontend is never mistaken for one the daemon produced itself.
+message ClientLogCmd {
+  ClientLogLevel level = 1;
+  string message = 2;
+  // Optional structured payload (ids, counters, timings) accompanying the
+  // message. Schemaless on purpose: it is diagnostic evidence whose shape is
+  // the reporting call site's business, and pinning a schema here would make
+  // adding a diagnostic a proto change.
+  google.protobuf.Struct context = 3;
 }
 
 // Additive (S9): graceful daemon shutdown over UDS (replaces Emacs

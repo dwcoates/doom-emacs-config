@@ -25,9 +25,22 @@
 import type { CommandAck, FrontendFrame, SessionView } from "./frontend-proto.js";
 import {
   encodeFrontendCommand,
+  type ClientLogBody,
+  type ClientLogBodyLevel,
   type CommandStruct,
   type FrontendCommandBody,
 } from "./frontend-command.js";
+
+/**
+ * How many in-flight `clientLog` request ids are remembered for ack
+ * recognition. Bounded so a socket that drops mid-flight cannot leak ids.
+ */
+const MAX_TRACKED_CLIENT_LOGS = 256;
+
+/** The default local-only sink for a rejected clientLog ack. */
+function defaultLocalLog(message: string): void {
+  console.warn(message);
+}
 
 export interface CreateSessionArgs {
   cwd: string;
@@ -52,6 +65,13 @@ export interface DispatchOptions {
   /** Correlation-id factory (injected for deterministic tests). */
   newRequestId?: () => string;
   log?: (level: "warn" | "error", message: string) => void;
+  /**
+   * LOCAL-ONLY diagnostic sink, used for the one thing `log` must never carry:
+   * a rejected `clientLog` ack. `log` forwards to the daemon AS a clientLog, so
+   * reporting a clientLog failure through it would re-send a clientLog, get
+   * another rejection, and loop. Defaults to the console.
+   */
+  logLocal?: (message: string) => void;
 }
 
 interface PendingAck {
@@ -73,6 +93,7 @@ export class CommandDispatcher {
   private readonly pending = new Map<string, PendingAck>();
   private readonly knownSessions = new Set<string>();
   private readonly creates: CreateWaiter[] = [];
+  private readonly clientLogAcks = new Set<string>();
   private counter = 0;
 
   constructor(private readonly opts: DispatchOptions) {}
@@ -138,7 +159,55 @@ export class CommandDispatcher {
     });
   }
 
+  /**
+   * Mirror one diagnostic line to the daemon (E4). Fire-and-forget by design,
+   * and the ONE command that is not promise/ack-correlated:
+   *
+   * - A log is evidence, not an operation, so nothing waits on its outcome.
+   * - An awaited ack would need a rejection handler, and the only way to report
+   *   that rejection is a log — which would send another clientLog. Not
+   *   awaiting removes the loop rather than damping it.
+   *
+   * Returns whether the socket accepted the frame, which is what the forwarding
+   * logger reports as delivery. Its request id is still REMEMBERED so the ack
+   * receipt is recognized instead of being reported as an unknown-request
+   * anomaly (which would itself be logged, and forwarded, and acked…).
+   */
+  clientLog(workspace: string, level: ClientLogBodyLevel, message: string, context?: CommandStruct): boolean {
+    const requestId = this.newId();
+    const body: ClientLogBody = {
+      case: "clientLog",
+      level,
+      message,
+      ...(context !== undefined ? { context } : {}),
+    };
+    const sent = this.opts.send(encodeFrontendCommand({ requestId, workspace, body }));
+    if (sent) this.rememberClientLog(requestId);
+    return sent;
+  }
+
+  /**
+   * Track an outstanding clientLog id, bounded: an unacked log (a socket that
+   * dropped mid-flight) must not accumulate ids forever. Evicting the oldest
+   * only costs that id its ack recognition, which degrades to one local line.
+   */
+  private rememberClientLog(requestId: string): void {
+    this.clientLogAcks.add(requestId);
+    while (this.clientLogAcks.size > MAX_TRACKED_CLIENT_LOGS) {
+      const oldest = this.clientLogAcks.values().next();
+      if (oldest.done === true) break;
+      this.clientLogAcks.delete(oldest.value);
+    }
+  }
+
   private onAck(ack: CommandAck): void {
+    if (this.clientLogAcks.delete(ack.requestId)) {
+      // A rejected client log is reported LOCALLY ONLY — see `logLocal`.
+      if (!ack.ok) {
+        (this.opts.logLocal ?? defaultLocalLog)(`clientLog rejected: ${ack.error}`);
+      }
+      return;
+    }
     const p = this.pending.get(ack.requestId);
     if (p === undefined) {
       this.opts.log?.("warn", `commandAck for unknown request '${ack.requestId}'`);

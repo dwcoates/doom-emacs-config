@@ -159,3 +159,97 @@ describe("createSession — SessionView correlation", () => {
     await expect(dispatcher.createSession(CREATE_ARGS)).rejects.toThrow(/socket not open/);
   });
 });
+
+describe("clientLog (E4)", () => {
+  it("sends a clientLog FrontendCommand frame", () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    dispatcher.clientLog("/w", "warn", "seq gap");
+    // Assert
+    expect(JSON.parse(sent[0])).toEqual({
+      requestId: "r1",
+      workspace: "/w",
+      clientLog: { level: "CLIENT_LOG_LEVEL_WARN", message: "seq gap" },
+    });
+  });
+
+  it("reports delivery from the socket, which is what the logger records", () => {
+    // Arrange
+    const { dispatcher } = newDispatcher();
+    // Act / Assert
+    expect(dispatcher.clientLog("/w", "info", "m")).toBe(true);
+  });
+
+  it("reports non-delivery on a closed socket", () => {
+    // Arrange
+    const { dispatcher } = newDispatcher(false);
+    // Act / Assert
+    expect(dispatcher.clientLog("/w", "info", "m")).toBe(false);
+  });
+
+  it("carries a structured context when one is supplied", () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    dispatcher.clientLog("/w", "info", "m", { seq: 7 });
+    // Assert
+    expect(JSON.parse(sent[0]).clientLog.context).toEqual({ seq: 7 });
+  });
+
+  it("does not report its own ack as an unknown request", () => {
+    // Arrange — the ack MUST be recognized: reporting it would log, which
+    // forwards another clientLog, which acks, which logs…
+    const { dispatcher, logs } = newDispatcher();
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", true));
+    // Assert
+    expect(logs).toEqual([]);
+  });
+
+  it("does not route a rejected clientLog ack through the forwarding logger", () => {
+    // Arrange — routing it there would re-send a clientLog and loop.
+    const { dispatcher, logs } = newDispatcher();
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "no message"));
+    // Assert
+    expect(logs).toEqual([]);
+  });
+
+  it("reports a rejected clientLog ack on the local-only sink", () => {
+    // Arrange
+    const local: string[] = [];
+    const dispatcher = new CommandDispatcher({
+      send: () => true,
+      newRequestId: () => "r1",
+      logLocal: (message) => local.push(message),
+    });
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "no message"));
+    // Assert — surfaced somewhere, just not back down the forwarding path.
+    expect(local).toEqual(["clientLog rejected: no message"]);
+  });
+
+  it("still reports a genuinely unknown ack as an anomaly", () => {
+    // Arrange — the clientLog carve-out must not blanket-silence onAck.
+    const { dispatcher, logs } = newDispatcher();
+    // Act
+    dispatcher.observe(ackFrame("never-sent", true));
+    // Assert
+    expect(logs[0][1]).toContain("unknown request");
+  });
+
+  it("tracks no ack id for a frame the socket refused", () => {
+    // Arrange — an undelivered log can never be acked, so remembering its id
+    // would leak it.
+    const { dispatcher, logs } = newDispatcher(false);
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", true));
+    // Assert — the id was never tracked, so this reads as an unknown ack.
+    expect(logs[0][1]).toContain("unknown request");
+  });
+});
