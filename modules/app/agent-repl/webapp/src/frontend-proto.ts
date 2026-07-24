@@ -103,6 +103,31 @@ export interface SessionView {
   claudeSessionId: string;
   /** Working directory a rebind's POST /sessions needs. */
   cwd: string;
+  // S7 GET /sessions parity fields (Emacs reads these off the pushed
+  // SessionView now that it dropped the HTTP poller). Optional: a SessionView
+  // that predates them decodes to the field default. The webapp adapter does
+  // not need them, but the strict decoder accepts them typed.
+  /** Whether the session's conversation has ended (delete / shim death). */
+  terminal: boolean;
+  /** Why a terminal session ended; "" while alive. */
+  deathReason: string;
+  /** Retained for wire parity; false post-cutover. */
+  rehydratable: boolean;
+  /** Retained for wire parity; false post-cutover. */
+  hibernated: boolean;
+  /** Count of unresolved permission requests on the live session. */
+  pendingPermissions: number;
+}
+
+/**
+ * Daemon-level identity/liveness (S7). Emacs keys boot detection and
+ * version-mismatch warnings on it; the webapp decodes it but renders no visual.
+ */
+export interface DaemonView {
+  bootId: string;
+  protocolVersion: string;
+  daemonBinaryMtimeMs: number;
+  daemonVersion: string;
 }
 
 export interface ConversationDelta {
@@ -154,6 +179,9 @@ export interface StateSnapshot {
   workspaces: WorkspaceState[];
   sessions: SessionView[];
   catalogs: TaskCatalog[];
+  /** Daemon identity carried on every connect snapshot (S7); absent on a
+   * pre-S7 daemon, so it is optional. */
+  daemon?: DaemonView;
 }
 
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
@@ -166,7 +194,8 @@ export type FrontendFrame = {
     | { case: "typingDelta"; value: TypingDelta }
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
-    | { case: "degradedNotice"; value: DegradedNotice };
+    | { case: "degradedNotice"; value: DegradedNotice }
+    | { case: "daemonView"; value: DaemonView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -210,6 +239,12 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, s
     "control-plane command receipt (agentshim.frontend.v1.CommandAck); the " +
       "webapp renders no visual for it — command dispatch/acking is out of " +
       "the render adapter's scope",
+  ],
+  [
+    "daemonView",
+    "daemon-level identity/liveness (agentshim.frontend.v1.DaemonView); the " +
+      "webapp decodes it but renders no visual — boot detection and " +
+      "version-mismatch warnings are an Emacs-frontend concern",
   ],
 ]);
 
@@ -271,6 +306,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["taskCatalog", (v: unknown) => ({ case: "taskCatalog" as const, value: decodeTaskCatalog(v) })],
   ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
   ["degradedNotice", (v: unknown) => ({ case: "degradedNotice" as const, value: decodeDegradedNotice(v) })],
+  ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -325,6 +361,11 @@ const SESSION_VIEW_KEYS = new Set([
   "shimAttached",
   "claudeSessionId",
   "cwd",
+  "terminal",
+  "deathReason",
+  "rehydratable",
+  "hibernated",
+  "pendingPermissions",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -344,6 +385,13 @@ function decodeSessionView(v: unknown): SessionView {
     // to "" (str default), so the rebind path simply has nothing to persist.
     claudeSessionId: str(o, "claudeSessionId", "SessionView"),
     cwd: str(o, "cwd", "SessionView"),
+    // S7 parity fields: default to the zero value when absent (a pre-S7 daemon
+    // does not send them), so the webapp is never fed a fabricated value.
+    terminal: bool(o, "terminal", "SessionView"),
+    deathReason: str(o, "deathReason", "SessionView"),
+    rehydratable: bool(o, "rehydratable", "SessionView"),
+    hibernated: bool(o, "hibernated", "SessionView"),
+    pendingPermissions: num(o, "pendingPermissions", "SessionView"),
   };
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
@@ -488,11 +536,28 @@ function decodeDegradedNotice(v: unknown): DegradedNotice {
   return dn;
 }
 
-const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs"]);
+const DAEMON_VIEW_KEYS = new Set([
+  "bootId",
+  "protocolVersion",
+  "daemonBinaryMtimeMs",
+  "daemonVersion",
+]);
+function decodeDaemonView(v: unknown): DaemonView {
+  const o = ensureObject(v, "DaemonView");
+  rejectUnknown(o, DAEMON_VIEW_KEYS, "DaemonView");
+  return {
+    bootId: str(o, "bootId", "DaemonView"),
+    protocolVersion: str(o, "protocolVersion", "DaemonView"),
+    daemonBinaryMtimeMs: num(o, "daemonBinaryMtimeMs", "DaemonView"),
+    daemonVersion: str(o, "daemonVersion", "DaemonView"),
+  };
+}
+
+const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon"]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
   rejectUnknown(o, STATE_SNAPSHOT_KEYS, "StateSnapshot");
-  return {
+  const snap: StateSnapshot = {
     workspaces: (o.workspaces === undefined || o.workspaces === null
       ? []
       : ensureArray(o.workspaces, "StateSnapshot.workspaces")
@@ -506,6 +571,12 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       : ensureArray(o.catalogs, "StateSnapshot.catalogs")
     ).map(decodeTaskCatalog),
   };
+  // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
+  // present rather than defaulting it away.
+  if (o.daemon !== undefined && o.daemon !== null) {
+    snap.daemon = decodeDaemonView(o.daemon);
+  }
+  return snap;
 }
 
 // --- primitive readers (loud, protojson-aware) ------------------------------

@@ -390,54 +390,63 @@ xwidget session cannot be retargeted from outside."
 
 ;;;; ---- Turns -----------------------------------------------------------------------
 
+(defmacro agent-repl-ecfg-test--with-uds (&rest body)
+  "Run BODY with the UDS command boundary shadowed; capture into `uds-cmds'.
+Each captured command is (FIELD PAYLOAD WORKSPACE), newest last."
+  (declare (indent 0))
+  `(let ((uds-cmds '()))
+     (ignore uds-cmds)
+     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                (lambda (field payload &optional ws &rest _)
+                  (setq uds-cmds (append uds-cmds (list (list field payload ws)))) "req"))
+               ((symbol-function 'agent-repl--uds-track-command)
+                (lambda (request-id &rest _) request-id)))
+       ,@body)))
+
 (ert-deftest agent-repl-ecfg-test-send/first-turn-carries-the-preamble ()
   "The first turn of a session is wrapped in the read-only contract."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (let (sent)
-      (cl-letf (((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (_id text) (setq sent text) "req-1")))
-        ;; Act
-        (agent-repl--explain-config-send "s_1" "what is SPC o c?")
-        ;; Assert
-        (should (string-match-p "READ-ONLY" sent))
-        (should (string-match-p "what is SPC o c\\?" sent))))))
+    (agent-repl-ecfg-test--with-uds
+      ;; Act
+      (agent-repl--explain-config-send "s_1" "what is SPC o c?")
+      ;; Assert — a submitPrompt whose text carries the preamble + question.
+      (let ((text (plist-get (nth 1 (car uds-cmds)) :text)))
+        (should (equal (nth 0 (car uds-cmds)) "submitPrompt"))
+        (should (string-match-p "READ-ONLY" text))
+        (should (string-match-p "what is SPC o c\\?" text))))))
 
 (ert-deftest agent-repl-ecfg-test-send/follow-up-turn-is-verbatim ()
   "A follow-up turn is sent verbatim — the contract is already in context."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (let ((agent-repl--explain-config-primed-p t)
-          sent)
-      (cl-letf (((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (_id text) (setq sent text) "req-2")))
+    (let ((agent-repl--explain-config-primed-p t))
+      (agent-repl-ecfg-test--with-uds
         ;; Act
         (agent-repl--explain-config-send "s_1" "and what about SPC o C?")
         ;; Assert
-        (should (equal sent "and what about SPC o C?"))))))
+        (should (equal (plist-get (nth 1 (car uds-cmds)) :text) "and what about SPC o C?"))))))
 
 (ert-deftest agent-repl-ecfg-test-send/primes-the-session-after-the-first-turn ()
   "Sending the first turn arms the primed flag so the next turn goes verbatim."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (cl-letf (((symbol-function 'agent-repl--frontend-send-message)
-               (lambda (&rest _) "req-1")))
+    (agent-repl-ecfg-test--with-uds
       ;; Act
       (agent-repl--explain-config-send "s_1" "q")
       ;; Assert
       (should agent-repl--explain-config-primed-p))))
 
-(ert-deftest agent-repl-ecfg-test-send/targets-the-given-session ()
-  "The turn is injected into the session it was handed, not a rediscovered one."
+(ert-deftest agent-repl-ecfg-test-send/targets-the-explain-config-workspace ()
+  "The turn is keyed by the explain-config cwd (its workspace), which the daemon
+resolves to the session — the workspace-less session's routing key."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (let (target)
-      (cl-letf (((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (id _text) (setq target id) "req-1")))
-        ;; Act
-        (agent-repl--explain-config-send "s_42" "q")
-        ;; Assert
-        (should (equal target "s_42"))))))
+    (agent-repl-ecfg-test--with-uds
+      ;; Act
+      (agent-repl--explain-config-send "s_42" "q")
+      ;; Assert
+      (should (equal (nth 2 (car uds-cmds)) (agent-repl--explain-config-cwd))))))
 
 ;;;; ---- agent-repl-explain-config -----------------------------------------------------
 
@@ -502,7 +511,7 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
   "A second question reuses the same session — that IS the conversation."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (let ((sessions nil)
+    (let ((sends 0)
           (created 0))
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
                 ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
@@ -512,13 +521,16 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
                 ((symbol-function 'agent-repl--explain-config-ensure-webview)
                  (lambda (_id) 'fake-webview))
                 ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (id _text) (push id sessions) "req")))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) (cl-incf sends) "req"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (r &rest _) r)))
         ;; Act
         (agent-repl-explain-config "first")
         (agent-repl-explain-config "second")
-        ;; Assert
-        (should (equal sessions '("s_1" "s_1")))
+        ;; Assert — both turns sent, but the session was created exactly once
+        ;; (the second reuses it — that IS the conversation).
+        (should (= sends 2))
         (should (= created 1))))))
 
 (ert-deftest agent-repl-ecfg-test-command/second-question-is-not-re-preambled ()
@@ -533,8 +545,10 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
                 ((symbol-function 'agent-repl--explain-config-ensure-webview)
                  (lambda (_id) 'fake-webview))
                 ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (_id text) (push text sent) "req")))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field payload &rest _) (push (plist-get payload :text) sent) "req"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (r &rest _) r)))
         ;; Act
         (agent-repl-explain-config "first")
         (agent-repl-explain-config "second")
@@ -598,15 +612,17 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
           (sent nil))
       (cl-letf (((symbol-function 'agent-repl--explain-config-hide) #'ignore)
                 ((symbol-function 'agent-repl--explain-config-release-webview) #'ignore)
-                ((symbol-function 'agent-repl--frontend-delete-session) (lambda (_id) t))
+                ((symbol-function 'agent-repl--frontend-delete-session) (lambda (_id &optional _ws) "req"))
                 ((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
                 ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
                 ((symbol-function 'agent-repl--frontend-create-session) (lambda (&rest _) "s_new"))
                 ((symbol-function 'agent-repl--explain-config-ensure-webview)
                  (lambda (_id) 'fake-webview))
                 ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--frontend-send-message)
-                 (lambda (_id text) (setq sent text) "req")))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field payload &rest _) (setq sent (plist-get payload :text)) "req"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (r &rest _) r)))
         ;; Act
         (agent-repl-explain-config "fresh" t)
         ;; Assert

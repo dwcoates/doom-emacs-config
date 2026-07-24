@@ -224,6 +224,11 @@ export class StateAdapter {
       case "commandAck":
         // Registered unsupported shape: no webapp visual (§11).
         return [this.ignore("commandAck")];
+      case "daemonView":
+        // Registered unsupported shape (S7): decoded for wire parity, but boot
+        // detection / version warnings are an Emacs-frontend concern with no
+        // webapp visual.
+        return [this.ignore("daemonView")];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.

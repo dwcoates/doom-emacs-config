@@ -14,6 +14,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -58,6 +59,85 @@ type Resyncer interface {
 	Resync(workspace string, fromSeq uint64) error
 }
 
+// SessionCreateDeleter is the daemon-core session-lifecycle surface behind the
+// createSession/deleteSession UDS commands (the same core POST /sessions and
+// DELETE /sessions/{id} use). *Server satisfies it, but it is constructed AFTER
+// WireAgentShim, so main injects the late-bound *SessionCommandBinding.
+type SessionCreateDeleter interface {
+	CreateSession(ctx context.Context, opts CreateOpts) (string, error)
+	DeleteSession(sessionID string) error
+}
+
+// DaemonViewSource supplies the daemon-identity frame for the connect snapshot
+// (boot id, protocol version, binary mtime, version). *Server satisfies it via
+// the same late-bound binding.
+type DaemonViewSource interface {
+	DaemonView() *frontendv1.DaemonView
+}
+
+// SessionCommands is the combined daemon-core surface the frontend command
+// handler and snapshot provider need. *SessionCommandBinding satisfies it via
+// its late-bound *Server target.
+type SessionCommands interface {
+	SessionCreateDeleter
+	DaemonViewSource
+}
+
+// SessionCommandBinding is the late-bound bridge from the frontend command
+// handler and snapshot provider to the daemon core. The *Server that satisfies
+// SessionCommands is constructed AFTER WireAgentShim (it needs the
+// frontend.Server WireAgentShim builds), so main injects this holder and calls
+// SetTarget once the Server exists — the same late-bind shape as PushForwarder.
+type SessionCommandBinding struct {
+	Logf   func(string, ...any)
+	target atomic.Pointer[Server]
+}
+
+var _ SessionCommands = (*SessionCommandBinding)(nil)
+
+// SetTarget binds the *Server the holder delegates to. Called once by main,
+// after New, before any frontend client can connect.
+func (b *SessionCommandBinding) SetTarget(s *Server) { b.target.Store(s) }
+
+func (b *SessionCommandBinding) logMiss(what string) {
+	if b.Logf != nil {
+		b.Logf("server: session-command binding %s before SetTarget — daemon core not yet wired", what)
+	}
+}
+
+// CreateSession delegates to the bound Server, or fails loudly when the binding
+// has no target yet (a construction-order bug, never a normal runtime state).
+func (b *SessionCommandBinding) CreateSession(ctx context.Context, opts CreateOpts) (string, error) {
+	s := b.target.Load()
+	if s == nil {
+		b.logMiss("CreateSession")
+		return "", fmt.Errorf("server: session-create binding not wired")
+	}
+	return s.CreateSession(ctx, opts)
+}
+
+// DeleteSession delegates to the bound Server, failing loudly when unbound.
+func (b *SessionCommandBinding) DeleteSession(sessionID string) error {
+	s := b.target.Load()
+	if s == nil {
+		b.logMiss("DeleteSession")
+		return fmt.Errorf("server: session-delete binding not wired")
+	}
+	return s.DeleteSession(sessionID)
+}
+
+// DaemonView delegates to the bound Server. An unbound binding logs the miss and
+// returns nil (a snapshot with no daemon block); in production the binding is
+// always set before any client connects.
+func (b *SessionCommandBinding) DaemonView() *frontendv1.DaemonView {
+	s := b.target.Load()
+	if s == nil {
+		b.logMiss("DaemonView")
+		return nil
+	}
+	return s.DaemonView()
+}
+
 // commandHandler implements frontend.CommandHandler by routing each command to
 // the owning module. Every dependency is required; a nil one is a construction
 // error (surfaced by newCommandHandler) rather than a nil-deref at dispatch.
@@ -68,14 +148,17 @@ type commandHandler struct {
 	// resyncer replays conversation deltas on a resync; nil-safe (Resync then
 	// documents the snapshot-only behavior rather than swallowing).
 	resyncer Resyncer
+	// sessions backs the createSession/deleteSession commands. Required.
+	sessions SessionCreateDeleter
 	logf     func(string, ...any)
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
 
 // newCommandHandler validates its dependencies and returns the handler. The
-// resyncer is optional (nil-safe); the three routers are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, logf func(string, ...any)) (*commandHandler, error) {
+// resyncer is optional (nil-safe); the three routers and the session-lifecycle
+// binding are required.
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, logf func(string, ...any)) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -83,11 +166,13 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		return nil, fmt.Errorf("server: frontend command handler needs a MergeRunner")
 	case lifecycle == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a WorkspaceLifecycle")
+	case sessions == nil:
+		return nil, fmt.Errorf("server: frontend command handler needs a SessionCreateDeleter")
 	}
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, logf: logf}, nil
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, logf: logf}, nil
 }
 
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
@@ -142,12 +227,44 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	return h.resyncer.Resync(workspace, cmd.GetFromSeq())
 }
 
+// CreateSession runs the shared create core for the command's cwd and reports
+// its outcome via the CommandAck (the resulting session identity reaches the
+// frontend as the SessionView the create core pushes). A typed create failure
+// (invalid mode / resume-missing) or a bring-up error surfaces loudly.
+func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
+	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v",
+		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake())
+	id, err := h.sessions.CreateSession(ctx, CreateOpts{
+		CWD:            cmd.GetCwd(),
+		Model:          cmd.GetModel(),
+		PermissionMode: cmd.GetPermissionMode(),
+		ConfigDir:      cmd.GetConfigDir(),
+		Resume:         cmd.GetResumeClaudeSessionId(),
+		Fake:           cmd.GetFake(),
+	})
+	if err != nil {
+		return err
+	}
+	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s", workspace, requestID, id)
+	return nil
+}
+
+// DeleteSession marks the command's session terminal and stops its shim.
+func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error {
+	h.logf("frontend cmd: delete_session ws=%s request_id=%s session=%s", workspace, requestID, cmd.GetSessionId())
+	return h.sessions.DeleteSession(cmd.GetSessionId())
+}
+
 // ssmSnapshotProvider implements frontend.StateProvider from the SSM's
 // resolved per-workspace state plus per-session metadata from the registry
 // (model/slug/title where the daemon has them, design §14.2 point 1).
 type ssmSnapshotProvider struct {
 	ssm      *ssm.Manager
 	sessions SessionMetaSource
+	// daemon supplies the DaemonView (boot id / protocol version / binary
+	// mtime / version) carried on every connect snapshot. Nil-safe: a nil
+	// source leaves snapshot.daemon unset rather than nil-derefing.
+	daemon DaemonViewSource
 }
 
 var _ frontend.StateProvider = (*ssmSnapshotProvider)(nil)
@@ -171,6 +288,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.sessions != nil {
 		snap.Sessions = p.sessions.SessionViews()
+	}
+	if p.daemon != nil {
+		snap.Daemon = p.daemon.DaemonView()
 	}
 	return snap
 }
