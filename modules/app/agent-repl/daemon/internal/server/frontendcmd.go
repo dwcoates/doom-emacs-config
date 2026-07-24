@@ -261,6 +261,10 @@ func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID s
 type ssmSnapshotProvider struct {
 	ssm      *ssm.Manager
 	sessions SessionMetaSource
+	// inits supplies the retained SessionInitView of every live session (S9),
+	// so a (re)connecting frontend sources its slash-command/tools/model menus
+	// from the snapshot. Nil-safe: a nil source leaves snapshot.inits empty.
+	inits SessionInitSource
 	// daemon supplies the DaemonView (boot id / protocol version / binary
 	// mtime / version) carried on every connect snapshot. Nil-safe: a nil
 	// source leaves snapshot.daemon unset rather than nil-derefing.
@@ -276,6 +280,13 @@ type SessionMetaSource interface {
 	SessionViews() []*frontendv1.SessionView
 }
 
+// SessionInitSource supplies the retained SystemInit of every live session as
+// SessionInitViews (S9), for the connect snapshot's inits. Satisfied by
+// *sessiondrv.Manager. Returning an empty slice is valid (no inits yet).
+type SessionInitSource interface {
+	SessionInits() []*frontendv1.SessionInitView
+}
+
 // Snapshot assembles a StateSnapshot from the SSM's workspace states and the
 // session metadata source. A failed SSM read yields the sessions-only snapshot
 // with the failure loud-logged by the SSM; it never blocks the connect.
@@ -288,6 +299,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.sessions != nil {
 		snap.Sessions = p.sessions.SessionViews()
+	}
+	if p.inits != nil {
+		snap.Inits = p.inits.SessionInits()
 	}
 	if p.daemon != nil {
 		snap.Daemon = p.daemon.DaemonView()

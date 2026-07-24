@@ -22,6 +22,7 @@ type Pusher interface {
 	PushTaskCatalog(*frontendv1.TaskCatalog)
 	PushDegradedNotice(*frontendv1.DegradedNotice)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
+	PushSessionInitView(*frontendv1.SessionInitView)
 }
 
 // StateApplier is the slice of the SSM the driver feeds lifecycle events to.
@@ -172,6 +173,15 @@ func (c *consumer) Consume(ev *corev1.Event) {
 			c.mu.Lock()
 			c.systemInit = si
 			c.mu.Unlock()
+			// The session's retained SystemInit just became available (attach or a
+			// fresh init): push it as a SessionInitView so frontends can source
+			// their slash-command/tools/model menus from it (S9), replacing the
+			// Emacs GET /commands HTTP menu.
+			c.push.PushSessionInitView(&frontendv1.SessionInitView{
+				Workspace: c.workspace,
+				SessionId: c.sessionID,
+				Init:      si,
+			})
 		}
 		c.pushConversation(ev)
 	default:

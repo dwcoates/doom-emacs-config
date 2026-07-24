@@ -318,6 +318,7 @@ func main() {
 		MergeDirs:       pendingMergeDirs{},
 		Lifecycle:       pendingLifecycle{},
 		Sessions:        registrySessions{reg: sessionRegistry, driver: driver},
+		Inits:           driver,
 		SessionCommands: sessionCommands,
 		Resyncer:        driver,
 		Logf:            log.Printf,
