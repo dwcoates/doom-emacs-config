@@ -175,9 +175,10 @@ export type PermissionPreview =
 // coordinator).
 
 /**
- * A webapp-side diagnostic line. Historically mirrored into the daemon's log
- * over the WS; post-cutover it has no FrontendCommand arm, so it is
- * console-only (the console being the primary sink for a wedged webview).
+ * A webapp-side diagnostic line: ALWAYS written to the local console, and
+ * mirrored into the daemon's log over the `client_log` FrontendCommand arm
+ * (E4). This is the in-memory shape the ForwardingLogger passes around; the
+ * wire encoding lives in frontend-command.ts (`ClientLogBody`).
  */
 export interface ClientLogCmd {
   type: "client-log";

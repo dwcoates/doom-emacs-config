@@ -19,12 +19,12 @@
  *   (`submitPrompt`, `interrupt`, …) whose value is the nested command message
  *   — exactly how the inbound `FrontendFrame.frame` oneof is shaped.
  *
- * SCOPE: only the six commands the WEBAPP originates are modeled here —
+ * SCOPE: only the seven commands the WEBAPP originates are modeled here —
  * submit_prompt, interrupt, permission_answer, create_session, delete_session,
- * resync. The workspace-lifecycle commands (merge/close/open) are the Emacs
- * frontend's, and `shutdown` is a daemon-lifecycle command the webapp never
- * sends; none are encodable here so a stray call is a compile error, not a
- * silently malformed frame.
+ * resync, client_log. The workspace-lifecycle commands (merge/close/open) are
+ * the Emacs frontend's, and `shutdown` is a daemon-lifecycle command the
+ * webapp never sends; none are encodable here so a stray call is a compile
+ * error, not a silently malformed frame.
  */
 
 /** A protojson `google.protobuf.Struct` value (a free-form JSON object). */
@@ -80,13 +80,38 @@ export interface ResyncBody {
   fromSeq: number;
 }
 
+/** The `ClientLogLevel` enum values, as their canonical protojson names. */
+const CLIENT_LOG_LEVEL_NAME = {
+  info: "CLIENT_LOG_LEVEL_INFO",
+  warn: "CLIENT_LOG_LEVEL_WARN",
+  error: "CLIENT_LOG_LEVEL_ERROR",
+} as const;
+
+export type ClientLogBodyLevel = keyof typeof CLIENT_LOG_LEVEL_NAME;
+
+/**
+ * ClientLogCmd (E4) — mirror one webapp diagnostic line into the daemon's log.
+ *
+ * The webview's JS console is invisible and unpersisted, so this is how a
+ * delivery-path failure in here leaves evidence anywhere. It is EVIDENCE, not
+ * a control signal: the daemon records it and does nothing else.
+ */
+export interface ClientLogBody {
+  case: "clientLog";
+  level: ClientLogBodyLevel;
+  message: string;
+  /** Optional structured payload (ids, counters, timings); omitted when absent. */
+  context?: CommandStruct;
+}
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
   | PermissionAnswerBody
   | CreateSessionBody
   | DeleteSessionBody
-  | ResyncBody;
+  | ResyncBody
+  | ClientLogBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -105,6 +130,7 @@ const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   createSession: "createSession",
   deleteSession: "deleteSession",
   resync: "resync",
+  clientLog: "clientLog",
 };
 
 /** Build the nested protojson command message for one body arm. */
@@ -139,6 +165,17 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "resync":
       // uint64 renders as a JSON string in protojson.
       return { fromSeq: String(b.fromSeq) };
+    case "clientLog": {
+      // An enum renders as its proto NAME in canonical protojson.
+      const arm: Record<string, unknown> = {
+        level: CLIENT_LOG_LEVEL_NAME[b.level],
+        message: b.message,
+      };
+      // A `google.protobuf.Struct` is a plain JSON object; only present it when
+      // the caller supplied one (never fabricate {}).
+      if (b.context !== undefined) arm.context = b.context;
+      return arm;
+    }
   }
 }
 

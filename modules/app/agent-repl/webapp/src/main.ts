@@ -71,7 +71,7 @@ import {
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
-import { ForwardingLogger, setLogger } from "./wslog.js";
+import { ForwardingLogger, setLogger, type ClientLogLevel } from "./wslog.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
 
@@ -107,14 +107,17 @@ async function boot(): Promise<void> {
   let midTaskActive = false;
   let autoContinueChecked = false;
 
-  // Delivery-path diagnostics (§2.15). GAP after the S8/S9 outbound cutover:
-  // the webapp→daemon log forward rode the legacy `client-log` ClientCommand,
-  // and the frozen FrontendCommand proto has no `client_log` arm (and there is
-  // no HTTP route), so daemon delivery is disabled — the `send` sink always
-  // reports not-delivered and every line stays on the console (the primary
-  // sink for a wedged webview). Restoring it needs a proto arm or a route
-  // (flagged for the coordinator).
-  const wslog = new ForwardingLogger(() => false);
+  // Delivery-path diagnostics (§2.15). The webapp→daemon log forward rode the
+  // legacy `client-log` ClientCommand, which the S8/S9 outbound cutover
+  // deleted; E4's additive `client_log` FrontendCommand arm restores it on the
+  // protobuf channel rather than reviving a second transport.
+  //
+  // The sink is assigned a few lines below rather than closed over directly,
+  // because the dispatcher it needs is built AFTER this logger (the dispatcher
+  // logs through it). Until then a line is console-only — exactly the pre-boot
+  // behavior `setLogger` already documents, not a fallback hiding a failure.
+  let clientLogSink: ((level: ClientLogLevel, message: string) => boolean) | null = null;
+  const wslog = new ForwardingLogger((cmd) => clientLogSink?.(cmd.level, cmd.message) ?? false);
   const clog = wslog.log.bind(wslog);
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
@@ -144,6 +147,10 @@ async function boot(): Promise<void> {
   // so this is advisory on the session socket and is legitimately "" until the
   // first SessionView lands.
   const cmdWorkspace = (): string => store.state.cwd;
+
+  // Close the diagnostics loop declared above: from here every forwarded line
+  // rides the protobuf command plane into the daemon's log.
+  clientLogSink = (level, message) => dispatcher.clientLog(cmdWorkspace(), level, message);
 
   // The permission mode the user picked that no prompt has carried yet:
   // frontend.v1 has no standalone set-permission-mode command, so the mode

@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -425,5 +427,163 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	}
 	if !found || cur.GetState() != frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED {
 		t.Fatalf("state found=%v state=%v, want MERGE_QUEUED", found, cur.GetState())
+	}
+}
+
+// --- ClientLog (E4) ---------------------------------------------------------
+
+// newLoggingHandler returns a handler whose log lines are captured, so the
+// client-log mirroring can be asserted on its ONLY observable effect.
+func newLoggingHandler(t *testing.T, lines *[]string) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil,
+		func(format string, args ...any) { *lines = append(*lines, fmt.Sprintf(format, args...)) })
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h
+}
+
+func TestCommandHandlerClientLogWritesTheMessage(t *testing.T) {
+	// Arrange.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	if err := h.ClientLog(context.Background(), "/w", "r1",
+		&frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN, Message: "seq gap at 42"}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if len(lines) != 1 || !strings.Contains(lines[0], "seq gap at 42") {
+		t.Fatalf("client log lines = %v, want one carrying the message", lines)
+	}
+}
+
+func TestCommandHandlerClientLogTagsTheFrontendOrigin(t *testing.T) {
+	// Arrange — a mirrored line must never read as one the daemon produced.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
+
+	// Assert.
+	if !strings.Contains(lines[0], "client-log") {
+		t.Fatalf("line %q carries no client-log tag", lines[0])
+	}
+}
+
+func TestCommandHandlerClientLogRendersTheLevel(t *testing.T) {
+	// Arrange.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1",
+		&frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_ERROR, Message: "x"})
+
+	// Assert.
+	if !strings.Contains(lines[0], "level=error") {
+		t.Fatalf("line %q does not render the level", lines[0])
+	}
+}
+
+func TestCommandHandlerClientLogDoesNotDefaultAnUnsetLevelToInfo(t *testing.T) {
+	// Arrange — a frontend that forgets the level must be visible as such, not
+	// silently promoted into a level it never claimed.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
+
+	// Assert.
+	if !strings.Contains(lines[0], "level=unspecified") {
+		t.Fatalf("line %q defaulted an unset level instead of reporting it", lines[0])
+	}
+}
+
+func TestCommandHandlerClientLogRendersTheStructuredContext(t *testing.T) {
+	// Arrange.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+	ctx, err := structpb.NewStruct(map[string]any{"seq": float64(42)})
+	if err != nil {
+		t.Fatalf("structpb.NewStruct: %v", err)
+	}
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x", Context: ctx})
+
+	// Assert.
+	if !strings.Contains(lines[0], `"seq"`) {
+		t.Fatalf("line %q dropped the structured context", lines[0])
+	}
+}
+
+func TestCommandHandlerClientLogOmitsAnEmptyContext(t *testing.T) {
+	// Arrange — an absent context must add no noise to the line.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
+
+	// Assert.
+	if strings.Contains(lines[0], "context=") {
+		t.Fatalf("line %q rendered an absent context", lines[0])
+	}
+}
+
+func TestCommandHandlerClientLogClampsAHugeMessage(t *testing.T) {
+	// Arrange — a pathological line must not run away with the daemon's disk.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1",
+		&frontendv1.ClientLogCmd{Message: strings.Repeat("x", clientLogMessageCap*3)})
+
+	// Assert.
+	if len(lines[0]) > clientLogMessageCap*2 {
+		t.Fatalf("line length %d exceeds the clamp", len(lines[0]))
+	}
+}
+
+func TestCommandHandlerClientLogRejectsAnEmptyMessage(t *testing.T) {
+	// Arrange — a log with no message carries no evidence; it is a caller bug.
+	var lines []string
+	h := newLoggingHandler(t, &lines)
+
+	// Act.
+	err := h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{})
+
+	// Assert — a loud failing ack, and no blank line written.
+	if err == nil {
+		t.Fatal("want a loud error for a message-less client log")
+	}
+	if len(lines) != 0 {
+		t.Fatalf("wrote %d lines for a message-less log, want 0", len(lines))
+	}
+}
+
+func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
+	// Arrange — a client log is EVIDENCE, never a control signal.
+	p := &fakePrompts{}
+	m := &fakeMerges{}
+	l := &fakeLifecycle{}
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
+
+	// Assert.
+	if len(p.prompted) != 0 || len(p.interrupts) != 0 {
+		t.Fatal("a client log must not drive the prompt router")
 	}
 }
