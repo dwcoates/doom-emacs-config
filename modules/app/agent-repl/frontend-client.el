@@ -45,8 +45,18 @@
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 (declare-function agent-repl--dispatch-resume-investigation "agent-repl-worktree" (resume-id searched-paths cwd))
+(declare-function agent-repl--assert-main-thread "agent-repl-worktree" (what))
+;; The UDS command channel + pushed-frame SessionView store (the daemon plane
+;; that replaced the GET /sessions poller); resolved at call time.
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
+(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-connected-p "frontend-uds" ())
+(declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
+(declare-function agent-repl--frontend-session-views-all "frontend-state" ())
+(declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
 
 (defvar url-http-response-status)
+(defvar agent-repl--uds-process)
 
 ;; Signalled when the daemon HARD-FAILS a --resume because the target
 ;; session has no transcript in its config dir (§2.10 resume viability
@@ -93,14 +103,6 @@ the SDK default."
 
 (defcustom agent-repl-frontend-ready-attempts 25
   "Poll attempts for `agent-repl--frontend-wait-ready' (0.2s apart)."
-  :type 'integer
-  :group 'agent-repl)
-
-(defcustom agent-repl-queue-preview-length 60
-  "Max characters of a queued message's content shown in previews.
-Caps the one-line preview `agent-repl--frontend-session-queue' derives
-from a queued item's content blocks, so the status segment and the
-`agent-repl-queue-*' completion prompts stay a single readable line."
   :type 'integer
   :group 'agent-repl)
 
@@ -204,42 +206,70 @@ SPAWNED, which precedes the port bind; polling closes that gap.  Polls
 
 ;;;; ---- Session CRUD -------------------------------------------------------
 
-(defun agent-repl--frontend-resume-transcript-missing (body)
-  "Return BODY's parsed alist when it is the daemon's `resume_transcript_missing'
-hard-fail, else nil.  Never signals: a non-JSON or unrelated error body
-returns nil so the generic error path handles it."
-  (let ((parsed (ignore-errors (agent-repl--frontend-parse-json body))))
-    (and (equal (alist-get 'code parsed) "resume_transcript_missing")
-         parsed)))
+(defcustom agent-repl-frontend-create-timeout 10
+  "Seconds `agent-repl--frontend-create-session' awaits its UDS outcome.
+createSession's `CommandAck' is a bare receipt; the new session id arrives
+on a pushed `SessionView'.  This bounds the synchronous await for both."
+  :type 'integer
+  :group 'agent-repl)
 
-(defun agent-repl--frontend-handle-resume-transcript-missing (cwd resume missing)
-  "React to the daemon HARD-FAILING a --resume whose transcript is gone.
-MISSING is the parsed `resume_transcript_missing' body (carrying
-`resume_id' and `searched_paths'); CWD is the failed workspace's project
-dir; RESUME is the id the create requested (fallback for `resume_id').
+(defvar agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal)
+  "Set of cwds with a `createSession' command awaiting its ack.
+Serializes concurrent creates per workspace so the SessionView->id
+correlation (`agent-repl--frontend-live-session-id-for-cwd') stays
+unambiguous: a second create for the same cwd while one is in flight is
+refused loudly rather than racing two views onto one key.")
 
-Opens an investigation workspace for the lost session via
-`agent-repl--dispatch-resume-investigation', then signals a loud,
-NON-recoverable `agent-repl-resume-transcript-missing' naming that
-workspace so the create fails hard instead of degrading to a fresh
-conversation.  Never returns normally."
-  (let* ((resume-id (or (alist-get 'resume_id missing) resume))
-         (searched (alist-get 'searched_paths missing))
-         (ws-name (agent-repl--dispatch-resume-investigation resume-id searched cwd)))
-    (signal 'agent-repl-resume-transcript-missing
-            (list (format (concat "resume target %s has no transcript — refusing a fresh "
-                                  "conversation; opened investigation workspace `%s' to locate "
-                                  "the lost session and diagnose the loss")
-                          resume-id ws-name)
-                  resume-id ws-name))))
+(defun agent-repl--frontend-await-uds (predicate timeout what)
+  "Block until PREDICATE returns non-nil or TIMEOUT seconds elapse; return its value.
+Pumps the frontend UDS connection via `accept-process-output' so inbound
+frames (the CommandAck, the SessionView) are dispatched while we wait.
+WHAT names the wait for the main-thread assertion + logging.
+
+MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
+`[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
+worker-thread trap); the boundary asserts it, same as the HTTP request."
+  (agent-repl--assert-main-thread (format "frontend-await-uds %s" what))
+  (let ((deadline (+ (float-time) timeout)) result)
+    (while (and (not (setq result (funcall predicate)))
+                (< (float-time) deadline))
+      (accept-process-output agent-repl--uds-process 0.1))
+    result))
+
+(defun agent-repl--frontend-create-handle-rejection (cwd model resume force-fresh err)
+  "Handle a REJECTED `createSession' for CWD; MODEL/RESUME were the request.
+ERR is the `CommandAck' error string.  When it names a missing resume
+transcript (the daemon's §2.10 resume-viability hard-fail, whose message
+contains \"has no transcript\"), reproduce the lost-transcript behavior:
+FORCE-FRESH recreates with no resume; otherwise open an investigation
+workspace and re-raise `agent-repl-resume-transcript-missing'.  Any other
+rejection is a loud error.
+
+NOTE (frontend.v1 constraint): a `CommandAck' carries only an error
+STRING, not the structured `searched_paths' the old HTTP 422 body did, so
+the investigation is dispatched with the resume id alone (nil paths)."
+  (if (and (stringp err) resume (string-match-p "has no transcript" err))
+      (progn
+        (agent-repl--log nil
+                         "createSession REJECTED for %s: resume %s transcript missing (%s)"
+                         cwd resume err)
+        (if force-fresh
+            (agent-repl--frontend-force-fresh-on-lost-transcript cwd model resume)
+          (let ((ws-name (agent-repl--dispatch-resume-investigation resume nil cwd)))
+            (signal 'agent-repl-resume-transcript-missing
+                    (list (format (concat "resume target %s has no transcript — refusing a fresh "
+                                          "conversation; opened investigation workspace `%s'")
+                                  resume ws-name)
+                          resume ws-name)))))
+    (error "agent-repl: createSession for %s failed: %s" cwd (or err "rejected"))))
 
 (defun agent-repl--frontend-force-fresh-on-lost-transcript (cwd model resume-id)
   "Degrade a lost-transcript resume for RESUME-ID to a FRESH conversation.
-Invoked in place of `agent-repl--frontend-handle-resume-transcript-missing'
-when `agent-repl--force-fresh-conversation' overrides the default
-investigation dispatch.  Logs the override, then recreates the session in
-CWD with MODEL and NO resume (which cannot re-trigger the lost-transcript
-hard-fail), and returns the fresh session id."
+Invoked by `agent-repl--frontend-create-handle-rejection' when
+`agent-repl--force-fresh-conversation' (or the FORCE-FRESH arg) overrides
+the default investigation dispatch.  Logs the override, then recreates the
+session in CWD with MODEL and NO resume (which cannot re-trigger the
+lost-transcript hard-fail), and returns the fresh session id."
   (agent-repl--log nil
                    (concat "force-fresh-conversation: lost resume %s overridden — creating a "
                            "fresh conversation in %s (skipping investigation)")
@@ -247,97 +277,95 @@ hard-fail), and returns the fresh session id."
   (agent-repl--frontend-create-session cwd model nil))
 
 (defun agent-repl--frontend-create-session (cwd &optional model resume force-fresh)
-  "POST /sessions rooted at CWD; return the new session id.
-MODEL and RESUME (a durable claude session uuid) are optional
-passthroughs.  Signals on HTTP failure or a malformed response.
+  "Create a daemon session rooted at CWD over the UDS `createSession' command;
+return the new session id.  MODEL and RESUME (a durable claude session
+uuid) are optional passthroughs.
 
-When the daemon HARD-FAILS a RESUME whose transcript it cannot find
-\(HTTP 422, `code: \"resume_transcript_missing\"'), the lost-workspace
-resume attempt is ALWAYS logged, then one of two branches runs:
+The daemon's `createSession' `CommandAck' is a BARE RECEIPT (it carries no
+session id); the id arrives on a pushed `SessionView' whose workspace is
+CWD.  So this: sends `createSession', awaits the ack (pumping the UDS link
+via `agent-repl--frontend-await-uds'), then correlates the id by matching
+the non-terminal `SessionView' the daemon pushed for CWD
+\(`agent-repl--frontend-live-session-id-for-cwd').  The daemon pushes that
+view BEFORE the ack, so on an accepted ack the view is already stored; a
+brief extra await tolerates the reverse ordering.  Creates are serialized
+per cwd (`agent-repl--frontend-creates-in-flight') so the cwd->id
+correlation is unambiguous.
 
- - Default (FORCE-FRESH nil, and `agent-repl--force-fresh-conversation'
-   nil): this does NOT start a fresh conversation.  It opens an
-   investigation workspace for the lost session and signals a
-   non-recoverable `agent-repl-resume-transcript-missing' naming that
-   workspace, via `agent-repl--frontend-handle-resume-transcript-missing'.
- - Override (FORCE-FRESH non-nil, defaulting to
-   `agent-repl--force-fresh-conversation'): the investigation is SKIPPED
-   and the session is recreated with no resume — a fresh conversation —
-   via `agent-repl--frontend-force-fresh-on-lost-transcript'.
+On a REJECTED ack the lost-workspace resume attempt is handled by
+`agent-repl--frontend-create-handle-rejection': the resume-viability
+hard-fail (ack error contains \"has no transcript\") either opens an
+investigation workspace and re-raises `agent-repl-resume-transcript-missing'
+\(default), or — under FORCE-FRESH / `agent-repl--force-fresh-conversation'
+— recreates with no resume.
 
 MODEL defaults to `agent-repl-interactive-model' when nil, matching the
-CLI-launch path (`agent-repl--compute-claude-flags'): a gui session that
-omitted the flag would run on whatever default the CLI picks, and the
-real Claude CLI names that model only AFTER the first turn, leaving the
-topbar's model picker EMPTY until then.  Sending a concrete `--model'
-makes the daemon's hello carry the real model from the first frame.  A
-nil `agent-repl-interactive-model' is respected as a deliberate \"let the
-CLI choose\" and still sends no flag.
+CLI-launch path: a concrete `--model' makes the daemon's hello carry the
+real model from the first frame instead of leaving the topbar picker empty
+until the first turn.  A nil `agent-repl-interactive-model' is respected as
+\"let the CLI choose\" and sends no model.
 
-The account the session's CLI runs as travels in the `config_dir' field,
-computed from CWD by `agent-repl--compute-config-dir' — the SAME resolver
-`ai-title.el' uses to locate a workspace's transcript, so a session
-always lands on the same account as the rest of the module resolves
-for the same project (~/.claude-chesscom under $MULTI_REPO_ROOT,
-~/.claude elsewhere).  Sending it per-session is not optional: ONE daemon
-serves every workspace, so the daemon's own environment cannot encode a
-per-workspace account, and without this field every gui session would
-silently run as whichever account the daemon happened to inherit."
+The account the CLI runs as travels in `configDir', computed from CWD by
+`agent-repl--compute-config-dir' — one daemon serves every workspace, so
+the daemon's own environment cannot encode a per-workspace account; without
+this field every gui session would run as whichever account the daemon
+inherited."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
+  (when (gethash cwd agent-repl--frontend-creates-in-flight)
+    (error "agent-repl: a createSession for %s is already in flight" cwd))
   (let* ((force-fresh (or force-fresh agent-repl--force-fresh-conversation))
          (model (agent-repl--effective-model model))
          (config-dir (agent-repl--compute-config-dir cwd))
-         (payload (append `(("cwd" . ,cwd))
-                          (when model `(("model" . ,model)))
-                          (when resume `(("resume" . ,resume)))
-                          (when config-dir `(("config_dir" . ,config-dir)))
+         (payload (append (list :cwd cwd)
+                          (when model (list :model model))
+                          (when resume (list :resumeClaudeSessionId resume))
+                          (when config-dir (list :configDir config-dir))
                           (when agent-repl-frontend-permission-mode
-                            `(("permission_mode" . ,agent-repl-frontend-permission-mode)))))
-         ;; Bypass `agent-repl--frontend-api' (which collapses every
-         ;; non-2xx into one opaque error) so the create can DETECT the
-         ;; daemon's structured `resume_transcript_missing' hard-fail and
-         ;; branch on it, rather than reparsing an error message string.
-         (url (concat (agent-repl--frontend-base-url) "/sessions"))
-         (resp (agent-repl--frontend-http-request "POST" url (json-encode payload)))
-         (status (car resp))
-         (body (cdr resp)))
+                            (list :permissionMode agent-repl-frontend-permission-mode))))
+         ;; Mutable outcome the ack callbacks flip; all keys pre-populated so
+         ;; `plist-put' mutates in place and the closures + await loop observe it.
+         (ack (list :done nil :ok nil :error nil)))
+    ;; Send + await the ack UNDER the in-flight guard, but handle the OUTCOME
+    ;; after releasing it: the force-fresh rejection branch recreates the SAME
+    ;; cwd, which the guard would otherwise refuse as "already in flight".
+    (puthash cwd t agent-repl--frontend-creates-in-flight)
+    (unwind-protect
+        (let ((req (agent-repl--uds-send-command "createSession" payload cwd)))
+          (agent-repl--uds-track-command
+           req "createSession" cwd
+           (lambda (err) (plist-put ack :error err) (plist-put ack :done t))
+           (lambda () (plist-put ack :ok t) (plist-put ack :done t)))
+          (agent-repl--frontend-await-uds
+           (lambda () (plist-get ack :done))
+           agent-repl-frontend-create-timeout
+           (format "createSession cwd=%s" cwd)))
+      (remhash cwd agent-repl--frontend-creates-in-flight))
     (cond
-     ((and (integerp status) (<= 200 status 299))
-      (let* ((parsed (agent-repl--frontend-parse-json body))
-             (id (alist-get 'session_id parsed)))
-        (unless (and (stringp id) (not (string-empty-p id)))
-          (error "agent-repl: POST /sessions returned no session_id: %S" parsed))
+     ((not (plist-get ack :done))
+      (error "agent-repl: createSession for %s timed out after %ss"
+             cwd agent-repl-frontend-create-timeout))
+     ((plist-get ack :ok)
+      (let ((id (agent-repl--frontend-await-uds
+                 (lambda () (agent-repl--frontend-live-session-id-for-cwd cwd))
+                 2 (format "sessionView cwd=%s" cwd))))
+        (unless id
+          (error "agent-repl: createSession for %s acked but no SessionView arrived" cwd))
+        (agent-repl--log nil "createSession: cwd=%s -> session %s (resume=%s)"
+                         cwd id (or resume "none"))
         id))
      (t
-      (let ((missing (agent-repl--frontend-resume-transcript-missing body)))
-        (if (not missing)
-            (error "agent-repl: POST /sessions failed (HTTP %s): %s"
-                   status (string-trim (or body "")))
-          (let ((resume-id (or (alist-get 'resume_id missing) resume)))
-            ;; The daemon could not find this resume target's transcript,
-            ;; so we ARE attempting to resume a lost workspace — surface
-            ;; that loudly in the log regardless of which branch handles it.
-            (agent-repl--log nil
-                             "resume target %s has no transcript — attempting to resume a LOST workspace"
-                             resume-id)
-            (if force-fresh
-                (agent-repl--frontend-force-fresh-on-lost-transcript cwd model resume-id)
-              (agent-repl--frontend-handle-resume-transcript-missing cwd resume missing)))))))))
+      (agent-repl--frontend-create-handle-rejection
+       cwd model resume force-fresh (plist-get ack :error))))))
 
-(defun agent-repl--frontend-list-sessions ()
-  "Return the daemon's session list (alist entries, possibly nil)."
-  (alist-get 'sessions (agent-repl--frontend-api "GET" "/sessions")))
-
-(defun agent-repl--frontend-delete-session (id)
-  "DELETE /sessions/ID.  Signals on HTTP failure."
-  (agent-repl--frontend-api "DELETE" (concat "/sessions/" id))
-  t)
-
-(defun agent-repl--frontend-session-entry (id)
-  "Return the GET /sessions entry for ID, or nil when not listed."
-  (seq-find (lambda (entry) (equal (alist-get 'session_id entry) id))
-            (agent-repl--frontend-list-sessions)))
+(defun agent-repl--frontend-delete-session (id &optional ws)
+  "Send a `deleteSession' UDS command for session ID; return the request-id.
+WS, when known, keys the frame + logging (an orphan reap passes nil).
+Fire-and-forget: the terminal `SessionView' the daemon pushes updates the
+store, and a rejected ack surfaces loudly via the shared ack handler."
+  (let ((req (agent-repl--uds-send-command "deleteSession" (list :sessionId id) ws)))
+    (agent-repl--uds-track-command req "deleteSession" ws)
+    req))
 
 (defun agent-repl--frontend-fetch-commands (session-id)
   "Return SESSION-ID's slash-command menu as a list of alists.
@@ -360,9 +388,17 @@ never blocks on the probe.  Signals on HTTP failure."
   t)
 
 (defun agent-repl--frontend-session-live-p (id)
-  "Return non-nil when ID is listed by the daemon and not terminal."
-  (let ((entry (agent-repl--frontend-session-entry id)))
-    (and entry (eq (alist-get 'terminal entry) :false))))
+  "Return non-nil when ID has a pushed `SessionView' that is not terminal.
+Reads the frontend-state.el SessionView store the daemon pushes into — the
+replacement for the GET /sessions per-id probe."
+  (let ((view (agent-repl--frontend-session-view id)))
+    (and view (not (eq (plist-get view :terminal) t)))))
+
+(defun agent-repl--frontend-ws-turn-active-p (ws)
+  "Return non-nil when WS's last pushed `WorkspaceState' is turn-active.
+Reads the `:turn-active' resolution input frontend-state.el stashed under
+`:pushed-render-state-meta' from the pushed frame (protojson bool -> t)."
+  (eq (plist-get (agent-repl--ws-get ws :pushed-render-state-meta) :turn-active) t))
 
 (defun agent-repl--frontend-bound-session-ids ()
   "Return the daemon session ids a live workspace is currently bound to.
@@ -374,80 +410,66 @@ superseded but left behind — that no client is watching."
                     (agent-repl--live-ws-names))))
 
 (defun agent-repl--frontend-turn-active-sessions ()
-  "Return workspace-bound session ids the daemon reports mid-turn;
-nil if unreachable.
-The daemon-stop guard keys on this: an unreachable daemon has nothing
-to protect, so unreachability reads as \"no turns\" (loudly logged).
+  "Return workspace-bound session ids the daemon reports mid-turn.
+Sourced entirely from pushed-frame state (no daemon round-trip): a session
+counts when its bound workspace's last `WorkspaceState' push is turn-active
+\(`agent-repl--frontend-ws-turn-active-p') AND its `SessionView' is
+non-terminal (`agent-repl--frontend-session-live-p').  The daemon-stop
+guard keys on this.
 
-Only a session that is turn-active, NON-TERMINAL, AND bound to a live
-workspace counts — exactly the conversations a bounce would interrupt
-mid-generation.  The two exclusions each guard against a stuck flag the
-daemon can leave behind, neither of which is a live turn anyone is
-watching:
-- TERMINAL (ended) sessions — a dead record has no shim or SDK query,
-  yet the daemon can leave a stale `turn_active' on one that shut down
-  mid-turn.
-- ORPHAN sessions no live workspace is bound to
-  (`agent-repl--frontend-bound-session-ids') — a bounce/reattach can
-  supersede a session yet leave it lingering non-terminal with
-  `turn_active' stuck true forever, and counting it would refuse every
-  future bounce even while every workspace is idle."
-  (condition-case err
-      (let ((bound (agent-repl--frontend-bound-session-ids))
-            busy)
-        (dolist (s (agent-repl--frontend-list-sessions) (nreverse busy))
-          (when (and (eq (alist-get 'turn_active s) t)
-                     (not (eq (alist-get 'terminal s) t))
-                     (member (alist-get 'session_id s) bound))
-            (push (alist-get 'session_id s) busy))))
-    (error
-     (agent-repl--log nil "turn-active-sessions: daemon unreachable (%s) — treating as none"
-                       (error-message-string err))
-     nil)))
+Iterating only live workspaces' bound ids intrinsically excludes both a
+stuck-flag ORPHAN (unbound, hence never visited) and a TERMINAL session
+\(filtered by the live-p check) — exactly the two exclusions the old
+GET /sessions sweep spelled out."
+  (let (busy)
+    (dolist (ws (agent-repl--live-ws-names) (nreverse busy))
+      (let ((sid (agent-repl--ws-get ws :frontend-session-id)))
+        (when (and sid
+                   (agent-repl--frontend-ws-turn-active-p ws)
+                   (agent-repl--frontend-session-live-p sid))
+          (push sid busy))))))
 
-(defun agent-repl--frontend-orphan-session-ids (sessions)
-  "Return ids of SESSIONS that leak a live shim for an already-bound conversation.
-Pure (no deletion).  A daemon bounce or reattach can supersede a session
-\(rebinding its workspace onto a fresh resume of the same conversation)
-while the old one's shim keeps running — a leaked `claude' process that
-no client is watching.  A target is a session that:
-- still holds a LIVE SHIM: non-terminal, not hibernated, not rehydratable
-  (a hibernated or cold record has already shed or never spawned its
-  shim, so it leaks nothing and is spared);
+(defun agent-repl--frontend-orphan-session-ids ()
+  "Return ids of pushed SessionViews leaking a live shim for a bound conversation.
+Pure (no deletion), sourced from the pushed `SessionView' roster
+\(`agent-repl--frontend-session-views-all').  A daemon bounce/reattach can
+supersede a session (rebinding its workspace onto a fresh resume of the
+same conversation) while the old one's shim keeps running — a leaked
+`claude' process no client is watching.  A target is a session that:
+- still holds a LIVE SHIM: non-terminal (post-cutover a session is either
+  live-shim or terminal; the old hibernated/rehydratable exclusions are
+  gone — those fields are hard-false on the frontend.v1 SessionView);
 - is bound to NO live workspace
   (`agent-repl--frontend-bound-session-ids'); and
-- shares its `claude_session_id' with a session a workspace IS bound to,
-  which is what makes it a superseded DUPLICATE rather than some
-  unrelated session, so a uniquely-unbound live session is left alone.
-
-SESSIONS is the `GET /sessions' listing (alist entries)."
+- shares its `claudeSessionId' with a session a workspace IS bound to,
+  making it a superseded DUPLICATE rather than an unrelated session, so a
+  uniquely-unbound live session is left alone."
   (let* ((bound (agent-repl--frontend-bound-session-ids))
+         (views (agent-repl--frontend-session-views-all))
          (bound-claude-ids
-          (delq nil (mapcar (lambda (s)
-                              (when (member (alist-get 'session_id s) bound)
-                                (alist-get 'claude_session_id s)))
-                            sessions))))
+          (delq nil (mapcar (lambda (v)
+                              (when (member (plist-get v :sessionId) bound)
+                                (plist-get v :claudeSessionId)))
+                            views))))
     (delq nil
           (mapcar
-           (lambda (s)
-             (let ((id (alist-get 'session_id s))
-                   (claude-id (alist-get 'claude_session_id s)))
-               (when (and (not (eq (alist-get 'terminal s) t))
-                          (not (eq (alist-get 'hibernated s) t))
-                          (not (eq (alist-get 'rehydratable s) t))
+           (lambda (v)
+             (let ((id (plist-get v :sessionId))
+                   (claude-id (plist-get v :claudeSessionId)))
+               (when (and (not (eq (plist-get v :terminal) t))
                           (not (member id bound))
-                          claude-id
+                          claude-id (not (string-empty-p claude-id))
                           (member claude-id bound-claude-ids))
                  id)))
-           sessions))))
+           views))))
 
-(defun agent-repl--frontend-reap-orphan-sessions (sessions)
-  "Delete the leaked-orphan sessions in SESSIONS, freeing their shim processes.
+(defun agent-repl--frontend-reap-orphan-sessions ()
+  "Delete the leaked-orphan sessions (from the pushed roster), freeing their shims.
 Targets come from `agent-repl--frontend-orphan-session-ids'.  A failed
-DELETE is logged and skipped rather than aborting the sweep — the next
+delete is logged and skipped rather than aborting the sweep — the next
 sweep retries it.  Returns the ids actually reaped."
   (let (reaped)
-    (dolist (id (agent-repl--frontend-orphan-session-ids sessions) (nreverse reaped))
+    (dolist (id (agent-repl--frontend-orphan-session-ids) (nreverse reaped))
       (condition-case err
           (progn
             (agent-repl--frontend-delete-session id)
@@ -567,42 +589,41 @@ the same environments that never auto-start the daemon."
                           #'agent-repl--frontend-reattach-check))))
 
 (defun agent-repl--frontend-reattach-check ()
-  "Reattach gui workspaces whose bound session vanished from the daemon.
-A binding missing from GET /sessions while the daemon answers means a
-new daemon instance (or a deleted session) — either way the workspace
-re-ensures and remounts.  When the daemon is unreachable but bindings
-exist, ensure it (spawn or adopt) so the next sweep can reattach."
-  (let ((resp (condition-case nil
-                  (agent-repl--frontend-api "GET" "/sessions")
-                (error :unreachable))))
-    (if (eq resp :unreachable)
-        (when (cl-some (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
-                       (agent-repl--live-ws-names))
-          (agent-repl--log nil "reattach: daemon unreachable with bound sessions — ensuring")
-          (condition-case err
-              (agent-repl--ensure-frontend-daemon)
-            (error
-             (agent-repl--log nil "reattach: daemon ensure failed: %s"
-                               (error-message-string err)))))
-      (agent-repl--frontend-note-boot-id (alist-get 'boot_id resp))
-      ;; Same GET /sessions poll now carries the per-session queue
-      ;; snapshot (§2.13); cache it per-workspace off the one listing we
-      ;; already fetched rather than issuing a second request.
-      (agent-repl--frontend-capture-queues (alist-get 'sessions resp))
-      (let ((listed (mapcar (lambda (s) (alist-get 'session_id s))
-                            (alist-get 'sessions resp))))
-        (dolist (ws (agent-repl--live-ws-names))
+  "Reattach gui workspaces whose bound session vanished from the pushed roster.
+Reads the pushed `SessionView' store (frontend-state.el), NOT GET /sessions:
+a bound id absent from the store (or terminal) means a new daemon instance
+\(or a deleted session) — the workspace re-ensures and remounts.  When the
+UDS link is DOWN but bindings exist, ensure the daemon (spawn or adopt) so
+the next sweep can reattach once the link + its snapshot return.
+
+Boot-instance detection moved to the pushed `DaemonView'
+\(`agent-repl--frontend-apply-daemon-view' -> `agent-repl--frontend-note-boot-id'):
+a bounce drops the UDS link, and the reconnect snapshot carries the new
+boot id, so the give-up reset no longer needs a GET /sessions probe here."
+  (if (not (agent-repl--uds-connected-p))
+      (when (cl-some (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
+                     (agent-repl--live-ws-names))
+        (agent-repl--log nil "reattach: UDS link down with bound sessions — ensuring daemon")
+        (condition-case err
+            (agent-repl--ensure-frontend-daemon)
+          (error
+           (agent-repl--log nil "reattach: daemon ensure failed: %s"
+                            (error-message-string err)))))
+    (let ((listed (delq nil (mapcar (lambda (v)
+                                      (unless (eq (plist-get v :terminal) t)
+                                        (plist-get v :sessionId)))
+                                    (agent-repl--frontend-session-views-all)))))
+      (dolist (ws (agent-repl--live-ws-names))
         (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
           (cond
            ((member bound listed)
             (agent-repl--ws-put ws :reattach-failed nil)
             (agent-repl--ws-put ws :reattach-failures nil))
            ((agent-repl--ws-get ws :reattach-failed) nil)
-           (t (agent-repl--frontend-reattach-ws ws bound))))))
-      ;; With bindings reconciled, reap any superseded session still
-      ;; running a leaked duplicate shim for a conversation now bound
-      ;; elsewhere (see `agent-repl--frontend-reap-orphan-sessions').
-      (agent-repl--frontend-reap-orphan-sessions (alist-get 'sessions resp)))))
+           (t (agent-repl--frontend-reattach-ws ws bound)))))
+      ;; With bindings reconciled, reap any superseded session still running a
+      ;; leaked duplicate shim for a conversation now bound elsewhere.
+      (agent-repl--frontend-reap-orphan-sessions))))
 
 (defun agent-repl--frontend-note-boot-id (boot-id)
   "Record BOOT-ID; on an instance change, reset every reattach give-up.
@@ -681,54 +702,18 @@ the count of open workspaces that carried a session binding to rebind."
     (agent-repl--frontend-remount-all-webviews)
     n))
 
-;;;; ---- Message / interrupt injection ------------------------------------------
-
-(defun agent-repl--frontend-send-message (session-id text &optional origin)
-  "POST TEXT as a user message to SESSION-ID; return the request id.
-The daemon injects the turn through the same pipeline as a WS submit,
-so every attached tab renders the user-turn echo.
-
-ORIGIN, when non-nil, is sent as the message's `origin' so the daemon
-stamps the resulting user-turn frame (e.g. \"merge\"): the GUI renders
-that turn as a status card instead of a user-prompt bubble, while the
-injected TEXT still drives the agent.  An ordinary prompt passes nil and
-its command body is byte-for-byte what it was before `origin' existed."
-  (let* ((resp (agent-repl--frontend-api
-                "POST" (format "/sessions/%s/message" session-id)
-                (append `(("content" . ,text))
-                        (when origin `(("origin" . ,origin))))))
-         (rid (alist-get 'request_id resp)))
-    (unless (and (stringp rid) (not (string-empty-p rid)))
-      (error "agent-repl: message injection returned no request_id: %S" resp))
-    rid))
-
-(defun agent-repl--frontend-interrupt-session (session-id &optional retract-request-id)
-  "Abort SESSION-ID's in-flight turn over HTTP.
-With RETRACT-REQUEST-ID, additionally ask the daemon to retract that
-turn — withdrawing its prompt bubble as though the send never happened
-\(the undo half of `C-c C-k').  The daemon retracts only when that id
-names the turn actually running AND the agent has not answered it yet,
-so naming a turn is a REQUEST, never a guarantee.
-
-Returns non-nil when the daemon reports it retracted the turn, which is
-the caller's cue that the prompt is now the caller's to restore.  A
-plain interrupt (no RETRACT-REQUEST-ID) always returns nil."
-  (let ((resp (agent-repl--frontend-api
-               "POST" (format "/sessions/%s/interrupt" session-id)
-               (when retract-request-id
-                 `(("retract_request_id" . ,retract-request-id))))))
-    (eq (alist-get 'retracted resp) t)))
-
 ;;;; ---- In-flight message queue (protocol §2.13) ---------------------------
 ;;
 ;; A `user-message' submitted while a turn is in flight is parked in the
 ;; daemon's per-session FIFO queue rather than forwarded.  The webapp owns
-;; the rich queued-message UI; the Emacs host holds no WebSocket, so it
-;; reaches the queue through two HTTP override routes and reads the queue
-;; SNAPSHOT off the `GET /sessions' listing (the `queue' array each entry
-;; now carries).  The snapshot is cached per-workspace under
-;; `:queued-messages' by `agent-repl--frontend-capture-queues', refreshed
-;; on the reattach sweep's existing GET /sessions poll.
+;; the rich queued-message UI; the Emacs host reaches the queue through two
+;; HTTP override routes (`queue-run-now'/`queue-cancel', kept: frontend.v1
+;; carries no queue-control command).  The queue SNAPSHOT read is gone: the
+;; post-cutover daemon no longer carries a `queue' array on GET /sessions
+;; and the frontend.v1 `SessionView' has no queue field, so
+;; `agent-repl--ws-queued-messages' now always reads the empty
+;; `:queued-messages' (nothing populates it) — the queued-count segment
+;; renders 0, matching the retired daemon-side queue plane.
 
 (defun agent-repl--frontend-queue-run-now (session-id queue-id)
   "Escalate queued message QUEUE-ID in SESSION-ID to run now over HTTP.
@@ -749,69 +734,12 @@ daemon-side no-op ack, not an error."
    "POST" (format "/sessions/%s/queue/%s/cancel" session-id queue-id))
   t)
 
-(defun agent-repl--frontend-queue-content-preview (content)
-  "Return a one-line text preview of CONTENT, a list of content-block alists.
-Concatenates the `text' of every text block, collapses runs of
-whitespace to single spaces, and truncates to
-`agent-repl-queue-preview-length' characters (an ellipsis marks a
-truncation).  Non-text blocks contribute nothing, so a tool-only turn
-previews as the empty string."
-  (let* ((texts (delq nil
-                      (mapcar (lambda (block)
-                                (when (equal (alist-get 'type block) "text")
-                                  (alist-get 'text block)))
-                              content)))
-         (joined (string-trim
-                  (replace-regexp-in-string
-                   "[ \t\n\r]+" " " (string-join texts " ")))))
-    (if (> (length joined) agent-repl-queue-preview-length)
-        (concat (substring joined 0 agent-repl-queue-preview-length) "…")
-      joined)))
-
-(defun agent-repl--frontend-session-queue (entry)
-  "Return ENTRY's in-flight message queue as a list of plists, front-to-back.
-ENTRY is a `GET /sessions' listing entry (an alist).  Each returned
-plist carries `:queue-id', `:status', `:verdict', and a
-`:content-preview' (a truncated one-line rendering of the item's content
-per §2.13).  Returns nil when ENTRY carries no `queue' array."
-  (mapcar (lambda (item)
-            (list :queue-id (alist-get 'queue_id item)
-                  :status (alist-get 'status item)
-                  :verdict (alist-get 'verdict item)
-                  :content-preview
-                  (agent-repl--frontend-queue-content-preview
-                   (alist-get 'content item))))
-          (alist-get 'queue entry)))
-
-(defun agent-repl--frontend-capture-queues (sessions)
-  "Refresh every live workspace's `:queued-messages' from SESSIONS.
-SESSIONS is the parsed `sessions' array of a GET /sessions poll.  For
-each live workspace bound to a listed session, the parsed queue snapshot
-\(`agent-repl--frontend-session-queue') is stored under
-`:queued-messages'; a bound workspace whose session is absent from
-SESSIONS has its queue cleared.  Forces a mode-line repaint so the
-queued-count segment reflects the new snapshot.
-
-The `async_live' capture was deleted in the agent-shim cutover (design
-§10): the idle-but-working (`:idle-async') render-state is now resolved
-by the daemon's SSM and pushed as a `frontend.v1' WorkspaceState frame,
-so Emacs no longer derives it from this poll.  This sweep is retained
-only for its non-status duties (§2.13 queue snapshot, daemon-bounce
-reattach, orphan reap)."
-  (dolist (ws (agent-repl--live-ws-names))
-    (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
-      (let ((entry (seq-find (lambda (s) (equal (alist-get 'session_id s) bound))
-                             sessions)))
-        (agent-repl--ws-put ws :queued-messages
-                            (and entry (agent-repl--frontend-session-queue entry))))))
-  (force-mode-line-update t))
-
 (defun agent-repl--ws-queued-messages (ws)
   "Return WS's last-known in-flight message queue (list of plists).
-Front-to-back, empty when nothing is queued; see
-`agent-repl--frontend-session-queue' for the plist shape.  Refreshed by
-`agent-repl--frontend-capture-queues' on the reattach sweep's
-GET /sessions poll."
+Front-to-back, empty when nothing is queued.  Post-cutover nothing
+populates `:queued-messages' (the daemon dropped the GET /sessions queue
+snapshot and the frontend.v1 `SessionView' has no queue field), so this
+now always returns nil — the queue plane is retired daemon-side."
   (agent-repl--ws-get ws :queued-messages))
 
 (defun agent-repl--ws-queued-count (ws)
@@ -862,27 +790,21 @@ sender watches the bottom from the instant the prompt leaves."
 
 (defun agent-repl--gui-interrupt (ws kind)
   "The gui frontend's interrupt capability (registry `:interrupt-fn').
-KIND again distinguishes the two gestures, as it did for the vterm TUI,
-though it now splits them on intent rather than on keystroke:
-
-  `escape' (`C-c C-k') means STOP, which before the agent has answered
-    is really an undo — so it asks the daemon to retract the sent turn
-    along with interrupting it.
-  `ctrl-c' (`C-c C-c') means clear the draft, and never retracts: that
-    gesture has just discarded the input buffer, and handing a prompt
-    back into it would undo the discard the user asked for.
-
-Returns `retracted' when the daemon withdrew the turn's prompt (the
-caller now owns that text), or t when the interrupt merely landed.
-Both are non-nil: the HTTP route either delivers or signals, so a
-return here always means delivered."
-  (let* ((id (agent-repl--ws-get ws :frontend-session-id))
-         (sent (and (eq kind 'escape) (agent-repl--ws-get ws :sent-turn)))
-         (retracted (agent-repl--frontend-interrupt-session
-                     id (plist-get sent :request-id))))
-    (agent-repl--log ws "interrupt[gui]: session=%s kind=%s retracted=%s"
-                     id kind retracted)
-    (if retracted 'retracted t)))
+Sends the UDS `interrupt' command keyed by WS (the daemon resolves WS ->
+session).  KIND (`escape' = `C-c C-k' STOP, `ctrl-c' = `C-c C-c' clear
+draft) no longer changes the wire request: frontend.v1's `InterruptCmd'
+carries only `hard' and NO retract id, so the retract half of the old
+`C-c C-k' undo is gone (it was already a daemon no-op post-cutover — the
+daemon's HTTP interrupt always reported retracted=false).  Always returns
+t: the interrupt is dispatched, never `retracted'."
+  (let ((id (agent-repl--ws-get ws :frontend-session-id)))
+    ;; nil payload -> the daemon reads InterruptCmd{} (hard=false), the same
+    ;; soft interrupt the retired HTTP route drove.
+    (let ((req (agent-repl--uds-send-command "interrupt" nil ws)))
+      (agent-repl--uds-track-command req "interrupt" ws)
+      (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"
+                       ws id kind)
+      t)))
 
 (defun agent-repl--gui-running-p (ws)
   "The gui frontend's liveness capability (registry `:running-p-fn').
@@ -897,12 +819,11 @@ nil when unbound, not yet initialized, or the daemon is unreachable
 \(logged — a dead daemon degrades a frontend switch to a fresh
 conversation rather than aborting it)."
   (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-    (condition-case err
-        (alist-get 'claude_session_id (agent-repl--frontend-session-entry sid))
-      (error
-       (agent-repl--log ws "gui durable-id fetch FAILED for %s: %s"
-                        sid (error-message-string err))
-       nil))))
+    ;; Read the durable id off the pushed `SessionView' store (the daemon
+    ;; stamps `claudeSessionId' once the CLI reports it), not a GET /sessions
+    ;; round-trip.  Absent until the first frame lands — nil then, exactly as
+    ;; the old unreachable/uninitialized path degraded.
+    (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId)))
 
 (defun agent-repl--gui-adopt-session (ws claude-session-id)
   "The gui frontend's adopt capability: resume CLAUDE-SESSION-ID.
@@ -942,21 +863,30 @@ discarded one."
     id))
 
 (defun agent-repl--frontend-send-user-message (ws text)
-  "Send TEXT as WS's user turn via its bound daemon session.
-Ensures the session first (recreating a stale binding), so a send into
-a dead session heals instead of 404ing."
+  "Send TEXT as WS's user turn over the UDS `submitPrompt' command.
+Ensures the session first (recreating a stale binding), so a send into a
+dead session heals instead of failing, then sends `submitPrompt' keyed by
+WS — the daemon resolves WS -> session, so no session id is on the wire.
+Returns the command request-id (retained by the caller as the sent-turn
+handle).
+
+The one-shot `:next-send-origin' tag (set by the merge remediation) is
+consumed and cleared here but is NOT forwarded: frontend.v1's
+`SubmitPromptCmd' has no `origin' field, so the merge status-card stamping
+is gone — matching the already-dead server behavior (the retired HTTP
+/message route never read `origin' into the driver either)."
   (let ((id (agent-repl--frontend-ensure-session ws))
-        ;; A one-shot `origin' tag parked on the ws (see
-        ;; `agent-repl--dispatch-merge-remediation'): consumed and cleared
-        ;; here so it stamps exactly this send and never a later prompt.
         (origin (agent-repl--ws-get ws :next-send-origin)))
     ;; The ensure may have HEALED a dead binding into a fresh session —
     ;; the displayed webview must follow, or the user watches the dead
     ;; session while the turn streams into the replacement.
     (agent-repl--frontend-sync-webview ws id)
     (when origin (agent-repl--ws-put ws :next-send-origin nil))
-    (agent-repl--log ws "frontend send: session=%s len=%d origin=%s" id (length text) origin)
-    (agent-repl--frontend-send-message id text origin)))
+    (agent-repl--log ws "frontend send: session=%s len=%d origin=%s (uds submitPrompt)"
+                     id (length text) origin)
+    (let ((req (agent-repl--uds-send-command "submitPrompt" (list :text text) ws)))
+      (agent-repl--uds-track-command req "submitPrompt" ws)
+      req)))
 
 (defun agent-repl--frontend-release-workspace-session (ws)
   "Best-effort DELETE of WS's daemon session (for `agent-repl-ws-del-hook').
@@ -968,7 +898,7 @@ silently dropped, the failure lands in the agent-repl log."
     (when id
       (condition-case err
           (progn
-            (agent-repl--frontend-delete-session id)
+            (agent-repl--frontend-delete-session id ws)
             (agent-repl--log ws "frontend session released: %s" id))
         (error
          (agent-repl--log ws "frontend session release FAILED for %s: %s"

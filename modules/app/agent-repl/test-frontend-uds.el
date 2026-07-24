@@ -413,6 +413,38 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
                         "interrupt" '(:hard t) "ws1" 'fake-proc)
                        "req-fixed"))))))
 
+(ert-deftest agent-repl-test-uds-send-command-accepts-create-session ()
+  "The S7 `createSession' command field is accepted and shaped."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command
+         "createSession" '(:cwd "/w" :model "haiku") "/w" 'fake-proc)
+        ;; Assert
+        (let ((frame (json-parse-string (string-trim-right sent)
+                                        :object-type 'plist :array-type 'list)))
+          (should (equal (plist-get (plist-get frame :createSession) :cwd) "/w")))))))
+
+(ert-deftest agent-repl-test-uds-send-command-accepts-delete-session ()
+  "The S7 `deleteSession' command field is accepted and shaped."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command "deleteSession" '(:sessionId "s_9") nil 'fake-proc)
+        ;; Assert
+        (let ((frame (json-parse-string (string-trim-right sent)
+                                        :object-type 'plist :array-type 'list)))
+          (should (equal (plist-get (plist-get frame :deleteSession) :sessionId) "s_9")))))))
+
+(ert-deftest agent-repl-test-uds-daemon-view-is-a-known-frame ()
+  "The S7 `daemonView' oneof arm is a recognized frame field (not malformed)."
+  ;; Act / Assert
+  (should (member "daemonView" agent-repl--uds-known-frame-fields)))
+
 (ert-deftest agent-repl-test-uds-send-command-empty-payload-is-object ()
   "A nil payload serializes as an empty object `{}', never JSON null."
   ;; Arrange
