@@ -14,20 +14,20 @@
 # pre-commit hooks).  Don't edit the marker.
 # AGENT_REPL_MANAGED_HOOK: agent-repl-precommit
 # Legacy marker kept alongside the current one during the
-# agent-repl -> agent-repl transition: the installed hook is SHARED
+# claude-repl -> agent-repl transition: the installed hook is SHARED
 # across worktrees via core.hooksPath, so a pre-rename install.sh (on a
 # sibling worktree) must still recognize this copy as managed.
-# AGENT_REPL_MANAGED_HOOK: agent-repl-precommit
+# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# The module was renamed agent-repl -> agent-repl.  This hook is shared
+# The module was renamed claude-repl -> agent-repl.  This hook is shared
 # across ALL worktrees (core.hooksPath points at the common git dir), and
 # sibling worktrees may still carry the old module name — resolve whichever
 # module (with its aggregator test file) exists in THIS checkout.
 MODULE_NAME=""
-for _name in agent-repl agent-repl; do
+for _name in agent-repl claude-repl; do
   if [ -f "$REPO_ROOT/modules/app/$_name/test-$_name.el" ]; then
     MODULE_NAME="$_name"
     break
@@ -63,7 +63,7 @@ if [ "$CURRENT_BRANCH" = "master" ]; then
 fi
 
 if [ -z "$MODULE_NAME" ]; then
-  echo "[pre-commit] no agent-repl/agent-repl module with an aggregator test file found — refusing to commit." >&2
+  echo "[pre-commit] no agent-repl/claude-repl module with an aggregator test file found — refusing to commit." >&2
   exit 1
 fi
 
