@@ -51,7 +51,17 @@ message FrontendFrame {
     TaskCatalog task_catalog = 6;
     CommandAck command_ack = 7;
     DegradedNotice degraded_notice = 8;
+    DaemonView daemon_view = 9;  // Additive (S7)
   }
+}
+
+// Additive (S7): daemon-level identity/liveness Emacs read from GET /sessions'
+// envelope (boot detection, version-mismatch warnings, binary staleness).
+message DaemonView {
+  string boot_id = 1;
+  string protocol_version = 2;
+  int64 daemon_binary_mtime_ms = 3;
+  string daemon_version = 4;
 }
 
 // THE resolved per-workspace state, plus the inputs snapshot that produced
@@ -83,6 +93,12 @@ message SessionView {
   // Additive (S6): resume/rebind keys the webapp lost in the cutover.
   string claude_session_id = 11;
   string cwd = 12;
+  // Additive (S7): GET /sessions parity so Emacs can drop HTTP entirely.
+  bool terminal = 13;
+  string death_reason = 14;
+  bool rehydratable = 15;
+  bool hibernated = 16;
+  int64 pending_permissions = 17;
 }
 
 // Complete (store-round-tripped) conversation additions, pre-rendered into
@@ -133,7 +149,24 @@ message FrontendCommand {
     CloseWorkspaceCmd close_workspace = 7;
     OpenWorkspaceCmd open_workspace = 8;
     ResyncCmd resync = 9;
+    CreateSessionCmd create_session = 10;  // Additive (S7)
+    DeleteSessionCmd delete_session = 11;  // Additive (S7)
   }
+}
+
+// Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
+message CreateSessionCmd {
+  string cwd = 1;
+  string model = 2;
+  string permission_mode = 3;
+  string config_dir = 4;
+  string resume_claude_session_id = 5;  // "" = fresh
+  bool fake = 6;                        // test harness sessions
+}
+
+// Additive (S7): session teardown over UDS (replaces DELETE /sessions/{id}).
+message DeleteSessionCmd {
+  string session_id = 1;
 }
 
 message SubmitPromptCmd {
@@ -188,4 +221,5 @@ message StateSnapshot {
   repeated WorkspaceState workspaces = 1;
   repeated SessionView sessions = 2;
   repeated TaskCatalog catalogs = 3;
+  DaemonView daemon = 4;  // Additive (S7)
 }
