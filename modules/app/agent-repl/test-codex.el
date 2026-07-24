@@ -345,59 +345,11 @@ The git-check skip is mandatory: headless spawns run from
 
 ;;;; ---- Tests: hooks installation ----
 
-(ert-deftest agent-repl-test-codex-install-hooks-writes-managed-set ()
-  "The installer registers exactly the codex-managed events in hooks.json."
-  (let* ((root (make-temp-file "agent-codex-" t))
-         (agent-repl-codex-home root))
-    (unwind-protect
-        (progn
-          (agent-repl-codex-install-hooks)
-          (let* ((json (agent-repl--read-settings-alist
-                        (agent-repl--codex-hooks-file)))
-                 (hooks (cdr (assq 'hooks json))))
-            (should (= (length hooks)
-                       (length agent-repl--codex-managed-hooks)))
-            (dolist (pair agent-repl--codex-managed-hooks)
-              (should (agent-repl--event-has-command-p
-                       hooks (car pair) (cdr pair))))))
-      (delete-directory root t))))
-
-(ert-deftest agent-repl-test-codex-install-hooks-excludes-claude-only-events ()
-  "Notification and StopFailure (absent from codex) are never registered."
-  (should-not (assq 'Notification agent-repl--codex-managed-hooks))
-  (should-not (assq 'StopFailure agent-repl--codex-managed-hooks)))
-
-(ert-deftest agent-repl-test-codex-install-hooks-excludes-permission-request ()
-  "No managed PERMISSION hook survives — its script was deleted with the rest.
-Registering it could only ever write a dangling command path; permission
-state comes from pushed `frontend.v1' state now."
-  (should-not (assq 'PermissionRequest agent-repl--codex-managed-hooks)))
-
 (defconst agent-repl-test--codex-repo-hooks-dir
   ;; Captured at LOAD time — `load-file-name' is nil inside ERT test bodies.
   (expand-file-name "hooks/"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to the checked-in `hooks/' directory.")
-
-(ert-deftest agent-repl-test-codex-managed-hook-scripts-exist-in-tree ()
-  "Every managed codex hook names a script that is actually checked in.
-Guards the class of breakage that deleting a hook script introduces: a
-registration left behind pointing at a file nobody ships."
-  ;; Arrange / Act / Assert
-  (dolist (pair agent-repl--codex-managed-hooks)
-    (should (file-exists-p
-             (expand-file-name (file-name-nondirectory (cdr pair))
-                               agent-repl-test--codex-repo-hooks-dir)))))
-
-(ert-deftest agent-repl-test-codex-install-hooks-idempotent ()
-  "A second install run is a no-op (returns nil, no duplicate entries)."
-  (let* ((root (make-temp-file "agent-codex-" t))
-         (agent-repl-codex-home root))
-    (unwind-protect
-        (progn
-          (should (agent-repl-codex-install-hooks))
-          (should-not (agent-repl-codex-install-hooks)))
-      (delete-directory root t))))
 
 ;;;; ---- Tests: doctor ----
 
@@ -416,19 +368,9 @@ registration left behind pointing at a file nobody ships."
   "No codex signals at all yields no issues."
   (let ((agent-repl-codex-home nil)
         (agent-repl-default-backend 'claude))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--codex-hooks-file)
-               (lambda () "/nonexistent/hooks.json")))
+    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
       (agent-repl-test--with-clean-state
         (should-not (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-missing-binary-errors ()
-  "codex in use without the binary on PATH yields an error issue."
-  (agent-repl-test--with-codex-doctor-env
-    (agent-repl-codex-install-hooks)
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) nil)))
-      (should (rassoc "codex backend in use but `codex' is not on PATH"
-                      (agent-repl--codex-doctor-issues))))))
 
 (ert-deftest agent-repl-test-codex-doctor-missing-home-errors ()
   "An explicitly configured but absent CODEX_HOME yields an error issue."
@@ -439,43 +381,6 @@ registration left behind pointing at a file nobody ships."
                             (and (eq (car issue) 'error)
                                  (string-match-p "does not exist" (cdr issue))))
                           (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-missing-hooks-file-errors ()
-  "codex in use with no hooks.json yields a single install-pointer error."
-  (agent-repl-test--with-codex-doctor-env
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
-      (should (cl-find-if (lambda (issue)
-                            (and (eq (car issue) 'error)
-                                 (string-match-p "hooks\\.json is missing"
-                                                 (cdr issue))))
-                          (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-unregistered-stop-errors ()
-  "A hooks.json missing the Stop registration yields an error for it."
-  (agent-repl-test--with-codex-doctor-env
-    (with-temp-file (agent-repl--codex-hooks-file) (insert "{\"hooks\":{}}"))
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
-      (should (cl-find-if (lambda (issue)
-                            (and (eq (car issue) 'error)
-                                 (string-match-p "hook Stop" (cdr issue))))
-                          (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-unregistered-subagent-warns ()
-  "A hooks.json missing SubagentStart yields only a warning for it."
-  (agent-repl-test--with-codex-doctor-env
-    (with-temp-file (agent-repl--codex-hooks-file) (insert "{\"hooks\":{}}"))
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
-      (should (cl-find-if (lambda (issue)
-                            (and (eq (car issue) 'warn)
-                                 (string-match-p "hook SubagentStart" (cdr issue))))
-                          (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-clean-after-install ()
-  "A full install with the binary present yields zero issues."
-  (agent-repl-test--with-codex-doctor-env
-    (agent-repl-codex-install-hooks)
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
-      (should-not (agent-repl--codex-doctor-issues)))))
 
 (ert-deftest agent-repl-test-codex-doctor-silent-in-sandbox ()
   "Inside the sandbox the codex doctor is silent (host-only concern)."
@@ -488,11 +393,9 @@ registration left behind pointing at a file nobody ships."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-codex-home nil)
           (agent-repl-default-backend 'claude))
-      (cl-letf (((symbol-function 'agent-repl--codex-hooks-file)
-                 (lambda () "/nonexistent/hooks.json")))
-        (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
-        (agent-repl--ws-put "ws1" :backend 'codex)
-        (should (agent-repl--codex-in-use-p))))))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp/p")
+      (agent-repl--ws-put "ws1" :backend 'codex)
+      (should (agent-repl--codex-in-use-p)))))
 
 ;;;; ---- Tests: registration ----
 

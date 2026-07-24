@@ -20,45 +20,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- Fixtures ----
-
-(defun test-install--json-with-all-hooks ()
-  "Return parsed JSON shape with all managed hooks registered."
-  '((hooks
-     (Stop . (((hooks . (((type . "command")
-                          (command . "~/.claude/hooks/stop-notify.sh")))))))
-     (StopFailure . (((hooks . (((type . "command")
-                                 (command . "~/.claude/hooks/stop-failure-notify.sh")))))))
-     (SubagentStart . (((hooks . (((type . "command")
-                                   (command . "~/.claude/hooks/subagent-start-notify.sh")))))))
-     (SubagentStop . (((hooks . (((type . "command")
-                                  (command . "~/.claude/hooks/subagent-stop-notify.sh")))))))
-     (UserPromptSubmit . (((hooks . (((type . "command")
-                                      (command . "~/.claude/hooks/prompt-submit-notify.sh")))))))
-     (SessionStart . (((hooks . (((type . "command")
-                                  (command . "~/.claude/hooks/session-start-notify.sh")))))))
-     (Notification . (((matcher . "permission_prompt")
-                       (hooks . (((type . "command")
-                                  (command . "~/.claude/hooks/permission-notify.sh")))))))
-     (PermissionRequest . (((hooks . (((type . "command")
-                                       (command . "~/.claude/hooks/permission-request-notify.sh"))))))))))
-
-(defun test-install--json-missing-one (event-to-drop)
-  "Like the all-hooks fixture but with EVENT-TO-DROP removed."
-  (let ((json (copy-tree (test-install--json-with-all-hooks))))
-    (setcdr (assq 'hooks json)
-            (assq-delete-all event-to-drop (cdr (assq 'hooks json))))
-    json))
-
-(defun test-install--json-with-foreign-stop ()
-  "All-hooks fixture plus a foreign entry under Stop before ours."
-  (let ((json (copy-tree (test-install--json-with-all-hooks))))
-    (setcdr (assq 'Stop (cdr (assq 'hooks json)))
-            (cons '((hooks . (((type . "command")
-                               (command . "/some/foreign.sh")))))
-                  (cdr (assq 'Stop (cdr (assq 'hooks json))))))
-    json))
-
 ;;;; ---- sandbox-p ----
 
 (ert-deftest agent-repl-test-in-sandbox-dockerenv ()
@@ -88,40 +49,12 @@
              (lambda (k) (and (equal k "DOOM_SANDBOX") "0"))))
     (should-not (agent-repl--in-sandbox-p))))
 
-;;;; ---- event-has-command-p ----
-
-(ert-deftest agent-repl-test-event-has-command-match ()
-  "Returns non-nil when CMD appears in an entry's inner .hooks[].command."
-  (let ((hooks (cdr (assq 'hooks (test-install--json-with-all-hooks)))))
-    (should (agent-repl--event-has-command-p
-             hooks 'Stop "~/.claude/hooks/stop-notify.sh"))))
-
-(ert-deftest agent-repl-test-event-has-command-mismatch ()
-  "Returns nil when CMD differs from any registered entry."
-  (let ((hooks (cdr (assq 'hooks (test-install--json-with-all-hooks)))))
-    (should-not (agent-repl--event-has-command-p
-                 hooks 'Stop "/nowhere.sh"))))
-
-(ert-deftest agent-repl-test-event-has-command-event-absent ()
-  "Returns nil when the event is not present in the hooks alist."
-  (let ((hooks (cdr (assq 'hooks (test-install--json-missing-one 'Stop)))))
-    (should-not (agent-repl--event-has-command-p
-                 hooks 'Stop "~/.claude/hooks/stop-notify.sh"))))
-
-(ert-deftest agent-repl-test-event-has-command-foreign-coresident ()
-  "Matches even when foreign entries co-exist in the event array."
-  (let ((hooks (cdr (assq 'hooks (test-install--json-with-foreign-stop)))))
-    (should (agent-repl--event-has-command-p
-             hooks 'Stop "~/.claude/hooks/stop-notify.sh"))
-    (should (agent-repl--event-has-command-p
-             hooks 'Stop "/some/foreign.sh"))))
-
-;; The hooks-installed-p / managed-hooks-includes-permission-request tests
-;; were deleted in the S8/S9 sentinel endgame: Emacs manages no Claude Code
-;; hooks any more, so there is no `agent-repl--managed-hooks' alist and no
-;; `agent-repl--hooks-installed-p' predicate to gate on.  The generic
-;; settings-writer `agent-repl--event-has-command-p' (codex-shared) is still
-;; covered above; the codex hook set is covered in test-codex.el.
+;; Every settings.json hook-writer test is gone with the writer itself (the
+;; D-phase census): Emacs provisions no agent-harness hooks for ANY backend,
+;; so there is no managed-hooks alist, no hooks-installed-p predicate, and no
+;; hook-array writer left to cover.  What install.el still does — skill
+;; symlink provisioning, the git pre-commit hook, the doctor — is covered
+;; below.
 
 ;;;; ---- run-install-action dispatch ----
 
@@ -770,65 +703,6 @@ That case is already covered by `agent-repl--check-skill-links'."
 ;; sentinel endgame: Emacs no longer provisions Claude Code hooks into any
 ;; CLAUDE_CONFIG_DIR.  `agent-repl--register-hooks-in-settings' survives only
 ;; as the codex-shared writer and is exercised below with explicit alists.
-
-(ert-deftest agent-repl-test-register-hooks-idempotent ()
-  "register-hooks-in-settings is a no-op on a second run (returns nil, no double-register)."
-  (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "settings.json" dir))
-         (hooks '((Stop . "/x/stop.sh"))))
-    (unwind-protect
-        (progn
-          (should (agent-repl--register-hooks-in-settings settings hooks))
-          (should-not (agent-repl--register-hooks-in-settings settings hooks)))
-      (delete-directory dir t))))
-
-(ert-deftest agent-repl-test-register-hooks-custom-alist ()
-  "register-hooks-in-settings registers exactly a caller-supplied alist.
-Guards the parameterization the codex hooks.json installer relies on:
-only the supplied events appear, with the supplied matcher."
-  (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "hooks.json" dir)))
-    (unwind-protect
-        (progn
-          (agent-repl--register-hooks-in-settings
-           settings
-           '((Stop . "/x/stop.sh"))
-           '((Stop . "stop-matcher")))
-          (let* ((json (agent-repl--read-settings-alist settings))
-                 (hooks (cdr (assq 'hooks json)))
-                 (stop (cdr (assq 'Stop hooks)))
-                 (entry (car stop)))
-            (should (= (length hooks) 1))
-            (should (equal (cdr (assq 'matcher entry)) "stop-matcher"))
-            (should (agent-repl--event-has-command-p hooks 'Stop "/x/stop.sh"))))
-      (delete-directory dir t))))
-
-(ert-deftest agent-repl-test-register-hooks-preserves-foreign ()
-  "register-hooks-in-settings preserves foreign top-level keys."
-  (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "settings.json" dir)))
-    (unwind-protect
-        (progn
-          (with-temp-file settings (insert "{\"model\":\"opus\"}"))
-          (agent-repl--register-hooks-in-settings settings '((Stop . "/x/stop.sh")))
-          (let ((json (agent-repl--read-settings-alist settings)))
-            (should (equal (cdr (assq 'model json)) "opus"))
-            (should (cdr (assq 'hooks json)))))
-      (delete-directory dir t))))
-
-(ert-deftest agent-repl-test-register-hooks-matcher ()
-  "register-hooks-in-settings writes a supplied matcher for its event."
-  (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "settings.json" dir)))
-    (unwind-protect
-        (progn
-          (agent-repl--register-hooks-in-settings
-           settings '((Notification . "/x/n.sh")) '((Notification . "some_matcher")))
-          (let* ((json (agent-repl--read-settings-alist settings))
-                 (entries (cdr (assq 'Notification (cdr (assq 'hooks json))))))
-            (should (seq-some (lambda (e) (equal (cdr (assq 'matcher e)) "some_matcher"))
-                              entries))))
-      (delete-directory dir t))))
 
 (ert-deftest agent-repl-test-register-hooks-malformed-signals ()
   "register-hooks-in-settings signals on malformed existing JSON (never silently resets)."
