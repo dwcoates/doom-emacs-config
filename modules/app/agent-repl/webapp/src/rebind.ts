@@ -70,32 +70,35 @@ export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKey
   };
 }
 
+/** Creates a session from the stored resume keys, returning its new id. */
+export type SessionCreator = (args: {
+  cwd: string;
+  resumeClaudeSessionId: string;
+}) => Promise<string>;
+
 /**
- * Rebind a gone session: POST /sessions with the stored resume keys and
- * return the successor session id. Returns null when no keys were ever
- * stored (nothing to rebind with — the caller escalates to
- * remediation); throws on a failed POST (same escalation, but loudly
- * distinguishable from "nothing stored"). The keys migrate to the
- * successor id so a SECOND loss rebinds too.
+ * Rebind a gone session: create a successor from the stored resume keys and
+ * return its id. Returns null when no keys were ever stored (nothing to
+ * rebind with — the caller escalates to remediation); rejects when the create
+ * fails (same escalation, but loudly distinguishable from "nothing stored").
+ * The keys migrate to the successor id so a SECOND loss rebinds too.
+ *
+ * The creator is injected because session creation is a `CreateSessionCmd` on
+ * the command plane, not the POST /sessions this used to issue: it needs a
+ * WebSocket the caller owns, and this stays a pure keys-and-storage unit.
  */
 export async function rebindSession(
-  httpBase: string,
   sessionId: string,
   storage: Storage,
-  fetchFn: typeof fetch = fetch,
+  createSession: SessionCreator,
 ): Promise<string | null> {
   const keys = recallResumeKeys(storage, sessionId);
   if (keys === null) return null;
-  const resp = await fetchFn(`${httpBase}/sessions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd: keys.cwd, resume: keys.claudeSessionId }),
+  const successor = await createSession({
+    cwd: keys.cwd,
+    resumeClaudeSessionId: keys.claudeSessionId,
   });
-  if (!resp.ok) {
-    throw new Error(`rebind POST /sessions: ${resp.status} ${await resp.text()}`);
-  }
-  const body = (await resp.json()) as { session_id: string };
-  rememberResumeKeys(storage, body.session_id, keys);
+  rememberResumeKeys(storage, successor, keys);
   storage.removeItem(KEY_PREFIX + sessionId);
-  return body.session_id;
+  return successor;
 }
