@@ -147,7 +147,26 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	node := nodePath(t)
 	script := shimScriptPath(t)
 	storeBin := buildShimStore(t)
-	storeSock := filepath.Join(t.TempDir(), "store.sock")
+	// The store socket cannot live under t.TempDir(): the test-name-derived
+	// path exceeds the 104-byte sun_path limit, so bind(2) fails on macOS.
+	sockDir, err := os.MkdirTemp("/tmp", "agent-repl-e2e-")
+	if err != nil {
+		t.Fatalf("make short socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
+	storeSock := filepath.Join(sockDir, "store.sock")
+	// Session sockets resolve under $HOME (~/.cache/agent-repl/sock, see
+	// shimclient.DefaultSocketPath). Point HOME at the short dir so the fake
+	// shim binds an isolated, sun_path-sized socket instead of a socket in the
+	// LIVE daemon's shared socket dir.
+	t.Setenv("HOME", sockDir)
+	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
+	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
+	// mirrors that guarantee — the shim itself does not mkdir, and node maps
+	// a missing parent dir to a fatal EACCES on bind.
+	if err := os.MkdirAll(filepath.Join(sockDir, ".cache", "agent-repl", "sock"), 0o700); err != nil {
+		t.Fatalf("make session socket dir: %v", err)
+	}
 	startShimStore(t, storeBin, storeSock)
 
 	reg := registry.Open(filepath.Join(t.TempDir(), "reg.json"), t.Logf)
@@ -195,13 +214,15 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	}
 	t.Cleanup(driver.Close)
 
+	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		SSM:       ssmMgr,
-		Prompts:   driver,
-		MergeDirs: stubMergeDirs{},
-		Lifecycle: stubLifecycle{},
-		Resyncer:  driver,
-		Logf:      t.Logf,
+		SSM:             ssmMgr,
+		Prompts:         driver,
+		MergeDirs:       stubMergeDirs{},
+		Lifecycle:       stubLifecycle{},
+		Resyncer:        driver,
+		SessionCommands: binding,
+		Logf:            t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -217,6 +238,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		Frontend:      agentShim.Server,
 		Logf:          t.Logf,
 	})
+	binding.SetTarget(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &e2eHarness{ts: ts}
@@ -298,8 +320,29 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 
-	// Act — send the webapp's still-Layer-2 user-message command.
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"hello uds e2e"}`)
+	// A submit during shim bring-up is honestly nacked (no queue by design),
+	// so wait for attach evidence first: the first session-scoped push, which
+	// rides the same shim connection the submit needs.
+	attachDeadline := time.Now().Add(frameTimeout)
+	attached := false
+	for !attached && time.Now().Before(attachDeadline) {
+		frame := readFrame(t, conn)
+		switch f := frame.GetFrame().(type) {
+		case *frontendv1.FrontendFrame_WorkspaceState:
+			attached = f.WorkspaceState.GetSessionId() == id || f.WorkspaceState.GetWorkspace() == cwd
+		case *frontendv1.FrontendFrame_SessionInit:
+			attached = f.SessionInit.GetSessionId() == id
+		case *frontendv1.FrontendFrame_SessionView:
+			attached = f.SessionView.GetSessionId() == id && f.SessionView.GetShimAttached()
+		}
+	}
+	if !attached {
+		t.Fatal("shim never attached (no session-scoped push arrived)")
+	}
+
+	// Act — submit the prompt as a FrontendCommand frame (the /stream socket
+	// is command-strict since S9; the scoped translator stamps the workspace).
+	writeCmd(t, conn, `{"requestId":"r1","submitPrompt":{"text":"hello uds e2e"}}`)
 
 	// Assert — a conversation delta or a workspace-state for this session
 	// arrives within the timeout (the fake SDK echoes the prompt back).
