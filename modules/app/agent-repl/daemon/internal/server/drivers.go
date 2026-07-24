@@ -253,3 +253,11 @@ func (f *PushForwarder) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	}
 	f.logMiss("workspace-state")
 }
+
+func (f *PushForwarder) PushSessionInitView(v *frontendv1.SessionInitView) {
+	if s := f.target.Load(); s != nil {
+		s.PushSessionInitView(v)
+		return
+	}
+	f.logMiss("session-init-view")
+}

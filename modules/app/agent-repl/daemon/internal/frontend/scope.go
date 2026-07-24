@@ -48,6 +48,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matches(f.TypingDelta.GetSessionId(), f.TypingDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return frame, sc.matches(f.TaskCatalog.GetSessionId(), f.TaskCatalog.GetWorkspace())
+	case *frontendv1.FrontendFrame_SessionInit:
+		return frame, sc.matches(f.SessionInit.GetSessionId(), f.SessionInit.GetWorkspace())
 	default:
 		// DegradedNotice / CommandAck / unknown: connection-global, pass through.
 		return frame, true
@@ -70,6 +72,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 	for _, v := range snap.GetSessions() {
 		if sc.matches(v.GetSessionId(), v.GetWorkspace()) {
 			out.Sessions = append(out.Sessions, v)
+		}
+	}
+	for _, in := range snap.GetInits() {
+		if sc.matches(in.GetSessionId(), in.GetWorkspace()) {
+			out.Inits = append(out.Inits, in)
 		}
 	}
 	return out

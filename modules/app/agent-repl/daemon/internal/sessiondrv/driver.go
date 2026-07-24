@@ -17,6 +17,7 @@ package sessiondrv
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -190,6 +191,30 @@ func (m *Manager) SystemInit(workspace string) (*datav1.SystemInit, bool) {
 	}
 	si := d.consumer.latestSystemInit()
 	return si, si != nil
+}
+
+// SessionInits returns a SessionInitView for every live session whose SystemInit
+// has landed, sorted by workspace for a stable connect snapshot (task step 4:
+// StateSnapshot.inits). A session with no init yet contributes nothing.
+func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
+	m.mu.Lock()
+	drivers := make([]*driven, 0, len(m.byWS))
+	for _, d := range m.byWS {
+		drivers = append(drivers, d)
+	}
+	m.mu.Unlock()
+	var out []*frontendv1.SessionInitView
+	for _, d := range drivers {
+		if si := d.consumer.latestSystemInit(); si != nil {
+			out = append(out, &frontendv1.SessionInitView{
+				Workspace: d.workspace,
+				SessionId: d.sessionID,
+				Init:      si,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].GetWorkspace() < out[j].GetWorkspace() })
+	return out
 }
 
 // TaskEntry returns the frontend TaskEntry (including its output_path) for a

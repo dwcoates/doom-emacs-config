@@ -34,6 +34,34 @@ func TestConsumerRetainsLatestSystemInit(t *testing.T) {
 	}
 }
 
+func TestConsumeVendorSystemInitPushesSessionInitView(t *testing.T) {
+	// Arrange — a vendor event carrying a SystemInit snapshot.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	csm := &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_SystemInit{SystemInit: &datav1.SystemInit{
+			Model: "haiku", SlashCommands: []string{"/foo"},
+		}},
+	}
+	any, err := anypb.New(csm)
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+
+	// Act.
+	c.Consume(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: any}})
+
+	// Assert — a SessionInitView is pushed when the init lands (S9), scoped to
+	// the consumer's workspace/session and carrying the retained init.
+	if len(push.inits) != 1 {
+		t.Fatalf("expected 1 SessionInitView push, got %d", len(push.inits))
+	}
+	got := push.inits[0]
+	if got.GetWorkspace() != "ws" || got.GetSessionId() != "s1" || got.GetInit().GetModel() != "haiku" {
+		t.Fatalf("SessionInitView = ws=%q session=%q model=%q", got.GetWorkspace(), got.GetSessionId(), got.GetInit().GetModel())
+	}
+}
+
 func TestSystemInitFromVendorIgnoresNonInitVendor(t *testing.T) {
 	// Arrange — a vendor event that is a ClaudeStreamMessage but NOT a system:init.
 	csm := &datav1.ClaudeStreamMessage{

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
@@ -263,6 +264,27 @@ func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 type fakeSessions struct{ views []*frontendv1.SessionView }
 
 func (f fakeSessions) SessionViews() []*frontendv1.SessionView { return f.views }
+
+type fakeInits struct{ inits []*frontendv1.SessionInitView }
+
+func (f fakeInits) SessionInits() []*frontendv1.SessionInitView { return f.inits }
+
+func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
+	// Arrange — a snapshot provider with a SessionInitSource (S9).
+	provider := &ssmSnapshotProvider{
+		inits: fakeInits{inits: []*frontendv1.SessionInitView{
+			{Workspace: "/w", SessionId: "s1", Init: &datav1.SystemInit{Model: "haiku"}},
+		}},
+	}
+
+	// Act.
+	snap := provider.Snapshot()
+
+	// Assert — the retained inits ride on the connect snapshot.
+	if len(snap.GetInits()) != 1 || snap.GetInits()[0].GetInit().GetModel() != "haiku" {
+		t.Fatalf("inits = %v", snap.GetInits())
+	}
+}
 
 func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 	// Arrange — an SSM with one workspace transition, plus a session view.
