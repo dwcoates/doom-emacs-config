@@ -108,16 +108,6 @@ interface TaskRecord {
 }
 
 /**
- * Every task the session created, in creation order, folded from its
- * `TaskCreate` and `TaskUpdate` calls. A row keeps its final subject and
- * current status; a `completed` task carries the counted-turn ordinal it
- * completed on, so the recency window can age it out.
- */
-export function sessionTasks(items: readonly ConversationItem[]): CounterEntry[] {
-  return taskEntries(items, () => true);
-}
-
-/**
  * The tasks the agent AGENTID itself drove — its own `TaskCreate` /
  * `TaskUpdate` calls, folded exactly as the session roster folds — the
  * agent-scoped twin of `sessionTasks`, feeding a bubble topbar's counter.
