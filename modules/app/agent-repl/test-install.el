@@ -705,23 +705,21 @@ That case is already covered by `agent-repl--check-skill-links'."
       (let ((issues (agent-repl--doctor-issues)))
         (should (test-install--doctor-find issues "Unmanaged broken symlink"))))))
 
-;;;; ---- Tests: settings-writer (codex-shared) ----
+;;;; ---- Tests: settings-writer (deleted) ----
 ;;
 ;; The alt-account config-dir provisioning tests (config-dirs-to-provision,
 ;; provision-registers-into-each-config-dir) were deleted in the S8/S9
 ;; sentinel endgame: Emacs no longer provisions Claude Code hooks into any
-;; CLAUDE_CONFIG_DIR.  `agent-repl--register-hooks-in-settings' survives only
-;; as the codex-shared writer and is exercised below with explicit alists.
-
-(ert-deftest agent-repl-test-register-hooks-malformed-signals ()
-  "register-hooks-in-settings signals on malformed existing JSON (never silently resets)."
-  (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "settings.json" dir)))
-    (unwind-protect
-        (progn
-          (with-temp-file settings (insert "{not json"))
-          (should-error
-           (agent-repl--register-hooks-in-settings settings '((Stop . "/x/stop.sh")))))
-      (delete-directory dir t))))
+;; CLAUDE_CONFIG_DIR.  The codex hook plane then took the writer itself
+;; (`agent-repl--register-hooks-in-settings') with it, so nothing in this
+;; module writes `settings.json' any more.
+;;
+;; Its malformed-JSON test went too, and deliberately so: with the writer
+;; gone the call signalled `void-function', which `should-error' accepted,
+;; so the test passed while asserting nothing about anything.  There is no
+;; error-handling coverage to preserve here -- the code path it guarded no
+;; longer exists.  Host settings.json entries left over from the
+;; pre-cutover installs are inert: `agent-repl--deprecated-sentinel-prefixes'
+;; (sentinel.el) drains and deletes the sentinel files they still write.
 
 ;;; test-install.el ends here
