@@ -180,7 +180,7 @@ debug logging on."
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
-    :frontend-buffer :frontend-buffer-session-id :queued-messages
+    :frontend-buffer :frontend-buffer-session-id
     :incoming-session-id :pushed-render-state :pushed-render-state-meta)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives

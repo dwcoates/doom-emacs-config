@@ -278,6 +278,127 @@ daemon no longer knows."
         ;; Assert
         (should (equal noted "b_9"))))))
 
+(ert-deftest agent-repl-test-apply-daemon-view-stores-the-view ()
+  "The daemonView handler stores the view for the readiness/staleness reads."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-last-daemon-view nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore))
+        ;; Act
+        (agent-repl--frontend-apply-daemon-view '(:bootId "b_9" :daemonVersion "v2"))
+        ;; Assert
+        (should (equal (plist-get (agent-repl--frontend-daemon-view) :daemonVersion)
+                       "v2"))))))
+
+(ert-deftest agent-repl-test-daemon-view-nil-before-any-frame ()
+  "The daemon-view accessor is nil until the first `DaemonView' is pushed."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view nil))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-view)))))
+
+(ert-deftest agent-repl-test-apply-snapshot-stores-the-daemon-view ()
+  "A StateSnapshot's `:daemon' arm lands in the daemon-view store."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-last-daemon-view nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore))
+        ;; Act
+        (agent-repl--frontend-apply-snapshot '(:daemon (:bootId "b_1")))
+        ;; Assert
+        (should (equal (plist-get (agent-repl--frontend-daemon-view) :bootId) "b_1"))))))
+
+;;;; ---- DaemonView binary mtime (staleness source) ----------------------
+
+(ert-deftest agent-repl-test-daemon-view-mtime-parses-protojson-string ()
+  "An int64 mtime arrives as a protojson STRING and converts to seconds."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view '(:daemonBinaryMtimeMs "1700000000000")))
+    ;; Act / Assert
+    (should (equal 1700000000
+                   (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+(ert-deftest agent-repl-test-daemon-view-mtime-accepts-a-number ()
+  "A numerically-decoded mtime converts to seconds just the same."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view '(:daemonBinaryMtimeMs 1700000000000)))
+    ;; Act / Assert
+    (should (equal 1700000000
+                   (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+(ert-deftest agent-repl-test-daemon-view-mtime-nil-without-a-view ()
+  "No pushed view yields nil, never a guessed mtime."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view nil))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+(ert-deftest agent-repl-test-daemon-view-mtime-nil-when-field-absent ()
+  "A view predating the mtime field yields nil."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+(ert-deftest agent-repl-test-daemon-view-mtime-nil-when-nonpositive ()
+  "A zero mtime (the daemon's boot-time self-stat failed) yields nil."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view '(:daemonBinaryMtimeMs "0")))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+(ert-deftest agent-repl-test-daemon-view-mtime-nil-when-unparsable ()
+  "A non-numeric mtime yields nil rather than a coerced zero."
+  ;; Arrange
+  (let ((agent-repl--frontend-last-daemon-view '(:daemonBinaryMtimeMs "garbage")))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-view-binary-mtime-seconds)))))
+
+;;;; ---- SessionInit store + handler (slash-menu source) -----------------
+
+(ert-deftest agent-repl-test-apply-session-init-stores-by-id ()
+  "The sessionInit handler stores its SystemInit keyed by session id."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-inits)
+    ;; Act
+    (agent-repl--frontend-apply-session-init
+     '(:sessionId "s_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
+    ;; Assert
+    (should (equal (plist-get (agent-repl--frontend-session-init "s_1") :slashCommands)
+                   '("commit" "review")))))
+
+(ert-deftest agent-repl-test-store-session-init-missing-id-errors ()
+  "A SessionInitView with no id fails loudly (No-Silent-Fallbacks)."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl--frontend-store-session-init '(:workspace "/w" :init (:slashCommands ())))))
+
+(ert-deftest agent-repl-test-session-init-nil-for-unknown ()
+  "The session-init accessor returns nil for a session with no pushed init."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-inits)
+    (should (null (agent-repl--frontend-session-init "s_nope")))))
+
+(ert-deftest agent-repl-test-apply-snapshot-rebuilds-session-inits ()
+  "A StateSnapshot rebuilds the session-init roster from its :inits list."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-inits)
+    ;; Arrange — a stale init that the snapshot must drop.
+    (agent-repl--frontend-store-session-init
+     '(:sessionId "s_stale" :init (:slashCommands ("old"))))
+    ;; Act
+    (agent-repl--frontend-apply-snapshot
+     '(:inits ((:sessionId "s_new" :init (:slashCommands ("new"))))))
+    ;; Assert — stale gone, new present.
+    (should-not (agent-repl--frontend-session-init "s_stale"))
+    (should (equal (plist-get (agent-repl--frontend-session-init "s_new") :slashCommands)
+                   '("new")))))
+
+(ert-deftest agent-repl-test-state-registers-session-init-handler ()
+  "The sessionInit oneof arm is wired to its handler."
+  (should (eq (cdr (assoc "sessionInit" agent-repl--uds-frame-handlers))
+              #'agent-repl--frontend-apply-session-init)))
+
 (ert-deftest agent-repl-test-state-registers-session-view-handler ()
   "The sessionView oneof arm is wired to its handler."
   (should (eq (cdr (assoc "sessionView" agent-repl--uds-frame-handlers))

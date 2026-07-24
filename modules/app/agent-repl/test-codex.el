@@ -367,6 +367,28 @@ The git-check skip is mandatory: headless spawns run from
   (should-not (assq 'Notification agent-repl--codex-managed-hooks))
   (should-not (assq 'StopFailure agent-repl--codex-managed-hooks)))
 
+(ert-deftest agent-repl-test-codex-install-hooks-excludes-permission-request ()
+  "No managed PERMISSION hook survives — its script was deleted with the rest.
+Registering it could only ever write a dangling command path; permission
+state comes from pushed `frontend.v1' state now."
+  (should-not (assq 'PermissionRequest agent-repl--codex-managed-hooks)))
+
+(defconst agent-repl-test--codex-repo-hooks-dir
+  ;; Captured at LOAD time — `load-file-name' is nil inside ERT test bodies.
+  (expand-file-name "hooks/"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path to the checked-in `hooks/' directory.")
+
+(ert-deftest agent-repl-test-codex-managed-hook-scripts-exist-in-tree ()
+  "Every managed codex hook names a script that is actually checked in.
+Guards the class of breakage that deleting a hook script introduces: a
+registration left behind pointing at a file nobody ships."
+  ;; Arrange / Act / Assert
+  (dolist (pair agent-repl--codex-managed-hooks)
+    (should (file-exists-p
+             (expand-file-name (file-name-nondirectory (cdr pair))
+                               agent-repl-test--codex-repo-hooks-dir)))))
+
 (ert-deftest agent-repl-test-codex-install-hooks-idempotent ()
   "A second install run is a no-op (returns nil, no duplicate entries)."
   (let* ((root (make-temp-file "agent-codex-" t))

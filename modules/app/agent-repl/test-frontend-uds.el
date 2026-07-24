@@ -313,6 +313,73 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
           (should (equal (nth 0 scheduled) 2.0))
           (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))))
 
+;;;; ---- socket liveness probe (adopted-daemon detection) ----------------
+
+(ert-deftest agent-repl-test-uds-socket-live-p-true-when-already-connected ()
+  "A live link is proof enough; no throwaway probe is dialed."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'live-proc)
+    (let ((probes 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'live-proc)))
+                ((symbol-function 'agent-repl--uds-probe)
+                 (lambda (&rest _) (cl-incf probes) t)))
+        ;; Act / Assert
+        (should (agent-repl--uds-socket-live-p))
+        (should (= probes 0))))))
+
+(ert-deftest agent-repl-test-uds-socket-live-p-probes-when-disconnected ()
+  "With no link, a throwaway probe answers the question."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (probed)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl--uds-probe)
+                 (lambda (path) (setq probed path) t)))
+        ;; Act / Assert
+        (should (agent-repl--uds-socket-live-p "/tmp/probe.sock"))
+        (should (equal probed "/tmp/probe.sock"))))))
+
+(ert-deftest agent-repl-test-uds-socket-live-p-defaults-to-configured-path ()
+  "The probe with no PATH targets `agent-repl-uds-socket-path'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl-uds-socket-path "/tmp/configured.sock")
+          probed)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl--uds-probe)
+                 (lambda (path) (setq probed path) t)))
+        ;; Act
+        (agent-repl--uds-socket-live-p)
+        ;; Assert
+        (should (equal probed "/tmp/configured.sock"))))))
+
+(ert-deftest agent-repl-test-uds-socket-live-p-nil-on-refused-dial ()
+  "A refused probe (no listener, or a stale socket file) reads as absent."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl--uds-probe)
+               (lambda (&rest _) (error "connection refused"))))
+      ;; Act / Assert
+      (should-not (agent-repl--uds-socket-live-p "/tmp/gone.sock")))))
+
+(ert-deftest agent-repl-test-uds-socket-live-p-never-adopts-the-probe-process ()
+  "The probe must not become the tracked connection."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl--uds-probe) (lambda (&rest _) t)))
+      ;; Act
+      (agent-repl--uds-socket-live-p "/tmp/probe.sock")
+      ;; Assert
+      (should-not agent-repl--uds-process))))
+
+(ert-deftest agent-repl-test-uds-probe-is-a-registered-external-boundary ()
+  "The throwaway probe opens a real socket, so it MUST carry a test guard."
+  ;; Arrange / Act / Assert
+  (should (memq 'agent-repl--uds-probe agent-repl--external-boundary-functions)))
+
 ;;;; ---- reconnect scheduling --------------------------------------------
 
 (ert-deftest agent-repl-test-uds-schedule-reconnect-uses-timer-seam ()
@@ -444,6 +511,27 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
   "The S7 `daemonView' oneof arm is a recognized frame field (not malformed)."
   ;; Act / Assert
   (should (member "daemonView" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-session-init-is-a-known-frame ()
+  "The S9 `sessionInit' oneof arm is a recognized frame field (not malformed)."
+  ;; Act / Assert
+  (should (member "sessionInit" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-shutdown-is-a-known-command ()
+  "The S9 `shutdown' command arm is an accepted outbound command field."
+  ;; Act / Assert
+  (should (member "shutdown" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-uds-send-command-accepts-shutdown ()
+  "The S9 `shutdown' command field is accepted and shapes an empty object."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command "shutdown" nil nil 'fake-proc)
+        ;; Assert — ShutdownCmd is empty; the arm must serialize as `{}'
+        (should (string-match-p "\"shutdown\":{}" sent))))))
 
 (ert-deftest agent-repl-test-uds-send-command-empty-payload-is-object ()
   "A nil payload serializes as an empty object `{}', never JSON null."
