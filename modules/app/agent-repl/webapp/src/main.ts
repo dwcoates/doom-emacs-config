@@ -664,7 +664,7 @@ async function boot(): Promise<void> {
         // is not a quiet state, and the dot is what the eye lands on.
         spinnerEl.classList.add("alarm");
         remediationEl.textContent = "rebinding session";
-        void rebindSession(httpBase, sessionId, localStorage)
+        void rebindSession(sessionId, localStorage, createSessionViaWs)
           .then((next) => {
             if (next !== null) {
               swapTo(next);
@@ -679,16 +679,17 @@ async function boot(): Promise<void> {
           });
       },
     });
-  // Bootstrap create (replaces POST /sessions): a short-lived connection to the
-  // unscoped /frontend WS — the daemon has no session-scoped socket to offer
-  // before the session exists. It feeds ONLY the dispatcher's correlation
-  // (never the render store), sends CreateSessionCmd once the initial snapshot
-  // lands (so the correlation's known-session set is populated first, and a
-  // pre-existing same-cwd session cannot masquerade as the new one), and
-  // resolves with the new id from the pushed SessionView.
-  // NOTE (coordinator): the webapp-create-over-WS path is unverifiable until
-  // A1's daemon lands the WS FrontendCommand inbound handling.
-  const bootstrapCreateSession = (): Promise<string> =>
+  // Session creation (replaces POST /sessions), used both to open the first
+  // session and to rebind a gone one: a short-lived connection to the unscoped
+  // /frontend WS — the daemon has no session-scoped socket to offer before the
+  // session exists. It feeds ONLY its own dispatcher's correlation (never the
+  // render store), sends CreateSessionCmd once the initial snapshot lands (so
+  // the correlation's known-session set is populated first, and a pre-existing
+  // same-cwd session cannot masquerade as the new one), and resolves with the
+  // new id from the pushed SessionView.
+  const createSessionViaWs = (
+    args: { cwd: string; resumeClaudeSessionId: string } = { cwd: "", resumeClaudeSessionId: "" },
+  ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       let created = false;
       let settled = false;
@@ -709,16 +710,16 @@ async function boot(): Promise<void> {
             clog("warn", `bootstrap frame decode failed: ${String(err)}`);
             return;
           }
-          dispatcher.observe(decoded);
+          bootDispatcher.observe(decoded);
           if (decoded.frame.case === "snapshot" && !created) {
             created = true;
-            void dispatcher
+            void bootDispatcher
               .createSession({
-                cwd: "",
+                cwd: args.cwd,
                 model: "",
                 permissionMode: "",
                 configDir: "",
-                resumeClaudeSessionId: "",
+                resumeClaudeSessionId: args.resumeClaudeSessionId,
                 fake: params.get("fake") === "1",
               })
               .then((id) => finish(() => resolve(id)))
@@ -729,17 +730,23 @@ async function boot(): Promise<void> {
         },
         log: (message) => clog("warn", message),
       });
+      // Its OWN dispatcher, bound to this socket: the live session's
+      // dispatcher must not be re-pointed at a socket that is about to close
+      // (a rebind runs this while the session socket is still the one every
+      // other command rides).
+      const bootDispatcher = new CommandDispatcher({
+        send: (raw) => bootWs.send(raw),
+        log: (level, message) => clog(level, message),
+      });
       const timeout = setTimeout(
-        () => finish(() => reject(new Error("bootstrap create: no daemon snapshot within 15s"))),
+        () => finish(() => reject(new Error("create session: no daemon snapshot within 15s"))),
         15_000,
       );
-      // Point the dispatcher's send at the bootstrap socket for the create.
-      ws = bootWs;
       bootWs.connect();
     });
 
   if (activeSessionId === "") {
-    activeSessionId = await bootstrapCreateSession();
+    activeSessionId = await createSessionViaWs();
     const url = new URL(location.href);
     url.searchParams.set("session", activeSessionId);
     history.replaceState(null, "", url.toString());
