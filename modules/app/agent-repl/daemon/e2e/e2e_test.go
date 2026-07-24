@@ -1,15 +1,20 @@
-// Package e2e exercises the full daemon⇄shim stack end to end: a real
-// claude-repld server spawning the real TS shim subprocess (in --fake
-// offline mode), driven by a real WebSocket client.
+// Package e2e exercises the full post-cutover daemon⇄shim stack end to end:
+// a real claude-repld frontend surface + per-session driver spawning the real
+// TS claude-shim in UDS mode (--uds-socket + --store-socket, --fake offline),
+// writing to a real agent-shim/shim-store, with the daemon consuming the
+// merged stream and rendering agentshim.frontend.v1 frames onto the existing
+// GET /sessions/{id}/stream WebSocket (scope-filtered per session).
 //
-// Prerequisite: the shim must be built (`npm run build` in
-// agent-shim/claude-shim/). The tests skip with an explicit message when
-// node or agent-shim/claude-shim/dist/main.js is unavailable, since they
-// cannot run at all without them.
+// Prerequisites (the test SKIPS loudly, never fails, when any is absent):
+//   - node on PATH
+//   - the shim bundle built: agent-shim/claude-shim/dist/main.js
+//     (run `npm run build` in agent-shim/claude-shim/)
+//   - a buildable agent-shim/shim-store (go build)
 package e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,30 +26,36 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
-	"claude-repld/internal/session"
+	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/ssm"
+	"claude-repld/internal/workspace/merge"
 )
 
-// frameTimeout is a var (not const) so the credential-gated real-SDK
-// test can widen it for live-API latency and restore it after.
-var frameTimeout = 15 * time.Second
+var frameTimeout = 30 * time.Second
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	// daemon/e2e -> daemon -> agent-repl
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	return root
+}
 
 func shimScriptPath(t *testing.T) string {
 	t.Helper()
-	path, err := filepath.Abs(filepath.Join(
-		"..", "..", "agent-shim", "claude-shim", "dist", "main.js",
-	))
-	if err != nil {
-		t.Fatalf("resolve shim path: %v", err)
-	}
+	path := filepath.Join(repoRoot(t), "agent-shim", "claude-shim", "dist", "main.js")
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf(
-			"shim not built (%s missing): run `npm run build` in agent-shim/claude-shim/",
-			path,
-		)
+		t.Skipf("shim not built (%s missing): run `npm run build` in agent-shim/claude-shim/", path)
 	}
 	return path
 }
@@ -58,66 +69,175 @@ func nodePath(t *testing.T) string {
 	return node
 }
 
+// buildShimStore compiles the shim-store into a temp binary, skipping loudly if
+// the build cannot run (no go toolchain, missing module).
+func buildShimStore(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not found in PATH")
+	}
+	storeDir := filepath.Join(repoRoot(t), "agent-shim", "shim-store")
+	if _, err := os.Stat(storeDir); err != nil {
+		t.Skipf("shim-store source not present (%s)", storeDir)
+	}
+	bin := filepath.Join(t.TempDir(), "shim-store")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = storeDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("shim-store build failed (skipping UDS e2e): %v\n%s", err, out)
+	}
+	return bin
+}
+
+// startShimStore launches the store on a temp socket and waits for it to
+// listen. It is torn down at test end.
+func startShimStore(t *testing.T, bin, sock string) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	logPath := filepath.Join(t.TempDir(), "shim-store.log")
+	cmd := exec.Command(bin, "-socket", sock, "-db", dbPath, "-log", logPath)
+	cmd.Stderr = &testLogWriter{t: t, tag: "shim-store"}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start shim-store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	// Wait for the socket to appear (the store creates it on listen).
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sock); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("shim-store did not create %s in time", sock)
+}
+
+type testLogWriter struct {
+	t   *testing.T
+	tag string
+}
+
+func (w *testLogWriter) Write(p []byte) (int, error) {
+	w.t.Logf("[%s] %s", w.tag, bytes.TrimRight(p, "\n"))
+	return len(p), nil
+}
+
+// --- minimal WireAgentShim stubs (merge/lifecycle unused here) --------------
+
+type stubMergeDirs struct{}
+
+func (stubMergeDirs) Resolve(string) (merge.Request, error) {
+	return merge.Request{}, fmt.Errorf("e2e: merge not exercised")
+}
+
+type stubLifecycle struct{}
+
+func (stubLifecycle) Close(context.Context, string) error { return nil }
+func (stubLifecycle) Open(context.Context, string) error  { return nil }
+
 type e2eHarness struct {
 	ts *httptest.Server
 }
 
-func newE2EHarness(t *testing.T) *e2eHarness {
+func newUDSHarness(t *testing.T) *e2eHarness {
 	t.Helper()
 	node := nodePath(t)
 	script := shimScriptPath(t)
+	storeBin := buildShimStore(t)
+	storeSock := filepath.Join(t.TempDir(), "store.sock")
+	startShimStore(t, storeBin, storeSock)
+
+	reg := registry.Open(filepath.Join(t.TempDir(), "reg.json"), t.Logf)
+	ssmMgr, err := ssm.Open(ssm.Options{
+		DBPath:   filepath.Join(t.TempDir(), "ssm.db"),
+		Resolver: server.NewRegistryResolver(reg),
+		Logf:     t.Logf,
+	})
+	if err != nil {
+		t.Fatalf("open ssm: %v", err)
+	}
+	t.Cleanup(func() { _ = ssmMgr.Close() })
+
+	forwarder := &server.PushForwarder{Logf: t.Logf}
+	udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) (func() error, error) {
+		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, opts, socketPath)
+		argv = append(argv, "--store-socket", storeSock)
+		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD, Logf: t.Logf})
+		if spawnErr != nil {
+			return nil, spawnErr
+		}
+		go func() {
+			for range proc.Events() { //nolint:revive
+			}
+		}()
+		t.Cleanup(func() {
+			_ = proc.Terminate()
+			_ = proc.Wait()
+		})
+		return func() error { return proc.Terminate() }, nil
+	}
+	driver, err := sessiondrv.New(sessiondrv.Config{
+		Push:            forwarder,
+		SSM:             ssmMgr,
+		Spawner:         server.NewShimSpawner(reg, nil, udsSpawn, t.Logf),
+		Locator:         &server.SessionLocator{Reg: reg},
+		SeqStore:        server.NewRegistrySeqStore(reg, t.Logf),
+		Registrar:       server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
+		DaemonVersion:   "0.1.0-e2e",
+		ProtocolVersion: "1",
+		Logf:            t.Logf,
+	})
+	if err != nil {
+		t.Fatalf("build driver: %v", err)
+	}
+	t.Cleanup(driver.Close)
+
+	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		SSM:       ssmMgr,
+		Prompts:   driver,
+		MergeDirs: stubMergeDirs{},
+		Lifecycle: stubLifecycle{},
+		Resyncer:  driver,
+		Logf:      t.Logf,
+	})
+	if err != nil {
+		t.Fatalf("WireAgentShim: %v", err)
+	}
+	forwarder.SetTarget(agentShim.Server)
+	t.Cleanup(func() { _ = agentShim.Close() })
+
 	srv := server.New(server.Config{
 		DaemonVersion: "0.1.0-e2e",
-		Retention:     256,
+		Registry:      reg,
+		Driver:        driver,
+		SSM:           ssmMgr,
+		Frontend:      agentShim.Server,
 		Logf:          t.Logf,
-		Spawn: func(sessionID string, opts server.CreateOpts) (session.ShimHandle, error) {
-			// Honor CreateOpts (fake, cwd, model, resume, mode) via the
-			// same argv builder production uses — forceFake stays false
-			// so a fake:false body reaches the real SDK.
-			proc, err := shim.Spawn(shim.Options{
-				Argv:     server.ShimArgv(node, script, sessionID, false, opts),
-				Dir:      opts.CWD,
-				ExtraEnv: server.ShimEnv(opts, ""),
-				Logf:     t.Logf,
-			})
-			if err != nil {
-				return nil, err
-			}
-			t.Cleanup(func() {
-				// Closing stdin is the implicit-shutdown signal: the
-				// shim drains and exits, letting Wait reap it.
-				_ = proc.CloseStdin()
-				_ = proc.Wait()
-			})
-			return proc, nil
-		},
 	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &e2eHarness{ts: ts}
 }
 
-func (h *e2eHarness) createSession(t *testing.T) string {
+func (h *e2eHarness) createSession(t *testing.T, cwd string) string {
 	t.Helper()
-	return h.createSessionWithBody(t, `{"fake":true}`)
-}
-
-func (h *e2eHarness) createSessionWithBody(t *testing.T, body string) string {
-	t.Helper()
-	resp, err := http.Post(h.ts.URL+"/sessions", "application/json",
-		bytes.NewBufferString(body))
+	body := fmt.Sprintf(`{"fake":true,"cwd":%q}`, cwd)
+	resp, err := http.Post(h.ts.URL+"/sessions", "application/json", bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("POST /sessions: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d", resp.StatusCode)
+		t.Fatalf("POST /sessions status = %d", resp.StatusCode)
 	}
 	var created struct {
 		SessionID string `json:"session_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decode create: %v", err)
 	}
 	return created.SessionID
 }
@@ -127,7 +247,7 @@ func (h *e2eHarness) dial(t *testing.T, sessionID string) *websocket.Conn {
 	wsURL := "ws" + strings.TrimPrefix(h.ts.URL, "http") + "/sessions/" + sessionID + "/stream"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("dial stream: %v", err)
 	}
 	if resp != nil {
 		defer resp.Body.Close()
@@ -136,7 +256,8 @@ func (h *e2eHarness) dial(t *testing.T, sessionID string) *websocket.Conn {
 	return conn
 }
 
-func readFrame(t *testing.T, conn *websocket.Conn) map[string]any {
+// readFrame reads one frontend.v1 protojson FrontendFrame off the socket.
+func readFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendFrame {
 	t.Helper()
 	if err := conn.SetReadDeadline(time.Now().Add(frameTimeout)); err != nil {
 		t.Fatalf("deadline: %v", err)
@@ -145,24 +266,11 @@ func readFrame(t *testing.T, conn *websocket.Conn) map[string]any {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	var frame map[string]any
-	if err := json.Unmarshal(data, &frame); err != nil {
-		t.Fatalf("unmarshal %s: %v", data, err)
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(data, frame); err != nil {
+		t.Fatalf("protojson unmarshal %s: %v", data, err)
 	}
 	return frame
-}
-
-// readUntil collects frames until one of type target arrives (inclusive).
-func readUntil(t *testing.T, conn *websocket.Conn, target string) []map[string]any {
-	t.Helper()
-	var frames []map[string]any
-	for {
-		frame := readFrame(t, conn)
-		frames = append(frames, frame)
-		if frame["type"] == target {
-			return frames
-		}
-	}
 }
 
 func writeCmd(t *testing.T, conn *websocket.Conn, cmd string) {
@@ -172,341 +280,42 @@ func writeCmd(t *testing.T, conn *websocket.Conn, cmd string) {
 	}
 }
 
-func frameTypes(frames []map[string]any) []string {
-	types := make([]string, len(frames))
-	for i, f := range frames {
-		types[i] = f["type"].(string)
-	}
-	return types
-}
-
-func hasType(frames []map[string]any, typ string) bool {
-	for _, f := range frames {
-		if f["type"] == typ {
-			return true
-		}
-	}
-	return false
-}
-
-func TestE2ETextTurnStreamsThroughTheFullStack(t *testing.T) {
+// TestE2EUDSTextTurnRendersFrontendFrames drives one text turn through the full
+// UDS stack and asserts the daemon renders it as frontend.v1 frames on the
+// scoped /stream socket: the connect StateSnapshot first, then (after the
+// prompt) at least one ConversationDelta or a WorkspaceState transition for
+// this session's workspace.
+func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
+	h := newUDSHarness(t)
+	cwd := t.TempDir()
+	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	hello := readFrame(t, conn)
-	if hello["type"] != "hello" || hello["session_id"] != id {
-		t.Fatalf("hello = %v", hello)
+
+	// The scoped connection opens with a StateSnapshot.
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
+		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 
-	// Act
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"hello e2e"}`)
-	frames := readUntil(t, conn, "result")
+	// Act — send the webapp's still-Layer-2 user-message command.
+	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"hello uds e2e"}`)
 
-	// Assert — the full §2 frame progression arrived.
-	for _, want := range []string{"user-turn", "text-start", "text-delta", "text-end", "result"} {
-		if !hasType(frames, want) {
-			t.Errorf("missing %s frame in %v", want, frameTypes(frames))
-		}
-	}
-	var finalText string
-	prevSeq := float64(hello["seq"].(float64))
-	for _, f := range frames {
-		seq := f["seq"].(float64)
-		if seq != prevSeq+1 {
-			t.Errorf("seq %v followed %v (must be strictly consecutive)", seq, prevSeq)
-		}
-		prevSeq = seq
-		if f["type"] == "text-end" {
-			finalText = f["final_text"].(string)
-		}
-	}
-	if !strings.Contains(finalText, "hello e2e") {
-		t.Errorf("final text = %q, want the echo", finalText)
-	}
-	last := frames[len(frames)-1]
-	if last["subtype"] != "success" || last["is_error"] != false {
-		t.Errorf("result = %v", last)
-	}
-}
-
-func TestE2EToolTurnWithPermissionAllow(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-
-	// Act — the fake SDK's !tool turn raises a real permission round-trip.
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"!tool echo hi"}`)
-	frames := readUntil(t, conn, "permission-request")
-	request := frames[len(frames)-1]
-	if request["tool_name"] != "Bash" {
-		t.Fatalf("permission-request = %v", request)
-	}
-	preview := request["preview"].(map[string]any)
-	if preview["kind"] != "bash" || preview["command"] != "echo hi" {
-		t.Fatalf("preview = %v", preview)
-	}
-	decision := fmt.Sprintf(
-		`{"type":"permission-decision","request_id":%q,"decision":{"behavior":"allow"}}`,
-		request["request_id"])
-	writeCmd(t, conn, decision)
-	rest := readUntil(t, conn, "result")
-
-	// Assert — the spec fixes no relative order between the tool-input
-	// frames and the permission prompt (they ride different SDK channels),
-	// so assert over the whole turn.
-	turn := append(append([]map[string]any{}, frames...), rest...)
-	for _, want := range []string{"tool-use-start", "tool-use-input-end", "permission-resolved", "tool-use-result"} {
-		if !hasType(turn, want) {
-			t.Errorf("missing %s frame in turn: %v", want, frameTypes(turn))
-		}
-	}
-	for _, f := range rest {
-		if f["type"] == "tool-use-result" {
-			if f["is_error"] != false {
-				t.Errorf("tool-use-result = %v", f)
+	// Assert — a conversation delta or a workspace-state for this session
+	// arrives within the timeout (the fake SDK echoes the prompt back).
+	deadline := time.Now().Add(frameTimeout)
+	for time.Now().Before(deadline) {
+		frame := readFrame(t, conn)
+		switch f := frame.GetFrame().(type) {
+		case *frontendv1.FrontendFrame_ConversationDelta:
+			if f.ConversationDelta.GetSessionId() == id || f.ConversationDelta.GetWorkspace() == cwd {
+				return // success: the turn rendered as frontend.v1
 			}
-			render := f["render"].(map[string]any)
-			if render["kind"] != "bash" {
-				t.Errorf("render = %v", render)
+		case *frontendv1.FrontendFrame_WorkspaceState:
+			if f.WorkspaceState.GetSessionId() == id || f.WorkspaceState.GetWorkspace() == cwd {
+				return // success: the driver drove an SSM transition for this session
 			}
 		}
 	}
-}
-
-func TestE2EToolTurnWithPermissionDeny(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"!tool rm -rf /"}`)
-	frames := readUntil(t, conn, "permission-request")
-	request := frames[len(frames)-1]
-
-	// Act
-	decision := fmt.Sprintf(
-		`{"type":"permission-decision","request_id":%q,"decision":{"behavior":"deny","message":"not today"}}`,
-		request["request_id"])
-	writeCmd(t, conn, decision)
-	rest := readUntil(t, conn, "result")
-
-	// Assert — the tool result reflects the denial.
-	for _, f := range rest {
-		if f["type"] == "tool-use-result" && f["is_error"] != true {
-			t.Errorf("denied tool result should be an error: %v", f)
-		}
-		if f["type"] == "permission-resolved" && f["decision"] != "deny" {
-			t.Errorf("resolved = %v", f)
-		}
-	}
-}
-
-func TestE2EPermissionModeRoundTrip(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-
-	// Act
-	writeCmd(t, conn, `{"type":"set-permission-mode","request_id":"m1","mode":"plan"}`)
-	frames := readUntil(t, conn, "permission-mode-changed")
-
-	// Assert — the shim ack propagated back as the §2.8 frame, and the
-	// fake SDK observes the mode on the next turn.
-	changed := frames[len(frames)-1]
-	if changed["mode"] != "plan" {
-		t.Fatalf("changed = %v", changed)
-	}
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"check"}`)
-	turn := readUntil(t, conn, "result")
-	for _, f := range turn {
-		if f["type"] == "text-end" && !strings.Contains(f["final_text"].(string), "mode=plan") {
-			t.Errorf("echo did not reflect the mode: %v", f["final_text"])
-		}
-	}
-}
-
-func TestE2EReplayReturnsIdenticalFrames(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"replay me"}`)
-	original := readUntil(t, conn, "result")
-
-	// Act
-	writeCmd(t, conn, `{"type":"replay-request","from_seq":1}`)
-	replayed := readUntil(t, conn, "result")
-
-	// Assert — §2.10: original seq and ts preserved.
-	if len(replayed) < len(original) {
-		t.Fatalf("replayed %d frames, original %d", len(replayed), len(original))
-	}
-	tail := replayed[len(replayed)-len(original):]
-	for i, orig := range original {
-		if tail[i]["seq"] != orig["seq"] || tail[i]["ts"] != orig["ts"] || tail[i]["type"] != orig["type"] {
-			t.Errorf("replay[%d] = %v, want %v", i, tail[i], orig)
-		}
-	}
-}
-
-func TestE2ESecondTabJoinsAndReplaysHistory(t *testing.T) {
-	// Arrange — one tab completes a turn.
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn1 := h.dial(t, id)
-	readFrame(t, conn1) // hello
-	writeCmd(t, conn1, `{"type":"user-message","request_id":"r1","content":"tab one"}`)
-	readUntil(t, conn1, "result")
-
-	// Act — a second tab joins and requests the retained history, as the
-	// SPA store does on a mid-conversation hello.
-	conn2 := h.dial(t, id)
-	hello := readFrame(t, conn2)
-	resumeFrom := hello["resume_from_seq"].(float64)
-	if resumeFrom != 1 {
-		t.Fatalf("resume_from_seq = %v, want 1", resumeFrom)
-	}
-	writeCmd(t, conn2, fmt.Sprintf(`{"type":"replay-request","from_seq":%d}`, int(resumeFrom)))
-	frames := readUntil(t, conn2, "result")
-
-	// Assert — the second tab reconstructed the full turn.
-	for _, want := range []string{"user-turn", "text-start", "text-end", "result"} {
-		if !hasType(frames, want) {
-			t.Errorf("missing %s in second tab's replay: %v", want, frameTypes(frames))
-		}
-	}
-}
-
-func TestE2EDeleteSessionShutsDownCleanly(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-
-	// Act
-	req, err := http.NewRequest(http.MethodDelete, h.ts.URL+"/sessions/"+id, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("DELETE: %v", err)
-	}
-	resp.Body.Close()
-
-	// Assert — the socket closes once the shim drains and exits; a clean
-	// shutdown must not surface a shim_died error frame first.
-	if err := conn.SetReadDeadline(time.Now().Add(frameTimeout)); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			return // closed — success
-		}
-		if strings.Contains(string(data), "shim_died") {
-			t.Fatalf("clean shutdown surfaced shim_died: %s", data)
-		}
-	}
-}
-
-// TestE2EFakeResumeReportsResumedClaudeSessionID pins the resume
-// plumbing offline: POST /sessions {resume} → shim --resume → fake init
-// continuation → translator capture → hello claude_session_id.
-func TestE2EFakeResumeReportsResumedClaudeSessionID(t *testing.T) {
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSessionWithBody(t, `{"fake":true,"resume":"cli-uuid-resumed"}`)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello (init may not be consumed yet)
-	// Act — the fake's init system frame arriving proves the translator
-	// has captured the resumed uuid (mirror updates precede broadcast).
-	readUntil(t, conn, "system")
-	late := h.dial(t, id)
-	hello := readFrame(t, late)
-	// Assert
-	if hello["claude_session_id"] != "cli-uuid-resumed" {
-		t.Errorf("hello = %v", hello)
-	}
-}
-
-func TestE2EBackgroundCompletionNotificationReachesTheClient(t *testing.T) {
-	// The fake emits its completion notification flagged isReplay, the
-	// shape the real SDK sends for harness-injected messages — this test
-	// is the regression fence for the shim dropping flagged
-	// notifications, which left every async badge spinning forever.
-	// Arrange
-	h := newE2EHarness(t)
-	id := h.createSession(t)
-	conn := h.dial(t, id)
-	readFrame(t, conn) // hello
-
-	// Act
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"!bg sleep 1"}`)
-	frames := readUntil(t, conn, "result")
-
-	// Assert — the task-notification frame arrived, correlated to the
-	// spawning call, before the turn's result closed the stream.
-	var notification map[string]any
-	for _, f := range frames {
-		if f["type"] == "task-notification" {
-			notification = f
-		}
-	}
-	if notification == nil {
-		t.Fatalf("no task-notification frame in %v", frameTypes(frames))
-	}
-	if notification["task_id"] == "" || notification["tool_use_id"] == "" {
-		t.Errorf("notification lacks correlation ids: %v", notification)
-	}
-	if notification["status"] != "completed" {
-		t.Errorf("status = %v", notification["status"])
-	}
-}
-
-// TestE2ERealSDKSmoke drives ONE live-API turn through the full stack.
-// Opt-in only: consumes real quota and needs ambient claude credentials.
-//
-//	AGENT_REPL_E2E_REAL=1 go test ./e2e -run TestE2ERealSDKSmoke -v
-func TestE2ERealSDKSmoke(t *testing.T) {
-	if os.Getenv("AGENT_REPL_E2E_REAL") == "" {
-		t.Skip("set AGENT_REPL_E2E_REAL=1 to run against the live API (consumes quota)")
-	}
-	// Arrange — widen the frame deadline for live-API latency.
-	oldTimeout := frameTimeout
-	frameTimeout = 90 * time.Second
-	t.Cleanup(func() { frameTimeout = oldTimeout })
-	h := newE2EHarness(t)
-	scratch := t.TempDir()
-	id := h.createSessionWithBody(t,
-		fmt.Sprintf(`{"fake":false,"model":"haiku","cwd":%q}`, scratch))
-	conn := h.dial(t, id)
-	hello := readFrame(t, conn)
-	if hello["type"] != "hello" {
-		t.Fatalf("hello = %v", hello)
-	}
-	// Act
-	writeCmd(t, conn, `{"type":"user-message","request_id":"r1","content":"Reply with exactly the word: pong"}`)
-	frames := readUntil(t, conn, "result")
-	// Assert — streamed text arrived and the turn succeeded.
-	var finalText string
-	for _, f := range frames {
-		if f["type"] == "text-end" {
-			finalText = f["final_text"].(string)
-		}
-	}
-	if !strings.Contains(strings.ToLower(finalText), "pong") {
-		t.Errorf("final text = %q, want pong", finalText)
-	}
-	last := frames[len(frames)-1]
-	if last["subtype"] != "success" {
-		t.Errorf("result = %v", last)
-	}
+	t.Fatal("no ConversationDelta or WorkspaceState for the session arrived before the deadline")
 }

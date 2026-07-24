@@ -12,6 +12,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -68,19 +69,24 @@ type ReattachProbe func(ctx context.Context, socketPath string) (bool, error)
 // ShimSpawnFunc execs a fresh UDS-mode shim for sessionID, told to listen on
 // socketPath and to write its events to the shim-store. The exec itself stays
 // in main (which owns node/shim paths and the store socket); ShimSpawner only
-// decides WHEN to call it. It returns once the shim has been launched (the
-// shimclient then dials socketPath and drives the handshake).
-type ShimSpawnFunc func(sessionID string, opts CreateOpts, socketPath string) error
+// decides WHEN to call it. It returns a stop func that terminates the launched
+// shim cleanly (SIGTERM) — the daemon uses it to hibernate the child — or nil
+// when there is nothing to stop (a reattached, daemon-external shim).
+type ShimSpawnFunc func(sessionID string, opts CreateOpts, socketPath string) (stop func() error, err error)
 
 // ShimSpawner makes a session's UDS shim reachable at its socket: it reattaches
 // to a live shim (the shim outlives a dead daemon, §4.4) or spawns a fresh one,
 // resolving the spawn's CreateOpts from the session's registry record. It
-// implements sessiondrv.Spawner.
+// tracks the stop func of every shim IT spawned so StopShim can SIGTERM it on
+// hibernation. It implements sessiondrv.Spawner.
 type ShimSpawner struct {
 	reg   *registry.Registry
 	probe ReattachProbe
 	spawn ShimSpawnFunc
 	logf  func(string, ...any)
+
+	mu    sync.Mutex
+	stops map[string]func() error // session id -> stop the shim WE spawned
 }
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil probe
@@ -92,7 +98,7 @@ func NewShimSpawner(reg *registry.Registry, probe ReattachProbe, spawn ShimSpawn
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &ShimSpawner{reg: reg, probe: probe, spawn: spawn, logf: logf}
+	return &ShimSpawner{reg: reg, probe: probe, spawn: spawn, logf: logf, stops: map[string]func() error{}}
 }
 
 // EnsureShim reattaches to a live shim at socketPath or spawns a fresh one.
@@ -128,7 +134,61 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID, socketPath stri
 		Resume:         rec.ClaudeSessionID,
 	}
 	s.logf("server: session %s: no live shim at %s — spawning fresh UDS shim (resume=%q)", sessionID, socketPath, rec.ClaudeSessionID)
-	return s.spawn(sessionID, opts, socketPath)
+	stop, err := s.spawn(sessionID, opts, socketPath)
+	if err != nil {
+		return err
+	}
+	if stop != nil {
+		s.mu.Lock()
+		s.stops[sessionID] = stop
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+// StopShim SIGTERMs the shim this spawner launched for sessionID (hibernation's
+// clean stop). A session whose shim the daemon did not spawn — a reattached one
+// that outlived a prior daemon — is a no-op: there is no child to signal.
+func (s *ShimSpawner) StopShim(sessionID string) error {
+	s.mu.Lock()
+	stop, ok := s.stops[sessionID]
+	if ok {
+		delete(s.stops, sessionID)
+	}
+	s.mu.Unlock()
+	if !ok {
+		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim; reattached or already stopped)", sessionID)
+		return nil
+	}
+	s.logf("server: session %s: stopping shim (SIGTERM)", sessionID)
+	return stop()
+}
+
+// RegistryRegistrar binds the driver's claude_session_id write-through
+// (sessiondrv.SessionRegistrar) to the persistent registry: when a session's
+// SessionStarted reports its CLI session uuid, it lands on the durable record
+// so --resume and rehydration survive a daemon restart. It replaces the old
+// L2 session hub's registrar, which the deleted stdio Run loop used to drive.
+type RegistryRegistrar struct {
+	Reg  *registry.Registry
+	Logf func(string, ...any)
+}
+
+// ClaudeSessionIDChanged persists claudeSessionID on sessionID's record. A
+// missing record or a write failure is loud-logged, never silently dropped
+// (the session would not survive a restart).
+func (r RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
+	if r.Reg == nil {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) { rec.ClaudeSessionID = claudeSessionID })
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry claude_session_id write FAILED — resume may break after a restart: %v", sessionID, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: claude_session_id write found no record (never registered)", sessionID)
+	}
 }
 
 // PushForwarder is the late-bound bridge from the driver's per-session sinks to

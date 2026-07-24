@@ -14,10 +14,10 @@ func TestScopeMatchesSessionOrWorkspace(t *testing.T) {
 		sid, ws string
 		want    bool
 	}{
-		{"s1", "/other", true},   // session match
-		{"other", "/w", true},    // workspace match
-		{"other", "/x", false},   // neither
-		{"", "", false},          // neither
+		{"s1", "/other", true}, // session match
+		{"other", "/w", true},  // workspace match
+		{"other", "/x", false}, // neither
+		{"", "", false},        // neither
 	}
 	for _, c := range cases {
 		if got := sc.matches(c.sid, c.ws); got != c.want {
