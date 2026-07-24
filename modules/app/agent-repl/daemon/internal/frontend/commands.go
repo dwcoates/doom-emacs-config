@@ -39,6 +39,9 @@ type CommandHandler interface {
 	// DeleteSession marks a session terminal and stops its shim (the UDS
 	// replacement for DELETE /sessions/{id}).
 	DeleteSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error
+	// Shutdown begins the daemon's graceful teardown (the UDS replacement for
+	// POST /shutdown), the same path SIGTERM triggers.
+	Shutdown(ctx context.Context, workspace, requestID string, cmd *frontendv1.ShutdownCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -72,6 +75,8 @@ func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCom
 		err = h.CreateSession(ctx, ws, reqID, c.CreateSession)
 	case *frontendv1.FrontendCommand_DeleteSession:
 		err = h.DeleteSession(ctx, ws, reqID, c.DeleteSession)
+	case *frontendv1.FrontendCommand_Shutdown:
+		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
 		return failAck(reqID, fmt.Sprintf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))

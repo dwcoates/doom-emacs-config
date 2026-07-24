@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -102,7 +103,7 @@ func (f *fakeSessionCmds) DeleteSession(id string) error {
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil)
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -198,14 +199,14 @@ func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 
 func TestNewCommandHandlerRejectsNilDeps(t *testing.T) {
 	// Arrange / Act / Assert
-	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil); err == nil {
+	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil); err == nil {
 		t.Fatal("want error for nil PromptRouter")
 	}
 }
 
 func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 	// Arrange / Act / Assert — the session-lifecycle binding is required.
-	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil); err == nil {
+	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil, nil); err == nil {
 		t.Fatal("want error for nil SessionCreateDeleter")
 	}
 }
@@ -213,7 +214,7 @@ func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -246,10 +247,48 @@ func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	}
 }
 
+func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
+	// Arrange — a shutdown func that signals when invoked.
+	fired := make(chan struct{}, 1)
+	newHandlerWithShutdown := func(shutdown func()) *commandHandler {
+		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil)
+		if err != nil {
+			t.Fatalf("newCommandHandler: %v", err)
+		}
+		return h
+	}
+	h := newHandlerWithShutdown(func() { fired <- struct{}{} })
+
+	// Act — the shutdown command routes to the same func POST /shutdown drives.
+	if err := h.Shutdown(context.Background(), "/w", "r1", &frontendv1.ShutdownCmd{}); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// Assert — the graceful teardown was requested (async).
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown command did not invoke the graceful teardown func")
+	}
+}
+
+func TestCommandHandlerShutdownUnconfiguredErrors(t *testing.T) {
+	// Arrange — no shutdown func wired.
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act / Assert — an unconfigured shutdown is a loud error, never a silent no-op.
+	if got := h.Shutdown(context.Background(), "/w", "r1", &frontendv1.ShutdownCmd{}); got == nil {
+		t.Fatal("want a loud error when shutdown is unconfigured")
+	}
+}
+
 func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 	// Arrange — the session core fails.
 	sc := &fakeSessionCmds{err: errors.New("bring up shim failed")}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
