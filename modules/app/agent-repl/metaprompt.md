@@ -134,6 +134,15 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
   - Inline code marks a literal, typeable token, not the idea that token names.
 
+### Fenced code blocks for anything longer than one statement
+
+- Code longer than one statement is NEVER inlined; it is always relayed in a fenced markdown code block.
+  - Fenced means triple backticks WITH a language specification (```protobuf, ```go, ```elisp, ```python, …).
+  - Single-backtick inline code stays reserved for single tokens and single statements per the section above.
+- Inside a TLDR tree, the fenced block is attached beneath its owning bullet.
+  - The block is the one sanctioned multi-line content a bullet may carry.
+  - Never decorate the block's lines with tree connectors (│, ├──) — the block renders clean, as-is.
+
 ### The response IS a single TLDR tree
 
 - The ENTIRE response should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
