@@ -529,20 +529,33 @@ if [ "${INSTALL_SH_LIB:-}" != "1" ]; then
   done
   ACTION="${ACTION:-install}"
 
+  # NOTE: each services step is guarded by a full `if` rather than
+  # `[ "$WITH_SERVICES" -eq 1 ] && step`.  The short-circuit form is the
+  # LAST command in its case arm, so with the flag OFF the false test
+  # became the script's exit status and a fully successful default
+  # install exited 1.
   case "$ACTION" in
     install)
       do_install
-      [ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services
+      if [ "$WITH_SERVICES" -eq 1 ]; then
+        install_agent_shim_services
+      fi
       ;;
     uninstall)
       do_uninstall
-      [ "$WITH_SERVICES" -eq 1 ] && uninstall_agent_shim_services
+      if [ "$WITH_SERVICES" -eq 1 ]; then
+        uninstall_agent_shim_services
+      fi
       ;;
     reinstall)
       do_uninstall
-      [ "$WITH_SERVICES" -eq 1 ] && uninstall_agent_shim_services
+      if [ "$WITH_SERVICES" -eq 1 ]; then
+        uninstall_agent_shim_services
+      fi
       do_install
-      [ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services
+      if [ "$WITH_SERVICES" -eq 1 ]; then
+        install_agent_shim_services
+      fi
       ;;
   esac
 fi
