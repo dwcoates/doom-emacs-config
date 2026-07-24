@@ -517,6 +517,56 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
   ;; Act / Assert
   (should (member "sessionInit" agent-repl--uds-known-frame-fields)))
 
+(ert-deftest agent-repl-test-uds-heartbeat-is-a-known-frame ()
+  "The E4 `heartbeat' oneof arm is a recognized frame field (not malformed)."
+  ;; Act / Assert
+  (should (member "heartbeat" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-heartbeat-is-a-deliberately-ignored-frame ()
+  "`heartbeat' is declared ignored, so its silence reads as design not a gap."
+  ;; Act / Assert
+  (should (member "heartbeat" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-ignored-frames-are-all-known-frames ()
+  "Every deliberately-ignored arm must also be a known arm, or dispatch signals."
+  ;; Act / Assert
+  (dolist (field agent-repl--uds-ignored-frame-fields)
+    (should (member field agent-repl--uds-known-frame-fields))))
+
+(ert-deftest agent-repl-test-uds-dispatch-ignored-field-returns-nil ()
+  "Dispatching a deliberately-ignored arm is a no-op, not a signal."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:heartbeat (:workspace "ws1" :progress (:toolUseId "tu1")))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-ignored-field-skips-unwired-warning ()
+  "An ignored arm must NOT log the unfinished-wiring message a real gap logs."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame '(:heartbeat (:workspace "ws1")))
+        ;; Assert
+        (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
+                              logged))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-unignored-gap-still-warns ()
+  "A known arm that is NOT declared ignored still logs the wiring gap loudly."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame '(:conversationDelta (:x 1)))
+        ;; Assert
+        (should (seq-find (lambda (m) (string-match-p "no handler registered" m))
+                          logged))))))
+
 (ert-deftest agent-repl-test-uds-shutdown-is-a-known-command ()
   "The S9 `shutdown' command arm is an accepted outbound command field."
   ;; Act / Assert

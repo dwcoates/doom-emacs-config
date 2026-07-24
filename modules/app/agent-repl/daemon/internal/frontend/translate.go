@@ -109,6 +109,12 @@ func SessionInitViewFrame(v *frontendv1.SessionInitView) *frontendv1.FrontendFra
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_SessionInit{SessionInit: v}}
 }
 
+// HeartbeatViewFrame wraps a HeartbeatView (E4): the ephemeral long-tool
+// liveness relay.
+func HeartbeatViewFrame(h *frontendv1.HeartbeatView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Heartbeat{Heartbeat: h}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------
@@ -127,6 +133,29 @@ func TypingDeltaFromContentDelta(workspace, sessionID string, cd *corev1.Content
 		Workspace: workspace,
 		SessionId: sessionID,
 		Delta:     cd,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HeartbeatProgress -> HeartbeatView (ephemeral long-tool liveness)
+// ---------------------------------------------------------------------------
+
+// HeartbeatViewFromProgress relays a core.HeartbeatProgress as the ephemeral
+// HeartbeatView (E4), embedding the progress UNCHANGED for the same reason
+// TypingDeltaFromContentDelta embeds its delta unchanged: this layer relays,
+// it never re-types. The frontend keys on progress.tool_use_id to find the
+// running tool and ticks its elapsed display from progress.elapsed_seconds.
+//
+// Returns nil for a nil progress so the caller pushes nothing rather than an
+// empty frame.
+func HeartbeatViewFromProgress(workspace, sessionID string, hp *corev1.HeartbeatProgress) *frontendv1.HeartbeatView {
+	if hp == nil {
+		return nil
+	}
+	return &frontendv1.HeartbeatView{
+		Workspace: workspace,
+		SessionId: sessionID,
+		Progress:  hp,
 	}
 }
 

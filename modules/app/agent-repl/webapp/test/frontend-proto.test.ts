@@ -46,6 +46,11 @@ const DAEMON_VIEW = {
   daemonBinaryMtimeMs: "1700000000000",
   daemonVersion: "v9",
 };
+const HEARTBEAT = {
+  workspace: "ws",
+  sessionId: "s1",
+  progress: { toolUseId: "tu1", toolName: "Bash", elapsedSeconds: 12.5 },
+};
 const SNAPSHOT = { workspaces: [WS_STATE], sessions: [SESSION_VIEW], catalogs: [TASK_CATALOG] };
 
 describe("decodeFrontendFrame — every frame variant decodes", () => {
@@ -60,6 +65,7 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
     ["degradedNotice", { degradedNotice: DEGRADED }],
     ["daemonView", { daemonView: DAEMON_VIEW }],
     ["sessionInit", { sessionInit: SESSION_INIT }],
+    ["heartbeat", { heartbeat: HEARTBEAT }],
   ];
   for (const [name, obj] of cases) {
     it(`decodes ${name}`, () => {
@@ -348,6 +354,59 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     expect(() =>
       decode({ snapshot: { workspaces: [{ sessionId: "s1", state: "RENDER_STATE_IDLE" }] } }),
     ).toThrow(/missing required `workspace`/);
+  });
+});
+
+describe("decodeFrontendFrame — HeartbeatView (E4)", () => {
+  it("flattens the embedded progress onto the view", () => {
+    // Arrange / Act
+    const frame = decode({ heartbeat: HEARTBEAT });
+    // Assert
+    if (frame.frame.case !== "heartbeat") throw new Error("wrong variant");
+    expect(frame.frame.value).toEqual({
+      workspace: "ws",
+      sessionId: "s1",
+      toolUseId: "tu1",
+      toolName: "Bash",
+      parentToolUseId: "",
+      elapsedSeconds: 12.5,
+    });
+  });
+
+  it("carries the subagent attribution when present", () => {
+    // Arrange / Act
+    const frame = decode({
+      heartbeat: { ...HEARTBEAT, progress: { ...HEARTBEAT.progress, parentToolUseId: "tu0" } },
+    });
+    // Assert
+    if (frame.frame.case !== "heartbeat") throw new Error("wrong variant");
+    expect(frame.frame.value.parentToolUseId).toBe("tu0");
+  });
+
+  it("rejects a heartbeat with no progress", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ heartbeat: { workspace: "ws", sessionId: "s1" } })).toThrow(
+      /missing required `progress`/,
+    );
+  });
+
+  it("rejects a progress with no toolUseId, which nothing could attribute", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ heartbeat: { ...HEARTBEAT, progress: { elapsedSeconds: 1 } } })).toThrow(
+      /missing required `toolUseId`/,
+    );
+  });
+
+  it("rejects an unrecognized field inside progress", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({ heartbeat: { ...HEARTBEAT, progress: { toolUseId: "tu1", bogus: 1 } } }),
+    ).toThrow(/HeartbeatView.progress has unrecognized field\(s\): bogus/);
+  });
+
+  it("reports heartbeat as visually supported (it feeds the running tool chip)", () => {
+    // Arrange / Act / Assert
+    expect(isVisuallySupportedFrame("heartbeat")).toBe(true);
   });
 });
 

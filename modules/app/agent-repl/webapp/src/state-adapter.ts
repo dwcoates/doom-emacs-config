@@ -58,6 +58,7 @@ import {
   type ConversationItemFrame,
   type DegradedNotice,
   type FrontendFrame,
+  type HeartbeatView,
   type SessionInitView,
   type SessionView,
   type TaskCatalog,
@@ -133,6 +134,20 @@ export interface TypingReveal {
   blockId: string;
 }
 
+/**
+ * One long-running tool's liveness tick (E4), flattened from a `HeartbeatView`.
+ * The store attributes it to the open `ToolItem` bearing `toolUseId`.
+ */
+export interface ToolProgressInput {
+  workspace: string;
+  sessionId: string;
+  toolUseId: string;
+  toolName: string;
+  parentToolUseId: string;
+  /** The SDK's raw elapsed clock for the running tool, in seconds. */
+  elapsedSeconds: number;
+}
+
 /** TaskCatalog → the async/task roster input (topbar counter vocabulary). */
 export interface TaskCatalogInput {
   workspace: string;
@@ -168,6 +183,7 @@ export type AdapterEffect =
       items: ConversationItem[];
     }
   | { kind: "typing"; value: TypingReveal }
+  | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
   | { kind: "session-init"; value: SessionInitInput }
   | { kind: "degraded"; value: DegradedBanner }
@@ -213,6 +229,8 @@ export class StateAdapter {
         return this.conversationEffects(frame.frame.value);
       case "typingDelta":
         return this.typingEffects(frame.frame.value);
+      case "heartbeat":
+        return [this.heartbeatEffect(frame.frame.value)];
       case "taskCatalog":
         return [this.catalogEffect(frame.frame.value)];
       case "sessionInit":
@@ -312,6 +330,27 @@ export class StateAdapter {
    * `signature` delta streams the thinking block's signature, which the webapp
    * renders no live preview for — so it is ignored (counted, logged once).
    */
+  /**
+   * A long-tool liveness heartbeat (E4). Purely additive to an EXISTING visual:
+   * the running tool chip already renders an elapsed clock off
+   * `ToolItem.progressElapsedS` (stream-member.ts), it just had nothing feeding
+   * it while HeartbeatProgress was being dropped daemon-side. So this is not a
+   * new visual and stays inside the §11 scope rule.
+   */
+  private heartbeatEffect(hv: HeartbeatView): AdapterEffect {
+    return {
+      kind: "tool-progress",
+      value: {
+        workspace: hv.workspace,
+        sessionId: hv.sessionId,
+        toolUseId: hv.toolUseId,
+        toolName: hv.toolName,
+        parentToolUseId: hv.parentToolUseId,
+        elapsedSeconds: hv.elapsedSeconds,
+      },
+    };
+  }
+
   private typingEffects(td: TypingDelta): AdapterEffect[] {
     if (td.kind === "signature") return [this.ignore("content-delta:signature")];
     return [

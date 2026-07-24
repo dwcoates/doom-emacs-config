@@ -294,6 +294,9 @@ func (s *Server) PushDegradedNotice(n *frontendv1.DegradedNotice) {
 func (s *Server) PushSessionInitView(v *frontendv1.SessionInitView) {
 	s.Broadcast(SessionInitViewFrame(v))
 }
+func (s *Server) PushHeartbeatView(h *frontendv1.HeartbeatView) {
+	s.Broadcast(HeartbeatViewFrame(h))
+}
 
 // ---------------------------------------------------------------------------
 // Per-connection lifecycle
