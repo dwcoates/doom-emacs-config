@@ -37,8 +37,7 @@ mkfake_repo() {
   mkdir -p "$root/.claude" \
            "$root/.githooks" \
            "$root/modules/app/agent-repl/skills-cache" \
-           "$root/modules/app/agent-repl/skills" \
-           "$root/modules/app/agent-repl/hooks"
+           "$root/modules/app/agent-repl/skills"
   cp "$REPO_ROOT/.claude/install.sh" "$root/.claude/install.sh"
   cp "$REPO_ROOT/.githooks/pre-commit" "$root/.githooks/pre-commit"
   chmod +x "$root/.claude/install.sh" "$root/.githooks/pre-commit"
@@ -55,9 +54,6 @@ EOF
     mkdir -p "$root/modules/app/agent-repl/skills/$s"
     printf 'name: %s\n' "$s" > "$root/modules/app/agent-repl/skills/$s/SKILL.md"
   done
-  # Dummy hook script so install.sh's hook-copy loop has something to do.
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$root/modules/app/agent-repl/hooks/dummy.sh"
-  chmod +x "$root/modules/app/agent-repl/hooks/dummy.sh"
   # Init git so install.sh can resolve --show-toplevel + --git-path.
   (cd "$root" && git init -q && git config user.email t@t && git config user.name t)
   echo "$root"

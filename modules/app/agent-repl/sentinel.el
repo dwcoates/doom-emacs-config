@@ -150,139 +150,6 @@ Falls back to container-path matching for Docker sandbox workspaces."
                       dir ws (cond (fast "fast-path") (container "container-path") (t "NONE")))
     ws))
 
-;;; Sentinel file reading
-
-(defconst agent-repl--sentinel-owned-marker "owned"
-  "Line-3 value marking a sentinel as written by a MODULE-LAUNCHED CLI.
-The hook scripts emit it when `AGENT_REPL_OWNED' (exported by the
-interactive start command — see `agent-repl--assemble-cmd' — and the
-daemon's shim spawn) or `DOOM_SANDBOX' is set; the daemon's own
-sentinel writer emits it unconditionally.  Its absence means a FOREIGN
-claude — e.g. a terminal session run by hand in a workspace's
-directory — whose session id must never be adopted onto the workspace
-\(see `agent-repl--update-session-id-from-sentinel').")
-
-(defun agent-repl--read-sentinel-file (file)
-  "Read sentinel FILE and return a plist, or nil.
-The plist shape is (:dir DIR :session-id SID :owned BOOL :source SRC).
-The file format is three lines: CWD, session_id, then the ownership
-marker (`agent-repl--sentinel-owned-marker' or empty).  Older
-two-line files (and single-line CWD-only files) parse as unowned with a
-nil session-id respectively — the conservative reading, since an
-unmarked writer cannot be proven to be ours.
-
-Line 4, written only by the session-start hook, is the SessionStart
-`source' field (\"startup\" / \"resume\" / \"clear\" / \"compact\") —
-the origin of the new session id.  Absent or empty parses as a nil
-`:source' (every non-session-start sentinel, plus files from older
-hook scripts)."
-  (let ((fname (file-name-nondirectory file)))
-    (agent-repl--log-verbose nil "read-sentinel-file: ENTER file=%s exists=%s readable=%s"
-                      fname (file-exists-p file) (file-readable-p file))
-    (condition-case err
-        (let* ((raw (with-temp-buffer
-                      (insert-file-contents file)
-                      (buffer-string)))
-               ;; NOT omit-nulls: an unowned sentinel's line 3 is EMPTY,
-               ;; and dropping it would shift nothing here but would make
-               ;; the marker's absence indistinguishable from a truncated
-               ;; file.  Trailing blank lines are trimmed off `raw' first.
-               (lines (split-string (string-trim raw) "\n"))
-               (dir (string-trim (or (nth 0 lines) "")))
-               (session-id (when (nth 1 lines)
-                             (let ((s (string-trim (nth 1 lines))))
-                               (unless (string-empty-p s) s))))
-               (owned (equal (string-trim (or (nth 2 lines) ""))
-                             agent-repl--sentinel-owned-marker))
-               (source (when (nth 3 lines)
-                         (let ((s (string-trim (nth 3 lines))))
-                           (unless (string-empty-p s) s)))))
-          (agent-repl--log-verbose nil "read-sentinel-file: file=%s dir=%S session-id=%S owned=%s source=%S"
-                            fname dir session-id owned source)
-          (if (or (string= dir "null") (string= dir ""))
-              (progn
-                (agent-repl--log nil "read-sentinel-file: REJECTING file=%s with bogus dir=%S (hook may not have received cwd)"
-                                  fname dir)
-                nil)
-            (list :dir dir :session-id session-id :owned owned :source source)))
-      (file-missing
-       (agent-repl--log nil "read-sentinel-file: RACE file=%s gone between exists-p and read" fname)
-       nil)
-      (error
-       (agent-repl--warn nil "sentinel file read error for %s: %S" fname err)
-       (agent-repl--log nil "read-sentinel-file: ERROR file=%s err=%S" fname err)
-       nil))))
-
-;;; Event handlers
-
-(defun agent-repl--update-session-id-from-sentinel (ws session-id &optional owned event source)
-  "Update the session ID for workspace WS from sentinel data if non-nil.
-Only updates when WS is already registered in `agent-repl--workspaces',
-SESSION-ID is a non-empty string that differs from the stored value, and
-OWNED is non-nil.
-Skipping unregistered workspaces is load-bearing: `agent-repl--active-inst'
-auto-creates an instantiation in the hash, which would otherwise cause
-sentinel fires for workspaces this module doesn't manage (e.g. the
-default persp matched via `workspace-for-buffer') to leak entries into
-`agent-repl--workspaces'.
-
-OWNED is the sentinel's ownership marker (see
-`agent-repl--sentinel-owned-marker').  The hooks are keyed on CWD, so a
-FOREIGN claude — a terminal session the user runs by hand inside a
-workspace's directory — fires the same hooks and, before this gate,
-stamped ITS session id onto the workspace.  The workspace's durable id
-is the resume target for both frontends, so the hijack silently made
-`SPC o c' (and every daemon-bounce reattach) resume the wrong
-conversation.  An unowned sentinel still drives STATE transitions
-\(thinking/done/permission — the user does want to see that an agent is
-running in that directory); only the identity write is refused.
-
-EVENT is the dispatching handler's `:name' (e.g. \"handle-stop\") and
-SOURCE is the SessionStart hook's `source' field (\"startup\" /
-\"resume\" / \"clear\" / \"compact\", session-start sentinels only).
-Together they gate WHEN an owned id becomes the durable resume target:
-
-  * A `handle-session-start' sentinel only STAGES the id under
-    `:incoming-session-id'.  A freshly started (or /clear-rotated, or
-    resume-forked) session has NO transcript until its first user
-    message, so adopting it immediately would clobber the last
-    resumable id with one that resolves to nothing if the session is
-    killed before a message is sent — the exact loss behind the
-    \"resume target has no transcript\" hard-fail.
-
-  * Every other owned event (prompt-submit, stop, permission,
-    subagent traffic) is evidence that a user message reached the
-    session — its transcript exists — so the id is promoted to the
-    durable stash via `agent-repl--set-session-id' and any staged
-    `:incoming-session-id' is cleared."
-  (when (and session-id
-             (not (string-empty-p session-id))
-             (gethash ws agent-repl--workspaces))
-    (let* ((inst (agent-repl--active-inst ws))
-           (current (agent-repl-instantiation-session-id inst))
-           (staged (agent-repl--ws-get ws :incoming-session-id)))
-      (cond
-       ((equal current session-id)
-        ;; Already durable; a staged id (from a rotation that never got
-        ;; a message before something re-adopted CURRENT) is stale.
-        (when staged
-          (agent-repl--log ws "update-session-id-from-sentinel: ws=%s clearing stale staged id %s (durable already %s)"
-                            ws staged current)
-          (agent-repl--ws-put ws :incoming-session-id nil)))
-       ((not owned)
-        (agent-repl--log ws "update-session-id-from-sentinel: REFUSING unowned session %s for ws=%s (foreign CLI in this cwd; keeping %s) event=%s source=%s"
-                          session-id ws current (or event "?") (or source "-")))
-       ((equal event "handle-session-start")
-        (agent-repl--log ws "update-session-id-from-sentinel: ws=%s STAGING incoming session %s (origin=%s; durable stays %s until a user message is seen in the new session)"
-                          ws session-id (or source "unknown-origin") current)
-        (agent-repl--ws-put ws :incoming-session-id session-id))
-       (t
-        (agent-repl--log ws "update-session-id-from-sentinel: ws=%s PROMOTING %s -> %s (event=%s is message/turn evidence%s)"
-                          ws current session-id (or event "?")
-                          (if (equal staged session-id) "; was staged" ""))
-        (agent-repl--ws-put ws :incoming-session-id nil)
-        (agent-repl--set-session-id ws session-id))))))
-
 (defun agent-repl--delete-sentinel-file (file ws)
   "Delete sentinel FILE, surfacing any failure loudly for workspace WS.
 Both the normal dispatch path and the deprecated-prefix drain must remove a
@@ -295,112 +162,6 @@ via `agent-repl--warn' rather than rethrown."
     (error
      (agent-repl--warn ws "could not delete sentinel file %s: %S"
                        (file-name-nondirectory file) err))))
-
-(defun agent-repl--process-sentinel-file (file handler)
-  "Read sentinel FILE, delete it, then dispatch it to HANDLER.
-Resolves the file's workspace, then invokes HANDLER's callback.
-HANDLER is an entry from `agent-repl--sentinel-dispatch-alist' with keys
-:warning, :callback, and :name.
-
-Reads the directory and session-id from FILE via
-`agent-repl--read-sentinel-file', then deletes FILE immediately so the
-poll fallback cannot race a slow handler and re-dispatch the same file.
-Resolves the workspace via `agent-repl--ws-for-dir'.  If the read
-failed \(nil return), does nothing further.  If the workspace is
-nil, logs the :warning message with the directory interpolated via %s.
-Otherwise updates the workspace's session ID (if provided), logs a standard
-entry using :name, then calls :callback with the workspace name and the
-directory.  Every handler uses the two-argument (ws dir) contract; the
-SessionStart `:source' is consumed only by
-`agent-repl--update-session-id-from-sentinel' (the three-argument
-session-start callback was deleted in the agent-shim cutover, design §10)."
-  (let* ((sentinel-data (agent-repl--read-sentinel-file file))
-         (dir (plist-get sentinel-data :dir))
-         (session-id (plist-get sentinel-data :session-id))
-         (owned (plist-get sentinel-data :owned))
-         (source (plist-get sentinel-data :source))
-         (ws  (when dir (agent-repl--ws-for-dir dir))))
-    ;; Delete the file immediately after reading so the poll fallback can't
-    ;; re-dispatch it while a slow handler (e.g. panel setup) is still running.
-    (agent-repl--delete-sentinel-file file ws)
-    (agent-repl--log ws "process-sentinel-file: handler=%s file=%s dir=%S session-id=%S owned=%s source=%S ws=%s"
-                      (plist-get handler :name) (file-name-nondirectory file) dir session-id owned source ws)
-    (cond
-     ((null dir)
-      (agent-repl--log nil "process-sentinel-file: dir is nil (read failed) for %s"
-                        (file-name-nondirectory file)))
-     ((null ws)
-      ;; A null ws on a sentinel from a non-git cwd is expected — the headless
-      ;; `claude -p' calls in `prompt-summary.el' / `worktree.el' deliberately
-      ;; spawn from `temporary-file-directory' so their hooks don't get
-      ;; attributed to the calling workspace.  Demote those to a verbose log;
-      ;; reserve the user-visible warning for genuine misattribution (cwd is
-      ;; inside a git repo, but the watcher couldn't match it).
-      (if (agent-repl--git-root dir)
-          ;; A sentinel from a real git repo that matched no workspace is a
-          ;; genuine misattribution — surface it on the log channel via
-          ;; `--do-log' (file + message), not `message' alone where it is
-          ;; lost to *Messages*.
-          (agent-repl--do-log nil (plist-get handler :warning) (list dir))
-        (agent-repl--log-verbose nil
-                                  "process-sentinel-file: skipping non-git cwd dir=%s file=%s"
-                                  dir (file-name-nondirectory file))))
-     (t
-      ;; Run the handler under `condition-case' so a thrown error surfaces on
-      ;; the agent-repl log (via `--do-log') instead of being swallowed into
-      ;; *Messages* by the file-notify / poll layer.  We deliberately do NOT
-      ;; rethrow: this runs from a file-notify callback, where a hard error
-      ;; would kill the sentinel watcher.  Surfacing on the agent-repl log
-      ;; (file + *Messages*, no modeline flash) is the established channel
-      ;; for this async context.
-      (condition-case err
-          (progn
-            (agent-repl--update-session-id-from-sentinel
-             ws session-id owned (plist-get handler :name) source)
-            (agent-repl--log ws "%s: file=%s dir=%s ws=%s status=%s"
-                              (plist-get handler :name)
-                              (file-name-nondirectory file) dir ws
-                              (agent-repl--ws-get ws :agent-state))
-            ;; Every surviving handler keeps the two-argument (ws dir)
-            ;; contract.  The SOURCE-consuming three-argument callback
-            ;; (`--on-session-start-event', re-firing the metaprompt after a
-            ;; /compact) was deleted in the agent-shim cutover; SOURCE is
-            ;; still read above for `--update-session-id-from-sentinel'.
-            (funcall (plist-get handler :callback) ws dir))
-        (error
-         (agent-repl--do-log ws "process-sentinel-file: handler=%s ERRORED file=%s dir=%s ws=%s err=%S"
-                              (list (plist-get handler :name)
-                                    (file-name-nondirectory file) dir ws err))))))))
-
-;; SENTINEL ENDGAME (design §10, S8/S9): Emacs no longer ACTS on any
-;; sentinel file.  Every live handler is gone:
-;;
-;;   * The STATUS handlers (stop_ / stop_failure_ / subagent_start_ /
-;;     subagent_stop_ / prompt_submit_ / session_start_) were deleted in
-;;     the agent-shim cutover (S2).  Render-state is resolved by the
-;;     daemon's SSM and pushed as `frontend.v1' WorkspaceState frames.
-;;
-;;   * The PERMISSION handlers (permission_request / permission_prompt /
-;;     permission_resolved) are deleted here.  The permission UX is driven
-;;     entirely by the pushed `PermissionItem' (conversationDelta) plus the
-;;     pushed `:permission' WorkspaceState — see `permission.el'.
-;;
-;;   * `session_dead_' is deleted here.  Session death is the pushed DEAD
-;;     WorkspaceState + SessionView terminal/death-reason fields; the
-;;     `agent-repl--mark-dead' effect is re-anchored on the state-transition
-;;     hook (see `agent-repl--status-react-to-pushed-death' in status.el).
-;;
-;;   * `account_changed_' (and its GET /sessions/{id}/account plumbing) is
-;;     deleted here.  Emacs is out of account switching entirely: the webapp
-;;     initiates it, the daemon executes it, and Emacs merely renders the
-;;     pushed SessionView (config_dir).
-;;
-;; The managed Claude Code hooks that once wrote the permission sentinels are
-;; removed from `install.el', so those files are no longer written at all;
-;; every retired prefix is DRAINED (see
-;; `agent-repl--deprecated-sentinel-prefixes') so a stale daemon binary or
-;; older shim that still emits one does not spam the poll log.  The
-;; `agent-repl--sentinel-dispatch-alist' is consequently EMPTY.
 
 (defvar agent-repl-ws-fully-loaded-functions nil
   "Hook run when a Agent REPL workspace is fully loaded.
@@ -470,27 +231,6 @@ running but its load cycle has logically ended)."
 
 ;;; Event dispatch
 
-(defconst agent-repl--sentinel-dispatch-alist
-  ;; EMPTY (design §10, S8/S9 sentinel endgame): every live handler was
-  ;; deleted.  Status channels went in S2; permission_request /
-  ;; permission_prompt / permission_resolved / session_dead_ /
-  ;; account_changed_ go here.  Render-state, permission UX, session death,
-  ;; and account identity are all driven by pushed `frontend.v1' state now,
-  ;; so Emacs acts on NO sentinel file.  Every retired prefix is in
-  ;; `agent-repl--deprecated-sentinel-prefixes' below and drained.
-  '()
-  "Alist mapping filename prefixes to handler plists.
-Each entry is (PREFIX . PLIST) where PLIST has keys:
-  :callback  - function called with (WS DIR) on match
-  :warning   - format string logged when no workspace matches
-               (interpolates DIR via %s)
-  :name      - handler name for debug logging
-
-EMPTY after the S8/S9 sentinel endgame: there are no live sentinel
-handlers left.  A sentinel file is either drained (a retired prefix in
-`agent-repl--deprecated-sentinel-prefixes') or warned about (a truly
-unknown prefix, left on disk for forward compatibility).")
-
 (defconst agent-repl--deprecated-sentinel-prefixes
   '("login_request_"
     ;; Retired STATUS channels (agent-shim cutover, design §10).  Their
@@ -516,8 +256,8 @@ unknown prefix, left on disk for forward compatibility).")
     "account_changed_")
   "Filename prefixes for sentinel channels Emacs no longer acts on.
 A file matching one of these is DRAINED (deleted and dropped) rather than
-warned about.  It is deliberately NOT in `agent-repl--sentinel-dispatch-alist':
-there is no live handler and no side effect to run, only cleanup.
+warned about: there is no live handler and no side effect to run, only
+cleanup.
 
 The reason draining matters: an unrecognized sentinel file is never deleted
 by the dispatch path, so `agent-repl--poll-workspace-notifications' re-detects
@@ -534,37 +274,28 @@ are left on disk, since a not-yet-reloaded handler may be able to process
 them (forward compatibility).")
 
 (defun agent-repl--dispatch-sentinel-file (file)
-  "Dispatch FILE to the appropriate sentinel handler.
-Matches the filename against `agent-repl--sentinel-dispatch-alist'.
-Returns non-nil if a handler was found and called."
-  (let* ((name (file-name-nondirectory file))
-         (matched-prefix nil)
-         (handler (cl-loop for (prefix . plist) in agent-repl--sentinel-dispatch-alist
-                           when (string-prefix-p prefix name)
-                           do (setq matched-prefix prefix)
-                           and return plist)))
-    (agent-repl--log nil "dispatch-sentinel-file: file=%s matched-prefix=%S handler=%s"
-                      name matched-prefix (if handler (plist-get handler :name) "NONE"))
+  "Drain FILE when it is a retired sentinel channel, else warn.
+There are NO sentinel handlers left: Emacs acts on no sentinel file at
+all, so this is a pure drain.  A retired prefix (see
+`agent-repl--deprecated-sentinel-prefixes') is deleted on sight so the
+poll fallback stops re-detecting it; a truly unknown prefix warns and is
+left on disk for forward compatibility.  Returns non-nil when the file
+was drained."
+  (let ((name (file-name-nondirectory file)))
     (cond
-     (handler
-      (agent-repl--process-sentinel-file file handler)
-      t)
      ((cl-some (lambda (prefix) (string-prefix-p prefix name))
                agent-repl--deprecated-sentinel-prefixes)
-      ;; Retired channel: drain the file so the poll fallback stops re-detecting
-      ;; and re-warning about it every cycle.  No handler and no side effect run.
       (agent-repl--delete-sentinel-file file nil)
       (agent-repl--log nil "dispatch-sentinel-file: drained deprecated sentinel file=%s" name)
       t)
      (t
       (agent-repl--warn nil "no handler for sentinel file %s" name)
-      (agent-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s (tried prefixes: %S)"
-                        name (mapcar #'car agent-repl--sentinel-dispatch-alist))
+      (agent-repl--log nil "dispatch-sentinel-file: NO HANDLER for file=%s" name)
       nil))))
 
 (defun agent-repl--dispatch-sentinel-event (event)
   "Handle file-notify EVENT for workspace notification sentinel files.
-Dispatches by filename via `agent-repl--sentinel-dispatch-alist'.
+Drains by filename via `agent-repl--dispatch-sentinel-file'.
 Skips files that no longer exist (file-notify often fires multiple events
 for a single file creation; the first handler deletes the file).
 Ignores events whose file is nil (e.g. `stopped' events fired when a
