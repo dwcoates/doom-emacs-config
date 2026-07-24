@@ -58,6 +58,10 @@ func (m *mockHandler) Shutdown(_ context.Context, ws, rid string, _ *frontendv1.
 	m.called, m.lastWorkspace, m.lastRequestID = "shutdown", ws, rid
 	return m.err
 }
+func (m *mockHandler) ClientLog(_ context.Context, ws, rid string, _ *frontendv1.ClientLogCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "client_log", ws, rid
+	return m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -114,6 +118,11 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "shutdown",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r10", Command: &frontendv1.FrontendCommand_Shutdown{Shutdown: &frontendv1.ShutdownCmd{}}},
 			wantHit: "shutdown",
+		},
+		{
+			name:    "client log",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r11", Workspace: "ws11", Command: &frontendv1.FrontendCommand_ClientLog{ClientLog: &frontendv1.ClientLogCmd{Message: "seq gap"}}},
+			wantHit: "client_log",
 		},
 	}
 	for _, tc := range tests {

@@ -42,6 +42,10 @@ type CommandHandler interface {
 	// Shutdown begins the daemon's graceful teardown (the UDS replacement for
 	// POST /shutdown), the same path SIGTERM triggers.
 	Shutdown(ctx context.Context, workspace, requestID string, cmd *frontendv1.ShutdownCmd) error
+	// ClientLog mirrors a frontend-side diagnostic line into the daemon's own
+	// log. It is EVIDENCE, not a control signal: the handler records it and
+	// changes no daemon state.
+	ClientLog(ctx context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -77,6 +81,8 @@ func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCom
 		err = h.DeleteSession(ctx, ws, reqID, c.DeleteSession)
 	case *frontendv1.FrontendCommand_Shutdown:
 		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
+	case *frontendv1.FrontendCommand_ClientLog:
+		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
 		return failAck(reqID, fmt.Sprintf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))

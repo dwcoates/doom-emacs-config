@@ -567,6 +567,11 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
         (should (seq-find (lambda (m) (string-match-p "no handler registered" m))
                           logged))))))
 
+(ert-deftest agent-repl-test-uds-client-log-is-a-known-command ()
+  "The E4 `clientLog' arm is in the command mirror, though Emacs never sends it."
+  ;; Act / Assert
+  (should (member "clientLog" agent-repl--uds-known-command-fields)))
+
 (ert-deftest agent-repl-test-uds-shutdown-is-a-known-command ()
   "The S9 `shutdown' command arm is an accepted outbound command field."
   ;; Act / Assert
