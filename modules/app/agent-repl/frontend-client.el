@@ -790,17 +790,20 @@ each live workspace bound to a listed session, the parsed queue snapshot
 \(`agent-repl--frontend-session-queue') is stored under
 `:queued-messages'; a bound workspace whose session is absent from
 SESSIONS has its queue cleared.  Forces a mode-line repaint so the
-queued-count segment reflects the new snapshot.  Also captures the
-entry's `async_live' count into `:async-live', the tab-bar's
-idle-but-working signal (see `agent-repl--ws-async-live-p')."
+queued-count segment reflects the new snapshot.
+
+The `async_live' capture was deleted in the agent-shim cutover (design
+§10): the idle-but-working (`:idle-async') render-state is now resolved
+by the daemon's SSM and pushed as a `frontend.v1' WorkspaceState frame,
+so Emacs no longer derives it from this poll.  This sweep is retained
+only for its non-status duties (§2.13 queue snapshot, daemon-bounce
+reattach, orphan reap)."
   (dolist (ws (agent-repl--live-ws-names))
     (when-let ((bound (agent-repl--ws-get ws :frontend-session-id)))
       (let ((entry (seq-find (lambda (s) (equal (alist-get 'session_id s) bound))
                              sessions)))
         (agent-repl--ws-put ws :queued-messages
-                            (and entry (agent-repl--frontend-session-queue entry)))
-        (agent-repl--ws-put ws :async-live
-                            (and entry (alist-get 'async_live entry))))))
+                            (and entry (agent-repl--frontend-session-queue entry))))))
   (force-mode-line-update t))
 
 (defun agent-repl--ws-queued-messages (ws)

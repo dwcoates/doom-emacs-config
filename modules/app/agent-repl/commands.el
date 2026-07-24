@@ -119,9 +119,10 @@ First %s is the change-spec, second %s is the prompt."
 
 (defcustom agent-repl-interrupt-confirm t
   "When non-nil, `agent-repl-interrupt' confirms before cancelling subagents.
-The prompt appears only when the targeted workspace has one or more
-subagents in flight (its `:pending-subagents' counter is non-zero — see
-`agent-repl--agent-subagents-running-p'); a workspace whose main agent
+The prompt appears only when the targeted workspace has detached
+background work in flight (its daemon-pushed render-state is
+`:idle-async' — see `agent-repl--agent-subagents-running-p'); a
+workspace whose main agent
 alone is running, or that has no turn in flight at all, is interrupted
 without a prompt, since there is no subagent work to protect.  Detached
 background watchers and shells never count as a running subagent and are
@@ -505,16 +506,18 @@ workspace carrying only such work returns nil here."
   (eq (agent-repl--ws-agent-state ws) :thinking))
 
 (defun agent-repl--agent-subagents-running-p (ws)
-  "Return non-nil when workspace WS has one or more subagents in flight.
-A subagent is a Task/Agent turn spawned within the main turn, tracked by
-WS's `:pending-subagents' counter (incremented on SubagentStart,
-decremented on SubagentStop — see `agent-repl--ws-pending-subagents').
-The main agent's own turn does NOT count: a workspace whose main agent is
-`:thinking' with no spawned subagents returns nil here.  This gates the
-`C-c C-k' cancel confirmation (see `agent-repl--confirm-cancel-running')
-so an accidental interrupt is guarded only when subagent work is actually
-at stake."
-  (> (agent-repl--ws-pending-subagents ws) 0))
+  "Return non-nil when workspace WS has detached background work in flight.
+Re-keyed in the agent-shim cutover (design §10): the Emacs-side
+`:pending-subagents' hook counter was deleted, so this reads the
+daemon-pushed render-state instead.  `:idle-async' is the SSM's
+resolved \"turn done, but backgrounded tasks (subagents/shells) are
+still running\" state — exactly the detached work this guard protects.
+The main agent's own in-flight turn resolves to `:thinking', not
+`:idle-async', so interrupting an ordinary turn is NOT gated (matching
+the prior intent: the guard fires only when background work is at
+stake).  This gates the `C-c C-k' cancel confirmation (see
+`agent-repl--confirm-cancel-running')."
+  (eq (agent-repl--ws-render-status ws) :idle-async))
 
 (defun agent-repl--confirm-cancel-prompt (running)
   "Return the confirmation prompt string naming the RUNNING workspaces.
@@ -551,8 +554,8 @@ current workspace when WS is nil (matches the interactive `SPC o x'
 behavior); programmatic callers pass WS so interrupts target a
 specific workspace.
 
-When the targeted workspace has subagents in flight (its
-`:pending-subagents' counter is non-zero) and NO-CONFIRM is nil, asks for
+When the targeted workspace has detached background work in flight (its
+daemon-pushed render-state is `:idle-async') and NO-CONFIRM is nil, asks for
 confirmation before cancelling, unless `agent-repl-interrupt-confirm' is
 nil; declining aborts without interrupting.  A main agent running on its
 own (no spawned subagents) is interrupted without a prompt.  Only the
@@ -570,11 +573,10 @@ there is a response on screen to keep, so the turn stands and this is
 an ordinary stop.  The daemon owns that judgment; Emacs only asks.
 
 After issuing the escape, marks the workspace's agent-state as
-`:done' and clears the Stop / SubagentStop tracking — interrupting
-terminates the in-flight turn, so the tab should immediately reflect
-\"finished\" rather than linger on `:thinking' until a stray hook
-arrives.  No Stop hook will fire for the interrupted turn, so Emacs
-is the sole observer here."
+`:done' — interrupting terminates the in-flight turn, so the tab
+should immediately reflect \"finished\" rather than linger on
+`:thinking'.  (The Stop / SubagentStop tracking clear was dropped in
+the agent-shim cutover; that hook counter no longer exists.)"
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "interrupt")
@@ -587,7 +589,6 @@ is the sole observer here."
       (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
         (if (not outcome)
             (agent-repl--log ws "interrupt: frontend reported not delivered, skipping")
-          (agent-repl--ws-clear-stop-tracking ws)
           (agent-repl--mark-agent-done ws)
           ;; Restore before the re-insert timer so the prompt is already
           ;; there to revise when the buffer takes insert state.

@@ -363,112 +363,18 @@ Compare-and-clear: no-op if the current value is not STATE."
                               "agent-state-clear-if ws=%s state=%s no-op (current=%s)"
                               ws state (agent-repl--ws-get ws :agent-state))))
 
-;; --- Stop / SubagentStop coordination ---
+;; --- Stop / SubagentStop coordination: DELETED (agent-shim cutover) ---
 ;;
-;; The Stop hook fires when the agent finishes its main response.  When
-;; the agent has spawned background subagents (Task tool with
-;; run_in_background: true), Stop can fire while those subagents are
-;; still running — so transitioning the workspace to :done on Stop alone
-;; would falsely advertise "ready for review" while work is still in
-;; flight.
-;;
-;; To gate the transition correctly we track two pieces of state:
-;;
-;;   :stop-received      - boolean, set by the Stop hook callback.
-;;   :pending-subagents  - integer counter, incremented by SubagentStart
-;;                         and decremented by SubagentStop.
-;;
-;; The transition to :done happens when both conditions are true:
-;; Stop has fired AND the counter is zero.  Whichever event resolves
-;; that conjunction (Stop arriving last, or the final SubagentStop
-;; arriving last) triggers `agent-repl--handle-agent-finished'.
-;;
-;; Empirical hook asymmetry (verified 2026-05-05):
-;;
-;; Claude Code fires SubagentStop *every turn*, not just per real
-;; subagent — even on a turn that invokes zero Task/Agent tools we see
-;; an unpaired SubagentStop arrive ~1–2s after Stop.  Best guess: the
-;; main agent's own end-of-turn fires both Stop (outer) and SubagentStop
-;; (inner), making the hooks asymmetric (N starts → N+1 stops per turn).
-;;
-;; This means the floor-at-zero in `decf-pending-subagents' is
-;; LOAD-BEARING ON EVERY TURN, not a defensive guard for rare edge
-;; cases.  Without it, the counter would drift toward -infinity over
-;; a long session.
-;;
-;; Why this still works correctly:
-;;   - clear-stop-tracking inside maybe-finalize-stop resets the counter
-;;     to 0 *before* the phantom arrives (the phantom lands ~1–2s after
-;;     Stop processing completes).
-;;   - The phantom hits decf with current=0; floor-at-zero clamps it to
-;;     0; net effect is a no-op.
-;;   - Steady state between turns: counter=0.
-;;
-;; Known narrow risk: cross-turn race.  If the user submits a new prompt
-;; very fast (within the ~2s phantom-arrival window) AND the new turn
-;; spawns multiple background subagents, the lingering phantom can
-;; cancel out one real SubagentStop and Stop may then false-finalize
-;; while a real subagent is still running.  Mitigation if this becomes
-;; observable: reset the counter on prompt-submit (treat each new turn
-;; as a fresh tracking window).  Not implemented today.
-
-(defun agent-repl--ws-stop-received-p (ws)
-  "Return non-nil if the Stop hook has fired for workspace WS without
-having yet been resolved into a `:done' transition."
-  (agent-repl--ws-get ws :stop-received))
-
-(defun agent-repl--ws-set-stop-received (ws val)
-  "Set workspace WS's :stop-received flag to VAL (a boolean)."
-  (unless ws (error "agent-repl--ws-set-stop-received: ws is nil"))
-  (agent-repl--log ws "stop-received %s -> %s" ws val)
-  (agent-repl--ws-put ws :stop-received val))
-
-(defun agent-repl--ws-pending-subagents (ws)
-  "Return WS's pending-subagent count (0 when unset)."
-  (or (agent-repl--ws-get ws :pending-subagents) 0))
-
-(defun agent-repl--ws-incf-pending-subagents (ws)
-  "Increment WS's pending-subagent counter and return the new value."
-  (unless ws (error "agent-repl--ws-incf-pending-subagents: ws is nil"))
-  (let ((new (1+ (agent-repl--ws-pending-subagents ws))))
-    (agent-repl--log ws "pending-subagents %s -> %d (incf)" ws new)
-    (agent-repl--ws-put ws :pending-subagents new)
-    new))
-
-(defun agent-repl--ws-decf-pending-subagents (ws)
-  "Decrement WS's pending-subagent counter and return the new value.
-
-Floors at 0.  This is LOAD-BEARING ON EVERY TURN, not a defensive
-edge-case guard: Claude Code empirically fires one unpaired
-SubagentStop per turn (see the block comment above for the
-N-starts/N+1-stops asymmetry).  Without the floor, the counter would
-drift toward -infinity across a session and the gating predicate
-`(zerop ...)' would silently start mis-classifying \"still running\"
-as \"all done\"."
-  (unless ws (error "agent-repl--ws-decf-pending-subagents: ws is nil"))
-  (let* ((cur (agent-repl--ws-pending-subagents ws))
-         (new (max 0 (1- cur))))
-    (agent-repl--log ws "pending-subagents %s -> %d (decf, was %d)" ws new cur)
-    (agent-repl--ws-put ws :pending-subagents new)
-    new))
-
-(defun agent-repl--fully-stopped-p (ws)
-  "Return non-nil when WS is fully stopped — Stop fired and no pending subagents.
-Used by Stop and SubagentStop callbacks to decide whether to drive the
-`:thinking → :done' transition.  See the block comment above for the
-coordination model."
-  (and (agent-repl--ws-stop-received-p ws)
-       (zerop (agent-repl--ws-pending-subagents ws))))
-
-(defun agent-repl--ws-clear-stop-tracking (ws)
-  "Reset the Stop / SubagentStop tracking fields on WS.
-Called when the workspace transitions out of `:thinking' so the next
-turn starts from a clean slate.  Resets `:stop-received' to nil and
-`:pending-subagents' to 0."
-  (unless ws (error "agent-repl--ws-clear-stop-tracking: ws is nil"))
-  (agent-repl--log ws "clear-stop-tracking %s" ws)
-  (agent-repl--ws-put ws :stop-received nil)
-  (agent-repl--ws-put ws :pending-subagents 0))
+;; The `:stop-received' / `:pending-subagents' hook-counter block and
+;; `agent-repl--fully-stopped-p' were deleted in the agent-shim cutover
+;; (design §10).  The turn-finished (`:thinking → :done') resolution and
+;; the subagent-in-flight accounting are now owned by the daemon's SSM,
+;; which resolves THE render-state (RENDER_STATE_DONE / IDLE / etc.) and
+;; pushes it as a `frontend.v1' WorkspaceState frame — Emacs no longer
+;; counts SubagentStart/SubagentStop hooks or gates on them.  The Stop /
+;; SubagentStart / SubagentStop / StopFailure managed hooks that fed this
+;; block are removed from `install.el', and their sentinel dispatch
+;; handlers are removed from `sentinel.el'.
 
 ;; Legacy APIs below delegate into the typed setters.  Call sites migrate
 ;; to the typed names in a later commit; retained here for the duration

@@ -914,6 +914,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
+    agent-repl--uds-connect
     agent-repl--image-call-process)
   "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The
