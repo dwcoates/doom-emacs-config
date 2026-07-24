@@ -1,6 +1,7 @@
 package ssm
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	_ "modernc.org/sqlite"
 )
 
 // fakeResolver binds session ids to workspaces from a static map.
@@ -437,5 +440,231 @@ func TestTransitionLogFormat(t *testing.T) {
 	want := "ws=ws1 ∅→RENDER_STATE_THINKING cause_kind=turn_started cause_seq=42"
 	if !cl.contains(want) {
 		t.Fatalf("missing transition line %q; got: %v", want, cl.lines)
+	}
+}
+
+// --- per-task idempotency of the live-task counter ---------------------------
+
+func TestLiveTaskCountIgnoresADuplicateTaskEnded(t *testing.T) {
+	// Arrange — one task, ended TWICE at different seqs. This is the real
+	// shape now that a shell spool's EXIT= marker can report a completion the
+	// stream plane or a TaskStop tool result already reported.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	mustApply(t, m, evSessionStarted("s1", 1))
+	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
+
+	// Act.
+	mustApply(t, m, evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
+
+	// Assert — the second end is a no-op, not a second decrement.
+	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 0 {
+		t.Fatalf("live task count = %d after a duplicate end, want 0", got)
+	}
+}
+
+func TestLiveTaskCountNeverGoesNegativeOnDuplicateEnds(t *testing.T) {
+	// Arrange — the failure the old SUM produced: repeated ends drove the
+	// counter below zero, which mis-derives idle vs idle_async.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	mustApply(t, m, evSessionStarted("s1", 1))
+	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
+
+	// Act.
+	for seq := uint64(3); seq <= 6; seq++ {
+		mustApply(t, m, evTaskEnded("s1", seq, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 0 {
+		t.Fatalf("live task count = %d, want 0 (never negative)", got)
+	}
+}
+
+func TestLiveTaskCountKeepsADuplicateEndFromResurrectingIdleAsync(t *testing.T) {
+	// Arrange — two live tasks; one of them ends twice.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	mustApply(t, m, evSessionStarted("s1", 1))
+	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
+	mustApply(t, m, evTaskStarted("s1", 3, "a2"))
+
+	// Act — a1 ends twice; a2 is still running.
+	mustApply(t, m, evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 5, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+
+	// Assert — a2 is still live, so the workspace stays idle_async.
+	cur := mustCurrent(t, m, "ws1")
+	if cur.LiveTaskCount != 1 {
+		t.Fatalf("live task count = %d, want 1 (a2 is still running)", cur.LiveTaskCount)
+	}
+	if cur.State != frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC {
+		t.Fatalf("state = %s, want idle_async", renderName(cur.State))
+	}
+}
+
+func TestLiveTaskCountIgnoresADuplicateTaskStarted(t *testing.T) {
+	// Arrange — the same dedup must hold on the opening side, or a task
+	// reported started twice would need two ends to clear.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	mustApply(t, m, evSessionStarted("s1", 1))
+
+	// Act.
+	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
+	mustApply(t, m, evTaskStarted("s1", 3, "a1"))
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 1 {
+		t.Fatalf("live task count = %d after a duplicate start, want 1", got)
+	}
+}
+
+func TestLiveTaskCountStillCountsDistinctTasks(t *testing.T) {
+	// Arrange — the dedup must not collapse genuinely different tasks.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	mustApply(t, m, evSessionStarted("s1", 1))
+
+	// Act.
+	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
+	mustApply(t, m, evTaskStarted("s1", 3, "a2"))
+	mustApply(t, m, evTaskStarted("s1", 4, "a3"))
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 3 {
+		t.Fatalf("live task count = %d, want 3", got)
+	}
+}
+
+// mustApply applies ev, failing the test on error.
+func mustApply(t *testing.T, m *Manager, ev *corev1.Event) {
+	t.Helper()
+	if err := m.Apply(ev); err != nil {
+		t.Fatalf("Apply(seq %d): %v", ev.GetSeq(), err)
+	}
+}
+
+// --- v1 -> v2 migration ------------------------------------------------------
+
+// writeV1DB creates a DB with the pre-task_id v1 schema and one row, as an
+// already-deployed daemon would have left it.
+func writeV1DB(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open v1 db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+		CREATE TABLE schema_meta (version INTEGER NOT NULL);
+		INSERT INTO schema_meta(version) VALUES (1);
+		CREATE TABLE workspace_state (
+			workspace   TEXT    NOT NULL,
+			session_id  TEXT,
+			state       TEXT    NOT NULL,
+			cause_kind  TEXT    NOT NULL,
+			cause_seq   INTEGER,
+			at          INTEGER NOT NULL,
+			PRIMARY KEY (workspace, at)
+		);
+		INSERT INTO workspace_state(workspace, session_id, state, cause_kind, cause_seq, at)
+		VALUES ('ws1','s1','idle','session_started',1,1);
+	`); err != nil {
+		t.Fatalf("seed v1 db: %v", err)
+	}
+}
+
+func TestMigrateAddsTaskIDToAV1Database(t *testing.T) {
+	// Arrange — a DB left by a daemon that predates the column.
+	path := filepath.Join(t.TempDir(), "state.db")
+	writeV1DB(t, path)
+
+	// Act.
+	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{"s1": "ws1"}})
+	if err != nil {
+		t.Fatalf("Open a v1 db: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+
+	// Assert — the workspace still resolves, which it cannot without the column.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_IDLE {
+		t.Fatalf("state after migration = %s, want idle", renderName(got))
+	}
+}
+
+func TestMigrateRecordsTheNewSchemaVersion(t *testing.T) {
+	// Arrange — leaving the stamp at 1 would make the version guard meaningless.
+	path := filepath.Join(t.TempDir(), "state.db")
+	writeV1DB(t, path)
+	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	m.Close()
+
+	// Act.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+	var version int64
+	if err := db.QueryRow(`SELECT version FROM schema_meta LIMIT 1`).Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+
+	// Assert.
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
+	}
+}
+
+func TestMigrateIsIdempotentAcrossReopens(t *testing.T) {
+	// Arrange — ALTER TABLE ADD COLUMN is not idempotent in SQLite, so a
+	// second open must not try to re-add the column.
+	path := filepath.Join(t.TempDir(), "state.db")
+	writeV1DB(t, path)
+	first, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	first.Close()
+
+	// Act.
+	second, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	second.Close()
+}
+
+func TestMigratedV1RowsStillCountIndividually(t *testing.T) {
+	// Arrange — pre-migration task rows carry a NULL task_id. They must keep
+	// counting one-per-row rather than collapsing into a single NULL group.
+	path := filepath.Join(t.TempDir(), "state.db")
+	writeV1DB(t, path)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO workspace_state(workspace, session_id, state, cause_kind, cause_seq, at)
+		VALUES ('ws1','s1','task_started','task_started',2,2),
+		       ('ws1','s1','task_started','task_started',3,3);
+	`); err != nil {
+		t.Fatalf("seed legacy task rows: %v", err)
+	}
+	db.Close()
+
+	// Act.
+	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{"s1": "ws1"}})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+
+	// Assert — two distinct legacy starts, not one collapsed NULL.
+	if got := mustCurrent(t, m, "ws1").LiveTaskCount; got != 2 {
+		t.Fatalf("live task count over legacy NULL rows = %d, want 2", got)
 	}
 }
