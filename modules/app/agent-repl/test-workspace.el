@@ -330,6 +330,34 @@ to avoid surfacing nuked workspaces."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--live-ws-names))))
 
+;;;; ---- Tests: project-pollable workspace partition ----
+
+(ert-deftest agent-repl-test-ws-project-pollable-p-requires-live-project ()
+  "Only a live entry with `:project-dir' is eligible for project polling."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "project" :project-dir "/tmp/project")
+    (agent-repl--ws-put "placeholder" :agent-state :idle)
+    (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
+    (agent-repl--ws-del "dead")
+    (should (equal (agent-repl--ws-project-pollable-p "project")
+                   "/tmp/project"))
+    (should-not (agent-repl--ws-project-pollable-p "placeholder"))
+    (should-not (agent-repl--ws-project-pollable-p "dead"))
+    (should-not (agent-repl--ws-project-pollable-p "unknown"))))
+
+(ert-deftest agent-repl-test-ws-project-poll-partition-separates-placeholders ()
+  "Project poll partition excludes tombstones and reports live placeholders."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "project" :project-dir "/tmp/project")
+    (agent-repl--ws-put "main" :agent-state :idle)
+    (agent-repl--ws-put "none" :repl-state :inactive)
+    (agent-repl--ws-put "dead" :project-dir "/tmp/dead")
+    (agent-repl--ws-del "dead")
+    (pcase-let ((`(,pollable . ,placeholders)
+                 (agent-repl--ws-project-poll-partition)))
+      (should (equal pollable '("project")))
+      (should (equal (sort placeholders #'string<) '("main" "none"))))))
+
 ;;;; ---- Tests: --ws-dir-owner ----
 
 (ert-deftest agent-repl-test-ws-dir-owner-finds-live-owner ()

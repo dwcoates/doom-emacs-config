@@ -1803,12 +1803,13 @@ DO-GIT-P is the precomputed mod-N gate for the whole pass (snapshotted
 at chain kickoff so every workspace in this pass sees the same value).
 GAP is the inter-step delay in seconds.
 
-Per-step `gethash' recheck against `agent-repl--workspaces' covers
-the snapshot-vs-live divergence: a workspace can be removed mid-chain
-\(`--ws-del' from a merge, kill, or sweep) and we must not act on
-ghost names.  The body itself is wrapped in `condition-case' so an
-error in one ws step never wedges the in-flight flag for subsequent
-ticks — the chain logs and keeps going.
+Per-step `agent-repl--ws-project-pollable-p' recheck covers
+snapshot-vs-live divergence: a workspace can be removed mid-chain
+\(`--ws-del' from a merge, kill, or sweep), or become a non-project
+placeholder, and we must not act on either shape.  The body itself is
+wrapped in `condition-case' so an error in one ws step never wedges
+the in-flight flag for subsequent ticks — the chain logs and keeps
+going.
 
 When `agent-repl--update-spread-sync' is non-nil (tests only),
 recurses directly instead of via `run-at-time'."
@@ -1819,8 +1820,13 @@ recurses directly instead of via `run-at-time'."
     (let ((ws (car remaining))
           (rest (cdr remaining)))
       (condition-case err
-          (when (gethash ws agent-repl--workspaces)
-            (agent-repl--update-one-workspace-state ws do-git-p))
+          (if (agent-repl--ws-project-pollable-p ws)
+              (agent-repl--update-one-workspace-state ws do-git-p)
+            (agent-repl--log-verbose
+             ws
+             "update-all-workspace-states--step: skipped ws=%s live=%S project-dir=%S"
+             ws (agent-repl--ws-live-p ws)
+             (agent-repl--ws-get ws :project-dir)))
         (error
          (agent-repl--log ws "update-all-workspace-states--step: error ws=%s err=%S"
                            ws err)))
@@ -1839,10 +1845,12 @@ Clears the in-flight flag so the next timer tick can run."
 
 (defun agent-repl--update-all-workspace-states-now ()
   "Unguarded entrypoint for the workspace-state update chain.
-Snapshots `(hash-table-keys agent-repl--workspaces)' so the chain
-iterates a stable list even as the hash mutates mid-pass; per-step
-`gethash' recheck (inside `--step') filters out workspaces deleted
-during the spread window.
+Snapshots `agent-repl--ws-project-poll-partition' so the chain
+iterates a stable list of live project workspaces even as state mutates
+mid-pass; per-step `agent-repl--ws-project-pollable-p' recheck filters
+out workspaces deleted or reduced to placeholders during the spread
+window.  The partition's placeholder names are included in the kickoff
+log so every exclusion is observable.
 
 Increments `agent-repl--update-tick-counter' and computes DO-GIT-P
 once so every ws in this pass agrees on the mod-N decision.  Sets the
@@ -1868,9 +1876,13 @@ unnecessary overhead on those paths.  The periodic timer
 \(`agent-repl--update-all-workspace-states') is the sole caller of
 the poll."
   (setq agent-repl--update-tick-counter (1+ agent-repl--update-tick-counter))
-  ;; Filter to live workspaces only — tombstoned entries have no live
-  ;; session to probe and would burn git status calls for no UI.
-  (let* ((ws-names (agent-repl--live-ws-names))
+  ;; Poll only live project workspaces.  Persp-mode placeholders such as
+  ;; "main" and "none" are real hash entries but intentionally have no
+  ;; project directory; the workspace-layer partition makes the exclusion
+  ;; explicit and observable.
+  (let* ((partition (agent-repl--ws-project-poll-partition))
+         (ws-names (car partition))
+         (placeholder-names (cdr partition))
          (n (length ws-names))
          (do-git-p (zerop (mod agent-repl--update-tick-counter
                                agent-repl-state-git-tick-modulus)))
@@ -1878,8 +1890,10 @@ the poll."
                   (max agent-repl-state-spread-min-gap
                        (/ agent-repl-state-spread-window (float n)))
                 agent-repl-state-spread-min-gap)))
-    (agent-repl--log-verbose nil "update-all-workspace-states-now: count=%d do-git=%s gap=%.3fs counter=%d"
-                              n do-git-p gap agent-repl--update-tick-counter)
+    (agent-repl--log-verbose
+     nil
+     "update-all-workspace-states-now: count=%d placeholders=%S do-git=%s gap=%.3fs counter=%d"
+     n placeholder-names do-git-p gap agent-repl--update-tick-counter)
     (setq agent-repl--update-in-flight (float-time))
     (agent-repl--update-all-workspace-states--step ws-names do-git-p gap)))
 
