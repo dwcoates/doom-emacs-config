@@ -38,6 +38,31 @@ func TestScopeFrameDropsNonMatchingConversationDelta(t *testing.T) {
 	}
 }
 
+func TestScopeFrameDropsNonMatchingHeartbeat(t *testing.T) {
+	// Arrange — a heartbeat for a different session. Without its own scope
+	// case a HeartbeatView would fall to the default and leak connection-wide.
+	sc := Scope{SessionID: "s1"}
+	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{SessionId: "s2", Workspace: "/w2"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a heartbeat for another session must be dropped")
+	}
+}
+
+func TestScopeFramePassesMatchingHeartbeat(t *testing.T) {
+	// Arrange — a heartbeat for this connection's own session.
+	sc := Scope{SessionID: "s1"}
+	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{SessionId: "s1", Workspace: "/w1"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a heartbeat for this session must pass")
+	}
+}
+
 func TestScopeFramePassesGlobalDegradedNotice(t *testing.T) {
 	// Arrange — a DegradedNotice carries no session/workspace identity.
 	sc := Scope{SessionID: "s1"}

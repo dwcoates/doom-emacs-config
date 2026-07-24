@@ -18,8 +18,9 @@ type fakePusher struct {
 	typing   []*frontendv1.TypingDelta
 	catalog  []*frontendv1.TaskCatalog
 	degraded []*frontendv1.DegradedNotice
-	state    []*frontendv1.WorkspaceState
-	inits    []*frontendv1.SessionInitView
+	state      []*frontendv1.WorkspaceState
+	inits      []*frontendv1.SessionInitView
+	heartbeats []*frontendv1.HeartbeatView
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
@@ -50,6 +51,11 @@ func (p *fakePusher) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 func (p *fakePusher) PushSessionInitView(v *frontendv1.SessionInitView) {
 	p.mu.Lock()
 	p.inits = append(p.inits, v)
+	p.mu.Unlock()
+}
+func (p *fakePusher) PushHeartbeatView(h *frontendv1.HeartbeatView) {
+	p.mu.Lock()
+	p.heartbeats = append(p.heartbeats, h)
 	p.mu.Unlock()
 }
 
@@ -148,9 +154,9 @@ func TestResyncReplaysLatestPermissionItem(t *testing.T) {
 	}
 }
 
-func TestConsumeHeartbeatProgressNotRelayed(t *testing.T) {
-	// Arrange: the S9 TypingDelta carries only a core.v1.ContentDelta, so a
-	// tool-progress heartbeat (not a ContentDelta) has no frontend.v1 arm.
+func TestConsumeHeartbeatProgressPushesHeartbeatView(t *testing.T) {
+	// Arrange: under S9 this event had no frontend.v1 arm and was dropped; E4
+	// added HeartbeatView, so it must now reach the frontend.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 
@@ -160,9 +166,71 @@ func TestConsumeHeartbeatProgressNotRelayed(t *testing.T) {
 		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "tu1", ElapsedSeconds: 12}},
 	})
 
-	// Assert: no typing push (a schema-forced drop, not a relay).
-	if len(push.typing) != 0 {
-		t.Fatalf("expected heartbeat progress to not relay, got %d typing pushes", len(push.typing))
+	// Assert.
+	if len(push.heartbeats) != 1 {
+		t.Fatalf("expected 1 heartbeat push, got %d", len(push.heartbeats))
+	}
+}
+
+func TestConsumeHeartbeatProgressEmbedsProgressUnchanged(t *testing.T) {
+	// Arrange: the relay must carry the core.v1 payload verbatim, exactly as
+	// TypingDelta carries its ContentDelta — this layer never re-types.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload: &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{
+			ToolUseId:       "tu1",
+			ToolName:        "Bash",
+			ParentToolUseId: "tu0",
+			ElapsedSeconds:  12.5,
+		}},
+	})
+
+	// Assert.
+	got := push.heartbeats[0].GetProgress()
+	if got.GetToolUseId() != "tu1" || got.GetToolName() != "Bash" ||
+		got.GetParentToolUseId() != "tu0" || got.GetElapsedSeconds() != 12.5 {
+		t.Errorf("embedded progress = %+v, want tu1/Bash/tu0/12.5", got)
+	}
+}
+
+func TestConsumeHeartbeatProgressStampsWorkspaceAndSession(t *testing.T) {
+	// Arrange: the relay is scope-filtered per connection, so it must carry the
+	// identity scopeFrame keys on.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "tu1"}},
+	})
+
+	// Assert.
+	hv := push.heartbeats[0]
+	if hv.GetWorkspace() != "ws" || hv.GetSessionId() != "s1" {
+		t.Errorf("heartbeat identity = %q/%q, want ws/s1", hv.GetWorkspace(), hv.GetSessionId())
+	}
+}
+
+func TestConsumeHeartbeatProgressPushesNothingForNilProgress(t *testing.T) {
+	// Arrange: a heartbeat arm with no payload must push nothing rather than an
+	// empty frame the frontend would have to defend against.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: nil},
+	})
+
+	// Assert.
+	if len(push.heartbeats) != 0 {
+		t.Fatalf("expected no heartbeat push for nil progress, got %d", len(push.heartbeats))
 	}
 }
 

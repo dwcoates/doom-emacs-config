@@ -91,7 +91,7 @@ when the ack reports failure — in addition to the loud log + echo).")
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView"
-    "sessionInit")
+    "sessionInit" "heartbeat")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -99,7 +99,26 @@ malformed (unknown wire field) and signals loudly.
 
 `sessionInit' (S9) carries the session's retained `SystemInit' (slash
 commands, tools, skills, model list); it is the pushed-frame replacement
-for the deleted GET /commands HTTP slash-menu source.")
+for the deleted GET /commands HTTP slash-menu source.
+
+`heartbeat' (E4) is the ephemeral long-tool liveness relay; Emacs
+decodes it for wire parity and renders nothing — see
+`agent-repl--uds-ignored-frame-fields'.")
+
+(defconst agent-repl--uds-ignored-frame-fields
+  '("heartbeat")
+  "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
+These are a subset of `agent-repl--uds-known-frame-fields'.
+
+The distinction matters for honest logging.  A known arm with no handler
+is normally an UNFINISHED-WIRING condition and is loud-logged as such, so
+the gap is visible.  An arm listed here is a settled DESIGN DECISION, not
+a gap: the webapp owns the visual and the Emacs frontend has no business
+rendering it.  Logging those at the same volume would train the reader to
+ignore a message that is supposed to mean \"something is missing\".
+
+`heartbeat' (E4): a tool-liveness tick whose only consumer is the
+webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
@@ -376,14 +395,20 @@ not silently dropped.  Returns the handler's value, or nil."
               (list (format "unknown oneof field: %s" field) frame)))
      (t
       (let ((handler (cdr (assoc field agent-repl--uds-frame-handlers))))
-        (if handler
-            (progn
-              (agent-repl--log nil "uds-dispatch: field=%s -> handler=%s" field handler)
-              (funcall handler payload))
+        (cond
+         (handler
+          (agent-repl--log nil "uds-dispatch: field=%s -> handler=%s" field handler)
+          (funcall handler payload))
+         ((member field agent-repl--uds-ignored-frame-fields)
+          (agent-repl--log-verbose
+           nil
+           "uds-dispatch: field=%s deliberately ignored by the Emacs frontend" field)
+          nil)
+         (t
           (agent-repl--log nil
                            "uds-dispatch: field=%s KNOWN but no handler registered — not dispatched (register one at stitch)"
                            field)
-          nil))))))
+          nil)))))))
 
 ;;;; ---- Outbound commands -----------------------------------------------
 

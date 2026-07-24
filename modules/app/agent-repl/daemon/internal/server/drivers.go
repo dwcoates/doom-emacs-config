@@ -261,3 +261,11 @@ func (f *PushForwarder) PushSessionInitView(v *frontendv1.SessionInitView) {
 	}
 	f.logMiss("session-init-view")
 }
+
+func (f *PushForwarder) PushHeartbeatView(h *frontendv1.HeartbeatView) {
+	if s := f.target.Load(); s != nil {
+		s.PushHeartbeatView(h)
+		return
+	}
+	f.logMiss("heartbeat-view")
+}

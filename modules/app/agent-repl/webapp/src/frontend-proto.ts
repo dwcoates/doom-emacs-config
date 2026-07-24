@@ -208,6 +208,24 @@ export interface TypingDelta {
 }
 
 /**
+ * The ephemeral long-tool liveness relay (E4), flattened from
+ * `HeartbeatView{workspace, session_id, progress}` the same way `TypingDelta`
+ * flattens its embedded `ContentDelta`.
+ *
+ * Never persisted and never present in a `StateSnapshot`: a reconnecting
+ * frontend simply waits for the next heartbeat rather than replaying old ones.
+ */
+export interface HeartbeatView {
+  workspace: string;
+  sessionId: string;
+  toolUseId: string;
+  toolName: string;
+  parentToolUseId: string;
+  /** The SDK's raw elapsed clock for the running tool, in seconds. */
+  elapsedSeconds: number;
+}
+
+/**
  * The session's retained `data.v1.SystemInit` (slash commands, tools, skills,
  * model, auth source, …), pushed on attach + carried in `StateSnapshot.inits`
  * (S9). `init` is adopted by shape — a large, additively-growing message the
@@ -270,7 +288,8 @@ export type FrontendFrame = {
     | { case: "commandAck"; value: CommandAck }
     | { case: "degradedNotice"; value: DegradedNotice }
     | { case: "daemonView"; value: DaemonView }
-    | { case: "sessionInit"; value: SessionInitView };
+    | { case: "sessionInit"; value: SessionInitView }
+    | { case: "heartbeat"; value: HeartbeatView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -370,6 +389,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["degradedNotice", (v: unknown) => ({ case: "degradedNotice" as const, value: decodeDegradedNotice(v) })],
   ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
   ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
+  ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -512,6 +532,38 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     // Adopt the typed payload by shape (see file-top §5.1 boundary note).
     payload: ensureObject(o[arm], `${ctx}.${arm}`),
   };
+}
+
+const HEARTBEAT_VIEW_KEYS = new Set(["workspace", "sessionId", "progress"]);
+const HEARTBEAT_PROGRESS_KEYS = new Set([
+  "toolUseId",
+  "toolName",
+  "parentToolUseId",
+  "elapsedSeconds",
+]);
+
+function decodeHeartbeatView(v: unknown): HeartbeatView {
+  const o = ensureObject(v, "HeartbeatView");
+  rejectUnknown(o, HEARTBEAT_VIEW_KEYS, "HeartbeatView");
+  if (o.progress === undefined || o.progress === null) {
+    throw new Error("frontend-proto: HeartbeatView missing required `progress`");
+  }
+  const p = ensureObject(o.progress, "HeartbeatView.progress");
+  rejectUnknown(p, HEARTBEAT_PROGRESS_KEYS, "HeartbeatView.progress");
+  const hv: HeartbeatView = {
+    workspace: str(o, "workspace", "HeartbeatView"),
+    sessionId: str(o, "sessionId", "HeartbeatView"),
+    toolUseId: str(p, "toolUseId", "HeartbeatView.progress"),
+    toolName: str(p, "toolName", "HeartbeatView.progress"),
+    parentToolUseId: str(p, "parentToolUseId", "HeartbeatView.progress"),
+    elapsedSeconds: num(p, "elapsedSeconds", "HeartbeatView.progress"),
+  };
+  // Without a tool_use_id there is no call to attribute the liveness to, so the
+  // frame is unusable rather than merely empty.
+  if (hv.toolUseId === "") {
+    throw new Error("frontend-proto: HeartbeatView.progress missing required `toolUseId`");
+  }
+  return hv;
 }
 
 const TYPING_DELTA_KEYS = new Set(["workspace", "sessionId", "delta"]);

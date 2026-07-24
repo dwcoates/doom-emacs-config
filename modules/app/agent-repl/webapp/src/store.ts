@@ -18,6 +18,7 @@ import type {
   AdapterEffect,
   SessionInitInput,
   SessionViewInput,
+  ToolProgressInput,
   TypingReveal,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
@@ -515,6 +516,9 @@ export class ConversationStore {
         case "typing":
           changed = this.applyTyping(effect.value) || changed;
           break;
+        case "tool-progress":
+          changed = this.applyToolProgress(effect.value) || changed;
+          break;
         case "task-catalog":
           this.taskRoster = effect.value.entries;
           changed = true;
@@ -612,6 +616,38 @@ export class ConversationStore {
    * call still awaiting its input; with none open it is loud-logged, never
    * silently dropped.
    */
+  /**
+   * Adopt a long-tool liveness heartbeat (E4) onto the open call it names, so
+   * the running tool chip's elapsed clock keeps ticking instead of the tool
+   * looking hung.
+   *
+   * A heartbeat naming a call the store does not hold is NOT an error: the
+   * relay is ephemeral and deliberately absent from StateSnapshot, so a
+   * frontend that reconnects mid-tool can legitimately receive heartbeats for
+   * a call whose tool_use block it never saw. That case is reported on the
+   * diagnostics channel and changes nothing, rather than being invented into
+   * a phantom item.
+   */
+  private applyToolProgress(p: ToolProgressInput): boolean {
+    const item = this.state.items.find(
+      (i): i is ToolItem => i.kind === "tool" && i.toolUseId === p.toolUseId,
+    );
+    if (!item) {
+      this.log(
+        "info",
+        `heartbeat for unknown tool call ${p.toolUseId} (${p.toolName}); ` +
+          "expected after a reconnect, since heartbeats are never replayed",
+      );
+      return false;
+    }
+    // A settled call cannot get any livelier; a late heartbeat must not revive
+    // its elapsed clock after the result already froze it.
+    if (item.resultTs !== undefined) return false;
+    if (item.progressElapsedS === p.elapsedSeconds) return false;
+    item.progressElapsedS = p.elapsedSeconds;
+    return true;
+  }
+
   private applyTyping(reveal: TypingReveal): boolean {
     const s = this.state;
     if (reveal.kind === "text" || reveal.kind === "thinking") {

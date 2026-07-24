@@ -23,6 +23,7 @@ type Pusher interface {
 	PushDegradedNotice(*frontendv1.DegradedNotice)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
 	PushSessionInitView(*frontendv1.SessionInitView)
+	PushHeartbeatView(*frontendv1.HeartbeatView)
 }
 
 // StateApplier is the slice of the SSM the driver feeds lifecycle events to.
@@ -168,13 +169,13 @@ func (c *consumer) Consume(ev *corev1.Event) {
 			c.push.PushTypingDelta(td)
 		}
 	case *corev1.Event_HeartbeatProgress:
-		// The S9 TypingDelta carries only a core.v1.ContentDelta; a tool-progress
-		// heartbeat is not a ContentDelta and has no other frontend.v1 arm, so it
-		// is intentionally not relayed (a schema-forced drop, loud-logged once so
-		// the gap is visible rather than silent). It stays an EPHEMERAL event the
-		// store never persists, so nothing durable is lost.
-		c.logf("sessiondrv: heartbeat progress not relayed (no frontend.v1 arm under S9) session=%s tool=%s",
-			c.sessionID, p.HeartbeatProgress.GetToolUseId())
+		// E4: relayed as HeartbeatView. Under S9 this was a schema-forced DROP —
+		// TypingDelta carries only a ContentDelta and there was no other arm to
+		// put a tool-progress heartbeat in. HeartbeatView is that arm, so the
+		// liveness signal now reaches the frontend instead of being logged away.
+		if hv := frontend.HeartbeatViewFromProgress(c.workspace, c.sessionID, p.HeartbeatProgress); hv != nil {
+			c.push.PushHeartbeatView(hv)
+		}
 	case *corev1.Event_Vendor:
 		if si := systemInitFromVendor(p.Vendor); si != nil {
 			c.mu.Lock()

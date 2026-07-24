@@ -535,3 +535,46 @@ describe("explicit-ignore path", () => {
     expect(logs.filter(([, m]) => m.includes("content-block:image"))).toHaveLength(1);
   });
 });
+
+describe("heartbeat -> tool-progress (E4)", () => {
+  it("maps a heartbeat frame to a tool-progress effect", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      heartbeat: {
+        workspace: "ws",
+        sessionId: "s1",
+        progress: { toolUseId: "tu1", toolName: "Bash", elapsedSeconds: 12.5 },
+      },
+    });
+
+    // Assert
+    expect(effects).toEqual([
+      {
+        kind: "tool-progress",
+        value: {
+          workspace: "ws",
+          sessionId: "s1",
+          toolUseId: "tu1",
+          toolName: "Bash",
+          parentToolUseId: "",
+          elapsedSeconds: 12.5,
+        },
+      },
+    ]);
+  });
+
+  it("does not route the heartbeat down the explicit-ignore path", () => {
+    // Arrange
+    const adapter = new StateAdapter();
+
+    // Act
+    adapter.apply(
+      frame({
+        heartbeat: { sessionId: "s1", progress: { toolUseId: "tu1", elapsedSeconds: 1 } },
+      }),
+    );
+
+    // Assert — a mapped visual must not be counted as an ignored shape.
+    expect(adapter.ignoredCounts().get("heartbeat")).toBeUndefined();
+  });
+});
