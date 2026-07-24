@@ -20,6 +20,9 @@
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
 ;;   - `agent-repl--ws-live-p'             entry exists AND not tombstoned
 ;;   - `agent-repl--live-ws-names'         live names (filtered)
+;;   - `agent-repl--ws-project-pollable-p' live entry with project dir
+;;   - `agent-repl--ws-project-poll-partition'
+;;                                         pollable names + placeholder names
 ;;
 ;; Future wrappers introduced by this branch:
 ;;   - `agent-repl--ws-known-p'            entry exists (live or tombstoned)
@@ -154,9 +157,9 @@ Emits an unconditional log line (via `agent-repl--do-log', bypassing
 `agent-repl-debug') when this call CREATES a fresh hash entry whose
 plist will lack `:project-dir' — the non-workspace stub shape (a plain
 persp such as Doom's default \"main\" auto-vivified by a persp hook).
-The workspace renderers (tab-bar, picker) filter that shape out
-entirely, so the log line is a producer diagnostic rather than a
-user-visible-bug warning.  Includes a
+The workspace renderers (tab-bar, picker) and project-state poller
+filter that shape out entirely, so the log line is a producer
+diagnostic rather than a user-visible-bug warning.  Includes a
 caller trace so the producer can be identified without first turning
 debug logging on."
   (let ((stub-create (and (null (gethash ws agent-repl--workspaces))
@@ -212,6 +215,30 @@ workspaces' — that idiom now over-includes tombstones, so route
 through this filter instead."
   (cl-remove-if-not #'agent-repl--ws-live-p
                     (hash-table-keys agent-repl--workspaces)))
+
+(defun agent-repl--ws-project-pollable-p (ws)
+  "Return non-nil when WS is live and owns a non-nil `:project-dir'.
+This is the workspace-layer precondition for project-state polling.
+Persp-mode placeholder entries such as \"main\" and \"none\" can be live
+hash entries while intentionally lacking `:project-dir'; they are not
+agent-repl projects and must never reach git or project-directory
+operations."
+  (and (agent-repl--ws-live-p ws)
+       (agent-repl--ws-get ws :project-dir)))
+
+(defun agent-repl--ws-project-poll-partition ()
+  "Return `(POLLABLE . PLACEHOLDERS)' for all live workspace entries.
+POLLABLE contains live names satisfying
+`agent-repl--ws-project-pollable-p'.  PLACEHOLDERS contains the other
+live names, which currently means persp-mode stubs without
+`:project-dir'.  The explicit second list lets the periodic poller log
+every exclusion instead of silently skipping malformed input."
+  (let (pollable placeholders)
+    (dolist (ws (agent-repl--live-ws-names))
+      (if (agent-repl--ws-project-pollable-p ws)
+          (push ws pollable)
+        (push ws placeholders)))
+    (cons (nreverse pollable) (nreverse placeholders))))
 
 (defun agent-repl--ws-dir-owner (dir &optional except)
   "Return a live workspace (other than EXCEPT) owning canonical DIR, or nil.
