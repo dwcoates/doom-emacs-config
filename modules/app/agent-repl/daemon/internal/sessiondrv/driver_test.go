@@ -3,12 +3,15 @@ package sessiondrv
 import (
 	"context"
 	"errors"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/shimclient"
 )
@@ -230,3 +233,110 @@ func TestEnsureShimFailurePropagates(t *testing.T) {
 }
 
 var errBringUp = errors.New("bring-up failed")
+
+// --- permHandler permission-item push (S8) ---------------------------------
+
+// newTestPermHandler builds a permHandler over a fresh registry and a
+// fakePusher-backed consumer, returning all three for assertions.
+func newTestPermHandler() (permHandler, *permRegistry, *fakePusher) {
+	push := &fakePusher{}
+	reg := newPermRegistry(nil)
+	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil)
+	return permHandler{reg: reg, cons: cons, logf: func(string, ...any) {}}, reg, push
+}
+
+// waitForPermWaiter blocks until reg has a pending waiter for id under ws,
+// yielding the scheduler so the blocked handler goroutine can park its waiter.
+// It is a deterministic rendezvous (HandlePermission registers the waiter
+// synchronously before blocking on the answer channel), not a timed sleep.
+func waitForPermWaiter(reg *permRegistry, ws, id string) {
+	for {
+		for _, got := range reg.idsForWorkspace(ws) {
+			if got == id {
+				return
+			}
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
+	// Arrange.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+
+	// Act: run the blocking handler, wait for its waiter, then allow.
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r1")
+	if err := reg.answer("r1", true, "", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	<-done
+
+	// Assert: pending then allowed on uuid r1, plus a PERMISSION render-state.
+	got := push.permissionResolutions("r1")
+	want := []corev1.PermissionItem_Resolution{
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_ALLOWED,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+	if len(push.state) == 0 || push.state[0].GetState() != frontendv1.RenderState_RENDER_STATE_PERMISSION {
+		t.Fatalf("expected a PERMISSION workspace-state push, got %v", push.state)
+	}
+}
+
+func TestHandlePermissionPushesDeniedWithMessage(t *testing.T) {
+	// Arrange.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r2", ToolName: "Bash"}
+
+	// Act.
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r2")
+	if err := reg.answer("r2", false, "not allowed", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	<-done
+
+	// Assert: pending then denied, and the denied item carries the deny message.
+	got := push.permissionResolutions("r2")
+	want := []corev1.PermissionItem_Resolution{
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_DENIED,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+	if msg := lastPermissionDenyMessage(push, "r2"); msg != "not allowed" {
+		t.Fatalf("deny message = %q, want %q", msg, "not allowed")
+	}
+}
+
+func TestHandlePermissionAbandonedOnTeardown(t *testing.T) {
+	// Arrange.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r3", ToolName: "Bash"}
+
+	// Act: the handler blocks; a teardown fail abandons it (nil response).
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r3")
+	reg.fail("connection teardown")
+	if resp := <-done; resp != nil {
+		t.Fatalf("abandoned permission must return a nil response, got %v", resp)
+	}
+
+	// Assert: pending then abandoned on uuid r3.
+	got := push.permissionResolutions("r3")
+	want := []corev1.PermissionItem_Resolution{
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_ABANDONED,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+}

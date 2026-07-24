@@ -61,6 +61,13 @@ type consumer struct {
 	// HTTP /status and /commands routes now that the L2 translator that used to
 	// cache it is gone. Nil until the first init lands (honest empty).
 	systemInit *datav1.SystemInit
+	// permItems retains the LATEST permission ConversationItem per request_id,
+	// in first-seen order, so a resync replays each permission's current
+	// resolution (S8). The retained ring holds core.v1.Events; a permission item
+	// is a daemon-composed frontend item with no store seq, so it lives here
+	// beside the ring and is replayed on every resync.
+	permItems map[string]*frontendv1.ConversationItem
+	permOrder []string
 }
 
 func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted)) *consumer {
@@ -247,6 +254,67 @@ func (c *consumer) resync(fromSeq uint64) {
 		if ev.GetVendor() != nil {
 			c.pushConversation(ev)
 		}
+	}
+	// Replay the retained permission items too: they carry no store seq (they
+	// are daemon-composed, not store events), so a pending or resolved
+	// permission is re-presented on reconnect regardless of fromSeq. Idempotent
+	// by uuid (the permission request_id) — a re-push REPLACES.
+	for _, item := range c.snapshotPermItems() {
+		c.pushPermissionDelta(item)
+	}
+}
+
+// pushPermission retains and pushes a permission ConversationItem, keyed by its
+// uuid (the permission request_id) so a resync replays the latest resolution.
+// A same-uuid push REPLACES the retained item, tracking the resolution
+// lifecycle (PENDING -> ALLOWED/DENIED/ABANDONED). This is the S8 permission
+// surface pushed through the NORMAL retained pusher path so resync replays it.
+func (c *consumer) pushPermission(item *frontendv1.ConversationItem) {
+	c.mu.Lock()
+	if c.permItems == nil {
+		c.permItems = map[string]*frontendv1.ConversationItem{}
+	}
+	if _, seen := c.permItems[item.GetUuid()]; !seen {
+		c.permOrder = append(c.permOrder, item.GetUuid())
+	}
+	c.permItems[item.GetUuid()] = item
+	c.mu.Unlock()
+	c.pushPermissionDelta(item)
+}
+
+// pushPermissionDelta wraps a single permission item in a ConversationDelta and
+// pushes it (no store seq: through_seq stays 0, daemon-local).
+func (c *consumer) pushPermissionDelta(item *frontendv1.ConversationItem) {
+	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
+		Workspace: c.workspace,
+		SessionId: c.sessionID,
+		Items:     []*frontendv1.ConversationItem{item},
+	})
+}
+
+// snapshotPermItems returns the retained permission items in first-seen order,
+// taken under the lock so a concurrent pushPermission cannot race the read.
+func (c *consumer) snapshotPermItems() []*frontendv1.ConversationItem {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*frontendv1.ConversationItem, 0, len(c.permOrder))
+	for _, id := range c.permOrder {
+		out = append(out, c.permItems[id])
+	}
+	return out
+}
+
+// permissionItem composes a permission ConversationItem: the request plus its
+// resolution, keyed by the request_id as the item uuid (the reconciliation key
+// frontends replace on). denyMessage is set only on RESOLUTION_DENIED.
+func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.ConversationItem {
+	return &frontendv1.ConversationItem{
+		Uuid: req.GetRequestId(),
+		Item: &frontendv1.ConversationItem_Permission{Permission: &corev1.PermissionItem{
+			Request:     req,
+			Resolution:  res,
+			DenyMessage: denyMessage,
+		}},
 	}
 }
 

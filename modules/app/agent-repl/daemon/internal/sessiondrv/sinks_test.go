@@ -53,6 +53,42 @@ func (p *fakePusher) PushSessionInitView(v *frontendv1.SessionInitView) {
 	p.mu.Unlock()
 }
 
+// permissionResolutions extracts, in push order, the resolution of every
+// permission ConversationItem keyed by uuid across the recorded deltas.
+func (p *fakePusher) permissionResolutions(uuid string) []corev1.PermissionItem_Resolution {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []corev1.PermissionItem_Resolution
+	for _, d := range p.convo {
+		for _, it := range d.GetItems() {
+			if it.GetUuid() == uuid {
+				if pi := it.GetPermission(); pi != nil {
+					out = append(out, pi.GetResolution())
+				}
+			}
+		}
+	}
+	return out
+}
+
+// lastPermissionDenyMessage returns the deny_message of the last permission
+// item keyed by uuid across the recorded deltas ("" when none carried one).
+func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	msg := ""
+	for _, d := range p.convo {
+		for _, it := range d.GetItems() {
+			if it.GetUuid() == uuid {
+				if pi := it.GetPermission(); pi != nil {
+					msg = pi.GetDenyMessage()
+				}
+			}
+		}
+	}
+	return msg
+}
+
 // fakeApplier records applied events and optionally returns an error.
 type fakeApplier struct {
 	applied []*corev1.Event
@@ -88,6 +124,27 @@ func TestConsumeContentDeltaPushesTyping(t *testing.T) {
 	got := push.typing[0].GetDelta()
 	if got.GetUuid() != "u1" || got.GetText() != "hi" {
 		t.Errorf("embedded content delta: got uuid=%q text=%q, want u1/hi", got.GetUuid(), got.GetText())
+	}
+}
+
+func TestResyncReplaysLatestPermissionItem(t *testing.T) {
+	// Arrange: a permission goes pending then allowed on the same request_id.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+	c.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
+	c.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ALLOWED, ""))
+	push.mu.Lock()
+	push.convo = nil // drop the live pushes; only the resync replay should remain
+	push.mu.Unlock()
+
+	// Act.
+	c.resync(0)
+
+	// Assert: exactly one replay carrying the LATEST resolution (allowed).
+	got := push.permissionResolutions("r1")
+	if len(got) != 1 || got[0] != corev1.PermissionItem_RESOLUTION_ALLOWED {
+		t.Fatalf("resync replay resolutions = %v, want [ALLOWED]", got)
 	}
 }
 
