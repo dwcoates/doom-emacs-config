@@ -240,6 +240,45 @@ test_install_refreshes_managed_hook() {
   cleanup "$repo" "$home"
 }
 
+# --- install: a hook carrying only the LEGACY marker is still ours ---
+# Regression: the claude-repl -> agent-repl rename rewrote the legacy
+# marker constant to the current spelling, so a pre-rename installed hook
+# was misreported as foreign and never refreshed — freezing the ERT gate
+# at a copy that greps a module path which no longer exists.
+test_install_refreshes_legacy_marked_hook() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  mkdir -p "$repo/.git/hooks"
+  # A pre-rename copy: legacy marker only, plus a body we can detect.
+  printf '#!/bin/sh\n# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit\necho stale\n' \
+    > "$repo/.git/hooks/pre-commit"
+  chmod +x "$repo/.git/hooks/pre-commit"
+  run_install "$repo" "$home"
+  if ! grep -q "echo stale" "$repo/.git/hooks/pre-commit" \
+     && grep -q "AGENT_REPL_MANAGED_HOOK" "$repo/.git/hooks/pre-commit" \
+     && grep -q "Refreshed managed pre-commit hook" "$repo/.install.log"; then
+    pass "legacy-marked pre-commit hook is refreshed, not called foreign"
+  else
+    fail "legacy-marked hook refresh" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- uninstall: a hook carrying only the LEGACY marker is removed ---
+test_uninstall_removes_legacy_marked_hook() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  mkdir -p "$repo/.git/hooks"
+  printf '#!/bin/sh\n# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit\necho stale\n' \
+    > "$repo/.git/hooks/pre-commit"
+  chmod +x "$repo/.git/hooks/pre-commit"
+  run_install "$repo" "$home" uninstall
+  if [ ! -e "$repo/.git/hooks/pre-commit" ]; then
+    pass "uninstall removes a legacy-marked pre-commit hook"
+  else
+    fail "legacy-marked hook uninstall" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
 # --- install: foreign pre-commit hook is preserved ---
 test_install_preserves_foreign_pre_commit() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
@@ -306,6 +345,8 @@ test_local_skills_link_to_main_worktree
 test_install_preserves_non_symlink_file
 test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook
+test_install_refreshes_legacy_marked_hook
+test_uninstall_removes_legacy_marked_hook
 test_install_preserves_foreign_pre_commit
 test_uninstall_removes_impl_symlink
 test_uninstall_only_removes_managed_hook
