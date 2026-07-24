@@ -218,6 +218,7 @@ const (
 	ApiKeySource_API_KEY_SOURCE_PROJECT     ApiKeySource = 2
 	ApiKeySource_API_KEY_SOURCE_ORG         ApiKeySource = 3
 	ApiKeySource_API_KEY_SOURCE_TEMPORARY   ApiKeySource = 4
+	ApiKeySource_API_KEY_SOURCE_NONE        ApiKeySource = 5 // [corpus] subscription auth reports "none"
 )
 
 // Enum value maps for ApiKeySource.
@@ -228,6 +229,7 @@ var (
 		2: "API_KEY_SOURCE_PROJECT",
 		3: "API_KEY_SOURCE_ORG",
 		4: "API_KEY_SOURCE_TEMPORARY",
+		5: "API_KEY_SOURCE_NONE",
 	}
 	ApiKeySource_value = map[string]int32{
 		"API_KEY_SOURCE_UNSPECIFIED": 0,
@@ -235,6 +237,7 @@ var (
 		"API_KEY_SOURCE_PROJECT":     2,
 		"API_KEY_SOURCE_ORG":         3,
 		"API_KEY_SOURCE_TEMPORARY":   4,
+		"API_KEY_SOURCE_NONE":        5,
 	}
 )
 
@@ -733,8 +736,11 @@ type UserMessage struct {
 	Uuid          string         `protobuf:"bytes,5,opt,name=uuid,proto3" json:"uuid,omitempty"` // optional in typings, always present on disk
 	SessionId     string         `protobuf:"bytes,6,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	IsReplay      bool           `protobuf:"varint,7,opt,name=is_replay,json=isReplay,proto3" json:"is_replay,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// [observed] present on subagent-context user messages:
+	SubagentType    string `protobuf:"bytes,8,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"`
+	TaskDescription string `protobuf:"bytes,9,opt,name=task_description,json=taskDescription,proto3" json:"task_description,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UserMessage) Reset() {
@@ -814,6 +820,20 @@ func (x *UserMessage) GetIsReplay() bool {
 		return x.IsReplay
 	}
 	return false
+}
+
+func (x *UserMessage) GetSubagentType() string {
+	if x != nil {
+		return x.SubagentType
+	}
+	return ""
+}
+
+func (x *UserMessage) GetTaskDescription() string {
+	if x != nil {
+		return x.TaskDescription
+	}
+	return ""
 }
 
 // [sdk coreTypes.d.ts:428-435] SDKAssistantMessage.
@@ -1425,6 +1445,8 @@ type PluginRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`   // [corpus] e.g. "gns-cowork@chesscom-gns"
+	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"` // [corpus]
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1473,6 +1495,20 @@ func (x *PluginRef) GetPath() string {
 	return ""
 }
 
+func (x *PluginRef) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *PluginRef) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 // [sdk coreTypes.d.ts:475-499] SDKSystemMessage subtype "init"
 // + [observed] fast_mode_state.
 type SystemInit struct {
@@ -1493,8 +1529,13 @@ type SystemInit struct {
 	Uuid              string                 `protobuf:"bytes,14,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId         string                 `protobuf:"bytes,15,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	FastModeState     string                 `protobuf:"bytes,16,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"` // [observed]
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// [corpus] further observed init fields:
+	Capabilities            []string          `protobuf:"bytes,17,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // e.g. "interrupt_receipt_v1"
+	AnalyticsDisabled       bool              `protobuf:"varint,18,opt,name=analytics_disabled,json=analyticsDisabled,proto3" json:"analytics_disabled,omitempty"`
+	ProductFeedbackDisabled bool              `protobuf:"varint,19,opt,name=product_feedback_disabled,json=productFeedbackDisabled,proto3" json:"product_feedback_disabled,omitempty"`
+	MemoryPaths             map[string]string `protobuf:"bytes,20,rep,name=memory_paths,json=memoryPaths,proto3" json:"memory_paths,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // e.g. {"auto": <memory dir>}
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *SystemInit) Reset() {
@@ -1639,6 +1680,34 @@ func (x *SystemInit) GetFastModeState() string {
 	return ""
 }
 
+func (x *SystemInit) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *SystemInit) GetAnalyticsDisabled() bool {
+	if x != nil {
+		return x.AnalyticsDisabled
+	}
+	return false
+}
+
+func (x *SystemInit) GetProductFeedbackDisabled() bool {
+	if x != nil {
+		return x.ProductFeedbackDisabled
+	}
+	return false
+}
+
+func (x *SystemInit) GetMemoryPaths() map[string]string {
+	if x != nil {
+		return x.MemoryPaths
+	}
+	return nil
+}
+
 // [sdk coreTypes.d.ts:500-506] SDKPartialAssistantMessage wrapping the raw
 // Anthropic API RawMessageStreamEvent. NOTE: in live operation these become
 // EPHEMERAL core.ContentDelta via the delta bypass; the full typed model
@@ -1649,6 +1718,7 @@ type StreamEvent struct {
 	ParentToolUseId string                 `protobuf:"bytes,2,opt,name=parent_tool_use_id,json=parentToolUseId,proto3" json:"parent_tool_use_id,omitempty"`
 	Uuid            string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	TtftMs          int64                  `protobuf:"varint,5,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"` // [observed] time-to-first-token stamp on partials
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1709,6 +1779,13 @@ func (x *StreamEvent) GetSessionId() string {
 		return x.SessionId
 	}
 	return ""
+}
+
+func (x *StreamEvent) GetTtftMs() int64 {
+	if x != nil {
+		return x.TtftMs
+	}
+	return 0
 }
 
 type RawMessageStreamEvent struct {
@@ -3918,7 +3995,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x16control_cancel_request\x18\x15 \x01(\v2'.agentshim.data.v1.ControlCancelRequestH\x00R\x14controlCancelRequest\x12=\n" +
 	"\n" +
 	"keep_alive\x18\x16 \x01(\v2\x1c.agentshim.data.v1.KeepAliveH\x00R\tkeepAliveB\x05\n" +
-	"\x03msg\"\xb4\x02\n" +
+	"\x03msg\"\x84\x03\n" +
 	"\vUserMessage\x12;\n" +
 	"\amessage\x18\x01 \x01(\v2!.agentshim.data.v1.ApiUserMessageR\amessage\x12+\n" +
 	"\x12parent_tool_use_id\x18\x02 \x01(\tR\x0fparentToolUseId\x12!\n" +
@@ -3927,7 +4004,9 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x04uuid\x18\x05 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x06 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tis_replay\x18\a \x01(\bR\bisReplay\"\x91\x02\n" +
+	"\tis_replay\x18\a \x01(\bR\bisReplay\x12#\n" +
+	"\rsubagent_type\x18\b \x01(\tR\fsubagentType\x12)\n" +
+	"\x10task_description\x18\t \x01(\tR\x0ftaskDescription\"\x91\x02\n" +
 	"\x10AssistantMessage\x12@\n" +
 	"\amessage\x18\x01 \x01(\v2&.agentshim.data.v1.ApiAssistantMessageR\amessage\x12+\n" +
 	"\x12parent_tool_use_id\x18\x02 \x01(\tR\x0fparentToolUseId\x12>\n" +
@@ -3992,10 +4071,12 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"tool_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\ttoolInput\"`\n" +
 	"\x0fMcpServerStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x129\n" +
-	"\x06status\x18\x02 \x01(\x0e2!.agentshim.data.v1.McpServerStateR\x06status\"3\n" +
+	"\x06status\x18\x02 \x01(\x0e2!.agentshim.data.v1.McpServerStateR\x06status\"e\n" +
 	"\tPluginRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04path\x18\x02 \x01(\tR\x04path\"\xd2\x04\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\"\xf4\x06\n" +
 	"\n" +
 	"SystemInit\x12\x16\n" +
 	"\x06agents\x18\x01 \x03(\tR\x06agents\x12E\n" +
@@ -4016,13 +4097,21 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x04uuid\x18\x0e \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x0f \x01(\tR\tsessionId\x12&\n" +
-	"\x0ffast_mode_state\x18\x10 \x01(\tR\rfastModeState\"\xad\x01\n" +
+	"\x0ffast_mode_state\x18\x10 \x01(\tR\rfastModeState\x12\"\n" +
+	"\fcapabilities\x18\x11 \x03(\tR\fcapabilities\x12-\n" +
+	"\x12analytics_disabled\x18\x12 \x01(\bR\x11analyticsDisabled\x12:\n" +
+	"\x19product_feedback_disabled\x18\x13 \x01(\bR\x17productFeedbackDisabled\x12Q\n" +
+	"\fmemory_paths\x18\x14 \x03(\v2..agentshim.data.v1.SystemInit.MemoryPathsEntryR\vmemoryPaths\x1a>\n" +
+	"\x10MemoryPathsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc6\x01\n" +
 	"\vStreamEvent\x12>\n" +
 	"\x05event\x18\x01 \x01(\v2(.agentshim.data.v1.RawMessageStreamEventR\x05event\x12+\n" +
 	"\x12parent_tool_use_id\x18\x02 \x01(\tR\x0fparentToolUseId\x12\x12\n" +
 	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\"\x98\x04\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x17\n" +
+	"\attft_ms\x18\x05 \x01(\x03R\x06ttftMs\"\x98\x04\n" +
 	"\x15RawMessageStreamEvent\x12K\n" +
 	"\rmessage_start\x18\x01 \x01(\v2$.agentshim.data.v1.MessageStartEventH\x00R\fmessageStart\x12[\n" +
 	"\x13content_block_start\x18\x02 \x01(\v2).agentshim.data.v1.ContentBlockStartEventH\x00R\x11contentBlockStart\x12[\n" +
@@ -4213,13 +4302,14 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x1aMCP_SERVER_STATE_CONNECTED\x10\x01\x12\x1b\n" +
 	"\x17MCP_SERVER_STATE_FAILED\x10\x02\x12\x1f\n" +
 	"\x1bMCP_SERVER_STATE_NEEDS_AUTH\x10\x03\x12\x1c\n" +
-	"\x18MCP_SERVER_STATE_PENDING\x10\x04*\x99\x01\n" +
+	"\x18MCP_SERVER_STATE_PENDING\x10\x04*\xb2\x01\n" +
 	"\fApiKeySource\x12\x1e\n" +
 	"\x1aAPI_KEY_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13API_KEY_SOURCE_USER\x10\x01\x12\x1a\n" +
 	"\x16API_KEY_SOURCE_PROJECT\x10\x02\x12\x16\n" +
 	"\x12API_KEY_SOURCE_ORG\x10\x03\x12\x1c\n" +
-	"\x18API_KEY_SOURCE_TEMPORARY\x10\x04*g\n" +
+	"\x18API_KEY_SOURCE_TEMPORARY\x10\x04\x12\x17\n" +
+	"\x13API_KEY_SOURCE_NONE\x10\x05*g\n" +
 	"\x0eCompactTrigger\x12\x1f\n" +
 	"\x1bCOMPACT_TRIGGER_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16COMPACT_TRIGGER_MANUAL\x10\x01\x12\x18\n" +
@@ -4238,7 +4328,7 @@ func file_agentshim_data_v1_stream_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_data_v1_stream_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
 var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(AssistantMessageError)(0),     // 0: agentshim.data.v1.AssistantMessageError
 	(ResultSubtype)(0),             // 1: agentshim.data.v1.ResultSubtype
@@ -4289,10 +4379,11 @@ var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(*ControlCancelRequest)(nil),   // 46: agentshim.data.v1.ControlCancelRequest
 	(*KeepAlive)(nil),              // 47: agentshim.data.v1.KeepAlive
 	nil,                            // 48: agentshim.data.v1.ResultMessage.ModelUsageEntry
-	(*ApiUserMessage)(nil),         // 49: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),          // 50: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),    // 51: agentshim.data.v1.ApiAssistantMessage
-	(*structpb.Struct)(nil),        // 52: google.protobuf.Struct
+	nil,                            // 49: agentshim.data.v1.SystemInit.MemoryPathsEntry
+	(*ApiUserMessage)(nil),         // 50: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),          // 51: agentshim.data.v1.ToolUseResult
+	(*ApiAssistantMessage)(nil),    // 52: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.Struct)(nil),        // 53: google.protobuf.Struct
 }
 var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	6,  // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
@@ -4317,50 +4408,51 @@ var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	45, // 19: agentshim.data.v1.ClaudeStreamMessage.control_response:type_name -> agentshim.data.v1.ControlResponse
 	46, // 20: agentshim.data.v1.ClaudeStreamMessage.control_cancel_request:type_name -> agentshim.data.v1.ControlCancelRequest
 	47, // 21: agentshim.data.v1.ClaudeStreamMessage.keep_alive:type_name -> agentshim.data.v1.KeepAlive
-	49, // 22: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
-	50, // 23: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	51, // 24: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	50, // 22: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
+	51, // 23: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	52, // 24: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
 	0,  // 25: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
 	1,  // 26: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
 	9,  // 27: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
 	48, // 28: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
 	11, // 29: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
-	52, // 30: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
-	52, // 31: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
-	52, // 32: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
-	52, // 33: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
+	53, // 30: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
+	53, // 31: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
+	53, // 32: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
+	53, // 33: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
 	2,  // 34: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
 	3,  // 35: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
 	12, // 36: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
 	13, // 37: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
-	16, // 38: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
-	17, // 39: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
-	18, // 40: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
-	19, // 41: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
-	24, // 42: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
-	25, // 43: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
-	26, // 44: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
-	52, // 45: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
-	52, // 46: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
-	20, // 47: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
-	21, // 48: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
-	22, // 49: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
-	23, // 50: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
-	52, // 51: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
-	9,  // 52: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
-	4,  // 53: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
-	32, // 54: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
-	38, // 55: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
-	40, // 56: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
-	42, // 57: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
-	52, // 58: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
-	52, // 59: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
-	10, // 60: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	49, // 38: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
+	16, // 39: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
+	17, // 40: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
+	18, // 41: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
+	19, // 42: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
+	24, // 43: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
+	25, // 44: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
+	26, // 45: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
+	53, // 46: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
+	53, // 47: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
+	20, // 48: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
+	21, // 49: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
+	22, // 50: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
+	23, // 51: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
+	53, // 52: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
+	9,  // 53: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
+	4,  // 54: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
+	32, // 55: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
+	38, // 56: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
+	40, // 57: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
+	42, // 58: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
+	53, // 59: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
+	53, // 60: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
+	10, // 61: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_stream_proto_init() }
@@ -4413,7 +4505,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_data_v1_stream_proto_rawDesc), len(file_agentshim_data_v1_stream_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   44,
+			NumMessages:   45,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

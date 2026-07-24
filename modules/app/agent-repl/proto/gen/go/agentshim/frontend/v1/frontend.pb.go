@@ -425,8 +425,11 @@ type SessionView struct {
 	ContextWindow  int64                  `protobuf:"varint,8,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
 	PermissionMode string                 `protobuf:"bytes,9,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	ShimAttached   bool                   `protobuf:"varint,10,opt,name=shim_attached,json=shimAttached,proto3" json:"shim_attached,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Additive (S6): resume/rebind keys the webapp lost in the cutover.
+	ClaudeSessionId string `protobuf:"bytes,11,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
+	Cwd             string `protobuf:"bytes,12,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SessionView) Reset() {
@@ -527,6 +530,20 @@ func (x *SessionView) GetShimAttached() bool {
 		return x.ShimAttached
 	}
 	return false
+}
+
+func (x *SessionView) GetClaudeSessionId() string {
+	if x != nil {
+		return x.ClaudeSessionId
+	}
+	return ""
+}
+
+func (x *SessionView) GetCwd() string {
+	if x != nil {
+		return x.Cwd
+	}
+	return ""
 }
 
 // Complete (store-round-tripped) conversation additions, pre-rendered into
@@ -1184,8 +1201,13 @@ type MergeWorkspaceCmd struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	Handler                  string                 `protobuf:"bytes,1,opt,name=handler,proto3" json:"handler,omitempty"`                                                                      // e.g. "cherry-pick"
 	ConflictResolvedContinue bool                   `protobuf:"varint,2,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// Additive (S6): the daemon has no workspace→worktree mapping of its own,
+	// so the frontend supplies the merge geometry with the command.
+	SourceBranch  string `protobuf:"bytes,3,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
+	SourceDir     string `protobuf:"bytes,4,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
+	TargetDir     string `protobuf:"bytes,5,opt,name=target_dir,json=targetDir,proto3" json:"target_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MergeWorkspaceCmd) Reset() {
@@ -1230,6 +1252,27 @@ func (x *MergeWorkspaceCmd) GetConflictResolvedContinue() bool {
 		return x.ConflictResolvedContinue
 	}
 	return false
+}
+
+func (x *MergeWorkspaceCmd) GetSourceBranch() string {
+	if x != nil {
+		return x.SourceBranch
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceCmd) GetSourceDir() string {
+	if x != nil {
+		return x.SourceDir
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceCmd) GetTargetDir() string {
+	if x != nil {
+		return x.TargetDir
+	}
+	return ""
 }
 
 type CloseWorkspaceCmd struct {
@@ -1566,7 +1609,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"cause_kind\x18\a \x01(\tR\tcauseKind\x12\x1b\n" +
 	"\tcause_seq\x18\b \x01(\x04R\bcauseSeq\x12\x13\n" +
-	"\x05at_ms\x18\t \x01(\x03R\x04atMs\"\xc8\x02\n" +
+	"\x05at_ms\x18\t \x01(\x03R\x04atMs\"\x86\x03\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1579,7 +1622,9 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0econtext_window\x18\b \x01(\x03R\rcontextWindow\x12'\n" +
 	"\x0fpermission_mode\x18\t \x01(\tR\x0epermissionMode\x12#\n" +
 	"\rshim_attached\x18\n" +
-	" \x01(\bR\fshimAttached\"\xa0\x01\n" +
+	" \x01(\bR\fshimAttached\x12*\n" +
+	"\x11claude_session_id\x18\v \x01(\tR\x0fclaudeSessionId\x12\x10\n" +
+	"\x03cwd\x18\f \x01(\tR\x03cwd\"\xa0\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1631,10 +1676,15 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15permission_request_id\x18\x01 \x01(\tR\x13permissionRequestId\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12<\n" +
 	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"k\n" +
+	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xce\x01\n" +
 	"\x11MergeWorkspaceCmd\x12\x18\n" +
 	"\ahandler\x18\x01 \x01(\tR\ahandler\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\"\x13\n" +
+	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12#\n" +
+	"\rsource_branch\x18\x03 \x01(\tR\fsourceBranch\x12\x1d\n" +
+	"\n" +
+	"source_dir\x18\x04 \x01(\tR\tsourceDir\x12\x1d\n" +
+	"\n" +
+	"target_dir\x18\x05 \x01(\tR\ttargetDir\"\x13\n" +
 	"\x11CloseWorkspaceCmd\"\x12\n" +
 	"\x10OpenWorkspaceCmd\"&\n" +
 	"\tResyncCmd\x12\x19\n" +

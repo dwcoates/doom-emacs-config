@@ -62,6 +62,9 @@ message UserMessage {
   string uuid = 5;  // optional in typings, always present on disk
   string session_id = 6;
   bool is_replay = 7;
+  // [observed] present on subagent-context user messages:
+  string subagent_type = 8;
+  string task_description = 9;
 }
 
 // [sdk coreTypes.d.ts:427] SDKAssistantMessageError.
@@ -171,6 +174,8 @@ message McpServerStatus {
 message PluginRef {
   string name = 1;
   string path = 2;
+  string source = 3;   // [corpus] e.g. "gns-cowork@chesscom-gns"
+  string version = 4;  // [corpus]
 }
 
 enum ApiKeySource {
@@ -179,6 +184,7 @@ enum ApiKeySource {
   API_KEY_SOURCE_PROJECT = 2;
   API_KEY_SOURCE_ORG = 3;
   API_KEY_SOURCE_TEMPORARY = 4;
+  API_KEY_SOURCE_NONE = 5;  // [corpus] subscription auth reports "none"
 }
 
 // [sdk coreTypes.d.ts:475-499] SDKSystemMessage subtype "init"
@@ -200,6 +206,11 @@ message SystemInit {
   string uuid = 14;
   string session_id = 15;
   string fast_mode_state = 16;  // [observed]
+  // [corpus] further observed init fields:
+  repeated string capabilities = 17;        // e.g. "interrupt_receipt_v1"
+  bool analytics_disabled = 18;
+  bool product_feedback_disabled = 19;
+  map<string, string> memory_paths = 20;    // e.g. {"auto": <memory dir>}
 }
 
 // --- stream_event (partial messages) ----------------------------------------
@@ -213,6 +224,7 @@ message StreamEvent {
   string parent_tool_use_id = 2;
   string uuid = 3;
   string session_id = 4;
+  int64 ttft_ms = 5;  // [observed] time-to-first-token stamp on partials
 }
 
 message RawMessageStreamEvent {

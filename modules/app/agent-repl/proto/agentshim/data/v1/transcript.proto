@@ -41,6 +41,7 @@ enum ToolDenialKind {
   TOOL_DENIAL_KIND_UNSPECIFIED = 0;
   TOOL_DENIAL_KIND_AUTOMODE_BLOCKED = 1;
   TOOL_DENIAL_KIND_USER_REJECTED = 2;
+  TOOL_DENIAL_KIND_PERMISSION_RULE = 3;  // [corpus]
 }
 
 enum QueueOp {
@@ -217,6 +218,9 @@ message DiskCompactMetadata {
   PreservedSegment preserved_segment = 4;
   PreservedMessages preserved_messages = 5;
   int64 post_tokens = 6;
+  // [corpus] observed on newer CC versions:
+  repeated string pre_compact_discovered_tools = 7;
+  int64 cumulative_dropped_tokens = 8;
 }
 
 message CompactBoundaryLine {
@@ -405,8 +409,15 @@ message HookNonBlockingErrorAttachment {
   HookSuccessAttachment fields = 1;
 }
 
+// [corpus] blocking variant carries a structured blockingError object.
+message BlockingErrorDetail {
+  string blocking_error = 1;
+  string command = 2;
+}
+
 message HookBlockingErrorAttachment {
   HookSuccessAttachment fields = 1;
+  BlockingErrorDetail blocking_error = 2;
 }
 
 message DeferredToolsDeltaAttachment {
