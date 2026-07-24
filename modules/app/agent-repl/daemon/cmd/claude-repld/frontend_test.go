@@ -58,14 +58,38 @@ func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 	}
 }
 
-// TestRegistrySessionViewsSkipsTerminalAndDirlessRecords verifies terminal
-// and cwd-less records are excluded from the snapshot's session views.
-func TestRegistrySessionViewsSkipsTerminalAndDirlessRecords(t *testing.T) {
+// TestRegistrySessionViewsIncludesTerminalRecords verifies the S7 parity
+// change: a terminal record IS included now (the orphan/reattach sweep re-keys
+// on its terminal + death_reason fields), carrying terminal=true and its death
+// reason, so Emacs can drop the GET /sessions poller.
+func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	// Arrange.
 	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
-	if err := reg.Put(registry.Record{SessionID: "s_terminal", CWD: "/work/x", Terminal: true}); err != nil {
+	if err := reg.Put(registry.Record{SessionID: "s_terminal", CWD: "/work/x", Terminal: true, DeathReason: "delete session"}); err != nil {
 		t.Fatalf("registry Put terminal: %v", err)
 	}
+
+	// Act.
+	views := registrySessions{reg: reg}.SessionViews()
+
+	// Assert.
+	if len(views) != 1 {
+		t.Fatalf("expected 1 session view (terminal included), got %d", len(views))
+	}
+	v := views[0]
+	if !v.GetTerminal() {
+		t.Errorf("terminal: got false, want true")
+	}
+	if got := v.GetDeathReason(); got != "delete session" {
+		t.Errorf("death_reason: got %q, want %q", got, "delete session")
+	}
+}
+
+// TestRegistrySessionViewsSkipsDirlessRecords verifies a cwd-less record is
+// excluded (no workspace to key by), even though terminal records are included.
+func TestRegistrySessionViewsSkipsDirlessRecords(t *testing.T) {
+	// Arrange.
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s_nodir"}); err != nil {
 		t.Fatalf("registry Put dirless: %v", err)
 	}
@@ -75,6 +99,6 @@ func TestRegistrySessionViewsSkipsTerminalAndDirlessRecords(t *testing.T) {
 
 	// Assert.
 	if len(views) != 0 {
-		t.Fatalf("expected 0 session views (terminal + dirless excluded), got %d", len(views))
+		t.Fatalf("expected 0 session views (dirless excluded), got %d", len(views))
 	}
 }
