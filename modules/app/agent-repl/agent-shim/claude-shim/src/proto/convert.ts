@@ -145,6 +145,13 @@ const PROMPT_PREVIEW_CAP = 200;
 /** Wall-clock injection for deterministic tests. */
 export interface ConvertOptions {
   nowMs?: number;
+  /**
+   * The `SessionStarted.source` a `system:init` should carry. The stitch
+   * phase (main.ts) passes SESSION_SOURCE_RESUME when the shim was spawned
+   * with `--resume`, FRESH otherwise. Absent → FRESH, which is exactly the
+   * pre-seam behavior, so every G4 test that omits it is unaffected.
+   */
+  sessionSource?: SessionSource;
 }
 
 /** The full result of converting one SDK message. */
@@ -184,7 +191,7 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
 
   const envelope = readEnvelope(message, opts);
   try {
-    const built = build(type, message, envelope.reader);
+    const built = build(type, message, envelope.reader, opts);
     const extras = envelope.reader.finish(built.typeLabel);
     const vendor = vendorEvent(built.csm, envelope, extras, built.ephemeral);
     const lifecycle = built.lifecyclePayloads.map((p) => lifecycleEvent(envelope, p));
@@ -287,7 +294,7 @@ function csm(msg: ClaudeStreamMessage["msg"]): ClaudeStreamMessage {
   return create(ClaudeStreamMessageSchema, { msg });
 }
 
-function build(type: string, message: Record<string, unknown>, r: Reader): Built {
+function build(type: string, message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
   r.ignore("type");
   switch (type) {
     case "user":
@@ -315,18 +322,18 @@ function build(type: string, message: Record<string, unknown>, r: Reader): Built
     case "keep_alive":
       return vendorOnly({ case: "keepAlive", value: create(KeepAliveSchema, {}) }, type);
     case "system":
-      return buildSystem(message, r);
+      return buildSystem(message, r, opts);
     default:
       throw new MissingFieldError(`unknown SDK message type "${type}"`);
   }
 }
 
-function buildSystem(message: Record<string, unknown>, r: Reader): Built {
+function buildSystem(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
   const subtype = r.str("subtype");
   const label = `system:${subtype}`;
   switch (subtype) {
     case "init":
-      return buildSystemInit(message, r, label);
+      return buildSystemInit(message, r, label, opts);
     case "status":
       return vendorOnly({ case: "status", value: create(StatusMessageSchema, { status: r.str("status"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
     case "hook_response":
@@ -538,7 +545,7 @@ function buildAuthStatus(message: Record<string, unknown>, r: Reader): Built {
 // system:init → SessionStarted
 // ---------------------------------------------------------------------------
 
-function buildSystemInit(message: Record<string, unknown>, r: Reader, label: string): Built {
+function buildSystemInit(message: Record<string, unknown>, r: Reader, label: string, opts?: ConvertOptions): Built {
   const init = create(SystemInitSchema, {
     agents: r.strList("agents"),
     apiKeySource: apiKeySourceEnum(r.str("api_key_source", "apiKeySource")),
@@ -562,7 +569,7 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
   // since they are recognized samples in the golden corpus, not schema drift.
   r.carry("capabilities", "analytics_disabled", "product_feedback_disabled", "memory_paths");
   const sessionStarted = create(SessionStartedSchema, {
-    source: SessionSource.FRESH,
+    source: opts?.sessionSource ?? SessionSource.FRESH,
     model: init.model,
     cwd: init.cwd,
     vendorSessionId: init.sessionId,

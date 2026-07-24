@@ -42,6 +42,12 @@ DAEMON_DIR="$ROOT/daemon"
 
 NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
 
+# The shim artifact is the esbuild SINGLE-FILE bundle (`npm run build` ->
+# build.mjs). It stays at dist/main.js — the exact entry the daemon (daemon.el)
+# and the e2e harness spawn — so the bundle IS the spawned shim without a path
+# change on the (frozen) daemon side. The bundle inlines @bufbuild/protobuf,
+# which the committed out-of-package proto stubs cannot resolve at runtime; a
+# plain tsc emit both breaks that resolution and lands under a deep rootDir path.
 SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
 WEBAPP_ARTIFACT="$WEBAPP_DIR/dist/index.html"
 DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
