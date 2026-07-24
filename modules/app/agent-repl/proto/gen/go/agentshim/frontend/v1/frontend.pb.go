@@ -8,7 +8,7 @@
 // - On (re)connect the daemon sends StateSnapshot first, then deltas.
 // - WorkspaceState is THE resolved render-state; frontends map .state to
 //   their display vocabulary and never re-derive from raw facts.
-// - TypingDelta is ephemeral (mirrors core.ContentDelta); consumers reconcile
+// - TypingDelta is ephemeral (embeds core.ContentDelta); consumers reconcile
 //   per uuid, replacing previews when the ConversationDelta carrying the
 //   complete message arrives.
 // - DegradedNotice is honest sad-path reporting (store/sidecar/shim outage);
@@ -23,6 +23,8 @@
 package frontendv1
 
 import (
+	v11 "agentrepl/proto/agentshim/core/v1"
+	v1 "agentrepl/proto/agentshim/data/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -137,6 +139,7 @@ type FrontendFrame struct {
 	//	*FrontendFrame_CommandAck
 	//	*FrontendFrame_DegradedNotice
 	//	*FrontendFrame_DaemonView
+	//	*FrontendFrame_SessionInit
 	Frame         isFrontendFrame_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -260,6 +263,15 @@ func (x *FrontendFrame) GetDaemonView() *DaemonView {
 	return nil
 }
 
+func (x *FrontendFrame) GetSessionInit() *SessionInitView {
+	if x != nil {
+		if x, ok := x.Frame.(*FrontendFrame_SessionInit); ok {
+			return x.SessionInit
+		}
+	}
+	return nil
+}
+
 type isFrontendFrame_Frame interface {
 	isFrontendFrame_Frame()
 }
@@ -300,6 +312,10 @@ type FrontendFrame_DaemonView struct {
 	DaemonView *DaemonView `protobuf:"bytes,9,opt,name=daemon_view,json=daemonView,proto3,oneof"` // Additive (S7)
 }
 
+type FrontendFrame_SessionInit struct {
+	SessionInit *SessionInitView `protobuf:"bytes,10,opt,name=session_init,json=sessionInit,proto3,oneof"` // Additive (S9)
+}
+
 func (*FrontendFrame_Snapshot) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_WorkspaceState) isFrontendFrame_Frame() {}
@@ -317,6 +333,8 @@ func (*FrontendFrame_CommandAck) isFrontendFrame_Frame() {}
 func (*FrontendFrame_DegradedNotice) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_DaemonView) isFrontendFrame_Frame() {}
+
+func (*FrontendFrame_SessionInit) isFrontendFrame_Frame() {}
 
 // Additive (S7): daemon-level identity/liveness Emacs read from GET /sessions'
 // envelope (boot detection, version-mismatch warnings, binary staleness).
@@ -520,8 +538,11 @@ type SessionView struct {
 	Rehydratable       bool   `protobuf:"varint,15,opt,name=rehydratable,proto3" json:"rehydratable,omitempty"`
 	Hibernated         bool   `protobuf:"varint,16,opt,name=hibernated,proto3" json:"hibernated,omitempty"`
 	PendingPermissions int64  `protobuf:"varint,17,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Additive (S8): account identity — the CLAUDE_CONFIG_DIR the session's
+	// shim runs against (account switching is daemon-executed, webapp-initiated).
+	ConfigDir     string `protobuf:"bytes,18,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SessionView) Reset() {
@@ -673,14 +694,22 @@ func (x *SessionView) GetPendingPermissions() int64 {
 	return 0
 }
 
-// Complete (store-round-tripped) conversation additions, pre-rendered into
-// the frontend vocabulary. items are protojson-friendly Structs shaped by
-// daemon/internal/frontend/translate.go — frontends render, never interpret.
+func (x *SessionView) GetConfigDir() string {
+	if x != nil {
+		return x.ConfigDir
+	}
+	return ""
+}
+
+// Complete (store-round-tripped) conversation additions, composed from the
+// typed agent payloads (S9). daemon/internal/frontend/translate.go CURATES
+// which payloads are pushed but never re-types them — frontends render,
+// never interpret.
 type ConversationDelta struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Items         []*structpb.Struct     `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
+	Items         []*ConversationItem    `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
 	ThroughSeq    uint64                 `protobuf:"varint,4,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"` // frontends persist this for reconnect resync
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -730,7 +759,7 @@ func (x *ConversationDelta) GetSessionId() string {
 	return ""
 }
 
-func (x *ConversationDelta) GetItems() []*structpb.Struct {
+func (x *ConversationDelta) GetItems() []*ConversationItem {
 	if x != nil {
 		return x.Items
 	}
@@ -744,22 +773,256 @@ func (x *ConversationDelta) GetThroughSeq() uint64 {
 	return 0
 }
 
+// One curated conversation addition: a thin envelope around the typed
+// data.v1/core.v1 payload. Consumers reconcile by uuid (permission items
+// use the permission request_id as their uuid).
+type ConversationItem struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Uuid      string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	TsMs      int64                  `protobuf:"varint,2,opt,name=ts_ms,json=tsMs,proto3" json:"ts_ms,omitempty"`
+	RequestId string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // vendor API request correlation, "" when absent
+	// Types that are valid to be assigned to Item:
+	//
+	//	*ConversationItem_AssistantMessage
+	//	*ConversationItem_UserMessage
+	//	*ConversationItem_ToolUse
+	//	*ConversationItem_ToolResult
+	//	*ConversationItem_ToolUseResult
+	//	*ConversationItem_Result
+	//	*ConversationItem_CompactBoundary
+	//	*ConversationItem_CompactBoundaryLine
+	//	*ConversationItem_ApiError
+	//	*ConversationItem_Permission
+	Item          isConversationItem_Item `protobuf_oneof:"item"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConversationItem) Reset() {
+	*x = ConversationItem{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationItem) ProtoMessage() {}
+
+func (x *ConversationItem) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationItem.ProtoReflect.Descriptor instead.
+func (*ConversationItem) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ConversationItem) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ConversationItem) GetTsMs() int64 {
+	if x != nil {
+		return x.TsMs
+	}
+	return 0
+}
+
+func (x *ConversationItem) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ConversationItem) GetItem() isConversationItem_Item {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetAssistantMessage() *v1.ApiAssistantMessage {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_AssistantMessage); ok {
+			return x.AssistantMessage
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetUserMessage() *v1.ApiUserMessage {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_UserMessage); ok {
+			return x.UserMessage
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetToolUse() *v1.ToolUseBlock {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_ToolUse); ok {
+			return x.ToolUse
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetToolResult() *v1.ToolResultBlock {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_ToolResult); ok {
+			return x.ToolResult
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetToolUseResult() *v1.ToolUseResult {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_ToolUseResult); ok {
+			return x.ToolUseResult
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetResult() *v1.ResultMessage {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_Result); ok {
+			return x.Result
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetCompactBoundary() *v1.CompactBoundary {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_CompactBoundary); ok {
+			return x.CompactBoundary
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetCompactBoundaryLine() *v1.CompactBoundaryLine {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_CompactBoundaryLine); ok {
+			return x.CompactBoundaryLine
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetApiError() *v1.ApiErrorLine {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_ApiError); ok {
+			return x.ApiError
+		}
+	}
+	return nil
+}
+
+func (x *ConversationItem) GetPermission() *v11.PermissionItem {
+	if x != nil {
+		if x, ok := x.Item.(*ConversationItem_Permission); ok {
+			return x.Permission
+		}
+	}
+	return nil
+}
+
+type isConversationItem_Item interface {
+	isConversationItem_Item()
+}
+
+type ConversationItem_AssistantMessage struct {
+	AssistantMessage *v1.ApiAssistantMessage `protobuf:"bytes,10,opt,name=assistant_message,json=assistantMessage,proto3,oneof"`
+}
+
+type ConversationItem_UserMessage struct {
+	UserMessage *v1.ApiUserMessage `protobuf:"bytes,11,opt,name=user_message,json=userMessage,proto3,oneof"`
+}
+
+type ConversationItem_ToolUse struct {
+	ToolUse *v1.ToolUseBlock `protobuf:"bytes,12,opt,name=tool_use,json=toolUse,proto3,oneof"`
+}
+
+type ConversationItem_ToolResult struct {
+	ToolResult *v1.ToolResultBlock `protobuf:"bytes,13,opt,name=tool_result,json=toolResult,proto3,oneof"`
+}
+
+type ConversationItem_ToolUseResult struct {
+	ToolUseResult *v1.ToolUseResult `protobuf:"bytes,14,opt,name=tool_use_result,json=toolUseResult,proto3,oneof"`
+}
+
+type ConversationItem_Result struct {
+	Result *v1.ResultMessage `protobuf:"bytes,15,opt,name=result,proto3,oneof"`
+}
+
+type ConversationItem_CompactBoundary struct {
+	CompactBoundary *v1.CompactBoundary `protobuf:"bytes,16,opt,name=compact_boundary,json=compactBoundary,proto3,oneof"`
+}
+
+type ConversationItem_CompactBoundaryLine struct {
+	CompactBoundaryLine *v1.CompactBoundaryLine `protobuf:"bytes,17,opt,name=compact_boundary_line,json=compactBoundaryLine,proto3,oneof"`
+}
+
+type ConversationItem_ApiError struct {
+	ApiError *v1.ApiErrorLine `protobuf:"bytes,18,opt,name=api_error,json=apiError,proto3,oneof"`
+}
+
+type ConversationItem_Permission struct {
+	Permission *v11.PermissionItem `protobuf:"bytes,30,opt,name=permission,proto3,oneof"`
+}
+
+func (*ConversationItem_AssistantMessage) isConversationItem_Item() {}
+
+func (*ConversationItem_UserMessage) isConversationItem_Item() {}
+
+func (*ConversationItem_ToolUse) isConversationItem_Item() {}
+
+func (*ConversationItem_ToolResult) isConversationItem_Item() {}
+
+func (*ConversationItem_ToolUseResult) isConversationItem_Item() {}
+
+func (*ConversationItem_Result) isConversationItem_Item() {}
+
+func (*ConversationItem_CompactBoundary) isConversationItem_Item() {}
+
+func (*ConversationItem_CompactBoundaryLine) isConversationItem_Item() {}
+
+func (*ConversationItem_ApiError) isConversationItem_Item() {}
+
+func (*ConversationItem_Permission) isConversationItem_Item() {}
+
 // Ephemeral live-typing relay (never persisted, never in snapshots).
 type TypingDelta struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	BlockIndex    uint32                 `protobuf:"varint,4,opt,name=block_index,json=blockIndex,proto3" json:"block_index,omitempty"`
-	Kind          string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"` // "text" | "thinking" | "input_json"
-	Delta         string                 `protobuf:"bytes,6,opt,name=delta,proto3" json:"delta,omitempty"`
+	Delta         *v11.ContentDelta      `protobuf:"bytes,3,opt,name=delta,proto3" json:"delta,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TypingDelta) Reset() {
 	*x = TypingDelta{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +1034,7 @@ func (x *TypingDelta) String() string {
 func (*TypingDelta) ProtoMessage() {}
 
 func (x *TypingDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +1047,7 @@ func (x *TypingDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingDelta.ProtoReflect.Descriptor instead.
 func (*TypingDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TypingDelta) GetWorkspace() string {
@@ -801,32 +1064,74 @@ func (x *TypingDelta) GetSessionId() string {
 	return ""
 }
 
-func (x *TypingDelta) GetUuid() string {
-	if x != nil {
-		return x.Uuid
-	}
-	return ""
-}
-
-func (x *TypingDelta) GetBlockIndex() uint32 {
-	if x != nil {
-		return x.BlockIndex
-	}
-	return 0
-}
-
-func (x *TypingDelta) GetKind() string {
-	if x != nil {
-		return x.Kind
-	}
-	return ""
-}
-
-func (x *TypingDelta) GetDelta() string {
+func (x *TypingDelta) GetDelta() *v11.ContentDelta {
 	if x != nil {
 		return x.Delta
 	}
+	return nil
+}
+
+// The session's retained SystemInit (slash commands, tools, skills, model
+// list), pushed on attach and included in StateSnapshot (S9). Replaces the
+// Emacs GET /commands HTTP menu source.
+type SessionInitView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Init          *v1.SystemInit         `protobuf:"bytes,3,opt,name=init,proto3" json:"init,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionInitView) Reset() {
+	*x = SessionInitView{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionInitView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionInitView) ProtoMessage() {}
+
+func (x *SessionInitView) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionInitView.ProtoReflect.Descriptor instead.
+func (*SessionInitView) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SessionInitView) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
 	return ""
+}
+
+func (x *SessionInitView) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SessionInitView) GetInit() *v1.SystemInit {
+	if x != nil {
+		return x.Init
+	}
+	return nil
 }
 
 type TaskEntry struct {
@@ -844,7 +1149,7 @@ type TaskEntry struct {
 
 func (x *TaskEntry) Reset() {
 	*x = TaskEntry{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -856,7 +1161,7 @@ func (x *TaskEntry) String() string {
 func (*TaskEntry) ProtoMessage() {}
 
 func (x *TaskEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -869,7 +1174,7 @@ func (x *TaskEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEntry.ProtoReflect.Descriptor instead.
 func (*TaskEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TaskEntry) GetTaskId() string {
@@ -932,7 +1237,7 @@ type TaskCatalog struct {
 
 func (x *TaskCatalog) Reset() {
 	*x = TaskCatalog{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -944,7 +1249,7 @@ func (x *TaskCatalog) String() string {
 func (*TaskCatalog) ProtoMessage() {}
 
 func (x *TaskCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -957,7 +1262,7 @@ func (x *TaskCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskCatalog.ProtoReflect.Descriptor instead.
 func (*TaskCatalog) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TaskCatalog) GetWorkspace() string {
@@ -997,6 +1302,7 @@ type FrontendCommand struct {
 	//	*FrontendCommand_Resync
 	//	*FrontendCommand_CreateSession
 	//	*FrontendCommand_DeleteSession
+	//	*FrontendCommand_Shutdown
 	Command       isFrontendCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1004,7 +1310,7 @@ type FrontendCommand struct {
 
 func (x *FrontendCommand) Reset() {
 	*x = FrontendCommand{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1016,7 +1322,7 @@ func (x *FrontendCommand) String() string {
 func (*FrontendCommand) ProtoMessage() {}
 
 func (x *FrontendCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1029,7 +1335,7 @@ func (x *FrontendCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrontendCommand.ProtoReflect.Descriptor instead.
 func (*FrontendCommand) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *FrontendCommand) GetRequestId() string {
@@ -1134,6 +1440,15 @@ func (x *FrontendCommand) GetDeleteSession() *DeleteSessionCmd {
 	return nil
 }
 
+func (x *FrontendCommand) GetShutdown() *ShutdownCmd {
+	if x != nil {
+		if x, ok := x.Command.(*FrontendCommand_Shutdown); ok {
+			return x.Shutdown
+		}
+	}
+	return nil
+}
+
 type isFrontendCommand_Command interface {
 	isFrontendCommand_Command()
 }
@@ -1174,6 +1489,10 @@ type FrontendCommand_DeleteSession struct {
 	DeleteSession *DeleteSessionCmd `protobuf:"bytes,11,opt,name=delete_session,json=deleteSession,proto3,oneof"` // Additive (S7)
 }
 
+type FrontendCommand_Shutdown struct {
+	Shutdown *ShutdownCmd `protobuf:"bytes,12,opt,name=shutdown,proto3,oneof"` // Additive (S9)
+}
+
 func (*FrontendCommand_SubmitPrompt) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_Interrupt) isFrontendCommand_Command() {}
@@ -1192,6 +1511,46 @@ func (*FrontendCommand_CreateSession) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_DeleteSession) isFrontendCommand_Command() {}
 
+func (*FrontendCommand_Shutdown) isFrontendCommand_Command() {}
+
+// Additive (S9): graceful daemon shutdown over UDS (replaces Emacs
+// POST /shutdown).
+type ShutdownCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownCmd) Reset() {
+	*x = ShutdownCmd{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownCmd) ProtoMessage() {}
+
+func (x *ShutdownCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownCmd.ProtoReflect.Descriptor instead.
+func (*ShutdownCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{11}
+}
+
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
 type CreateSessionCmd struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
@@ -1207,7 +1566,7 @@ type CreateSessionCmd struct {
 
 func (x *CreateSessionCmd) Reset() {
 	*x = CreateSessionCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1219,7 +1578,7 @@ func (x *CreateSessionCmd) String() string {
 func (*CreateSessionCmd) ProtoMessage() {}
 
 func (x *CreateSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1232,7 +1591,7 @@ func (x *CreateSessionCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSessionCmd.ProtoReflect.Descriptor instead.
 func (*CreateSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CreateSessionCmd) GetCwd() string {
@@ -1287,7 +1646,7 @@ type DeleteSessionCmd struct {
 
 func (x *DeleteSessionCmd) Reset() {
 	*x = DeleteSessionCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1299,7 +1658,7 @@ func (x *DeleteSessionCmd) String() string {
 func (*DeleteSessionCmd) ProtoMessage() {}
 
 func (x *DeleteSessionCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1312,7 +1671,7 @@ func (x *DeleteSessionCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionCmd.ProtoReflect.Descriptor instead.
 func (*DeleteSessionCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DeleteSessionCmd) GetSessionId() string {
@@ -1332,7 +1691,7 @@ type SubmitPromptCmd struct {
 
 func (x *SubmitPromptCmd) Reset() {
 	*x = SubmitPromptCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1344,7 +1703,7 @@ func (x *SubmitPromptCmd) String() string {
 func (*SubmitPromptCmd) ProtoMessage() {}
 
 func (x *SubmitPromptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1357,7 +1716,7 @@ func (x *SubmitPromptCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptCmd.ProtoReflect.Descriptor instead.
 func (*SubmitPromptCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SubmitPromptCmd) GetText() string {
@@ -1383,7 +1742,7 @@ type InterruptCmd struct {
 
 func (x *InterruptCmd) Reset() {
 	*x = InterruptCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1395,7 +1754,7 @@ func (x *InterruptCmd) String() string {
 func (*InterruptCmd) ProtoMessage() {}
 
 func (x *InterruptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1408,7 +1767,7 @@ func (x *InterruptCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptCmd.ProtoReflect.Descriptor instead.
 func (*InterruptCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *InterruptCmd) GetHard() bool {
@@ -1430,7 +1789,7 @@ type PermissionAnswerCmd struct {
 
 func (x *PermissionAnswerCmd) Reset() {
 	*x = PermissionAnswerCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1442,7 +1801,7 @@ func (x *PermissionAnswerCmd) String() string {
 func (*PermissionAnswerCmd) ProtoMessage() {}
 
 func (x *PermissionAnswerCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1455,7 +1814,7 @@ func (x *PermissionAnswerCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionAnswerCmd.ProtoReflect.Descriptor instead.
 func (*PermissionAnswerCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PermissionAnswerCmd) GetPermissionRequestId() string {
@@ -1501,7 +1860,7 @@ type MergeWorkspaceCmd struct {
 
 func (x *MergeWorkspaceCmd) Reset() {
 	*x = MergeWorkspaceCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1872,7 @@ func (x *MergeWorkspaceCmd) String() string {
 func (*MergeWorkspaceCmd) ProtoMessage() {}
 
 func (x *MergeWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1885,7 @@ func (x *MergeWorkspaceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{14}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MergeWorkspaceCmd) GetHandler() string {
@@ -1572,7 +1931,7 @@ type CloseWorkspaceCmd struct {
 
 func (x *CloseWorkspaceCmd) Reset() {
 	*x = CloseWorkspaceCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1584,7 +1943,7 @@ func (x *CloseWorkspaceCmd) String() string {
 func (*CloseWorkspaceCmd) ProtoMessage() {}
 
 func (x *CloseWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1597,7 +1956,7 @@ func (x *CloseWorkspaceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*CloseWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{15}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{18}
 }
 
 type OpenWorkspaceCmd struct {
@@ -1608,7 +1967,7 @@ type OpenWorkspaceCmd struct {
 
 func (x *OpenWorkspaceCmd) Reset() {
 	*x = OpenWorkspaceCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[16]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1979,7 @@ func (x *OpenWorkspaceCmd) String() string {
 func (*OpenWorkspaceCmd) ProtoMessage() {}
 
 func (x *OpenWorkspaceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[16]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +1992,7 @@ func (x *OpenWorkspaceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{16}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{19}
 }
 
 type ResyncCmd struct {
@@ -1645,7 +2004,7 @@ type ResyncCmd struct {
 
 func (x *ResyncCmd) Reset() {
 	*x = ResyncCmd{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[17]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1657,7 +2016,7 @@ func (x *ResyncCmd) String() string {
 func (*ResyncCmd) ProtoMessage() {}
 
 func (x *ResyncCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[17]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1670,7 +2029,7 @@ func (x *ResyncCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResyncCmd.ProtoReflect.Descriptor instead.
 func (*ResyncCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{17}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ResyncCmd) GetFromSeq() uint64 {
@@ -1691,7 +2050,7 @@ type CommandAck struct {
 
 func (x *CommandAck) Reset() {
 	*x = CommandAck{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[18]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1703,7 +2062,7 @@ func (x *CommandAck) String() string {
 func (*CommandAck) ProtoMessage() {}
 
 func (x *CommandAck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[18]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1716,7 +2075,7 @@ func (x *CommandAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandAck.ProtoReflect.Descriptor instead.
 func (*CommandAck) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{18}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CommandAck) GetRequestId() string {
@@ -1752,7 +2111,7 @@ type DegradedNotice struct {
 
 func (x *DegradedNotice) Reset() {
 	*x = DegradedNotice{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[19]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1764,7 +2123,7 @@ func (x *DegradedNotice) String() string {
 func (*DegradedNotice) ProtoMessage() {}
 
 func (x *DegradedNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[19]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1777,7 +2136,7 @@ func (x *DegradedNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DegradedNotice.ProtoReflect.Descriptor instead.
 func (*DegradedNotice) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{19}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DegradedNotice) GetComponent() string {
@@ -1815,13 +2174,14 @@ type StateSnapshot struct {
 	Sessions      []*SessionView         `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	Catalogs      []*TaskCatalog         `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
 	Daemon        *DaemonView            `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"` // Additive (S7)
+	Inits         []*SessionInitView     `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`   // Additive (S9)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StateSnapshot) Reset() {
 	*x = StateSnapshot{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[20]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1833,7 +2193,7 @@ func (x *StateSnapshot) String() string {
 func (*StateSnapshot) ProtoMessage() {}
 
 func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[20]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1846,7 +2206,7 @@ func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateSnapshot.ProtoReflect.Descriptor instead.
 func (*StateSnapshot) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{20}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StateSnapshot) GetWorkspaces() []*WorkspaceState {
@@ -1877,11 +2237,18 @@ func (x *StateSnapshot) GetDaemon() *DaemonView {
 	return nil
 }
 
+func (x *StateSnapshot) GetInits() []*SessionInitView {
+	if x != nil {
+		return x.Inits
+	}
+	return nil
+}
+
 var File_agentshim_frontend_v1_frontend_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
-	"$agentshim/frontend/v1/frontend.proto\x12\x15agentshim.frontend.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xc2\x05\n" +
+	"$agentshim/frontend/v1/frontend.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\"agentshim/data/v1/transcript.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x8f\x06\n" +
 	"\rFrontendFrame\x12B\n" +
 	"\bsnapshot\x18\x01 \x01(\v2$.agentshim.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12P\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2%.agentshim.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12G\n" +
@@ -1893,7 +2260,9 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"commandAck\x12P\n" +
 	"\x0fdegraded_notice\x18\b \x01(\v2%.agentshim.frontend.v1.DegradedNoticeH\x00R\x0edegradedNotice\x12D\n" +
 	"\vdaemon_view\x18\t \x01(\v2!.agentshim.frontend.v1.DaemonViewH\x00R\n" +
-	"daemonViewB\a\n" +
+	"daemonView\x12K\n" +
+	"\fsession_init\x18\n" +
+	" \x01(\v2&.agentshim.frontend.v1.SessionInitViewH\x00R\vsessionInitB\a\n" +
 	"\x05frame\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
@@ -1914,7 +2283,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"cause_kind\x18\a \x01(\tR\tcauseKind\x12\x1b\n" +
 	"\tcause_seq\x18\b \x01(\x04R\bcauseSeq\x12\x13\n" +
-	"\x05at_ms\x18\t \x01(\x03R\x04atMs\"\xba\x04\n" +
+	"\x05at_ms\x18\t \x01(\x03R\x04atMs\"\xd9\x04\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1936,23 +2305,46 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"hibernated\x18\x10 \x01(\bR\n" +
 	"hibernated\x12/\n" +
-	"\x13pending_permissions\x18\x11 \x01(\x03R\x12pendingPermissions\"\xa0\x01\n" +
+	"\x13pending_permissions\x18\x11 \x01(\x03R\x12pendingPermissions\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x12 \x01(\tR\tconfigDir\"\xb0\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\x12-\n" +
-	"\x05items\x18\x03 \x03(\v2\x17.google.protobuf.StructR\x05items\x12\x1f\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12=\n" +
+	"\x05items\x18\x03 \x03(\v2'.agentshim.frontend.v1.ConversationItemR\x05items\x12\x1f\n" +
 	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
-	"throughSeq\"\xa9\x01\n" +
+	"throughSeq\"\xc2\x06\n" +
+	"\x10ConversationItem\x12\x12\n" +
+	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
+	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\x12U\n" +
+	"\x11assistant_message\x18\n" +
+	" \x01(\v2&.agentshim.data.v1.ApiAssistantMessageH\x00R\x10assistantMessage\x12F\n" +
+	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x00R\vuserMessage\x12<\n" +
+	"\btool_use\x18\f \x01(\v2\x1f.agentshim.data.v1.ToolUseBlockH\x00R\atoolUse\x12E\n" +
+	"\vtool_result\x18\r \x01(\v2\".agentshim.data.v1.ToolResultBlockH\x00R\n" +
+	"toolResult\x12J\n" +
+	"\x0ftool_use_result\x18\x0e \x01(\v2 .agentshim.data.v1.ToolUseResultH\x00R\rtoolUseResult\x12:\n" +
+	"\x06result\x18\x0f \x01(\v2 .agentshim.data.v1.ResultMessageH\x00R\x06result\x12O\n" +
+	"\x10compact_boundary\x18\x10 \x01(\v2\".agentshim.data.v1.CompactBoundaryH\x00R\x0fcompactBoundary\x12\\\n" +
+	"\x15compact_boundary_line\x18\x11 \x01(\v2&.agentshim.data.v1.CompactBoundaryLineH\x00R\x13compactBoundaryLine\x12>\n" +
+	"\tapi_error\x18\x12 \x01(\v2\x1f.agentshim.data.v1.ApiErrorLineH\x00R\bapiError\x12C\n" +
+	"\n" +
+	"permission\x18\x1e \x01(\v2!.agentshim.core.v1.PermissionItemH\x00R\n" +
+	"permissionB\x06\n" +
+	"\x04item\"\x81\x01\n" +
 	"\vTypingDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1f\n" +
-	"\vblock_index\x18\x04 \x01(\rR\n" +
-	"blockIndex\x12\x12\n" +
-	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x14\n" +
-	"\x05delta\x18\x06 \x01(\tR\x05delta\"\xd7\x01\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x125\n" +
+	"\x05delta\x18\x03 \x01(\v2\x1f.agentshim.core.v1.ContentDeltaR\x05delta\"\x81\x01\n" +
+	"\x0fSessionInitView\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x121\n" +
+	"\x04init\x18\x03 \x01(\v2\x1d.agentshim.data.v1.SystemInitR\x04init\"\xd7\x01\n" +
 	"\tTaskEntry\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12 \n" +
@@ -1966,7 +2358,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x126\n" +
-	"\x05tasks\x18\x03 \x03(\v2 .agentshim.frontend.v1.TaskEntryR\x05tasks\"\xa4\x06\n" +
+	"\x05tasks\x18\x03 \x03(\v2 .agentshim.frontend.v1.TaskEntryR\x05tasks\"\xe6\x06\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1980,8 +2372,10 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06resync\x18\t \x01(\v2 .agentshim.frontend.v1.ResyncCmdH\x00R\x06resync\x12P\n" +
 	"\x0ecreate_session\x18\n" +
 	" \x01(\v2'.agentshim.frontend.v1.CreateSessionCmdH\x00R\rcreateSession\x12P\n" +
-	"\x0edelete_session\x18\v \x01(\v2'.agentshim.frontend.v1.DeleteSessionCmdH\x00R\rdeleteSessionB\t\n" +
-	"\acommand\"\xcf\x01\n" +
+	"\x0edelete_session\x18\v \x01(\v2'.agentshim.frontend.v1.DeleteSessionCmdH\x00R\rdeleteSession\x12@\n" +
+	"\bshutdown\x18\f \x01(\v2\".agentshim.frontend.v1.ShutdownCmdH\x00R\bshutdownB\t\n" +
+	"\acommand\"\r\n" +
+	"\vShutdownCmd\"\xcf\x01\n" +
 	"\x10CreateSessionCmd\x12\x10\n" +
 	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12'\n" +
@@ -2025,14 +2419,15 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
 	"\trecovered\x18\x03 \x01(\bR\trecovered\x12\x13\n" +
-	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\"\x91\x02\n" +
+	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\"\xcf\x02\n" +
 	"\rStateSnapshot\x12E\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2%.agentshim.frontend.v1.WorkspaceStateR\n" +
 	"workspaces\x12>\n" +
 	"\bsessions\x18\x02 \x03(\v2\".agentshim.frontend.v1.SessionViewR\bsessions\x12>\n" +
 	"\bcatalogs\x18\x03 \x03(\v2\".agentshim.frontend.v1.TaskCatalogR\bcatalogs\x129\n" +
-	"\x06daemon\x18\x04 \x01(\v2!.agentshim.frontend.v1.DaemonViewR\x06daemon*\xa7\x03\n" +
+	"\x06daemon\x18\x04 \x01(\v2!.agentshim.frontend.v1.DaemonViewR\x06daemon\x12<\n" +
+	"\x05inits\x18\x05 \x03(\v2&.agentshim.frontend.v1.SessionInitViewR\x05inits*\xa7\x03\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -2064,64 +2459,94 @@ func file_agentshim_frontend_v1_frontend_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
-	(RenderState)(0),            // 0: agentshim.frontend.v1.RenderState
-	(*FrontendFrame)(nil),       // 1: agentshim.frontend.v1.FrontendFrame
-	(*DaemonView)(nil),          // 2: agentshim.frontend.v1.DaemonView
-	(*WorkspaceState)(nil),      // 3: agentshim.frontend.v1.WorkspaceState
-	(*SessionView)(nil),         // 4: agentshim.frontend.v1.SessionView
-	(*ConversationDelta)(nil),   // 5: agentshim.frontend.v1.ConversationDelta
-	(*TypingDelta)(nil),         // 6: agentshim.frontend.v1.TypingDelta
-	(*TaskEntry)(nil),           // 7: agentshim.frontend.v1.TaskEntry
-	(*TaskCatalog)(nil),         // 8: agentshim.frontend.v1.TaskCatalog
-	(*FrontendCommand)(nil),     // 9: agentshim.frontend.v1.FrontendCommand
-	(*CreateSessionCmd)(nil),    // 10: agentshim.frontend.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),    // 11: agentshim.frontend.v1.DeleteSessionCmd
-	(*SubmitPromptCmd)(nil),     // 12: agentshim.frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),        // 13: agentshim.frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil), // 14: agentshim.frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),   // 15: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),   // 16: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),    // 17: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*ResyncCmd)(nil),           // 18: agentshim.frontend.v1.ResyncCmd
-	(*CommandAck)(nil),          // 19: agentshim.frontend.v1.CommandAck
-	(*DegradedNotice)(nil),      // 20: agentshim.frontend.v1.DegradedNotice
-	(*StateSnapshot)(nil),       // 21: agentshim.frontend.v1.StateSnapshot
-	(*structpb.Struct)(nil),     // 22: google.protobuf.Struct
+	(RenderState)(0),               // 0: agentshim.frontend.v1.RenderState
+	(*FrontendFrame)(nil),          // 1: agentshim.frontend.v1.FrontendFrame
+	(*DaemonView)(nil),             // 2: agentshim.frontend.v1.DaemonView
+	(*WorkspaceState)(nil),         // 3: agentshim.frontend.v1.WorkspaceState
+	(*SessionView)(nil),            // 4: agentshim.frontend.v1.SessionView
+	(*ConversationDelta)(nil),      // 5: agentshim.frontend.v1.ConversationDelta
+	(*ConversationItem)(nil),       // 6: agentshim.frontend.v1.ConversationItem
+	(*TypingDelta)(nil),            // 7: agentshim.frontend.v1.TypingDelta
+	(*SessionInitView)(nil),        // 8: agentshim.frontend.v1.SessionInitView
+	(*TaskEntry)(nil),              // 9: agentshim.frontend.v1.TaskEntry
+	(*TaskCatalog)(nil),            // 10: agentshim.frontend.v1.TaskCatalog
+	(*FrontendCommand)(nil),        // 11: agentshim.frontend.v1.FrontendCommand
+	(*ShutdownCmd)(nil),            // 12: agentshim.frontend.v1.ShutdownCmd
+	(*CreateSessionCmd)(nil),       // 13: agentshim.frontend.v1.CreateSessionCmd
+	(*DeleteSessionCmd)(nil),       // 14: agentshim.frontend.v1.DeleteSessionCmd
+	(*SubmitPromptCmd)(nil),        // 15: agentshim.frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),           // 16: agentshim.frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),    // 17: agentshim.frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),      // 18: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),      // 19: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),       // 20: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*ResyncCmd)(nil),              // 21: agentshim.frontend.v1.ResyncCmd
+	(*CommandAck)(nil),             // 22: agentshim.frontend.v1.CommandAck
+	(*DegradedNotice)(nil),         // 23: agentshim.frontend.v1.DegradedNotice
+	(*StateSnapshot)(nil),          // 24: agentshim.frontend.v1.StateSnapshot
+	(*v1.ApiAssistantMessage)(nil), // 25: agentshim.data.v1.ApiAssistantMessage
+	(*v1.ApiUserMessage)(nil),      // 26: agentshim.data.v1.ApiUserMessage
+	(*v1.ToolUseBlock)(nil),        // 27: agentshim.data.v1.ToolUseBlock
+	(*v1.ToolResultBlock)(nil),     // 28: agentshim.data.v1.ToolResultBlock
+	(*v1.ToolUseResult)(nil),       // 29: agentshim.data.v1.ToolUseResult
+	(*v1.ResultMessage)(nil),       // 30: agentshim.data.v1.ResultMessage
+	(*v1.CompactBoundary)(nil),     // 31: agentshim.data.v1.CompactBoundary
+	(*v1.CompactBoundaryLine)(nil), // 32: agentshim.data.v1.CompactBoundaryLine
+	(*v1.ApiErrorLine)(nil),        // 33: agentshim.data.v1.ApiErrorLine
+	(*v11.PermissionItem)(nil),     // 34: agentshim.core.v1.PermissionItem
+	(*v11.ContentDelta)(nil),       // 35: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),          // 36: agentshim.data.v1.SystemInit
+	(*structpb.Struct)(nil),        // 37: google.protobuf.Struct
 }
 var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
-	21, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
+	24, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
 	3,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
 	4,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
 	5,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
-	6,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
-	8,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
-	19, // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
-	20, // 7: agentshim.frontend.v1.FrontendFrame.degraded_notice:type_name -> agentshim.frontend.v1.DegradedNotice
+	7,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
+	10, // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
+	22, // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
+	23, // 7: agentshim.frontend.v1.FrontendFrame.degraded_notice:type_name -> agentshim.frontend.v1.DegradedNotice
 	2,  // 8: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
-	0,  // 9: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
-	22, // 10: agentshim.frontend.v1.ConversationDelta.items:type_name -> google.protobuf.Struct
-	7,  // 11: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	12, // 12: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	13, // 13: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	14, // 14: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	15, // 15: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	16, // 16: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	17, // 17: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	18, // 18: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	10, // 19: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	11, // 20: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	22, // 21: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	3,  // 22: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	4,  // 23: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	8,  // 24: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	2,  // 25: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	8,  // 9: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
+	0,  // 10: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
+	6,  // 11: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
+	25, // 12: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	26, // 13: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	27, // 14: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
+	28, // 15: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
+	29, // 16: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	30, // 17: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
+	31, // 18: agentshim.frontend.v1.ConversationItem.compact_boundary:type_name -> agentshim.data.v1.CompactBoundary
+	32, // 19: agentshim.frontend.v1.ConversationItem.compact_boundary_line:type_name -> agentshim.data.v1.CompactBoundaryLine
+	33, // 20: agentshim.frontend.v1.ConversationItem.api_error:type_name -> agentshim.data.v1.ApiErrorLine
+	34, // 21: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	35, // 22: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	36, // 23: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	9,  // 24: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	15, // 25: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	16, // 26: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	17, // 27: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	18, // 28: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	19, // 29: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	20, // 30: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	21, // 31: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	13, // 32: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	14, // 33: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	12, // 34: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	37, // 35: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
+	3,  // 36: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	4,  // 37: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	10, // 38: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	2,  // 39: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	8,  // 40: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
@@ -2139,8 +2564,21 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		(*FrontendFrame_CommandAck)(nil),
 		(*FrontendFrame_DegradedNotice)(nil),
 		(*FrontendFrame_DaemonView)(nil),
+		(*FrontendFrame_SessionInit)(nil),
 	}
-	file_agentshim_frontend_v1_frontend_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentshim_frontend_v1_frontend_proto_msgTypes[5].OneofWrappers = []any{
+		(*ConversationItem_AssistantMessage)(nil),
+		(*ConversationItem_UserMessage)(nil),
+		(*ConversationItem_ToolUse)(nil),
+		(*ConversationItem_ToolResult)(nil),
+		(*ConversationItem_ToolUseResult)(nil),
+		(*ConversationItem_Result)(nil),
+		(*ConversationItem_CompactBoundary)(nil),
+		(*ConversationItem_CompactBoundaryLine)(nil),
+		(*ConversationItem_ApiError)(nil),
+		(*ConversationItem_Permission)(nil),
+	}
+	file_agentshim_frontend_v1_frontend_proto_msgTypes[10].OneofWrappers = []any{
 		(*FrontendCommand_SubmitPrompt)(nil),
 		(*FrontendCommand_Interrupt)(nil),
 		(*FrontendCommand_PermissionAnswer)(nil),
@@ -2150,6 +2588,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		(*FrontendCommand_Resync)(nil),
 		(*FrontendCommand_CreateSession)(nil),
 		(*FrontendCommand_DeleteSession)(nil),
+		(*FrontendCommand_Shutdown)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2157,7 +2596,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_frontend_proto_rawDesc), len(file_agentshim_frontend_v1_frontend_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   21,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -8,7 +8,7 @@
 // - On (re)connect the daemon sends StateSnapshot first, then deltas.
 // - WorkspaceState is THE resolved render-state; frontends map .state to
 //   their display vocabulary and never re-derive from raw facts.
-// - TypingDelta is ephemeral (mirrors core.ContentDelta); consumers reconcile
+// - TypingDelta is ephemeral (embeds core.ContentDelta); consumers reconcile
 //   per uuid, replacing previews when the ConversationDelta carrying the
 //   complete message arrives.
 // - DegradedNotice is honest sad-path reporting (store/sidecar/shim outage);
@@ -18,6 +18,10 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
+import "agentshim/core/v1/core.proto";
+import "agentshim/data/v1/stream.proto";
+import "agentshim/data/v1/tools.proto";
+import "agentshim/data/v1/transcript.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
@@ -51,7 +55,8 @@ message FrontendFrame {
     TaskCatalog task_catalog = 6;
     CommandAck command_ack = 7;
     DegradedNotice degraded_notice = 8;
-    DaemonView daemon_view = 9;  // Additive (S7)
+    DaemonView daemon_view = 9;   // Additive (S7)
+    SessionInitView session_init = 10;  // Additive (S9)
   }
 }
 
@@ -99,26 +104,57 @@ message SessionView {
   bool rehydratable = 15;
   bool hibernated = 16;
   int64 pending_permissions = 17;
+  // Additive (S8): account identity — the CLAUDE_CONFIG_DIR the session's
+  // shim runs against (account switching is daemon-executed, webapp-initiated).
+  string config_dir = 18;
 }
 
-// Complete (store-round-tripped) conversation additions, pre-rendered into
-// the frontend vocabulary. items are protojson-friendly Structs shaped by
-// daemon/internal/frontend/translate.go — frontends render, never interpret.
+// Complete (store-round-tripped) conversation additions, composed from the
+// typed agent payloads (S9). daemon/internal/frontend/translate.go CURATES
+// which payloads are pushed but never re-types them — frontends render,
+// never interpret.
 message ConversationDelta {
   string workspace = 1;
   string session_id = 2;
-  repeated google.protobuf.Struct items = 3;
+  repeated ConversationItem items = 3;
   uint64 through_seq = 4;  // frontends persist this for reconnect resync
+}
+
+// One curated conversation addition: a thin envelope around the typed
+// data.v1/core.v1 payload. Consumers reconcile by uuid (permission items
+// use the permission request_id as their uuid).
+message ConversationItem {
+  string uuid = 1;
+  int64 ts_ms = 2;
+  string request_id = 3;  // vendor API request correlation, "" when absent
+  oneof item {
+    agentshim.data.v1.ApiAssistantMessage assistant_message = 10;
+    agentshim.data.v1.ApiUserMessage user_message = 11;
+    agentshim.data.v1.ToolUseBlock tool_use = 12;
+    agentshim.data.v1.ToolResultBlock tool_result = 13;
+    agentshim.data.v1.ToolUseResult tool_use_result = 14;
+    agentshim.data.v1.ResultMessage result = 15;
+    agentshim.data.v1.CompactBoundary compact_boundary = 16;
+    agentshim.data.v1.CompactBoundaryLine compact_boundary_line = 17;
+    agentshim.data.v1.ApiErrorLine api_error = 18;
+    agentshim.core.v1.PermissionItem permission = 30;
+  }
 }
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).
 message TypingDelta {
   string workspace = 1;
   string session_id = 2;
-  string uuid = 3;
-  uint32 block_index = 4;
-  string kind = 5;   // "text" | "thinking" | "input_json"
-  string delta = 6;
+  agentshim.core.v1.ContentDelta delta = 3;
+}
+
+// The session's retained SystemInit (slash commands, tools, skills, model
+// list), pushed on attach and included in StateSnapshot (S9). Replaces the
+// Emacs GET /commands HTTP menu source.
+message SessionInitView {
+  string workspace = 1;
+  string session_id = 2;
+  agentshim.data.v1.SystemInit init = 3;
 }
 
 message TaskEntry {
@@ -151,8 +187,13 @@ message FrontendCommand {
     ResyncCmd resync = 9;
     CreateSessionCmd create_session = 10;  // Additive (S7)
     DeleteSessionCmd delete_session = 11;  // Additive (S7)
+    ShutdownCmd shutdown = 12;             // Additive (S9)
   }
 }
+
+// Additive (S9): graceful daemon shutdown over UDS (replaces Emacs
+// POST /shutdown).
+message ShutdownCmd {}
 
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
 message CreateSessionCmd {
@@ -222,4 +263,5 @@ message StateSnapshot {
   repeated SessionView sessions = 2;
   repeated TaskCatalog catalogs = 3;
   DaemonView daemon = 4;  // Additive (S7)
+  repeated SessionInitView inits = 5;  // Additive (S9)
 }
