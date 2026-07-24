@@ -294,45 +294,73 @@ func (s *Server) updateRegistry(id, what string, fn func(*registry.Record)) {
 // migration.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	// POST /sessions was DELETED in the D-phase census: both frontends create
-	// sessions over the createSession FrontendCommand (the webapp's bootstrap
-	// /frontend socket, Emacs's UDS link), correlating the new id off the
-	// pushed SessionView. The create CORE (s.CreateSession) is untouched.
-	mux.HandleFunc("GET /sessions", s.handleListSessions)
-	mux.HandleFunc("GET /sessions/{id}/stream", s.handleStream)
-	// DELETE /sessions/{id}, POST /sessions/{id}/message, and
-	// POST /sessions/{id}/interrupt were removed in S7: Emacs drives them over
-	// the frontend.v1 UDS commands (deleteSession/submitPrompt/interrupt) and
-	// the webapp never used them (it submits/interrupts over its /stream WS).
-	// Their cores survive: s.DeleteSession backs the deleteSession command, and
-	// the driver's SubmitPrompt/Interrupt back the prompt/interrupt commands.
-	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
-	// The slash-command routes (GET /sessions/{id}/commands, POST
-	// /sessions/{id}/commands/refresh) and the status routes (GET
-	// /sessions/{id}/status, POST /sessions/{id}/status/refresh) were DELETED in
-	// the D-phase census: both frontends re-source the SDK system:init from the
-	// pushed SessionInitView frame, and the two refresh routes had already
-	// degraded to loud no-ops (the UDS shim has no re-init control).
-	// The queue-control routes (POST /sessions/{id}/queue/{queueId}/run-now and
-	// /cancel) were DELETED in S9: the daemon-owned queue plane is dead
-	// server-side, and both routes were already loud no-ops. Frontends drive the
-	// turn directly over submitPrompt/interrupt.
-	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
-	mux.HandleFunc("POST /sessions/{id}/account", s.handleAccountSwitch)
-	mux.HandleFunc("GET /accounts", s.handleAccounts)
-	mux.HandleFunc("GET /capabilities", s.handleCapabilities)
-	mux.HandleFunc("POST /sessions/{id}/login", s.handleLogin)
-	mux.HandleFunc("GET /sessions/{id}/login/terminal", s.handleLoginTerminal)
-	mux.HandleFunc("DELETE /sessions/{id}/login", s.handleLoginClose)
-	mux.HandleFunc("GET /sessions/{id}/chess-game", s.handleChessGameFile)
-	mux.HandleFunc("POST /sessions/{id}/add-support", s.handleAddSupport)
-	mux.HandleFunc("POST /remediation", s.handleRemediate) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("POST /workspace-command", s.handleWorkspaceCommand)
-	// POST /shutdown was DELETED in the D-phase census: Emacs bounces an
-	// adopted daemon over the shutdown FrontendCommand (frontend-uds.el) and no
-	// other surface ever called it. The graceful-teardown func it drove survives
-	// on the command handler.
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
 	return mux
+}
+
+// route is one registered HTTP pattern. Handler() registers the table, and
+// TestEveryRouteIsCoveredByAnAPIPrefix walks it to prove every pattern is
+// actually reachable through APIPrefixes.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// APIPrefixes are the URL prefixes the daemon's API handler must be mounted at
+// on the process-level mux. They matter because the webapp SPA is mounted at
+// "/": a route whose prefix is MISSING here does not 404 from this mux at all —
+// it silently falls through to the static file server, which answers the
+// frontend's API call with a 404 page. That is exactly how POST
+// /workspace-command was unreachable while a stale "/workspaces/" prefix (whose
+// route had long since been deleted) sat in its place.
+//
+// This list is the single source of truth: cmd/claude-repld mounts from it, and
+// the routes() table is asserted against it.
+var APIPrefixes = []string{
+	"/sessions",
+	"/sessions/",
+	"/accounts",
+	"/capabilities",
+	"/remediation",
+	"/workspace-command",
+}
+
+// routes is the daemon's full HTTP surface.
+//
+// Deleted routes and where their capability went, so the absences stay legible:
+//   - POST /sessions (D-phase): both frontends create over the createSession
+//     FrontendCommand, correlating the new id off the pushed SessionView. The
+//     create CORE (s.CreateSession) is untouched.
+//   - DELETE /sessions/{id}, POST /sessions/{id}/message, POST
+//     /sessions/{id}/interrupt (S7): driven as frontend.v1 commands
+//     (deleteSession/submitPrompt/interrupt). Their cores survive.
+//   - GET/POST /sessions/{id}/commands{,/refresh} and .../status{,/refresh}
+//     (D-phase): both frontends re-source the SDK system:init from the pushed
+//     SessionInitView frame; the refresh halves were already loud no-ops
+//     because the UDS shim has no re-init control.
+//   - POST /sessions/{id}/queue/{queueId}/{run-now,cancel} (S9): the
+//     daemon-owned queue plane is dead server-side.
+//   - POST /shutdown (D-phase): Emacs bounces an adopted daemon over the
+//     shutdown FrontendCommand.
+func (s *Server) routes() []route {
+	return []route{
+		{"GET /sessions", s.handleListSessions},
+		{"GET /sessions/{id}/stream", s.handleStream},
+		{"GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput},
+		{"GET /sessions/{id}/account", s.handleAccount},
+		{"POST /sessions/{id}/account", s.handleAccountSwitch},
+		{"GET /accounts", s.handleAccounts},
+		{"GET /capabilities", s.handleCapabilities},
+		{"POST /sessions/{id}/login", s.handleLogin},
+		{"GET /sessions/{id}/login/terminal", s.handleLoginTerminal},
+		{"DELETE /sessions/{id}/login", s.handleLoginClose},
+		{"GET /sessions/{id}/chess-game", s.handleChessGameFile},
+		{"POST /sessions/{id}/add-support", s.handleAddSupport},
+		{"POST /remediation", s.handleRemediate},
+		{"POST /workspace-command", s.handleWorkspaceCommand},
+	}
 }
 
 // ---------------------------------------------------------------------------

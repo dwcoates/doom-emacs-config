@@ -346,12 +346,15 @@ func main() {
 	sessionCommands.SetTarget(srv)
 
 	mux := http.NewServeMux()
-	mux.Handle("/sessions", srv.Handler())
-	mux.Handle("/sessions/", srv.Handler())
-	mux.Handle("/remediation", srv.Handler())
-	mux.Handle("/accounts", srv.Handler())
-	mux.Handle("/capabilities", srv.Handler())
-	mux.Handle("/workspaces/", srv.Handler())
+	// Mount the API at every prefix its routes live under. Driven off
+	// server.APIPrefixes rather than a hand-kept list here: anything not
+	// mounted falls through to the SPA at "/" and is answered by the file
+	// server, so a missing prefix reads as a 404 from the frontend rather than
+	// as a routing bug.
+	api := srv.Handler()
+	for _, prefix := range server.APIPrefixes {
+		mux.Handle(prefix, api)
+	}
 	if h := webappHandler(*webappDir, log.Printf); h != nil {
 		mux.Handle("/", h)
 	}
