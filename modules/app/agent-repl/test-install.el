@@ -610,17 +610,26 @@ Leaving the old name in the managed list would demand a host symlink
 whose repo-local source directory no longer exists."
   (should-not (member "workspace-open" agent-repl--managed-local-skills)))
 
-(ert-deftest agent-repl-test-managed-skills-includes-build-skill ()
-  "External managed-skills list must include `build-skill' (regression guard).
-The skill lives at `agent-repl-skills-src-dir'/build-skill on the host;
-the doctor uses this list to verify the host symlink points at it."
-  (should (member "build-skill" agent-repl--managed-skills)))
+(ert-deftest agent-repl-test-managed-skills-includes-create-or-update-skill ()
+  "External managed-skills list must include `create-or-update-skill'.
+Regression guard: the skill lives at
+`agent-repl-skills-src-dir'/create-or-update-skill on the host; the
+doctor uses this list to verify the host symlink points at it."
+  (should (member "create-or-update-skill" agent-repl--managed-skills)))
 
-(ert-deftest agent-repl-test-managed-skills-includes-workspace ()
-  "External managed-skills list must include the collapsed `workspace' skill.
-The per-command `workspace-*' skills were folded into `/workspace', so
-the doctor verifies the single `workspace' host symlink now."
-  (should (member "workspace" agent-repl--managed-skills)))
+(ert-deftest agent-repl-test-managed-skills-includes-create-or-update-workspace ()
+  "External managed-skills list must include `create-or-update-workspace'.
+The per-command `workspace-*' skills were folded into the single
+workspace skill, which the doctor verifies via one host symlink."
+  (should (member "create-or-update-workspace" agent-repl--managed-skills)))
+
+(ert-deftest agent-repl-test-managed-skills-excludes-pre-rename-names ()
+  "The pre-rename skill names must NOT be managed any more.
+Upstream renamed them to the `create-or-update-*' spellings; leaving the
+old names in the managed list would make the doctor demand host symlinks
+whose impl paths no longer exist."
+  (dolist (name '("workspace" "build-skill"))
+    (should-not (member name agent-repl--managed-skills))))
 
 (ert-deftest agent-repl-test-managed-skills-excludes-folded-workspace-skills ()
   "The folded per-command workspace skills must NOT be managed any more.

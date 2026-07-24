@@ -22,10 +22,16 @@
 # Such a path dangles the moment the worktree is pruned.  install.sh
 # rejects any such entry hard.  The folded `/workspace-*' skills
 # (workspace-merge, workspace-status, workspace-update, generate-workspace)
-# now live inside the single `/workspace' skill and are no longer managed
-# here; `workspace-annotate' was removed for lacking a main-worktree home.
+# now live inside the single `/create-or-update-workspace' skill and are no
+# longer managed here; `workspace-annotate' was removed for lacking a
+# main-worktree home.
+#
+# The upstream explanation-engine repo renamed both managed skills
+# (`workspace' -> `create-or-update-workspace', `build-skill' ->
+# `create-or-update-skill'), so both the installed name and the impl path
+# track the new spelling.
 
 CACHED_SKILLS=(
-  "workspace|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/workspace"
-  "build-skill|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/build-skill"
+  "create-or-update-workspace|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/create-or-update-workspace"
+  "create-or-update-skill|$HOME/workspace/ChessCom/explanation-engine/.claude/skills/create-or-update-skill"
 )

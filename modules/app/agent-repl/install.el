@@ -66,8 +66,8 @@ of where the Doom config tree is mounted.")
   "Buffer name used to surface install-script output to the user.")
 
 (defconst agent-repl--managed-skills
-  '("workspace"
-    "build-skill")
+  '("create-or-update-workspace"
+    "create-or-update-skill")
   "Bare names for managed host-level skill symlinks.
 Subset of cached skills (see `CACHED_SKILLS' in
 `modules/app/agent-repl/skills-cache/manifest.sh') whose impl source
@@ -75,8 +75,11 @@ lives under `agent-repl-skills-src-dir', so the doctor's
 `points-elsewhere' check has the right expected target.
 
 The former `workspace-merge', `workspace-status', `workspace-update',
-and `generate-workspace' skills were folded into the single `workspace'
-skill and are no longer managed.")
+and `generate-workspace' skills were folded into the single workspace
+skill and are no longer managed.  That skill and `build-skill' were then
+renamed upstream to `create-or-update-workspace' and
+`create-or-update-skill'; the old names no longer exist on the host, so
+managing them would make the doctor demand a dangling symlink.")
 
 (defconst agent-repl--skills-dest-dir "~/.claude/skills/"
   "Destination directory where managed skill symlinks are created.")
