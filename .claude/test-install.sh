@@ -91,6 +91,35 @@ test_install_fresh_symlinks_to_impl() {
   cleanup "$repo" "$home"
 }
 
+# --- install: the default action reports success in its EXIT CODE ---
+# Regression: the services step used to be guarded by a short-circuit
+# `[ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services` that was the
+# last command in its case arm, so with the opt-in flag OFF a fully
+# successful install exited 1.
+test_install_default_action_exits_zero() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && grep -q "^\[install\] Done\." "$repo/.install.log"; then
+    pass "default install (no services flag) exits zero"
+  else
+    fail "default install exit code" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- uninstall: the default action reports success in its EXIT CODE ---
+test_uninstall_default_action_exits_zero() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  run_install "$repo" "$home"
+  run_install "$repo" "$home" uninstall
+  if [ "$LAST_RC" -eq 0 ] && grep -q "^\[uninstall\] Done\." "$repo/.install.log"; then
+    pass "default uninstall (no services flag) exits zero"
+  else
+    fail "default uninstall exit code" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
 # --- install: a pre-existing (stale) symlink is repaired to the impl ---
 test_install_relinks_existing_symlink_to_impl() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
@@ -268,6 +297,8 @@ test_uninstall_only_removes_managed_hook() {
 
 echo "=== test-install.sh ==="
 test_install_fresh_symlinks_to_impl
+test_install_default_action_exits_zero
+test_uninstall_default_action_exits_zero
 test_install_relinks_existing_symlink_to_impl
 test_install_fails_hard_when_impl_missing
 test_install_rejects_nonmain_worktree_impl
