@@ -90,18 +90,27 @@ when the ack reports failure — in addition to the loud log + echo).")
 
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
-    "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView")
+    "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView"
+    "sessionInit")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
-malformed (unknown wire field) and signals loudly.")
+malformed (unknown wire field) and signals loudly.
+
+`sessionInit' (S9) carries the session's retained `SystemInit' (slash
+commands, tools, skills, model list); it is the pushed-frame replacement
+for the deleted GET /commands HTTP slash-menu source.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
-    "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession")
+    "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
+    "shutdown")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
-command field is a programming error and fails loudly.")
+command field is a programming error and fails loudly.
+
+`shutdown' (S9) is the graceful-daemon-shutdown command (`ShutdownCmd')
+that replaces the Emacs POST /shutdown HTTP call.")
 
 (defvar agent-repl--uds-frame-handlers nil
   "Alist mapping a `FrontendFrame' oneof field name (string) to a handler fn.
@@ -158,11 +167,53 @@ this module's landing report) so the test guard installs for it."
    :filter filter
    :sentinel sentinel))
 
+(defun agent-repl--uds-probe (path)
+  "External boundary: open a THROWAWAY connection to the UDS at PATH.
+Does nothing but dial and immediately close, so the only thing its return
+proves is that something is LISTENING at PATH.  Signals (like
+`make-network-process') when nothing is; callers convert that to a
+boolean.  Deliberately separate from `agent-repl--uds-connect': it must
+not disturb `agent-repl--uds-process', install handlers, or arm the
+reconnect timer, because the liveness probes in daemon.el ask the
+question repeatedly (including while waiting for a daemon to EXIT).
+
+AGENTS.md external-boundary wrapper: registered in
+`agent-repl--external-boundary-functions'."
+  (delete-process
+   (make-network-process
+    :name "agent-repl-frontend-uds-probe"
+    :family 'local
+    :service path
+    :nowait nil
+    :noquery t))
+  t)
+
 ;;;; ---- Connection lifecycle --------------------------------------------
 
 (defun agent-repl--uds-connected-p ()
   "Return non-nil iff the frontend UDS link is live."
   (process-live-p agent-repl--uds-process))
+
+(defun agent-repl--uds-socket-live-p (&optional path)
+  "Return non-nil when a daemon is listening on the frontend UDS at PATH.
+PATH defaults to `agent-repl-uds-socket-path'.  An already-live link is
+proof enough; otherwise a throwaway `agent-repl--uds-probe' dials.  A
+refused dial (no listener, or a stale socket FILE left by a dead daemon)
+counts as absent, which is how the daemon-adoption and shutdown-grace
+polls in daemon.el read \"no daemon there\".
+
+This is the UDS replacement for the deleted `GET /sessions' port probe:
+the socket is the same one a FOREIGN daemon (one this Emacs did not
+spawn) owns, so it detects an adopted daemon exactly as the HTTP probe
+did."
+  (or (agent-repl--uds-connected-p)
+      (condition-case err
+          (agent-repl--uds-probe (or path agent-repl-uds-socket-path))
+        (error
+         (agent-repl--log nil "uds-socket-live-p: no listener at %s (%s)"
+                          (or path agent-repl-uds-socket-path)
+                          (error-message-string err))
+         nil))))
 
 (cl-defun agent-repl-uds-connect (&optional path)
   "Establish (or re-establish) the frontend UDS connection.

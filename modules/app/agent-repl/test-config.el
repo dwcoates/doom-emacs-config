@@ -386,7 +386,7 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
   ;; Arrange / Act / Assert
   (should-error (agent-repl--early-git-string "rev-parse" "HEAD")
                 :type 'error)
-  (should-error (agent-repl--frontend-http-request "GET" "http://x" nil)
+  (should-error (agent-repl--uds-probe "/tmp/agent-repl-probe.sock")
                 :type 'error))
 
 (provide 'test-config)

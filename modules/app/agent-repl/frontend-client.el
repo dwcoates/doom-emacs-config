@@ -1,12 +1,19 @@
-;;; frontend-client.el --- HTTP session client for the claude-repld daemon -*- lexical-binding: t; -*-
+;;; frontend-client.el --- session client for the claude-repld daemon -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; The Emacs-side seam onto claude-repld's HTTP surface (POST/GET/DELETE
-;; /sessions).  One module owns URL construction, JSON encoding/decoding,
-;; readiness polling, and the workspace ⇄ session binding, so the panel
-;; layer (frontend.el) and any future consumer share a single client
-;; instead of hand-rolling requests.
+;; The Emacs-side seam onto claude-repld's SESSION plane.  Emacs speaks no
+;; HTTP to the daemon at all any more (S8/S9 sentinel endgame): session
+;; CRUD travels as `frontend.v1' commands over the UDS (frontend-uds.el)
+;; and every read comes off pushed frames (frontend-state.el).  What is
+;; left here is the command/await choreography and the workspace ⇄ session
+;; binding, so the panel layer (frontend.el) and any future consumer share
+;; one client instead of hand-rolling command round-trips.
+;;
+;; The one URL this module still builds is the WEBVIEW's
+;; (`agent-repl--frontend-session-url'): the webapp bundle is served over
+;; HTTP to an embedded browser, which is a browser navigation, not an
+;; Emacs-side HTTP client call.
 ;;
 ;; Binding model:
 ;;   - Each workspace gets AT MOST one daemon session, tracked under the
@@ -19,17 +26,14 @@
 ;;   - `agent-repl-ws-del-hook' releases the daemon session when the
 ;;     workspace is nuked (best-effort: a dead daemon only logs).
 ;;
-;; All external I/O funnels through the single boundary wrapper
-;; `agent-repl--frontend-http-request', registered in
+;; All external I/O funnels through the transport's single boundary wrapper
+;; `agent-repl--uds-connect' (frontend-uds.el), registered in
 ;; `agent-repl--external-boundary-functions' per the test-harness
 ;; contract; tests mock it via `cl-letf'.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'json)
-(require 'url)
-(require 'url-http)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
@@ -51,12 +55,14 @@
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
+(declare-function agent-repl-uds-connect "frontend-uds" (&optional path))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
+(declare-function agent-repl--frontend-daemon-view "frontend-state" ())
 
-(defvar url-http-response-status)
 (defvar agent-repl--uds-process)
+(defvar agent-repl-uds-socket-path)
 
 ;; Signalled when the daemon HARD-FAILS a --resume because the target
 ;; session has no transcript in its config dir (§2.10 resume viability
@@ -85,13 +91,8 @@ in `agent-repl--frontend-create-session'.")
 
 ;;;; ---- Customization ----------------------------------------------------
 
-(defcustom agent-repl-frontend-http-timeout 10
-  "Seconds `agent-repl--frontend-http-request' waits for a daemon response."
-  :type 'integer
-  :group 'agent-repl)
-
 (defcustom agent-repl-frontend-permission-mode "auto"
-  "Permission mode for gui-created sessions (POST /sessions).
+  "Permission mode for gui-created sessions (`CreateSessionCmd').
 Defaults to `auto' to match the CLI's own permission-mode config
 (`agent-repl-personal-permission-flag' /
 `agent-repl-managed-permission-flag'), which requires the daemon to
@@ -106,102 +107,70 @@ the SDK default."
   :type 'integer
   :group 'agent-repl)
 
-;;;; ---- External boundary ------------------------------------------------
-
-(defun agent-repl--frontend-http-request (method url &optional payload)
-  "External-boundary wrapper: synchronous HTTP METHOD to URL.
-PAYLOAD, when non-nil, is a JSON string sent as the request body.
-Returns (STATUS . BODY-STRING).  Body does nothing but perform the
-external call so tests mock it via `cl-letf'; registered in
-`agent-repl--external-boundary-functions'.
-
-MAIN THREAD ONLY.  `url-retrieve-synchronously' routes through
-`accept-process-output' -> `ns_select_1' -> `[NSApp run]', and running
-the AppKit event loop on a worker thread deadlocks Emacs (the
-AGENTS.md `ns_select_1' worker-thread trap; it froze Emacs on
-2026-07-18 via the merge worker's config reload -> watcher re-arm ->
-drain chain).  Any indirect chain can smuggle this call onto a worker,
-so the boundary itself refuses via `agent-repl--assert-main-thread'."
-  (agent-repl--assert-main-thread (format "frontend-http %s %s" method url))
-  (let* ((url-request-method method)
-         (url-request-extra-headers
-          (when payload '(("Content-Type" . "application/json"))))
-         (url-request-data
-          (when payload (encode-coding-string payload 'utf-8)))
-         (buf (url-retrieve-synchronously ;; ALLOW-EXTERNAL-BOUNDARY
-               url t t agent-repl-frontend-http-timeout)))
-    (unless buf
-      (error "agent-repl: no response from %s %s" method url))
-    (with-current-buffer buf
-      (unwind-protect
-          (progn
-            (goto-char (point-min))
-            (let ((status url-http-response-status))
-              (if (re-search-forward "\n\n" nil t)
-                  (cons status (buffer-substring-no-properties
-                                (point) (point-max)))
-                (cons status ""))))
-        (kill-buffer buf)))))
-
-;;;; ---- JSON API core ----------------------------------------------------
+;;;; ---- Webview URL --------------------------------------------------------
 
 (defun agent-repl--frontend-base-url ()
-  "Return the daemon's HTTP base URL from the configured address."
+  "Return the daemon's HTTP base URL from the configured address.
+The ONLY surviving URL construction in the Emacs client: it addresses the
+webapp bundle the daemon serves to the embedded browser
+\(`agent-repl--frontend-session-url'), which is a browser navigation.
+Emacs itself never issues an HTTP request to the daemon."
   (format "http://%s" agent-repl-frontend-daemon-addr))
-
-(defun agent-repl--frontend-parse-json (body)
-  "Parse BODY (a JSON string) into an alist, or nil when BODY is blank.
-Object keys decode to symbols and JSON arrays to lists.  Signals the raw
-`json-parse-string' error on undecodable non-blank BODY; callers wanting
-a request-scoped message (`agent-repl--frontend-api') wrap it."
-  (when (and body (not (string-empty-p (string-trim body))))
-    (json-parse-string body :object-type 'alist :array-type 'list)))
-
-(defun agent-repl--frontend-api (method path &optional payload-alist)
-  "Issue METHOD PATH against the daemon and return the parsed JSON body.
-PAYLOAD-ALIST, when non-nil, is JSON-encoded as the request body.
-Signals an error on any non-2xx status (the daemon's error text is
-included) and on undecodable response bodies.  Returns nil for empty
-bodies (e.g. DELETE's 204)."
-  (let* ((url (concat (agent-repl--frontend-base-url) path))
-         (payload (when payload-alist (json-encode payload-alist)))
-         (resp (agent-repl--frontend-http-request method url payload))
-         (status (car resp))
-         (body (cdr resp)))
-    (unless (and (integerp status) (<= 200 status 299))
-      (error "agent-repl: %s %s failed (HTTP %s): %s"
-             method path status (string-trim (or body ""))))
-    (condition-case err
-        (agent-repl--frontend-parse-json body)
-      (error
-       (error "agent-repl: %s %s returned undecodable JSON (%s): %s"
-              method path (error-message-string err) body)))))
 
 ;;;; ---- Readiness ---------------------------------------------------------
 
+(defun agent-repl--frontend-daemon-ready-p ()
+  "Return non-nil when the daemon is up AND has identified itself.
+Readiness is two facts, both of which the UDS plane already carries:
+
+  1. the frontend UDS link is LIVE (`agent-repl--uds-connected-p') — the
+     daemon bound its socket and accepted us;
+  2. a `DaemonView' has been pushed (`agent-repl--frontend-daemon-view') —
+     the connect `StateSnapshot' arrived, so the daemon is past bring-up
+     and its identity (boot id, versions, binary mtime) is known.
+
+Fact 1 alone is not enough: a connection can be accepted a beat before the
+snapshot is composed, and every consumer of readiness immediately issues a
+command whose answer arrives as pushed state.  This is the replacement for
+the deleted `GET /sessions' probe, which conflated both facts in one
+round-trip."
+  (and (agent-repl--uds-connected-p)
+       (agent-repl--frontend-daemon-view)
+       t))
+
 (defun agent-repl--frontend-wait-ready ()
-  "Block until the daemon answers GET /sessions, or signal an error.
+  "Block until the frontend UDS link is ready, or signal an error.
 `agent-repl--ensure-frontend-daemon' returns as soon as the process is
-SPAWNED, which precedes the port bind; polling closes that gap.  Polls
-`agent-repl-frontend-ready-attempts' times, 0.2s apart."
+SPAWNED, which precedes the socket bind; polling closes that gap.  Each
+attempt dials when the link is down (`agent-repl-uds-connect', which
+loud-logs its own failures and arms the reconnect timer) and otherwise
+PUMPS the live connection so the connect snapshot — which carries the
+`DaemonView' readiness depends on — is dispatched while we wait.  Polls
+`agent-repl-frontend-ready-attempts' times, 0.2s apart.
+
+MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
+`[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
+worker-thread trap), so this asserts it up front exactly as the old
+synchronous HTTP boundary did."
+  (agent-repl--assert-main-thread "frontend-wait-ready")
   (let ((attempt 0)
-        (ready nil)
-        (last-err nil))
+        (ready (agent-repl--frontend-daemon-ready-p)))
     (while (and (not ready) (< attempt agent-repl-frontend-ready-attempts))
       (setq attempt (1+ attempt))
-      (condition-case err
-          (progn (agent-repl--frontend-api "GET" "/sessions")
-                 (setq ready t))
-        (error
-         (setq last-err err)
-         ;; sleep-for, NOT sit-for: sit-for returns immediately when
-         ;; input is pending, which would collapse the whole readiness
-         ;; window into back-to-back failed probes while the user types.
-         (sleep-for 0.2))))
+      (unless (agent-repl--uds-connected-p)
+        (agent-repl-uds-connect))
+      (if (agent-repl--uds-connected-p)
+          (accept-process-output agent-repl--uds-process 0.2)
+        ;; sleep-for, NOT sit-for: sit-for returns immediately when
+        ;; input is pending, which would collapse the whole readiness
+        ;; window into back-to-back failed dials while the user types.
+        (sleep-for 0.2))
+      (setq ready (agent-repl--frontend-daemon-ready-p)))
     (unless ready
-      (error "agent-repl: daemon at %s never became ready (%d attempts): %s"
-             agent-repl-frontend-daemon-addr attempt
-             (error-message-string last-err)))
+      (error "agent-repl: daemon at %s never became ready (%d attempts; connected=%s daemon-view=%s)"
+             agent-repl-uds-socket-path attempt
+             (if (agent-repl--uds-connected-p) "yes" "no")
+             (if (agent-repl--frontend-daemon-view) "yes" "no")))
     t))
 
 ;;;; ---- Session CRUD -------------------------------------------------------
@@ -228,7 +197,7 @@ WHAT names the wait for the main-thread assertion + logging.
 
 MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
 `[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
-worker-thread trap); the boundary asserts it, same as the HTTP request."
+worker-thread trap); every blocking wait in this module asserts it."
   (agent-repl--assert-main-thread (format "frontend-await-uds %s" what))
   (let ((deadline (+ (float-time) timeout)) result)
     (while (and (not (setq result (funcall predicate)))
@@ -367,25 +336,10 @@ store, and a rejected ack surfaces loudly via the shared ack handler."
     (agent-repl--uds-track-command req "deleteSession" ws)
     req))
 
-(defun agent-repl--frontend-fetch-commands (session-id)
-  "Return SESSION-ID's slash-command menu as a list of alists.
-Each entry carries the symbol keys `name', `description', and
-`argumentHint'.  The list may be empty when the daemon has not yet
-resolved the menu off the SDK's init handshake, which is a transient
-startup state rather than an error.  Signals on an HTTP or decode
-failure, per `agent-repl--frontend-api'."
-  (alist-get 'commands
-             (agent-repl--frontend-api
-              "GET" (format "/sessions/%s/commands" session-id))))
-
-(defun agent-repl--frontend-refresh-commands (session-id)
-  "Ask the daemon to re-resolve SESSION-ID's slash-command menu.
-Fire-and-forget: the daemon answers 202 immediately and the fresh list
-lands on its cache asynchronously once its re-probe completes, so this
-never blocks on the probe.  Signals on HTTP failure."
-  (agent-repl--frontend-api
-   "POST" (format "/sessions/%s/commands/refresh" session-id))
-  t)
+;; The GET /commands slash-menu fetch + POST /commands/refresh re-resolve
+;; were deleted in the S9 cutover: the slash-command menu is now the pushed
+;; `SessionInitView' (retained `SystemInit'), read off frontend-state.el's
+;; session-init store by input.el's completion — no HTTP round-trip.
 
 (defun agent-repl--frontend-session-live-p (id)
   "Return non-nil when ID has a pushed `SessionView' that is not terminal.
@@ -702,49 +656,12 @@ the count of open workspaces that carried a session binding to rebind."
     (agent-repl--frontend-remount-all-webviews)
     n))
 
-;;;; ---- In-flight message queue (protocol §2.13) ---------------------------
-;;
-;; A `user-message' submitted while a turn is in flight is parked in the
-;; daemon's per-session FIFO queue rather than forwarded.  The webapp owns
-;; the rich queued-message UI; the Emacs host reaches the queue through two
-;; HTTP override routes (`queue-run-now'/`queue-cancel', kept: frontend.v1
-;; carries no queue-control command).  The queue SNAPSHOT read is gone: the
-;; post-cutover daemon no longer carries a `queue' array on GET /sessions
-;; and the frontend.v1 `SessionView' has no queue field, so
-;; `agent-repl--ws-queued-messages' now always reads the empty
-;; `:queued-messages' (nothing populates it) — the queued-count segment
-;; renders 0, matching the retired daemon-side queue plane.
-
-(defun agent-repl--frontend-queue-run-now (session-id queue-id)
-  "Escalate queued message QUEUE-ID in SESSION-ID to run now over HTTP.
-POSTs the daemon's run-now override route, a manual `interrupt' verdict
-\(§2.13): the item moves to the queue front and, if a turn is in flight,
-the running turn is interrupted so the drain picks this item up next.
-A stale QUEUE-ID is a daemon-side no-op ack, not an error."
-  (agent-repl--frontend-api
-   "POST" (format "/sessions/%s/queue/%s/run-now" session-id queue-id))
-  t)
-
-(defun agent-repl--frontend-queue-cancel (session-id queue-id)
-  "Cancel queued message QUEUE-ID in SESSION-ID over HTTP.
-POSTs the daemon's cancel override route, removing the item from the
-queue without ever sending it (§2.13).  A stale QUEUE-ID is a
-daemon-side no-op ack, not an error."
-  (agent-repl--frontend-api
-   "POST" (format "/sessions/%s/queue/%s/cancel" session-id queue-id))
-  t)
-
-(defun agent-repl--ws-queued-messages (ws)
-  "Return WS's last-known in-flight message queue (list of plists).
-Front-to-back, empty when nothing is queued.  Post-cutover nothing
-populates `:queued-messages' (the daemon dropped the GET /sessions queue
-snapshot and the frontend.v1 `SessionView' has no queue field), so this
-now always returns nil — the queue plane is retired daemon-side."
-  (agent-repl--ws-get ws :queued-messages))
-
-(defun agent-repl--ws-queued-count (ws)
-  "Return the number of messages queued for WS (0 when none)."
-  (length (agent-repl--ws-queued-messages ws)))
+;; The in-flight message-queue plane (§2.13) is fully retired.  It was dead
+;; server-side (the post-cutover daemon carries no `queue' array and
+;; frontend.v1 has no queue field or queue-control command), so the Emacs
+;; `queue-run-now'/`queue-cancel' HTTP override routes and the
+;; perpetually-empty `:queued-messages' accessors were deleted in the S9
+;; endgame — the webapp owns the queued-message UI end to end.
 
 (defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
   "The gui frontend's send capability (registry `:send-fn').
@@ -756,12 +673,10 @@ once needed disambiguating — but the prefix counter still increments
 so metaprompt periodicity is tracked the same way for every workspace.
 Posthooks and prompt summary key on RAW, identically.
 
-Sets `:thinking' optimistically BEFORE the HTTP send: the
-UserPromptSubmit hook remains the authoritative confirmation, but a
-permission request can beat a lagging hook and
-`agent-repl--on-permission-event' gates on `:thinking' — without the
-optimistic write the daemon's permission sentinel would be silently
-dropped.
+Sets `:thinking' optimistically BEFORE the send so the turn reads as
+in-flight immediately, ahead of the daemon's authoritative pushed
+THINKING `WorkspaceState' (the sentinel/hook confirmation this write
+once raced was deleted in the S8/S9 sentinel endgame).
 
 Records the sent turn's request id and RAW text under `:sent-turn',
 which is what `agent-repl-interrupt' needs to undo the send: the

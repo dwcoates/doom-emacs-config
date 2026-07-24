@@ -42,6 +42,7 @@
   (load (expand-file-name "test-merge-handlers.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
+  (load (expand-file-name "test-permission.el" dir) nil t)
   (load (expand-file-name "test-prompt-summary.el" dir) nil t)
   (load (expand-file-name "test-sentinel.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)

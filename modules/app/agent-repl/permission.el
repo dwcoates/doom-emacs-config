@@ -1,0 +1,258 @@
+;;; permission.el --- permission UX from pushed frontend.v1 state -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; The Emacs-side permission surface, driven ENTIRELY by daemon-pushed
+;; `frontend.v1' state (design §5.4, §10; S8/S9 sentinel endgame).  It
+;; replaces the deleted permission sentinels + managed Claude Code hooks
+;; (`permission_request' / `permission_prompt' / `permission_resolved',
+;; and the `Notification' / `PermissionRequest' hooks): Emacs no longer
+;; learns about permission prompts from harness hooks at all.
+;;
+;; The daemon composes each `canUseTool' round-trip into a
+;; `core.v1.PermissionItem' and pushes it as a `permission' arm of a
+;; `ConversationDelta' (item uuid == the permission request id), with a
+;; resolution lifecycle:
+;;
+;;   RESOLUTION_PENDING   -> a prompt is waiting on an answer.  This file
+;;                           records it under the workspace's
+;;                           `:permission-prompt-active' key (the existing
+;;                           permission UI surface) AND fires Emacs's own
+;;                           desktop notification (the user-visible effect
+;;                           the deleted `Notification' hook used to have).
+;;   RESOLUTION_ALLOWED   -> answered allow; clears the prompt.
+;;   RESOLUTION_DENIED    -> answered deny; clears the prompt, may echo the
+;;                           daemon's deny message.
+;;   RESOLUTION_ABANDONED -> the turn ended / session torn down before an
+;;                           answer; clears the prompt SILENTLY (the shim
+;;                           re-asks on reattach, replayed off the retained
+;;                           ring — no special-casing here).
+;;
+;; The `:permission' render state itself is pushed as a `WorkspaceState'
+;; (handled in `frontend-state.el'); this file owns only the prompt
+;; bookkeeping, the notification, and the answer round-trip.
+;;
+;; Answers travel back over the UDS as a `PermissionAnswerCmd'
+;; \(permissionRequestId / allow / updatedInput / denyMessage) — the same
+;; command the webapp answers with.  Reconnect re-presentation needs no
+;; special handling: the retained-ring resync replays the pending item and
+;; re-drives this handler; the per-uuid idempotency guard keeps a replay of
+;; an already-active prompt from re-notifying.
+;;
+;; No-Silent-Fallbacks (AGENTS.md): a permission item with no workspace, or
+;; with an unknown/absent resolution, is loud-logged and SIGNALS — never a
+;; defaulted value.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'subr-x)
+
+(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--ws-get "workspace" (ws key))
+(declare-function agent-repl--ws-put "workspace" (ws key val))
+(declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl--notify "notifications" (ws title message))
+(declare-function agent-repl--uds-register-handler "frontend-uds" (field fn))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
+(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+
+;;;; ---- Resolution vocabulary -------------------------------------------
+
+(defconst agent-repl--permission-resolution-pending "RESOLUTION_PENDING"
+  "protojson enum name for an unanswered `PermissionItem'.")
+
+(defconst agent-repl--permission-resolutions-terminal
+  '("RESOLUTION_ALLOWED" "RESOLUTION_DENIED" "RESOLUTION_ABANDONED")
+  "protojson enum names for the answered/abandoned `PermissionItem' states.
+Each clears the active prompt for the item's workspace when its uuid
+matches.  RENDER-agnostic: the `:permission' render state itself is
+carried by the pushed `WorkspaceState', not by these.")
+
+;;;; ---- ConversationDelta permission handling ---------------------------
+
+(defun agent-repl--permission-item-p (item)
+  "Return non-nil when ITEM (a `ConversationItem' plist) is a permission arm.
+protojson emits ONLY the set oneof arm, so a `permission' key present
+means this item is a `PermissionItem'; every other conversation item
+type (assistant/user message, tool use/result, …) is for the webapp feed
+and carries a different arm key, which Emacs ignores."
+  (and (plist-member item :permission) t))
+
+(defun agent-repl--frontend-apply-conversation-delta (delta)
+  "Apply a `ConversationDelta' frame DELTA (a plist).  Handler for `conversationDelta'.
+Emacs is state-centric: of the delta's typed items it consumes ONLY the
+`permission' arm (the daemon-composed `PermissionItem'); every other item
+type is the webapp's to render and is skipped here.  Each permission item
+is dispatched to `agent-repl--permission-handle-item' with the delta's
+workspace.  Returns the count of permission items handled."
+  (let ((workspace (plist-get delta :workspace))
+        (handled 0))
+    (dolist (item (plist-get delta :items))
+      (when (agent-repl--permission-item-p item)
+        (agent-repl--permission-handle-item workspace item)
+        (cl-incf handled)))
+    (when (> handled 0)
+      (agent-repl--log workspace
+                       "frontend-apply-conversation-delta: ws=%s handled %d permission item(s)"
+                       workspace handled))
+    handled))
+
+(defun agent-repl--permission-handle-item (workspace item)
+  "Dispatch permission ITEM for WORKSPACE on its resolution.
+ITEM is a `ConversationItem' plist whose `:permission' arm is a
+`PermissionItem' (request + resolution).  Fails loudly (No-Silent-Fallbacks)
+when WORKSPACE is missing/blank or the resolution is unknown/absent —
+never a defaulted value.  Returns the resolution keyword acted on."
+  (when (or (null workspace) (and (stringp workspace) (string-empty-p workspace)))
+    (agent-repl--log nil
+                     "permission-handle-item: MISSING workspace for item=%S — no fallback"
+                     item)
+    (error "agent-repl permission: ConversationItem permission arm missing workspace"))
+  (let* ((uuid (plist-get item :uuid))
+         (perm (plist-get item :permission))
+         (request (plist-get perm :request))
+         (resolution (plist-get perm :resolution))
+         (deny-message (plist-get perm :denyMessage))
+         (tool-name (plist-get request :toolName))
+         (input (plist-get request :input)))
+    (cond
+     ((equal resolution agent-repl--permission-resolution-pending)
+      (agent-repl--permission-present workspace uuid tool-name input)
+      :pending)
+     ((member resolution agent-repl--permission-resolutions-terminal)
+      (agent-repl--permission-clear workspace uuid resolution deny-message)
+      (intern (concat ":" (downcase (or resolution "")))))
+     (t
+      (agent-repl--log workspace
+                       "permission-handle-item: UNKNOWN resolution=%S uuid=%s ws=%s — no fallback"
+                       resolution uuid workspace)
+      (error "agent-repl permission: unknown resolution %S" resolution)))))
+
+;;;; ---- Present / clear the prompt --------------------------------------
+
+(defun agent-repl--permission-present (ws uuid tool-name input)
+  "Record a PENDING permission prompt for WS and fire a desktop notification.
+UUID is the permission request id, TOOL-NAME the requested tool, INPUT its
+argument Struct (a plist).  Stores the prompt under the existing
+`:permission-prompt-active' workspace key so the answer command and a
+later resolution update can find it.
+
+Idempotent per uuid: when the workspace already has the SAME uuid active
+\(a retained-ring replay after reconnect re-drives the same item), this is
+a no-op and does NOT re-notify.  Returns the recorded prompt plist, or nil
+when it was already active."
+  (let ((active (agent-repl--ws-get ws :permission-prompt-active)))
+    (if (and active (equal (plist-get active :request-id) uuid))
+        (progn
+          (agent-repl--log ws
+                           "permission-present: ws=%s uuid=%s already active — no re-notify"
+                           ws uuid)
+          nil)
+      (let ((prompt (list :request-id uuid :tool-name tool-name :input input)))
+        (agent-repl--ws-put ws :permission-prompt-active prompt)
+        (agent-repl--log ws "permission-present: ws=%s uuid=%s tool=%s — presenting + notifying"
+                         ws uuid (or tool-name "?"))
+        (agent-repl--permission-notify ws tool-name)
+        prompt))))
+
+(defun agent-repl--permission-notify (ws tool-name)
+  "Fire Emacs's own desktop notification that WS is awaiting a permission answer.
+TOOL-NAME names the requested tool.  Uses `agent-repl--notify' — the same
+focus-gated desktop-notification mechanism the module already uses for the
+agent-finished banner — so no banner appears while the user is already
+looking at Emacs.  Replaces the notification the deleted `Notification'
+managed hook used to fire."
+  (agent-repl--notify ws "Agent REPL"
+                      (format "%s: permission requested%s"
+                              ws
+                              (if (and tool-name (not (string-empty-p tool-name)))
+                                  (format " — %s" tool-name)
+                                ""))))
+
+(defun agent-repl--permission-clear (ws uuid resolution deny-message)
+  "Clear WS's active permission prompt when its uuid matches UUID.
+RESOLUTION is the terminal protojson enum name.  A `RESOLUTION_DENIED' may
+echo DENY-MESSAGE to the echo area (when non-empty); `RESOLUTION_ABANDONED'
+clears SILENTLY (log only); `RESOLUTION_ALLOWED' logs only.  A resolution
+whose uuid does not match the active prompt (already cleared, or never seen
+by this Emacs — e.g. resolved before connect) is a benign no-op, logged,
+never an error.  Returns non-nil when a prompt was cleared."
+  (let ((active (agent-repl--ws-get ws :permission-prompt-active)))
+    (if (and active (equal (plist-get active :request-id) uuid))
+        (progn
+          (agent-repl--ws-put ws :permission-prompt-active nil)
+          (agent-repl--log ws "permission-clear: ws=%s uuid=%s resolution=%s — cleared"
+                           ws uuid resolution)
+          (when (and (equal resolution "RESOLUTION_DENIED")
+                     (stringp deny-message)
+                     (not (string-empty-p deny-message)))
+            (message "agent-repl: permission denied — %s" deny-message))
+          t)
+      (agent-repl--log ws
+                       "permission-clear: ws=%s uuid=%s resolution=%s — no matching active prompt (already cleared / never presented)"
+                       ws uuid resolution)
+      nil)))
+
+;;;; ---- Answering over UDS ----------------------------------------------
+
+(defun agent-repl--send-permission-answer (ws request-id allow &optional updated-input deny-message)
+  "Send a `PermissionAnswerCmd' for REQUEST-ID over the UDS, keyed by WS.
+ALLOW non-nil answers allow; nil answers deny.  UPDATED-INPUT, when
+non-nil, is an allow-with-edits Struct (a plist) sent as `updatedInput'.
+DENY-MESSAGE, when non-nil on a deny, travels as `denyMessage'.  A false
+`allow' is OMITTED from the frame rather than sent as JSON false, matching
+protojson's default-omission (the daemon reads an absent bool as deny).
+Tracks the command so a rejected ack surfaces loudly.  Returns the
+request id of the sent command."
+  (let* ((payload (append (list :permissionRequestId request-id)
+                          (when allow (list :allow t))
+                          (when updated-input (list :updatedInput updated-input))
+                          (when (and (not allow) deny-message
+                                     (not (string-empty-p deny-message)))
+                            (list :denyMessage deny-message))))
+         (req (agent-repl--uds-send-command "permissionAnswer" payload ws)))
+    (agent-repl--uds-track-command req "permissionAnswer" ws)
+    (agent-repl--log ws "send-permission-answer: ws=%s request=%s allow=%s"
+                     ws request-id (if allow "yes" "no"))
+    req))
+
+;;;###autoload
+(defun agent-repl-answer-permission (&optional ws)
+  "Answer the active permission prompt for workspace WS over the UDS.
+Reads WS's `:permission-prompt-active' (set from the pushed pending
+`PermissionItem'), prompts allow/deny (deny optionally with a message),
+and sends the answer as a `PermissionAnswerCmd'.  The prompt is NOT
+cleared optimistically — the daemon pushes a resolution update that
+clears it, keeping pushed state the single source of truth.  Signals
+`user-error' when WS has no active permission prompt.  Defaults to the
+current workspace."
+  (interactive)
+  (let* ((ws (or ws (agent-repl--ws-current-name)))
+         (prompt (and ws (agent-repl--ws-get ws :permission-prompt-active))))
+    (unless prompt
+      (user-error "agent-repl: no active permission prompt in workspace '%s'" ws))
+    (let* ((request-id (plist-get prompt :request-id))
+           (tool-name (plist-get prompt :tool-name))
+           (allow (y-or-n-p (format "Allow permission for %s in '%s'? "
+                                    (or tool-name "tool") ws)))
+           (deny-message (unless allow
+                           (let ((m (read-string "Deny message (optional): ")))
+                             (unless (string-empty-p m) m)))))
+      (agent-repl--send-permission-answer ws request-id allow nil deny-message)
+      (message "agent-repl: %s permission for %s"
+               (if allow "allowed" "denied") (or tool-name "tool")))))
+
+;;;; ---- Handler registration --------------------------------------------
+;;
+;; Registered on the transport (`frontend-uds.el', loaded first per
+;; config.el order).  Emacs is the only frontend that reduces a
+;; ConversationDelta to just its permission items; the webapp renders the
+;; full typed feed.
+
+(agent-repl--uds-register-handler "conversationDelta"
+                                  #'agent-repl--frontend-apply-conversation-delta)
+
+(provide 'permission)
+
+;;; permission.el ends here

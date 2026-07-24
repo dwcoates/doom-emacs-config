@@ -618,11 +618,12 @@ WHAT names the guarded operation in the log line and error text.
 
 Guards main-thread-only operations against the AGENTS.md `ns_select_1'
 worker-thread trap: anything that reaches `accept-process-output' /
-`[NSApp run]' (e.g. the synchronous frontend HTTP boundary) deadlocks
-Emacs when run on a worker thread, and an indirect call chain can
-smuggle such an operation onto a worker without any call site noticing
-\(the 2026-07-18 freeze arrived via merge worker -> config reload ->
-watcher re-arm -> notification drain -> HTTP).  Signaling here converts
+`[NSApp run]' (e.g. the blocking frontend UDS waits — readiness, the
+command awaits) deadlocks Emacs when run on a worker thread, and an
+indirect call chain can smuggle such an operation onto a worker without
+any call site noticing \(the 2026-07-18 freeze arrived via merge worker
+-> config reload -> watcher re-arm -> notification drain -> the
+then-synchronous frontend HTTP call).  Signaling here converts
 the would-be hard deadlock into an ordinary error that the caller's
 failure handling surfaces."
   (unless (eq (current-thread) main-thread)
@@ -910,11 +911,11 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-run-build-script
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
-    agent-repl--frontend-http-request
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
     agent-repl--uds-connect
+    agent-repl--uds-probe
     agent-repl--image-call-process)
   "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The

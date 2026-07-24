@@ -2250,10 +2250,11 @@ The reload MUST NOT run on the merge worker thread: loading module
 files re-arms file-notify watchers (`agent-repl--dir-watcher-register'
 tears down the old watch first, and `file-notify-rm-watch'
 synchronously fires the handler's `stopped' branch), whose pending-file
-drain can reach the frontend HTTP boundary — and
-`url-retrieve-synchronously' off the main thread lands in the
-`ns_select_1'/`[NSApp run]' worker-thread trap (AGENTS.md), which
-froze Emacs on 2026-07-18.  The clear + drain ride in the same thunk
+drain can reach the frontend's blocking waits — and `accept-process-output'
+off the main thread lands in the `ns_select_1'/`[NSApp run]' worker-thread
+trap (AGENTS.md), which froze Emacs on 2026-07-18 (through the
+since-deleted `url-retrieve-synchronously' HTTP boundary, whose UDS
+replacement pumps through the same primitive).  The clear + drain ride in the same thunk
 to preserve the load -> clear -> drain ordering the inline version
 had: the drain gate must not open before the in-flight flag clears,
 and the next dispatched merge should see the reloaded code.
