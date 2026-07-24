@@ -40,10 +40,18 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
+		// Populate the SessionView from the registry record: model +
+		// permission mode, plus the claude_session_id and cwd proto fields
+		// (design §14.2 step 3). Slug/title are not carried in the registry
+		// record (they arrive from ai-title/slug events the SSM does not yet
+		// retain), so they stay blank here rather than being faked.
 		out = append(out, &frontendv1.SessionView{
-			Workspace: rec.CWD,
-			SessionId: rec.SessionID,
-			Model:     rec.Model,
+			Workspace:       rec.CWD,
+			SessionId:       rec.SessionID,
+			Model:           rec.Model,
+			PermissionMode:  rec.PermissionMode,
+			ClaudeSessionId: rec.ClaudeSessionID,
+			Cwd:             rec.CWD,
 		})
 	}
 	return out
