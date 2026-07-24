@@ -2719,16 +2719,18 @@ func (x *ReadResult) GetFile() *structpb.Struct {
 }
 
 type EditResult struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	FilePath        string                 `protobuf:"bytes,1,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
-	OldString       string                 `protobuf:"bytes,2,opt,name=old_string,json=oldString,proto3" json:"old_string,omitempty"`
-	NewString       string                 `protobuf:"bytes,3,opt,name=new_string,json=newString,proto3" json:"new_string,omitempty"`
-	OriginalFile    string                 `protobuf:"bytes,4,opt,name=original_file,json=originalFile,proto3" json:"original_file,omitempty"`
-	ReplaceAll      bool                   `protobuf:"varint,5,opt,name=replace_all,json=replaceAll,proto3" json:"replace_all,omitempty"`
-	StructuredPatch *structpb.Struct       `protobuf:"bytes,6,opt,name=structured_patch,json=structuredPatch,proto3" json:"structured_patch,omitempty"`
-	UserModified    bool                   `protobuf:"varint,7,opt,name=user_modified,json=userModified,proto3" json:"user_modified,omitempty"`
-	StaleRecovered  bool                   `protobuf:"varint,8,opt,name=stale_recovered,json=staleRecovered,proto3" json:"stale_recovered,omitempty"`
-	MemdirStamped   bool                   `protobuf:"varint,9,opt,name=memdir_stamped,json=memdirStamped,proto3" json:"memdir_stamped,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	FilePath     string                 `protobuf:"bytes,1,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
+	OldString    string                 `protobuf:"bytes,2,opt,name=old_string,json=oldString,proto3" json:"old_string,omitempty"`
+	NewString    string                 `protobuf:"bytes,3,opt,name=new_string,json=newString,proto3" json:"new_string,omitempty"`
+	OriginalFile string                 `protobuf:"bytes,4,opt,name=original_file,json=originalFile,proto3" json:"original_file,omitempty"`
+	ReplaceAll   bool                   `protobuf:"varint,5,opt,name=replace_all,json=replaceAll,proto3" json:"replace_all,omitempty"`
+	// Array of hunks: [{oldStart,oldLines,newStart,newLines,lines:[string]}].
+	// Schemaless list (no fixed hunk message); corpus: tool-results/edit.jsonl.
+	StructuredPatch *structpb.ListValue `protobuf:"bytes,6,opt,name=structured_patch,json=structuredPatch,proto3" json:"structured_patch,omitempty"`
+	UserModified    bool                `protobuf:"varint,7,opt,name=user_modified,json=userModified,proto3" json:"user_modified,omitempty"`
+	StaleRecovered  bool                `protobuf:"varint,8,opt,name=stale_recovered,json=staleRecovered,proto3" json:"stale_recovered,omitempty"`
+	MemdirStamped   bool                `protobuf:"varint,9,opt,name=memdir_stamped,json=memdirStamped,proto3" json:"memdir_stamped,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2798,7 +2800,7 @@ func (x *EditResult) GetReplaceAll() bool {
 	return false
 }
 
-func (x *EditResult) GetStructuredPatch() *structpb.Struct {
+func (x *EditResult) GetStructuredPatch() *structpb.ListValue {
 	if x != nil {
 		return x.StructuredPatch
 	}
@@ -2827,13 +2829,14 @@ func (x *EditResult) GetMemdirStamped() bool {
 }
 
 type WriteResult struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Type            string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	FilePath        string                 `protobuf:"bytes,2,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
-	Content         string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
-	OriginalFile    string                 `protobuf:"bytes,4,opt,name=original_file,json=originalFile,proto3" json:"original_file,omitempty"`
-	StructuredPatch *structpb.Struct       `protobuf:"bytes,5,opt,name=structured_patch,json=structuredPatch,proto3" json:"structured_patch,omitempty"`
-	UserModified    bool                   `protobuf:"varint,6,opt,name=user_modified,json=userModified,proto3" json:"user_modified,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Type         string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	FilePath     string                 `protobuf:"bytes,2,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
+	Content      string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	OriginalFile string                 `protobuf:"bytes,4,opt,name=original_file,json=originalFile,proto3" json:"original_file,omitempty"`
+	// Same hunk-array shape as EditResult; corpus: tool-results/write.jsonl.
+	StructuredPatch *structpb.ListValue `protobuf:"bytes,5,opt,name=structured_patch,json=structuredPatch,proto3" json:"structured_patch,omitempty"`
+	UserModified    bool                `protobuf:"varint,6,opt,name=user_modified,json=userModified,proto3" json:"user_modified,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2896,7 +2899,7 @@ func (x *WriteResult) GetOriginalFile() string {
 	return ""
 }
 
-func (x *WriteResult) GetStructuredPatch() *structpb.Struct {
+func (x *WriteResult) GetStructuredPatch() *structpb.ListValue {
 	if x != nil {
 		return x.StructuredPatch
 	}
@@ -3075,11 +3078,13 @@ func (x *TaskCreateResult) GetTask() *structpb.Struct {
 }
 
 type TaskUpdateResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	StatusChange  string                 `protobuf:"bytes,2,opt,name=status_change,json=statusChange,proto3" json:"status_change,omitempty"`
-	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
-	UpdatedFields *structpb.Struct       `protobuf:"bytes,4,opt,name=updated_fields,json=updatedFields,proto3" json:"updated_fields,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// Object {from,to}; corpus: tool-results/task_update.jsonl.
+	StatusChange *structpb.Struct `protobuf:"bytes,2,opt,name=status_change,json=statusChange,proto3" json:"status_change,omitempty"`
+	Success      bool             `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	// Array of changed field names; corpus: tool-results/task_update.jsonl.
+	UpdatedFields *structpb.ListValue `protobuf:"bytes,4,opt,name=updated_fields,json=updatedFields,proto3" json:"updated_fields,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3121,11 +3126,11 @@ func (x *TaskUpdateResult) GetTaskId() string {
 	return ""
 }
 
-func (x *TaskUpdateResult) GetStatusChange() string {
+func (x *TaskUpdateResult) GetStatusChange() *structpb.Struct {
 	if x != nil {
 		return x.StatusChange
 	}
-	return ""
+	return nil
 }
 
 func (x *TaskUpdateResult) GetSuccess() bool {
@@ -3135,7 +3140,7 @@ func (x *TaskUpdateResult) GetSuccess() bool {
 	return false
 }
 
-func (x *TaskUpdateResult) GetUpdatedFields() *structpb.Struct {
+func (x *TaskUpdateResult) GetUpdatedFields() *structpb.ListValue {
 	if x != nil {
 		return x.UpdatedFields
 	}
@@ -3144,7 +3149,7 @@ func (x *TaskUpdateResult) GetUpdatedFields() *structpb.Struct {
 
 type TaskListResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tasks         *structpb.Struct       `protobuf:"bytes,1,opt,name=tasks,proto3" json:"tasks,omitempty"` // list payload verbatim
+	Tasks         *structpb.ListValue    `protobuf:"bytes,1,opt,name=tasks,proto3" json:"tasks,omitempty"` // list payload verbatim
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3179,7 +3184,7 @@ func (*TaskListResult) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *TaskListResult) GetTasks() *structpb.Struct {
+func (x *TaskListResult) GetTasks() *structpb.ListValue {
 	if x != nil {
 		return x.Tasks
 	}
@@ -3187,11 +3192,12 @@ func (x *TaskListResult) GetTasks() *structpb.Struct {
 }
 
 type SendMessageResult struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Message        string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	Pin            bool                   `protobuf:"varint,2,opt,name=pin,proto3" json:"pin,omitempty"`
-	Success        bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
-	ResumedAgentId string                 `protobuf:"bytes,4,opt,name=resumed_agent_id,json=resumedAgentId,proto3" json:"resumed_agent_id,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Message string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// Object {id,name,ref} pin descriptor; corpus: tool-results/send_message.jsonl.
+	Pin            *structpb.Struct `protobuf:"bytes,2,opt,name=pin,proto3" json:"pin,omitempty"`
+	Success        bool             `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	ResumedAgentId string           `protobuf:"bytes,4,opt,name=resumed_agent_id,json=resumedAgentId,proto3" json:"resumed_agent_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3233,11 +3239,11 @@ func (x *SendMessageResult) GetMessage() string {
 	return ""
 }
 
-func (x *SendMessageResult) GetPin() bool {
+func (x *SendMessageResult) GetPin() *structpb.Struct {
 	if x != nil {
 		return x.Pin
 	}
-	return false
+	return nil
 }
 
 func (x *SendMessageResult) GetSuccess() bool {
@@ -3342,10 +3348,12 @@ type WebSearchResult struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	DurationSeconds float64                `protobuf:"fixed64,1,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
 	Query           string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	Results         *structpb.Struct       `protobuf:"bytes,3,opt,name=results,proto3" json:"results,omitempty"`
-	SearchCount     int64                  `protobuf:"varint,4,opt,name=search_count,json=searchCount,proto3" json:"search_count,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// HETEROGENEOUS array (per-search result objects interleaved with plain
+	// summary strings); corpus: tool-results/web_search.jsonl.
+	Results       *structpb.ListValue `protobuf:"bytes,3,opt,name=results,proto3" json:"results,omitempty"`
+	SearchCount   int64               `protobuf:"varint,4,opt,name=search_count,json=searchCount,proto3" json:"search_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WebSearchResult) Reset() {
@@ -3392,7 +3400,7 @@ func (x *WebSearchResult) GetQuery() string {
 	return ""
 }
 
-func (x *WebSearchResult) GetResults() *structpb.Struct {
+func (x *WebSearchResult) GetResults() *structpb.ListValue {
 	if x != nil {
 		return x.Results
 	}
@@ -3407,10 +3415,12 @@ func (x *WebSearchResult) GetSearchCount() int64 {
 }
 
 type AskUserQuestionResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Questions     *structpb.Struct       `protobuf:"bytes,1,opt,name=questions,proto3" json:"questions,omitempty"`
-	Answers       *structpb.Struct       `protobuf:"bytes,2,opt,name=answers,proto3" json:"answers,omitempty"`
-	Annotations   *structpb.Struct       `protobuf:"bytes,3,opt,name=annotations,proto3" json:"annotations,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Same element shape as AskUserQuestionInput.questions; corpus:
+	// tool-results/ask_user_question.jsonl.
+	Questions     []*Question      `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`
+	Answers       *structpb.Struct `protobuf:"bytes,2,opt,name=answers,proto3" json:"answers,omitempty"`
+	Annotations   *structpb.Struct `protobuf:"bytes,3,opt,name=annotations,proto3" json:"annotations,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3445,7 +3455,7 @@ func (*AskUserQuestionResult) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{38}
 }
 
-func (x *AskUserQuestionResult) GetQuestions() *structpb.Struct {
+func (x *AskUserQuestionResult) GetQuestions() []*Question {
 	if x != nil {
 		return x.Questions
 	}
@@ -3469,7 +3479,7 @@ func (x *AskUserQuestionResult) GetAnnotations() *structpb.Struct {
 type ScheduleWakeupResult struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	ClampedDelaySeconds int64                  `protobuf:"varint,1,opt,name=clamped_delay_seconds,json=clampedDelaySeconds,proto3" json:"clamped_delay_seconds,omitempty"`
-	ScheduledFor        string                 `protobuf:"bytes,2,opt,name=scheduled_for,json=scheduledFor,proto3" json:"scheduled_for,omitempty"`
+	ScheduledFor        int64                  `protobuf:"varint,2,opt,name=scheduled_for,json=scheduledFor,proto3" json:"scheduled_for,omitempty"` // epoch millis; corpus: tool-results/schedule_wakeup.jsonl
 	WasClamped          bool                   `protobuf:"varint,3,opt,name=was_clamped,json=wasClamped,proto3" json:"was_clamped,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -3512,11 +3522,11 @@ func (x *ScheduleWakeupResult) GetClampedDelaySeconds() int64 {
 	return 0
 }
 
-func (x *ScheduleWakeupResult) GetScheduledFor() string {
+func (x *ScheduleWakeupResult) GetScheduledFor() int64 {
 	if x != nil {
 		return x.ScheduledFor
 	}
-	return ""
+	return 0
 }
 
 func (x *ScheduleWakeupResult) GetWasClamped() bool {
@@ -5494,7 +5504,7 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\n" +
 	"ReadResult\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12+\n" +
-	"\x04file\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x04file\"\xe6\x02\n" +
+	"\x04file\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x04file\"\xe9\x02\n" +
 	"\n" +
 	"EditResult\x12\x1b\n" +
 	"\tfile_path\x18\x01 \x01(\tR\bfilePath\x12\x1d\n" +
@@ -5504,17 +5514,17 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"new_string\x18\x03 \x01(\tR\tnewString\x12#\n" +
 	"\roriginal_file\x18\x04 \x01(\tR\foriginalFile\x12\x1f\n" +
 	"\vreplace_all\x18\x05 \x01(\bR\n" +
-	"replaceAll\x12B\n" +
-	"\x10structured_patch\x18\x06 \x01(\v2\x17.google.protobuf.StructR\x0fstructuredPatch\x12#\n" +
+	"replaceAll\x12E\n" +
+	"\x10structured_patch\x18\x06 \x01(\v2\x1a.google.protobuf.ListValueR\x0fstructuredPatch\x12#\n" +
 	"\ruser_modified\x18\a \x01(\bR\fuserModified\x12'\n" +
 	"\x0fstale_recovered\x18\b \x01(\bR\x0estaleRecovered\x12%\n" +
-	"\x0ememdir_stamped\x18\t \x01(\bR\rmemdirStamped\"\xe6\x01\n" +
+	"\x0ememdir_stamped\x18\t \x01(\bR\rmemdirStamped\"\xe9\x01\n" +
 	"\vWriteResult\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1b\n" +
 	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12\x18\n" +
 	"\acontent\x18\x03 \x01(\tR\acontent\x12#\n" +
-	"\roriginal_file\x18\x04 \x01(\tR\foriginalFile\x12B\n" +
-	"\x10structured_patch\x18\x05 \x01(\v2\x17.google.protobuf.StructR\x0fstructuredPatch\x12#\n" +
+	"\roriginal_file\x18\x04 \x01(\tR\foriginalFile\x12E\n" +
+	"\x10structured_patch\x18\x05 \x01(\v2\x1a.google.protobuf.ListValueR\x0fstructuredPatch\x12#\n" +
 	"\ruser_modified\x18\x06 \x01(\bR\fuserModified\"o\n" +
 	"\vSkillResult\x12!\n" +
 	"\fcommand_name\x18\x01 \x01(\tR\vcommandName\x12\x18\n" +
@@ -5525,17 +5535,17 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x120\n" +
 	"\x14total_deferred_tools\x18\x03 \x01(\x03R\x12totalDeferredTools\"?\n" +
 	"\x10TaskCreateResult\x12+\n" +
-	"\x04task\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04task\"\xaa\x01\n" +
+	"\x04task\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04task\"\xc6\x01\n" +
 	"\x10TaskUpdateResult\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12#\n" +
-	"\rstatus_change\x18\x02 \x01(\tR\fstatusChange\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\x12>\n" +
-	"\x0eupdated_fields\x18\x04 \x01(\v2\x17.google.protobuf.StructR\rupdatedFields\"?\n" +
-	"\x0eTaskListResult\x12-\n" +
-	"\x05tasks\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x05tasks\"\x83\x01\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12<\n" +
+	"\rstatus_change\x18\x02 \x01(\v2\x17.google.protobuf.StructR\fstatusChange\x12\x18\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\x12A\n" +
+	"\x0eupdated_fields\x18\x04 \x01(\v2\x1a.google.protobuf.ListValueR\rupdatedFields\"B\n" +
+	"\x0eTaskListResult\x120\n" +
+	"\x05tasks\x18\x01 \x01(\v2\x1a.google.protobuf.ListValueR\x05tasks\"\x9c\x01\n" +
 	"\x11SendMessageResult\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\x12\x10\n" +
-	"\x03pin\x18\x02 \x01(\bR\x03pin\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\x12)\n" +
+	"\x03pin\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x03pin\x12\x18\n" +
 	"\asuccess\x18\x03 \x01(\bR\asuccess\x12(\n" +
 	"\x10resumed_agent_id\x18\x04 \x01(\tR\x0eresumedAgentId\"\xa2\x01\n" +
 	"\x0eWebFetchResult\x12\x14\n" +
@@ -5545,19 +5555,19 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\vduration_ms\x18\x04 \x01(\x03R\n" +
 	"durationMs\x12\x16\n" +
 	"\x06result\x18\x05 \x01(\tR\x06result\x12\x10\n" +
-	"\x03url\x18\x06 \x01(\tR\x03url\"\xa8\x01\n" +
+	"\x03url\x18\x06 \x01(\tR\x03url\"\xab\x01\n" +
 	"\x0fWebSearchResult\x12)\n" +
 	"\x10duration_seconds\x18\x01 \x01(\x01R\x0fdurationSeconds\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05query\x121\n" +
-	"\aresults\x18\x03 \x01(\v2\x17.google.protobuf.StructR\aresults\x12!\n" +
-	"\fsearch_count\x18\x04 \x01(\x03R\vsearchCount\"\xbc\x01\n" +
-	"\x15AskUserQuestionResult\x125\n" +
-	"\tquestions\x18\x01 \x01(\v2\x17.google.protobuf.StructR\tquestions\x121\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x124\n" +
+	"\aresults\x18\x03 \x01(\v2\x1a.google.protobuf.ListValueR\aresults\x12!\n" +
+	"\fsearch_count\x18\x04 \x01(\x03R\vsearchCount\"\xc0\x01\n" +
+	"\x15AskUserQuestionResult\x129\n" +
+	"\tquestions\x18\x01 \x03(\v2\x1b.agentshim.data.v1.QuestionR\tquestions\x121\n" +
 	"\aanswers\x18\x02 \x01(\v2\x17.google.protobuf.StructR\aanswers\x129\n" +
 	"\vannotations\x18\x03 \x01(\v2\x17.google.protobuf.StructR\vannotations\"\x90\x01\n" +
 	"\x14ScheduleWakeupResult\x122\n" +
 	"\x15clamped_delay_seconds\x18\x01 \x01(\x03R\x13clampedDelaySeconds\x12#\n" +
-	"\rscheduled_for\x18\x02 \x01(\tR\fscheduledFor\x12\x1f\n" +
+	"\rscheduled_for\x18\x02 \x01(\x03R\fscheduledFor\x12\x1f\n" +
 	"\vwas_clamped\x18\x03 \x01(\bR\n" +
 	"wasClamped\"\xce\n" +
 	"\n" +
@@ -5850,47 +5860,49 @@ var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	24, // 56: agentshim.data.v1.TaskOutputResult.local_agent:type_name -> agentshim.data.v1.LocalAgentTask
 	0,  // 57: agentshim.data.v1.WorkflowLaunchResult.status:type_name -> agentshim.data.v1.RawTaskStatus
 	65, // 58: agentshim.data.v1.ReadResult.file:type_name -> google.protobuf.Struct
-	65, // 59: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.Struct
-	65, // 60: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.Struct
+	66, // 59: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.ListValue
+	66, // 60: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.ListValue
 	65, // 61: agentshim.data.v1.TaskCreateResult.task:type_name -> google.protobuf.Struct
-	65, // 62: agentshim.data.v1.TaskUpdateResult.updated_fields:type_name -> google.protobuf.Struct
-	65, // 63: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.Struct
-	65, // 64: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.Struct
-	65, // 65: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> google.protobuf.Struct
-	65, // 66: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
-	65, // 67: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
-	43, // 68: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
-	44, // 69: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
-	45, // 70: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
-	46, // 71: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
-	47, // 72: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
-	48, // 73: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
-	49, // 74: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
-	50, // 75: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
-	51, // 76: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
-	52, // 77: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
-	54, // 78: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
-	55, // 79: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
-	56, // 80: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
-	59, // 81: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
-	60, // 82: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
-	61, // 83: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
-	62, // 84: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
-	63, // 85: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
-	64, // 86: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
-	65, // 87: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
-	53, // 88: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
-	57, // 89: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
-	58, // 90: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
-	65, // 91: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
-	65, // 92: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
-	65, // 93: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
-	65, // 94: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
-	95, // [95:95] is the sub-list for method output_type
-	95, // [95:95] is the sub-list for method input_type
-	95, // [95:95] is the sub-list for extension type_name
-	95, // [95:95] is the sub-list for extension extendee
-	0,  // [0:95] is the sub-list for field type_name
+	65, // 62: agentshim.data.v1.TaskUpdateResult.status_change:type_name -> google.protobuf.Struct
+	66, // 63: agentshim.data.v1.TaskUpdateResult.updated_fields:type_name -> google.protobuf.ListValue
+	66, // 64: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.ListValue
+	65, // 65: agentshim.data.v1.SendMessageResult.pin:type_name -> google.protobuf.Struct
+	66, // 66: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.ListValue
+	58, // 67: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> agentshim.data.v1.Question
+	65, // 68: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
+	65, // 69: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
+	43, // 70: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
+	44, // 71: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
+	45, // 72: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
+	46, // 73: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
+	47, // 74: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
+	48, // 75: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
+	49, // 76: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
+	50, // 77: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
+	51, // 78: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
+	52, // 79: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
+	54, // 80: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
+	55, // 81: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
+	56, // 82: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
+	59, // 83: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
+	60, // 84: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
+	61, // 85: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
+	62, // 86: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
+	63, // 87: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
+	64, // 88: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
+	65, // 89: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
+	53, // 90: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
+	57, // 91: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
+	58, // 92: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
+	65, // 93: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
+	65, // 94: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
+	65, // 95: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
+	65, // 96: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
+	97, // [97:97] is the sub-list for method output_type
+	97, // [97:97] is the sub-list for method input_type
+	97, // [97:97] is the sub-list for extension type_name
+	97, // [97:97] is the sub-list for extension extendee
+	0,  // [0:97] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_tools_proto_init() }

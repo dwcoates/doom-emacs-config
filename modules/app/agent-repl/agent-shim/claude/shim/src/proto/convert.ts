@@ -30,9 +30,9 @@
  * decode (probes/tests/diagnostics), marking the envelope EPHEMERAL so the
  * wiring never routes them to `StoreWrite`.
  */
-import { create } from "@bufbuild/protobuf";
-import type { JsonObject } from "@bufbuild/protobuf";
-import { anyPack } from "@bufbuild/protobuf/wkt";
+import { create, fromJson } from "@bufbuild/protobuf";
+import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
+import { anyPack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
 import { shimLog } from "../uds/log.js";
 import {
   EventClass,
@@ -111,19 +111,26 @@ import {
   ApiContentBlocksSchema,
   ApiUsageSchema,
   ApiUserMessageSchema,
+  AskUserQuestionResultSchema,
   BashResultSchema,
   CallerSchema,
   ContentBlockSchema,
+  EditResultSchema,
   FallbackBlockSchema,
   FallbackModelRefSchema,
   ImageBlockSchema,
   ImageSourceSchema,
   MonitorResultSchema,
+  QuestionOptionSchema,
+  QuestionSchema,
   ReadResultSchema,
+  ScheduleWakeupResultSchema,
+  SendMessageResultSchema,
   SkillResultSchema,
   TaskCreateResultSchema,
   TaskListResultSchema,
   TaskStopResultSchema,
+  TaskUpdateResultSchema,
   TextBlockSchema,
   ThinkingBlockSchema,
   ToolReferenceBlockSchema,
@@ -132,8 +139,11 @@ import {
   ToolSearchResultSchema,
   ToolUseBlockSchema,
   ToolUseResultSchema,
+  WebSearchResultSchema,
   WorkflowLaunchResultSchema,
+  WriteResultSchema,
   type ContentBlock,
+  type Question,
   type ToolUseResult,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 
@@ -903,7 +913,68 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
     return { case: "taskCreate", value: create(TaskCreateResultSchema, { task: o["task"] as JsonObject }) };
   }
   if (has("tasks") && Array.isArray(o["tasks"]) && Object.keys(o).length === 1) {
-    return { case: "taskList", value: create(TaskListResultSchema, { tasks: { tasks: o["tasks"] } as JsonObject }) };
+    return { case: "taskList", value: create(TaskListResultSchema, { tasks: asListValueOpt(o["tasks"]) }) };
+  }
+  if (has("oldString") || has("old_string")) {
+    return { case: "edit", value: create(EditResultSchema, {
+      filePath: strOf(pick(o, "file_path", "filePath")),
+      oldString: strOf(pick(o, "old_string", "oldString")),
+      newString: strOf(pick(o, "new_string", "newString")),
+      originalFile: strOf(pick(o, "original_file", "originalFile")),
+      replaceAll: pick(o, "replace_all", "replaceAll") === true,
+      structuredPatch: asListValueOpt(pick(o, "structured_patch", "structuredPatch")),
+      userModified: pick(o, "user_modified", "userModified") === true,
+      staleRecovered: pick(o, "stale_recovered", "staleRecovered") === true,
+      memdirStamped: pick(o, "memdir_stamped", "memdirStamped") === true,
+    }) };
+  }
+  if (any("structuredPatch", "structured_patch") && has("content") && any("filePath", "file_path")) {
+    return { case: "write", value: create(WriteResultSchema, {
+      type: strOf(o["type"]),
+      filePath: strOf(pick(o, "file_path", "filePath")),
+      content: strOf(o["content"]),
+      originalFile: strOf(pick(o, "original_file", "originalFile")),
+      structuredPatch: asListValueOpt(pick(o, "structured_patch", "structuredPatch")),
+      userModified: pick(o, "user_modified", "userModified") === true,
+    }) };
+  }
+  if (any("clampedDelaySeconds", "clamped_delay_seconds", "scheduledFor", "scheduled_for")) {
+    return { case: "scheduleWakeup", value: create(ScheduleWakeupResultSchema, {
+      clampedDelaySeconds: bigOf(pick(o, "clamped_delay_seconds", "clampedDelaySeconds")),
+      scheduledFor: bigOf(pick(o, "scheduled_for", "scheduledFor")),
+      wasClamped: pick(o, "was_clamped", "wasClamped") === true,
+    }) };
+  }
+  if (has("questions") && has("answers")) {
+    return { case: "askUserQuestion", value: create(AskUserQuestionResultSchema, {
+      questions: questionsOf(o["questions"]),
+      answers: asStructOpt(o["answers"]),
+      annotations: asStructOpt(o["annotations"]),
+    }) };
+  }
+  if (any("searchCount", "search_count", "durationSeconds", "duration_seconds")) {
+    return { case: "webSearch", value: create(WebSearchResultSchema, {
+      durationSeconds: numOf(pick(o, "duration_seconds", "durationSeconds")),
+      query: strOf(o["query"]),
+      results: asListValueOpt(o["results"]),
+      searchCount: bigOf(pick(o, "search_count", "searchCount")),
+    }) };
+  }
+  if (any("statusChange", "status_change", "updatedFields", "updated_fields")) {
+    return { case: "taskUpdate", value: create(TaskUpdateResultSchema, {
+      taskId: strOf(pick(o, "task_id", "taskId")),
+      statusChange: asStructOpt(pick(o, "status_change", "statusChange")),
+      success: o["success"] === true,
+      updatedFields: asListValueOpt(pick(o, "updated_fields", "updatedFields")),
+    }) };
+  }
+  if (has("pin")) {
+    return { case: "sendMessage", value: create(SendMessageResultSchema, {
+      message: strOf(o["message"]),
+      pin: asStructOpt(o["pin"]),
+      success: o["success"] === true,
+      resumedAgentId: strOf(pick(o, "resumed_agent_id", "resumedAgentId")),
+    }) };
   }
   if (any("workflow_name", "workflowName") && any("run_id", "runId")) {
     return { case: "workflowLaunch", value: create(WorkflowLaunchResultSchema, {
@@ -1139,6 +1210,47 @@ function asStruct(v: unknown): JsonObject {
 
 function asStructOpt(v: unknown): JsonObject | undefined {
   return isObject(v) ? (v as JsonObject) : undefined;
+}
+
+/**
+ * Build a `google.protobuf.ListValue` from a JSON array subtree.
+ *
+ * Unlike Struct (whose init accepts a plain JsonObject), a ListValue field's
+ * init demands the message form — handing it a bare array silently yields an
+ * EMPTY list. `fromJson` on the ListValue schema is the only faithful path:
+ * ListValue's JSON representation IS the array, so heterogeneous elements
+ * (WebSearchResult.results interleaves objects and strings) survive verbatim.
+ * A non-array is NOT coerced — the caller decides (there is no correct
+ * fallback for a shape the corpus says is always an array).
+ */
+function asListValueOpt(v: unknown): ListValue | undefined {
+  return Array.isArray(v) ? fromJson(ListValueSchema, v as JsonValue[]) : undefined;
+}
+
+/**
+ * Map a raw `questions` array onto the typed `Question` element the schema
+ * shares with AskUserQuestionInput (corpus: tool-results/ask_user_question).
+ * A non-array or a non-object element is skipped rather than guessed.
+ */
+function questionsOf(v: unknown): Question[] {
+  if (!Array.isArray(v)) return [];
+  const out: Question[] = [];
+  for (const q of v) {
+    if (!isObject(q)) continue;
+    const rawOpts = q["options"];
+    out.push(create(QuestionSchema, {
+      question: strOf(q["question"]),
+      header: strOf(q["header"]),
+      options: (Array.isArray(rawOpts) ? rawOpts : []).filter(isObject).map((opt) =>
+        create(QuestionOptionSchema, {
+          label: strOf(opt["label"]),
+          description: strOf(opt["description"]),
+          preview: strOf(opt["preview"]),
+        })),
+      multiSelect: pick(q, "multi_select", "multiSelect") === true,
+    }));
+  }
+  return out;
 }
 
 function uuidOf(message: Record<string, unknown>): string {

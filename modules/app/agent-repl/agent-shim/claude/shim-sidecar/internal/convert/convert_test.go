@@ -59,8 +59,8 @@ func corpusRoot(t *testing.T) string {
 // plane: closing each gap is a G1 proto change (see the group report), NOT a
 // silent fallback. The value is the exact proto amendment required.
 //
-// Keys are canonical leaf names (see convert.canon); "content" is special-cased
-// in isKnownGap by parent because "content" is a valid modeled field elsewhere.
+// Keys are canonical leaf names (see convert.canon).
+//
 // NOTE: as of proto commit bc3d014f the following ADDITIVE fields closed their
 // gaps (now decoded as typed data with zero extras, hence removed from this map):
 //   iterations → ApiUsage.iterations (google.protobuf.ListValue)
@@ -70,35 +70,33 @@ func corpusRoot(t *testing.T) string {
 //   precompactdiscoveredtools → DiskCompactMetadata.pre_compact_discovered_tools
 //   cumulativedroppedtokens → DiskCompactMetadata.cumulative_dropped_tokens
 //   blockingerror → HookBlockingErrorAttachment.blocking_error (BlockingErrorDetail)
-// The entries that REMAIN are BREAKING type mismatches (a Struct/scalar proto
-// field where the disk carries an array/object/other type); closing each is a
-// non-additive G1 proto change still pending user approval.
-var knownSchemaGaps = map[string]string{
-	"structuredpatch":     "Edit/WriteResult.structured_patch: model as ListValue/repeated (disk is an array, proto is Struct)",
-	"questions":           "AskUserQuestionResult.questions: model as ListValue (disk is an array, proto is Struct)",
-	"results":             "WebSearchResult.results: model as ListValue (disk is an array, proto is Struct)",
-	"tasks":               "TaskListResult.tasks: model as ListValue (disk is an array, proto is Struct)",
-	"updatedfields":       "TaskUpdateResult.updated_fields: model as ListValue (disk is an array, proto is Struct)",
-	"statuschange":        "TaskUpdateResult.status_change: model as Struct (disk is an object, proto is string)",
-	"pin":                 "SendMessageResult.pin: model as Struct (disk is an object, proto is bool)",
-	"scheduledfor":        "ScheduleWakeupResult.scheduled_for: model as int64 (disk is an int, proto is string)",
-	"automodeconsentflow": "AutoModeAttachment.auto_mode_consent_flow: model as bool (disk is a bool, proto is Struct)",
-	"files":               "DiagnosticsAttachment.files: model as ListValue (disk is an array, proto is Struct)",
-}
+//
+// The remaining 10 gap names were BREAKING type mismatches (a Struct/scalar proto
+// field where the disk carries an array/object/other type). All were corrected in
+// the proto under explicit user approval and are now decoded as typed data:
+//   structuredpatch      → Edit/WriteResult.structured_patch (ListValue)
+//   questions            → AskUserQuestionResult.questions (repeated Question)
+//   results              → WebSearchResult.results (ListValue)
+//   tasks                → TaskListResult.tasks (ListValue)
+//   updatedfields        → TaskUpdateResult.updated_fields (ListValue)
+//   statuschange         → TaskUpdateResult.status_change (Struct)
+//   pin                  → SendMessageResult.pin (Struct)
+//   scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
+//   automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
+//   files                → DiagnosticsAttachment.files (ListValue)
+//   content              → FileAttachment.content (Struct) /
+//                          TaskReminderAttachment.content (ListValue)
+//
+// The map is therefore EMPTY: the corpus is fully modeled and the contract is now
+// ZERO extras anywhere in it. The mechanism stays so a future corpus shape the
+// proto cannot express is documented here deliberately rather than tolerated
+// silently — an undocumented extra fails the build.
+var knownSchemaGaps = map[string]string{}
 
 // isKnownGap reports whether an extras dotted-path is a documented schema gap.
 func isKnownGap(path string) bool {
 	segs := strings.Split(path, ".")
 	leaf := stripIndex(segs[len(segs)-1])
-	parent := ""
-	if len(segs) >= 2 {
-		parent = stripIndex(segs[len(segs)-2])
-	}
-	if canon(leaf) == "content" {
-		// FileAttachment.content (object on disk) and TaskReminderAttachment.content
-		// (array on disk) are both modeled as string.
-		return canon(parent) == "file" || canon(parent) == "taskreminder"
-	}
 	_, ok := knownSchemaGaps[canon(leaf)]
 	return ok
 }
