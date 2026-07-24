@@ -8,19 +8,15 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/workspace/merge"
-
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // This file holds the daemon-side production backends for the frontend.v1
-// command surface (server.WireAgentShim). The SSM-backed state snapshot and
-// the merge-transition push loop are fully live; the command backends below
-// are the stitch-phase seams for work that lands with the COUPLED parallel
-// tasks, and each fails LOUDLY rather than silently no-opping (no-fallbacks
-// rule):
+// command surface (server.WireAgentShim). The SSM-backed state snapshot, the
+// merge-transition push loop, and the prompt/interrupt/permission routing (the
+// per-session driver, wired in main) are live; the command backends below are
+// the stitch-phase seams for work that lands with the COUPLED parallel tasks,
+// and each fails LOUDLY rather than silently no-opping (no-fallbacks rule):
 //
-//   - prompt/interrupt/permission need the per-session shimclient manager,
-//     which cannot connect until the shim speaks UDS (a separate task, §8).
 //   - merge needs the workspace -> (source/target worktree, branch) resolution
 //     that lives in the Emacs worktree layout; the daemon has no daemon-side
 //     source for it yet (§9.3 open question).
@@ -55,20 +51,6 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 		})
 	}
 	return out
-}
-
-// pendingPrompts is the not-yet-connected PromptRouter: it errors loudly until
-// the per-session shimclient manager is wired (coupled to the UDS shim task).
-type pendingPrompts struct{}
-
-func (pendingPrompts) SubmitPrompt(context.Context, string, string, string) error {
-	return fmt.Errorf("prompt routing not connected: awaiting the per-session shimclient (UDS shim cutover)")
-}
-func (pendingPrompts) Interrupt(context.Context, string, bool) error {
-	return fmt.Errorf("interrupt routing not connected: awaiting the per-session shimclient (UDS shim cutover)")
-}
-func (pendingPrompts) AnswerPermission(context.Context, string, string, bool, string, *structpb.Struct) error {
-	return fmt.Errorf("permission routing not connected: awaiting the per-session shimclient (UDS shim cutover)")
 }
 
 // pendingMergeDirs is the not-yet-resolved MergeDirResolver: the daemon has no

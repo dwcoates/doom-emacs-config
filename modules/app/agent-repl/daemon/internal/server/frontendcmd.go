@@ -51,6 +51,13 @@ type WorkspaceLifecycle interface {
 	Open(ctx context.Context, workspace string) error
 }
 
+// Resyncer replays a workspace's retained conversation deltas from an exclusive
+// seq (design §5.4), the conversation-delta half of a frontend resync the
+// StateSnapshot re-send does not cover. Satisfied by *sessiondrv.Manager.
+type Resyncer interface {
+	Resync(workspace string, fromSeq uint64) error
+}
+
 // commandHandler implements frontend.CommandHandler by routing each command to
 // the owning module. Every dependency is required; a nil one is a construction
 // error (surfaced by newCommandHandler) rather than a nil-deref at dispatch.
@@ -58,13 +65,17 @@ type commandHandler struct {
 	prompts   PromptRouter
 	merges    MergeRunner
 	lifecycle WorkspaceLifecycle
-	logf      func(string, ...any)
+	// resyncer replays conversation deltas on a resync; nil-safe (Resync then
+	// documents the snapshot-only behavior rather than swallowing).
+	resyncer Resyncer
+	logf     func(string, ...any)
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
 
-// newCommandHandler validates its dependencies and returns the handler.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, logf func(string, ...any)) (*commandHandler, error) {
+// newCommandHandler validates its dependencies and returns the handler. The
+// resyncer is optional (nil-safe); the three routers are required.
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, logf func(string, ...any)) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -76,7 +87,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, logf: logf}, nil
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, logf: logf}, nil
 }
 
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
@@ -116,16 +127,19 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 	return h.lifecycle.Open(ctx, workspace)
 }
 
-// Resync: the frontend server independently re-sends a StateSnapshot to the
-// requesting client (server.go readLoop), so the resolved workspace/session
-// state resync is already covered. The conversation-delta replay this hook
-// would additionally drive flows from the per-session shimclient event path,
-// which is not yet wired in this stitch step; until then this is a documented
-// no-op (the snapshot half is honest and sufficient for state), not a swallow.
+// Resync drives the conversation-delta replay half of a frontend resync (the
+// frontend server independently re-sends the StateSnapshot). It routes to the
+// per-session driver's retained-ring replay from the requested exclusive seq.
+// A nil resyncer (no driver wired) leaves this a documented no-op — the
+// snapshot half is honest and sufficient for state — rather than a swallow.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
-	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; conversation replay pending shim event path)",
-		workspace, requestID, cmd.GetFromSeq())
-	return nil
+	if h.resyncer == nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; no driver wired for conversation replay)",
+			workspace, requestID, cmd.GetFromSeq())
+		return nil
+	}
+	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d", workspace, requestID, cmd.GetFromSeq())
+	return h.resyncer.Resync(workspace, cmd.GetFromSeq())
 }
 
 // ssmSnapshotProvider implements frontend.StateProvider from the SSM's
