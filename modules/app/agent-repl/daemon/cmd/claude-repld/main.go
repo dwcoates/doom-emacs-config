@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/frontend"
 	"claude-repld/internal/login"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
@@ -154,6 +155,7 @@ func main() {
 		summarizeTurns = flag.Bool("summarize-turns", envBool("AGENT_REPL_SUMMARIZE_TURNS", true), "summarize each completed turn into the one-line topbar objective via a headless model (§2.14)")
 		summaryMdl     = flag.String("summary-model", envStr("AGENT_REPL_SUMMARY_MODEL", "haiku"), "model for the per-turn objective summarizer")
 		accountsFlag   = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
+		frontendUDS    = flag.Bool("frontend-uds", envBool("AGENT_REPL_FRONTEND_UDS", false), "mount the agent-shim frontend.v1 surface: a UDS listener (Emacs) at ~/.cache/agent-repl/sock/daemon-frontend.sock + a WS endpoint at /frontend, both serving SSM-resolved state. Off by default during the cutover: the command backends (prompt/merge/lifecycle) are not fully connected until the coupled shim/elisp/webapp tasks land (see cmd/claude-repld/frontend.go)")
 	)
 	flag.Parse()
 
@@ -291,6 +293,31 @@ func main() {
 		DaemonAddr:      *addr,
 	})
 
+	// Agent-shim frontend.v1 surface (design §9.1 ADD, §14.2): the SSM +
+	// merge Engine + frontend Server, mounted as a UDS listener (Emacs) and a
+	// WS endpoint (webapp). Constructed only when enabled: during the cutover
+	// its command backends are not fully connected (see frontend.go), so the
+	// default daemon keeps its existing behavior untouched.
+	var agentShim *server.AgentShim
+	if *frontendUDS {
+		agentShim, err = server.WireAgentShim(server.AgentShimConfig{
+			Resolver:  server.NewRegistryResolver(sessionRegistry),
+			Prompts:   pendingPrompts{},
+			MergeDirs: pendingMergeDirs{},
+			Lifecycle: pendingLifecycle{},
+			Sessions:  registrySessions{reg: sessionRegistry},
+			Logf:      log.Printf,
+		})
+		if err != nil {
+			log.Fatalf("claude-repld: frontend surface: %v", err)
+		}
+		defer func() {
+			if cerr := agentShim.Close(); cerr != nil {
+				log.Printf("claude-repld: frontend surface close: %v", cerr)
+			}
+		}()
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/sessions", srv.Handler())
 	mux.Handle("/sessions/", srv.Handler())
@@ -308,6 +335,21 @@ func main() {
 	// probe detects.
 	if *widgetAssets != "" {
 		mux.Handle("/widget-assets/", http.StripPrefix("/widget-assets/", http.FileServer(http.Dir(*widgetAssets))))
+	}
+	// Frontend WS endpoint (webapp) on the existing mux, and the UDS listener
+	// (Emacs) on its own goroutine, both serving frontend.v1 protojson frames.
+	if agentShim != nil {
+		mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
+		sockPath, perr := frontend.DefaultSocketPath()
+		if perr != nil {
+			log.Fatalf("claude-repld: frontend socket path: %v", perr)
+		}
+		go func() {
+			log.Printf("claude-repld: frontend UDS listening on %s", sockPath)
+			if serveErr := agentShim.Server.ServeUDS(sockPath); serveErr != nil {
+				log.Printf("claude-repld: frontend UDS serve ended: %v", serveErr)
+			}
+		}()
 	}
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
