@@ -1,11 +1,18 @@
 # Design: generalized async/streaming response types in the expanded bubble view
 
 Status: **IMPLEMENTED.** The seam, the three renderers, and the fixes below
-all shipped; `shared/protocol.md` §1.2 (`structured`) and §2.6
-(`async-source`) are the live contract. This document is kept as the record
-of WHY, and of what was deliberately left out (§1.4, §2.5).
+all shipped. This document is kept as the record of WHY, and of what was
+deliberately left out (§1.4, §2.5).
 Scope: `modules/app/agent-repl/` (`agent-shim/claude/shim/`, `daemon/`,
-`webapp/`, `shared/protocol.md`).
+`webapp/`).
+
+> **Citation note.** This document cites `shared/protocol.md`, the
+> pre-cutover NDJSON prose spec, which has since been **deleted**. The
+> live wire contracts are the protobuf schemas under `proto/agentshim/`
+> (see `proto/AGENTS.md`); the residual NDJSON stdio plane is defined by
+> its own declarations in `agent-shim/claude/shim/src/protocol.ts` and
+> `daemon/internal/protocol/`. Every `shared/protocol.md` reference below
+> is a historical citation, not a live pointer.
 
 ## Correction (post-review)
 

@@ -1,6 +1,8 @@
-// Package protocol implements the claude-repl wire formats defined in
-// shared/protocol.md: Layer 1 (Go ⇄ TS shim, stdio NDJSON) and Layer 2
-// (Go daemon ⇄ webapp, WebSocket NDJSON).
+// Package protocol implements the pre-cutover claude-repl wire formats:
+// Layer 1 (Go ⇄ TS shim, stdio NDJSON) and Layer 2 (Go daemon ⇄ webapp,
+// WebSocket NDJSON). The prose spec that used to govern them
+// (shared/protocol.md) has been deleted, so these declarations ARE the
+// definition; the protobuf planes live in proto/agentshim/ instead.
 package protocol
 
 import (

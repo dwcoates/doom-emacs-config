@@ -1,13 +1,15 @@
 /**
  * Layer 1 wire protocol — Go daemon ⇄ TS shim (stdio NDJSON).
  *
- * Source of truth: ../../shared/protocol.md (§1). Field shapes here must
- * stay in lockstep with that document. Every frame carries a `type`
- * discriminator; unknown `type` values are ignored by receivers.
+ * Source of truth: this file. The prose spec that used to govern it
+ * (shared/protocol.md) has been deleted, so these declarations ARE the
+ * definition of the stdio plane; the protobuf planes are specified
+ * separately under ../../../../proto/agentshim/. Every frame carries a
+ * `type` discriminator; unknown `type` values are ignored by receivers.
  */
 
 // ---------------------------------------------------------------------------
-// Common shared types (protocol.md "Common shared types")
+// Common shared types
 // ---------------------------------------------------------------------------
 
 export type SessionId = string;
@@ -122,7 +124,7 @@ export type ContentBlock =
   | ContentBlockToolResult;
 
 // ---------------------------------------------------------------------------
-// Commands (Go → shim), protocol.md §1.1
+// Commands (Go → shim)
 // ---------------------------------------------------------------------------
 
 export interface UserMessageCmd {
@@ -223,7 +225,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
-// Events (shim → Go), protocol.md §1.2
+// Events (shim → Go)
 // ---------------------------------------------------------------------------
 
 export interface ReadyEvt {
@@ -393,8 +395,7 @@ export interface PermissionRequestEvt {
  * Tool results surface from the SDK as user-role messages carrying
  * `tool_result` content blocks; Layer 2's `tool-use-result` frame needs
  * them, so the shim decomposes each such block into one `tool-result`
- * event. Documented in protocol.md §1.2 as a forward-compatible
- * extension of the original event set.
+ * event. A forward-compatible extension of the original event set.
  */
 export interface ToolResultEvt {
   type: "tool-result";

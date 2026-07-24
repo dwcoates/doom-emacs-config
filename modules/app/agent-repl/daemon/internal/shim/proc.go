@@ -1,5 +1,5 @@
 // Package shim spawns and supervises one TS shim subprocess per session,
-// speaking Layer 1 (stdio NDJSON) as specified in shared/protocol.md §1.
+// speaking Layer 1 (stdio NDJSON) as declared in internal/protocol.
 package shim
 
 import (
@@ -22,7 +22,7 @@ const maxEventLine = 32 * 1024 * 1024
 //
 // Events() yields decoded Layer-1 events until the shim's stdout closes,
 // after which the channel is closed; the supervisor keys lifecycle off
-// the `closed` event plus Wait()'s exit code, per protocol.md §1.2.
+// the `closed` event plus Wait()'s exit code.
 type Proc struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser

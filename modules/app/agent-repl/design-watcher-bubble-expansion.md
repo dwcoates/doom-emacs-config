@@ -1,9 +1,16 @@
 # Design: watcher-bubble expansion (live background-task progress in a response bubble)
 
 Status: **proposal — nothing implemented.**
-Scope: `modules/app/agent-repl/` (`webapp/`, `daemon/`, `shared/protocol.md`).
+Scope: `modules/app/agent-repl/` (`webapp/`, `daemon/`).
 
 All `path:line` anchors are relative to `modules/app/agent-repl/`.
+
+> **Citation note.** This document cites `shared/protocol.md`, the
+> pre-cutover NDJSON prose spec, which has since been **deleted**, along
+> with the Layer-2 frame types it specified. The live wire contracts are
+> the protobuf schemas under `proto/agentshim/` (see `proto/AGENTS.md`).
+> Every `shared/protocol.md` reference below is a historical citation,
+> not a live pointer.
 
 ---
 
