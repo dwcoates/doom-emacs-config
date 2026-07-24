@@ -48,10 +48,11 @@
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--frontend-wait-ready "agent-repl-frontend-client" ())
 (declare-function agent-repl--frontend-create-session "agent-repl-frontend-client" (cwd &optional model resume force-fresh))
-(declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id))
+(declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
 (declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
-(declare-function agent-repl--frontend-send-message "agent-repl-frontend-client" (session-id text))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
+(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
 (declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name))
 (declare-function agent-repl--frontend-kill-webview "agent-repl-frontend" (buf))
@@ -319,6 +320,15 @@ touched."
 
 ;;;; ---- Session ---------------------------------------------------------------
 
+(defun agent-repl--explain-config-cwd ()
+  "Return the fixed cwd the explain-config session runs in (its workspace key).
+The daemon keys `submitPrompt'/`createSession'/`deleteSession' by this cwd,
+so create and send MUST compute it identically — hence one helper.  It is a
+dedicated directory (`agent-repl-explain-config-dir'), never a real gui
+workspace's root, so keying the workspace-less explain-config session by
+its cwd cannot collide with another session."
+  (file-name-as-directory (expand-file-name agent-repl-explain-config-dir)))
+
 (defun agent-repl--explain-config-ensure-session ()
   "Return the live explain-config daemon session id, creating it if needed.
 Ensures the daemon itself (built if stale, launched if absent) and
@@ -334,8 +344,7 @@ flag, so its first turn carries the read-only preamble."
   (if (and agent-repl--explain-config-session-id
            (agent-repl--frontend-session-live-p agent-repl--explain-config-session-id))
       agent-repl--explain-config-session-id
-    (let* ((dir (file-name-as-directory
-                 (expand-file-name agent-repl-explain-config-dir)))
+    (let* ((dir (agent-repl--explain-config-cwd))
            (agent-repl-frontend-permission-mode
             agent-repl-explain-config-permission-mode)
            (id (agent-repl--frontend-create-session
@@ -414,16 +423,19 @@ popup is chrome, not a browser."
   (format agent-repl-explain-config-preamble raw))
 
 (defun agent-repl--explain-config-send (session-id question)
-  "Send QUESTION into SESSION-ID as a user turn.
-The FIRST turn of a session is wrapped in the read-only preamble;
-every follow-up is sent verbatim, inheriting the contract from the
-conversation's context."
+  "Send QUESTION into SESSION-ID as a user turn over the UDS `submitPrompt'.
+The command is keyed by the explain-config cwd (`agent-repl--explain-config-cwd'),
+which the daemon resolves to SESSION-ID.  The FIRST turn of a session is
+wrapped in the read-only preamble; every follow-up is sent verbatim,
+inheriting the contract from the conversation's context."
   (let ((text (if agent-repl--explain-config-primed-p
                   question
-                (agent-repl--explain-config-build-input question))))
-    (agent-repl--log nil "explain-config: send session=%s primed=%s len=%d"
-                     session-id agent-repl--explain-config-primed-p (length text))
-    (agent-repl--frontend-send-message session-id text)
+                (agent-repl--explain-config-build-input question)))
+        (cwd (agent-repl--explain-config-cwd)))
+    (agent-repl--log nil "explain-config: send session=%s primed=%s len=%d (uds submitPrompt cwd=%s)"
+                     session-id agent-repl--explain-config-primed-p (length text) cwd)
+    (let ((req (agent-repl--uds-send-command "submitPrompt" (list :text text) cwd)))
+      (agent-repl--uds-track-command req "submitPrompt" cwd))
     (setq agent-repl--explain-config-primed-p t)))
 
 ;;;; ---- Commands ------------------------------------------------------------------

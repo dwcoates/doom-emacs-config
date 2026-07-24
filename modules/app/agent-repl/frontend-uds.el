@@ -90,7 +90,7 @@ when the ack reports failure — in addition to the loud log + echo).")
 
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
-    "typingDelta" "taskCatalog" "commandAck" "degradedNotice")
+    "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -98,7 +98,7 @@ malformed (unknown wire field) and signals loudly.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
-    "closeWorkspace" "openWorkspace" "resync")
+    "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.")
@@ -392,15 +392,18 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
 ;; it and, on failure, surfaces loudly (log + echo area) per
 ;; No-Silent-Fallbacks — a rejected command is never dropped silently.
 
-(defun agent-repl--uds-track-command (request-id field workspace &optional on-failure)
+(defun agent-repl--uds-track-command (request-id field workspace &optional on-failure on-success)
   "Record REQUEST-ID as an in-flight FIELD command for WORKSPACE.
 Pends until its `CommandAck' arrives (see
 `agent-repl--uds-handle-command-ack').  ON-FAILURE, when non-nil, is a
 function of one argument (the ack error string) run if the ack reports
-failure, IN ADDITION to the loud log + echo-area surfacing.  Returns
-REQUEST-ID."
+failure, IN ADDITION to the loud log + echo-area surfacing.  ON-SUCCESS,
+when non-nil, is a thunk (no args) run when the ack reports success — the
+synchronous createSession bridge uses it to unblock its await loop.
+Returns REQUEST-ID."
   (puthash request-id
-           (list :field field :workspace workspace :on-failure on-failure)
+           (list :field field :workspace workspace
+                 :on-failure on-failure :on-success on-success)
            agent-repl--uds-pending-commands)
   (agent-repl--log workspace
                    "uds-track-command: tracking request-id=%s field=%s"
@@ -437,7 +440,14 @@ the `:ok' flag."
      (ok
       (agent-repl--log workspace
                        "uds-command-ack: ACCEPTED request-id=%s field=%s"
-                       request-id field))
+                       request-id field)
+      (when-let ((on-success (plist-get pending :on-success)))
+        (condition-case cb-err
+            (funcall on-success)
+          (error
+           (agent-repl--log workspace
+                            "uds-command-ack: on-success callback errored: %S"
+                            cb-err)))))
      (t
       (agent-repl--log workspace
                        "uds-command-ack: REJECTED request-id=%s field=%s error=%s — surfacing"

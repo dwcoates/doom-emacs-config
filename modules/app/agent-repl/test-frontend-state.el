@@ -188,17 +188,105 @@
     ;; Act / Assert
     (should (= (agent-repl--frontend-apply-snapshot '(:workspaces nil)) 0))))
 
-(ert-deftest agent-repl-test-apply-snapshot-ignores-sessions-catalogs ()
-  "Sessions/catalogs arrays do not break the snapshot (deferred to their handlers)."
+(ert-deftest agent-repl-test-apply-snapshot-applies-sessions-and-tolerates-catalogs ()
+  "A snapshot applies workspaces AND rebuilds the SessionView store from
+`:sessions'; the `:catalogs' array (no handler here) does not break it."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    ;; Act — sessions/catalogs present but unhandled here
+    (clrhash agent-repl--frontend-session-views)
+    ;; Act — sessions carry ids now; catalogs present but unhandled here.
     (agent-repl--frontend-apply-snapshot
      '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE"))
-       :sessions ((:workspace "a" :model "haiku"))
+       :sessions ((:sessionId "s_a" :workspace "a" :model "haiku"))
        :catalogs ((:workspace "a" :tasks nil))))
-    ;; Assert — the workspace state still applied cleanly
-    (should (eq (agent-repl--ws-get "a" :pushed-render-state) :idle))))
+    ;; Assert — the workspace state applied AND the session view is stored.
+    (should (eq (agent-repl--ws-get "a" :pushed-render-state) :idle))
+    (should (equal (plist-get (agent-repl--frontend-session-view "s_a") :model) "haiku"))))
+
+(ert-deftest agent-repl-test-apply-snapshot-rebuilds-session-store ()
+  "A snapshot REBUILDS the roster wholesale, dropping stale entries a bounced
+daemon no longer knows."
+  ;; Arrange — a stale view lingers before the snapshot.
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view '(:sessionId "s_stale" :workspace "old"))
+    ;; Act
+    (agent-repl--frontend-apply-snapshot
+     '(:workspaces nil :sessions ((:sessionId "s_new" :workspace "a"))))
+    ;; Assert — the stale entry is gone, only the snapshot's roster remains.
+    (should-not (agent-repl--frontend-session-view "s_stale"))
+    (should (agent-repl--frontend-session-view "s_new"))))
+
+(ert-deftest agent-repl-test-apply-snapshot-applies-daemon-view ()
+  "A snapshot's `:daemon' member routes into the boot-id note (give-up reset)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id)
+                 (lambda (boot-id) (setq noted boot-id))))
+        ;; Act
+        (agent-repl--frontend-apply-snapshot
+         '(:workspaces nil :daemon (:bootId "b_1" :protocolVersion "1")))
+        ;; Assert
+        (should (equal noted "b_1"))))))
+
+;;;; ---- SessionView store + handler -------------------------------------
+
+(ert-deftest agent-repl-test-apply-session-view-stores-by-id ()
+  "The sessionView handler upserts the view into the store, keyed by id."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    ;; Act
+    (agent-repl--frontend-apply-session-view
+     '(:sessionId "s_1" :workspace "/w" :claudeSessionId "cli-1"))
+    ;; Assert
+    (should (equal (plist-get (agent-repl--frontend-session-view "s_1") :claudeSessionId) "cli-1"))))
+
+(ert-deftest agent-repl-test-store-session-view-missing-id-errors ()
+  "A SessionView with no id fails loudly (No-Silent-Fallbacks)."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl--frontend-store-session-view '(:workspace "/w"))))
+
+(ert-deftest agent-repl-test-live-session-id-for-cwd-finds-non-terminal ()
+  "The cwd correlation returns the non-terminal session bound to that cwd."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view '(:sessionId "s_dead" :workspace "/w" :terminal t))
+    (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
+    ;; Act / Assert — the terminal one is skipped, the live one is returned.
+    (should (equal (agent-repl--frontend-live-session-id-for-cwd "/w") "s_live"))))
+
+(ert-deftest agent-repl-test-live-session-id-for-cwd-nil-when-none ()
+  "The cwd correlation returns nil when no live session is bound to the cwd."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-live-session-id-for-cwd "/nope")))))
+
+(ert-deftest agent-repl-test-apply-daemon-view-notes-boot-id ()
+  "The daemonView handler routes its bootId into `--frontend-note-boot-id'."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id)
+                 (lambda (boot-id) (setq noted boot-id))))
+        ;; Act
+        (agent-repl--frontend-apply-daemon-view '(:bootId "b_9" :protocolVersion "1"))
+        ;; Assert
+        (should (equal noted "b_9"))))))
+
+(ert-deftest agent-repl-test-state-registers-session-view-handler ()
+  "The sessionView oneof arm is wired to its handler."
+  (should (eq (cdr (assoc "sessionView" agent-repl--uds-frame-handlers))
+              #'agent-repl--frontend-apply-session-view)))
+
+(ert-deftest agent-repl-test-state-registers-daemon-view-handler ()
+  "The daemonView oneof arm is wired to its handler."
+  (should (eq (cdr (assoc "daemonView" agent-repl--uds-frame-handlers))
+              #'agent-repl--frontend-apply-daemon-view)))
 
 ;;;; ---- DegradedNotice surfacing ----------------------------------------
 
