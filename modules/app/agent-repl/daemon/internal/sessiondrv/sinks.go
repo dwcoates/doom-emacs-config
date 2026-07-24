@@ -6,9 +6,12 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/frontend"
+
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Pusher is the slice of the frontend server the driver pushes to. Satisfied by
@@ -53,6 +56,11 @@ type consumer struct {
 
 	mu   sync.Mutex
 	ring []*corev1.Event
+	// systemInit is the last SDK system:init snapshot seen on this session's
+	// stream (a data.v1 SystemInit inside a vendor event). It backs the daemon's
+	// HTTP /status and /commands routes now that the L2 translator that used to
+	// cache it is gone. Nil until the first init lands (honest empty).
+	systemInit *datav1.SystemInit
 }
 
 func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted)) *consumer {
@@ -93,6 +101,33 @@ func (c *consumer) snapshotRing() []*corev1.Event {
 	return out
 }
 
+// latestSystemInit returns the last SDK system:init snapshot seen on this
+// session's stream, or nil before the first init lands.
+func (c *consumer) latestSystemInit() *datav1.SystemInit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.systemInit
+}
+
+// systemInitFromVendor decodes a vendor event's Any into its SystemInit arm, or
+// nil when the Any is not a ClaudeStreamMessage carrying a system:init (every
+// vendor event shares the same Any type URL; the inner oneof is the
+// discriminator).
+func systemInitFromVendor(a *anypb.Any) *datav1.SystemInit {
+	if a == nil {
+		return nil
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil
+	}
+	csm, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return nil
+	}
+	return csm.GetSystemInit()
+}
+
 // Apply feeds a lifecycle event to the SSM and refreshes the TaskCatalog on
 // task-lifecycle transitions (design step 1). It also fires onSessionStarted so
 // the driver can arm the metaprompt re-fire. An SSM apply error is loud-logged,
@@ -128,6 +163,11 @@ func (c *consumer) Consume(ev *corev1.Event) {
 	case *corev1.Event_HeartbeatProgress:
 		c.push.PushTypingDelta(heartbeatTypingDelta(c.workspace, c.sessionID, p.HeartbeatProgress))
 	case *corev1.Event_Vendor:
+		if si := systemInitFromVendor(p.Vendor); si != nil {
+			c.mu.Lock()
+			c.systemInit = si
+			c.mu.Unlock()
+		}
 		c.pushConversation(ev)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
