@@ -1,89 +1,121 @@
 /**
  * The /status panel: the GUI's rich, non-interactive replacement for the CLI
- * status command it can never open. Data is the SDK's system:init snapshot
- * (re-probed on demand) plus the account block the init omits, merged with the
- * live model/permission mode the store already tracks.
+ * status command it can never open. Data is the SDK's system:init snapshot,
+ * PUSHED as a frontend.v1 sessionInit frame, plus the account block the init
+ * omits, merged with the live model/permission mode the store already tracks.
  */
 import { describe, expect, it } from "vitest";
 
 import {
+  apiKeySourceWord,
   authLabel,
   fastModeLabel,
-  fetchStatus,
   pluginLabels,
-  refreshStatus,
   statusPanelHtml,
   statusRows,
+  statusSnapshotFromInit,
   StatusSnapshot,
 } from "../src/status.js";
 import { Account } from "../src/account.js";
 
-/** A fetch capturing the URL/method and answering with the given response. */
-function fakeFetch(resp: { ok: boolean; status?: number; body?: unknown }): {
-  fetchFn: typeof fetch;
-  calls: Array<{ url: string; method: string }>;
-} {
-  const calls: Array<{ url: string; method: string }> = [];
-  const fetchFn = (async (url: string, init?: { method?: string }) => {
-    calls.push({ url, method: init?.method ?? "GET" });
-    return {
-      ok: resp.ok,
-      status: resp.status ?? 200,
-      json: async () => resp.body ?? { snapshot: null, account: { config_dir: "", email: "" } },
-      text: async () => "boom",
-    };
-  }) as unknown as typeof fetch;
-  return { fetchFn, calls };
-}
-
 const account: Account = { config_dir: "", email: "dodge@chess.com" };
 
-describe("fetchStatus", () => {
-  it("gets the session's own status route", async () => {
-    // Arrange
-    const { fetchFn, calls } = fakeFetch({ ok: true });
-    // Act
-    await fetchStatus("http://d", "s_1", fetchFn);
+describe("apiKeySourceWord", () => {
+  it("reduces the protojson enum name to the bare source word", () => {
+    // Arrange + Act
+    const word = apiKeySourceWord("API_KEY_SOURCE_PROJECT");
     // Assert
-    expect(calls[0].url).toBe("http://d/sessions/s_1/status");
+    expect(word).toBe("project");
   });
 
-  it("returns the snapshot and account together", async () => {
-    // Arrange
-    const { fetchFn } = fakeFetch({
-      ok: true,
-      body: { snapshot: { fast_mode_state: "on" }, account },
-    });
-    // Act
-    const res = await fetchStatus("http://d", "s_1", fetchFn);
+  it("treats UNSPECIFIED as unset so the label falls to a subscription", () => {
+    // Arrange + Act
+    const word = apiKeySourceWord("API_KEY_SOURCE_UNSPECIFIED");
     // Assert
-    expect(res.snapshot?.fast_mode_state).toBe("on");
-    expect(res.account.email).toBe("dodge@chess.com");
+    expect(word).toBeUndefined();
   });
 
-  it("rejects on a non-2xx", async () => {
-    // Arrange
-    const { fetchFn } = fakeFetch({ ok: false, status: 500 });
-    // Act + Assert
-    await expect(fetchStatus("http://d", "s_1", fetchFn)).rejects.toThrow(/500/);
+  it("passes through a value that is already a bare word", () => {
+    // Arrange + Act
+    const word = apiKeySourceWord("none");
+    // Assert
+    expect(word).toBe("none");
+  });
+
+  it("leaves an absent source unset", () => {
+    // Arrange + Act
+    const word = apiKeySourceWord(undefined);
+    // Assert
+    expect(word).toBeUndefined();
   });
 });
 
-describe("refreshStatus", () => {
-  it("posts the session's status refresh route", async () => {
-    // Arrange
-    const { fetchFn, calls } = fakeFetch({ ok: true, status: 202 });
-    // Act
-    await refreshStatus("http://d", "s_1", fetchFn);
+describe("statusSnapshotFromInit", () => {
+  it("has no snapshot before any init has been pushed", () => {
+    // Arrange + Act
+    const snap = statusSnapshotFromInit(null);
     // Assert
-    expect(calls[0]).toEqual({ url: "http://d/sessions/s_1/status/refresh", method: "POST" });
+    expect(snap).toBeNull();
   });
 
-  it("rejects on a non-2xx", async () => {
+  it("reads the init's lowerCamel protojson field names", () => {
     // Arrange
-    const { fetchFn } = fakeFetch({ ok: false, status: 409 });
-    // Act + Assert
-    await expect(refreshStatus("http://d", "s_1", fetchFn)).rejects.toThrow(/409/);
+    const init = { claudeCodeVersion: "1.2.3", fastModeState: "on", outputStyle: "concise" };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect(snap).toMatchObject({
+      claude_code_version: "1.2.3",
+      fast_mode_state: "on",
+      output_style: "concise",
+    });
+  });
+
+  it("normalizes the auth source enum onto the snapshot", () => {
+    // Arrange
+    const init = { apiKeySource: "API_KEY_SOURCE_ORG" };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect(snap?.apiKeySource).toBe("org");
+  });
+
+  it("carries the repeated rosters through as arrays", () => {
+    // Arrange
+    const init = { mcpServers: [{ name: "gns" }], skills: ["a", "b"], agents: ["x"] };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect([snap?.mcp_servers?.length, snap?.skills?.length, snap?.agents?.length]).toEqual([
+      1, 2, 1,
+    ]);
+  });
+
+  it("carries the memory-path map through", () => {
+    // Arrange
+    const init = { memoryPaths: { auto: "/m/CLAUDE.md" } };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect(snap?.memory_paths).toEqual({ auto: "/m/CLAUDE.md" });
+  });
+
+  it("leaves a field the init never carried unset rather than guessing", () => {
+    // Arrange — an init from a release that reports none of these.
+    const init = { cwd: "/w" };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect(snap?.claude_code_version).toBeUndefined();
+  });
+
+  it("ignores a field whose type is not the one the panel reads", () => {
+    // Arrange — a scalar where the panel expects a roster.
+    const init = { skills: "not-an-array" };
+    // Act
+    const snap = statusSnapshotFromInit(init);
+    // Assert
+    expect(snap?.skills).toBeUndefined();
   });
 });
 

@@ -6,30 +6,48 @@
  * the WebSocket — the SAME message set Emacs consumes, so the two frontends
  * can never diverge.
  *
+ * S9 RECOMPOSITION — the two breaking changes this decoder now speaks:
+ * - `ConversationDelta.items` is a repeated typed `ConversationItem`: a thin
+ *   envelope {uuid, tsMs, requestId} carrying EXACTLY ONE typed data.v1/core.v1
+ *   payload arm (assistantMessage, userMessage, toolUse, toolResult,
+ *   toolUseResult, result, compactBoundary, compactBoundaryLine, apiError,
+ *   permission). The webapp DECOMPOSES those typed payloads back into its
+ *   render vocabulary in `state-adapter.ts`; the OLD `kind`-discriminated
+ *   pre-rendered Struct vocabulary is gone.
+ * - `TypingDelta` embeds a `core.v1.ContentDelta` under `delta`
+ *   ({uuid, blockIndex, one of text/thinking/inputJson/signature,
+ *   estimatedTokens}) rather than the old flat uuid/blockIndex/kind/delta.
+ * Additive S9: the `sessionInit` frame + `StateSnapshot.inits` carry the
+ * retained `data.v1.SystemInit`; `SessionView.configDir`.
+ *
  * STUB vs HAND-TYPED — the choice (per the G11 charter):
  * We HAND-TYPE the protojson shapes rather than importing the committed
  * `proto/gen/ts` protobuf-es stubs. The stubs work at runtime (Vite/Vitest
  * resolve them), but `tsc` cannot: the stub's own bare imports
  * (`@bufbuild/protobuf/codegenv2`, `/wkt`) are resolved relative to the stub's
  * directory (`proto/gen/ts/…`), which has no reachable `node_modules`, so
- * `npm run typecheck` fails with TS2307. Making tsc resolve it would require a
- * `tsconfig` `paths`/`baseUrl` hack reaching outside the webapp project — a
- * change to an existing webapp config file the G11 constraints tell us to
- * leave alone. `frontend.v1` is small (~10 messages), so hand-typing is cheap,
- * self-contained (no new dependency), and lets us implement the §5.1 loud
- * validation contract directly and visibly.
+ * `npm run typecheck` fails with TS2307. `frontend.v1` is small, so hand-typing
+ * is cheap, self-contained, and lets us implement the §5.1 loud validation
+ * contract directly and visibly.
  *
  * VALIDATION CONTRACT (§5.1) — the decoder hard-errors (never returns a
  * degraded value) on:
  * - input that is not valid JSON / not a JSON object;
- * - an unrecognized field (top-level or nested) — the protojson analogue of a
- *   new/unknown field, surfaced loudly rather than silently kept;
+ * - an unrecognized field (top-level or on a `frontend.v1`-owned message) —
+ *   the protojson analogue of a new/unknown field, surfaced loudly;
  * - an empty or unrecognized `FrontendFrame` oneof variant;
- * - an unknown enum name/value;
- * - a scalar of the wrong JSON type;
- * - a recognized variant missing a load-bearing field.
- * Field names are the canonical protojson (lowerCamelCase) names; int64/uint64
- * scalars arrive as JSON strings and are parsed to `number`.
+ * - an empty, multiple, or unrecognized `ConversationItem`/`ContentDelta`
+ *   oneof arm;
+ * - an unknown enum name/value; a scalar of the wrong JSON type; a recognized
+ *   variant missing a load-bearing field.
+ * BOUNDARY: the DEEP interior of a `ConversationItem`'s typed data.v1/core.v1
+ * payload (and of `SessionInit`) is ADOPTED BY SHAPE — those messages grow
+ * additively on the daemon side, so re-litigating every nested field would
+ * break the webapp on every additive daemon change. The state-adapter reads
+ * the load-bearing fields of each payload loudly; validating the rest is the
+ * daemon-side converter's job (§5.1).
+ * Field names are canonical protojson (lowerCamelCase); int64/uint64 scalars
+ * arrive as JSON strings and are parsed to `number`.
  */
 
 // --- enums ------------------------------------------------------------------
@@ -101,12 +119,11 @@ export interface SessionView {
   shimAttached: boolean;
   /** Durable CLI conversation uuid — the resume/rebind key (protojson camelCase). */
   claudeSessionId: string;
-  /** Working directory a rebind's POST /sessions needs. */
+  /** Working directory a rebind's CreateSessionCmd needs. */
   cwd: string;
   // S7 GET /sessions parity fields (Emacs reads these off the pushed
   // SessionView now that it dropped the HTTP poller). Optional: a SessionView
-  // that predates them decodes to the field default. The webapp adapter does
-  // not need them, but the strict decoder accepts them typed.
+  // that predates them decodes to the field default.
   /** Whether the session's conversation has ended (delete / shim death). */
   terminal: boolean;
   /** Why a terminal session ended; "" while alive. */
@@ -117,6 +134,11 @@ export interface SessionView {
   hibernated: boolean;
   /** Count of unresolved permission requests on the live session. */
   pendingPermissions: number;
+  /**
+   * Additive (S8): the CLAUDE_CONFIG_DIR the session's shim runs against — the
+   * account identity for a daemon-executed, webapp-initiated switch.
+   */
+  configDir: string;
 }
 
 /**
@@ -130,20 +152,71 @@ export interface DaemonView {
   daemonVersion: string;
 }
 
+/** The protojson arm keys a `ConversationItem` oneof may set (S9). */
+export const CONVERSATION_ITEM_ARMS = [
+  "assistantMessage",
+  "userMessage",
+  "toolUse",
+  "toolResult",
+  "toolUseResult",
+  "result",
+  "compactBoundary",
+  "compactBoundaryLine",
+  "apiError",
+  "permission",
+] as const;
+export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
+
+/**
+ * One decoded conversation addition: the {uuid, tsMs, requestId} envelope plus
+ * the single selected typed payload arm and its (shape-adopted) value. The
+ * state-adapter decomposes `payload` per `arm` into the store's render items.
+ */
+export interface ConversationItemFrame {
+  uuid: string;
+  tsMs: number;
+  requestId: string;
+  arm: ConversationItemArm;
+  /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
+  payload: JsonObject;
+}
+
 export interface ConversationDelta {
   workspace: string;
   sessionId: string;
-  items: JsonObject[];
+  items: ConversationItemFrame[];
   throughSeq: number;
 }
 
+/** The content-delta kinds a `TypingDelta`'s embedded `ContentDelta` may set. */
+export const CONTENT_DELTA_KINDS = ["text", "thinking", "input_json", "signature"] as const;
+export type ContentDeltaKind = (typeof CONTENT_DELTA_KINDS)[number];
+
+/**
+ * Ephemeral live-typing relay — flattened from the embedded
+ * `core.v1.ContentDelta` for the store's reveal feed. `kind` is normalized to
+ * the store's snake vocabulary (the `inputJson` arm reads as `input_json`).
+ */
 export interface TypingDelta {
   workspace: string;
   sessionId: string;
   uuid: string;
   blockIndex: number;
-  kind: string;
+  kind: ContentDeltaKind;
   delta: string;
+  estimatedTokens: number;
+}
+
+/**
+ * The session's retained `data.v1.SystemInit` (slash commands, tools, skills,
+ * model, auth source, …), pushed on attach + carried in `StateSnapshot.inits`
+ * (S9). `init` is adopted by shape — a large, additively-growing message the
+ * status panel reads leniently. Replaces the HTTP `/status` snapshot source.
+ */
+export interface SessionInitView {
+  workspace: string;
+  sessionId: string;
+  init: JsonObject;
 }
 
 export interface TaskEntry {
@@ -179,9 +252,10 @@ export interface StateSnapshot {
   workspaces: WorkspaceState[];
   sessions: SessionView[];
   catalogs: TaskCatalog[];
-  /** Daemon identity carried on every connect snapshot (S7); absent on a
-   * pre-S7 daemon, so it is optional. */
+  /** Daemon identity carried on every connect snapshot (S7); optional. */
   daemon?: DaemonView;
+  /** Retained per-session SystemInits (S9); absent on a pre-S9 daemon. */
+  inits: SessionInitView[];
 }
 
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
@@ -195,17 +269,14 @@ export type FrontendFrame = {
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
     | { case: "degradedNotice"; value: DegradedNotice }
-    | { case: "daemonView"; value: DaemonView };
+    | { case: "daemonView"; value: DaemonView }
+    | { case: "sessionInit"; value: SessionInitView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
 export type FrameCase = FrontendFrame["frame"]["case"];
 
 // --- vocabularies -----------------------------------------------------------
-
-/** The kinds a `TypingDelta.kind` may name. */
-export const TYPING_KINDS = ["text", "thinking", "input_json"] as const;
-export type TypingKind = (typeof TYPING_KINDS)[number];
 
 /** The kinds a `TaskEntry.kind` may name. */
 export const TASK_KINDS = ["agent", "shell", "workflow"] as const;
@@ -216,29 +287,20 @@ export const TASK_STATUSES = ["running", "done", "error", "killed", "stopped", "
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 /**
- * The EXPLICIT unsupported-shapes registry (§11 deliverable). Every
- * `FrontendFrame` variant the webapp does NOT map to a visual is listed here
- * with the reason, so unsupported coverage is a known, enumerated quantity
- * rather than an unknown. The state adapter consults this to route a listed
- * variant down its typed, counted, log-once ignore path instead of crashing or
- * silently dropping it.
- *
- * Within `agentshim.frontend.v1`, `commandAck` is the sole frame with no
- * webapp visual: it is a control-plane receipt for a `FrontendCommand`,
- * consumed by the command dispatcher (outside the render adapter's scope).
- * Every OTHER frame variant maps to an already-supported visual (see the
- * coverage table in the G11 report). Unsupported CONVERSATION-ITEM kinds
- * inside a `ConversationDelta` are handled dynamically by the adapter (an item
- * whose `kind` is outside the store's bubble/card vocabulary is ignored the
- * same way, logged once per distinct kind), since that set is the daemon's
- * (G9 translate.go) to grow, not a fixed frontend.v1 enum.
+ * The EXPLICIT unsupported-shapes registry (§11 deliverable) — the
+ * `FrontendFrame` variants the webapp does NOT map to a visual, each with the
+ * reason. Everything else maps to a supported visual (`sessionInit` feeds the
+ * /status panel + slash-menu source). The state adapter routes a listed
+ * variant down its typed, counted, log-once ignore path. Unsupported
+ * CONVERSATION-ITEM arms/blocks (a `toolUseResult` with no correlation key, a
+ * `signature` content delta, an image content block) are ignored dynamically
+ * by the adapter the same way, since that set is the daemon's to grow.
  */
 export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, string>([
   [
     "commandAck",
     "control-plane command receipt (agentshim.frontend.v1.CommandAck); the " +
-      "webapp renders no visual for it — command dispatch/acking is out of " +
-      "the render adapter's scope",
+      "webapp consumes it in the command dispatcher, not the render adapter",
   ],
   [
     "daemonView",
@@ -307,6 +369,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
   ["degradedNotice", (v: unknown) => ({ case: "degradedNotice" as const, value: decodeDegradedNotice(v) })],
   ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
+  ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -366,6 +429,7 @@ const SESSION_VIEW_KEYS = new Set([
   "rehydratable",
   "hibernated",
   "pendingPermissions",
+  "configDir",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -392,6 +456,8 @@ function decodeSessionView(v: unknown): SessionView {
     rehydratable: bool(o, "rehydratable", "SessionView"),
     hibernated: bool(o, "hibernated", "SessionView"),
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
+    // S8 account identity: "" when the daemon has not resolved a config dir.
+    configDir: str(o, "configDir", "SessionView"),
   };
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
@@ -406,17 +472,10 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   const cd: ConversationDelta = {
     workspace: str(o, "workspace", "ConversationDelta"),
     sessionId: str(o, "sessionId", "ConversationDelta"),
-    items: (o.items === undefined || o.items === null ? [] : ensureArray(o.items, "ConversationDelta.items")).map(
-      (item, i) => {
-        const io = ensureObject(item, `ConversationDelta.items[${i}]`);
-        if (typeof io.kind !== "string" || io.kind === "") {
-          throw new Error(
-            `frontend-proto: ConversationDelta item[${i}] missing string \`kind\` discriminator`,
-          );
-        }
-        return io;
-      },
-    ),
+    items: (o.items === undefined || o.items === null
+      ? []
+      : ensureArray(o.items, "ConversationDelta.items")
+    ).map((item, i) => decodeConversationItem(item, i)),
     throughSeq: num(o, "throughSeq", "ConversationDelta"),
   };
   if (cd.sessionId === "") {
@@ -425,28 +484,100 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   return cd;
 }
 
-const TYPING_DELTA_KEYS = new Set(["workspace", "sessionId", "uuid", "blockIndex", "kind", "delta"]);
+const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId"]);
+const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
+function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
+  const ctx = `ConversationItem[${i}]`;
+  const o = ensureObject(v, ctx);
+  const keys = Object.keys(o);
+  const armKeys = keys.filter((k) => CONVERSATION_ITEM_ARM_SET.has(k));
+  const unknown = keys.filter(
+    (k) => !CONVERSATION_ITEM_ENVELOPE_KEYS.has(k) && !CONVERSATION_ITEM_ARM_SET.has(k),
+  );
+  if (unknown.length > 0) {
+    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`);
+  }
+  if (armKeys.length === 0) {
+    throw new Error(`frontend-proto: ${ctx} carries no item variant (empty or unrecognized oneof)`);
+  }
+  if (armKeys.length > 1) {
+    throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
+  }
+  const arm = armKeys[0] as ConversationItemArm;
+  return {
+    uuid: str(o, "uuid", ctx),
+    tsMs: num(o, "tsMs", ctx),
+    requestId: str(o, "requestId", ctx),
+    arm,
+    // Adopt the typed payload by shape (see file-top §5.1 boundary note).
+    payload: ensureObject(o[arm], `${ctx}.${arm}`),
+  };
+}
+
+const TYPING_DELTA_KEYS = new Set(["workspace", "sessionId", "delta"]);
+const CONTENT_DELTA_KEYS = new Set([
+  "uuid",
+  "blockIndex",
+  "text",
+  "thinking",
+  "inputJson",
+  "signature",
+  "estimatedTokens",
+]);
+/** ContentDelta oneof arm key → the store's normalized kind. */
+const CONTENT_DELTA_ARM_KIND: Readonly<Record<string, ContentDeltaKind>> = {
+  text: "text",
+  thinking: "thinking",
+  inputJson: "input_json",
+  signature: "signature",
+};
 function decodeTypingDelta(v: unknown): TypingDelta {
   const o = ensureObject(v, "TypingDelta");
   rejectUnknown(o, TYPING_DELTA_KEYS, "TypingDelta");
+  if (o.delta === undefined || o.delta === null) {
+    throw new Error("frontend-proto: TypingDelta missing required `delta`");
+  }
+  const d = ensureObject(o.delta, "TypingDelta.delta");
+  rejectUnknown(d, CONTENT_DELTA_KEYS, "TypingDelta.delta");
+  const armKeys = Object.keys(d).filter((k) => k in CONTENT_DELTA_ARM_KIND);
+  if (armKeys.length === 0) {
+    throw new Error("frontend-proto: TypingDelta.delta carries no content delta (empty oneof)");
+  }
+  if (armKeys.length > 1) {
+    throw new Error(
+      `frontend-proto: TypingDelta.delta sets multiple content deltas: ${armKeys.join(", ")}`,
+    );
+  }
+  const armKey = armKeys[0];
   const td: TypingDelta = {
     workspace: str(o, "workspace", "TypingDelta"),
     sessionId: str(o, "sessionId", "TypingDelta"),
-    uuid: str(o, "uuid", "TypingDelta"),
-    blockIndex: num(o, "blockIndex", "TypingDelta"),
-    kind: str(o, "kind", "TypingDelta"),
-    delta: str(o, "delta", "TypingDelta"),
+    uuid: str(d, "uuid", "TypingDelta.delta"),
+    blockIndex: num(d, "blockIndex", "TypingDelta.delta"),
+    kind: CONTENT_DELTA_ARM_KIND[armKey],
+    delta: str(d, armKey, "TypingDelta.delta"),
+    estimatedTokens: num(d, "estimatedTokens", "TypingDelta.delta"),
   };
   if (td.uuid === "") {
-    throw new Error("frontend-proto: TypingDelta missing required `uuid`");
-  }
-  if (!(TYPING_KINDS as readonly string[]).includes(td.kind)) {
-    throw new Error(
-      `frontend-proto: TypingDelta has unknown kind '${td.kind}' ` +
-        `(expected one of ${TYPING_KINDS.join(", ")})`,
-    );
+    throw new Error("frontend-proto: TypingDelta.delta missing required `uuid`");
   }
   return td;
+}
+
+const SESSION_INIT_VIEW_KEYS = new Set(["workspace", "sessionId", "init"]);
+function decodeSessionInitView(v: unknown): SessionInitView {
+  const o = ensureObject(v, "SessionInitView");
+  rejectUnknown(o, SESSION_INIT_VIEW_KEYS, "SessionInitView");
+  const siv: SessionInitView = {
+    workspace: str(o, "workspace", "SessionInitView"),
+    sessionId: str(o, "sessionId", "SessionInitView"),
+    // The SystemInit is adopted by shape (large, additive); an absent init is {}.
+    init: o.init === undefined || o.init === null ? {} : ensureObject(o.init, "SessionInitView.init"),
+  };
+  if (siv.sessionId === "") {
+    throw new Error("frontend-proto: SessionInitView missing required `session_id`");
+  }
+  return siv;
 }
 
 const TASK_ENTRY_KEYS = new Set([
@@ -553,7 +684,7 @@ function decodeDaemonView(v: unknown): DaemonView {
   };
 }
 
-const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon"]);
+const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon", "inits"]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
   rejectUnknown(o, STATE_SNAPSHOT_KEYS, "StateSnapshot");
@@ -570,6 +701,10 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.catalogs, "StateSnapshot.catalogs")
     ).map(decodeTaskCatalog),
+    inits: (o.inits === undefined || o.inits === null
+      ? []
+      : ensureArray(o.inits, "StateSnapshot.inits")
+    ).map(decodeSessionInitView),
   };
   // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
   // present rather than defaulting it away.

@@ -16,6 +16,7 @@
 import type { CounterEntry } from "./counter-menu.js";
 import type {
   AdapterEffect,
+  SessionInitInput,
   SessionViewInput,
   TypingReveal,
   WorkspaceStatusInput,
@@ -286,24 +287,23 @@ export interface StoreState {
    */
   models: ModelInfo[];
   /**
-   * The session's working directory. GAP after the cutover: not carried by
-   * `SessionView`, so it stays empty (the resume/rebind path that persisted it
-   * client-side loses its input).
+   * The session's working directory, from `SessionView.cwd` (the additive S6
+   * field that gave the resume/rebind path its input back).
    */
   cwd: string;
   /**
-   * Durable CLI session uuid. GAP after the cutover: not carried by
-   * `SessionView`, so it stays empty and the client-side rebind key is unset.
+   * Durable CLI session uuid, from `SessionView.claude_session_id` (additive
+   * S6) — the client-side rebind/auto-continue key.
    */
   claudeSessionId: string;
   permissionMode: PermissionMode;
   /**
-   * The session's `/status` snapshot, seeded over HTTP (`fetchStatus`). GAP
-   * after the cutover for the PUSH refresh: the old `status` frame that pushed
-   * a re-probed snapshot has no `frontend.v1` equivalent, so the panel shows
-   * the GET-seeded value only.
+   * The session's retained `data.v1.SystemInit` (protojson, camelCase),
+   * adopted from the pushed `sessionInit` frame — the /status panel's snapshot
+   * source after the cutover (replacing the GET /status probe). `null` before
+   * any init lands.
    */
-  statusSnapshot: unknown;
+  systemInit: Record<string, unknown> | null;
   items: ConversationItem[];
   /**
    * The in-flight message queue. GAP after the cutover: `frontend.v1` carries
@@ -385,7 +385,7 @@ function initialState(): StoreState {
     cwd: "",
     claudeSessionId: "",
     permissionMode: "default",
-    statusSnapshot: null,
+    systemInit: null,
     items: [],
     queued: [],
     turnInFlight: false,
@@ -408,6 +408,37 @@ function initialState(): StoreState {
 export interface IngestResult {
   /** Whether visible state changed (render needed). */
   changed: boolean;
+}
+
+/**
+ * Fold an incoming tool item onto the one it reconciles with (same
+ * toolUseId). A tool call arrives as TWO items sharing that id — the
+ * `tool_use` (name + input) and, later, the `tool_result` (the result,
+ * carrying an EMPTY toolName and no input by the daemon's contract, since
+ * those live on the call item). Each contributes only the fields it holds, so
+ * an incoming empty/absent field never clobbers a value already held, and
+ * cross-plane reordering (a result observed before its call) lands the same
+ * merged card either way.
+ */
+function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
+  const merged: ToolItem = { ...existing };
+  if (incoming.toolName !== "") merged.toolName = incoming.toolName;
+  if (incoming.messageId !== "") merged.messageId = incoming.messageId;
+  // `ts` is when the call OPENED; a result item's later stamp must not move it.
+  if (merged.ts === "" && incoming.ts !== "") merged.ts = incoming.ts;
+  if (incoming.inputDone) merged.inputDone = true;
+  if (incoming.inputJson !== "") merged.inputJson = incoming.inputJson;
+  if (incoming.input !== undefined) merged.input = incoming.input;
+  if (incoming.parentToolUseId !== undefined) merged.parentToolUseId = incoming.parentToolUseId;
+  if (incoming.contextTokens !== undefined) merged.contextTokens = incoming.contextTokens;
+  if (incoming.progress !== undefined) merged.progress = incoming.progress;
+  if (incoming.progressElapsedS !== undefined) merged.progressElapsedS = incoming.progressElapsedS;
+  if (incoming.notification !== undefined) merged.notification = incoming.notification;
+  if (incoming.resultTs !== undefined) merged.resultTs = incoming.resultTs;
+  if (incoming.asyncSource !== undefined) merged.asyncSource = incoming.asyncSource;
+  if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
+  if (incoming.result !== undefined) merged.result = incoming.result;
+  return merged;
 }
 
 /** The stable identity a conversation item is reconciled on, or null if it has none. */
@@ -488,6 +519,9 @@ export class ConversationStore {
           this.taskRoster = effect.value.entries;
           changed = true;
           break;
+        case "session-init":
+          changed = this.applySessionInit(effect.value) || changed;
+          break;
         case "degraded":
         case "ignored":
           break;
@@ -526,6 +560,15 @@ export class ConversationStore {
     return true;
   }
 
+  /**
+   * Adopt the pushed `SystemInit` — the /status panel's snapshot source. The
+   * daemon re-pushes the whole retained init, so the latest wins wholesale.
+   */
+  private applySessionInit(si: SessionInitInput): boolean {
+    this.state.systemInit = si.init;
+    return true;
+  }
+
   private applyConversationItems(
     items: readonly ConversationItem[],
     throughSeq: number,
@@ -546,7 +589,14 @@ export class ConversationStore {
     if (key !== null) {
       const idx = this.state.items.findIndex((i) => itemKey(i) === key);
       if (idx !== -1) {
-        this.state.items[idx] = item;
+        const existing = this.state.items[idx];
+        // A tool call's two items (use + result) field-merge so the result
+        // never wipes the call's name/input; every other kind is a whole-item
+        // replace (a completing text/thinking block supersedes its preview).
+        this.state.items[idx] =
+          item.kind === "tool" && existing.kind === "tool"
+            ? mergeToolItem(existing, item)
+            : item;
         return;
       }
     }

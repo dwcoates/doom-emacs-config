@@ -4,50 +4,47 @@
  * visuals only (§11 scope rule).
  *
  * This is the seam between the new protobuf frontend surface and the webapp's
- * current rendering vocabulary. It is deliberately a PURE producer: `apply()`
- * returns typed effects describing what the store/render layer should adopt,
- * and never touches the DOM or mutates a store itself — the stitch phase wires
- * each effect into its existing consumer (see the G11 report's stitch section).
+ * current rendering vocabulary. It is a PURE producer: `apply()` returns typed
+ * effects describing what the store/render layer should adopt, and never
+ * touches the DOM or mutates a store itself.
  *
- * SUPPORTED MAPPINGS (the only visuals the webapp renders today):
- * - WorkspaceState  → status/tail-row inputs (`WorkspaceStatusInput`).
- * - SessionView     → topbar / session-info inputs (`SessionViewInput`).
- * - ConversationDelta items → the existing bubble/card vocabulary
- *   (`ConversationItem[]` from store.ts) — one per item whose `kind` the store
- *   knows.
- * - TypingDelta     → the smooth.ts reveal feed (`TypingReveal`).
- * - TaskCatalog     → the async/task roster inputs (`CounterEntry[]` from
- *   counter-menu.ts, the same shape tasks.ts feeds the topbar counter).
- * - DegradedNotice  → a visible banner input (`DegradedBanner`).
- * - StateSnapshot   → decomposed into the WorkspaceState / SessionView /
- *   TaskCatalog effects above.
+ * S9 RECOMPOSITION — the daemon (translate.go) became a CURATOR that pushes the
+ * TYPED data.v1/core.v1 payloads (frontend-proto.ts `ConversationItemFrame`),
+ * and THIS adapter now does the DECOMPOSITION the daemon used to do: it fans a
+ * payload back into the store's bubble/card vocabulary. The mapping mirrors the
+ * old translate.go decomposition semantics:
+ * - assistantMessage (ApiAssistantMessage) → one item per content block:
+ *   text → TextItem, thinking → ThinkingItem, tool_use → ToolItem; block id is
+ *   `${uuid}:${blockIndex}`, message id is the envelope uuid.
+ * - userMessage (ApiUserMessage) → each tool_result block → a ToolItem
+ *   (result-only, empty toolName — it reconciles onto the tool_use item by
+ *   toolUseId in the store); the remaining blocks → one UserTurnItem (none = no
+ *   turn, the tool-feedback case).
+ * - toolUse (ToolUseBlock) / toolResult (ToolResultBlock) arms → the same two
+ *   ToolItems, standalone; the store field-merges the pair by toolUseId.
+ * - result (ResultMessage) → ResultItem; compactBoundary / compactBoundaryLine
+ *   → CompactBoundaryItem; apiError (ApiErrorLine) → RetryItem or ErrorItem;
+ *   permission (core.v1.PermissionItem) → PermissionItem.
+ * - sessionInit (SessionInitView) → the /status panel's SystemInit source.
  *
- * EXPLICIT IGNORE (no new visuals are added; §11): a frame variant in
- * `UNSUPPORTED_SHAPES` (today: `commandAck`) and a `ConversationDelta` item
- * whose `kind` is outside the store's vocabulary are IGNORED EXPLICITLY —
+ * EXPLICIT IGNORE (no new visuals; §11): a frame variant in `UNSUPPORTED_SHAPES`
+ * (commandAck, daemonView) and a CONVERSATION-ITEM shape with no webapp visual
+ * — a `toolUseResult` arm (no correlation key on the proto arm; the tool result
+ * is carried by tool_result blocks), a `signature` content delta, an image /
+ * tool_reference / fallback / unknown content block — are IGNORED EXPLICITLY:
  * typed as an `{ kind: "ignored" }` effect, counted, and debug-logged once per
- * distinct shape name. They are never crashed on and never silently dropped
- * without the log.
+ * distinct shape name. They are never crashed on and never silently dropped.
  */
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
-import type {
-  AssistantMessageError,
-  AsyncSource,
-  ContentBlock,
-  PermissionPreview,
-  ResultSubtype,
-  Usage,
-} from "./protocol.js";
+import type { ContentBlock, ResultSubtype, Usage } from "./protocol.js";
 import type {
   CompactBoundaryItem,
   ConversationItem,
   ErrorItem,
   PermissionItem,
-  ResultContext,
   ResultItem,
   RetryItem,
-  SystemItem,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -57,8 +54,11 @@ import {
   RenderState,
   UNSUPPORTED_SHAPES,
   type ConversationDelta,
+  type ConversationItemArm,
+  type ConversationItemFrame,
   type DegradedNotice,
   type FrontendFrame,
+  type SessionInitView,
   type SessionView,
   type TaskCatalog,
   type TaskEntry,
@@ -110,8 +110,10 @@ export interface SessionViewInput {
   shimAttached: boolean;
   /** Durable CLI conversation uuid — the resume/rebind + auto-continue key. */
   claudeSessionId: string;
-  /** Working directory a rebind's POST /sessions needs. */
+  /** Working directory a rebind's CreateSessionCmd needs. */
   cwd: string;
+  /** CLAUDE_CONFIG_DIR the session runs against (account identity, S8). */
+  configDir: string;
 }
 
 /** TypingDelta → the smooth.ts reveal feed's append. */
@@ -124,9 +126,9 @@ export interface TypingReveal {
   delta: string;
   /**
    * The stable block id the store/smooth reveal keys the growing block on,
-   * synthesized from the ephemeral relay's `uuid` + `block_index` (a message
-   * can open several blocks). Matches how the existing store keys text/thinking
-   * blocks by a single id.
+   * synthesized from the ephemeral relay's `uuid` + `block_index`. Matches how
+   * the complete assistantMessage's blocks key (`${uuid}:${blockIndex}`), so a
+   * preview reconciles onto its finished block.
    */
   blockId: string;
 }
@@ -136,6 +138,14 @@ export interface TaskCatalogInput {
   workspace: string;
   sessionId: string;
   entries: CounterEntry[];
+}
+
+/** SessionInitView → the /status panel's SystemInit snapshot source. */
+export interface SessionInitInput {
+  workspace: string;
+  sessionId: string;
+  /** The data.v1.SystemInit payload, adopted by shape (read leniently). */
+  init: Record<string, unknown>;
 }
 
 /** DegradedNotice → the visible banner input. */
@@ -159,27 +169,12 @@ export type AdapterEffect =
     }
   | { kind: "typing"; value: TypingReveal }
   | { kind: "task-catalog"; value: TaskCatalogInput }
+  | { kind: "session-init"; value: SessionInitInput }
   | { kind: "degraded"; value: DegradedBanner }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn";
 export type AdapterLogger = (level: AdapterLogLevel, message: string) => void;
-
-// --- the store's bubble/card vocabulary (ConversationDelta items) -----------
-
-/** The `kind` discriminators the store's ConversationItem union recognizes. */
-export const KNOWN_ITEM_KINDS: ReadonlySet<string> = new Set([
-  "user-turn",
-  "text",
-  "thinking",
-  "tool",
-  "permission",
-  "result",
-  "compact-boundary",
-  "error",
-  "retry",
-  "system",
-]);
 
 // --- the adapter ------------------------------------------------------------
 
@@ -207,6 +202,7 @@ export class StateAdapter {
           ...s.workspaces.map((ws) => this.workspaceEffect(ws)),
           ...s.sessions.map((sv) => this.sessionEffect(sv)),
           ...s.catalogs.map((tc) => this.catalogEffect(tc)),
+          ...s.inits.map((si) => this.sessionInitEffect(si)),
         ];
       }
       case "workspaceState":
@@ -216,9 +212,11 @@ export class StateAdapter {
       case "conversationDelta":
         return this.conversationEffects(frame.frame.value);
       case "typingDelta":
-        return [this.typingEffect(frame.frame.value)];
+        return this.typingEffects(frame.frame.value);
       case "taskCatalog":
         return [this.catalogEffect(frame.frame.value)];
+      case "sessionInit":
+        return [this.sessionInitEffect(frame.frame.value)];
       case "degradedNotice":
         return [this.degradedEffect(frame.frame.value)];
       case "commandAck":
@@ -226,8 +224,7 @@ export class StateAdapter {
         return [this.ignore("commandAck")];
       case "daemonView":
         // Registered unsupported shape (S7): decoded for wire parity, but boot
-        // detection / version warnings are an Emacs-frontend concern with no
-        // webapp visual.
+        // detection / version warnings are an Emacs-frontend concern.
         return [this.ignore("daemonView")];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
@@ -275,22 +272,7 @@ export class StateAdapter {
         shimAttached: sv.shimAttached,
         claudeSessionId: sv.claudeSessionId,
         cwd: sv.cwd,
-      },
-    };
-  }
-
-  private typingEffect(td: TypingDelta): AdapterEffect {
-    return {
-      kind: "typing",
-      value: {
-        workspace: td.workspace,
-        sessionId: td.sessionId,
-        uuid: td.uuid,
-        blockIndex: td.blockIndex,
-        // Validated by decodeFrontendFrame; narrow for the output type.
-        kind: td.kind as TypingReveal["kind"],
-        delta: td.delta,
-        blockId: `${td.uuid}:${td.blockIndex}`,
+        configDir: sv.configDir,
       },
     };
   }
@@ -306,6 +288,13 @@ export class StateAdapter {
     };
   }
 
+  private sessionInitEffect(si: SessionInitView): AdapterEffect {
+    return {
+      kind: "session-init",
+      value: { workspace: si.workspace, sessionId: si.sessionId, init: si.init },
+    };
+  }
+
   private degradedEffect(dn: DegradedNotice): AdapterEffect {
     return {
       kind: "degraded",
@@ -318,16 +307,36 @@ export class StateAdapter {
     };
   }
 
+  /**
+   * A `text`/`thinking`/`input_json` content delta grows the reveal feed; a
+   * `signature` delta streams the thinking block's signature, which the webapp
+   * renders no live preview for — so it is ignored (counted, logged once).
+   */
+  private typingEffects(td: TypingDelta): AdapterEffect[] {
+    if (td.kind === "signature") return [this.ignore("content-delta:signature")];
+    return [
+      {
+        kind: "typing",
+        value: {
+          workspace: td.workspace,
+          sessionId: td.sessionId,
+          uuid: td.uuid,
+          blockIndex: td.blockIndex,
+          kind: td.kind,
+          delta: td.delta,
+          blockId: `${td.uuid}:${td.blockIndex}`,
+        },
+      },
+    ];
+  }
+
   private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
     const items: ConversationItem[] = [];
     const ignored: AdapterEffect[] = [];
-    for (const raw of cd.items) {
-      const kind = String((raw as Record<string, unknown>).kind);
-      if (!KNOWN_ITEM_KINDS.has(kind)) {
-        ignored.push(this.ignore(`conversation-item:${kind}`));
-        continue;
-      }
-      items.push(buildConversationItem(kind, raw as Record<string, unknown>));
+    for (const frame of cd.items) {
+      const built = itemsFromFrame(frame);
+      items.push(...built.items);
+      for (const shape of built.ignores) ignored.push(this.ignore(shape));
     }
     return [
       {
@@ -381,9 +390,7 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
 function renderStateKeyword(state: RenderState): WebRenderState {
   const kw = RENDER_STATE_KEYWORD[state];
   if (kw === null || kw === undefined) {
-    throw new Error(
-      `state-adapter: WorkspaceState has unrenderable RenderState ${state}`,
-    );
+    throw new Error(`state-adapter: WorkspaceState has unrenderable RenderState ${state}`);
   }
   return kw;
 }
@@ -420,196 +427,404 @@ function taskEntryToCounter(t: TaskEntry): CounterEntry {
   };
 }
 
-// --- ConversationDelta item → ConversationItem ------------------------------
+// --- ConversationItemFrame → ConversationItem[] -----------------------------
 //
-// The daemon (G9 translate.go) pre-renders complete conversation additions
-// INTO the store's bubble/card vocabulary and ships them as protojson Structs.
-// This builder is the receiving contract: it validates each item's `kind`
-// discriminator and its load-bearing fields loudly, then materializes the
-// typed ConversationItem. Deeply-nested optional payloads (a tool result, an
-// async source, a permission preview) are adopted by shape — validating their
-// interior is the daemon-side converter's job (§5.1), not re-litigated here.
+// The daemon (translate.go, S9) is a CURATOR: it pushes the TYPED data.v1 /
+// core.v1 payload for each conversation addition and no longer pre-renders the
+// store vocabulary. This decomposition is the receiving contract — it fans one
+// typed payload into the store's items, reading the load-bearing fields loudly
+// and adopting deep interiors by shape (§5.1).
+//
+// KNOWN WIRE GAPS (surfaced to the coordinator, not papered over):
+// - `parentToolUseId` (subagent nesting) has no home in the ConversationItem
+//   envelope or in ApiAssistantMessage/ToolUseBlock, so items decomposed here
+//   carry none — subagent bubbles render on the main chain until the proto
+//   threads the parent id.
+// - `toolUseResult` (the rich structured result) has no correlation key on its
+//   arm and no built curator counterpart; it is routed to the ignore path. The
+//   basic tool result rides the `toolResult` block path instead.
+// - permission `toolUseId`/`preview` and user-turn `origin` have no source in
+//   the typed payloads and are left unset.
 
 type Obj = Record<string, unknown>;
 
-function buildConversationItem(kind: string, o: Obj): ConversationItem {
-  switch (kind) {
-    case "user-turn":
-      return {
-        kind: "user-turn",
-        requestId: reqStr(o, "requestId", "user-turn"),
-        content: reqArr(o, "content", "user-turn") as ContentBlock[],
-        ts: reqStr(o, "ts", "user-turn"),
-        ...(has(o, "origin") ? { origin: reqStr(o, "origin", "user-turn") } : {}),
-      } satisfies UserTurnItem;
-    case "text":
-      return {
-        kind: "text",
-        blockId: reqStr(o, "blockId", "text"),
-        messageId: reqStr(o, "messageId", "text"),
-        text: reqStr(o, "text", "text"),
-        done: reqBool(o, "done", "text"),
-        ts: reqStr(o, "ts", "text"),
-        ...(has(o, "parentToolUseId")
-          ? { parentToolUseId: reqStr(o, "parentToolUseId", "text") }
-          : {}),
-        ...(has(o, "error")
-          ? { error: reqStr(o, "error", "text") as AssistantMessageError }
-          : {}),
-      } satisfies TextItem;
-    case "thinking":
-      return {
-        kind: "thinking",
-        blockId: reqStr(o, "blockId", "thinking"),
-        messageId: reqStr(o, "messageId", "thinking"),
-        text: reqStr(o, "text", "thinking"),
-        done: reqBool(o, "done", "thinking"),
-        ...(has(o, "signature")
-          ? { signature: reqStr(o, "signature", "thinking") }
-          : {}),
-        ...(has(o, "parentToolUseId")
-          ? { parentToolUseId: reqStr(o, "parentToolUseId", "thinking") }
-          : {}),
-      } satisfies ThinkingItem;
-    case "tool":
-      return buildToolItem(o);
-    case "permission":
-      return {
-        kind: "permission",
-        requestId: reqStr(o, "requestId", "permission"),
-        toolUseId: reqStr(o, "toolUseId", "permission"),
-        toolName: reqStr(o, "toolName", "permission"),
-        input: reqPresent(o, "input", "permission"),
-        ...(has(o, "preview") ? { preview: o.preview as PermissionPreview } : {}),
-        ...(has(o, "resolution")
-          ? { resolution: o.resolution as PermissionItem["resolution"] }
-          : {}),
-      } satisfies PermissionItem;
+/** Decompose one decoded conversation item into store items + ignore shapes. */
+function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem[]; ignores: string[] } {
+  const arm: ConversationItemArm = frame.arm;
+  switch (arm) {
+    case "assistantMessage":
+      return assistantMessageItems(frame);
+    case "userMessage":
+      return userMessageItems(frame);
+    case "toolUse":
+      return { items: [toolItemFromUse(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
+    case "toolResult":
+      return { items: [toolItemFromResult(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
+    case "toolUseResult":
+      // No correlation key on the arm + unbuilt curator counterpart; ignored.
+      return { items: [], ignores: ["conversation-item:toolUseResult"] };
     case "result":
-      return {
-        kind: "result",
-        subtype: reqStr(o, "subtype", "result") as ResultSubtype,
-        durationMs: reqNum(o, "durationMs", "result"),
-        sincePrevFinalMs: reqNum(o, "sincePrevFinalMs", "result"),
-        numTurns: reqNum(o, "numTurns", "result"),
-        totalCostUsd: reqNum(o, "totalCostUsd", "result"),
-        usage: reqObj(o, "usage", "result") as unknown as Usage,
-        isError: reqBool(o, "isError", "result"),
-        ...(has(o, "resultText")
-          ? { resultText: reqStr(o, "resultText", "result") }
-          : {}),
-        context: (o.context ?? null) as ResultContext | null,
-      } satisfies ResultItem;
-    case "compact-boundary":
-      return {
-        kind: "compact-boundary",
-        trigger: reqStr(o, "trigger", "compact-boundary") as "auto" | "manual",
-        preTokens: reqNum(o, "preTokens", "compact-boundary"),
-        postTokens: reqNum(o, "postTokens", "compact-boundary"),
-      } satisfies CompactBoundaryItem;
-    case "error":
-      return {
-        kind: "error",
-        code: reqStr(o, "code", "error"),
-        message: reqStr(o, "message", "error"),
-        recoverable: reqBool(o, "recoverable", "error"),
-      } satisfies ErrorItem;
-    case "retry":
-      return {
-        kind: "retry",
-        attempt: reqNum(o, "attempt", "retry"),
-        reason: reqStr(o, "reason", "retry"),
-        fatal: reqBool(o, "fatal", "retry"),
-      } satisfies RetryItem;
-    case "system":
-      return {
-        kind: "system",
-        subtype: reqStr(o, "subtype", "system"),
-      } satisfies SystemItem;
-    default:
-      // Unreachable: callers gate on KNOWN_ITEM_KINDS. Loud, never silent.
-      throw new Error(`state-adapter: no builder for conversation item kind '${kind}'`);
+      return { items: [resultItemFrom(frame.payload)], ignores: [] };
+    case "compactBoundary":
+      return { items: [compactBoundaryItem(frame.payload)], ignores: [] };
+    case "compactBoundaryLine":
+      return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
+    case "apiError":
+      return { items: [apiErrorItem(frame.payload)], ignores: [] };
+    case "permission":
+      return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
+    default: {
+      const never: never = arm;
+      throw new Error(`state-adapter: unhandled conversation item arm ${JSON.stringify(never)}`);
+    }
   }
 }
 
-function buildToolItem(o: Obj): ToolItem {
+/** The content-block oneof arm keys (data.v1.ContentBlock, protojson). */
+const CONTENT_BLOCK_ARMS = [
+  "text",
+  "thinking",
+  "toolUse",
+  "toolResult",
+  "image",
+  "toolReference",
+  "fallback",
+] as const;
+
+/** The single set content-block arm and its (shape-adopted) value. */
+function contentBlockArm(block: Obj): { arm: string; value: Obj } {
+  for (const arm of CONTENT_BLOCK_ARMS) {
+    const v = block[arm];
+    if (v !== undefined && v !== null) {
+      return { arm, value: typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {} };
+    }
+  }
+  return { arm: "unknown", value: {} };
+}
+
+function assistantMessageItems(frame: ConversationItemFrame): {
+  items: ConversationItem[];
+  ignores: string[];
+} {
+  const uuid = frame.uuid;
+  const ts = tsFromMs(frame.tsMs);
+  const items: ConversationItem[] = [];
+  const ignores: string[] = [];
+  parr(frame.payload, "content").forEach((raw, index) => {
+    const { arm, value } = contentBlockArm(ensureObj(raw));
+    switch (arm) {
+      case "text": {
+        const item: TextItem = {
+          kind: "text",
+          blockId: `${uuid}:${index}`,
+          messageId: uuid,
+          text: pstr(value, "text"),
+          done: true,
+          ts,
+        };
+        items.push(item);
+        break;
+      }
+      case "thinking": {
+        const item: ThinkingItem = {
+          kind: "thinking",
+          blockId: `${uuid}:${index}`,
+          messageId: uuid,
+          text: pstr(value, "thinking"),
+          done: true,
+        };
+        const sig = pstr(value, "signature");
+        if (sig !== "") item.signature = sig;
+        items.push(item);
+        break;
+      }
+      case "toolUse":
+        items.push(toolItemFromUse(value, uuid, ts));
+        break;
+      case "toolResult":
+        items.push(toolItemFromResult(value, uuid, ts));
+        break;
+      default:
+        // image | toolReference | fallback | unknown — no per-block visual.
+        ignores.push(`content-block:${arm}`);
+    }
+  });
+  return { items, ignores };
+}
+
+function userMessageItems(frame: ConversationItemFrame): {
+  items: ConversationItem[];
+  ignores: string[];
+} {
+  const msg = frame.payload;
+  const ts = tsFromMs(frame.tsMs);
+  const items: ConversationItem[] = [];
+  const ignores: string[] = [];
+
+  // ApiUserMessage.content oneof: content_string | content_blocks.
+  if (typeof msg.contentString === "string") {
+    items.push(userTurn(frame.requestId, [{ type: "text", text: msg.contentString }], ts));
+    return { items, ignores };
+  }
+
+  const list = pobj(msg, "contentBlocks");
+  const blocks = list ? parr(list, "blocks") : [];
+  const turnContent: ContentBlock[] = [];
+  for (const raw of blocks) {
+    const { arm, value } = contentBlockArm(ensureObj(raw));
+    if (arm === "toolResult") {
+      // A tool-result block reconciles onto its tool_use item by toolUseId.
+      items.push(toolItemFromResult(value, frame.uuid, ts));
+    } else if (arm === "text") {
+      turnContent.push({ type: "text", text: pstr(value, "text") });
+    } else {
+      // thinking/image/toolReference/fallback/unknown in a user message: keep
+      // as a generic content block on the turn (render reads text primarily).
+      turnContent.push({ type: arm, ...value });
+    }
+  }
+  // A pure tool-feedback message (only tool_result blocks) yields no user-turn.
+  if (turnContent.length > 0) items.push(userTurn(frame.requestId, turnContent, ts));
+  return { items, ignores };
+}
+
+function userTurn(requestId: string, content: ContentBlock[], ts: string): UserTurnItem {
+  return { kind: "user-turn", requestId, content, ts };
+}
+
+/** ToolUseBlock {id, name, input, caller} → the tool CALL item (no result). */
+function toolItemFromUse(use: Obj, messageUuid: string, ts: string): ToolItem {
   const item: ToolItem = {
     kind: "tool",
-    toolUseId: reqStr(o, "toolUseId", "tool"),
-    toolName: reqStr(o, "toolName", "tool"),
-    messageId: reqStr(o, "messageId", "tool"),
-    ts: reqStr(o, "ts", "tool"),
-    inputJson: has(o, "inputJson") ? reqStr(o, "inputJson", "tool") : "",
-    inputDone: has(o, "inputDone") ? reqBool(o, "inputDone", "tool") : false,
+    toolUseId: pstr(use, "id"),
+    toolName: pstr(use, "name"),
+    messageId: messageUuid,
+    ts,
+    inputJson: "",
+    inputDone: true,
   };
-  if (has(o, "parentToolUseId")) item.parentToolUseId = reqStr(o, "parentToolUseId", "tool");
-  if (has(o, "contextTokens")) item.contextTokens = reqNum(o, "contextTokens", "tool");
-  if (has(o, "input")) item.input = o.input as Record<string, unknown>;
-  if (has(o, "progress")) item.progress = reqStr(o, "progress", "tool");
-  if (has(o, "progressElapsedS")) item.progressElapsedS = reqNum(o, "progressElapsedS", "tool");
-  if (has(o, "notification")) item.notification = o.notification as ToolItem["notification"];
-  if (has(o, "resultTs")) item.resultTs = reqStr(o, "resultTs", "tool");
-  if (has(o, "asyncSource")) item.asyncSource = o.asyncSource as AsyncSource;
-  if (has(o, "taskOutput")) item.taskOutput = reqStr(o, "taskOutput", "tool");
-  if (has(o, "result")) item.result = o.result as ToolItem["result"];
+  const input = pobj(use, "input");
+  if (input !== undefined) item.input = input;
   return item;
 }
 
-// --- field readers (loud) ---------------------------------------------------
-
-function has(o: Obj, key: string): boolean {
-  return o[key] !== undefined && o[key] !== null;
+/**
+ * ToolResultBlock {toolUseId, content, isError} → the tool RESULT item. Empty
+ * toolName by contract (the name lives on the tool_use item this reconciles
+ * onto by toolUseId; the store field-merges the pair).
+ */
+function toolItemFromResult(res: Obj, messageUuid: string, ts: string): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: pstr(res, "toolUseId"),
+    toolName: "",
+    messageId: messageUuid,
+    ts,
+    inputJson: "",
+    inputDone: true,
+    resultTs: ts,
+    result: {
+      isError: pbool(res, "isError"),
+      content: toolResultContent(res),
+    },
+  };
 }
 
-function reqPresent(o: Obj, key: string, ctx: string): unknown {
-  if (!(key in o)) {
-    throw new Error(`state-adapter: ${ctx} item missing required \`${key}\``);
+/** ToolResultBlock content oneof (content_string | content_blocks) → store shape. */
+function toolResultContent(res: Obj): string | Array<{ type: "text"; text: string }> {
+  if (typeof res.contentString === "string") return res.contentString;
+  const list = pobj(res, "contentBlocks");
+  const blocks = list ? parr(list, "blocks") : [];
+  return blocks.map((raw) => {
+    const { arm, value } = contentBlockArm(ensureObj(raw));
+    return { type: "text" as const, text: arm === "text" ? pstr(value, "text") : "" };
+  });
+}
+
+/** RESULT_SUBTYPE_* (proto enum name) → the store's ResultSubtype vocabulary. */
+function resultSubtype(name: string): ResultSubtype {
+  switch (name) {
+    case "RESULT_SUBTYPE_SUCCESS":
+    case "success":
+      return "success";
+    case "RESULT_SUBTYPE_ERROR_MAX_TURNS":
+    case "error_max_turns":
+      return "error_max_turns";
+    default:
+      // ERROR_DURING_EXECUTION / ERROR_MAX_BUDGET_USD /
+      // ERROR_MAX_STRUCTURED_OUTPUT_RETRIES / UNSPECIFIED all read as a
+      // during-execution error (the store has no finer bucket for them).
+      return "error_during_execution";
   }
-  return o[key];
 }
 
-function reqStr(o: Obj, key: string, ctx: string): string {
-  const v = o[key];
-  if (typeof v !== "string") {
-    throw new Error(
-      `state-adapter: ${ctx} item field \`${key}\` must be a string (got ${typeof v})`,
-    );
+/** data.v1.Usage (protojson camelCase) → the store's snake-cased Usage. */
+function usageFrom(u: Obj | undefined): Usage {
+  if (u === undefined) return { input_tokens: 0, output_tokens: 0 };
+  return {
+    input_tokens: pnum(u, "inputTokens"),
+    output_tokens: pnum(u, "outputTokens"),
+    cache_creation_input_tokens: pnum(u, "cacheCreationInputTokens"),
+    cache_read_input_tokens: pnum(u, "cacheReadInputTokens"),
+  };
+}
+
+function resultItemFrom(r: Obj): ResultItem {
+  const item: ResultItem = {
+    kind: "result",
+    subtype: resultSubtype(pstr(r, "subtype")),
+    durationMs: pnum(r, "durationMs"),
+    // The cross-turn deltas are session state this per-item translator does not
+    // hold; the store re-derives them (matching the old translate.go contract).
+    sincePrevFinalMs: 0,
+    numTurns: pnum(r, "numTurns"),
+    totalCostUsd: pnum(r, "totalCostUsd"),
+    usage: usageFrom(pobj(r, "usage")),
+    isError: pbool(r, "isError"),
+    context: null,
+  };
+  const resultText = pstr(r, "result");
+  if (resultText !== "") item.resultText = resultText;
+  return item;
+}
+
+/** "auto"/"manual" from either a proto enum name or a disk plain string. */
+function compactTrigger(raw: string): "auto" | "manual" {
+  return raw === "manual" || raw === "COMPACT_TRIGGER_MANUAL" ? "manual" : "auto";
+}
+
+function compactBoundaryItem(c: Obj): CompactBoundaryItem {
+  // Stream-plane boundary: postTokens is unknown here (0).
+  return {
+    kind: "compact-boundary",
+    trigger: compactTrigger(pstr(c, "trigger")),
+    preTokens: pnum(c, "preTokens"),
+    postTokens: 0,
+  };
+}
+
+function compactBoundaryLineItem(line: Obj): CompactBoundaryItem {
+  // Disk-plane boundary: the richer metadata carries pre AND post tokens.
+  const meta = pobj(line, "compactMetadata") ?? {};
+  return {
+    kind: "compact-boundary",
+    trigger: compactTrigger(pstr(meta, "trigger")),
+    preTokens: pnum(meta, "preTokens"),
+    postTokens: pnum(meta, "postTokens"),
+  };
+}
+
+function apiErrorItem(e: Obj): ErrorItem | RetryItem {
+  const detail = pobj(e, "error") ?? {};
+  const message = pstr(detail, "message");
+  const retryAttempt = pnum(e, "retryAttempt");
+  const retryInMs = pnum(e, "retryInMs");
+  const maxRetries = pnum(e, "maxRetries");
+  if (retryAttempt > 0 || retryInMs > 0) {
+    return {
+      kind: "retry",
+      attempt: retryAttempt,
+      reason: message,
+      fatal: pbool(detail, "isNetworkDown") || (maxRetries > 0 && retryAttempt >= maxRetries),
+    };
   }
-  return v;
+  return { kind: "error", code: "api_error", message, recoverable: false };
 }
 
-function reqNum(o: Obj, key: string, ctx: string): number {
-  const v = o[key];
-  if (typeof v !== "number") {
-    throw new Error(
-      `state-adapter: ${ctx} item field \`${key}\` must be a number (got ${typeof v})`,
-    );
+/** core.v1.PermissionItem.Resolution (proto enum name) → the store shape. */
+function permissionResolution(
+  name: string,
+  denyMessage: string,
+): PermissionItem["resolution"] {
+  switch (name) {
+    case "RESOLUTION_ALLOWED":
+      return { decision: "allow" };
+    case "RESOLUTION_DENIED":
+      return { decision: "deny", ...(denyMessage !== "" ? { message: denyMessage } : {}) };
+    case "RESOLUTION_ABANDONED":
+      return { decision: "cancel", ...(denyMessage !== "" ? { message: denyMessage } : {}) };
+    default:
+      // PENDING / UNSPECIFIED / unknown → no resolution (a live prompt).
+      return undefined;
   }
-  return v;
 }
 
-function reqBool(o: Obj, key: string, ctx: string): boolean {
-  const v = o[key];
-  if (typeof v !== "boolean") {
-    throw new Error(
-      `state-adapter: ${ctx} item field \`${key}\` must be a boolean (got ${typeof v})`,
-    );
-  }
-  return v;
+function permissionItemFrom(p: Obj, uuid: string): PermissionItem {
+  const request = pobj(p, "request") ?? {};
+  const item: PermissionItem = {
+    kind: "permission",
+    // uuid == the permission request_id (frontend.proto §ConversationItem).
+    requestId: pstr(request, "requestId") || uuid,
+    // GAP: core.v1.PermissionItem carries no tool_use_id (render keys on
+    // requestId, so this is inert) and no preview.
+    toolUseId: "",
+    toolName: pstr(request, "toolName"),
+    input: pobj(request, "input") ?? {},
+  };
+  const resolution = permissionResolution(pstr(p, "resolution"), pstr(p, "denyMessage"));
+  if (resolution !== undefined) item.resolution = resolution;
+  return item;
 }
 
-function reqArr(o: Obj, key: string, ctx: string): unknown[] {
-  const v = o[key];
-  if (!Array.isArray(v)) {
-    throw new Error(`state-adapter: ${ctx} item field \`${key}\` must be an array`);
-  }
-  return v;
-}
+// --- field readers (loud on wrong type, defaulting on absent) ---------------
 
-function reqObj(o: Obj, key: string, ctx: string): Obj {
-  const v = o[key];
+function ensureObj(v: unknown): Obj {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    throw new Error(`state-adapter: ${ctx} item field \`${key}\` must be an object`);
+    throw new Error("state-adapter: expected a JSON object");
   }
   return v as Obj;
+}
+
+function pstr(o: Obj, key: string): string {
+  const v = o[key];
+  if (v === undefined || v === null) return "";
+  if (typeof v !== "string") {
+    throw new Error(`state-adapter: field \`${key}\` must be a string (got ${typeof v})`);
+  }
+  return v;
+}
+
+function pnum(o: Obj, key: string): number {
+  const v = o[key];
+  if (v === undefined || v === null) return 0;
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) {
+      throw new Error(`state-adapter: field \`${key}\` is not numeric ('${v}')`);
+    }
+    return n;
+  }
+  throw new Error(`state-adapter: field \`${key}\` must be a number or numeric string (got ${typeof v})`);
+}
+
+function pbool(o: Obj, key: string): boolean {
+  const v = o[key];
+  if (v === undefined || v === null) return false;
+  if (typeof v !== "boolean") {
+    throw new Error(`state-adapter: field \`${key}\` must be a boolean (got ${typeof v})`);
+  }
+  return v;
+}
+
+function pobj(o: Obj, key: string): Obj | undefined {
+  const v = o[key];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) {
+    throw new Error(`state-adapter: field \`${key}\` must be an object`);
+  }
+  return v as Obj;
+}
+
+function parr(o: Obj, key: string): unknown[] {
+  const v = o[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) {
+    throw new Error(`state-adapter: field \`${key}\` must be an array`);
+  }
+  return v;
+}
+
+function tsFromMs(ms: number): string {
+  return ms > 0 ? new Date(ms).toISOString() : "";
 }

@@ -53,11 +53,13 @@ import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
 import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
+import { CommandDispatcher } from "./command-dispatch.js";
+import { PendingPermissionMode } from "./pending-mode.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
-import { fetchStatus, refreshStatus } from "./status.js";
+import { statusSnapshotFromInit } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
 import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
@@ -79,36 +81,19 @@ function must<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
-async function createSession(base: string, fake: boolean): Promise<string> {
-  const resp = await fetch(`${base}/sessions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fake }),
-  });
-  if (!resp.ok) {
-    throw new Error(`POST /sessions failed: ${resp.status} ${await resp.text()}`);
-  }
-  const body = (await resp.json()) as { session_id: string };
-  return body.session_id;
-}
-
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const daemon = params.get("daemon") ?? location.host;
   const httpBase = `${location.protocol === "https:" ? "https" : "http"}://${daemon}`;
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
 
-  let joined = params.get("session");
-  if (!joined) {
-    joined = await createSession(httpBase, params.get("fake") === "1");
-    const url = new URL(location.href);
-    url.searchParams.set("session", joined);
-    history.replaceState(null, "", url.toString());
-  }
+  // The session id to join. When ?session is unset it is created over the WS
+  // (CreateSessionCmd) once the command dispatcher exists — see below.
+  const joinParam = params.get("session");
   // Mutable on purpose: the "session gone" rebind swaps the live view
   // onto a successor session id; every closure below reads the current
   // binding.
-  let activeSessionId: string = joined;
+  let activeSessionId: string = joinParam ?? "";
   let ws: WsClient;
 
   // Resume/rebind + auto-continue tracking, re-fed by the SessionView plane
@@ -122,11 +107,14 @@ async function boot(): Promise<void> {
   let midTaskActive = false;
   let autoContinueChecked = false;
 
-  // Delivery-path diagnostics (§2.15): console always, mirrored to the
-  // daemon's disk log best-effort. Reads `ws` at call time — before the
-  // first connect the binding is still undefined (hence the runtime
-  // guard behind the cast), and the line stays console-only.
-  const wslog = new ForwardingLogger((cmd) => (ws as WsClient | undefined)?.send(cmd) ?? false);
+  // Delivery-path diagnostics (§2.15). GAP after the S8/S9 outbound cutover:
+  // the webapp→daemon log forward rode the legacy `client-log` ClientCommand,
+  // and the frozen FrontendCommand proto has no `client_log` arm (and there is
+  // no HTTP route), so daemon delivery is disabled — the `send` sink always
+  // reports not-delivered and every line stays on the console (the primary
+  // sink for a wedged webview). Restoring it needs a proto arm or a route
+  // (flagged for the coordinator).
+  const wslog = new ForwardingLogger(() => false);
   const clog = wslog.log.bind(wslog);
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
@@ -141,6 +129,38 @@ async function boot(): Promise<void> {
   const adapter = new StateAdapter((level, message) =>
     wslog.log(level === "debug" ? "info" : level, message),
   );
+  // The frontend→daemon command plane (§task 4): every outbound command is a
+  // FrontendCommand protojson frame over the CURRENT socket (read lazily, like
+  // wslog, so a rebind's successor socket carries subsequent commands). The
+  // dispatcher is fed every inbound decoded frame (`observe`) so it can
+  // correlate CommandAcks by requestId and a createSession's pushed SessionView.
+  const dispatcher = new CommandDispatcher({
+    send: (raw) => (ws as WsClient | undefined)?.send(raw) ?? false,
+    log: (level, message) => clog(level, message),
+  });
+  // The workspace a runtime command names — the live session's cwd, as the
+  // pushed `SessionView` reports it. The daemon stamps the URL-scoped
+  // workspace onto any command that omits one (see frontendCommandTranslator),
+  // so this is advisory on the session socket and is legitimately "" until the
+  // first SessionView lands.
+  const cmdWorkspace = (): string => store.state.cwd;
+
+  // The permission mode the user picked that no prompt has carried yet:
+  // frontend.v1 has no standalone set-permission-mode command, so the mode
+  // rides `SubmitPromptCmd` and settles only when a pushed SessionView
+  // reports it in force (see pending-mode.ts and renderChrome).
+  const pendingMode = new PendingPermissionMode();
+  /**
+   * Submit one prompt as a `SubmitPromptCmd`, carrying any pending permission
+   * mode. The pending mode is NOT spent on send: it clears when a pushed
+   * SessionView reports it in force, so a failed submit does not silently
+   * drop the user's choice.
+   */
+  const submitPrompt = (text: string, what: string): void => {
+    void dispatcher
+      .submitPrompt(cmdWorkspace(), text, pendingMode.outbound)
+      .catch((err: unknown) => clog("error", `${what} failed: ${String(err)}`));
+  };
   const feedEl = must("feed");
   // The store/sidecar/shim degraded-state banner (design §11): a simple line
   // pinned above the feed, styled as a warning, shown while a component is
@@ -226,42 +246,37 @@ async function boot(): Promise<void> {
   const feed = new FeedRenderer(feedEl, {
     onRendered: () => search.refresh(),
     decidePermission: (requestId, behavior) => {
-      ws.send(
-        behavior === "allow"
-          ? { type: "permission-decision", request_id: requestId, decision: { behavior: "allow" } }
-          : {
-              type: "permission-decision",
-              request_id: requestId,
-              decision: { behavior: "deny", message: "denied from webapp" },
-            },
-      );
+      // Answer the pending canUseTool via PermissionAnswerCmd (S8).
+      void dispatcher
+        .permissionAnswer(cmdWorkspace(), {
+          permissionRequestId: requestId,
+          allow: behavior === "allow",
+          denyMessage: behavior === "allow" ? "" : "denied from webapp",
+        })
+        .catch((err: unknown) => clog("error", `permission answer failed: ${String(err)}`));
     },
     answerQuestions: (requestId, updatedInput) => {
       // AskUserQuestion contract: allow with the tool input echoed back
-      // carrying the `answers` record the user picked.
-      ws.send({
-        type: "permission-decision",
-        request_id: requestId,
-        decision: { behavior: "allow", updated_input: updatedInput },
-      });
+      // carrying the `answers` record the user picked (updated_input Struct).
+      void dispatcher
+        .permissionAnswer(cmdWorkspace(), {
+          permissionRequestId: requestId,
+          allow: true,
+          updatedInput: updatedInput as Record<string, unknown>,
+          denyMessage: "",
+        })
+        .catch((err: unknown) => clog("error", `question answer failed: ${String(err)}`));
     },
-    // §2.13 queued-card controls: both are daemon-handled Layer-2 commands,
-    // never forwarded to the shim, reusing the request_id convention.
-    cancelQueued: (queueId) => {
-      ws.send({ type: "queue-cancel", request_id: crypto.randomUUID(), queue_id: queueId });
-    },
-    runQueuedNow: (queueId) => {
-      ws.send({ type: "queue-run-now", request_id: crypto.randomUUID(), queue_id: queueId });
-    },
+    // §2.13 queued-card controls: the queue plane is dead server-side (S7) and
+    // has NO FrontendCommand arm; the store's queue is always empty so these
+    // cards never render. Kept as loud no-ops (flagged: queued affordance
+    // dropped in the cutover), never a silent crash.
+    cancelQueued: () => clog("warn", "queue-cancel: no FrontendCommand arm (queue plane dead)"),
+    runQueuedNow: () => clog("warn", "queue-run-now: no FrontendCommand arm (queue plane dead)"),
     sendPrompt: (text) => {
-      // Card controls (stop task) are prompt-mediated: the button sends
-      // an ordinary user message through the same channel the composer
-      // uses, so it spends a turn and queues like any other prompt.
-      ws.send({
-        type: "user-message",
-        request_id: crypto.randomUUID(),
-        content: text,
-      });
+      // Card controls (stop task) are prompt-mediated: the button sends an
+      // ordinary user message through the same command the composer uses.
+      submitPrompt(text, "card prompt");
     },
     // Watcher folds poll this while open (§ watcher-bubble expansion),
     // targeting the CURRENT session so a rebind moves the polls with it.
@@ -271,12 +286,17 @@ async function boot(): Promise<void> {
     // resolves to the workspace name Emacs was asked for — Emacs, not the
     // daemon, decides what actually happens next.
     addSupport: (command) => requestSupportWorkspace(httpBase, activeSessionId, command),
-    // The `/status` panel's data, targeting the CURRENT session so a rebind
-    // reads the status of the checkout in view. `getStatus` seeds the panel
-    // (snapshot + account); `refreshStatus` re-probes so the snapshot reflects
-    // any mid-session change, arriving back as a `status` frame.
-    getStatus: () => fetchStatus(httpBase, activeSessionId),
-    refreshStatus: () => refreshStatus(httpBase, activeSessionId),
+    // The `/status` panel's data. The snapshot half is re-sourced from the
+    // session's PUSHED SystemInit (no round trip, and never staler than the
+    // daemon's own view, which is why the old GET /status and its
+    // /status/refresh re-probe are both gone). Only the account half is
+    // fetched, on the sanctioned account endpoint, targeting the CURRENT
+    // session so a rebind reads the account of the checkout in view.
+    getStatus: () =>
+      fetchAccount(httpBase, activeSessionId).then((account) => ({
+        snapshot: statusSnapshotFromInit(store.state.systemInit),
+        account,
+      })),
   }, tailSlotEl);
 
   const statusEl = must("conn-status");
@@ -348,7 +368,10 @@ async function boot(): Promise<void> {
     // a dropdown the user had open.
     const nextOptions = modelOptionsHtml(s.models, s.model);
     if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
-    if (modeEl.value !== s.permissionMode) modeEl.value = s.permissionMode;
+    // A held permission-mode pick keeps the picker on the user's choice until
+    // the daemon reports that mode in force, at which point the pick is spent.
+    const wantMode = pendingMode.settle(s.permissionMode);
+    if (modeEl.value !== wantMode) modeEl.value = wantMode;
     spinnerEl.classList.toggle("on", s.turnInFlight);
     // The centered "current objective" label (§2.14): textContent (not
     // innerHTML) so the daemon's summary is inert text, and the full line
@@ -551,14 +574,17 @@ async function boot(): Promise<void> {
       url: `${wsBase}/sessions/${sessionId}/stream`,
       log: (message) => clog("warn", message),
       onMessage: (data) => {
-        // The one path: decode the protojson `frontend.v1` frame, map it to
-        // typed adapter effects, surface any degraded banner, then ingest the
-        // effects into the store. A malformed/unknown frame hard-errors (the
-        // decoder and adapter never degrade) — evidence first, then re-throw,
-        // exactly as the old raw path did.
+        // The one path: decode the protojson `frontend.v1` frame, let the
+        // command dispatcher correlate its CommandAcks + a createSession's
+        // pushed SessionView, map it to typed adapter effects, surface any
+        // degraded banner, then ingest the effects into the store. A
+        // malformed/unknown frame hard-errors (the decoder and adapter never
+        // degrade) — evidence first, then re-throw, as the old raw path did.
         let effects;
         try {
-          effects = adapter.apply(decodeFrontendFrame(data));
+          const decoded = decodeFrontendFrame(data);
+          dispatcher.observe(decoded);
+          effects = adapter.apply(decoded);
         } catch (err) {
           clog(
             "error",
@@ -598,11 +624,7 @@ async function boot(): Promise<void> {
             // BEFORE the marker rewrite below so it sees the pre-boot value.
             autoContinueChecked = true;
             if (shouldAutoContinue(localStorage, claudeId, store.state.turnInFlight)) {
-              ws.send({
-                type: "user-message",
-                request_id: crypto.randomUUID(),
-                content: hiddenContinueMessage(),
-              });
+              submitPrompt(hiddenContinueMessage(), "auto-continue");
             }
           }
           // Track turn-in-flight transitions so a kill mid-task leaves the
@@ -657,6 +679,71 @@ async function boot(): Promise<void> {
           });
       },
     });
+  // Bootstrap create (replaces POST /sessions): a short-lived connection to the
+  // unscoped /frontend WS — the daemon has no session-scoped socket to offer
+  // before the session exists. It feeds ONLY the dispatcher's correlation
+  // (never the render store), sends CreateSessionCmd once the initial snapshot
+  // lands (so the correlation's known-session set is populated first, and a
+  // pre-existing same-cwd session cannot masquerade as the new one), and
+  // resolves with the new id from the pushed SessionView.
+  // NOTE (coordinator): the webapp-create-over-WS path is unverifiable until
+  // A1's daemon lands the WS FrontendCommand inbound handling.
+  const bootstrapCreateSession = (): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      let created = false;
+      let settled = false;
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        bootWs.close();
+        fn();
+      };
+      const bootWs = new WsClient({
+        url: `${wsBase}/frontend`,
+        onMessage: (data) => {
+          let decoded;
+          try {
+            decoded = decodeFrontendFrame(data);
+          } catch (err) {
+            clog("warn", `bootstrap frame decode failed: ${String(err)}`);
+            return;
+          }
+          dispatcher.observe(decoded);
+          if (decoded.frame.case === "snapshot" && !created) {
+            created = true;
+            void dispatcher
+              .createSession({
+                cwd: "",
+                model: "",
+                permissionMode: "",
+                configDir: "",
+                resumeClaudeSessionId: "",
+                fake: params.get("fake") === "1",
+              })
+              .then((id) => finish(() => resolve(id)))
+              .catch((err: unknown) =>
+                finish(() => reject(err instanceof Error ? err : new Error(String(err)))),
+              );
+          }
+        },
+        log: (message) => clog("warn", message),
+      });
+      const timeout = setTimeout(
+        () => finish(() => reject(new Error("bootstrap create: no daemon snapshot within 15s"))),
+        15_000,
+      );
+      // Point the dispatcher's send at the bootstrap socket for the create.
+      ws = bootWs;
+      bootWs.connect();
+    });
+
+  if (activeSessionId === "") {
+    activeSessionId = await bootstrapCreateSession();
+    const url = new URL(location.href);
+    url.searchParams.set("session", activeSessionId);
+    history.replaceState(null, "", url.toString());
+  }
   ws = makeClient(activeSessionId);
   ws.connect();
 
@@ -665,11 +752,7 @@ async function boot(): Promise<void> {
     const submit = (): void => {
       const text = input.value.trim();
       if (text === "") return;
-      ws.send({
-        type: "user-message",
-        request_id: crypto.randomUUID(),
-        content: text,
-      });
+      submitPrompt(text, "submit prompt");
       input.value = "";
     };
     must<HTMLButtonElement>("send-btn").addEventListener("click", submit);
@@ -693,24 +776,27 @@ async function boot(): Promise<void> {
     must("composer").style.display = "none";
   }
 
+  // Picking a mode ASKS for the switch; it does not assert it. There is no
+  // standalone set-permission-mode command in frontend.v1 — the mode is a
+  // `SubmitPromptCmd` field — so the pick is HELD and applied by the next
+  // prompt, and the picker only settles when a pushed SessionView reports it.
   modeEl.addEventListener("change", () => {
-    ws.send({
-      type: "set-permission-mode",
-      request_id: crypto.randomUUID(),
-      mode: modeEl.value as PermissionMode,
-    });
+    pendingMode.pick(modeEl.value as PermissionMode);
+    clog("info", `permission mode "${modeEl.value}" will ride the next prompt`);
   });
 
-  // Picking a model ASKS for the switch; it does not assert it. The topbar
-  // moves only when the `model-changed` frame comes back, so a switch the
-  // SDK rejects leaves the picker showing the model still in force rather
-  // than one the session never adopted.
+  // GAP (flagged for the coordinator): frontend.v1 carries a model ONLY on
+  // CreateSessionCmd, so there is no mid-session model switch to send, and
+  // SessionView carries no model catalog (store.models is therefore always
+  // empty, leaving this control with nothing to offer in the first place).
+  // Refuse loudly and put the picker back on the model actually in force,
+  // rather than leave it displaying one the session never adopted.
   modelEl.addEventListener("change", () => {
-    ws.send({
-      type: "set-model",
-      request_id: crypto.randomUUID(),
-      model: modelEl.value,
-    });
+    clog(
+      "warn",
+      `model switch to "${modelEl.value}" not sent: frontend.v1 has no set-model command`,
+    );
+    modelEl.value = store.state.model;
   });
 
   // Which account this session runs as, plus the roster that names its root.

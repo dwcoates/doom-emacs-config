@@ -35,7 +35,7 @@ import {
   transcriptFeed,
 } from "./subfeed.js";
 import { parseUnsupportedCommand } from "./unsupported.js";
-import { StatusResponse, StatusSnapshot, statusPanelHtml } from "./status.js";
+import { StatusResponse, statusPanelHtml, statusSnapshotFromInit } from "./status.js";
 import {
   BodySpec,
   MemberContext,
@@ -54,6 +54,7 @@ import { inline, renderMarkdown } from "./markdown.js";
 import { renderPromptBody } from "./prompt-body.js";
 import { findTreeRegion, looksLikeIntendedTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
+import { previewFromInput } from "./permission-preview.js";
 import { navTokensForItem } from "./nav.js";
 import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
 import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
@@ -115,19 +116,13 @@ export interface Actions {
    */
   addSupport?(command: string): Promise<string>;
   /**
-   * Fetch the session's `/status` snapshot and account for the status panel
-   * (GET /sessions/{id}/status). Present only when a daemon backs the webapp;
-   * without it a refused `/status` falls back to the generic unsupported
-   * card. Session-bound by main.ts, like `addSupport`.
+   * Assemble the status panel's inputs: the snapshot projected from the
+   * session's PUSHED `SystemInit` plus the account read from the sanctioned
+   * account endpoint. Present only when a daemon backs the webapp; without it
+   * a refused `/status` falls back to the generic unsupported card.
+   * Session-bound by main.ts, like `addSupport`.
    */
   getStatus?(): Promise<StatusResponse>;
-  /**
-   * Ask the daemon to re-probe the `/status` snapshot (POST
-   * /sessions/{id}/status/refresh). Fire-and-forget: the fresh value returns
-   * later as a `status` frame the store adopts. Present alongside
-   * `getStatus`.
-   */
-  refreshStatus?(): Promise<void>;
   /**
    * Fired after every render, once the feed's DOM is settled.
    *
@@ -1567,14 +1562,16 @@ function PermissionPrompt(item: PermissionItem, selections?: QuestionSelections)
   if (questions) return QuestionPrompt(item, questions, selections);
   const preview = permissionPreviewHtml(item);
   if (item.resolution) {
-    const label =
-      item.resolution.decision === "cancel"
-        ? `cancelled${item.resolution.message ? ` — ${escapeHtml(item.resolution.message)}` : ""}`
-        : `${item.resolution.decision}ed`;
+    const { decision, message } = item.resolution;
+    // The reason rides EVERY refusal, not just an abandoned one: a denial
+    // carries the daemon's `deny_message`, and dropping it would leave the
+    // card stating that permission was refused without saying why.
+    const verb = decision === "allow" ? "allowed" : decision === "deny" ? "denied" : "cancelled";
+    const label = message ? `${verb} — ${escapeHtml(message)}` : verb;
     return `
       <div class="permission resolved">
         <div class="perm-head">Permission: ${escapeHtml(item.toolName)} <span class="badge ${
-          item.resolution.decision === "allow" ? "ok" : "err"
+          decision === "allow" ? "ok" : "err"
         }">${label}</span></div>
         ${preview}
       </div>`;
@@ -1699,7 +1696,9 @@ function UnsupportedCommandCard(
 }
 
 function permissionPreviewHtml(item: PermissionItem): string {
-  const p = item.preview;
+  // A pushed core.v1.PermissionItem carries no preview, so it is derived from
+  // the tool input rather than leaving the card with nothing to show.
+  const p = item.preview ?? previewFromInput(item.toolName, item.input);
   if (!p) return "";
   switch (p.kind) {
     case "bash":
@@ -2706,11 +2705,11 @@ export class FeedRenderer {
    */
   private supportPhases = new Map<string, SupportPhase>();
   /**
-   * The `/status` panel's fetch state. Renderer state (like supportPhases)
-   * so a re-render cannot wipe a landed snapshot back to a spinner. `idle`
-   * until a refused `/status` first appears, then `loading` until GET
-   * /status resolves; the store's `statusSnapshot` frame overlays the
-   * freshest snapshot on top of whichever GET landed.
+   * The `/status` panel's load state. Renderer state (like supportPhases) so
+   * a re-render cannot wipe a landed snapshot back to a spinner. `idle` until
+   * a refused `/status` first appears, then `loading` until the account read
+   * resolves; the session's pushed `SystemInit` overlays the freshest
+   * snapshot on top of whatever that load carried.
    */
   private statusState:
     | { kind: "idle" }
@@ -2976,16 +2975,17 @@ export class FeedRenderer {
    * support wired (no `getStatus` action) — in which case a refused
    * `/status` falls back to the generic unsupported card.
    *
-   * Merges three sources: the store's `statusSnapshot` (the freshest, from a
-   * `refresh-status` push frame) preferred over the GET's snapshot, the
-   * GET's account, and the store's live model / permission mode.
+   * Merges three sources: the session's PUSHED `SystemInit` (the freshest,
+   * arriving on `sessionInit` frames) preferred over the snapshot the load
+   * carried, that load's account, and the store's live model / permission
+   * mode.
    */
   private statusCardHtml(): string | undefined {
     if (!this.actions.getStatus) return undefined;
     const st = this.statusState;
     const store = this.lastState;
     const loaded = st.kind === "loaded" ? st.data : null;
-    const fromFrame = (store?.statusSnapshot ?? null) as StatusSnapshot | null;
+    const fromFrame = statusSnapshotFromInit(store?.systemInit ?? null);
     return statusPanelHtml({
       snapshot: fromFrame ?? loaded?.snapshot ?? null,
       account: loaded?.account ?? null,
@@ -2999,9 +2999,9 @@ export class FeedRenderer {
   /**
    * Kick off the `/status` fetch the first time a refused `/status` appears.
    *
-   * Fetched once (gated on `idle`): a re-probe is triggered so the snapshot
-   * reflects any mid-session change, and the GET seeds an instant value
-   * (account plus the init-warmed snapshot) while that re-probe is in flight.
+   * Loaded once (gated on `idle`): it only fetches the account. The snapshot
+   * half needs no load at all — the pushed `SystemInit` already reflects any
+   * mid-session change, and overlays whatever this load carried.
    */
   private maybeRequestStatus(state: StoreState): void {
     if (!this.actions.getStatus) return;
@@ -3013,21 +3013,16 @@ export class FeedRenderer {
   }
 
   /**
-   * Fetch the `/status` snapshot and account, triggering a re-probe first so
-   * the panel converges on the freshest snapshot.
-   *
-   * The re-probe is best-effort: its failure is logged, never swallowed, but
-   * does not fail the panel — the GET's cached snapshot still renders. The
-   * GET's own failure IS surfaced, on the panel, as an error state.
+   * Load the panel's inputs. There is no re-probe to trigger: the snapshot
+   * half comes off the push plane and is already as fresh as the daemon's own
+   * view, so only the account half is actually fetched. Its failure IS
+   * surfaced, on the panel, as an error state.
    */
   private requestStatus(): void {
     const get = this.actions.getStatus;
     if (!get) return;
     if (this.statusState.kind !== "idle") return;
     this.statusState = { kind: "loading" };
-    void this.actions.refreshStatus?.().catch((err: unknown) => {
-      console.error("status refresh failed", err);
-    });
     void get().then(
       (data) => {
         this.statusState = { kind: "loaded", data };

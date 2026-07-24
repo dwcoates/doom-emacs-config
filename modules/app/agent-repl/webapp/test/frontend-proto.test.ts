@@ -1,6 +1,7 @@
 /**
- * frontend-proto — decode + loud validation of agentshim.frontend.v1
- * protojson frames. One edge per test (AAA).
+ * frontend-proto — decode + loud validation of agentshim.frontend.v1 protojson
+ * frames (S9 typed ConversationItem envelope + ContentDelta typing +
+ * SessionInitView). One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -24,7 +25,7 @@ const SESSION_VIEW = {
   totalCostUsd: 0.5,
   contextWindow: "200000",
 };
-const TYPING = { workspace: "ws", sessionId: "s1", uuid: "u1", blockIndex: 0, kind: "text", delta: "hi" };
+const TYPING = { workspace: "ws", sessionId: "s1", delta: { uuid: "u1", blockIndex: 0, text: "hi" } };
 const TASK_CATALOG = {
   workspace: "ws",
   sessionId: "s1",
@@ -34,8 +35,9 @@ const CONV_DELTA = {
   workspace: "ws",
   sessionId: "s1",
   throughSeq: "5",
-  items: [{ kind: "system", subtype: "init" }],
+  items: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
 };
+const SESSION_INIT = { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } };
 const COMMAND_ACK = { requestId: "r1", ok: true };
 const DEGRADED = { component: "shim-store", reason: "down" };
 const DAEMON_VIEW = {
@@ -57,6 +59,7 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
     ["commandAck", { commandAck: COMMAND_ACK }],
     ["degradedNotice", { degradedNotice: DEGRADED }],
     ["daemonView", { daemonView: DAEMON_VIEW }],
+    ["sessionInit", { sessionInit: SESSION_INIT }],
   ];
   for (const [name, obj] of cases) {
     it(`decodes ${name}`, () => {
@@ -80,7 +83,7 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
   });
 });
 
-describe("decodeFrontendFrame — SessionView resume keys", () => {
+describe("decodeFrontendFrame — SessionView resume keys + config dir", () => {
   it("decodes claudeSessionId + cwd (protojson camelCase)", () => {
     const frame = decode({ sessionView: { ...SESSION_VIEW, claudeSessionId: "cli-uuid", cwd: "/work" } });
     if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
@@ -88,11 +91,18 @@ describe("decodeFrontendFrame — SessionView resume keys", () => {
     expect(frame.frame.value.cwd).toBe("/work");
   });
 
-  it("defaults the resume keys to empty strings when absent (optional)", () => {
+  it("decodes the S8 configDir account identity", () => {
+    const frame = decode({ sessionView: { ...SESSION_VIEW, configDir: "/home/u/.claude" } });
+    if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
+    expect(frame.frame.value.configDir).toBe("/home/u/.claude");
+  });
+
+  it("defaults the resume keys + configDir to empty strings when absent", () => {
     const frame = decode({ sessionView: SESSION_VIEW });
     if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
     expect(frame.frame.value.claudeSessionId).toBe("");
     expect(frame.frame.value.cwd).toBe("");
+    expect(frame.frame.value.configDir).toBe("");
   });
 });
 
@@ -109,15 +119,128 @@ describe("decodeFrontendFrame — SessionView S7 parity fields", () => {
     if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
     expect(frame.frame.value.pendingPermissions).toBe(2);
   });
+});
 
-  it("defaults the parity fields when absent (pre-S7 daemon)", () => {
-    const frame = decode({ sessionView: SESSION_VIEW });
-    if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
-    expect(frame.frame.value.terminal).toBe(false);
-    expect(frame.frame.value.deathReason).toBe("");
-    expect(frame.frame.value.rehydratable).toBe(false);
-    expect(frame.frame.value.hibernated).toBe(false);
-    expect(frame.frame.value.pendingPermissions).toBe(0);
+describe("decodeFrontendFrame — ConversationItem envelope", () => {
+  function itemOf(item: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({ conversationDelta: { sessionId: "s1", items: [item] } });
+  }
+
+  it("decodes the envelope + selected arm", () => {
+    const frame = itemOf({ uuid: "u1", tsMs: "1700000000000", requestId: "r7", toolUse: { id: "tu1", name: "Bash" } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    const item = frame.frame.value.items[0];
+    expect(item.uuid).toBe("u1");
+    expect(item.tsMs).toBe(1700000000000);
+    expect(item.requestId).toBe("r7");
+    expect(item.arm).toBe("toolUse");
+    expect(item.payload).toEqual({ id: "tu1", name: "Bash" });
+  });
+
+  it("rejects an item with no arm (empty oneof)", () => {
+    expect(() => itemOf({ uuid: "u1" })).toThrow(/carries no item variant/);
+  });
+
+  it("rejects an item that sets multiple arms", () => {
+    expect(() => itemOf({ uuid: "u1", toolUse: {}, result: {} })).toThrow(/sets multiple item variants/);
+  });
+
+  it("rejects an item with an unrecognized field", () => {
+    expect(() => itemOf({ uuid: "u1", toolUse: {}, bogus: 1 })).toThrow(/unrecognized field/);
+  });
+
+  it("adopts the typed payload by shape (does not reject its inner fields)", () => {
+    const frame = itemOf({ uuid: "u1", permission: { request: { requestId: "u1" }, brandNewField: 9 } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.items[0].payload).toHaveProperty("brandNewField", 9);
+  });
+});
+
+describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
+  it("normalizes the inputJson arm to the input_json kind", () => {
+    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: '{"a":' } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.kind).toBe("input_json");
+    expect(frame.frame.value.blockIndex).toBe(2);
+    expect(frame.frame.value.delta).toBe('{"a":');
+  });
+
+  it("decodes a thinking delta with its estimatedTokens int64 string", () => {
+    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", thinking: "hmm", estimatedTokens: "12" } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.kind).toBe("thinking");
+    expect(frame.frame.value.estimatedTokens).toBe(12);
+  });
+
+  it("decodes a signature delta", () => {
+    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", signature: "sig" } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.kind).toBe("signature");
+  });
+
+  it("rejects a TypingDelta with no delta", () => {
+    expect(() => decode({ typingDelta: { sessionId: "s1" } })).toThrow(/TypingDelta missing required `delta`/);
+  });
+
+  it("rejects a ContentDelta with no content arm (empty oneof)", () => {
+    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 0 } } })).toThrow(
+      /carries no content delta/,
+    );
+  });
+
+  it("rejects a ContentDelta that sets two content arms", () => {
+    expect(() =>
+      decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "a", thinking: "b" } } }),
+    ).toThrow(/sets multiple content deltas/);
+  });
+
+  it("rejects a ContentDelta with an unrecognized field", () => {
+    expect(() =>
+      decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "a", bogus: 1 } } }),
+    ).toThrow(/unrecognized field/);
+  });
+
+  it("rejects a ContentDelta without a uuid", () => {
+    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { text: "a" } } })).toThrow(
+      /TypingDelta.delta missing required `uuid`/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — SessionInitView (S9)", () => {
+  it("adopts the SystemInit init by shape", () => {
+    const frame = decode({ sessionInit: SESSION_INIT });
+    if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
+    expect(frame.frame.value.init).toEqual({ model: "claude", cwd: "/w" });
+  });
+
+  it("defaults an absent init to an empty object", () => {
+    const frame = decode({ sessionInit: { sessionId: "s1" } });
+    if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
+    expect(frame.frame.value.init).toEqual({});
+  });
+
+  it("rejects an unrecognized SessionInitView field loudly", () => {
+    expect(() => decode({ sessionInit: { ...SESSION_INIT, bogus: 1 } })).toThrow(/unrecognized field/);
+  });
+
+  it("rejects a SessionInitView without a session id", () => {
+    expect(() => decode({ sessionInit: { workspace: "ws", init: {} } })).toThrow(
+      /SessionInitView missing required `session_id`/,
+    );
+  });
+
+  it("decodes snapshot.inits", () => {
+    const frame = decode({ snapshot: { ...SNAPSHOT, inits: [SESSION_INIT] } });
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.inits).toHaveLength(1);
+    expect(frame.frame.value.inits[0].init).toEqual({ model: "claude", cwd: "/w" });
+  });
+
+  it("defaults snapshot.inits to an empty array when absent", () => {
+    const frame = decode({ snapshot: SNAPSHOT });
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.inits).toEqual([]);
   });
 });
 
@@ -126,9 +249,7 @@ describe("decodeFrontendFrame — DaemonView", () => {
     const frame = decode({ daemonView: DAEMON_VIEW });
     if (frame.frame.case !== "daemonView") throw new Error("wrong variant");
     expect(frame.frame.value.bootId).toBe("b_abc");
-    expect(frame.frame.value.protocolVersion).toBe("1");
     expect(frame.frame.value.daemonBinaryMtimeMs).toBe(1700000000000);
-    expect(frame.frame.value.daemonVersion).toBe("v9");
   });
 
   it("decodes the optional daemon member on a snapshot", () => {
@@ -195,19 +316,9 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     );
   });
 
-  it("rejects a ConversationDelta whose item lacks a kind", () => {
-    expect(() =>
-      decode({ conversationDelta: { sessionId: "s1", items: [{ text: "x" }] } }),
-    ).toThrow(/missing string `kind`/);
-  });
-
-  it("rejects a TypingDelta with an unknown kind", () => {
-    expect(() => decode({ typingDelta: { ...TYPING, kind: "colour" } })).toThrow(/unknown kind 'colour'/);
-  });
-
-  it("rejects a TypingDelta without a uuid", () => {
-    expect(() => decode({ typingDelta: { sessionId: "s1", kind: "text", delta: "x" } })).toThrow(
-      /TypingDelta missing required `uuid`/,
+  it("rejects a ConversationDelta without a session id", () => {
+    expect(() => decode({ conversationDelta: { workspace: "ws", items: [] } })).toThrow(
+      /ConversationDelta missing required `session_id`/,
     );
   });
 
@@ -251,6 +362,10 @@ describe("UNSUPPORTED_SHAPES registry", () => {
 
   it("reports daemonView as visually unsupported", () => {
     expect(isVisuallySupportedFrame("daemonView")).toBe(false);
+  });
+
+  it("reports sessionInit as visually supported (feeds the /status panel)", () => {
+    expect(isVisuallySupportedFrame("sessionInit")).toBe(true);
   });
 
   it("reports a mapped variant as visually supported", () => {
