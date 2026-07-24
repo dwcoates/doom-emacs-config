@@ -27,7 +27,7 @@ func TestConsumerRetainsLatestSystemInit(t *testing.T) {
 	// Act
 	c.Consume(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: any}})
 
-	// Assert — the snapshot is retained for the /status and /commands routes.
+	// Assert — the snapshot is retained for the pushed SessionInitView frame.
 	si := c.latestSystemInit()
 	if si == nil || si.GetModel() != "haiku" || len(si.GetSlashCommands()) != 2 {
 		t.Fatalf("latestSystemInit = %v", si)

@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/frontend"
@@ -179,18 +178,6 @@ func New(cfg Config) (*Manager, error) {
 func (m *Manager) Ensure(workspace string) error {
 	_, err := m.ensure(workspace)
 	return err
-}
-
-// SystemInit returns the last SDK system:init snapshot for the workspace's live
-// session (backing /status and /commands), or ok=false when the workspace has
-// no live driver or no init has landed yet.
-func (m *Manager) SystemInit(workspace string) (*datav1.SystemInit, bool) {
-	d, err := m.existing(workspace)
-	if err != nil {
-		return nil, false
-	}
-	si := d.consumer.latestSystemInit()
-	return si, si != nil
 }
 
 // SessionInits returns a SessionInitView for every live session whose SystemInit
