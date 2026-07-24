@@ -3,12 +3,21 @@
 ;;; Commentary:
 
 ;; Read the model actually in use by a workspace's session from its own
-;; session jsonl.  This file used to ALSO render that model as a
-;; segment in the vterm mode-line; the vterm frontend is gone, and the
-;; sole surviving frontend (the xwidget webview) has no mode-line of
-;; its own — the webapp topbar already renders model + tokens directly
-;; (`webapp/src/render.ts').  What remains here is the reading
-;; capability itself, which two callers still depend on:
+;; session jsonl.
+;;
+;; Emacs does not display the model at all, by design.  This file used
+;; to ALSO render it as a segment in the vterm mode-line; the vterm
+;; frontend is gone, and the sole surviving frontend (the xwidget
+;; webview) has no mode-line of its own — the webapp topbar already
+;; renders model + tokens directly (`webapp/src/render.ts').  The
+;; display-formatting helper that survived that removal
+;; (`agent-repl--model-prettify', which turned `claude-opus-4-8' into
+;; `Opus 4.8') had no remaining callers and is now deleted too; nothing
+;; in elisp turns a model id into user-facing text.
+;;
+;; What remains here is the reading capability itself, whose values are
+;; consumed as DATA rather than displayed, and which two callers still
+;; depend on:
 ;;
 ;;   - `backend.el' registers `agent-repl--model-read-from-jsonl' as
 ;;     the claude backend's TRANSCRIPT-MODEL-FN capability.
@@ -53,31 +62,6 @@ lookup would be wasteful for large transcripts."
   :type 'integer
   :group 'agent-repl)
 
-;;;; Model id prettifying
-
-(defun agent-repl--model-prettify (model)
-  "Return a compact human label for raw MODEL id, or nil.
-Strips the leading `claude-' vendor prefix, then renders a known family
-(`opus'/`sonnet'/`haiku') capitalized with any trailing `-MAJOR-MINOR'
-version rejoined with a dot (e.g. `claude-opus-4-8' → `Opus 4.8').
-Falls back to the prefix-stripped id verbatim for unrecognized shapes.
-Returns nil for nil/empty input so callers can short-circuit."
-  (when (and (stringp model) (not (string-empty-p model)))
-    (let ((s (if (string-prefix-p "claude-" model)
-                 (substring model (length "claude-"))
-               model)))
-      (if (string-match
-           "\\`\\(opus\\|sonnet\\|haiku\\)\\(?:-\\([0-9]+\\)\\(?:-\\([0-9]+\\)\\)?\\)?"
-           s)
-          (let ((fam (capitalize (match-string 1 s)))
-                (maj (match-string 2 s))
-                (min (match-string 3 s)))
-            (cond
-             ((and maj min) (format "%s %s.%s" fam maj min))
-             (maj (format "%s %s" fam maj))
-             (t fam)))
-        s))))
-
 ;;;; File reading
 
 (defun agent-repl--model-extract-from-tail (tail)
@@ -86,7 +70,7 @@ TAIL is the trailing chunk of a session jsonl (one JSON object per
 line).  Walks lines bottom-up so we hit the most recent assistant entry
 first.  Skips lines that are not main-chain `type:assistant' entries
 \(sidechain lines, e.g. subagent or headless-haiku traffic, are ignored
-so the segment reflects the primary conversation model), don't parse, or
+so the result reflects the primary conversation model), don't parse, or
 carry no string `message.model'."
   (when (and (stringp tail) (not (string-empty-p tail)))
     (let ((lines (split-string tail "\n" t))
