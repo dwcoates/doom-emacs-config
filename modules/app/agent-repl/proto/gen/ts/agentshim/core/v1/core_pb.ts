@@ -474,8 +474,12 @@ export type TaskEnded = Message<"agentshim.core.v1.TaskEnded"> & {
   outputPath: string;
 
   /**
-   * For LOST: which inference fired (vanished-file | silence-timeout |
-   * boot-sweep), for the loud transition log and frontend display.
+   * How the terminal status was determined, when it was not reported
+   * directly: vanished-file | silence-timeout | boot-sweep (the LOST
+   * staleness inferences) or exit-marker (a shell spool's own trailing
+   * `EXIT=<code>` line). Empty when the producer observed the end directly.
+   * Carried for the loud transition log and for frontend display, so "we
+   * watched it exit" is distinguishable from "we stopped hearing from it".
    *
    * @generated from field: string inference = 6;
    */
