@@ -144,6 +144,7 @@ const (
 	ToolDenialKind_TOOL_DENIAL_KIND_UNSPECIFIED      ToolDenialKind = 0
 	ToolDenialKind_TOOL_DENIAL_KIND_AUTOMODE_BLOCKED ToolDenialKind = 1
 	ToolDenialKind_TOOL_DENIAL_KIND_USER_REJECTED    ToolDenialKind = 2
+	ToolDenialKind_TOOL_DENIAL_KIND_PERMISSION_RULE  ToolDenialKind = 3 // [corpus]
 )
 
 // Enum value maps for ToolDenialKind.
@@ -152,11 +153,13 @@ var (
 		0: "TOOL_DENIAL_KIND_UNSPECIFIED",
 		1: "TOOL_DENIAL_KIND_AUTOMODE_BLOCKED",
 		2: "TOOL_DENIAL_KIND_USER_REJECTED",
+		3: "TOOL_DENIAL_KIND_PERMISSION_RULE",
 	}
 	ToolDenialKind_value = map[string]int32{
 		"TOOL_DENIAL_KIND_UNSPECIFIED":      0,
 		"TOOL_DENIAL_KIND_AUTOMODE_BLOCKED": 1,
 		"TOOL_DENIAL_KIND_USER_REJECTED":    2,
+		"TOOL_DENIAL_KIND_PERMISSION_RULE":  3,
 	}
 )
 
@@ -1733,8 +1736,11 @@ type DiskCompactMetadata struct {
 	PreservedSegment  *PreservedSegment      `protobuf:"bytes,4,opt,name=preserved_segment,json=preservedSegment,proto3" json:"preserved_segment,omitempty"`
 	PreservedMessages *PreservedMessages     `protobuf:"bytes,5,opt,name=preserved_messages,json=preservedMessages,proto3" json:"preserved_messages,omitempty"`
 	PostTokens        int64                  `protobuf:"varint,6,opt,name=post_tokens,json=postTokens,proto3" json:"post_tokens,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// [corpus] observed on newer CC versions:
+	PreCompactDiscoveredTools []string `protobuf:"bytes,7,rep,name=pre_compact_discovered_tools,json=preCompactDiscoveredTools,proto3" json:"pre_compact_discovered_tools,omitempty"`
+	CumulativeDroppedTokens   int64    `protobuf:"varint,8,opt,name=cumulative_dropped_tokens,json=cumulativeDroppedTokens,proto3" json:"cumulative_dropped_tokens,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *DiskCompactMetadata) Reset() {
@@ -1805,6 +1811,20 @@ func (x *DiskCompactMetadata) GetPreservedMessages() *PreservedMessages {
 func (x *DiskCompactMetadata) GetPostTokens() int64 {
 	if x != nil {
 		return x.PostTokens
+	}
+	return 0
+}
+
+func (x *DiskCompactMetadata) GetPreCompactDiscoveredTools() []string {
+	if x != nil {
+		return x.PreCompactDiscoveredTools
+	}
+	return nil
+}
+
+func (x *DiskCompactMetadata) GetCumulativeDroppedTokens() int64 {
+	if x != nil {
+		return x.CumulativeDroppedTokens
 	}
 	return 0
 }
@@ -3642,16 +3662,70 @@ func (x *HookNonBlockingErrorAttachment) GetFields() *HookSuccessAttachment {
 	return nil
 }
 
+// [corpus] blocking variant carries a structured blockingError object.
+type BlockingErrorDetail struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockingError string                 `protobuf:"bytes,1,opt,name=blocking_error,json=blockingError,proto3" json:"blocking_error,omitempty"`
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockingErrorDetail) Reset() {
+	*x = BlockingErrorDetail{}
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockingErrorDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockingErrorDetail) ProtoMessage() {}
+
+func (x *BlockingErrorDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockingErrorDetail.ProtoReflect.Descriptor instead.
+func (*BlockingErrorDetail) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *BlockingErrorDetail) GetBlockingError() string {
+	if x != nil {
+		return x.BlockingError
+	}
+	return ""
+}
+
+func (x *BlockingErrorDetail) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
 type HookBlockingErrorAttachment struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Fields        *HookSuccessAttachment `protobuf:"bytes,1,opt,name=fields,proto3" json:"fields,omitempty"`
+	BlockingError *BlockingErrorDetail   `protobuf:"bytes,2,opt,name=blocking_error,json=blockingError,proto3" json:"blocking_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HookBlockingErrorAttachment) Reset() {
 	*x = HookBlockingErrorAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3663,7 +3737,7 @@ func (x *HookBlockingErrorAttachment) String() string {
 func (*HookBlockingErrorAttachment) ProtoMessage() {}
 
 func (x *HookBlockingErrorAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3676,12 +3750,19 @@ func (x *HookBlockingErrorAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookBlockingErrorAttachment.ProtoReflect.Descriptor instead.
 func (*HookBlockingErrorAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{35}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *HookBlockingErrorAttachment) GetFields() *HookSuccessAttachment {
 	if x != nil {
 		return x.Fields
+	}
+	return nil
+}
+
+func (x *HookBlockingErrorAttachment) GetBlockingError() *BlockingErrorDetail {
+	if x != nil {
+		return x.BlockingError
 	}
 	return nil
 }
@@ -3700,7 +3781,7 @@ type DeferredToolsDeltaAttachment struct {
 
 func (x *DeferredToolsDeltaAttachment) Reset() {
 	*x = DeferredToolsDeltaAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3712,7 +3793,7 @@ func (x *DeferredToolsDeltaAttachment) String() string {
 func (*DeferredToolsDeltaAttachment) ProtoMessage() {}
 
 func (x *DeferredToolsDeltaAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3725,7 +3806,7 @@ func (x *DeferredToolsDeltaAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeferredToolsDeltaAttachment.ProtoReflect.Descriptor instead.
 func (*DeferredToolsDeltaAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{36}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *DeferredToolsDeltaAttachment) GetAddedLines() []string {
@@ -3782,7 +3863,7 @@ type SkillListingAttachment struct {
 
 func (x *SkillListingAttachment) Reset() {
 	*x = SkillListingAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3794,7 +3875,7 @@ func (x *SkillListingAttachment) String() string {
 func (*SkillListingAttachment) ProtoMessage() {}
 
 func (x *SkillListingAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3807,7 +3888,7 @@ func (x *SkillListingAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillListingAttachment.ProtoReflect.Descriptor instead.
 func (*SkillListingAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{37}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SkillListingAttachment) GetContent() string {
@@ -3851,7 +3932,7 @@ type AgentListingDeltaAttachment struct {
 
 func (x *AgentListingDeltaAttachment) Reset() {
 	*x = AgentListingDeltaAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3863,7 +3944,7 @@ func (x *AgentListingDeltaAttachment) String() string {
 func (*AgentListingDeltaAttachment) ProtoMessage() {}
 
 func (x *AgentListingDeltaAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3876,7 +3957,7 @@ func (x *AgentListingDeltaAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentListingDeltaAttachment.ProtoReflect.Descriptor instead.
 func (*AgentListingDeltaAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{38}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AgentListingDeltaAttachment) GetAddedLines() []string {
@@ -3924,7 +4005,7 @@ type TaskReminderAttachment struct {
 
 func (x *TaskReminderAttachment) Reset() {
 	*x = TaskReminderAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3936,7 +4017,7 @@ func (x *TaskReminderAttachment) String() string {
 func (*TaskReminderAttachment) ProtoMessage() {}
 
 func (x *TaskReminderAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3949,7 +4030,7 @@ func (x *TaskReminderAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskReminderAttachment.ProtoReflect.Descriptor instead.
 func (*TaskReminderAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{39}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *TaskReminderAttachment) GetContent() string {
@@ -3975,7 +4056,7 @@ type AutoModeAttachment struct {
 
 func (x *AutoModeAttachment) Reset() {
 	*x = AutoModeAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3987,7 +4068,7 @@ func (x *AutoModeAttachment) String() string {
 func (*AutoModeAttachment) ProtoMessage() {}
 
 func (x *AutoModeAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4000,7 +4081,7 @@ func (x *AutoModeAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutoModeAttachment.ProtoReflect.Descriptor instead.
 func (*AutoModeAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{40}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AutoModeAttachment) GetAutoModeConsentFlow() *structpb.Struct {
@@ -4020,7 +4101,7 @@ type EditedTextFileAttachment struct {
 
 func (x *EditedTextFileAttachment) Reset() {
 	*x = EditedTextFileAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4032,7 +4113,7 @@ func (x *EditedTextFileAttachment) String() string {
 func (*EditedTextFileAttachment) ProtoMessage() {}
 
 func (x *EditedTextFileAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4045,7 +4126,7 @@ func (x *EditedTextFileAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditedTextFileAttachment.ProtoReflect.Descriptor instead.
 func (*EditedTextFileAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{41}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *EditedTextFileAttachment) GetFilename() string {
@@ -4072,7 +4153,7 @@ type DiagnosticsAttachment struct {
 
 func (x *DiagnosticsAttachment) Reset() {
 	*x = DiagnosticsAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4084,7 +4165,7 @@ func (x *DiagnosticsAttachment) String() string {
 func (*DiagnosticsAttachment) ProtoMessage() {}
 
 func (x *DiagnosticsAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4097,7 +4178,7 @@ func (x *DiagnosticsAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiagnosticsAttachment.ProtoReflect.Descriptor instead.
 func (*DiagnosticsAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{42}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *DiagnosticsAttachment) GetFiles() *structpb.Struct {
@@ -4123,7 +4204,7 @@ type CommandPermissionsAttachment struct {
 
 func (x *CommandPermissionsAttachment) Reset() {
 	*x = CommandPermissionsAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4135,7 +4216,7 @@ func (x *CommandPermissionsAttachment) String() string {
 func (*CommandPermissionsAttachment) ProtoMessage() {}
 
 func (x *CommandPermissionsAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4148,7 +4229,7 @@ func (x *CommandPermissionsAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandPermissionsAttachment.ProtoReflect.Descriptor instead.
 func (*CommandPermissionsAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{43}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *CommandPermissionsAttachment) GetAllowedTools() []string {
@@ -4170,7 +4251,7 @@ type QueuedCommandAttachment struct {
 
 func (x *QueuedCommandAttachment) Reset() {
 	*x = QueuedCommandAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4182,7 +4263,7 @@ func (x *QueuedCommandAttachment) String() string {
 func (*QueuedCommandAttachment) ProtoMessage() {}
 
 func (x *QueuedCommandAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4195,7 +4276,7 @@ func (x *QueuedCommandAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueuedCommandAttachment.ProtoReflect.Descriptor instead.
 func (*QueuedCommandAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{44}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *QueuedCommandAttachment) GetCommandMode() string {
@@ -4235,7 +4316,7 @@ type ReadTruncationNoticeAttachment struct {
 
 func (x *ReadTruncationNoticeAttachment) Reset() {
 	*x = ReadTruncationNoticeAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4247,7 +4328,7 @@ func (x *ReadTruncationNoticeAttachment) String() string {
 func (*ReadTruncationNoticeAttachment) ProtoMessage() {}
 
 func (x *ReadTruncationNoticeAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4260,7 +4341,7 @@ func (x *ReadTruncationNoticeAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadTruncationNoticeAttachment.ProtoReflect.Descriptor instead.
 func (*ReadTruncationNoticeAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{45}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ReadTruncationNoticeAttachment) GetPayload() *structpb.Struct {
@@ -4280,7 +4361,7 @@ type StructuredOutputAttachment struct {
 
 func (x *StructuredOutputAttachment) Reset() {
 	*x = StructuredOutputAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4292,7 +4373,7 @@ func (x *StructuredOutputAttachment) String() string {
 func (*StructuredOutputAttachment) ProtoMessage() {}
 
 func (x *StructuredOutputAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4305,7 +4386,7 @@ func (x *StructuredOutputAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredOutputAttachment.ProtoReflect.Descriptor instead.
 func (*StructuredOutputAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{46}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *StructuredOutputAttachment) GetData() *structpb.Struct {
@@ -4331,7 +4412,7 @@ type CompactFileReferenceAttachment struct {
 
 func (x *CompactFileReferenceAttachment) Reset() {
 	*x = CompactFileReferenceAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4343,7 +4424,7 @@ func (x *CompactFileReferenceAttachment) String() string {
 func (*CompactFileReferenceAttachment) ProtoMessage() {}
 
 func (x *CompactFileReferenceAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4356,7 +4437,7 @@ func (x *CompactFileReferenceAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactFileReferenceAttachment.ProtoReflect.Descriptor instead.
 func (*CompactFileReferenceAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{47}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *CompactFileReferenceAttachment) GetPayload() *structpb.Struct {
@@ -4375,7 +4456,7 @@ type ContextTipAttachment struct {
 
 func (x *ContextTipAttachment) Reset() {
 	*x = ContextTipAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4387,7 +4468,7 @@ func (x *ContextTipAttachment) String() string {
 func (*ContextTipAttachment) ProtoMessage() {}
 
 func (x *ContextTipAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4400,7 +4481,7 @@ func (x *ContextTipAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextTipAttachment.ProtoReflect.Descriptor instead.
 func (*ContextTipAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{48}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ContextTipAttachment) GetPayload() *structpb.Struct {
@@ -4419,7 +4500,7 @@ type DateChangeAttachment struct {
 
 func (x *DateChangeAttachment) Reset() {
 	*x = DateChangeAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4431,7 +4512,7 @@ func (x *DateChangeAttachment) String() string {
 func (*DateChangeAttachment) ProtoMessage() {}
 
 func (x *DateChangeAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4444,7 +4525,7 @@ func (x *DateChangeAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DateChangeAttachment.ProtoReflect.Descriptor instead.
 func (*DateChangeAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{49}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *DateChangeAttachment) GetPayload() *structpb.Struct {
@@ -4463,7 +4544,7 @@ type NestedMemoryAttachment struct {
 
 func (x *NestedMemoryAttachment) Reset() {
 	*x = NestedMemoryAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4475,7 +4556,7 @@ func (x *NestedMemoryAttachment) String() string {
 func (*NestedMemoryAttachment) ProtoMessage() {}
 
 func (x *NestedMemoryAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4488,7 +4569,7 @@ func (x *NestedMemoryAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NestedMemoryAttachment.ProtoReflect.Descriptor instead.
 func (*NestedMemoryAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{50}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *NestedMemoryAttachment) GetPayload() *structpb.Struct {
@@ -4509,7 +4590,7 @@ type FileAttachment struct {
 
 func (x *FileAttachment) Reset() {
 	*x = FileAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4521,7 +4602,7 @@ func (x *FileAttachment) String() string {
 func (*FileAttachment) ProtoMessage() {}
 
 func (x *FileAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4534,7 +4615,7 @@ func (x *FileAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileAttachment.ProtoReflect.Descriptor instead.
 func (*FileAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{51}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *FileAttachment) GetContent() string {
@@ -4567,7 +4648,7 @@ type UltrathinkEffortAttachment struct {
 
 func (x *UltrathinkEffortAttachment) Reset() {
 	*x = UltrathinkEffortAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4579,7 +4660,7 @@ func (x *UltrathinkEffortAttachment) String() string {
 func (*UltrathinkEffortAttachment) ProtoMessage() {}
 
 func (x *UltrathinkEffortAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4592,7 +4673,7 @@ func (x *UltrathinkEffortAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UltrathinkEffortAttachment.ProtoReflect.Descriptor instead.
 func (*UltrathinkEffortAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{52}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *UltrathinkEffortAttachment) GetPayload() *structpb.Struct {
@@ -4611,7 +4692,7 @@ type DynamicSkillAttachment struct {
 
 func (x *DynamicSkillAttachment) Reset() {
 	*x = DynamicSkillAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4623,7 +4704,7 @@ func (x *DynamicSkillAttachment) String() string {
 func (*DynamicSkillAttachment) ProtoMessage() {}
 
 func (x *DynamicSkillAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4636,7 +4717,7 @@ func (x *DynamicSkillAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DynamicSkillAttachment.ProtoReflect.Descriptor instead.
 func (*DynamicSkillAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{53}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *DynamicSkillAttachment) GetPayload() *structpb.Struct {
@@ -4655,7 +4736,7 @@ type UltraEffortEnterAttachment struct {
 
 func (x *UltraEffortEnterAttachment) Reset() {
 	*x = UltraEffortEnterAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4667,7 +4748,7 @@ func (x *UltraEffortEnterAttachment) String() string {
 func (*UltraEffortEnterAttachment) ProtoMessage() {}
 
 func (x *UltraEffortEnterAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4680,7 +4761,7 @@ func (x *UltraEffortEnterAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UltraEffortEnterAttachment.ProtoReflect.Descriptor instead.
 func (*UltraEffortEnterAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{54}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *UltraEffortEnterAttachment) GetPayload() *structpb.Struct {
@@ -4699,7 +4780,7 @@ type UltraEffortExitAttachment struct {
 
 func (x *UltraEffortExitAttachment) Reset() {
 	*x = UltraEffortExitAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4711,7 +4792,7 @@ func (x *UltraEffortExitAttachment) String() string {
 func (*UltraEffortExitAttachment) ProtoMessage() {}
 
 func (x *UltraEffortExitAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4724,7 +4805,7 @@ func (x *UltraEffortExitAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UltraEffortExitAttachment.ProtoReflect.Descriptor instead.
 func (*UltraEffortExitAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{55}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *UltraEffortExitAttachment) GetPayload() *structpb.Struct {
@@ -4743,7 +4824,7 @@ type PlanModeExitAttachment struct {
 
 func (x *PlanModeExitAttachment) Reset() {
 	*x = PlanModeExitAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4755,7 +4836,7 @@ func (x *PlanModeExitAttachment) String() string {
 func (*PlanModeExitAttachment) ProtoMessage() {}
 
 func (x *PlanModeExitAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4768,7 +4849,7 @@ func (x *PlanModeExitAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanModeExitAttachment.ProtoReflect.Descriptor instead.
 func (*PlanModeExitAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{56}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *PlanModeExitAttachment) GetPayload() *structpb.Struct {
@@ -4790,7 +4871,7 @@ type HookCancelledAttachment struct {
 
 func (x *HookCancelledAttachment) Reset() {
 	*x = HookCancelledAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4802,7 +4883,7 @@ func (x *HookCancelledAttachment) String() string {
 func (*HookCancelledAttachment) ProtoMessage() {}
 
 func (x *HookCancelledAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4815,7 +4896,7 @@ func (x *HookCancelledAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookCancelledAttachment.ProtoReflect.Descriptor instead.
 func (*HookCancelledAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{57}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *HookCancelledAttachment) GetHookName() string {
@@ -4851,7 +4932,7 @@ type InvokedSkill struct {
 
 func (x *InvokedSkill) Reset() {
 	*x = InvokedSkill{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4863,7 +4944,7 @@ func (x *InvokedSkill) String() string {
 func (*InvokedSkill) ProtoMessage() {}
 
 func (x *InvokedSkill) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4876,7 +4957,7 @@ func (x *InvokedSkill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokedSkill.ProtoReflect.Descriptor instead.
 func (*InvokedSkill) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{58}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *InvokedSkill) GetName() string {
@@ -4909,7 +4990,7 @@ type InvokedSkillsAttachment struct {
 
 func (x *InvokedSkillsAttachment) Reset() {
 	*x = InvokedSkillsAttachment{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4921,7 +5002,7 @@ func (x *InvokedSkillsAttachment) String() string {
 func (*InvokedSkillsAttachment) ProtoMessage() {}
 
 func (x *InvokedSkillsAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4934,7 +5015,7 @@ func (x *InvokedSkillsAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokedSkillsAttachment.ProtoReflect.Descriptor instead.
 func (*InvokedSkillsAttachment) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{59}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *InvokedSkillsAttachment) GetSkills() []*InvokedSkill {
@@ -4957,7 +5038,7 @@ type AgentMetaJson struct {
 
 func (x *AgentMetaJson) Reset() {
 	*x = AgentMetaJson{}
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4969,7 +5050,7 @@ func (x *AgentMetaJson) String() string {
 func (*AgentMetaJson) ProtoMessage() {}
 
 func (x *AgentMetaJson) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_transcript_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4982,7 +5063,7 @@ func (x *AgentMetaJson) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMetaJson.ProtoReflect.Descriptor instead.
 func (*AgentMetaJson) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{60}
+	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *AgentMetaJson) GetAgentType() string {
@@ -5154,7 +5235,7 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\vanchor_uuid\x18\x01 \x01(\tR\n" +
 	"anchorUuid\x12\x14\n" +
 	"\x05uuids\x18\x02 \x03(\tR\x05uuids\x12\x1b\n" +
-	"\tall_uuids\x18\x03 \x03(\tR\ballUuids\"\xb7\x02\n" +
+	"\tall_uuids\x18\x03 \x03(\tR\ballUuids\"\xb4\x03\n" +
 	"\x13DiskCompactMetadata\x12\x18\n" +
 	"\atrigger\x18\x01 \x01(\tR\atrigger\x12\x1d\n" +
 	"\n" +
@@ -5164,7 +5245,9 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x11preserved_segment\x18\x04 \x01(\v2#.agentshim.data.v1.PreservedSegmentR\x10preservedSegment\x12S\n" +
 	"\x12preserved_messages\x18\x05 \x01(\v2$.agentshim.data.v1.PreservedMessagesR\x11preservedMessages\x12\x1f\n" +
 	"\vpost_tokens\x18\x06 \x01(\x03R\n" +
-	"postTokens\"\x98\x01\n" +
+	"postTokens\x12?\n" +
+	"\x1cpre_compact_discovered_tools\x18\a \x03(\tR\x19preCompactDiscoveredTools\x12:\n" +
+	"\x19cumulative_dropped_tokens\x18\b \x01(\x03R\x17cumulativeDroppedTokens\"\x98\x01\n" +
 	"\x13CompactBoundaryLine\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12Q\n" +
@@ -5319,9 +5402,13 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x06stdout\x18\b \x01(\tR\x06stdout\x12\x1e\n" +
 	"\vtool_use_id\x18\t \x01(\tR\ttoolUseId\"b\n" +
 	"\x1eHookNonBlockingErrorAttachment\x12@\n" +
-	"\x06fields\x18\x01 \x01(\v2(.agentshim.data.v1.HookSuccessAttachmentR\x06fields\"_\n" +
+	"\x06fields\x18\x01 \x01(\v2(.agentshim.data.v1.HookSuccessAttachmentR\x06fields\"V\n" +
+	"\x13BlockingErrorDetail\x12%\n" +
+	"\x0eblocking_error\x18\x01 \x01(\tR\rblockingError\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\"\xae\x01\n" +
 	"\x1bHookBlockingErrorAttachment\x12@\n" +
-	"\x06fields\x18\x01 \x01(\v2(.agentshim.data.v1.HookSuccessAttachmentR\x06fields\"\x8f\x02\n" +
+	"\x06fields\x18\x01 \x01(\v2(.agentshim.data.v1.HookSuccessAttachmentR\x06fields\x12M\n" +
+	"\x0eblocking_error\x18\x02 \x01(\v2&.agentshim.data.v1.BlockingErrorDetailR\rblockingError\"\x8f\x02\n" +
 	"\x1cDeferredToolsDeltaAttachment\x12\x1f\n" +
 	"\vadded_lines\x18\x01 \x03(\tR\n" +
 	"addedLines\x12\x1f\n" +
@@ -5422,11 +5509,12 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x11PROMPT_SOURCE_SDK\x10\x01\x12\x17\n" +
 	"\x13PROMPT_SOURCE_TYPED\x10\x02\x12\x18\n" +
 	"\x14PROMPT_SOURCE_SYSTEM\x10\x03\x12\x18\n" +
-	"\x14PROMPT_SOURCE_QUEUED\x10\x04*}\n" +
+	"\x14PROMPT_SOURCE_QUEUED\x10\x04*\xa3\x01\n" +
 	"\x0eToolDenialKind\x12 \n" +
 	"\x1cTOOL_DENIAL_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!TOOL_DENIAL_KIND_AUTOMODE_BLOCKED\x10\x01\x12\"\n" +
-	"\x1eTOOL_DENIAL_KIND_USER_REJECTED\x10\x02*d\n" +
+	"\x1eTOOL_DENIAL_KIND_USER_REJECTED\x10\x02\x12$\n" +
+	" TOOL_DENIAL_KIND_PERMISSION_RULE\x10\x03*d\n" +
 	"\aQueueOp\x12\x18\n" +
 	"\x14QUEUE_OP_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10QUEUE_OP_ENQUEUE\x10\x01\x12\x14\n" +
@@ -5452,7 +5540,7 @@ func file_agentshim_data_v1_transcript_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_data_v1_transcript_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agentshim_data_v1_transcript_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_agentshim_data_v1_transcript_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_agentshim_data_v1_transcript_proto_goTypes = []any{
 	(Entrypoint)(0),                        // 0: agentshim.data.v1.Entrypoint
 	(PromptSource)(0),                      // 1: agentshim.data.v1.PromptSource
@@ -5494,36 +5582,37 @@ var file_agentshim_data_v1_transcript_proto_goTypes = []any{
 	(*AttachmentLine)(nil),                 // 37: agentshim.data.v1.AttachmentLine
 	(*HookSuccessAttachment)(nil),          // 38: agentshim.data.v1.HookSuccessAttachment
 	(*HookNonBlockingErrorAttachment)(nil), // 39: agentshim.data.v1.HookNonBlockingErrorAttachment
-	(*HookBlockingErrorAttachment)(nil),    // 40: agentshim.data.v1.HookBlockingErrorAttachment
-	(*DeferredToolsDeltaAttachment)(nil),   // 41: agentshim.data.v1.DeferredToolsDeltaAttachment
-	(*SkillListingAttachment)(nil),         // 42: agentshim.data.v1.SkillListingAttachment
-	(*AgentListingDeltaAttachment)(nil),    // 43: agentshim.data.v1.AgentListingDeltaAttachment
-	(*TaskReminderAttachment)(nil),         // 44: agentshim.data.v1.TaskReminderAttachment
-	(*AutoModeAttachment)(nil),             // 45: agentshim.data.v1.AutoModeAttachment
-	(*EditedTextFileAttachment)(nil),       // 46: agentshim.data.v1.EditedTextFileAttachment
-	(*DiagnosticsAttachment)(nil),          // 47: agentshim.data.v1.DiagnosticsAttachment
-	(*CommandPermissionsAttachment)(nil),   // 48: agentshim.data.v1.CommandPermissionsAttachment
-	(*QueuedCommandAttachment)(nil),        // 49: agentshim.data.v1.QueuedCommandAttachment
-	(*ReadTruncationNoticeAttachment)(nil), // 50: agentshim.data.v1.ReadTruncationNoticeAttachment
-	(*StructuredOutputAttachment)(nil),     // 51: agentshim.data.v1.StructuredOutputAttachment
-	(*CompactFileReferenceAttachment)(nil), // 52: agentshim.data.v1.CompactFileReferenceAttachment
-	(*ContextTipAttachment)(nil),           // 53: agentshim.data.v1.ContextTipAttachment
-	(*DateChangeAttachment)(nil),           // 54: agentshim.data.v1.DateChangeAttachment
-	(*NestedMemoryAttachment)(nil),         // 55: agentshim.data.v1.NestedMemoryAttachment
-	(*FileAttachment)(nil),                 // 56: agentshim.data.v1.FileAttachment
-	(*UltrathinkEffortAttachment)(nil),     // 57: agentshim.data.v1.UltrathinkEffortAttachment
-	(*DynamicSkillAttachment)(nil),         // 58: agentshim.data.v1.DynamicSkillAttachment
-	(*UltraEffortEnterAttachment)(nil),     // 59: agentshim.data.v1.UltraEffortEnterAttachment
-	(*UltraEffortExitAttachment)(nil),      // 60: agentshim.data.v1.UltraEffortExitAttachment
-	(*PlanModeExitAttachment)(nil),         // 61: agentshim.data.v1.PlanModeExitAttachment
-	(*HookCancelledAttachment)(nil),        // 62: agentshim.data.v1.HookCancelledAttachment
-	(*InvokedSkill)(nil),                   // 63: agentshim.data.v1.InvokedSkill
-	(*InvokedSkillsAttachment)(nil),        // 64: agentshim.data.v1.InvokedSkillsAttachment
-	(*AgentMetaJson)(nil),                  // 65: agentshim.data.v1.AgentMetaJson
-	(*structpb.Struct)(nil),                // 66: google.protobuf.Struct
-	(*ApiUserMessage)(nil),                 // 67: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),                  // 68: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),            // 69: agentshim.data.v1.ApiAssistantMessage
+	(*BlockingErrorDetail)(nil),            // 40: agentshim.data.v1.BlockingErrorDetail
+	(*HookBlockingErrorAttachment)(nil),    // 41: agentshim.data.v1.HookBlockingErrorAttachment
+	(*DeferredToolsDeltaAttachment)(nil),   // 42: agentshim.data.v1.DeferredToolsDeltaAttachment
+	(*SkillListingAttachment)(nil),         // 43: agentshim.data.v1.SkillListingAttachment
+	(*AgentListingDeltaAttachment)(nil),    // 44: agentshim.data.v1.AgentListingDeltaAttachment
+	(*TaskReminderAttachment)(nil),         // 45: agentshim.data.v1.TaskReminderAttachment
+	(*AutoModeAttachment)(nil),             // 46: agentshim.data.v1.AutoModeAttachment
+	(*EditedTextFileAttachment)(nil),       // 47: agentshim.data.v1.EditedTextFileAttachment
+	(*DiagnosticsAttachment)(nil),          // 48: agentshim.data.v1.DiagnosticsAttachment
+	(*CommandPermissionsAttachment)(nil),   // 49: agentshim.data.v1.CommandPermissionsAttachment
+	(*QueuedCommandAttachment)(nil),        // 50: agentshim.data.v1.QueuedCommandAttachment
+	(*ReadTruncationNoticeAttachment)(nil), // 51: agentshim.data.v1.ReadTruncationNoticeAttachment
+	(*StructuredOutputAttachment)(nil),     // 52: agentshim.data.v1.StructuredOutputAttachment
+	(*CompactFileReferenceAttachment)(nil), // 53: agentshim.data.v1.CompactFileReferenceAttachment
+	(*ContextTipAttachment)(nil),           // 54: agentshim.data.v1.ContextTipAttachment
+	(*DateChangeAttachment)(nil),           // 55: agentshim.data.v1.DateChangeAttachment
+	(*NestedMemoryAttachment)(nil),         // 56: agentshim.data.v1.NestedMemoryAttachment
+	(*FileAttachment)(nil),                 // 57: agentshim.data.v1.FileAttachment
+	(*UltrathinkEffortAttachment)(nil),     // 58: agentshim.data.v1.UltrathinkEffortAttachment
+	(*DynamicSkillAttachment)(nil),         // 59: agentshim.data.v1.DynamicSkillAttachment
+	(*UltraEffortEnterAttachment)(nil),     // 60: agentshim.data.v1.UltraEffortEnterAttachment
+	(*UltraEffortExitAttachment)(nil),      // 61: agentshim.data.v1.UltraEffortExitAttachment
+	(*PlanModeExitAttachment)(nil),         // 62: agentshim.data.v1.PlanModeExitAttachment
+	(*HookCancelledAttachment)(nil),        // 63: agentshim.data.v1.HookCancelledAttachment
+	(*InvokedSkill)(nil),                   // 64: agentshim.data.v1.InvokedSkill
+	(*InvokedSkillsAttachment)(nil),        // 65: agentshim.data.v1.InvokedSkillsAttachment
+	(*AgentMetaJson)(nil),                  // 66: agentshim.data.v1.AgentMetaJson
+	(*structpb.Struct)(nil),                // 67: google.protobuf.Struct
+	(*ApiUserMessage)(nil),                 // 68: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),                  // 69: agentshim.data.v1.ToolUseResult
+	(*ApiAssistantMessage)(nil),            // 70: agentshim.data.v1.ApiAssistantMessage
 }
 var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	8,  // 0: agentshim.data.v1.TranscriptLine.user:type_name -> agentshim.data.v1.UserLine
@@ -5543,14 +5632,14 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	0,  // 14: agentshim.data.v1.LineEnvelope.entrypoint:type_name -> agentshim.data.v1.Entrypoint
 	1,  // 15: agentshim.data.v1.LineEnvelope.prompt_source:type_name -> agentshim.data.v1.PromptSource
 	6,  // 16: agentshim.data.v1.LineEnvelope.origin:type_name -> agentshim.data.v1.Origin
-	66, // 17: agentshim.data.v1.LineEnvelope.error_details:type_name -> google.protobuf.Struct
+	67, // 17: agentshim.data.v1.LineEnvelope.error_details:type_name -> google.protobuf.Struct
 	2,  // 18: agentshim.data.v1.LineEnvelope.tool_denial_kind:type_name -> agentshim.data.v1.ToolDenialKind
-	66, // 19: agentshim.data.v1.LineEnvelope.classifier_meta_lines:type_name -> google.protobuf.Struct
+	67, // 19: agentshim.data.v1.LineEnvelope.classifier_meta_lines:type_name -> google.protobuf.Struct
 	7,  // 20: agentshim.data.v1.UserLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	67, // 21: agentshim.data.v1.UserLine.message:type_name -> agentshim.data.v1.ApiUserMessage
-	68, // 22: agentshim.data.v1.UserLine.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	68, // 21: agentshim.data.v1.UserLine.message:type_name -> agentshim.data.v1.ApiUserMessage
+	69, // 22: agentshim.data.v1.UserLine.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
 	7,  // 23: agentshim.data.v1.AssistantLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	69, // 24: agentshim.data.v1.AssistantLine.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	70, // 24: agentshim.data.v1.AssistantLine.message:type_name -> agentshim.data.v1.ApiAssistantMessage
 	7,  // 25: agentshim.data.v1.SystemLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
 	12, // 26: agentshim.data.v1.SystemLine.stop_hook_summary:type_name -> agentshim.data.v1.StopHookSummaryLine
 	13, // 27: agentshim.data.v1.SystemLine.turn_duration:type_name -> agentshim.data.v1.TurnDurationLine
@@ -5567,61 +5656,62 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	16, // 38: agentshim.data.v1.DiskCompactMetadata.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
 	17, // 39: agentshim.data.v1.DiskCompactMetadata.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
 	18, // 40: agentshim.data.v1.CompactBoundaryLine.compact_metadata:type_name -> agentshim.data.v1.DiskCompactMetadata
-	66, // 41: agentshim.data.v1.ApiErrorDetail.connection:type_name -> google.protobuf.Struct
-	66, // 42: agentshim.data.v1.ApiErrorDetail.rate_limits:type_name -> google.protobuf.Struct
+	67, // 41: agentshim.data.v1.ApiErrorDetail.connection:type_name -> google.protobuf.Struct
+	67, // 42: agentshim.data.v1.ApiErrorDetail.rate_limits:type_name -> google.protobuf.Struct
 	23, // 43: agentshim.data.v1.ApiErrorLine.error:type_name -> agentshim.data.v1.ApiErrorDetail
 	3,  // 44: agentshim.data.v1.QueueOperationLine.operation:type_name -> agentshim.data.v1.QueueOp
-	66, // 45: agentshim.data.v1.FileHistorySnapshotLine.snapshot:type_name -> google.protobuf.Struct
+	67, // 45: agentshim.data.v1.FileHistorySnapshotLine.snapshot:type_name -> google.protobuf.Struct
 	34, // 46: agentshim.data.v1.FileHistoryDeltaLine.backup:type_name -> agentshim.data.v1.FileBackup
 	7,  // 47: agentshim.data.v1.AttachmentLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
 	38, // 48: agentshim.data.v1.AttachmentLine.hook_success:type_name -> agentshim.data.v1.HookSuccessAttachment
 	39, // 49: agentshim.data.v1.AttachmentLine.hook_non_blocking_error:type_name -> agentshim.data.v1.HookNonBlockingErrorAttachment
-	40, // 50: agentshim.data.v1.AttachmentLine.hook_blocking_error:type_name -> agentshim.data.v1.HookBlockingErrorAttachment
-	41, // 51: agentshim.data.v1.AttachmentLine.deferred_tools_delta:type_name -> agentshim.data.v1.DeferredToolsDeltaAttachment
-	42, // 52: agentshim.data.v1.AttachmentLine.skill_listing:type_name -> agentshim.data.v1.SkillListingAttachment
-	43, // 53: agentshim.data.v1.AttachmentLine.agent_listing_delta:type_name -> agentshim.data.v1.AgentListingDeltaAttachment
-	44, // 54: agentshim.data.v1.AttachmentLine.task_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
-	45, // 55: agentshim.data.v1.AttachmentLine.auto_mode:type_name -> agentshim.data.v1.AutoModeAttachment
-	46, // 56: agentshim.data.v1.AttachmentLine.edited_text_file:type_name -> agentshim.data.v1.EditedTextFileAttachment
-	47, // 57: agentshim.data.v1.AttachmentLine.diagnostics:type_name -> agentshim.data.v1.DiagnosticsAttachment
-	48, // 58: agentshim.data.v1.AttachmentLine.command_permissions:type_name -> agentshim.data.v1.CommandPermissionsAttachment
-	49, // 59: agentshim.data.v1.AttachmentLine.queued_command:type_name -> agentshim.data.v1.QueuedCommandAttachment
-	50, // 60: agentshim.data.v1.AttachmentLine.read_truncation_notice:type_name -> agentshim.data.v1.ReadTruncationNoticeAttachment
-	51, // 61: agentshim.data.v1.AttachmentLine.structured_output:type_name -> agentshim.data.v1.StructuredOutputAttachment
-	52, // 62: agentshim.data.v1.AttachmentLine.compact_file_reference:type_name -> agentshim.data.v1.CompactFileReferenceAttachment
-	53, // 63: agentshim.data.v1.AttachmentLine.context_tip:type_name -> agentshim.data.v1.ContextTipAttachment
-	54, // 64: agentshim.data.v1.AttachmentLine.date_change:type_name -> agentshim.data.v1.DateChangeAttachment
-	55, // 65: agentshim.data.v1.AttachmentLine.nested_memory:type_name -> agentshim.data.v1.NestedMemoryAttachment
-	56, // 66: agentshim.data.v1.AttachmentLine.file:type_name -> agentshim.data.v1.FileAttachment
-	57, // 67: agentshim.data.v1.AttachmentLine.ultrathink_effort:type_name -> agentshim.data.v1.UltrathinkEffortAttachment
-	58, // 68: agentshim.data.v1.AttachmentLine.dynamic_skill:type_name -> agentshim.data.v1.DynamicSkillAttachment
-	59, // 69: agentshim.data.v1.AttachmentLine.ultra_effort_enter:type_name -> agentshim.data.v1.UltraEffortEnterAttachment
-	60, // 70: agentshim.data.v1.AttachmentLine.ultra_effort_exit:type_name -> agentshim.data.v1.UltraEffortExitAttachment
-	61, // 71: agentshim.data.v1.AttachmentLine.plan_mode_exit:type_name -> agentshim.data.v1.PlanModeExitAttachment
-	62, // 72: agentshim.data.v1.AttachmentLine.hook_cancelled:type_name -> agentshim.data.v1.HookCancelledAttachment
-	64, // 73: agentshim.data.v1.AttachmentLine.invoked_skills:type_name -> agentshim.data.v1.InvokedSkillsAttachment
+	41, // 50: agentshim.data.v1.AttachmentLine.hook_blocking_error:type_name -> agentshim.data.v1.HookBlockingErrorAttachment
+	42, // 51: agentshim.data.v1.AttachmentLine.deferred_tools_delta:type_name -> agentshim.data.v1.DeferredToolsDeltaAttachment
+	43, // 52: agentshim.data.v1.AttachmentLine.skill_listing:type_name -> agentshim.data.v1.SkillListingAttachment
+	44, // 53: agentshim.data.v1.AttachmentLine.agent_listing_delta:type_name -> agentshim.data.v1.AgentListingDeltaAttachment
+	45, // 54: agentshim.data.v1.AttachmentLine.task_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
+	46, // 55: agentshim.data.v1.AttachmentLine.auto_mode:type_name -> agentshim.data.v1.AutoModeAttachment
+	47, // 56: agentshim.data.v1.AttachmentLine.edited_text_file:type_name -> agentshim.data.v1.EditedTextFileAttachment
+	48, // 57: agentshim.data.v1.AttachmentLine.diagnostics:type_name -> agentshim.data.v1.DiagnosticsAttachment
+	49, // 58: agentshim.data.v1.AttachmentLine.command_permissions:type_name -> agentshim.data.v1.CommandPermissionsAttachment
+	50, // 59: agentshim.data.v1.AttachmentLine.queued_command:type_name -> agentshim.data.v1.QueuedCommandAttachment
+	51, // 60: agentshim.data.v1.AttachmentLine.read_truncation_notice:type_name -> agentshim.data.v1.ReadTruncationNoticeAttachment
+	52, // 61: agentshim.data.v1.AttachmentLine.structured_output:type_name -> agentshim.data.v1.StructuredOutputAttachment
+	53, // 62: agentshim.data.v1.AttachmentLine.compact_file_reference:type_name -> agentshim.data.v1.CompactFileReferenceAttachment
+	54, // 63: agentshim.data.v1.AttachmentLine.context_tip:type_name -> agentshim.data.v1.ContextTipAttachment
+	55, // 64: agentshim.data.v1.AttachmentLine.date_change:type_name -> agentshim.data.v1.DateChangeAttachment
+	56, // 65: agentshim.data.v1.AttachmentLine.nested_memory:type_name -> agentshim.data.v1.NestedMemoryAttachment
+	57, // 66: agentshim.data.v1.AttachmentLine.file:type_name -> agentshim.data.v1.FileAttachment
+	58, // 67: agentshim.data.v1.AttachmentLine.ultrathink_effort:type_name -> agentshim.data.v1.UltrathinkEffortAttachment
+	59, // 68: agentshim.data.v1.AttachmentLine.dynamic_skill:type_name -> agentshim.data.v1.DynamicSkillAttachment
+	60, // 69: agentshim.data.v1.AttachmentLine.ultra_effort_enter:type_name -> agentshim.data.v1.UltraEffortEnterAttachment
+	61, // 70: agentshim.data.v1.AttachmentLine.ultra_effort_exit:type_name -> agentshim.data.v1.UltraEffortExitAttachment
+	62, // 71: agentshim.data.v1.AttachmentLine.plan_mode_exit:type_name -> agentshim.data.v1.PlanModeExitAttachment
+	63, // 72: agentshim.data.v1.AttachmentLine.hook_cancelled:type_name -> agentshim.data.v1.HookCancelledAttachment
+	65, // 73: agentshim.data.v1.AttachmentLine.invoked_skills:type_name -> agentshim.data.v1.InvokedSkillsAttachment
 	38, // 74: agentshim.data.v1.HookNonBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
 	38, // 75: agentshim.data.v1.HookBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
-	66, // 76: agentshim.data.v1.AutoModeAttachment.auto_mode_consent_flow:type_name -> google.protobuf.Struct
-	66, // 77: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.Struct
-	6,  // 78: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
-	66, // 79: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 80: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
-	66, // 81: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 82: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 83: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 84: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 85: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 86: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 87: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 88: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
-	66, // 89: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
-	63, // 90: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
-	91, // [91:91] is the sub-list for method output_type
-	91, // [91:91] is the sub-list for method input_type
-	91, // [91:91] is the sub-list for extension type_name
-	91, // [91:91] is the sub-list for extension extendee
-	0,  // [0:91] is the sub-list for field type_name
+	40, // 76: agentshim.data.v1.HookBlockingErrorAttachment.blocking_error:type_name -> agentshim.data.v1.BlockingErrorDetail
+	67, // 77: agentshim.data.v1.AutoModeAttachment.auto_mode_consent_flow:type_name -> google.protobuf.Struct
+	67, // 78: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.Struct
+	6,  // 79: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
+	67, // 80: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 81: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
+	67, // 82: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 83: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 84: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 85: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 86: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 87: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 88: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 89: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 90: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
+	64, // 91: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
+	92, // [92:92] is the sub-list for method output_type
+	92, // [92:92] is the sub-list for method input_type
+	92, // [92:92] is the sub-list for extension type_name
+	92, // [92:92] is the sub-list for extension extendee
+	0,  // [0:92] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_transcript_proto_init() }
@@ -5692,7 +5782,7 @@ func file_agentshim_data_v1_transcript_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_data_v1_transcript_proto_rawDesc), len(file_agentshim_data_v1_transcript_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   61,
+			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
