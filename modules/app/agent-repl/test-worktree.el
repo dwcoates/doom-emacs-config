@@ -1666,12 +1666,15 @@ anyway — a hung session must not stall close indefinitely."
 ;;;; ---- Tests: handle-merge-command ----
 
 (ert-deftest agent-repl-test-handle-merge-command-literal-match ()
-  "Literal workspace name with a registered :project-dir is forwarded as-is."
+  "Literal workspace name with a registered :project-dir is routed as-is to the
+daemon cherry-pick dispatch (design §4.6 — skill merges are DAEMON-ROUTED)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
     (let ((received :unset))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (ws &optional _silent _auto) (setq received ws))))
+      (cl-letf (((symbol-function 'agent-repl--merge-dispatch-cherry-pick-over-uds)
+                 (lambda (ws) (setq received ws)))
+                ((symbol-function 'agent-repl--main-worktree-path)
+                 (lambda (dir) dir)))
         (agent-repl--handle-merge-command
          '((type . "merge") (workspace . "feature-one")))
         (should (equal received "feature-one"))))))
@@ -1679,12 +1682,15 @@ anyway — a hung session must not stall close indefinitely."
 (ert-deftest agent-repl-test-handle-merge-command-falls-back-to-tail ()
   "Branch-style \"DWC/foo\" falls back to \"foo\" when only \"foo\" is registered.
 Resolves the bare tail after the last `/' so the spawning agent can send
-its branch name verbatim without pre-stripping it."
+its branch name verbatim without pre-stripping it; the resolved name is
+routed to the daemon cherry-pick dispatch."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "foo" :project-dir "/tmp/foo")
     (let ((received :unset))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (ws &optional _silent _auto) (setq received ws))))
+      (cl-letf (((symbol-function 'agent-repl--merge-dispatch-cherry-pick-over-uds)
+                 (lambda (ws) (setq received ws)))
+                ((symbol-function 'agent-repl--main-worktree-path)
+                 (lambda (dir) dir)))
         (agent-repl--handle-merge-command
          '((type . "merge") (workspace . "DWC/foo")))
         (should (equal received "foo"))))))
@@ -1773,19 +1779,12 @@ operator can see both the name and the path that missed."
                                 (string-match-p "also tried project_dir /nonexistent/path" s)))
                          logged))))))
 
-(ert-deftest agent-repl-test-handle-merge-command-runs-silently ()
-  "Skill-invoked merges (`/create-or-update-workspace merge') must pass SILENT=t to
-workspace-merge-into-source so the merge does not steal user focus.
-Interactive entries (`SPC TAB m'/`SPC TAB M') leave SILENT nil and
-retain the old switch-to-project + magit pop behavior."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
-    (let ((silent-arg :unset))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (_ws &optional silent _auto) (setq silent-arg silent))))
-        (agent-repl--handle-merge-command
-         '((type . "merge") (workspace . "feature-one")))
-        (should (eq silent-arg t))))))
+;; NOTE: the former `runs-silently' and `passes-auto-resolve' tests were
+;; removed in the agent-shim cutover — the daemon now owns cherry-pick
+;; execution (including silent/auto-resolve semantics), so those knobs no
+;; longer exist on the Emacs side.  `handle-merge-command-literal-match'
+;; covers the surviving contract: a resolved skill merge is routed to the
+;; daemon cherry-pick dispatch.
 
 ;;;; ---- Tests: ws-merge-routing-root ----
 
@@ -4682,18 +4681,9 @@ always reflects the most recent run."
 
 ;;;; ---- Tests: handle-merge-command auto-resolve gating ----
 
-(ert-deftest agent-repl-test-handle-merge-command-passes-auto-resolve ()
-  "Skill-invoked `/create-or-update-workspace merge' passes AUTO-RESOLVE=t to
-workspace-merge-into-source so cherry-pick conflicts are sent to the
-headless resolver — interactive paths leave it nil."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "feature-one" :project-dir "/tmp/feature-one")
-    (let ((auto-arg :unset))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (_ws &optional _silent auto) (setq auto-arg auto))))
-        (agent-repl--handle-merge-command
-         '((type . "merge") (workspace . "feature-one")))
-        (should (eq auto-arg t))))))
+;; The former `handle-merge-command-passes-auto-resolve' test was removed in
+;; the agent-shim cutover: auto-resolve is now a daemon-internal concern of
+;; the ported cherry-pick engine, not an Emacs-side argument.
 
 ;;;; ---- Tests: workspace-merge-async ----
 
@@ -4704,6 +4694,8 @@ keeps `:project-dir' alive so the reopen-on-failure path can find it."
   (let ((close-args nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                agent-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+               (lambda (&rest _) 'onto-master))
               ((symbol-function 'agent-repl--close-workspace)
                (lambda (ws preserve) (setq close-args (list ws preserve))))
               ((symbol-function 'make-thread)
@@ -4718,6 +4710,8 @@ during `accept-process-output' so the main UI keeps ticking."
   (let ((thread-spawned nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                agent-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+               (lambda (&rest _) 'onto-master))
               ((symbol-function 'agent-repl--close-workspace) #'ignore)
               ((symbol-function 'make-thread)
                (lambda (_thunk &optional _name) (setq thread-spawned t) nil)))
@@ -4732,6 +4726,8 @@ both end up here via the same dispatch."
   (let ((dispatch-args nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                agent-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+               (lambda (&rest _) 'onto-master))
               ((symbol-function 'agent-repl--close-workspace) #'ignore)
               ;; Run the thread body inline so we can observe the dispatch
               ;; call without thread-join machinery.
@@ -4751,6 +4747,8 @@ reaches the handler-routing layer."
   (let ((dispatch-args nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                agent-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+               (lambda (&rest _) 'onto-master))
               ((symbol-function 'agent-repl--close-workspace) #'ignore)
               ((symbol-function 'make-thread)
                (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4783,6 +4781,8 @@ stubs the rest."
       (let ((scheduled nil))
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4810,6 +4810,8 @@ a reopen — the merge body's own deferred teardown is the cleanup path."
   (let ((scheduled nil))
     (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                agent-repl-test--orig-workspace-merge-async)
+              ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+               (lambda (&rest _) 'onto-master))
               ((symbol-function 'agent-repl--close-workspace) #'ignore)
               ((symbol-function 'make-thread)
                (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4831,6 +4833,8 @@ on the next attempt."
         (agent-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4863,6 +4867,8 @@ emit a spurious git error."
         (agent-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4896,6 +4902,8 @@ get a turn before this one is retried."
             (list (list :source-ws "ws-front" :silent t :auto-resolve t)))
       (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                  agent-repl-test--orig-workspace-merge-async)
+                ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                 (lambda (&rest _) 'onto-master))
                 ((symbol-function 'agent-repl--close-workspace) #'ignore)
                 ((symbol-function 'make-thread)
                  (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4935,6 +4943,8 @@ back out and loop the same failure."
             (list (list :source-ws "ws-existing" :silent t :auto-resolve t)))
       (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                  agent-repl-test--orig-workspace-merge-async)
+                ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                 (lambda (&rest _) 'onto-master))
                 ((symbol-function 'agent-repl--close-workspace) #'ignore)
                 ((symbol-function 'make-thread)
                  (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -4970,6 +4980,8 @@ workspace's agent has no in-band signal that a merge failed."
         (agent-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -5009,6 +5021,8 @@ while the rejecting workspace waits at the back."
         (agent-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -5038,6 +5052,8 @@ call is cheaper and makes the asymmetry explicit at the call site."
         (agent-repl--ws-put "ws1" :resolved-target-dir "/tmp/target")
         (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
                    agent-repl-test--orig-workspace-merge-async)
+                  ((symbol-function 'agent-repl--resolve-merge-handler-symbol)
+                   (lambda (&rest _) 'onto-master))
                   ((symbol-function 'agent-repl--close-workspace) #'ignore)
                   ((symbol-function 'make-thread)
                    (lambda (thunk &optional _name) (funcall thunk) nil))
@@ -9104,78 +9120,41 @@ then-reopen-on-failure; tests of that lifecycle live near the helper."
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-merge-into-source-routes-to-recorded-source-dir ()
-  "When :source-ws-dir points at an existing dir, --workspace-merge-do receives it
-as the resolved target.  The interactive entry point now routes through the
-cherry-pick handler (silent=t auto-resolve=t), so `switch-to-project' is NOT
-called on the happy path — the assertion is on merge-do's TARGET-DIR arg."
+  "When :source-ws-dir points at an existing dir, it is the resolved merge target.
+Target resolution now lives in `agent-repl--merge-target-dir-for-ws' (the
+geometry the daemon cherry-pick command carries), so the assertion is on its
+return value directly rather than on the retired local merge-do."
   (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-merge-src-" t))
-          (switch-called nil)
-          (merge-do-args :unset))
+    (let ((tmpdir (make-temp-file "test-merge-src-" t)))
       (unwind-protect
           (progn
             (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
             (agent-repl--ws-put "wt-ws" :source-ws-dir tmpdir)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-                      ((symbol-function 'agent-repl--master-worktree-path)
-                       (lambda (_root) nil))
-                      ((symbol-function 'agent-repl--main-worktree-path)
-                       (lambda (dir) dir))
-                      ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--assert-clean-worktree)
-                       (lambda (&rest _) nil))
-                      ((symbol-function 'agent-repl-switch-to-project)
-                       (lambda (&rest _) (setq switch-called t)))
-                      ((symbol-function 'agent-repl--git-branch-of-dir)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--workspace-merge-do)
-                       (lambda (&rest args) (setq merge-do-args args))))
-              (agent-repl-workspace-merge-current-into-source)
-              (should-not switch-called)
-              (should (equal merge-do-args (list "wt-ws" tmpdir t t)))))
+            (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
+                       (lambda (_root) nil)))
+              (should (equal (agent-repl--merge-target-dir-for-ws "wt-ws") tmpdir))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-merge-into-source-falls-back-to-master-when-recorded-dir-gone ()
-  "If :source-ws-dir refers to a missing directory, fall back to master worktree path.
-Assertion is on merge-do's TARGET-DIR arg (post-handler-routing, silent=t skips
-the `switch-to-project' call)."
+  "If :source-ws-dir refers to a missing directory, the resolved merge target
+falls back to the master worktree path (`--merge-target-dir-for-ws')."
   (agent-repl-test--with-clean-state
-    (let ((merge-do-args :unset))
-      (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
-      (agent-repl--ws-put "wt-ws" :source-ws-dir "/no/such/dir/")
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root) "/tmp/master-fallback/"))
-                ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
-                 (lambda (_) nil))
-                ((symbol-function 'agent-repl--assert-clean-worktree)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl-switch-to-project) #'ignore)
-                ((symbol-function 'agent-repl--workspace-merge-do)
-                 (lambda (&rest args) (setq merge-do-args args))))
-        (agent-repl-workspace-merge-current-into-source)
-        (should (equal merge-do-args (list "wt-ws" "/tmp/master-fallback/" t t)))))))
+    (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+    (agent-repl--ws-put "wt-ws" :source-ws-dir "/no/such/dir/")
+    (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
+               (lambda (_root) "/tmp/master-fallback/")))
+      (should (equal (agent-repl--merge-target-dir-for-ws "wt-ws")
+                     "/tmp/master-fallback/")))))
 
 (ert-deftest agent-repl-test-merge-into-source-falls-back-to-master-when-no-recorded-source ()
-  "Legacy workspace with no :source-ws-dir falls back to master worktree path.
-Assertion is on merge-do's TARGET-DIR arg (post-handler-routing, silent=t skips
-the `switch-to-project' call)."
+  "Legacy workspace with no :source-ws-dir resolves its merge target to the
+master worktree path (`--merge-target-dir-for-ws')."
   (agent-repl-test--with-clean-state
-    (let ((merge-do-args :unset))
-      (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root) "/tmp/master-fallback/"))
-                ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
-                 (lambda (_) nil))
-                ((symbol-function 'agent-repl--assert-clean-worktree)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl-switch-to-project) #'ignore)
-                ((symbol-function 'agent-repl--workspace-merge-do)
-                 (lambda (&rest args) (setq merge-do-args args))))
-        (agent-repl-workspace-merge-current-into-source)
-        (should (equal merge-do-args (list "wt-ws" "/tmp/master-fallback/" t t)))))))
+    (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
+    (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
+               (lambda (_root) "/tmp/master-fallback/")))
+      (should (equal (agent-repl--merge-target-dir-for-ws "wt-ws")
+                     "/tmp/master-fallback/")))))
 
 (ert-deftest agent-repl-test-merge-into-source-silent-skips-switch-to-project ()
   "When SILENT is non-nil, --workspace-merge-into-source must NOT call
@@ -9209,13 +9188,15 @@ background-triggered /create-or-update-workspace merge does not yank the user's 
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-merge-into-source-errors-when-no-source-and-no-master ()
-  "user-errors when neither a recorded source nor a master worktree can be found."
+  "Geometry resolution user-errors when neither a recorded source nor a master
+worktree can be found (No-Silent-Fallbacks: no target -> no command sent)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-              ((symbol-function 'agent-repl--master-worktree-path)
-               (lambda (_root) nil)))
-      (should-error (agent-repl-workspace-merge-current-into-source)
+    (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
+               (lambda (_root) nil))
+              ((symbol-function 'agent-repl--workspace-branch)
+               (lambda (_ws) "wt-ws")))
+      (should-error (agent-repl--merge-cherry-pick-geometry "wt-ws")
                     :type 'user-error))))
 
 (ert-deftest agent-repl-test-merge-into-source-errors-when-already-on-source ()
@@ -9746,69 +9727,41 @@ with `identity' so `agent-repl--ws-name-for-dir' resolves literal dirs."
 ;;;; ---- Tests: merge-into-source re-routes when parent merged into master ----
 
 (ert-deftest agent-repl-test-merge-into-source-reroutes-to-master-when-parent-already-merged ()
-  "When parent worktree's branch is already in master, merge-do receives master-dir
-as the resolved target.  The interactive entry point routes through the
-cherry-pick handler (silent=t auto-resolve=t), so the rerouting decision is
-visible in merge-do's TARGET-DIR arg rather than in `switch-to-project'."
+  "When the parent worktree's branch is already in master, the resolved merge
+target is master-dir (`--merge-target-dir-for-ws' → the reroute in
+`--resolve-merge-into-source-target')."
   (agent-repl-test--with-clean-state
     (let ((parent-dir (make-temp-file "test-reroute-parent-" t))
-          (master-dir (make-temp-file "test-reroute-master-" t))
-          (merge-do-args :unset))
+          (master-dir (make-temp-file "test-reroute-master-" t)))
       (unwind-protect
           (progn
             (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
             (agent-repl--ws-put "wt-ws" :source-ws-dir parent-dir)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-                      ((symbol-function 'agent-repl--master-worktree-path)
+            (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
                        (lambda (_root) master-dir))
-                      ((symbol-function 'agent-repl--main-worktree-path)
-                       (lambda (dir) dir))
                       ((symbol-function 'agent-repl--branch-merged-into-p)
-                       (lambda (_s _t) t))
-                      ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--assert-clean-worktree)
-                       (lambda (&rest _) nil))
-                      ((symbol-function 'agent-repl-switch-to-project) #'ignore)
-                      ((symbol-function 'agent-repl--git-branch-of-dir)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--workspace-merge-do)
-                       (lambda (&rest args) (setq merge-do-args args))))
-              (agent-repl-workspace-merge-current-into-source)
-              (should (equal merge-do-args (list "wt-ws" master-dir t t)))))
+                       (lambda (_s _t) t)))
+              (should (equal (agent-repl--merge-target-dir-for-ws "wt-ws")
+                             master-dir))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
 (ert-deftest agent-repl-test-merge-into-source-stays-on-parent-when-not-yet-merged ()
-  "When parent worktree's branch has unmerged commits, keep parent as the target.
-Routes through the cherry-pick handler (silent=t auto-resolve=t); the
-target-dir decision shows up in merge-do's args."
+  "When the parent worktree's branch has unmerged commits, the resolved merge
+target stays the parent (`--merge-target-dir-for-ws')."
   (agent-repl-test--with-clean-state
     (let ((parent-dir (make-temp-file "test-stay-parent-" t))
-          (master-dir (make-temp-file "test-stay-master-" t))
-          (merge-do-args :unset))
+          (master-dir (make-temp-file "test-stay-master-" t)))
       (unwind-protect
           (progn
             (agent-repl--ws-put "wt-ws" :project-dir "/tmp/wt-dir/")
             (agent-repl--ws-put "wt-ws" :source-ws-dir parent-dir)
-            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "wt-ws"))
-                      ((symbol-function 'agent-repl--master-worktree-path)
+            (cl-letf (((symbol-function 'agent-repl--master-worktree-path)
                        (lambda (_root) master-dir))
-                      ((symbol-function 'agent-repl--main-worktree-path)
-                       (lambda (dir) dir))
                       ((symbol-function 'agent-repl--branch-merged-into-p)
-                       (lambda (_s _t) nil))
-                      ((symbol-function 'agent-repl--cherry-pick-in-progress-p)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--assert-clean-worktree)
-                       (lambda (&rest _) nil))
-                      ((symbol-function 'agent-repl-switch-to-project) #'ignore)
-                      ((symbol-function 'agent-repl--git-branch-of-dir)
-                       (lambda (_) nil))
-                      ((symbol-function 'agent-repl--workspace-merge-do)
-                       (lambda (&rest args) (setq merge-do-args args))))
-              (agent-repl-workspace-merge-current-into-source)
-              (should (equal merge-do-args (list "wt-ws" parent-dir t t)))))
+                       (lambda (_s _t) nil)))
+              (should (equal (agent-repl--merge-target-dir-for-ws "wt-ws")
+                             parent-dir))))
         (delete-directory parent-dir t)
         (delete-directory master-dir t)))))
 
@@ -13139,5 +13092,131 @@ into the anaphoric variable `calls', oldest first."
       (let ((parked (car (agent-repl--ws-get "ws1" :pending-prompts))))
         (should (equal (agent-repl--pending-prompt-origin parked) "merge"))
         (should (equal (agent-repl--pending-prompt-text parked) "rebase"))))))
+
+;;;; ---- Tests: reactive consequences of daemon-pushed merge state ----
+
+(ert-deftest agent-repl-test-merge-react-noop-without-dispatch-marker ()
+  "The reactor is a no-op for a workspace this Emacs did not dispatch a merge for."
+  (agent-repl-test--with-clean-state
+    (let (reacted)
+      (cl-letf (((symbol-function 'agent-repl--merge-react-merged)
+                 (lambda (_ws) (setq reacted t))))
+        (agent-repl--merge-react-to-pushed-state "ws1" :merged nil)
+        (should-not reacted)))))
+
+(ert-deftest agent-repl-test-merge-react-dispatches-merged ()
+  "With the dispatch marker set, a `:merged' push drives the merged reactor."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (let (reacted)
+      (cl-letf (((symbol-function 'agent-repl--merge-react-merged)
+                 (lambda (ws) (setq reacted ws))))
+        (agent-repl--merge-react-to-pushed-state "ws1" :merged :merging)
+        (should (equal reacted "ws1"))))))
+
+(ert-deftest agent-repl-test-merge-react-dispatches-conflict ()
+  "With the marker set, a `:merge-conflict' push drives the conflict reactor."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (let (reacted)
+      (cl-letf (((symbol-function 'agent-repl--merge-react-conflict)
+                 (lambda (ws) (setq reacted ws))))
+        (agent-repl--merge-react-to-pushed-state "ws1" :merge-conflict :merging)
+        (should (equal reacted "ws1"))))))
+
+(ert-deftest agent-repl-test-merge-react-dispatches-failed ()
+  "With the marker set, a `:merge-failed' push drives the failed reactor."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (let (reacted)
+      (cl-letf (((symbol-function 'agent-repl--merge-react-failed)
+                 (lambda (ws) (setq reacted ws))))
+        (agent-repl--merge-react-to-pushed-state "ws1" :merge-failed :merging)
+        (should (equal reacted "ws1"))))))
+
+(ert-deftest agent-repl-test-merge-react-ignores-non-terminal-state ()
+  "A non-merge-terminal push (e.g. :merging) drives none of the reactors."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (let (reacted)
+      (cl-letf (((symbol-function 'agent-repl--merge-react-merged)
+                 (lambda (_ws) (setq reacted t)))
+                ((symbol-function 'agent-repl--merge-react-conflict)
+                 (lambda (_ws) (setq reacted t)))
+                ((symbol-function 'agent-repl--merge-react-failed)
+                 (lambda (_ws) (setq reacted t))))
+        (agent-repl--merge-react-to-pushed-state "ws1" :merging nil)
+        (should-not reacted)))))
+
+(ert-deftest agent-repl-test-merge-react-merged-records-and-tears-down ()
+  "The merged reactor records the merged-in ws, phones home, and tears down;
+it clears the dispatch marker."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (agent-repl--ws-put "ws1" :resolved-target-dir "/tgt")
+    (agent-repl--ws-put "ws1" :merge-target-branch "DWC/foo")
+    (agent-repl--ws-put "ws1" :merge-base "BASE")
+    (let (recorded phoned closed)
+      (cl-letf (((symbol-function 'agent-repl--record-merged-in-workspace)
+                 (lambda (dir ws) (setq recorded (list dir ws))))
+                ((symbol-function 'agent-repl--maybe-notify-parent-of-child-merge)
+                 (lambda (ws dir branch base) (setq phoned (list ws dir branch base))))
+                ((symbol-function 'agent-repl--gns-sockets-close-then)
+                 (lambda (_ws thunk) (funcall thunk)))
+                ((symbol-function 'agent-repl--merge-close-workspace)
+                 (lambda (ws _preserve) (setq closed ws)))
+                ((symbol-function 'agent-repl--refresh-magit-status-for-dir)
+                 #'ignore))
+        (agent-repl--merge-react-merged "ws1")
+        (should (equal recorded '("/tgt" "ws1")))
+        (should (equal phoned '("ws1" "/tgt" "DWC/foo" "BASE")))
+        (should (equal closed "ws1"))
+        (should-not (agent-repl--ws-get "ws1" :daemon-merge-dispatched))))))
+
+(ert-deftest agent-repl-test-merge-react-conflict-opens-magit-keeps-marker ()
+  "The conflict reactor pops magit on the target dir and KEEPS the dispatch
+marker (a resume is expected)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (agent-repl--ws-put "ws1" :resolved-target-dir "/tgt")
+    (let (magit-dir)
+      (cl-letf (((symbol-function 'agent-repl-switch-to-project) #'ignore)
+                ((symbol-function 'magit-status)
+                 (lambda (dir) (setq magit-dir dir))))
+        (agent-repl--merge-react-conflict "ws1")
+        (should (equal magit-dir "/tgt"))
+        (should (eq (agent-repl--ws-get "ws1" :daemon-merge-dispatched) t))))))
+
+(ert-deftest agent-repl-test-merge-react-failed-surfaces-and-clears-marker ()
+  "The failed reactor surfaces an echo-area message + a retry prompt, and clears
+the dispatch marker."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :daemon-merge-dispatched t)
+    (let (echoed prompted)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args))))
+                ((symbol-function 'agent-repl--format-merge-failure-prompt)
+                 (lambda (_err) "retry please"))
+                ((symbol-function 'agent-repl--dispatch-prompt-command)
+                 (lambda (ws prompt) (setq prompted (list ws prompt)))))
+        (agent-repl--merge-react-failed "ws1")
+        (should (string-match-p "ws1" echoed))
+        (should (equal prompted '("ws1" "retry please")))
+        (should-not (agent-repl--ws-get "ws1" :daemon-merge-dispatched))))))
+
+(ert-deftest agent-repl-test-merge-react-subscribed-to-transition-hook ()
+  "The reactor is registered on `agent-repl-ws-state-transition-functions'."
+  (should (memq #'agent-repl--merge-react-to-pushed-state
+                agent-repl-ws-state-transition-functions)))
+
+(ert-deftest agent-repl-test-merge-continue-after-resolve-sends-resume ()
+  "The interactive continue command sends the resume over UDS for the current ws."
+  (agent-repl-test--with-clean-state
+    (let (resumed)
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--merge-resume-over-uds)
+                 (lambda (ws) (setq resumed ws))))
+        (agent-repl-workspace-merge-continue-after-resolve)
+        (should (equal resumed "ws1"))))))
 
 ;;; test-worktree.el ends here

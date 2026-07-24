@@ -269,6 +269,81 @@
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :permission))))
 
+;;;; ---- State-transition hook -------------------------------------------
+
+(ert-deftest agent-repl-test-state-transition-hook-fires-on-push ()
+  "Applying a WorkspaceState runs the state-transition hook with (ws new prev)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; `let*': the hook-list init form closes over `captured', which must be
+    ;; bound FIRST (a plain `let' evaluates all inits in the outer scope, so
+    ;; the closure would capture an empty lexical env and never see `captured').
+    (let* (captured
+           (agent-repl-ws-state-transition-functions
+            (list (lambda (ws new prev) (setq captured (list ws new prev))))))
+      ;; Act
+      (agent-repl--frontend-apply-workspace-state
+       '(:workspace "ws1" :state "RENDER_STATE_MERGING"))
+      ;; Assert
+      (should (equal captured '("ws1" :merging nil))))))
+
+(ert-deftest agent-repl-test-state-transition-hook-previous-keyword ()
+  "The hook receives the prior pushed keyword as PREVIOUS on a later push."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* (captured
+           (agent-repl-ws-state-transition-functions
+            (list (lambda (ws new prev) (setq captured (list ws new prev))))))
+      (agent-repl--frontend-apply-workspace-state
+       '(:workspace "ws1" :state "RENDER_STATE_MERGING"))
+      ;; Act — second push transitions merging -> merge-conflict
+      (agent-repl--frontend-apply-workspace-state
+       '(:workspace "ws1" :state "RENDER_STATE_MERGE_CONFLICT"))
+      ;; Assert
+      (should (equal captured '("ws1" :merge-conflict :merging))))))
+
+(ert-deftest agent-repl-test-state-transition-hook-subscriber-error-isolated ()
+  "A signaling subscriber is caught + logged; state application still succeeds."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-ws-state-transition-functions
+           (list (lambda (&rest _) (error "boom")))))
+      ;; Act
+      (agent-repl--frontend-apply-workspace-state
+       '(:workspace "ws1" :state "RENDER_STATE_MERGED"))
+      ;; Assert — the pushed state landed despite the broken subscriber
+      (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :merged)))))
+
+;;;; ---- Session-ready latch ---------------------------------------------
+
+(ert-deftest agent-repl-test-latch-fires-agent-ready-on-first-push ()
+  "The FIRST pushed WorkspaceState arms the :agent-ready latch bit."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
+                 (lambda (ws key &optional _m) (push (list ws key) calls))))
+        ;; Act
+        (agent-repl--frontend-apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_INIT"))
+        ;; Assert
+        (should (equal calls '(("ws1" :agent-ready))))))))
+
+(ert-deftest agent-repl-test-latch-fires-only-once-per-workspace ()
+  "A second pushed state for the same workspace does not re-arm the latch."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
+                 (lambda (ws key &optional _m) (push (list ws key) calls))))
+        (agent-repl--frontend-apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_INIT"))
+        ;; Act — second push
+        (agent-repl--frontend-apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_IDLE"))
+        ;; Assert — latch fired exactly once
+        (should (= (length calls) 1))))))
+
 (provide 'test-frontend-state)
 
 ;;; test-frontend-state.el ends here

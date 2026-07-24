@@ -2557,7 +2557,7 @@ async-dispatch-specific and stays in `agent-repl--workspace-merge-async'."
     (when conflict-rejection
       (agent-repl--drain-merge-queue))))
 
-(defun agent-repl--workspace-merge-async (ws repo-root &optional onto-master)
+(cl-defun agent-repl--workspace-merge-async (ws repo-root &optional onto-master)
   "Run a workspace merge asynchronously.  Single unified entry for both
 the interactive `SPC TAB M' path and the
 `/create-or-update-workspace merge' skill dispatch — there is no
@@ -2568,55 +2568,43 @@ non-nil it forces the `onto-master' handler (advance local trunk to
 `origin/master' for an already-merged PR) regardless of the repo's
 checked-in handler.
 
-Flow:
-  1. `agent-repl--close-workspace ws \\='preserve-entry' — tear down the
-     workspace UI immediately so the user is freed from it on keystroke
-     return.  `preserve-entry' keeps `:project-dir' (and the rest of
-     the plist) in `agent-repl--workspaces' so the reopen path can
-     find it if the merge fails.
-  2. `make-thread' that runs `agent-repl--dispatch-merge-handler ws
-     repo-root' — the standard handler-routing entry, which lands on
-     the default `cherry-pick' handler (silent=t auto-resolve=t) for
-     repos without a custom handler.  The worker thread yields to
-     the main thread via `condition-wait' (inside
-     `agent-repl--wait-for-process-exit') while the resolver runs,
-     keeping the main thread responsive — see AGENTS.md
-     `ns_select_1 worker-thread trap' for why this path matters.
-  3. `condition-case' inside the thread catches any signal:
-       - Success: post a no-op to the main thread.  The merge body's
-         own deferred teardown (gns-sockets-close-then ->
-         close-workspace via `--defer-to-main-thread') has already
-         scheduled the final cleanup.
-       - Failure (`agent-repl-merge-conflict-error' or generic
-         `error'): centralized failure handling runs on the worker
-         thread (queue mutation + cherry-pick abort are non-UI ops
-         and safe) and UI ops (reopen, agent-send) are deferred to
-         the main thread.  Specifically:
-           a. `--abort-cherry-pick-if-in-flight' on the resolved
-              target dir (no-op if CHERRY_PICK_HEAD absent).
-           b. `--reenqueue-merge-on-failure' classifies the error:
-              `agent-repl-merge-conflict-error' → BACK of queue
-              (recoverable; siblings get a turn).  Anything else →
-              FRONT with `:halt-until-human t' (no auto-drain).
-           c. Deferred to main thread: `--reopen-workspace-from-state'
-              to restore the source workspace, then
-              `--dispatch-prompt-command' to send the formatted error
-              to the workspace's agent with the analyze-only
-              directive so the user and agent can diagnose together.
-           d. For conflict-rejection, calls `--drain-merge-queue' so a
-              sibling workspace can attempt its own merge while this
-              one waits at the back.  Generic failures skip the drain
-              call (the front entry's `:halt-until-human' would block
-              the drain anyway, but skipping the call is cheaper).
+Two paths, keyed on the resolved handler symbol
+\(`agent-repl--resolve-merge-handler-symbol'):
 
-All UI ops INSIDE the merge body must use `--defer-to-main-thread'
-because they run from the worker thread; the existing call sites in
-`--workspace-merge-do' and `--surface-silent-merge-conflict' already
-do this."
-  (let ((t0-async (float-time)))
+  - `cherry-pick' → DAEMON-ROUTED (design §4.6/§9.3).  The daemon runs
+    the merge and publishes its state; Emacs merely sends the
+    `mergeWorkspace' command (`--dispatch-merge-handler' →
+    `--merge-dispatch-cherry-pick-over-uds') on the MAIN thread and
+    reacts to the pushed WorkspaceState.  No pre-close, no worker
+    thread, no local git — the geometry is resolved-and-validated
+    inside dispatch BEFORE anything is sent, so a missing-geometry
+    abort leaves the workspace untouched (No-Silent-Fallbacks / no
+    partial state).  Teardown, the conflict magit popup, and failure
+    surfacing all key off `agent-repl--merge-react-to-pushed-state'.
+
+  - anything else (`onto-master' / `refresh-master-from-origin' / …,
+    DAEMON-PORT PENDING) → the historical LOCAL path:
+      1. `--merge-close-workspace ws \\='preserve-entry' tears down the
+         workspace UI immediately (preserve-entry keeps the plist so the
+         reopen path can find it if the merge fails).
+      2. `make-thread' runs `--dispatch-merge-handler' on a worker that
+         yields to the main thread via `condition-wait' (AGENTS.md
+         `ns_select_1 worker-thread trap').
+      3. `condition-case' catches any signal: non-UI recovery
+         (`--reenqueue-and-redrive-on-failure') runs on the worker, and
+         UI recovery (reopen + agent-send the error) is deferred to the
+         main thread."
+  (let ((symbol (agent-repl--resolve-merge-handler-symbol repo-root onto-master))
+        (t0-async (float-time)))
+    (when (eq symbol 'cherry-pick)
+      (agent-repl--log ws
+                        "workspace-merge-async: ws=%s repo-root=%s DAEMON-ROUTED cherry-pick — dispatching over UDS on main thread (no pre-close/worker)"
+                        ws (or repo-root "nil"))
+      (cl-return-from agent-repl--workspace-merge-async
+        (agent-repl--dispatch-merge-handler ws repo-root onto-master)))
     (agent-repl--log ws
-                      "workspace-merge-async: ws=%s repo-root=%s — closing UI and spawning worker thread"
-                      ws (or repo-root "nil"))
+                      "workspace-merge-async: ws=%s repo-root=%s handler=%S — closing UI and spawning worker thread"
+                      ws (or repo-root "nil") symbol)
     (agent-repl--log ws "workspace-merge-async: calling close-workspace ws=%s" ws)
     (let ((agent-repl--kill-cause "workspace merge teardown (workspace-merge-async)"))
       (agent-repl--merge-close-workspace ws 'preserve-entry))
@@ -6607,6 +6595,108 @@ errored\" UX."
                       "workspace-merge-current-into-source: ws=%s repo-root=%s"
                       ws (or repo-root "nil"))
     (agent-repl--workspace-merge-async ws repo-root)))
+
+(defun agent-repl-workspace-merge-continue-after-resolve ()
+  "Continue a daemon cherry-pick after resolving its conflict (design §9.3).
+The daemon leaves a conflicting cherry-pick IN the target tree and pushes
+`:merge-conflict'; the reactor pops magit on the target worktree.  After the
+human stages the resolution there, this sends the resolve-and-continue
+`mergeWorkspace' command (conflict_resolved_continue=t) so the daemon runs
+`git add -u' + `cherry-pick --continue'.  Signals `user-error' (via
+`agent-repl--merge-cherry-pick-geometry') if the geometry can no longer be
+resolved."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (agent-repl--log ws "workspace-merge-continue-after-resolve: ws=%s" ws)
+    (agent-repl--merge-resume-over-uds ws)))
+
+;;; Reactive consequences of daemon-pushed merge state (design §4.6/§9.3)
+;;
+;; The daemon owns merge STATE now: it publishes `:merging'/`:merge-conflict'/
+;; `:merged'/`:merge-failed' over the frontend surface, and Emacs re-keys the
+;; consequences that USED to fire off local `:merge-*' plist flips
+;; (`--workspace-merge-do' success teardown + phone-home, `--mark-merge-*',
+;; and `--workspace-merge-async's reopen-on-failure) onto the pushed state via
+;; `agent-repl-ws-state-transition-functions' (frontend-state.el).
+;;
+;; Every reaction is GATED on `:daemon-merge-dispatched' — set by
+;; `--merge-dispatch-cherry-pick-over-uds' when THIS Emacs initiated the merge
+;; — so a snapshot resync (which re-pushes every workspace's current state on
+;; reconnect) cannot re-fire teardown for a long-since-merged workspace.  The
+;; hook runs on the main thread (UDS filter), so the UI ops here need no
+;; `--defer-to-main-thread'.
+
+(defun agent-repl--merge-react-to-pushed-state (ws new _previous)
+  "Drive merge consequences from a pushed render state NEW for WS.
+Subscriber for `agent-repl-ws-state-transition-functions'.  No-op unless WS
+carries `:daemon-merge-dispatched' (this Emacs initiated the merge)."
+  (when (agent-repl--ws-get ws :daemon-merge-dispatched)
+    (agent-repl--log ws "merge-react-to-pushed-state: ws=%s new=%s (dispatched)" ws new)
+    (pcase new
+      (:merged (agent-repl--merge-react-merged ws))
+      (:merge-conflict (agent-repl--merge-react-conflict ws))
+      (:merge-failed (agent-repl--merge-react-failed ws)))))
+
+(defun agent-repl--merge-react-merged (ws)
+  "React to WS's daemon merge landing (`:merged').
+Records WS on the target's merged-in list, phones the parent home, and tears
+the workspace UI down — the reactive replacement for the success tail of the
+old `--workspace-merge-do'.  The daemon already tagged the completion, so no
+tag is written here.  Clears `:daemon-merge-dispatched' (terminal)."
+  (let ((target-dir (agent-repl--ws-get ws :resolved-target-dir))
+        (target-branch (agent-repl--ws-get ws :merge-target-branch))
+        (base (agent-repl--ws-get ws :merge-base)))
+    (agent-repl--log ws
+                      "merge-react-merged: ws=%s target-dir=%s target-branch=%s"
+                      ws (or target-dir "nil") (or target-branch "nil"))
+    (agent-repl--ws-put ws :daemon-merge-dispatched nil)
+    (when target-dir
+      (agent-repl--record-merged-in-workspace target-dir ws))
+    ;; Phone home to a non-main-worktree parent (no-op otherwise).
+    (when (and target-dir target-branch)
+      (agent-repl--maybe-notify-parent-of-child-merge ws target-dir target-branch base))
+    ;; Tear the workspace down (gate the close on `/gns-sockets close' so the
+    ;; agent releases held sockets first), then force a final magit refresh of
+    ;; the target so an open status buffer reflects the post-merge tree.
+    (agent-repl--gns-sockets-close-then
+     ws
+     (lambda ()
+       (let ((agent-repl--kill-cause "daemon cherry-pick merged teardown (auto)"))
+         (agent-repl--merge-close-workspace ws 'preserve-entry))
+       (when target-dir
+         (agent-repl--refresh-magit-status-for-dir target-dir ws))))))
+
+(defun agent-repl--merge-react-conflict (ws)
+  "React to WS's daemon merge conflicting (`:merge-conflict').
+The daemon left the cherry-pick in the target tree; switch there and pop
+`magit-status' so the human can resolve, then continue via
+`agent-repl-workspace-merge-continue-after-resolve'.  Keeps
+`:daemon-merge-dispatched' set (a resume is expected).  Reactive replacement
+for `--surface-silent-merge-conflict'."
+  (let ((target-dir (agent-repl--ws-get ws :resolved-target-dir)))
+    (agent-repl--log ws
+                      "merge-react-conflict: ws=%s target-dir=%s — opening magit for resolve"
+                      ws (or target-dir "nil"))
+    (when target-dir
+      (when (fboundp 'agent-repl-switch-to-project)
+        (agent-repl-switch-to-project target-dir))
+      (when (fboundp 'magit-status)
+        (magit-status target-dir)))))
+
+(defun agent-repl--merge-react-failed (ws)
+  "React to WS's daemon merge failing (`:merge-failed').
+Surfaces the failure loudly (echo area + a retry prompt to the workspace's
+agent).  The workspace was never pre-closed on the daemon path, so nothing
+to reopen.  Clears `:daemon-merge-dispatched' (terminal).  Reactive
+replacement for `--mark-merge-*' + the async reopen-on-failure."
+  (agent-repl--log ws "merge-react-failed: ws=%s — surfacing failure" ws)
+  (agent-repl--ws-put ws :daemon-merge-dispatched nil)
+  (message "agent-repl: merge of workspace '%s' failed — see the daemon log" ws)
+  (agent-repl--dispatch-prompt-command
+   ws (agent-repl--format-merge-failure-prompt "daemon-reported merge failure")))
+
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--merge-react-to-pushed-state)
 
 ;;; Main-thread heartbeat (diagnostic instrumentation)
 ;;

@@ -699,6 +699,7 @@ so a chord wins key lookup regardless of which evil state is current.")
        :desc "Fork worktree ws + fork Claude session" "f" #'agent-repl-fork-worktree-workspace
        :desc "Merge workspace into current" "m" #'agent-repl-workspace-merge
        :desc "Merge current workspace into source" "M" #'agent-repl-workspace-merge-current-into-source
+       :desc "Continue merge after resolving conflict" "c" #'agent-repl-workspace-merge-continue-after-resolve
        :desc "Rename current workspace" "r" #'agent-repl-rename-workspace
        :desc "Push workspace to second-to-last" "p" #'agent-repl-workspace-push-to-back
        :desc "Pull workspace to second" "P" #'agent-repl-workspace-pull-to-front
