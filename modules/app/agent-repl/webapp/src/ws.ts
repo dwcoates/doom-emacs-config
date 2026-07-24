@@ -1,14 +1,14 @@
 /**
  * WsClient — thin reconnecting WebSocket transport. All protocol logic
- * (gap detection, replay) lives in the store; the client just shuttles
- * raw messages and outbound commands.
+ * (gap detection, replay) lives in the store; the client just shuttles raw
+ * inbound frames to `onMessage` and sends pre-encoded outbound frames (the
+ * caller encodes `FrontendCommand` protojson via command-dispatch.ts).
  */
-import { ClientCommand } from "./protocol.js";
 
 export interface WsClientOptions {
   url: string;
-  /** Raw inbound text message. Return value is a command to send back. */
-  onMessage: (data: string) => ClientCommand | undefined;
+  /** Raw inbound text frame; the caller decodes + routes it. */
+  onMessage: (data: string) => void;
   onStatusChange?: (connected: boolean) => void;
   /** WebSocket constructor (injectable for tests). */
   wsFactory?: (url: string) => WebSocket;
@@ -68,10 +68,7 @@ export class WsClient {
       this.opts.onStatusChange?.(true);
     };
     ws.onmessage = (event: MessageEvent) => {
-      const reply = this.opts.onMessage(String(event.data));
-      if (reply && !this.send(reply)) {
-        this.opts.log?.(`ws: dropped outbound ${reply.type} — socket not open`);
-      }
+      this.opts.onMessage(String(event.data));
     };
     ws.onclose = () => {
       this.opts.onStatusChange?.(false);
@@ -118,11 +115,12 @@ export class WsClient {
     this.connect();
   }
 
-  send(cmd: ClientCommand): boolean {
+  /** Send one pre-encoded frame; false when the socket is not open. */
+  send(raw: string): boolean {
     if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) {
       return false;
     }
-    this.ws.send(JSON.stringify(cmd));
+    this.ws.send(raw);
     return true;
   }
 

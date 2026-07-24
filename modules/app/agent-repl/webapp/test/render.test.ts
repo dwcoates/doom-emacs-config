@@ -500,7 +500,7 @@ describe("turnStatsRowHtml (live turn clock + context delta)", () => {
       cwd: "/w",
       claudeSessionId: "",
       permissionMode: "default",
-      statusSnapshot: null,
+      systemInit: null,
       items: [],
       queued: [],
       turnInFlight: true,
@@ -1362,6 +1362,85 @@ describe("renderItem", () => {
     const html = renderItem(item);
     // Assert
     expect(html).not.toContain("data-perm-allow");
+  });
+
+  it("shows the command a pending permission would run when no preview was sent", () => {
+    // Arrange — a pushed core.v1.PermissionItem carries no preview, only input.
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: { command: "rm -rf /tmp/x" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert — the user can see what they are approving.
+    expect(html).toContain("rm -rf /tmp/x");
+  });
+
+  it("states the deny reason the daemon sent on a refused permission", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: {},
+      resolution: { decision: "deny", message: "not in this workspace" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("denied — not in this workspace");
+  });
+
+  it("labels a refusal that carried no reason", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: {},
+      resolution: { decision: "deny" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(">denied<");
+  });
+
+  it("escapes a deny reason rather than letting it inject markup", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: {},
+      resolution: { decision: "deny", message: "<img src=x>" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).not.toContain("<img src=x>");
+  });
+
+  it("labels an allowed permission", () => {
+    // Arrange
+    const item: ConversationItem = {
+      kind: "permission",
+      requestId: "p1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      input: {},
+      resolution: { decision: "allow" },
+    };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(">allowed<");
   });
 
   it("suppresses the tool card for AskUserQuestion", () => {

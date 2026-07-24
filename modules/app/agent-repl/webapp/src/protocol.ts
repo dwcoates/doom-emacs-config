@@ -163,83 +163,24 @@ export type PermissionPreview =
   | { kind: "write"; file_path: string; bytes: number; preview: string }
   | { kind: "generic"; summary: string };
 
-// --- webapp → daemon commands ------------------------------------------------
-
-export interface UserMessageCmd {
-  type: "user-message";
-  request_id: string;
-  content: string | ContentBlock[];
-  parent_tool_use_id?: string;
-}
-
-export interface PermissionDecisionCmd {
-  type: "permission-decision";
-  request_id: string;
-  decision:
-    | { behavior: "allow"; updated_input?: unknown; updated_permissions?: unknown[] }
-    | { behavior: "deny"; message: string; interrupt?: boolean };
-}
-
-export interface InterruptCmd {
-  type: "interrupt";
-  request_id: string;
-}
-
-export interface SetPermissionModeCmd {
-  type: "set-permission-mode";
-  request_id: string;
-  mode: PermissionMode;
-}
+// --- webapp diagnostic log ---------------------------------------------------
+//
+// The S8/S9 cutover deleted the legacy JSON `ClientCommand` command union: every
+// frontend→daemon command is now an `agentshim.frontend.v1.FrontendCommand`
+// protojson frame (see frontend-command.ts / command-dispatch.ts). The one
+// straggler with NO FrontendCommand arm is the webapp→daemon diagnostic
+// forward: `ClientLogCmd` survives ONLY as the shape `wslog.ts` formats its
+// console line from — its daemon delivery is disabled at the seam (main.ts)
+// until a `client_log` arm or a dedicated route exists (flagged for the
+// coordinator).
 
 /**
- * Switch the model mid-flight. `model` is always a concrete id from the
- * model menu: the SDK's "back to the default" form is not exposed, because the
- * id it resolves to is unknowable until the next assistant message.
- */
-export interface SetModelCmd {
-  type: "set-model";
-  request_id: string;
-  model: string;
-}
-
-/**
- * Mirror a webapp-side diagnostic line into the daemon's log, where it reaches
- * disk. Fire-and-forget observation: no request_id, honored on hibernated and
- * terminal sessions, never revives one. This is how a wedged webview — whose
- * console nobody can see — leaves evidence.
+ * A webapp-side diagnostic line. Historically mirrored into the daemon's log
+ * over the WS; post-cutover it has no FrontendCommand arm, so it is
+ * console-only (the console being the primary sink for a wedged webview).
  */
 export interface ClientLogCmd {
   type: "client-log";
   level: "info" | "warn" | "error";
   message: string;
 }
-
-/**
- * Escalate a queued item to preempt the running turn. Daemon-handled, never
- * forwarded to the shim; a stale `queue_id` is a no-op ack.
- */
-export interface QueueRunNowCmd {
-  type: "queue-run-now";
-  request_id: string;
-  queue_id: string;
-}
-
-/**
- * Remove a queued item without ever sending it. Daemon-handled; a stale
- * `queue_id` is a no-op ack, not an error.
- */
-export interface QueueCancelCmd {
-  type: "queue-cancel";
-  request_id: string;
-  queue_id: string;
-}
-
-export type ClientCommand =
-  | UserMessageCmd
-  | PermissionDecisionCmd
-  | InterruptCmd
-  | SetPermissionModeCmd
-  | SetModelCmd
-  | ClientLogCmd
-  | QueueRunNowCmd
-  | QueueCancelCmd;
