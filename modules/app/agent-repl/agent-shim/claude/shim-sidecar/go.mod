@@ -11,6 +11,6 @@ require (
 
 require golang.org/x/sys v0.13.0
 
-replace agentrepl/proto => ../../proto/gen/go
+replace agentrepl/proto => ../../../proto/gen/go
 
-replace agentrepl/wire => ../wire
+replace agentrepl/wire => ../../wire

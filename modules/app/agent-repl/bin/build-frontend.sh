@@ -4,7 +4,7 @@
 #
 # Three artifacts are managed, each independently:
 #   1. shim    — TypeScript, built with `npm run build` ->
-#               agent-shim/claude-shim/dist/main.js
+#               agent-shim/claude/shim/dist/main.js
 #   2. webapp  — TypeScript + Vite, built with `npm run build` -> webapp/dist/index.html
 #   3. daemon  — Go, built with `go build` -> daemon/bin/claude-repld
 #
@@ -36,7 +36,7 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$THIS_DIR/.." && pwd)"
 
-SHIM_DIR="$ROOT/agent-shim/claude-shim"
+SHIM_DIR="$ROOT/agent-shim/claude/shim"
 WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
 

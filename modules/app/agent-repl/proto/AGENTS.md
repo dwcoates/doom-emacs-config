@@ -24,8 +24,8 @@ repo-root AGENTS.md wire-protocol rule).
 ## Codegen
 
 `make` generates Go (`gen/go`, consumed by `daemon/`,
-`agent-shim/shim-store/`, `agent-shim/shim-claude-sidecar/`) and TS
-(`gen/ts`, consumed by `agent-shim/claude-shim/`, `webapp/`). `make lint`
+`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`) and TS
+(`gen/ts`, consumed by `agent-shim/claude/shim/`, `webapp/`). `make lint`
 syntax-checks without emitting.
 
 Dependencies: protoc, protoc-gen-go, @bufbuild/protoc-gen-es.

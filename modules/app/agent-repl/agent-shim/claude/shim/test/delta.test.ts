@@ -9,7 +9,7 @@ import {
 import { EventClass, Plane } from "../src/uds/proto.js";
 
 function loadStream(name: string): Record<string, unknown> {
-  const line = readFileSync(new URL(`../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
+  const line = readFileSync(new URL(`../../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return JSON.parse(line) as Record<string, unknown>;
 }
 

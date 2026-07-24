@@ -60,7 +60,7 @@ Anchors the frontend build script and artifact locations.")
   "Absolute path to the build-if-stale orchestrator script.")
 
 (defconst agent-repl--frontend-shim-entry
-  (expand-file-name "agent-shim/claude-shim/dist/main.js"
+  (expand-file-name "agent-shim/claude/shim/dist/main.js"
                     agent-repl--frontend-root)
   "Built shim entrypoint handed to `claude-repld' via --shim.")
 
