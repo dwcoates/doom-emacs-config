@@ -266,3 +266,220 @@ func TestShellHandlerNoFramesNoEvents(t *testing.T) {
 		t.Fatalf("events = %d, want 0", len(evs))
 	}
 }
+
+// --- shell EXIT= marker ------------------------------------------------------
+
+// shellHandle runs the shell handler over one raw batch at a byte offset.
+func shellHandle(raw string, offset int64) []*corev1.Event {
+	h := NewShellOutputHandler(quietLog)
+	return h.Handle([]tail.Frame{{Raw: []byte(raw), Offset: offset}},
+		&Context{SessionID: "s1", TaskID: "b123", Path: "/tmp/t/b123.output", Kind: tail.KindShellSpool})
+}
+
+// shellTaskEnded returns the TaskEnded a shell batch produced, or nil.
+func shellTaskEnded(raw string, offset int64) *corev1.TaskEnded {
+	for _, e := range shellHandle(raw, offset) {
+		if te := e.GetTaskEnded(); te != nil {
+			return te
+		}
+	}
+	return nil
+}
+
+func TestShellHandlerExitZeroEndsTheTaskDone(t *testing.T) {
+	// Arrange / Act
+	te := shellTaskEnded("output line\nEXIT=0\n", 0)
+	// Assert
+	if te == nil || te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_DONE {
+		t.Fatalf("TaskEnded = %+v, want DONE", te)
+	}
+}
+
+func TestShellHandlerNonZeroExitEndsTheTaskError(t *testing.T) {
+	// Arrange / Act
+	te := shellTaskEnded("output line\nEXIT=1\n", 0)
+	// Assert
+	if te == nil || te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_ERROR {
+		t.Fatalf("TaskEnded = %+v, want ERROR", te)
+	}
+}
+
+func TestShellHandlerMarkerNamesItsInference(t *testing.T) {
+	// Arrange / Act — so a frontend can tell this from a LOST sweep.
+	te := shellTaskEnded("x\nEXIT=0\n", 0)
+	// Assert
+	if te.GetInference() != "exit-marker" {
+		t.Fatalf("inference = %q, want exit-marker", te.GetInference())
+	}
+}
+
+func TestShellHandlerMarkerCarriesTheShellKind(t *testing.T) {
+	// Arrange / Act
+	te := shellTaskEnded("x\nEXIT=0\n", 0)
+	// Assert
+	if te.GetKind() != corev1.TaskKind_TASK_KIND_SHELL {
+		t.Fatalf("kind = %v, want SHELL", te.GetKind())
+	}
+}
+
+func TestShellHandlerMarkerCarriesTheOutputPath(t *testing.T) {
+	// Arrange / Act
+	te := shellTaskEnded("x\nEXIT=0\n", 0)
+	// Assert
+	if te.GetOutputPath() != "/tmp/t/b123.output" {
+		t.Fatalf("output path = %q", te.GetOutputPath())
+	}
+}
+
+func TestShellHandlerStillEmitsProgressAlongsideTheMarker(t *testing.T) {
+	// Arrange / Act — the terminating batch's bytes still count.
+	evs := shellHandle("x\nEXIT=0\n", 0)
+	// Assert
+	if len(evs) != 2 || evs[0].GetTaskProgress() == nil {
+		t.Fatalf("events = %d, want progress then ended", len(evs))
+	}
+}
+
+func TestShellHandlerMarkerAloneAtFileStartEnds(t *testing.T) {
+	// Arrange / Act — a command with NO output at all: a real observed spool
+	// is exactly the 7 bytes "EXIT=0\n".
+	te := shellTaskEnded("EXIT=0\n", 0)
+	// Assert
+	if te == nil {
+		t.Fatal("a spool that is only the marker must end the task")
+	}
+}
+
+func TestShellHandlerIgnoresASuffixedExitAssignment(t *testing.T) {
+	// Arrange / Act — the common false positive: script output like
+	// `BUILD_EXIT=0`, which is 109 of the 128 EXIT=-bearing spools on disk.
+	te := shellTaskEnded("running\nBUILD_EXIT=0\n", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("BUILD_EXIT=0 must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresAMarkerThatIsNotLast(t *testing.T) {
+	// Arrange / Act — the marker terminates the spool; mid-batch it is output.
+	te := shellTaskEnded("EXIT=0\nmore output\n", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("a non-final EXIT= must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresANonNumericExitValue(t *testing.T) {
+	// Arrange / Act
+	te := shellTaskEnded("x\nEXIT=abc\n", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("EXIT=abc must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresAnEmptyExitValue(t *testing.T) {
+	// Arrange / Act — `WEBAPP_TC_EXIT=` shapes appear in real spools.
+	te := shellTaskEnded("x\nEXIT=\n", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("EXIT= with no code must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresAnOverlongExitValue(t *testing.T) {
+	// Arrange / Act — an exit code is 0-255; 4+ digits is not the marker.
+	te := shellTaskEnded("x\nEXIT=1234\n", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("EXIT=1234 must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresAnUnterminatedMarker(t *testing.T) {
+	// Arrange / Act — no trailing newline means the line may still be growing.
+	te := shellTaskEnded("x\nEXIT=0", 0)
+	// Assert
+	if te != nil {
+		t.Fatalf("an unterminated marker must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerIgnoresAMarkerStartingAMidFileBatch(t *testing.T) {
+	// Arrange / Act — mid-file with no newline in the batch, the text may be
+	// the tail of a line that began in an earlier batch (so `...FOO_EXIT=0`).
+	te := shellTaskEnded("EXIT=0\n", 4096)
+	// Assert
+	if te != nil {
+		t.Fatalf("an unprovable line start must not end the task, got %+v", te)
+	}
+}
+
+func TestShellHandlerEndsOnAThreeDigitExitCode(t *testing.T) {
+	// Arrange / Act — 130 (SIGINT) is a real, in-range code.
+	te := shellTaskEnded("x\nEXIT=130\n", 0)
+	// Assert
+	if te == nil || te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_ERROR {
+		t.Fatalf("TaskEnded = %+v, want ERROR", te)
+	}
+}
+
+// --- shell EXIT= marker, against the real corpus fixtures --------------------
+
+// spoolCorpusRoot walks up to testdata/corpus, the golden fixture set.
+func spoolCorpusRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		cand := filepath.Join(dir, "testdata", "corpus")
+		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not locate testdata/corpus above %s", dir)
+		}
+		dir = parent
+	}
+}
+
+// handleCorpusSpool feeds a corpus spool file through the shell handler as one
+// whole-file batch, the way the tailer's first poll of a finished spool does.
+func handleCorpusSpool(t *testing.T, name string) *corev1.TaskEnded {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(spoolCorpusRoot(t), "spools", name))
+	if err != nil {
+		t.Fatalf("read corpus spool %s: %v", name, err)
+	}
+	h := NewShellOutputHandler(quietLog)
+	evs := h.Handle([]tail.Frame{{Raw: raw, Offset: 0}},
+		&Context{SessionID: "s1", TaskID: "b1", Kind: tail.KindShellSpool})
+	for _, e := range evs {
+		if te := e.GetTaskEnded(); te != nil {
+			return te
+		}
+	}
+	return nil
+}
+
+func TestShellHandlerCorpusCleanSpoolEndsWithItsRealExitCode(t *testing.T) {
+	// Arrange / Act — bash-clean.output really ends "...\n\nEXIT=1\n".
+	te := handleCorpusSpool(t, "bash-clean.output")
+	// Assert
+	if te == nil || te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_ERROR {
+		t.Fatalf("TaskEnded = %+v, want ERROR from the fixture's EXIT=1", te)
+	}
+}
+
+func TestShellHandlerCorpusUnterminatedSpoolDoesNotEnd(t *testing.T) {
+	// Arrange / Act — bash-midoutput.output has no terminator at all, which is
+	// the shape of the great majority of real spools.
+	te := handleCorpusSpool(t, "bash-midoutput.output")
+	// Assert
+	if te != nil {
+		t.Fatalf("an unterminated spool must not end the task, got %+v", te)
+	}
+}

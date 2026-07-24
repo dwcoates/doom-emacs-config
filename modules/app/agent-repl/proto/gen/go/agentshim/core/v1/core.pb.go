@@ -1248,8 +1248,12 @@ type TaskEnded struct {
 	Status     TerminalStatus         `protobuf:"varint,3,opt,name=status,proto3,enum=agentshim.core.v1.TerminalStatus" json:"status,omitempty"`
 	Summary    string                 `protobuf:"bytes,4,opt,name=summary,proto3" json:"summary,omitempty"`
 	OutputPath string                 `protobuf:"bytes,5,opt,name=output_path,json=outputPath,proto3" json:"output_path,omitempty"`
-	// For LOST: which inference fired (vanished-file | silence-timeout |
-	// boot-sweep), for the loud transition log and frontend display.
+	// How the terminal status was determined, when it was not reported
+	// directly: vanished-file | silence-timeout | boot-sweep (the LOST
+	// staleness inferences) or exit-marker (a shell spool's own trailing
+	// `EXIT=<code>` line). Empty when the producer observed the end directly.
+	// Carried for the loud transition log and for frontend display, so "we
+	// watched it exit" is distinguishable from "we stopped hearing from it".
 	Inference     string `protobuf:"bytes,6,opt,name=inference,proto3" json:"inference,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
