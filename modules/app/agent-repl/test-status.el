@@ -1885,6 +1885,28 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
         (should (equal updated-ws "ws1"))
         (should (equal refreshed-ws "ws1"))))))
 
+(ert-deftest agent-repl-test-update-all-excludes-projectless-placeholders ()
+  "Project-state updates skip and log live persp placeholders without dirs."
+  (agent-repl-test--with-clean-state
+    (let (processed logs)
+      (agent-repl--ws-put "project" :project-dir "/tmp/project")
+      (agent-repl--ws-put "main" :agent-state :idle)
+      (agent-repl--ws-put "none" :repl-state :inactive)
+      (cl-letf (((symbol-function 'agent-repl--update-one-workspace-state)
+                 (lambda (ws _do-git-p) (push ws processed)))
+                ((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logs))))
+        (agent-repl--update-all-workspace-states-now)
+        (should (equal processed '("project")))
+        (should
+         (cl-some
+          (lambda (line)
+            (and (string-match-p "placeholders=" line)
+                 (string-match-p "main" line)
+                 (string-match-p "none" line)))
+          logs))))))
+
 (ert-deftest agent-repl-test-update-all-non-gui-not-running-marks-dead ()
   "update-all should call mark-dead for a non-gui workspace with no running agent.
 `mark-dead' fires every tick regardless of the mod-N gate, so no
@@ -2378,7 +2400,7 @@ the flag-clear invariant."
 ;;;; ---- Tests: mid-chain ws removal ----
 
 (ert-deftest agent-repl-test-update-all-step-skips-removed-ws ()
-  "The recursive step rechecks `gethash' before acting on each ws.
+  "The recursive step rechecks workspace pollability before acting on each ws.
 A workspace can be deleted via `--ws-del' between the chain snapshot and the
 step that would process it; the per-step recheck filters out ghost names so
 the body never touches a removed workspace's stale plist (which would
