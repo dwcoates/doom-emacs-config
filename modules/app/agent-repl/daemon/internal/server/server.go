@@ -329,8 +329,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
 	mux.HandleFunc("GET /sessions/{id}/status", s.handleStatus)
 	mux.HandleFunc("POST /sessions/{id}/status/refresh", s.handleRefreshStatus)
-	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/run-now", s.handleQueueRunNow)
-	mux.HandleFunc("POST /sessions/{id}/queue/{queueId}/cancel", s.handleQueueCancel)
+	// The queue-control routes (POST /sessions/{id}/queue/{queueId}/run-now and
+	// /cancel) were DELETED in S9: the daemon-owned queue plane is dead
+	// server-side, and both routes were already loud no-ops. Frontends drive the
+	// turn directly over submitPrompt/interrupt.
 	mux.HandleFunc("GET /sessions/{id}/account", s.handleAccount)
 	mux.HandleFunc("POST /sessions/{id}/account", s.handleAccountSwitch)
 	mux.HandleFunc("GET /accounts", s.handleAccounts)
@@ -1149,21 +1151,6 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 // its /stream WebSocket — neither HTTP route had a remaining caller. The turn
 // still flows through the same per-session driver (SubmitPrompt/Interrupt); only
 // the HTTP entry points are gone.
-
-// handleQueueRunNow is a no-op under the cutover: the daemon-owned queue plane
-// is gone. The webapp still calls it, so it is accepted loudly rather than
-// errored. SUPERSEDED (S7).
-func (s *Server) handleQueueRunNow(w http.ResponseWriter, _ *http.Request) {
-	s.logf("server: SUPERSEDED (S7): queue control (run-now) not supported over the UDS plane")
-	w.WriteHeader(http.StatusAccepted)
-}
-
-// handleQueueCancel is a no-op under the cutover, for the same reason
-// handleQueueRunNow is. SUPERSEDED (S7).
-func (s *Server) handleQueueCancel(w http.ResponseWriter, _ *http.Request) {
-	s.logf("server: SUPERSEDED (S7): queue control (cancel) not supported over the UDS plane")
-	w.WriteHeader(http.StatusAccepted)
-}
 
 // frontendProtocolVersion is the agentshim.frontend.v1 protocol version the
 // daemon reports in DaemonView. It is distinct from protocol.Layer2Version (the
