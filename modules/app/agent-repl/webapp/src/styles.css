@@ -1649,6 +1649,20 @@ pre {
   font-size: 0.85rem;
 }
 
+/* The agent-shim degraded-state banner (#degraded-banner): store/sidecar/shim
+   downtime surfaced honestly at the top of the feed (design §11). A warning,
+   not a fatal error — so it wears the remediation amber, kin to the other
+   "needs attention" chrome, rather than the red .error-banner. `[hidden]`
+   collapses it whenever no component is degraded. */
+#degraded-banner {
+  border: 1px solid var(--remediation);
+  color: var(--remediation);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+
 /* --- §2.13 in-flight message queue ----------------------------------------
    A queued message is PARKED, not active. It must read as subdued and
    plainly distinct from a live .bubble.user, so the user sees the message

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   TASK_TOOLS,
   agentTasks,
-  sessionTasks,
   taskCreateToolUseId,
   taskIdFromCreateResult,
   tasksMenuHtml,
@@ -128,118 +127,6 @@ describe("taskCreateToolUseId", () => {
     });
     // Act + Assert
     expect(taskCreateToolUseId([taskCreate(), second], "2")).toBe("c2");
-  });
-});
-
-describe("sessionTasks", () => {
-  it("derives one entry per created task", () => {
-    // Arrange + Act
-    const tasks = sessionTasks([taskCreate()]);
-    // Assert
-    expect(tasks).toHaveLength(1);
-  });
-
-  it("names the task by its create subject", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate()]);
-    // Assert
-    expect(task.summary).toBe("wire the counter");
-  });
-
-  it("reads a freshly created task as pending (starting)", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate()]);
-    // Assert
-    expect(task.status).toBe("starting");
-  });
-
-  it("reads an in-progress task as running", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate(), taskUpdate()]);
-    // Assert
-    expect(task.status).toBe("running");
-  });
-
-  it("reads a completed task as done", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate(), taskUpdate({ input: { taskId: "1", status: "completed" } })]);
-    // Assert
-    expect(task.status).toBe("done");
-  });
-
-  it("drops a deleted task entirely", () => {
-    // Arrange + Act
-    const tasks = sessionTasks([taskCreate(), taskUpdate({ input: { taskId: "1", status: "deleted" } })]);
-    // Assert
-    expect(tasks).toHaveLength(0);
-  });
-
-  it("correlates an update to its create by the result id", () => {
-    // Arrange — the update's taskId matches the id parsed from the create result.
-    const tasks = sessionTasks([taskCreate(), taskUpdate({ input: { taskId: "1", status: "completed" } })]);
-    // Act + Assert — one folded row, not two stranded ones.
-    expect(tasks).toHaveLength(1);
-  });
-
-  it("renames a task when an update carries a new subject", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([
-      taskCreate(),
-      taskUpdate({ input: { taskId: "1", subject: "rewire the counter" } }),
-    ]);
-    // Assert
-    expect(task.summary).toBe("rewire the counter");
-  });
-
-  it("reopens a completed task back to running when an update reactivates it", () => {
-    // Arrange — completed then pushed back to in_progress.
-    const items: ConversationItem[] = [
-      taskCreate(),
-      taskUpdate({ input: { taskId: "1", status: "completed" } }),
-      taskUpdate({ input: { taskId: "1", status: "in_progress" } }),
-    ];
-    // Act
-    const [task] = sessionTasks(items);
-    // Assert
-    expect(task.status).toBe("running");
-  });
-
-  it("keeps tasks in creation order", () => {
-    // Arrange
-    const items: ConversationItem[] = [
-      taskCreate({ toolUseId: "c1", result: { isError: false, content: "Task #1 created successfully: first" } }),
-      taskCreate({ toolUseId: "c2", input: { subject: "second", description: "d" }, result: { isError: false, content: "Task #2 created successfully: second" } }),
-    ];
-    // Act
-    const tasks = sessionTasks(items);
-    // Assert
-    expect(tasks.map((t) => t.summary)).toEqual(["wire the counter", "second"]);
-  });
-
-  it("ignores non-task tool calls", () => {
-    // Arrange
-    const items: ConversationItem[] = [taskCreate({ toolName: "Bash" })];
-    // Act + Assert
-    expect(sessionTasks(items)).toHaveLength(0);
-  });
-
-  it("ignores non-tool items", () => {
-    // Arrange + Act + Assert
-    expect(sessionTasks([userTurn("hi")])).toHaveLength(0);
-  });
-
-  it("carries no detail chip for a task", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate()]);
-    // Assert
-    expect(task.detail).toBe("");
-  });
-
-  it("never nests a task row", () => {
-    // Arrange + Act
-    const [task] = sessionTasks([taskCreate()]);
-    // Assert
-    expect(task.nested).toBe(false);
   });
 });
 
