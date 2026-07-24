@@ -321,6 +321,7 @@ func main() {
 		Inits:           driver,
 		SessionCommands: sessionCommands,
 		Resyncer:        driver,
+		RequestShutdown: requestShutdown,
 		Logf:            log.Printf,
 	})
 	if err != nil {

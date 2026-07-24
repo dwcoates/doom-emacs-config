@@ -135,7 +135,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	// The command handler needs the session-lifecycle binding, whose *Server
 	// target does not exist until New below — bind it after (mirrors main).
 	binding := &SessionCommandBinding{Logf: logf}
-	handler, err := newCommandHandler(driver, stubMerge{}, stubLifecycle{}, driver, binding, logf)
+	handler, err := newCommandHandler(driver, stubMerge{}, stubLifecycle{}, driver, binding, nil, logf)
 	if err != nil {
 		t.Fatalf("command handler: %v", err)
 	}

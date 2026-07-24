@@ -49,6 +49,10 @@ type AgentShimConfig struct {
 	// resync (design §5.4). Nil-safe: a nil Resyncer makes Resync a documented
 	// no-op (the server still re-sends the StateSnapshot independently).
 	Resyncer Resyncer
+	// RequestShutdown begins the daemon's graceful teardown, backing the
+	// shutdown FrontendCommand (the same func POST /shutdown drives). Nil makes
+	// the shutdown command a loud failing ack (the capability is unconfigured).
+	RequestShutdown func()
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 }
@@ -132,7 +136,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, logf)
 	if err != nil {
 		return nil, err
 	}
