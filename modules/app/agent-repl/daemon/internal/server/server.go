@@ -318,10 +318,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions", s.handleCreateSession)
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}/stream", s.handleStream)
-	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)     // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)    // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
+	// DELETE /sessions/{id}, POST /sessions/{id}/message, and
+	// POST /sessions/{id}/interrupt were removed in S7: Emacs drives them over
+	// the frontend.v1 UDS commands (deleteSession/submitPrompt/interrupt) and
+	// the webapp never used them (it submits/interrupts over its /stream WS).
+	// Their cores survive: s.DeleteSession backs the deleteSession command, and
+	// the driver's SubmitPrompt/Interrupt back the prompt/interrupt commands.
+	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands) // SUPERSEDED (S7): elisp slash-command menu; no frontend.v1 arm, so retained
 	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
 	mux.HandleFunc("GET /sessions/{id}/status", s.handleStatus)
@@ -1140,57 +1143,12 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.logf, map[string]bool{"started": started})
 }
 
-// handleSendMessage submits a user turn over HTTP — the send path for clients
-// that hold no WebSocket (the Emacs input buffer). The turn flows through the
-// per-session driver exactly as a WS-submitted prompt does. SUPERSEDED (S7).
-func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, ok := s.workspaceForSession(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	var body struct {
-		Content   string `json:"content"`
-		RequestID string `json:"request_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-		return
-	}
-	if strings.TrimSpace(body.Content) == "" {
-		httpError(w, http.StatusBadRequest, "content must be non-empty")
-		return
-	}
-	if body.RequestID == "" {
-		body.RequestID = newRequestID()
-	}
-	if err := s.driver.SubmitPrompt(r.Context(), cwd, body.Content, ""); err != nil {
-		s.httpFail(w, r, http.StatusBadGateway, "session %s (cwd %s): submit prompt: %v", id, cwd, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]string{"request_id": body.RequestID})
-}
-
-// handleInterrupt aborts the in-flight turn over HTTP (the Emacs-side
-// C-c C-k path). The retract half is gone under the cutover. SUPERSEDED (S7).
-func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, ok := s.workspaceForSession(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	if err := s.driver.Interrupt(r.Context(), cwd, false); err != nil {
-		s.httpFail(w, r, http.StatusBadGateway, "session %s (cwd %s): interrupt: %v", id, cwd, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]bool{"retracted": false})
-}
+// handleSendMessage and handleInterrupt were removed in S7: Emacs submits
+// prompts and interrupts over the frontend.v1 UDS commands
+// (submitPrompt/interrupt, keyed by workspace), and the webapp drives both over
+// its /stream WebSocket — neither HTTP route had a remaining caller. The turn
+// still flows through the same per-session driver (SubmitPrompt/Interrupt); only
+// the HTTP entry points are gone.
 
 // handleQueueRunNow is a no-op under the cutover: the daemon-owned queue plane
 // is gone. The webapp still calls it, so it is accepted loudly rather than
@@ -1471,21 +1429,6 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleDeleteSession marks the session's record terminal so its id stops
-// resolving, and best-effort stops its live shim. SUPERSEDED (S7).
-func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := s.DeleteSession(id); err != nil {
-		if errors.Is(err, errSessionNotFound) {
-			httpError(w, http.StatusNotFound, "no such session")
-			return
-		}
-		s.httpFail(w, r, http.StatusInternalServerError, "session %s: delete: %v", id, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cwd, ok := s.workspaceForSession(id)
@@ -1687,11 +1630,6 @@ func newSessionID() string {
 // process, different after every restart.
 func newBootID() string {
 	return "b_" + randomHex()
-}
-
-// newRequestID mints correlation ids for daemon-originated commands.
-func newRequestID() string {
-	return "r_" + randomHex()
 }
 
 func randomHex() string {
