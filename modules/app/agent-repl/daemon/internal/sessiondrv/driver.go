@@ -20,12 +20,22 @@ import (
 	"sync"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/frontend"
 	"claude-repld/internal/shimclient"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// SessionRegistrar persists the durable CLI session uuid a session's
+// SessionStarted carries (vendor_session_id), so --resume and cross-restart
+// rehydration keep working after the L2 stdio plane that used to write it is
+// gone. Bound in main to a registry-writing adapter; nil disables the write.
+type SessionRegistrar interface {
+	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+}
 
 // Spawner makes a session's UDS shim reachable at its socket: it reattaches to
 // a live shim (the reattach-first decision, §4.4) or spawns a fresh UDS-mode
@@ -68,6 +78,9 @@ type Config struct {
 	// must equal the shim's ("1").
 	DaemonVersion   string
 	ProtocolVersion string
+	// Registrar persists SessionStarted.vendor_session_id (the CLI session uuid)
+	// through to the durable registry record; nil disables the write.
+	Registrar SessionRegistrar
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 
@@ -89,6 +102,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	byWS     map[string]*driven // workspace -> live driver
+	lastCSID map[string]string  // session id -> last-persisted claude session uuid
 	closed   bool
 	rootCtx  context.Context
 	rootStop context.CancelFunc
@@ -145,9 +159,69 @@ func New(cfg Config) (*Manager, error) {
 		socketPath: socketPath,
 		newClient:  newClient,
 		byWS:       make(map[string]*driven),
+		lastCSID:   make(map[string]string),
 		rootCtx:    rootCtx,
 		rootStop:   rootStop,
 	}, nil
+}
+
+// Ensure brings the workspace's session up (lazily, reattach-first) without
+// submitting a prompt — the eager bring-up the create path uses so a freshly
+// created session's shim is live (and its stream consumed onto the frontend +
+// SSM) before the first prompt. A workspace with no live session is a loud
+// error, same as SubmitPrompt.
+func (m *Manager) Ensure(workspace string) error {
+	_, err := m.ensure(workspace)
+	return err
+}
+
+// SystemInit returns the last SDK system:init snapshot for the workspace's live
+// session (backing /status and /commands), or ok=false when the workspace has
+// no live driver or no init has landed yet.
+func (m *Manager) SystemInit(workspace string) (*datav1.SystemInit, bool) {
+	d, err := m.existing(workspace)
+	if err != nil {
+		return nil, false
+	}
+	si := d.consumer.latestSystemInit()
+	return si, si != nil
+}
+
+// TaskEntry returns the frontend TaskEntry (including its output_path) for a
+// detached task on the workspace's live session, rebuilt from the retained
+// event ring. ok=false when the workspace has no live driver or no such task.
+// The caller enforces the path-confinement predicates before reading the file.
+func (m *Manager) TaskEntry(workspace, taskID string) (*frontendv1.TaskEntry, bool) {
+	d, err := m.existing(workspace)
+	if err != nil {
+		return nil, false
+	}
+	cat := frontend.BuildTaskCatalog(workspace, d.sessionID, d.consumer.snapshotRing())
+	for _, e := range cat.GetTasks() {
+		if e.GetTaskId() == taskID {
+			return e, true
+		}
+	}
+	return nil, false
+}
+
+// persistVendorSessionID writes a session's CLI uuid through to the registry
+// via the injected Registrar, deduped per session so a repeated SessionStarted
+// (a reattach replay) does not re-write the same value. No-op when no registrar
+// is wired or the uuid is empty.
+func (m *Manager) persistVendorSessionID(sessionID, csid string) {
+	if m.cfg.Registrar == nil || csid == "" {
+		return
+	}
+	m.mu.Lock()
+	if m.lastCSID[sessionID] == csid {
+		m.mu.Unlock()
+		return
+	}
+	m.lastCSID[sessionID] = csid
+	m.mu.Unlock()
+	m.logf("sessiondrv: persisting claude_session_id session=%s uuid=%s", sessionID, csid)
+	m.cfg.Registrar.ClaudeSessionIDChanged(sessionID, csid)
 }
 
 // SubmitPrompt brings the workspace's session up (lazily, reattach-first) and
@@ -251,6 +325,7 @@ func (m *Manager) ensure(workspace string) (*driven, error) {
 	d := &driven{sessionID: sessionID, workspace: workspace}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
+		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	})
 	d.consumer = cons
 	ph := permHandler{reg: m.reg, push: m.cfg.Push, workspace: workspace, sessionID: sessionID, logf: m.logf}

@@ -69,10 +69,15 @@ type Server struct {
 // client is one connected frontend's outbound state. send is never closed
 // (avoids send-on-closed races with concurrent broadcasts); done signals the
 // writer to stop and is closed exactly once by disconnect.
+//
+// scope, when non-nil, restricts this connection to one session/workspace (the
+// per-session GET /sessions/{id}/stream view); nil is the unfiltered /frontend
+// consumer that sees every workspace.
 type client struct {
 	send      chan []byte
 	done      chan struct{}
 	closeOnce sync.Once
+	scope     *Scope
 }
 
 // New builds a Server. It panics on a missing required dependency: a frontend
@@ -156,20 +161,48 @@ func (s *Server) Serve(l net.Listener) error {
 			}
 			return fmt.Errorf("frontend: accept: %w", err)
 		}
-		go s.serveClient(newUDSConn(conn))
+		go s.serveClient(newUDSConn(conn), nil)
 	}
 }
 
-// ServeWS upgrades an HTTP request to a WebSocket and serves it as a frontend
-// client. Mount it on the daemon's HTTP mux. It blocks for the connection's
-// lifetime (the reader loop runs on this goroutine).
+// ServeWS upgrades an HTTP request to a WebSocket and serves it as an
+// UNSCOPED frontend client (the /frontend endpoint: every workspace). Mount it
+// on the daemon's HTTP mux. It blocks for the connection's lifetime (the reader
+// loop runs on this goroutine).
 func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logf("frontend: websocket upgrade: %v", err)
 		return
 	}
-	s.serveClient(newWSConn(conn))
+	s.serveClient(newWSConn(conn), nil)
+}
+
+// CommandTranslator converts one raw inbound message on a scoped connection
+// into a FrontendCommand to dispatch. dispatch=false means the translator
+// handled the message itself (logged it, or it is a deliberate no-op) and no
+// command should be dispatched — the read loop simply reads the next message.
+// A non-nil error marks a bad frame (logged; the connection continues). It
+// lets the per-session /stream bridge accept the webapp's still-Layer-2 client
+// commands while the connection SERVES frontend.v1 frames.
+type CommandTranslator func(raw []byte) (cmd *frontendv1.FrontendCommand, dispatch bool, err error)
+
+// ServeWSScoped upgrades an HTTP request to a WebSocket and serves it as a
+// client SCOPED to one session/workspace: only frames matching scope reach it
+// (the connect/resync snapshot is filtered likewise). translate adapts inbound
+// messages (the webapp's Layer-2 client commands) into FrontendCommands the
+// shared handler dispatches; a nil translate parses frontend.v1 commands
+// directly. This backs GET /sessions/{id}/stream.
+func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Scope, translate CommandTranslator) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.logf("frontend: websocket upgrade: %v", err)
+		return
+	}
+	wc := newWSConn(conn)
+	wc.translate = translate
+	wc.logf = s.logf
+	s.serveClient(wc, &scope)
 }
 
 // Close stops accepting, disconnects every client, and closes the listener.
@@ -200,13 +233,22 @@ func (s *Server) Close() error {
 // Fan-out API — the surface the stitch phase (shimclient/ssm/merge) pushes to.
 // ---------------------------------------------------------------------------
 
-// Broadcast marshals a frame once and enqueues it to every connected client.
-// A client whose bounded buffer is full is hard-disconnected (loud log).
+// Broadcast enqueues frame to every connected client. An unscoped client gets
+// the frame marshaled once (shared bytes); a scoped client gets the frame only
+// if it matches its scope (a StateSnapshot is scope-filtered), marshaled per
+// connection. A client whose bounded buffer is full is hard-disconnected.
 func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
-	data, err := marshalFrame(frame)
-	if err != nil {
-		s.logf("frontend: marshal frame for broadcast: %v", err)
-		return
+	var (
+		unscoped     []byte
+		unscopedErr  error
+		unscopedDone bool
+	)
+	marshalUnscoped := func() ([]byte, error) {
+		if !unscopedDone {
+			unscoped, unscopedErr = marshalFrame(frame)
+			unscopedDone = true
+		}
+		return unscoped, unscopedErr
 	}
 	s.mu.Lock()
 	clients := make([]*client, 0, len(s.clients))
@@ -215,6 +257,23 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 	}
 	s.mu.Unlock()
 	for _, cl := range clients {
+		var (
+			data []byte
+			err  error
+		)
+		if cl.scope == nil {
+			data, err = marshalUnscoped()
+		} else {
+			out, keep := scopeFrame(frame, *cl.scope)
+			if !keep {
+				continue
+			}
+			data, err = marshalFrame(out)
+		}
+		if err != nil {
+			s.logf("frontend: marshal frame for broadcast: %v", err)
+			continue
+		}
 		s.enqueue(cl, data)
 	}
 }
@@ -237,10 +296,11 @@ func (s *Server) PushDegradedNotice(n *frontendv1.DegradedNotice) {
 // Per-connection lifecycle
 // ---------------------------------------------------------------------------
 
-func (s *Server) serveClient(c conn) {
+func (s *Server) serveClient(c conn, scope *Scope) {
 	cl := &client{
-		send: make(chan []byte, s.bufSize),
-		done: make(chan struct{}),
+		send:  make(chan []byte, s.bufSize),
+		done:  make(chan struct{}),
+		scope: scope,
 	}
 
 	// Register the client and enqueue its StateSnapshot atomically, under the
@@ -253,7 +313,11 @@ func (s *Server) serveClient(c conn) {
 		_ = c.close()
 		return
 	}
-	snap, err := marshalFrame(SnapshotFrame(s.state.Snapshot()))
+	snapshot := s.state.Snapshot()
+	if scope != nil {
+		snapshot = filterSnapshot(snapshot, *scope)
+	}
+	snap, err := marshalFrame(SnapshotFrame(snapshot))
 	if err != nil {
 		s.mu.Unlock()
 		s.logf("frontend: marshal connect snapshot: %v", err)
@@ -298,10 +362,15 @@ func (s *Server) readLoop(c conn, cl *client) {
 			}
 			return
 		}
-		// A resync re-sends a fresh StateSnapshot to THIS client (§5.4). The
-		// handler covers the conversation-delta replay the snapshot omits.
+		// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
+		// scope-filtered for a scoped connection. The handler covers the
+		// conversation-delta replay the snapshot omits.
 		if cmd.GetResync() != nil {
-			if snap, err := marshalFrame(SnapshotFrame(s.state.Snapshot())); err != nil {
+			snapshot := s.state.Snapshot()
+			if cl.scope != nil {
+				snapshot = filterSnapshot(snapshot, *cl.scope)
+			}
+			if snap, err := marshalFrame(SnapshotFrame(snapshot)); err != nil {
 				s.logf("frontend: marshal resync snapshot: %v", err)
 			} else {
 				s.enqueue(cl, snap)
@@ -415,9 +484,15 @@ func (u *udsConn) readCommand() (*frontendv1.FrontendCommand, error) {
 
 func (u *udsConn) close() error { return u.nc.Close() }
 
-// wsConn frames protojson one-frame-per-message over a WebSocket.
+// wsConn frames protojson one-frame-per-message over a WebSocket. translate,
+// when set (scoped /stream connections), adapts an inbound raw message into a
+// FrontendCommand; a message the translator handles itself (dispatch=false) or
+// rejects (err) is skipped and the loop reads the next one, so the shared read
+// loop only ever sees dispatchable commands.
 type wsConn struct {
-	ws *websocket.Conn
+	ws        *websocket.Conn
+	translate CommandTranslator
+	logf      dlog.Logf
 }
 
 func newWSConn(ws *websocket.Conn) *wsConn { return &wsConn{ws: ws} }
@@ -427,11 +502,26 @@ func (w *wsConn) writeFrame(data []byte) error {
 }
 
 func (w *wsConn) readCommand() (*frontendv1.FrontendCommand, error) {
-	_, data, err := w.ws.ReadMessage()
-	if err != nil {
-		return nil, err
+	for {
+		_, data, err := w.ws.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		if w.translate == nil {
+			return unmarshalCommand(data)
+		}
+		cmd, dispatch, terr := w.translate(data)
+		if terr != nil {
+			if w.logf != nil {
+				w.logf("frontend: scoped stream: inbound command rejected: %v", terr)
+			}
+			continue
+		}
+		if !dispatch {
+			continue
+		}
+		return cmd, nil
 	}
-	return unmarshalCommand(data)
 }
 
 func (w *wsConn) close() error { return w.ws.Close() }
