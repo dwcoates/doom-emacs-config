@@ -9,9 +9,9 @@
  * reading the feed wants only their own prompt back.
  *
  * The host brackets each injected span with the inert HTML-comment markers
- * below (see `agent-repl--meta-wrap` in core.el, and shared/protocol.md
- * §2.3). Marking happens at the injection site, so the frontend never has
- * to recognize — or stay in sync with — the injected text itself.
+ * below (see `agent-repl--meta-wrap` in core.el). Marking happens at the
+ * injection site, so the frontend never has to recognize — or stay in
+ * sync with — the injected text itself.
  */
 
 /** Opening marker of a harness-injected span (mirrors `agent-repl--meta-open`). */

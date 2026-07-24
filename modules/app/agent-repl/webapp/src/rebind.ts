@@ -1,8 +1,8 @@
 /**
  * Client-side session rebind: the "session gone" escape hatch.
  *
- * The daemon makes its s_ ids survive restarts (registry + rehydration,
- * protocol.md §2.11), so a failed existence probe should be rare — the
+ * The daemon makes its s_ ids survive restarts (registry + rehydration),
+ * so a failed existence probe should be rare — the
  * id is genuinely unresolvable (transcript pruned, fake session,
  * registry lost). Even then the CONVERSATION usually still exists under
  * its durable CLI uuid, which every hello frame carries. This module
