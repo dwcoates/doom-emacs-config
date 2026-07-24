@@ -32,6 +32,48 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+;; `agent-repl--latch-and-maybe-fire-loaded' lives in sentinel.el; both load
+;; as part of the same module, so the symbol is resolved at call time.
+(declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
+
+;;;; ---- State-transition hook -------------------------------------------
+
+(defvar agent-repl-ws-state-transition-functions nil
+  "Abnormal hook run each time a daemon-pushed `WorkspaceState' is applied.
+Each function is called with three arguments: (WORKSPACE NEW-KEYWORD
+PREVIOUS-KEYWORD), where NEW-KEYWORD is the render keyword just stored
+under `:pushed-render-state' and PREVIOUS-KEYWORD is what it replaced
+\(nil on the first push for a workspace).
+
+This is the single subscription point the agent-shim cutover (design §4.6,
+§9.3) re-anchors the merge reactive consequences onto: the daemon now owns
+merge STATE (it publishes `:merging'/`:merge-conflict'/`:merged'/… over the
+frontend surface), so the magit conflict popup, the merged-teardown, the
+close-after-merge, and the parent notification — all previously keyed off
+LOCAL `:merge-*' plist flips in worktree.el — key off THIS hook instead
+\(see `agent-repl--merge-react-to-pushed-state' in worktree.el).
+
+Handlers run via `run-hook-wrapped' inside `condition-case', so a broken
+subscriber cannot prevent state application or later subscribers from
+running — the error is loud-logged, never swallowed silently.")
+
+(defun agent-repl--frontend-run-state-transition-hook (workspace new previous)
+  "Run `agent-repl-ws-state-transition-functions' for WORKSPACE.
+NEW and PREVIOUS are render keywords (PREVIOUS nil on first push).  Each
+handler is wrapped so a signal is caught + logged rather than aborting
+state application (the log keeps the No-Silent-Fallbacks contract: the
+failure is surfaced, not hidden)."
+  (run-hook-wrapped 'agent-repl-ws-state-transition-functions
+                    (lambda (fn ws n p)
+                      (condition-case err
+                          (funcall fn ws n p)
+                        (error
+                         (agent-repl--log ws
+                                          "ws-state-transition-hook fn=%s err=%S"
+                                          fn err)))
+                      nil)
+                    workspace new previous))
+
 ;;;; ---- RenderState → keyword mapping -----------------------------------
 
 (defconst agent-repl--frontend-render-state-map
@@ -117,7 +159,31 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                        "frontend-apply-workspace-state: %s -> %s (cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s)"
                        previous keyword cause-kind cause-seq
                        turn-active live-tasks merge-phase)
+      ;; Session-ready latch (design §10 cutover gap): the SessionStart
+      ;; managed hook that used to set the `:agent-ready' half of the
+      ;; ws-fully-loaded latch was deleted in S2, orphaning
+      ;; `agent-repl-ws-fully-loaded-functions'.  The daemon now owns
+      ;; session-ready reporting, so the FIRST pushed WorkspaceState for a
+      ;; workspace (any state) is the ready signal.  One-shot per workspace,
+      ;; guarded by `:agent-ready-latched' (cleared when the ws plist resets
+      ;; on kill/relaunch, so the next session re-latches).
+      (agent-repl--frontend-maybe-latch-agent-ready workspace)
+      ;; Re-key point for the merge reactive consequences (design §4.6/§9.3):
+      ;; run AFTER the pushed state is stored so subscribers observe it.
+      (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
       keyword)))
+
+(defun agent-repl--frontend-maybe-latch-agent-ready (workspace)
+  "Set the `:agent-ready' latch bit for WORKSPACE on its FIRST pushed state.
+One-shot per workspace: guarded by the `:agent-ready-latched' plist key so
+only the first `WorkspaceState' push arms the latch.  Loud-logged.  See
+`agent-repl-ws-fully-loaded-functions'."
+  (unless (agent-repl--ws-get workspace :agent-ready-latched)
+    (agent-repl--ws-put workspace :agent-ready-latched t)
+    (agent-repl--log workspace
+                     "frontend-latch-agent-ready: first pushed state for ws=%s — setting :agent-ready"
+                     workspace)
+    (agent-repl--latch-and-maybe-fire-loaded workspace :agent-ready)))
 
 ;;;; ---- StateSnapshot resync --------------------------------------------
 
