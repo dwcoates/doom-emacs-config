@@ -61,24 +61,29 @@ func corpusRoot(t *testing.T) string {
 //
 // Keys are canonical leaf names (see convert.canon); "content" is special-cased
 // in isKnownGap by parent because "content" is a valid modeled field elsewhere.
+// NOTE: as of proto commit bc3d014f the following ADDITIVE fields closed their
+// gaps (now decoded as typed data with zero extras, hence removed from this map):
+//   iterations → ApiUsage.iterations (google.protobuf.ListValue)
+//   speed → ApiUsage.speed (string)
+//   inferencegeo → ApiUsage.inference_geo (string)
+//   tooldenialkind → ToolDenialKind.TOOL_DENIAL_KIND_PERMISSION_RULE enum value
+//   precompactdiscoveredtools → DiskCompactMetadata.pre_compact_discovered_tools
+//   cumulativedroppedtokens → DiskCompactMetadata.cumulative_dropped_tokens
+//   blockingerror → HookBlockingErrorAttachment.blocking_error (BlockingErrorDetail)
+// The entries that REMAIN are BREAKING type mismatches (a Struct/scalar proto
+// field where the disk carries an array/object/other type); closing each is a
+// non-additive G1 proto change still pending user approval.
 var knownSchemaGaps = map[string]string{
-	"iterations":               "ApiUsage: add repeated per-iteration usage (usage.iterations)",
-	"speed":                    "ApiUsage: add string speed",
-	"inferencegeo":             "ApiUsage: add string inference_geo",
-	"tooldenialkind":           "ToolDenialKind enum: add value for \"permission-rule\"",
-	"precompactdiscoveredtools": "DiskCompactMetadata: add repeated string pre_compact_discovered_tools",
-	"cumulativedroppedtokens":  "DiskCompactMetadata: add int64 cumulative_dropped_tokens",
-	"structuredpatch":          "Edit/WriteResult.structured_patch: model as ListValue/repeated (disk is an array, proto is Struct)",
-	"questions":                "AskUserQuestionResult.questions: model as ListValue (disk is an array, proto is Struct)",
-	"results":                  "WebSearchResult.results: model as ListValue (disk is an array, proto is Struct)",
-	"tasks":                    "TaskListResult.tasks: model as ListValue (disk is an array, proto is Struct)",
-	"updatedfields":            "TaskUpdateResult.updated_fields: model as ListValue (disk is an array, proto is Struct)",
-	"statuschange":             "TaskUpdateResult.status_change: model as Struct (disk is an object, proto is string)",
-	"pin":                      "SendMessageResult.pin: model as Struct (disk is an object, proto is bool)",
-	"scheduledfor":             "ScheduleWakeupResult.scheduled_for: model as int64 (disk is an int, proto is string)",
-	"blockingerror":            "HookSuccessAttachment: add blocking_error Struct (hook_blocking_error carries it)",
-	"automodeconsentflow":      "AutoModeAttachment.auto_mode_consent_flow: model as bool (disk is a bool, proto is Struct)",
-	"files":                    "DiagnosticsAttachment.files: model as ListValue (disk is an array, proto is Struct)",
+	"structuredpatch":     "Edit/WriteResult.structured_patch: model as ListValue/repeated (disk is an array, proto is Struct)",
+	"questions":           "AskUserQuestionResult.questions: model as ListValue (disk is an array, proto is Struct)",
+	"results":             "WebSearchResult.results: model as ListValue (disk is an array, proto is Struct)",
+	"tasks":               "TaskListResult.tasks: model as ListValue (disk is an array, proto is Struct)",
+	"updatedfields":       "TaskUpdateResult.updated_fields: model as ListValue (disk is an array, proto is Struct)",
+	"statuschange":        "TaskUpdateResult.status_change: model as Struct (disk is an object, proto is string)",
+	"pin":                 "SendMessageResult.pin: model as Struct (disk is an object, proto is bool)",
+	"scheduledfor":        "ScheduleWakeupResult.scheduled_for: model as int64 (disk is an int, proto is string)",
+	"automodeconsentflow": "AutoModeAttachment.auto_mode_consent_flow: model as bool (disk is a bool, proto is Struct)",
+	"files":               "DiagnosticsAttachment.files: model as ListValue (disk is an array, proto is Struct)",
 }
 
 // isKnownGap reports whether an extras dotted-path is a documented schema gap.
@@ -275,6 +280,106 @@ func TestGoldenSidechain(t *testing.T) {
 				checkExtras(t, name, obj, extras.AsMap())
 			}
 		})
+	}
+}
+
+// TestListValueFieldAbsorbsArray covers the singular google.protobuf.ListValue
+// path: a JSON array (ApiUsage.iterations) is decoded as a typed ListValue with
+// no extras, rather than being captured verbatim.
+func TestListValueFieldAbsorbsArray(t *testing.T) {
+	// Arrange
+	c := New(nil)
+	obj := map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role": "assistant",
+			"usage": map[string]any{
+				"iterations": []any{
+					map[string]any{"input_tokens": float64(1), "output_tokens": float64(2)},
+				},
+			},
+		},
+	}
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	usage := line.GetAssistant().GetMessage().GetUsage()
+	if usage.GetIterations() == nil {
+		t.Fatal("iterations ListValue not populated")
+	}
+	if got := len(usage.GetIterations().GetValues()); got != 1 {
+		t.Fatalf("iterations length = %d, want 1", got)
+	}
+}
+
+// TestHookBlockingErrorRoutesOuterDetail covers the split routing: the disk
+// blockingError object lands in the OUTER blocking_error detail while the other
+// keys populate the wrapped HookSuccessAttachment, with no extras.
+func TestHookBlockingErrorRoutesOuterDetail(t *testing.T) {
+	// Arrange
+	c := New(nil)
+	obj := map[string]any{
+		"type": "attachment",
+		"attachment": map[string]any{
+			"type":      "hook_blocking_error",
+			"hookName":  "PostToolUse:Edit",
+			"toolUseID": "toolu_x",
+			"hookEvent": "PostToolUse",
+			"blockingError": map[string]any{
+				"blockingError": "tests failed",
+				"command":       "run-tests.sh",
+			},
+		},
+	}
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	att := line.GetAttachment().GetHookBlockingError()
+	if att.GetBlockingError().GetBlockingError() != "tests failed" {
+		t.Fatalf("outer blocking_error not routed: %+v", att.GetBlockingError())
+	}
+	if att.GetBlockingError().GetCommand() != "run-tests.sh" {
+		t.Fatalf("outer blocking_error command not routed: %+v", att.GetBlockingError())
+	}
+	if att.GetFields().GetHookName() != "PostToolUse:Edit" {
+		t.Fatalf("wrapped fields.hook_name not populated: %+v", att.GetFields())
+	}
+}
+
+// TestPermissionRuleDenialKind covers the additive enum value: the corpus string
+// "permission-rule" now resolves to the typed ToolDenialKind rather than extras.
+func TestPermissionRuleDenialKind(t *testing.T) {
+	// Arrange
+	c := New(nil)
+	obj := map[string]any{
+		"type":           "user",
+		"toolDenialKind": "permission-rule",
+		"message":        map[string]any{"role": "user", "content": "x"},
+	}
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	got := line.GetUser().GetEnvelope().GetToolDenialKind()
+	if got != datav1.ToolDenialKind_TOOL_DENIAL_KIND_PERMISSION_RULE {
+		t.Fatalf("tool_denial_kind = %v, want PERMISSION_RULE", got)
 	}
 }
 
