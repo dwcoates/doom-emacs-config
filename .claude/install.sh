@@ -197,13 +197,17 @@ GITHOOKS_DIR="$(_canonpath "$SCRIPT_DIR/../.githooks")"
 
 # Each entry: EVENT_KEY|SCRIPT_NAME|MATCHER
 # MATCHER is optional (only used for Notification hooks).
+#
+# The six status hooks (Stop, StopFailure, SubagentStart, SubagentStop,
+# UserPromptSubmit, SessionStart) were removed here in the agent-shim cutover
+# (design §10): agent/session/task state is now resolved by the daemon's SSM
+# and pushed as frontend.v1 WorkspaceState frames, so Emacs no longer derives
+# it from these managed settings hooks. Only the permission hooks remain —
+# they surface the real-time `:permission' signal the tab-bar needs. Any stale
+# status-hook entries a prior install left in settings.json are tolerated by
+# the Emacs drain list; do_uninstall no longer removes them because they are
+# no longer in HOOKS (a foreign entry to the trimmed set).
 HOOKS=(
-  "Stop|stop-notify.sh|"
-  "StopFailure|stop-failure-notify.sh|"
-  "SubagentStart|subagent-start-notify.sh|"
-  "SubagentStop|subagent-stop-notify.sh|"
-  "UserPromptSubmit|prompt-submit-notify.sh|"
-  "SessionStart|session-start-notify.sh|"
   "Notification|permission-notify.sh|permission_prompt"
   # PermissionRequest fires at the moment the permission dialog appears,
   # BEFORE the user answers — that's the real-time signal the tab-bar
