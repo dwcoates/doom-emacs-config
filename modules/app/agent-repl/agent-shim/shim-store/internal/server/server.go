@@ -161,8 +161,38 @@ func (s *Server) handleConn(conn net.Conn) {
 		s.serveProducer(conn, m)
 	case *corev1.Subscribe:
 		s.serveSubscriber(conn, m)
+	case *corev1.CursorQuery:
+		s.serveCursorQuery(conn, m)
 	default:
-		s.log("first frame is %T; expected StoreWrite or Subscribe", m)
+		s.log("first frame is %T; expected StoreWrite, Subscribe, or CursorQuery", m)
+	}
+}
+
+// serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
+// an empty file_id returns all persisted cursors, a set file_id returns just
+// that one (or an empty list when absent). One CursorList reply, then the
+// connection is done.
+func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
+	var cursors []*corev1.CursorState
+	if id := q.GetFileId(); id != "" {
+		c, err := s.db.Cursor(id)
+		if err != nil {
+			s.log("cursor query failed (file_id=%s): %v", id, err)
+			return
+		}
+		if c != nil {
+			cursors = append(cursors, c)
+		}
+	} else {
+		all, err := s.db.Cursors()
+		if err != nil {
+			s.log("cursor query failed (all): %v", err)
+			return
+		}
+		cursors = all
+	}
+	if err := writeMsg(conn, &corev1.CursorList{Cursors: cursors}); err != nil {
+		s.log("cursor query reply failed: %v", err)
 	}
 }
 

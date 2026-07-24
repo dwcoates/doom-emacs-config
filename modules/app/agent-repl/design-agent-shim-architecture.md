@@ -659,16 +659,21 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   ├── shim-claude-sidecar/                               (G3)
     │   │   ├── AGENTS.md                                    A ✓
     │   │   ├── go.mod                                       A
-    │   │   ├── main.go                                      A
+    │   │   ├── go.sum                                       A
+    │   │   ├── main.go (+_test)                             A
     │   │   └── internal/
     │   │       ├── discover/discover.go (+_test)            A
+    │   │       ├── discover/watcher.go                      A   (fsnotify wrapper)
     │   │       ├── tail/tailer.go (+_test)                  A
     │   │       ├── tail/codec.go (+_test)                   A
+    │   │       ├── tail/context.go                          A   (Context+Kind+Handler; breaks handler↔tail cycle)
+    │   │       ├── handler/handler.go                       A   (shared Context alias + event builders)
     │   │       ├── handler/transcript.go (+_test)           A
-    │   │       ├── handler/agent.go (+_test)                A
-    │   │       ├── handler/journal.go (+_test)              A
-    │   │       ├── handler/shell.go (+_test)                A
+    │   │       ├── handler/agent.go                         A
+    │   │       ├── handler/journal.go                       A
+    │   │       ├── handler/shell.go                         A
     │   │       ├── convert/convert.go (+_test)              A
+    │   │       ├── convert/registry.go                      A   (concrete-message factory)
     │   │       ├── stale/stale.go (+_test)                  A
     │   │       └── storeclient/client.go (+_test)           A
     │   └── shim-store/                                        (G2)
