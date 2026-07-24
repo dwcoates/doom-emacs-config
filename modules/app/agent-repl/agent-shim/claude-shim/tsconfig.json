@@ -30,5 +30,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "../../proto/gen/ts/**/*.ts"]
+  // test/ is in the program too: vitest transpiles without typechecking, so
+  // leaving the suites out meant `npm run typecheck` never saw them AND an
+  // editor's language server fell back to an inferred config with no `paths`
+  // mapping -- which resolves @bufbuild/protobuf twice and degrades
+  // MessageShape<Desc> inference to the bare `Message | Message<string>`
+  // constraint, producing phantom property-access errors on framed messages.
+  "include": ["src/**/*.ts", "test/**/*.ts", "../../proto/gen/ts/**/*.ts"]
 }
