@@ -615,7 +615,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
 ~/.config/doom/
 ├── AGENTS.md                                                M ✓ (protocol gate, doctrine, shim scope)
 ├── .claude/
-│   └── install.sh                                           M   (build + launchctl bootstrap both services)
+│   └── install.sh                                           M ✓ (build + launchctl bootstrap both services)
 └── modules/app/agent-repl/
     ├── design-agent-shim-architecture.md                    A ✓
     ├── metaprompt.md                                        M ✓ (no-fallbacks rule)
@@ -661,82 +661,88 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   │   └── test/{framing,server,store-client,control,reattach}.test.ts  A ✓ (G5)
     │   ├── shim-claude-sidecar/                               (G3)
     │   │   ├── AGENTS.md                                    A ✓
-    │   │   ├── go.mod                                       A
-    │   │   ├── go.sum                                       A
-    │   │   ├── main.go (+_test)                             A
+    │   │   ├── go.mod                                       A ✓
+    │   │   ├── go.sum                                       A ✓
+    │   │   ├── main.go (+_test)                             A ✓
     │   │   └── internal/
-    │   │       ├── discover/discover.go (+_test)            A
-    │   │       ├── discover/watcher.go                      A   (fsnotify wrapper)
-    │   │       ├── tail/tailer.go (+_test)                  A
-    │   │       ├── tail/codec.go (+_test)                   A
-    │   │       ├── tail/context.go                          A   (Context+Kind+Handler; breaks handler↔tail cycle)
-    │   │       ├── handler/handler.go                       A   (shared Context alias + event builders)
-    │   │       ├── handler/transcript.go (+_test)           A
-    │   │       ├── handler/agent.go                         A
-    │   │       ├── handler/journal.go                       A
-    │   │       ├── handler/shell.go                         A
-    │   │       ├── convert/convert.go (+_test)              A
-    │   │       ├── convert/registry.go                      A   (concrete-message factory)
-    │   │       ├── stale/stale.go (+_test)                  A
-    │   │       └── storeclient/client.go (+_test)           A
+    │   │       ├── discover/discover.go (+_test)            A ✓
+    │   │       ├── discover/watcher.go                      A ✓ (fsnotify wrapper)
+    │   │       ├── tail/tailer.go (+_test)                  A ✓
+    │   │       ├── tail/codec.go (+_test)                   A ✓
+    │   │       ├── tail/context.go                          A ✓ (Context+Kind+Handler; breaks handler↔tail cycle)
+    │   │       ├── handler/handler.go                       A ✓ (shared Context alias + event builders)
+    │   │       ├── handler/transcript.go (+_test)           A ✓
+    │   │       ├── handler/agent.go                         A ✓
+    │   │       ├── handler/journal.go                       A ✓
+    │   │       ├── handler/shell.go                         A ✓
+    │   │       ├── convert/convert.go (+_test)              A ✓
+    │   │       ├── convert/registry.go                      A ✓ (concrete-message factory)
+    │   │       ├── stale/stale.go (+_test)                  A ✓
+    │   │       └── storeclient/client.go (+_test)           A ✓
     │   └── shim-store/                                        (G2)
     │       ├── AGENTS.md                                    A ✓
-    │       ├── go.mod                                       A
-    │       ├── main.go                                      A
+    │       ├── go.mod                                       A ✓
+    │       ├── main.go                                      A ✓
     │       └── internal/
-    │           ├── db/db.go                                 A
-    │           ├── db/ingest.go (+_test)                    A
-    │           ├── db/query.go (+_test)                     A
-    │           ├── server/server.go                         A
-    │           ├── server/fanout.go (+_test)                A
-    │           └── dedup/dedup.go (+_test)                  A
+    │           ├── db/db.go                                 A ✓
+    │           ├── db/ingest.go (+_test)                    A ✓
+    │           ├── db/query.go (+_test)                     A ✓
+    │           ├── server/server.go                         A ✓
+    │           ├── server/fanout.go (+_test)                A ✓
+    │           └── dedup/dedup.go (+_test)                  A ✓
     ├── daemon/
     │   ├── go.mod                                           M ✓ (agentrepl/proto, agentrepl/wire, protobuf, sqlite)
     │   └── internal/
-    │       ├── protodeps/protodeps.go                       A ✓ (temporary dep pin; DELETED at stitch)
+    │       ├── protodeps/protodeps.go                       D ✓ (temporary dep pin; deleted at stitch as planned)
     │       ├── ssm/                                           (G6)
     │       │   ├── AGENTS.md                                A ✓
-    │       │   ├── ssm.go (+_test)                          A
-    │       │   ├── db.go                                    A
-    │       │   └── resolve.go (+_test)                      A
+    │       │   ├── ssm.go (+_test)                          A ✓
+    │       │   ├── db.go                                    A ✓
+    │       │   └── resolve.go (+_test)                      A ✓
     │       ├── shimclient/                                    (G7)
     │       │   ├── AGENTS.md                                A ✓
-    │       │   ├── client.go (+_test)                       A
-    │       │   ├── control.go (+_test)                      A
-    │       │   └── events.go (+_test)                       A
+    │       │   ├── client.go (+_test)                       A ✓
+    │       │   ├── control.go (+_test)                      A ✓
+    │       │   └── events.go (+_test)                       A ✓
     │       ├── workspace/
     │       │   ├── AGENTS.md                                A ✓
     │       │   └── merge/                                     (G8)
     │       │       ├── AGENTS.md                            A ✓
-    │       │       ├── merge.go (+_test)                    A
-    │       │       └── state.go (+_test)                    A
+    │       │       ├── merge.go (+_test)                    A ✓
+    │       │       └── state.go (+_test)                    A ✓
     │       ├── frontend/                                      (G9)
     │       │   ├── AGENTS.md                                A ✓
-    │       │   ├── server.go (+_test)                       A
-    │       │   ├── translate.go (+_test)                    A
-    │       │   └── commands.go (+_test)                     A
-    │       ├── server/server.go                             M   (drop HTTP frontend + async_live; wire new modules)
-    │       ├── session/tailer.go                            D
-    │       ├── session/asyncsource.go                       M   (prose-regex spawn parsing deleted)
-    │       ├── session/registry.go                          M   (shim-socket reattach fields)
+    │       │   ├── server.go (+_test)                       A ✓
+    │       │   ├── translate.go (+_test)                    A ✓
+    │       │   └── commands.go (+_test)                     A ✓
+    │       ├── server/server.go                             M ✓ (HTTP frontend + async_live dropped; D-phase: POST /sessions, /commands{,/refresh}, /status{,/refresh}, POST /shutdown and the sentinel poke deleted; routes() table + APIPrefixes)
+    │       ├── session/tailer.go                            D ✓
+    │       ├── sentinel/                                     D ✓ (D-phase: the last poke went; Emacs listens to none)
+    │       ├── protocol/layer2.go                            M ✓ (D-phase: Envelope/L2Frame/~45 *Frame types deleted; only Layer2Version survives)
+    │       ├── protocol/layer1.go                            M ✓ (D-phase: the legacy inbound client-command union deleted; shim-stdio direction kept)
+    │       ├── session/asyncsource.go                       D ✓ (deleted entirely with the async plane, not just its prose parsing)
+    │       ├── registry/registry.go                         M ✓ (shim-socket reattach fields; moved out of session/)
     │       ├── remediation/remediation.go                   M ✓ (prose path)
-    │       └── workspacecmd/workspacecmd.go                 M   (route via SSM + frontend push)
-    ├── frontend-uds.el                                      A   (G10)
-    ├── frontend-state.el                                    A
-    ├── test-frontend-uds.el                                 A
-    ├── test-frontend-state.el                               A
-    ├── sentinel.el                                          M   (status-hook dispatch deleted; may die entirely)
-    ├── test-sentinel.el                                     M
-    ├── status.el                                            M   (counter + fully-stopped-p deleted)
-    ├── test-status.el                                       M
-    ├── workspace.el                                         M   (render-status becomes pushed-state lookup)
-    ├── test-workspace.el                                    M
-    ├── frontend-client.el                                   M   (HTTP poller deleted; delegates to frontend-uds.el)
-    ├── test-frontend-client.el                              M
-    ├── merge-handlers.el                                    M   (producers deleted; conflict UX kept)
-    ├── test-merge-handlers.el                               M
-    ├── install.el                                           M   (managed settings hooks deleted)
-    ├── test-install.el                                      M
+    │       └── workspacecmd/workspacecmd.go                 M ✓ (route via SSM + frontend push)
+    ├── codex.el                                             M ✓ (D-phase: managed hooks + installer + hooks.json doctor deleted)
+    ├── hooks/*-notify.sh                                    D ✓ (D-phase: six orphaned sentinel scripts; prepare-commit-msg-emoji.sh kept)
+    ├── bin/smoke-real-sdk.mjs                               D ✓ (D-phase: unreferenced, and dead against every current protocol)
+    ├── frontend-uds.el                                      A ✓ (G10)
+    ├── frontend-state.el                                    A ✓
+    ├── test-frontend-uds.el                                 A ✓
+    ├── test-frontend-state.el                               A ✓
+    ├── sentinel.el                                          M ✓ (D-phase: dispatch alist + every sentinel READER deleted; the drain rig and the ws-for-dir/load-barrier halves stay)
+    ├── test-sentinel.el                                     M ✓
+    ├── status.el                                            M ✓ (counter + fully-stopped-p deleted)
+    ├── test-status.el                                       M ✓
+    ├── workspace.el                                         M ✓ (render-status becomes pushed-state lookup)
+    ├── test-workspace.el                                    M ✓
+    ├── frontend-client.el                                   M ✓ (HTTP poller deleted; delegates to frontend-uds.el)
+    ├── test-frontend-client.el                              M ✓
+    ├── merge-handlers.el                                    M ✓ (producers deleted; conflict UX kept)
+    ├── test-merge-handlers.el                               M ✓
+    ├── install.el                                           M ✓ (managed settings hooks deleted; D-phase: the whole settings.json hook-array writer went with the codex hook plane)
+    ├── test-install.el                                      M ✓
     ├── webapp/                                                (G11 + stitch S3)
     │   ├── index.html                                       M ✓ (degraded-state banner element)
     │   ├── src/frontend-proto.ts                            A ✓ (hand-typed protojson; no new dep)
@@ -755,15 +761,15 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   └── (src/render.ts, src/wslog.ts, package.json)          (unchanged: render consumes the store model as before; wslog keeps only ClientLogCmd; frontend-proto is hand-typed so no protojson dep)
     ├── launchd/                                               (G12)
     │   ├── AGENTS.md                                        A ✓
-    │   ├── com.agentrepl.shim-store.plist                   A
-    │   └── com.agentrepl.shim-claude-sidecar.plist          A
+    │   ├── com.agentrepl.shim-store.plist                   A ✓
+    │   └── com.agentrepl.shim-claude-sidecar.plist          A ✓
     ├── scripts/
     │   ├── AGENTS.md                                        A ✓
-    │   └── agent-shim-doctor.sh                             A
+    │   └── agent-shim-doctor.sh                             A ✓
     └── testdata/corpus/                                       (G13)
         ├── AGENTS.md                                        A ✓
-        ├── MANIFEST.md                                      A
-        └── <fixtures per the corpus contract>               A
+        ├── MANIFEST.md                                      A ✓
+        └── <fixtures per the corpus contract>               A ✓
 ```
 
 Notes: `proto/gen/` (generated Go/TS stubs via `proto/Makefile`, plus
