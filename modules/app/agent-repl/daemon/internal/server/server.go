@@ -308,7 +308,10 @@ func (s *Server) updateRegistry(id, what string, fn func(*registry.Record)) {
 // migration.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /sessions", s.handleCreateSession)
+	// POST /sessions was DELETED in the D-phase census: both frontends create
+	// sessions over the createSession FrontendCommand (the webapp's bootstrap
+	// /frontend socket, Emacs's UDS link), correlating the new id off the
+	// pushed SessionView. The create CORE (s.CreateSession) is untouched.
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}/stream", s.handleStream)
 	// DELETE /sessions/{id}, POST /sessions/{id}/message, and
@@ -1236,36 +1239,6 @@ func (s *Server) pushSessionView(id string) {
 	s.frontend.PushSessionView(SessionViewFromRecord(rec, pending))
 }
 
-func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	var opts CreateOpts
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil && err.Error() != "EOF" {
-			httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-			return
-		}
-	}
-	id, err := s.CreateSession(r.Context(), opts)
-	if err != nil {
-		var invalid *InvalidCreateError
-		var missing *ResumeTranscriptMissingError
-		switch {
-		case errors.As(err, &invalid):
-			httpError(w, http.StatusBadRequest, invalid.Error())
-		case errors.As(err, &missing):
-			writeResumeTranscriptMissing(w, missing.ResumeID, missing.SearchedPaths)
-		default:
-			s.httpFail(w, r, http.StatusInternalServerError, "%v", err)
-		}
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, s.logf, map[string]string{
-		"session_id": id,
-		"stream_url": fmt.Sprintf("/sessions/%s/stream", id),
-	})
-}
-
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	// SUPERSEDED (S7): the Emacs poller consumes the full list; the webapp
 	// probe only reads presence. It is built entirely off the registry (the
@@ -1433,23 +1406,6 @@ func (s *Server) httpFail(w http.ResponseWriter, r *http.Request, status int, fo
 	msg := fmt.Sprintf(format, args...)
 	s.logf("server: %s %s -> %d: %s", r.Method, r.URL.Path, status, msg)
 	httpError(w, status, msg)
-}
-
-// writeResumeTranscriptMissing hard-fails a create whose --resume target has
-// no transcript in this daemon's config dir. No session is brought up: the
-// body carries a machine-detectable code plus the resume id and every path
-// stat'd so the Emacs client can open an investigation workspace.
-func writeResumeTranscriptMissing(w http.ResponseWriter, resumeID string, searchedPaths []string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"code":           "resume_transcript_missing",
-		"resume_id":      resumeID,
-		"searched_paths": searchedPaths,
-		"error": fmt.Sprintf(
-			"resume target %s has no transcript in this daemon's config dir (searched %s); refusing to start a fresh conversation — the client will open an investigation workspace",
-			resumeID, strings.Join(searchedPaths, ", ")),
-	})
 }
 
 func writeJSON(w http.ResponseWriter, logf func(string, ...any), v any) {

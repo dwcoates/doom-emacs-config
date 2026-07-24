@@ -56,7 +56,7 @@ func TestAddSupportEmitsACreateForEmacs(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 
 	// Act.
 	resp := postAddSupport(t, h, id, `{"command":"status"}`)
@@ -82,7 +82,7 @@ func TestAddSupportUsesTheSessionCwdAsGitRoot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/some/checkout"}`)
+	id := createSession(t, h, `{"cwd":"/some/checkout"}`)
 
 	// Act.
 	postAddSupport(t, h, id, `{"command":"status"}`)
@@ -102,7 +102,7 @@ func TestAddSupportPromptNamesTheSessionConfigDir(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w","config_dir":"/home/u/.claude-chesscom"}`)
+	id := createSession(t, h, `{"cwd":"/w","config_dir":"/home/u/.claude-chesscom"}`)
 
 	// Act.
 	postAddSupport(t, h, id, `{"command":"status"}`)
@@ -141,7 +141,7 @@ func TestAddSupportRefusesAnInvalidCommand(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 
 	// Act.
 	resp := postAddSupport(t, h, id, `{"command":"../../etc/passwd"}`)
@@ -160,7 +160,7 @@ func TestAddSupportRefusesAnEmptyCommand(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 
 	// Act.
 	resp := postAddSupport(t, h, id, `{"command":""}`)
@@ -176,7 +176,7 @@ func TestAddSupportRefusesAMalformedBody(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{"cwd":"/w"}`)
+	id := createSession(t, h, `{"cwd":"/w"}`)
 
 	// Act.
 	resp := postAddSupport(t, h, id, `{not json`)
@@ -192,7 +192,7 @@ func TestAddSupportRefusesASessionWithNoWorkingDirectory(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
 	h := newHarness(t)
-	id := postCreate(t, h, `{}`)
+	id := createSession(t, h, `{}`)
 
 	// Act.
 	resp := postAddSupport(t, h, id, `{"command":"status"}`)
