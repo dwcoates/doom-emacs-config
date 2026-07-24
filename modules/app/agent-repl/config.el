@@ -339,6 +339,14 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
+;; The agent-shim frontend UDS transport + state application (design §10,
+;; G10).  Loaded right after frontend-client: `frontend-uds' owns the
+;; connection/framing/dispatch, `frontend-state' registers the state-bearing
+;; handlers on it (order matters — `frontend-state' calls
+;; `agent-repl--uds-register-handler', defined in `frontend-uds').  These
+;; supersede the sentinel/hook-derived render-status inputs the cutover deletes.
+(agent-repl--load-module "frontend-uds")
+(agent-repl--load-module "frontend-state")
 (agent-repl--load-module "frontend")
 ;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
 ;; view groups workspaces under, persisting via history.el's sexp-file

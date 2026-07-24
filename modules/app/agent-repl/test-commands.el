@@ -672,28 +672,9 @@ reports the interrupt was delivered."
       (agent-repl-interrupt)
       (should (eq (agent-repl--ws-get "test-ws" :agent-state) :done)))))
 
-(ert-deftest agent-repl-cmd-test-interrupt/clears-stop-tracking-when-delivered ()
-  "interrupt clears :stop-received and :pending-subagents when the frontend
-reports the interrupt was delivered.
-The interrupted turn will never see a Stop hook, so leftover tracking
-state from the previous turn must be reset by Emacs."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'gui)
-    (agent-repl--ws-set-stop-received "test-ws" t)
-    (agent-repl--ws-incf-pending-subagents "test-ws")
-    (cl-letf (((symbol-function '+workspace-current-name)
-               (lambda () "test-ws"))
-              ;; Subagents are pending, so the cancel confirmation fires;
-              ;; confirm it so the test exercises the delivered/clearing path.
-              ((symbol-function 'y-or-n-p)
-               (lambda (_prompt) t))
-              ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
-               (lambda (_ws _kind) t))
-              ((symbol-function 'run-at-time)
-               (lambda (&rest _) nil)))
-      (agent-repl-interrupt)
-      (should-not (agent-repl--ws-stop-received-p "test-ws"))
-      (should (= 0 (agent-repl--ws-pending-subagents "test-ws"))))))
+;; The interrupt/clears-stop-tracking test was deleted in the agent-shim
+;; cutover (design §10): `agent-repl-interrupt' no longer clears Stop /
+;; SubagentStop tracking (that hook counter no longer exists).
 
 (ert-deftest agent-repl-cmd-test-interrupt/does-not-mark-done-when-not-delivered ()
   "interrupt does not mark :done when the frontend reports the interrupt
@@ -739,7 +720,7 @@ is consulted, so BODY can assert whether a prompt was raised."
 (ert-deftest agent-repl-cmd-test-interrupt/prompts-and-cancels-when-confirmed ()
   "A workspace with subagents in flight, confirmed at the prompt, is interrupted."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
-    (agent-repl--ws-incf-pending-subagents "test-ws")
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt)
     (should prompted)
     (should (equal dispatched '("test-ws" escape)))))
@@ -747,7 +728,7 @@ is consulted, so BODY can assert whether a prompt was raised."
 (ert-deftest agent-repl-cmd-test-interrupt/aborts-when-declined ()
   "A workspace with subagents, declined at the prompt, is NOT interrupted."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
-    (agent-repl--ws-incf-pending-subagents "test-ws")
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt)
     (should prompted)
     (should-not dispatched)))
@@ -755,7 +736,7 @@ is consulted, so BODY can assert whether a prompt was raised."
 (ert-deftest agent-repl-cmd-test-interrupt/leaves-running-agent-alone-when-declined ()
   "A declined confirmation leaves the agent-state at :thinking."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
-    (agent-repl--ws-incf-pending-subagents "test-ws")
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt)
     (should (eq (agent-repl--ws-get "test-ws" :agent-state) :thinking))))
 
@@ -777,7 +758,7 @@ is consulted, so BODY can assert whether a prompt was raised."
   "With `agent-repl-interrupt-confirm' nil, subagents are interrupted directly."
   (let ((agent-repl-interrupt-confirm nil))
     (agent-repl-cmd-test--with-interrupt-confirm :thinking t
-      (agent-repl--ws-incf-pending-subagents "test-ws")
+      (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
       (agent-repl-interrupt)
       (should-not prompted)
       (should (equal dispatched '("test-ws" escape))))))
@@ -785,7 +766,7 @@ is consulted, so BODY can assert whether a prompt was raised."
 (ert-deftest agent-repl-cmd-test-interrupt/no-confirm-arg-suppresses-prompt ()
   "Passing NO-CONFIRM non-nil interrupts running subagents without prompting."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
-    (agent-repl--ws-incf-pending-subagents "test-ws")
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt "test-ws" t)
     (should-not prompted)
     (should (equal dispatched '("test-ws" escape)))))
@@ -816,7 +797,7 @@ is consulted, so BODY can assert whether a prompt was raised."
   "A workspace with subagents in the set consults `y-or-n-p' exactly once."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "run-ws" :thinking)
-    (agent-repl--ws-incf-pending-subagents "run-ws")
+    (agent-repl--ws-put "run-ws" :pushed-render-state :idle-async)
     (agent-repl--ws-set-agent-state "idle-ws" :idle)
     (let ((prompt-count 0))
       (cl-letf (((symbol-function 'y-or-n-p)
@@ -828,7 +809,7 @@ is consulted, so BODY can assert whether a prompt was raised."
   "A nil `agent-repl-interrupt-confirm' returns t without prompting."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "run-ws" :thinking)
-    (agent-repl--ws-incf-pending-subagents "run-ws")
+    (agent-repl--ws-put "run-ws" :pushed-render-state :idle-async)
     (let ((agent-repl-interrupt-confirm nil)
           (prompted nil))
       (cl-letf (((symbol-function 'y-or-n-p)
@@ -858,16 +839,18 @@ is consulted, so BODY can assert whether a prompt was raised."
     (agent-repl--ws-set-agent-state "idle-ws" :idle)
     (should-not (agent-repl--agent-thinking-p "idle-ws"))))
 
-(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/nonzero-counter-is-running ()
-  "A workspace with a non-zero `:pending-subagents' counter reads as running subagents."
+(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/idle-async-is-running ()
+  "A workspace whose daemon-pushed render-state is `:idle-async' reads as
+having detached background work in flight (re-keyed post-cutover)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "run-ws")
+    (agent-repl--ws-put "run-ws" :pushed-render-state :idle-async)
     (should (agent-repl--agent-subagents-running-p "run-ws"))))
 
-(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/thinking-without-subagents-is-not-running ()
-  "A `:thinking' workspace with a zero subagent counter does NOT read as running subagents."
+(ert-deftest agent-repl-cmd-test-agent-subagents-running-p/thinking-is-not-running ()
+  "A workspace whose pushed render-state is `:thinking' does NOT read as
+having detached background work (the main turn is not `:idle-async')."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "run-ws" :thinking)
+    (agent-repl--ws-put "run-ws" :pushed-render-state :thinking)
     (should-not (agent-repl--agent-subagents-running-p "run-ws"))))
 
 ;;;; ---- agent-repl-interrupt: undo of an unanswered send ----
@@ -5458,7 +5441,7 @@ even if downstream teardown errors before the redundant save fires."
 for that workspace — pins the shared render-status precedence through
 `SPC p p' rather than collapsing every live ws to a single 🟢."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-live" :agent-state :thinking)
+    (agent-repl--ws-put "ws-live" :pushed-render-state :thinking)
     (let ((summary '(:workspace-name "ws-live" :live-p t
                      :last-killed-at (1 2 3) :has-state t)))
       (should (equal (agent-repl--picker-status-emoji summary)
@@ -5469,8 +5452,7 @@ for that workspace — pins the shared render-status precedence through
 Pins the shared repl-state precedence (💥 wins over :agent-state)
 through the picker's mirror path."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-conflict" :agent-state :thinking)
-    (agent-repl--ws-put "ws-conflict" :repl-state :merge-conflict)
+    (agent-repl--ws-put "ws-conflict" :pushed-render-state :merge-conflict)
     (let ((summary '(:workspace-name "ws-conflict" :live-p t
                      :has-state t)))
       (should (equal (agent-repl--picker-status-emoji summary) "💥")))))
@@ -5481,7 +5463,7 @@ data on the summary — when `:workspace-name' is set the picker reads
 the state glyph from the cached ws plist and never consults the
 non-live 📁 fallback branch."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws-respawned" :agent-state :done)
+    (agent-repl--ws-put "ws-respawned" :pushed-render-state :done)
     (let ((summary '(:workspace-name "ws-respawned"
                      :last-killed-at (1 2 3))))
       (should (equal (agent-repl--picker-status-emoji summary)
@@ -5719,7 +5701,7 @@ on-disk state file so dead workspaces still show real dates."
 and includes the workspace name."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "wsx" :project-dir "/tmp/wsx")
-    (agent-repl--ws-put "wsx" :agent-state :idle)
+    (agent-repl--ws-put "wsx" :pushed-render-state :idle)
     (let ((display (substring-no-properties
                     (car (car (agent-repl--build-workspace-picker-candidates
                                '(("wsx" . "/tmp/wsx"))))))))

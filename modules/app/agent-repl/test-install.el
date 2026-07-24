@@ -124,17 +124,9 @@
              #'test-install--json-with-all-hooks))
     (should (agent-repl--hooks-installed-p))))
 
-(ert-deftest agent-repl-test-hooks-installed-missing-stop ()
-  "Returns nil when Stop is absent."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'Stop))))
-    (should-not (agent-repl--hooks-installed-p))))
-
-(ert-deftest agent-repl-test-hooks-installed-missing-session-start ()
-  "Returns nil when SessionStart is absent (post-e3d7451 dealbreaker)."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'SessionStart))))
-    (should-not (agent-repl--hooks-installed-p))))
+;; The missing-Stop / missing-SessionStart hooks-installed-p tests were
+;; deleted in the agent-shim cutover (design §10): those hooks are no
+;; longer managed, so `agent-repl--managed-hooks' does not gate on them.
 
 (ert-deftest agent-repl-test-hooks-installed-missing-notification ()
   "Returns nil when the permission Notification hook is absent."
@@ -330,42 +322,9 @@ entry would silently revert to the lagging Notification path."
              (lambda (_issues) nil)))
     (should-not (agent-repl--doctor-issues))))
 
-(ert-deftest agent-repl-test-doctor-missing-stop-errors ()
-  "Missing Stop registration is error-level (workspaces stuck in :thinking)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'Stop)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "Stop hook not registered"))
-      (should (eq 'error
-                  (car (test-install--doctor-find
-                        issues "Stop hook not registered")))))))
-
-(ert-deftest agent-repl-test-doctor-missing-session-start-errors ()
-  "Missing SessionStart is error-level (readiness never fires, placeholder stuck)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'SessionStart)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "SessionStart"))
-      (should (eq 'error
-                  (car (test-install--doctor-find issues "SessionStart")))))))
-
-(ert-deftest agent-repl-test-doctor-missing-user-prompt-submit-warns ()
-  "Missing UserPromptSubmit is warn-level (Emacs do-send still sets :thinking)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'UserPromptSubmit)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "UserPromptSubmit"))
-      (should (eq 'warn
-                  (car (test-install--doctor-find issues "UserPromptSubmit")))))))
+;; The missing-Stop / SessionStart / UserPromptSubmit doctor-severity
+;; tests were deleted in the agent-shim cutover (design §10): those hooks
+;; are no longer managed, so doctor no longer reports on them.
 
 (ert-deftest agent-repl-test-doctor-missing-notification-warns ()
   "Missing Notification is warn-level (❓ badge absent but module works)."
@@ -379,45 +338,9 @@ entry would silently revert to the lagging Notification path."
       (should (eq 'warn
                   (car (test-install--doctor-find issues "Notification")))))))
 
-(ert-deftest agent-repl-test-doctor-missing-stop-failure-warns ()
-  "Missing StopFailure is warn-level (the :stop-failed state never appears,
-but the core REPL loop still works)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'StopFailure)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "StopFailure"))
-      (should (eq 'warn
-                  (car (test-install--doctor-find issues "StopFailure")))))))
-
-(ert-deftest agent-repl-test-doctor-missing-subagent-start-warns ()
-  "Missing SubagentStart is warn-level (Stop gating reduces to legacy
-behavior — Stop transitions immediately even with subagents in flight)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'SubagentStart)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "SubagentStart"))
-      (should (eq 'warn
-                  (car (test-install--doctor-find issues "SubagentStart")))))))
-
-(ert-deftest agent-repl-test-doctor-missing-subagent-stop-warns ()
-  "Missing SubagentStop is warn-level (counter would never decrement, so
-in practice Stop would still drive transitions correctly when there are
-no SubagentStart fires either; degraded but not broken)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'SubagentStop)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "SubagentStop"))
-      (should (eq 'warn
-                  (car (test-install--doctor-find issues "SubagentStop")))))))
+;; The missing-StopFailure / SubagentStart / SubagentStop doctor-severity
+;; tests were deleted in the agent-shim cutover (design §10): those hooks
+;; are no longer managed.
 
 (ert-deftest agent-repl-test-doctor-settings-skip-short-circuits-script-checks ()
   "When settings.json is missing, script-file checks are not performed."
@@ -456,15 +379,12 @@ SCRIPT-NAME with `:missing' means leave that script absent."
       (delete-directory tmpdir t))))
 
 (ert-deftest agent-repl-test-doctor-script-missing-errors ()
-  "A missing installed script emits an error-level issue."
+  "A missing installed script emits an error-level issue.
+Targets a MANAGED script (permission-notify.sh) — post-cutover the
+status scripts are no longer managed, so doctor only checks the two
+permission scripts."
   (test-install--with-fake-hooks-dir
-   `(("stop-notify.sh" . :missing)
-     ("stop-failure-notify.sh" . (#o755 . "x"))
-     ("subagent-start-notify.sh" . (#o755 . "x"))
-     ("subagent-stop-notify.sh" . (#o755 . "x"))
-     ("prompt-submit-notify.sh" . (#o755 . "x"))
-     ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x"))
+   `(("permission-notify.sh" . :missing)
      ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
@@ -474,20 +394,14 @@ SCRIPT-NAME with `:missing' means leave that script absent."
                 (lambda (_) nil)))
        (let* ((issues (agent-repl--doctor-issues))
               (found (test-install--doctor-find
-                      issues "missing:.*stop-notify\\.sh")))
+                      issues "missing:.*permission-notify\\.sh")))
          (should found)
          (should (eq 'error (car found))))))))
 
 (ert-deftest agent-repl-test-doctor-script-not-executable-errors ()
   "A non-executable installed script emits an error-level issue."
   (test-install--with-fake-hooks-dir
-   `(("stop-notify.sh" . (#o644 . "x"))
-     ("stop-failure-notify.sh" . (#o755 . "x"))
-     ("subagent-start-notify.sh" . (#o755 . "x"))
-     ("subagent-stop-notify.sh" . (#o755 . "x"))
-     ("prompt-submit-notify.sh" . (#o755 . "x"))
-     ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x"))
+   `(("permission-notify.sh" . (#o644 . "x"))
      ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
@@ -503,13 +417,7 @@ SCRIPT-NAME with `:missing' means leave that script absent."
 (ert-deftest agent-repl-test-doctor-script-drift-warns ()
   "A drifted installed script emits a warn-level issue."
   (test-install--with-fake-hooks-dir
-   `(("stop-notify.sh" . (#o755 . "x"))
-     ("stop-failure-notify.sh" . (#o755 . "x"))
-     ("subagent-start-notify.sh" . (#o755 . "x"))
-     ("subagent-stop-notify.sh" . (#o755 . "x"))
-     ("prompt-submit-notify.sh" . (#o755 . "x"))
-     ("session-start-notify.sh" . (#o755 . "x"))
-     ("permission-notify.sh" . (#o755 . "x"))
+   `(("permission-notify.sh" . (#o755 . "x"))
      ("permission-request-notify.sh" . (#o755 . "x")))
    (lambda (_tmp)
      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
@@ -518,7 +426,7 @@ SCRIPT-NAME with `:missing' means leave that script absent."
                ((symbol-function 'agent-repl--script-drift-p)
                 (lambda (cmd)
                   (equal (file-name-nondirectory cmd)
-                         "stop-notify.sh"))))
+                         "permission-notify.sh"))))
        (let* ((issues (agent-repl--doctor-issues))
               (found (test-install--doctor-find issues "drift")))
          (should found)
