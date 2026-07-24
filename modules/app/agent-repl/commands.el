@@ -614,7 +614,7 @@ stay unique even when two queued messages share a preview."
 With exactly one queued message, returns it directly; with several,
 prompts via `completing-read' (showing each content preview); with none,
 signals `user-error' naming ACTION-DESC and WS.  Returns the selected
-item plist (see `agent-repl--frontend-session-queue')."
+item plist (see `agent-repl--ws-queued-messages')."
   (let ((items (agent-repl--ws-queued-messages ws)))
     (pcase items
       ('nil (user-error "agent-repl: no queued messages to %s in workspace '%s'"

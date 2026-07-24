@@ -35,6 +35,12 @@ type AgentShimConfig struct {
 	Lifecycle WorkspaceLifecycle
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
+	// SessionCommands is the late-bound daemon-core surface (session
+	// create/delete + DaemonView) the command handler and snapshot provider
+	// need. Required: main injects a *SessionCommandBinding and calls SetTarget
+	// once the *Server exists (WireAgentShim runs first, so the Server does not
+	// exist yet here — hence the late-bind holder).
+	SessionCommands SessionCommands
 	// Resyncer replays a workspace's retained conversation deltas on a frontend
 	// resync (design §5.4). Nil-safe: a nil Resyncer makes Resync a documented
 	// no-op (the server still re-sends the StateSnapshot independently).
@@ -112,6 +118,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs an SSM")
 	case cfg.MergeDirs == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a MergeDirResolver")
+	case cfg.SessionCommands == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a SessionCommands binding")
 	}
 	mgr := cfg.SSM
 
@@ -120,14 +128,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, logf)
 	if err != nil {
 		return nil, err
 	}
 
 	srv := frontend.New(frontend.Config{
 		Logf:    logf,
-		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions},
+		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, daemon: cfg.SessionCommands},
 		Handler: handler,
 	})
 

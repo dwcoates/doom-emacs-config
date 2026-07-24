@@ -35,6 +35,9 @@
 ;; `agent-repl--latch-and-maybe-fire-loaded' lives in sentinel.el; both load
 ;; as part of the same module, so the symbol is resolved at call time.
 (declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
+;; `agent-repl--frontend-note-boot-id' lives in frontend-client.el (it owns the
+;; reattach give-up state the boot-id change resets); resolved at call time.
+(declare-function agent-repl--frontend-note-boot-id "frontend-client" (boot-id))
 
 ;;;; ---- State-transition hook -------------------------------------------
 
@@ -191,20 +194,37 @@ only the first `WorkspaceState' push arms the latch.  Loud-logged.  See
   "Apply a `StateSnapshot' frame SNAPSHOT (a plist) — full resync.
 Handler for the `snapshot' oneof arm.  Applies every `WorkspaceState' in
 the snapshot's `:workspaces' list via
-`agent-repl--frontend-apply-workspace-state'.  The `:sessions' and
-`:catalogs' arrays are the responsibility of the SessionView / TaskCatalog
-handlers (registered by other modules at stitch) and are logged but not
-applied here.  Returns the count of workspace states applied."
+`agent-repl--frontend-apply-workspace-state', REBUILDS the SessionView
+store wholesale from `:sessions' (the daemon's full roster, terminal
+sessions included — a wholesale rebuild drops entries a bounced daemon no
+longer knows, unlike an upsert), and applies `:daemon' (DaemonView) for
+boot detection.  The `:catalogs' array is the TaskCatalog handler's
+responsibility and is logged but not applied here.  Returns the count of
+workspace states applied.
+
+On the scoped per-session webapp connection the daemon omits `:daemon'
+\(and catalogs); a nil `:daemon' is therefore skipped, not an error.  This
+handler runs on the UNSCOPED Emacs connection, which receives all of them."
   (let ((workspaces (plist-get snapshot :workspaces))
         (sessions (plist-get snapshot :sessions))
-        (catalogs (plist-get snapshot :catalogs)))
+        (catalogs (plist-get snapshot :catalogs))
+        (daemon (plist-get snapshot :daemon)))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d catalog(s) (states applied here; sessions/catalogs deferred to their handlers)"
-                     (length workspaces) (length sessions) (length catalogs))
+                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d catalog(s), daemon=%S (catalogs deferred to their handler)"
+                     (length workspaces) (length sessions) (length catalogs)
+                     (and daemon t))
+    ;; Rebuild the session roster from scratch: the snapshot is authoritative,
+    ;; so a session absent from it (a bounced daemon never heard of) must not
+    ;; linger in the store where the orphan/live-p reads would still see it.
+    (clrhash agent-repl--frontend-session-views)
+    (dolist (view sessions)
+      (agent-repl--frontend-apply-session-view view))
     (dolist (ws-state workspaces)
       (agent-repl--frontend-apply-workspace-state ws-state))
-    (agent-repl--log nil "frontend-apply-snapshot: applied %d workspace state(s)"
-                     (length workspaces))
+    (when daemon
+      (agent-repl--frontend-apply-daemon-view daemon))
+    (agent-repl--log nil "frontend-apply-snapshot: applied %d workspace state(s), %d session(s)"
+                     (length workspaces) (length sessions))
     (length workspaces)))
 
 ;;;; ---- DegradedNotice surfacing ----------------------------------------
@@ -235,6 +255,87 @@ Fails loudly on a missing/blank `component' (invariant violation)."
       (message "agent-repl DEGRADED: %s — %s" component reason))
     recovered))
 
+;;;; ---- SessionView store -----------------------------------------------
+;;
+;; The daemon pushes a `SessionView' when a session is created/deleted (and
+;; carries the full roster — terminal sessions included — in the connect
+;; snapshot's `:sessions').  This is the pushed-frame replacement for the
+;; Emacs-side GET /sessions poller: the session-CRUD reads that used to hit
+;; the daemon (live-p, the create→id correlation, turn-active gating, orphan
+;; reap roster) key off THIS store instead.  Keyed by session id; each value
+;; is the decoded SessionView plist.
+
+(defvar agent-repl--frontend-session-views (make-hash-table :test 'equal)
+  "Hash of session-id -> decoded `SessionView' plist (pushed-frame roster).
+Populated by `agent-repl--frontend-apply-session-view' (per-session pushes)
+and rebuilt wholesale from the connect snapshot's `:sessions'.  The single
+source of truth for daemon session metadata now that Emacs no longer polls
+GET /sessions for it.")
+
+(defun agent-repl--frontend-session-view (session-id)
+  "Return the stored `SessionView' plist for SESSION-ID, or nil when unknown."
+  (and session-id (gethash session-id agent-repl--frontend-session-views)))
+
+(defun agent-repl--frontend-session-views-all ()
+  "Return every stored `SessionView' plist (the full known roster)."
+  (hash-table-values agent-repl--frontend-session-views))
+
+(defun agent-repl--frontend-live-session-id-for-cwd (cwd)
+  "Return the id of a NON-TERMINAL stored SessionView whose workspace is CWD.
+The daemon supersedes older sessions on the same transcript, so there is
+at most one live session per cwd; nil when none is known yet.  This is how
+`createSession' correlates its (ack-receipt-only) command to the id the
+daemon delivers on the pushed SessionView."
+  (catch 'found
+    (maphash (lambda (id view)
+               (when (and (equal (plist-get view :workspace) cwd)
+                          (not (eq (plist-get view :terminal) t)))
+                 (throw 'found id)))
+             agent-repl--frontend-session-views)
+    nil))
+
+(defun agent-repl--frontend-store-session-view (view)
+  "Upsert VIEW (a decoded `SessionView' plist) into the store, keyed by id.
+A view with no `:sessionId' is an invariant violation and fails loudly
+\(No-Silent-Fallbacks) — the daemon always stamps the id.  Returns the id."
+  (let ((id (plist-get view :sessionId)))
+    (when (or (null id) (and (stringp id) (string-empty-p id)))
+      (agent-repl--log nil
+                       "frontend-store-session-view: MISSING sessionId in %S — no fallback"
+                       view)
+      (error "agent-repl frontend: SessionView missing sessionId"))
+    (puthash id view agent-repl--frontend-session-views)
+    id))
+
+(defun agent-repl--frontend-apply-session-view (view)
+  "Apply a `SessionView' frame VIEW (a plist).  Handler for `sessionView'.
+Upserts it into `agent-repl--frontend-session-views' and logs the parity
+fields the reattach/orphan/turn-active reads consume.  Returns the id."
+  (let ((id (agent-repl--frontend-store-session-view view)))
+    (agent-repl--log (plist-get view :workspace)
+                     "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s"
+                     id (plist-get view :workspace) (plist-get view :terminal)
+                     (or (plist-get view :claudeSessionId) "nil")
+                     (or (plist-get view :pendingPermissions) "0"))
+    id))
+
+;;;; ---- DaemonView (boot/version) ---------------------------------------
+
+(defun agent-repl--frontend-apply-daemon-view (view)
+  "Apply a `DaemonView' frame VIEW (a plist).  Handler for `daemonView'.
+Routes the daemon `:bootId' into `agent-repl--frontend-note-boot-id' — the
+pushed-frame replacement for the boot id the reattach sweep used to read
+off the GET /sessions envelope, so a daemon-instance change still resets
+the reattach give-ups.  Returns the boot id."
+  (let ((boot-id (plist-get view :bootId)))
+    (agent-repl--log nil
+                     "frontend-apply-daemon-view: boot-id=%s protocol=%s version=%s mtime-ms=%s"
+                     (or boot-id "nil") (plist-get view :protocolVersion)
+                     (plist-get view :daemonVersion)
+                     (or (plist-get view :daemonBinaryMtimeMs) "nil"))
+    (agent-repl--frontend-note-boot-id boot-id)
+    boot-id))
+
 ;;;; ---- Handler registration --------------------------------------------
 ;;
 ;; Loaded after `frontend-uds.el' (config.el load order / the test files),
@@ -246,6 +347,10 @@ Fails loudly on a missing/blank `component' (invariant violation)."
                                   #'agent-repl--frontend-apply-snapshot)
 (agent-repl--uds-register-handler "degradedNotice"
                                   #'agent-repl--frontend-apply-degraded-notice)
+(agent-repl--uds-register-handler "sessionView"
+                                  #'agent-repl--frontend-apply-session-view)
+(agent-repl--uds-register-handler "daemonView"
+                                  #'agent-repl--frontend-apply-daemon-view)
 
 ;;;; ---- Module init: open the frontend UDS link -------------------------
 ;;

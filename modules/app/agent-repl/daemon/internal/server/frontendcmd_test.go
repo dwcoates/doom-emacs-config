@@ -81,10 +81,27 @@ func (f *fakeLifecycle) Open(_ context.Context, ws string) error {
 	return nil
 }
 
+// fakeSessionCmds records createSession/deleteSession routing and can inject an
+// error (the SessionCreateDeleter dispatch fake).
+type fakeSessionCmds struct {
+	created []CreateOpts
+	deleted []string
+	err     error
+}
+
+func (f *fakeSessionCmds) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
+	f.created = append(f.created, opts)
+	return "s_test", f.err
+}
+func (f *fakeSessionCmds) DeleteSession(id string) error {
+	f.deleted = append(f.deleted, id)
+	return f.err
+}
+
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -166,7 +183,7 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, nil)
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -180,8 +197,64 @@ func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 
 func TestNewCommandHandlerRejectsNilDeps(t *testing.T) {
 	// Arrange / Act / Assert
-	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, nil); err == nil {
+	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil); err == nil {
 		t.Fatal("want error for nil PromptRouter")
+	}
+}
+
+func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
+	// Arrange / Act / Assert — the session-lifecycle binding is required.
+	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil); err == nil {
+		t.Fatal("want error for nil SessionCreateDeleter")
+	}
+}
+
+func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
+	// Arrange
+	sc := &fakeSessionCmds{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act
+	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"})
+	// Assert — the create routes with its opts, never a silent drop.
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sc.created) != 1 || sc.created[0].CWD != "/w" || sc.created[0].Model != "haiku" {
+		t.Fatalf("created = %v", sc.created)
+	}
+}
+
+func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
+	// Arrange
+	sc := &fakeSessionCmds{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act
+	err = h.DeleteSession(context.Background(), "/w", "r1", &frontendv1.DeleteSessionCmd{SessionId: "s_9"})
+	// Assert
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sc.deleted) != 1 || sc.deleted[0] != "s_9" {
+		t.Fatalf("deleted = %v", sc.deleted)
+	}
+}
+
+func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
+	// Arrange — the session core fails.
+	sc := &fakeSessionCmds{err: errors.New("bring up shim failed")}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act / Assert — the error is surfaced, never swallowed.
+	if got := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"}); got == nil {
+		t.Fatal("want the create error surfaced")
 	}
 }
 
@@ -198,11 +271,12 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSM:       openTestSSM(t, reg),
-		Prompts:   &fakePrompts{},
-		MergeDirs: fakeMergeDirs{},
-		Lifecycle: &fakeLifecycle{},
-		Sessions:  fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
+		SSM:             openTestSSM(t, reg),
+		Prompts:         &fakePrompts{},
+		MergeDirs:       fakeMergeDirs{},
+		Lifecycle:       &fakeLifecycle{},
+		Sessions:        fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
+		SessionCommands: &SessionCommandBinding{},
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -268,10 +342,11 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	// Arrange
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSM:       openTestSSM(t, reg),
-		Prompts:   &fakePrompts{},
-		MergeDirs: fakeMergeDirs{},
-		Lifecycle: &fakeLifecycle{},
+		SSM:             openTestSSM(t, reg),
+		Prompts:         &fakePrompts{},
+		MergeDirs:       fakeMergeDirs{},
+		Lifecycle:       &fakeLifecycle{},
+		SessionCommands: &SessionCommandBinding{},
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
