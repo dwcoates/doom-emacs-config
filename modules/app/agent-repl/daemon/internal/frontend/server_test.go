@@ -177,6 +177,51 @@ func TestServeWSSnapshotThenCommandAck(t *testing.T) {
 	}
 }
 
+// TestServeWSScopedCommandStrictRoutesCommand proves the per-session /stream
+// surface (a SCOPED connection) accepts an inbound FrontendCommand protojson
+// frame with a nil translator (command-strict) and routes it through the SAME
+// shared handler, delivering the ack — so the webapp can go command-strict.
+func TestServeWSScopedCommandStrictRoutesCommand(t *testing.T) {
+	// Arrange.
+	s, h := newTestServer(t, 0)
+	defer s.Close()
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.ServeWSScoped(w, r, Scope{Workspace: "ws"}, nil) // nil translator = command-strict
+	}))
+	defer httpSrv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Act: snapshot first, then a FrontendCommand protojson frame.
+	if snap := readWSFrame(t, conn); snap.GetSnapshot() == nil {
+		t.Fatalf("first WS frame was not a snapshot: %v", snap)
+	}
+	cmdData, err := protojson.Marshal(&frontendv1.FrontendCommand{
+		Workspace: "ws", RequestId: "cscoped",
+		Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("marshal cmd: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, cmdData); err != nil {
+		t.Fatalf("ws write: %v", err)
+	}
+	ackFrame := readWSFrame(t, conn)
+
+	// Assert.
+	if ackFrame.GetCommandAck().GetRequestId() != "cscoped" {
+		t.Errorf("ack request_id = %q, want cscoped", ackFrame.GetCommandAck().GetRequestId())
+	}
+	if h.called != "submit_prompt" {
+		t.Errorf("handler called %q, want submit_prompt", h.called)
+	}
+}
+
 // --- Broadcast reaches a connected client -----------------------------------
 
 func TestBroadcastReachesClient(t *testing.T) {

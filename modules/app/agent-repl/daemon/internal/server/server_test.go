@@ -17,6 +17,8 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
@@ -682,83 +684,96 @@ func TestUnknownSessionRoutesReturn404(t *testing.T) {
 	}
 }
 
-// --- streamCommandTranslator (unit) ---------------------------------------
+// --- frontendCommandTranslator (command-strict, S9) ------------------------
 
-func TestStreamTranslatorUserMessageBecomesSubmitPrompt(t *testing.T) {
-	// Arrange
+// TestFrontendCommandTranslatorRoutesEachCommand proves every FrontendCommand
+// the webapp sends over its /stream WebSocket decodes to the SAME command the
+// Emacs UDS surface routes: submit/interrupt/permission-answer/create/delete/
+// resync/shutdown all pass through the command-strict translator unchanged.
+func TestFrontendCommandTranslatorRoutesEachCommand(t *testing.T) {
 	h := newHarness(t)
-	tr := h.srv.streamCommandTranslator("/w")
-	// Act
-	cmd, dispatch, err := tr([]byte(`{"type":"user-message","request_id":"r1","content":"hello"}`))
-	// Assert
-	if err != nil || !dispatch {
-		t.Fatalf("translate = (dispatch %v, err %v), want dispatch true no err", dispatch, err)
+	tr := h.srv.frontendCommandTranslator("/w")
+	tests := []struct {
+		name string
+		cmd  *frontendv1.FrontendCommand
+		ok   func(*frontendv1.FrontendCommand) bool
+	}{
+		{"submit", &frontendv1.FrontendCommand{RequestId: "r1", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: "hi"}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetSubmitPrompt().GetText() == "hi" }},
+		{"interrupt", &frontendv1.FrontendCommand{RequestId: "r2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{Hard: true}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetInterrupt().GetHard() }},
+		{"permission-answer", &frontendv1.FrontendCommand{RequestId: "r3", Command: &frontendv1.FrontendCommand_PermissionAnswer{PermissionAnswer: &frontendv1.PermissionAnswerCmd{PermissionRequestId: "perm-1", Allow: true}}}, func(c *frontendv1.FrontendCommand) bool {
+			return c.GetPermissionAnswer().GetPermissionRequestId() == "perm-1" && c.GetPermissionAnswer().GetAllow()
+		}},
+		{"create", &frontendv1.FrontendCommand{RequestId: "r4", Command: &frontendv1.FrontendCommand_CreateSession{CreateSession: &frontendv1.CreateSessionCmd{Cwd: "/w"}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetCreateSession().GetCwd() == "/w" }},
+		{"delete", &frontendv1.FrontendCommand{RequestId: "r5", Command: &frontendv1.FrontendCommand_DeleteSession{DeleteSession: &frontendv1.DeleteSessionCmd{SessionId: "s_9"}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetDeleteSession().GetSessionId() == "s_9" }},
+		{"resync", &frontendv1.FrontendCommand{RequestId: "r6", Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{FromSeq: 5}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetResync().GetFromSeq() == 5 }},
+		{"shutdown", &frontendv1.FrontendCommand{RequestId: "r7", Command: &frontendv1.FrontendCommand_Shutdown{Shutdown: &frontendv1.ShutdownCmd{}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetShutdown() != nil }},
 	}
-	sp := cmd.GetSubmitPrompt()
-	if sp == nil || sp.GetText() != "hello" {
-		t.Fatalf("command = %+v, want a submit_prompt carrying 'hello'", cmd)
-	}
-	if cmd.GetWorkspace() != "/w" || cmd.GetRequestId() != "r1" {
-		t.Errorf("command ws/request = %q/%q, want /w/r1", cmd.GetWorkspace(), cmd.GetRequestId())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			raw, err := protojson.Marshal(tc.cmd)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			// Act.
+			got, dispatch, terr := tr(raw)
+			// Assert.
+			if terr != nil || !dispatch {
+				t.Fatalf("translate = (dispatch %v, err %v), want dispatch true no err", dispatch, terr)
+			}
+			if !tc.ok(got) {
+				t.Fatalf("command routed to the wrong arm: %+v", got)
+			}
+		})
 	}
 }
 
-func TestStreamTranslatorInterrupt(t *testing.T) {
+func TestFrontendCommandTranslatorStampsScopedWorkspace(t *testing.T) {
+	// Arrange — a command that omits the workspace (the URL already scopes it).
 	h := newHarness(t)
-	cmd, dispatch, err := h.srv.streamCommandTranslator("/w")([]byte(`{"type":"interrupt","request_id":"r1"}`))
-	if err != nil || !dispatch || cmd.GetInterrupt() == nil {
-		t.Fatalf("translate interrupt = (%+v, %v, %v)", cmd, dispatch, err)
-	}
-}
-
-func TestStreamTranslatorPermissionDecisionAllow(t *testing.T) {
-	h := newHarness(t)
-	raw := `{"type":"permission-decision","request_id":"perm-1","decision":{"behavior":"allow"}}`
-	cmd, dispatch, err := h.srv.streamCommandTranslator("/w")([]byte(raw))
-	if err != nil || !dispatch {
-		t.Fatalf("translate = (dispatch %v, err %v)", dispatch, err)
-	}
-	pa := cmd.GetPermissionAnswer()
-	if pa == nil || !pa.GetAllow() || pa.GetPermissionRequestId() != "perm-1" {
-		t.Fatalf("permission answer = %+v, want allow with request id perm-1", pa)
-	}
-}
-
-func TestStreamTranslatorPermissionDecisionDenyCarriesMessage(t *testing.T) {
-	h := newHarness(t)
-	raw := `{"type":"permission-decision","request_id":"perm-1","decision":{"behavior":"deny","message":"no"}}`
-	cmd, _, err := h.srv.streamCommandTranslator("/w")([]byte(raw))
+	raw, err := protojson.Marshal(&frontendv1.FrontendCommand{RequestId: "r1", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}})
 	if err != nil {
-		t.Fatalf("translate: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	pa := cmd.GetPermissionAnswer()
-	if pa.GetAllow() || pa.GetDenyMessage() != "no" {
-		t.Fatalf("deny answer = %+v, want allow=false with deny message 'no'", pa)
+
+	// Act.
+	cmd, _, terr := h.srv.frontendCommandTranslator("/w")(raw)
+
+	// Assert — the scoped workspace is stamped on.
+	if terr != nil {
+		t.Fatalf("translate: %v", terr)
+	}
+	if cmd.GetWorkspace() != "/w" {
+		t.Fatalf("workspace = %q, want the scoped /w stamped on", cmd.GetWorkspace())
 	}
 }
 
-func TestStreamTranslatorSupersededCommandIsALoudNoOp(t *testing.T) {
+func TestFrontendCommandTranslatorKeepsExplicitWorkspace(t *testing.T) {
+	// Arrange — a command that names its own workspace.
 	h := newHarness(t)
-	cmd, dispatch, err := h.srv.streamCommandTranslator("/w")([]byte(`{"type":"set-model","request_id":"r1","model":"opus"}`))
+	raw, err := protojson.Marshal(&frontendv1.FrontendCommand{Workspace: "/other", RequestId: "r1", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}})
 	if err != nil {
-		t.Fatalf("translate: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	if dispatch || cmd != nil {
-		t.Fatalf("set-model should be a no-op, got (dispatch %v, cmd %+v)", dispatch, cmd)
+
+	// Act.
+	cmd, _, terr := h.srv.frontendCommandTranslator("/w")(raw)
+
+	// Assert — an explicit workspace is not overwritten by the scope.
+	if terr != nil {
+		t.Fatalf("translate: %v", terr)
+	}
+	if cmd.GetWorkspace() != "/other" {
+		t.Fatalf("workspace = %q, want the explicit /other preserved", cmd.GetWorkspace())
 	}
 }
 
-func TestStreamTranslatorClientLogIsHandledInternally(t *testing.T) {
+func TestFrontendCommandTranslatorMalformedFrameErrors(t *testing.T) {
+	// Arrange / Act.
 	h := newHarness(t)
-	_, dispatch, err := h.srv.streamCommandTranslator("/w")([]byte(`{"type":"client-log","level":"warn","message":"x"}`))
-	if err != nil || dispatch {
-		t.Fatalf("client-log = (dispatch %v, err %v), want handled internally", dispatch, err)
-	}
-}
+	_, _, err := h.srv.frontendCommandTranslator("/w")([]byte(`{not json`))
 
-func TestStreamTranslatorMalformedFrameErrors(t *testing.T) {
-	h := newHarness(t)
-	_, _, err := h.srv.streamCommandTranslator("/w")([]byte(`{not json`))
+	// Assert — a malformed frame surfaces an error so the read loop logs it.
 	if err == nil {
 		t.Fatal("a malformed frame must surface an error so the read loop logs it")
 	}
