@@ -59,6 +59,7 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
       shimAttached: true,
       claudeSessionId: "",
       cwd: "",
+      configDir: "",
       ...over,
     },
   };
@@ -322,6 +323,37 @@ describe("ingest conversation-items", () => {
     expect((store.state.items[0] as ToolItem).result?.content).toBe("ok");
   });
 
+  it("preserves the call's name and input when the empty-named result item merges", () => {
+    // Arrange — the tool_use card (name + input), then the daemon's result
+    // item, which carries an empty toolName and no input by contract.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ toolName: "Bash", input: { command: "ls" }, inputDone: true })])]);
+    // Act
+    store.ingest([
+      itemsEffect([toolItem({ toolName: "", inputDone: true, result: { isError: false, content: "ok" } })]),
+    ]);
+    // Assert — one card that kept its name + input and gained the result.
+    expect(store.state.items).toHaveLength(1);
+    const merged = store.state.items[0] as ToolItem;
+    expect(merged.toolName).toBe("Bash");
+    expect(merged.input).toEqual({ command: "ls" });
+    expect(merged.result?.content).toBe("ok");
+  });
+
+  it("field-merges a tool pair regardless of arrival order (result before the call)", () => {
+    // Arrange — the result item lands first (cross-plane reordering).
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ toolName: "", result: { isError: true, content: "boom" } })])]);
+    // Act — the call item arrives second, naming the tool + input.
+    store.ingest([itemsEffect([toolItem({ toolName: "Read", input: { file_path: "/x" }, inputDone: true })])]);
+    // Assert — one card carrying both halves.
+    expect(store.state.items).toHaveLength(1);
+    const merged = store.state.items[0] as ToolItem;
+    expect(merged.toolName).toBe("Read");
+    expect(merged.input).toEqual({ file_path: "/x" });
+    expect(merged.result?.content).toBe("boom");
+  });
+
   it("reconciles a text block by block id", () => {
     // Arrange
     const store = new ConversationStore();
@@ -466,6 +498,31 @@ describe("ingest task-catalog", () => {
     store.ingest([catalogEffect([])]);
     // Assert
     expect(store.taskRoster).toHaveLength(0);
+  });
+});
+
+// --- session-init -----------------------------------------------------------
+
+describe("ingest session-init", () => {
+  it("adopts the pushed SystemInit as the status snapshot source", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([
+      { kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } } },
+    ]);
+    // Assert
+    expect(store.state.systemInit).toEqual({ model: "claude", cwd: "/w" });
+  });
+
+  it("replaces the retained init wholesale on the next push", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([{ kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { fastModeState: "off" } } }]);
+    // Act
+    store.ingest([{ kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { fastModeState: "on" } } }]);
+    // Assert
+    expect(store.state.systemInit).toEqual({ fastModeState: "on" });
   });
 });
 

@@ -48,7 +48,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function newClient(onMessage: (data: string) => any = () => undefined) {
+function newClient(onMessage: (data: string) => void = () => {}) {
   const statusChanges: boolean[] = [];
   const client = new WsClient({
     url: "ws://x/sessions/s1/stream",
@@ -76,7 +76,6 @@ describe("WsClient", () => {
     const seen: string[] = [];
     const { client } = newClient((d) => {
       seen.push(d);
-      return undefined;
     });
     client.connect();
     FakeWebSocket.instances[0].open();
@@ -86,16 +85,17 @@ describe("WsClient", () => {
     expect(seen).toEqual([`{"type":"x","seq":1}`]);
   });
 
-  it("sends the command onMessage returns (replay-request path)", () => {
+  it("send() forwards a pre-encoded frame verbatim once open", () => {
     // Arrange
-    const { client } = newClient(() => ({ type: "replay-request", from_seq: 4 }));
+    const { client } = newClient();
     client.connect();
     const ws = FakeWebSocket.instances[0];
     ws.open();
     // Act
-    ws.receive(`{"type":"x","seq":9}`);
+    const ok = client.send(`{"requestId":"r1","interrupt":{"hard":false}}`);
     // Assert
-    expect(ws.sent).toEqual([`{"type":"replay-request","from_seq":4}`]);
+    expect(ok).toBe(true);
+    expect(ws.sent).toEqual([`{"requestId":"r1","interrupt":{"hard":false}}`]);
   });
 
   it("send() returns false when the socket is not open", () => {
@@ -103,7 +103,7 @@ describe("WsClient", () => {
     const { client } = newClient();
     client.connect();
     // Act + Assert — never opened.
-    expect(client.send({ type: "interrupt", request_id: "r1" })).toBe(false);
+    expect(client.send("{}")).toBe(false);
   });
 
   it("composerEnabled is on by default and off only for composer=0", () => {
@@ -237,28 +237,5 @@ describe("WsClient", () => {
     vi.advanceTimersByTime(1000);
     // Assert
     expect(FakeWebSocket.instances).toHaveLength(1);
-  });
-
-  it("logs a reply it could not send because the socket is not open", () => {
-    // Arrange — onMessage generates a command while the socket is already
-    // closing (readyState past OPEN).
-    const logged: string[] = [];
-    const client = new WsClient({
-      url: "ws://x/sessions/s1/stream",
-      onMessage: () =>
-        ({ type: "queue-cancel", request_id: "r1", queue_id: "q1" }) as const,
-      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
-      backoffMs: [10],
-      log: (m) => logged.push(m),
-    });
-    client.connect();
-    const sock = FakeWebSocket.instances[0];
-    sock.open();
-    sock.readyState = 3; // closing under us, onclose not yet delivered
-    // Act
-    sock.receive(`{"type":"workspaceState"}`);
-    // Assert — the drop left a trace naming the lost command.
-    expect(sock.sent).toHaveLength(0);
-    expect(logged).toEqual(["ws: dropped outbound queue-cancel — socket not open"]);
   });
 });

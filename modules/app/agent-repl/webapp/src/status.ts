@@ -3,12 +3,16 @@
  * rendered graphically for the GUI that can never open that terminal panel.
  *
  * The data is the SDK's `system:init` snapshot — model, version, cwd, auth
- * source, MCP/plugin/skill rosters, memory paths — which the daemon caches
- * from the live init and re-reads on demand off a throwaway `refresh-status`
- * probe (so a mid-session `/fast` toggle or config edit is reflected, not the
- * value frozen at session start). The one section the init omits is the
- * logged-in account, which the daemon reads fresh from the config dir and
- * bundles into the same GET.
+ * source, MCP/plugin/skill rosters, memory paths — which the daemon retains
+ * per session and PUSHES as a `frontend.v1` `sessionInit` frame (and inside
+ * `StateSnapshot.inits` on attach). The panel therefore reads live state off
+ * the push plane; the old `GET /sessions/{id}/status` and its
+ * `POST /status/refresh` re-probe are both gone, the latter because there is
+ * nothing staler than the last pushed init left to refresh.
+ *
+ * The one section the init omits is the logged-in account, which the daemon
+ * reads fresh from the config dir; that stays an HTTP read on the sanctioned
+ * account endpoint.
  *
  * Model and permission mode are NOT read off the snapshot here: the store
  * already tracks them live from their own frames, so the panel is handed the
@@ -36,7 +40,7 @@ export interface StatusSnapshot {
   memory_paths?: Record<string, string>;
 }
 
-/** GET /sessions/{id}/status: the cached snapshot plus the account block. */
+/** The panel's inputs: the init-derived snapshot plus the account block. */
 export interface StatusResponse {
   /** The `system:init` snapshot, or null before any init has landed. */
   snapshot: StatusSnapshot | null;
@@ -44,45 +48,68 @@ export interface StatusResponse {
   account: Account;
 }
 
-/**
- * Fetch the session's `/status` snapshot and account.
- *
- * Rejects on any non-2xx. A session whose init has not landed is NOT an
- * error — it returns 200 with a null snapshot, which the panel renders as a
- * loading state until the refresh's push frame arrives.
- */
-export async function fetchStatus(
-  httpBase: string,
-  sessionId: string,
-  fetchFn: typeof fetch = fetch,
-): Promise<StatusResponse> {
-  const resp = await fetchFn(`${httpBase}/sessions/${sessionId}/status`);
-  if (!resp.ok) {
-    throw new Error(
-      `GET /sessions/${sessionId}/status: ${resp.status} ${await resp.text()}`,
-    );
-  }
-  return (await resp.json()) as StatusResponse;
+/** Read one string field, treating an absent or non-string value as unset. */
+function str(init: Record<string, unknown>, key: string): string | undefined {
+  const v = init[key];
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+/** Read one repeated field, treating an absent or non-array value as unset. */
+function arr(init: Record<string, unknown>, key: string): unknown[] | undefined {
+  const v = init[key];
+  return Array.isArray(v) ? v : undefined;
 }
 
 /**
- * Ask the daemon to re-probe the snapshot. Fire-and-forget: the daemon
- * answers 202 immediately and the fresh snapshot arrives later as a `status`
- * frame, which the store adopts and the open panel re-renders on.
+ * Normalize the `data.v1.ApiKeySource` enum to the bare source word the panel
+ * labels. protojson spells an enum as its NAME, so the wire carries
+ * `API_KEY_SOURCE_NONE` where the panel wants `none`.
+ *
+ * `UNSPECIFIED` maps to unset — the daemon does not know the source, which is
+ * exactly the case the label already renders as a subscription login.
  */
-export async function refreshStatus(
-  httpBase: string,
-  sessionId: string,
-  fetchFn: typeof fetch = fetch,
-): Promise<void> {
-  const resp = await fetchFn(`${httpBase}/sessions/${sessionId}/status/refresh`, {
-    method: "POST",
-  });
-  if (!resp.ok) {
-    throw new Error(
-      `POST /sessions/${sessionId}/status/refresh: ${resp.status} ${await resp.text()}`,
-    );
-  }
+export function apiKeySourceWord(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const prefix = "API_KEY_SOURCE_";
+  if (!raw.startsWith(prefix)) return raw;
+  const word = raw.slice(prefix.length).toLowerCase();
+  return word === "unspecified" ? undefined : word;
+}
+
+/**
+ * Project a pushed `data.v1.SystemInit` (protojson, lowerCamel field names)
+ * onto the panel's snapshot view-model.
+ *
+ * This replaces the old `GET /sessions/{id}/status`: the daemon retains the
+ * session's SystemInit and pushes it as a `sessionInit` frame (and in
+ * `StateSnapshot.inits`), so the panel reads live state off the push plane
+ * instead of a round trip. It is also why the old `/status/refresh` re-probe
+ * is gone — there is nothing staler than the last pushed init to refresh.
+ *
+ * Read leniently by design: the payload is the SDK's to define and grows per
+ * release, so a field that is absent or of an unexpected type renders as
+ * "unknown" rather than breaking the panel.
+ */
+export function statusSnapshotFromInit(
+  init: Record<string, unknown> | null,
+): StatusSnapshot | null {
+  if (init === null) return null;
+  const memory = init["memoryPaths"];
+  return {
+    cwd: str(init, "cwd"),
+    apiKeySource: apiKeySourceWord(str(init, "apiKeySource")),
+    claude_code_version: str(init, "claudeCodeVersion"),
+    output_style: str(init, "outputStyle"),
+    fast_mode_state: str(init, "fastModeState"),
+    mcp_servers: arr(init, "mcpServers"),
+    plugins: arr(init, "plugins") as StatusSnapshot["plugins"],
+    skills: arr(init, "skills"),
+    agents: arr(init, "agents"),
+    memory_paths:
+      typeof memory === "object" && memory !== null && !Array.isArray(memory)
+        ? (memory as Record<string, string>)
+        : undefined,
+  };
 }
 
 /** Human label for the auth source. `none` means an OAuth/subscription login,
