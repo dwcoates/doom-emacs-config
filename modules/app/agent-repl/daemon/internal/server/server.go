@@ -1079,6 +1079,10 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logf("session %s: switched to account %q (%s), resume %s", id, target.Label, target.ConfigDir, csid)
+	// Push the updated SessionView so every frontend reflects the new account
+	// (SessionView.config_dir now carries the switched-to root, S8). The webapp
+	// owns account switching; Emacs merely renders this pushed state.
+	s.pushSessionView(id)
 	// Poke Emacs over the sentinel side channel: its per-workspace config-dir
 	// override must follow the switch, or its own next create/reattach would
 	// put the session back on the computed default.
@@ -1313,6 +1317,11 @@ func SessionViewFromRecord(rec registry.Record, pendingPermissions []string) *fr
 		Terminal:           rec.Terminal,
 		DeathReason:        rec.DeathReason,
 		PendingPermissions: int64(len(pendingPermissions)),
+		// The CLAUDE_CONFIG_DIR the session's shim runs against — the ACCOUNT it
+		// runs as (S8). Empty names the CLI's own default root. Carried on every
+		// SessionView push (this is the single shaping) so account switching is
+		// webapp-initiated, daemon-executed, and reflected in pushed state.
+		ConfigDir: rec.ConfigDir,
 	}
 }
 
