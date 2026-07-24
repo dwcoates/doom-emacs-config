@@ -8,13 +8,13 @@
 ;; Doom-config root; this file shells out to it and surfaces output in a
 ;; buffer.
 ;;
-;; Emacs manages NO Claude Code HARNESS hooks any more (S8/S9 sentinel
-;; endgame): render-state, permission UX, session death, and account
-;; identity are all driven by daemon-pushed `frontend.v1' state, so there
-;; is nothing for a Claude hook to feed.  What remains here is the skill
-;; symlink provisioning + doctor, plus the settings-writer primitives
-;; (`agent-repl--register-hooks-in-settings' and friends) that the codex
-;; backend reuses for its own `~/.codex/hooks.json'.
+;; Emacs manages NO agent-harness hooks any more, for any backend (S8/S9
+;; sentinel endgame + the D-phase census): render-state, permission UX,
+;; session death, and account identity are all driven by daemon-pushed
+;; `frontend.v1' state, so there is nothing for a hook to feed.  The
+;; settings.json hook-array writer that survived for the codex backend
+;; went with codex's own hook plane.  What remains here is the skill
+;; symlink provisioning + doctor.
 ;;
 ;; Host-only: no-ops when running inside the agent sandbox.
 
@@ -127,22 +127,6 @@ under the same conditions: a `/.dockerenv' file exists or the
 `DOOM_SANDBOX' environment variable is set to `1'."
   (or (file-exists-p agent-repl-sandbox-dockerenv-path)
       (equal (getenv agent-repl-sandbox-env-var) agent-repl-sandbox-env-value)))
-
-;;;; ---- Settings-writer primitive (codex-shared) -------------------------
-
-(defun agent-repl--event-has-command-p (hooks event cmd)
-  "Return non-nil when HOOKS alist has a CMD registered under EVENT.
-HOOKS is the value of `.hooks' from `settings.json'.  EVENT is a
-symbol (e.g. `Stop').  CMD is the literal command string we expect to
-find in any entry's inner `.hooks[].command'."
-  (let ((entries (cdr (assq event hooks))))
-    (and entries
-         (seq-some
-          (lambda (entry)
-            (let ((inner (cdr (assq 'hooks entry))))
-              (seq-some (lambda (h) (equal (cdr (assq 'command h)) cmd))
-                        inner)))
-          entries))))
 
 ;;;; ---- Running the bash script ------------------------------------------
 
@@ -264,93 +248,6 @@ corrupts window-layout assertions in the test suite."
 
 ;; The actual call happens at the bottom of this file, after
 ;; `agent-repl--doctor-issues' and its helpers are defined.
-
-;;;; ---- Settings-writer primitives (codex-shared) ------------------------
-;;
-;; Emacs no longer provisions Claude Code hooks into any CLAUDE_CONFIG_DIR
-;; (the S8/S9 sentinel endgame removed every managed Claude hook).  What
-;; survives here is the generic settings.json hook-array writer, retained
-;; ONLY because the codex backend reuses it to register its own hooks into
-;; `~/.codex/hooks.json' — codex's hooks block nests identically to Claude
-;; Code's settings.json, so the two share one writer.
-
-(defun agent-repl--managed-hook-entry (cmd matcher)
-  "Build a settings.json hook-array entry registering CMD, with optional MATCHER.
-Shape mirrors install.sh: `((matcher . MATCHER) (hooks . (((type . \"command\")
-\(command . CMD)))))', with the `matcher' pair omitted when MATCHER is nil."
-  (append (and matcher (list (cons 'matcher matcher)))
-          (list (cons 'hooks
-                      (list (list (cons 'type "command")
-                                  (cons 'command cmd)))))))
-
-(defun agent-repl--alist-append (alist key value)
-  "Return ALIST with VALUE appended to the list under KEY.
-When KEY is present, VALUE is appended to its existing list in place and
-the original ALIST head is returned.  When KEY is absent, a new
-\(KEY . (VALUE)) cell is appended and the (possibly new) head is returned."
-  (let ((cell (assq key alist)))
-    (if cell
-        (progn (setcdr cell (append (cdr cell) (list value))) alist)
-      (append alist (list (cons key (list value)))))))
-
-(defun agent-repl--alist-put (alist key value)
-  "Return ALIST with KEY mapped to VALUE.
-Updates the existing cell in place when KEY is present, otherwise appends
-a new cell and returns the (possibly new) head."
-  (let ((cell (assq key alist)))
-    (if cell
-        (progn (setcdr cell value) alist)
-      (append alist (list (cons key value))))))
-
-(defun agent-repl--read-settings-alist (path)
-  "Parse the settings.json at PATH into an alist, or nil when PATH is absent.
-Arrays are read as lists and objects as alists so the result is easy to
-mutate and re-encode.  Signals (never swallows) when PATH exists but is
-not valid JSON — a malformed settings file is a loud failure, not a
-silent reset."
-  (when (file-exists-p path)
-    (let ((json-object-type 'alist)
-          (json-array-type 'list)
-          (json-key-type 'symbol))
-      (json-read-file path))))
-
-(defun agent-repl--register-hooks-in-settings (settings-file hooks-alist &optional matchers-alist)
-  "Ensure every hook in HOOKS-ALIST is registered in SETTINGS-FILE.
-Reads SETTINGS-FILE (or starts from an empty object when absent), appends
-any hook whose command path is not already present under its event, and
-writes the result back (pretty-printed).  Idempotent: foreign entries and
-already-present entries are preserved, so a no-change run rewrites
-nothing.  Creates the parent directory when needed.  Returns non-nil when
-a write occurred, nil when already complete.  Signals on malformed
-existing JSON (never silently resets).
-
-HOOKS-ALIST is the (EVENT-SYMBOL . COMMAND-PATH) list to register;
-MATCHERS-ALIST is the optional (EVENT-SYMBOL . MATCHER) list (an event
-with no entry gets no matcher).  The codex backend is the sole caller —
-its `~/.codex/hooks.json' nests its hooks block identically to Claude
-Code's settings.json, so it reuses this writer with its own alists.
-Emacs itself no longer manages any Claude Code hooks."
-  (let* ((path (expand-file-name settings-file))
-         (json (agent-repl--read-settings-alist path))
-         (hooks (cdr (assq 'hooks json)))
-         (changed nil))
-    (dolist (pair hooks-alist)
-      (let ((event (car pair))
-            (cmd (cdr pair)))
-        (unless (agent-repl--event-has-command-p hooks event cmd)
-          (let ((matcher (cdr (assq event matchers-alist))))
-            (setq hooks (agent-repl--alist-append
-                         hooks event
-                         (agent-repl--managed-hook-entry cmd matcher)))
-            (setq changed t)))))
-    (when changed
-      (setq json (agent-repl--alist-put json 'hooks hooks))
-      (make-directory (file-name-directory path) t)
-      (with-temp-file path
-        (insert (json-encode json))
-        (json-pretty-print-buffer))
-      (agent-repl--log nil "register-hooks-in-settings: wrote %s" path))
-    changed))
 
 ;;;; ---- Doctor support ---------------------------------------------------
 

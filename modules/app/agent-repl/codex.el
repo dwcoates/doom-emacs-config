@@ -18,13 +18,12 @@
 ;;   `--skip-git-repo-check' is mandatory.
 ;; - CODEX_HOME relocates all codex state (config, auth, sessions,
 ;;   hooks.json); codex requires the directory to pre-exist.
-;; - Hooks: ~/.codex/hooks.json nests its "hooks" block identically to
-;;   Claude Code's settings.json, with a 10-event vocabulary that
-;;   INCLUDES Stop / SessionStart / UserPromptSubmit / SubagentStart /
-;;   SubagentStop / PermissionRequest but has NO Notification and NO
-;;   StopFailure.  The hook stdin payload carries the same `session_id'
-;;   and `cwd' fields the managed sentinel scripts already parse, so
-;;   the SAME scripts are registered for codex.
+;; - Hooks: none.  agent-repl used to register sentinel-writing hook
+;;   scripts in ~/.codex/hooks.json, but that whole plane is gone: the
+;;   scripts are no longer installed, the sentinels they wrote are no
+;;   longer dispatched, and session state for EVERY backend now arrives
+;;   as pushed `frontend.v1' state from the daemon.  Nothing here writes
+;;   hooks.json, and its presence says nothing about this backend.
 ;; - Rollouts: `<sessions>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl'
 ;;   where <uuid> is the session id.  The model rides on `turn_context'
 ;;   lines (payload.model); token usage on `event_msg' lines with
@@ -92,10 +91,6 @@ tail suffices (same rationale as the claude segment scan caps)."
 (defun agent-repl--codex-sessions-dir ()
   "Return the codex rollout root: <CODEX_HOME>/sessions."
   (expand-file-name "sessions" (agent-repl--codex-effective-home)))
-
-(defun agent-repl--codex-hooks-file ()
-  "Return the codex hooks file path: <CODEX_HOME>/hooks.json."
-  (expand-file-name "hooks.json" (agent-repl--codex-effective-home)))
 
 ;;;; ---- Interactive start command ------------------------------------------
 
@@ -264,59 +259,15 @@ trailing `agent-repl-codex-scan-bytes'."
   (let ((tail (agent-repl--transcript-read-tail path agent-repl-codex-scan-bytes)))
     (and tail (agent-repl--codex-context-extract-from-tail tail))))
 
-;;;; ---- Hook installation ---------------------------------------------------
-
-(defconst agent-repl--codex-managed-hooks
-  '((Stop              . "~/.claude/hooks/stop-notify.sh")
-    (SubagentStart     . "~/.claude/hooks/subagent-start-notify.sh")
-    (SubagentStop      . "~/.claude/hooks/subagent-stop-notify.sh")
-    (UserPromptSubmit  . "~/.claude/hooks/prompt-submit-notify.sh")
-    (SessionStart      . "~/.claude/hooks/session-start-notify.sh"))
-  "Alist (EVENT-SYMBOL . COMMAND-PATH) of managed hooks for codex.
-The SAME sentinel-writing scripts as the claude backend: codex's hook
-stdin payload carries the `session_id' and `cwd' fields they parse, and
-they write to the shared sentinel mailbox
-\(`~/.claude-emacs/workspace-notifications', self-computed by the
-scripts via AGENT_REPL_STATE_DIR) the sentinel watches, so state
-tracking is backend-agnostic downstream.  The scripts intentionally
-live under `~/.claude/hooks/' — that is where `.claude/install.sh'
-installs the canonical copies, regardless of which backends consume
-them.
-
-Codex has no `Notification' event and no `StopFailure' event (codex stop
-failures are not surfaced).  `PermissionRequest' is gone too: the S8/S9
-sentinel endgame deleted `permission-request-notify.sh' along with every
-managed permission hook, and permission state is driven by pushed
-`frontend.v1' state (permission.el) for every backend — registering an
-event whose script no longer exists could only ever write a dangling
-command path.")
-
-(defun agent-repl-codex-install-hooks ()
-  "Register the managed codex hooks in `agent-repl--codex-hooks-file'.
-Idempotent (see `agent-repl--register-hooks-in-settings', which this
-reuses — codex's hooks.json nests its hooks block identically to Claude
-Code's settings.json).  No matcher entries are needed: codex ignores
-matchers for Stop/UserPromptSubmit and the managed set registers no
-matched events."
-  (interactive)
-  (let ((wrote (agent-repl--register-hooks-in-settings
-                (agent-repl--codex-hooks-file)
-                agent-repl--codex-managed-hooks
-                nil)))
-    (message "agent-repl: codex hooks %s in %s"
-             (if wrote "registered" "already registered (no change)")
-             (agent-repl--codex-hooks-file))
-    wrote))
-
 ;;;; ---- Doctor --------------------------------------------------------------
 
 (defun agent-repl--codex-in-use-p ()
   "Return non-nil when the codex backend is plausibly in use on this host.
 True when the default backend is codex, any registered workspace
-carries a codex `:backend' override, an explicit
-`agent-repl-codex-home' is configured, or a codex hooks.json already
-exists.  The boundp guards keep this callable from `doom doctor''s
-standalone load, where the module proper is not loaded."
+carries a codex `:backend' override, or an explicit
+`agent-repl-codex-home' is configured.  The boundp guards keep this
+callable from `doom doctor''s standalone load, where the module proper
+is not loaded."
   (or (and (boundp 'agent-repl-default-backend)
            (eq agent-repl-default-backend 'codex))
       (and (boundp 'agent-repl--workspaces)
@@ -327,8 +278,7 @@ standalone load, where the module proper is not loaded."
                           (throw 'found t)))
                       agent-repl--workspaces)
              nil))
-      agent-repl-codex-home
-      (file-exists-p (agent-repl--codex-hooks-file))))
+      agent-repl-codex-home))
 
 (defun agent-repl--codex-doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing codex-backend problems.
@@ -336,9 +286,7 @@ Empty when the codex backend is not in use (see
 `agent-repl--codex-in-use-p'), when running inside the sandbox, or when
 everything checks out.  Checks: the `codex' binary on PATH, the
 existence of an explicitly configured CODEX_HOME (codex requires it to
-pre-exist), and registration of every managed hook in hooks.json
-\(Stop/SessionStart missing are errors — state tracking is blind
-without them — the rest warn)."
+pre-exist)."
   (cond
    ((agent-repl--in-sandbox-p) nil)
    ((not (agent-repl--codex-in-use-p)) nil)
@@ -353,23 +301,6 @@ without them — the rest warn)."
                     (format "agent-repl-codex-home %s does not exist — codex requires CODEX_HOME to pre-exist"
                             (agent-repl--codex-effective-home)))
               issues))
-      (let* ((path (agent-repl--codex-hooks-file))
-             (json (and (file-exists-p path)
-                        (agent-repl--read-settings-alist path)))
-             (hooks (cdr (assq 'hooks json))))
-        (if (not json)
-            (push (cons 'error
-                        (format "%s is missing — run M-x agent-repl-codex-install-hooks"
-                                path))
-                  issues)
-          (dolist (pair agent-repl--codex-managed-hooks)
-            (let ((event (car pair))
-                  (cmd (cdr pair)))
-              (unless (agent-repl--event-has-command-p hooks event cmd)
-                (push (cons (if (memq event '(Stop SessionStart)) 'error 'warn)
-                            (format "codex hook %s not registered in %s — run M-x agent-repl-codex-install-hooks"
-                                    event path))
-                      issues))))))
       (nreverse issues)))))
 
 ;;;; ---- Backend registration -----------------------------------------------
