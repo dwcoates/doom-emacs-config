@@ -31,7 +31,6 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/account"
@@ -325,11 +324,13 @@ func (s *Server) Handler() http.Handler {
 	// the webapp never used them (it submits/interrupts over its /stream WS).
 	// Their cores survive: s.DeleteSession backs the deleteSession command, and
 	// the driver's SubmitPrompt/Interrupt back the prompt/interrupt commands.
-	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands) // SUPERSEDED (S7): elisp slash-command menu; no frontend.v1 arm, so retained
 	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
-	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("GET /sessions/{id}/status", s.handleStatus)
-	mux.HandleFunc("POST /sessions/{id}/status/refresh", s.handleRefreshStatus)
+	// The slash-command routes (GET /sessions/{id}/commands, POST
+	// /sessions/{id}/commands/refresh) and the status routes (GET
+	// /sessions/{id}/status, POST /sessions/{id}/status/refresh) were DELETED in
+	// the D-phase census: both frontends re-source the SDK system:init from the
+	// pushed SessionInitView frame, and the two refresh routes had already
+	// degraded to loud no-ops (the UDS shim has no re-init control).
 	// The queue-control routes (POST /sessions/{id}/queue/{queueId}/run-now and
 	// /cancel) were DELETED in S9: the daemon-owned queue plane is dead
 	// server-side, and both routes were already loud no-ops. Frontends drive the
@@ -763,25 +764,6 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleCommands answers the session's slash-command menu, honestly empty
-// until the shim's SDK init has landed. SUPERSEDED (S7).
-func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, ok := s.workspaceForSession(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	commands := []protocol.SlashCommand{}
-	if si, ok := s.driver.SystemInit(cwd); ok {
-		for _, name := range si.GetSlashCommands() {
-			commands = append(commands, protocol.SlashCommand{Name: name})
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, s.logf, map[string]any{"commands": commands})
-}
-
 // handleTaskOutput serves a bounded, session-scoped tail of a detached task's
 // output file. The task's output path comes off the driver's rebuilt
 // TaskEntry and is re-validated for confinement before any read. The response
@@ -835,77 +817,6 @@ func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 		"done":       done,
 		"elapsed_ms": elapsedMs,
 	})
-}
-
-// handleRefreshCommands is a no-op under the cutover: the UDS shim has no
-// re-init control (the SDK memoizes the menu against its init handshake). The
-// webapp/Emacs watcher fires this fire-and-forget, so it is accepted loudly
-// rather than errored. SUPERSEDED (S7).
-func (s *Server) handleRefreshCommands(w http.ResponseWriter, _ *http.Request) {
-	s.logf("server: SUPERSEDED (S7): refresh-commands not supported over the UDS plane")
-	w.WriteHeader(http.StatusAccepted)
-}
-
-// handleStatus serves the webapp's status panel snapshot: the cached SDK
-// system:init the panel renders, plus the logged-in account read fresh from
-// the config dir. A null snapshot means "no init has landed yet".
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, configDir, known := s.sessionDirs(id)
-	if !known {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	identity, err := account.Read(configDir)
-	if err != nil {
-		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): read account identity: %v", id, cwd, err)
-		return
-	}
-	var snapshot any // JSON null when no init has landed yet
-	if si, ok := s.driver.SystemInit(cwd); ok {
-		snapshot = systemInitSnapshot(si)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, s.logf, map[string]any{
-		"snapshot": snapshot,
-		"account":  identity,
-	})
-}
-
-// systemInitSnapshot maps the driver's SDK system:init proto onto the JSON
-// StatusSnapshot object the webapp status panel reads. Enum fields are
-// serialized as their raw protobuf enum names (the panel tolerates the raw
-// spelling; the account block is read separately by the caller).
-func systemInitSnapshot(si *datav1.SystemInit) map[string]any {
-	mcp := make([]map[string]any, 0, len(si.GetMcpServers()))
-	for _, m := range si.GetMcpServers() {
-		mcp = append(mcp, map[string]any{"name": m.GetName(), "status": m.GetStatus().String()})
-	}
-	plugins := make([]map[string]any, 0, len(si.GetPlugins()))
-	for _, p := range si.GetPlugins() {
-		plugins = append(plugins, map[string]any{"name": p.GetName(), "version": p.GetVersion()})
-	}
-	return map[string]any{
-		"cwd":                 si.GetCwd(),
-		"apiKeySource":        si.GetApiKeySource().String(),
-		"claude_code_version": si.GetClaudeCodeVersion(),
-		"output_style":        si.GetOutputStyle(),
-		"fast_mode_state":     si.GetFastModeState(),
-		"mcp_servers":         mcp,
-		"plugins":             plugins,
-		"skills":              si.GetSkills(),
-		"agents":              si.GetAgents(),
-		"memory_paths":        si.GetMemoryPaths(),
-	}
-}
-
-// handleRefreshStatus is a no-op under the cutover, for the same reason
-// handleRefreshCommands is: the UDS shim has no re-init control. The webapp
-// fires it fire-and-forget on panel open, so it is accepted loudly rather than
-// errored. Webapp-consumed, so it must keep returning 202.
-func (s *Server) handleRefreshStatus(w http.ResponseWriter, _ *http.Request) {
-	s.logf("server: SUPERSEDED (S7): refresh-status not supported over the UDS plane")
-	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {

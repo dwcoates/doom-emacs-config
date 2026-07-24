@@ -811,8 +811,6 @@ func TestShutdownEndpointReportsUnconfiguredWhenNoHook(t *testing.T) {
 func TestUnknownSessionRoutesReturn404(t *testing.T) {
 	h := newHarness(t)
 	for _, path := range []string{
-		"/sessions/s_nope/commands",
-		"/sessions/s_nope/status",
 		"/sessions/s_nope/account",
 	} {
 		resp, err := http.Get(h.ts.URL + path)
