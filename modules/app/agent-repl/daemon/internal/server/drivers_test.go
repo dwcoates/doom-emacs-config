@@ -216,3 +216,9 @@ func (nopHandler) OpenWorkspace(context.Context, string, string, *frontendv1.Ope
 	return nil
 }
 func (nopHandler) Resync(context.Context, string, string, *frontendv1.ResyncCmd) error { return nil }
+func (nopHandler) CreateSession(context.Context, string, string, *frontendv1.CreateSessionCmd) error {
+	return nil
+}
+func (nopHandler) DeleteSession(context.Context, string, string, *frontendv1.DeleteSessionCmd) error {
+	return nil
+}

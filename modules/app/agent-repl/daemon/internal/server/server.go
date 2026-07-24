@@ -12,9 +12,11 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -316,10 +318,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions", s.handleCreateSession)
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}/stream", s.handleStream)
-	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)     // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("POST /sessions/{id}/message", s.handleSendMessage) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("POST /sessions/{id}/interrupt", s.handleInterrupt) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
-	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands)    // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
+	// DELETE /sessions/{id}, POST /sessions/{id}/message, and
+	// POST /sessions/{id}/interrupt were removed in S7: Emacs drives them over
+	// the frontend.v1 UDS commands (deleteSession/submitPrompt/interrupt) and
+	// the webapp never used them (it submits/interrupts over its /stream WS).
+	// Their cores survive: s.DeleteSession backs the deleteSession command, and
+	// the driver's SubmitPrompt/Interrupt back the prompt/interrupt commands.
+	mux.HandleFunc("GET /sessions/{id}/commands", s.handleCommands) // SUPERSEDED (S7): elisp slash-command menu; no frontend.v1 arm, so retained
 	mux.HandleFunc("GET /sessions/{id}/tasks/{taskId}/output", s.handleTaskOutput)
 	mux.HandleFunc("POST /sessions/{id}/commands/refresh", s.handleRefreshCommands) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
 	mux.HandleFunc("GET /sessions/{id}/status", s.handleStatus)
@@ -1138,57 +1143,12 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.logf, map[string]bool{"started": started})
 }
 
-// handleSendMessage submits a user turn over HTTP — the send path for clients
-// that hold no WebSocket (the Emacs input buffer). The turn flows through the
-// per-session driver exactly as a WS-submitted prompt does. SUPERSEDED (S7).
-func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, ok := s.workspaceForSession(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	var body struct {
-		Content   string `json:"content"`
-		RequestID string `json:"request_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-		return
-	}
-	if strings.TrimSpace(body.Content) == "" {
-		httpError(w, http.StatusBadRequest, "content must be non-empty")
-		return
-	}
-	if body.RequestID == "" {
-		body.RequestID = newRequestID()
-	}
-	if err := s.driver.SubmitPrompt(r.Context(), cwd, body.Content, ""); err != nil {
-		s.httpFail(w, r, http.StatusBadGateway, "session %s (cwd %s): submit prompt: %v", id, cwd, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]string{"request_id": body.RequestID})
-}
-
-// handleInterrupt aborts the in-flight turn over HTTP (the Emacs-side
-// C-c C-k path). The retract half is gone under the cutover. SUPERSEDED (S7).
-func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cwd, ok := s.workspaceForSession(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	if err := s.driver.Interrupt(r.Context(), cwd, false); err != nil {
-		s.httpFail(w, r, http.StatusBadGateway, "session %s (cwd %s): interrupt: %v", id, cwd, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]bool{"retracted": false})
-}
+// handleSendMessage and handleInterrupt were removed in S7: Emacs submits
+// prompts and interrupts over the frontend.v1 UDS commands
+// (submitPrompt/interrupt, keyed by workspace), and the webapp drives both over
+// its /stream WebSocket — neither HTTP route had a remaining caller. The turn
+// still flows through the same per-session driver (SubmitPrompt/Interrupt); only
+// the HTTP entry points are gone.
 
 // handleQueueRunNow is a no-op under the cutover: the daemon-owned queue plane
 // is gone. The webapp still calls it, so it is accepted loudly rather than
@@ -1205,17 +1165,46 @@ func (s *Server) handleQueueCancel(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	var opts CreateOpts
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil && err.Error() != "EOF" {
-			httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-			return
-		}
-	}
+// frontendProtocolVersion is the agentshim.frontend.v1 protocol version the
+// daemon reports in DaemonView. It is distinct from protocol.Layer2Version (the
+// Layer-2 wire version GET /sessions still reports): the frontend surface has
+// its own version line, and Emacs keys its UDS version-mismatch warnings on it.
+const frontendProtocolVersion = "1"
+
+// ResumeTranscriptMissingError reports a create rejected by the resume-viability
+// gate: the --resume target has no transcript in this daemon's config dir.
+// Callers map it to their transport — HTTP a 422 with the structured body, UDS a
+// loud CommandAck error — rather than silently downgrading to a fresh session.
+type ResumeTranscriptMissingError struct {
+	ResumeID      string
+	SearchedPaths []string
+}
+
+func (e *ResumeTranscriptMissingError) Error() string {
+	return fmt.Sprintf("resume target %s has no transcript in this daemon's config dir (searched %s); refusing to start a fresh conversation",
+		e.ResumeID, strings.Join(e.SearchedPaths, ", "))
+}
+
+// InvalidCreateError reports a malformed create request (currently only an
+// invalid permission mode). HTTP maps it to 400; UDS surfaces it as a loud ack.
+type InvalidCreateError struct{ msg string }
+
+func (e *InvalidCreateError) Error() string { return e.msg }
+
+// errSessionNotFound reports a delete/lookup for an id with no registry record.
+var errSessionNotFound = errors.New("no such session")
+
+// CreateSession is the shared create-session core behind both POST /sessions
+// (webapp) and the createSession UDS command (Emacs): validate, apply the
+// resume-viability gate, supersede transcript conflicts, register the record,
+// and bring up the shim. It returns the new session id and pushes a SessionView
+// so every connected frontend learns the workspace->session binding without
+// polling GET /sessions. Typed errors (*InvalidCreateError,
+// *ResumeTranscriptMissingError) let callers map to their transport; any other
+// error is an internal bring-up failure surfaced loudly.
+func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
 	if opts.PermissionMode != "" && !protocol.ValidPermissionMode(opts.PermissionMode) {
-		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode))
-		return
+		return "", &InvalidCreateError{msg: fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode)}
 	}
 	resumeLabel := opts.Resume
 	if resumeLabel == "" {
@@ -1233,8 +1222,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		if _, statErr := os.Stat(path); statErr != nil {
 			s.logf("session create REJECTED: resume target %s has no transcript at %s — hard-failing so the client opens an investigation workspace: %v",
 				opts.Resume, path, statErr)
-			writeResumeTranscriptMissing(w, opts.Resume, []string{path})
-			return
+			return "", &ResumeTranscriptMissingError{ResumeID: opts.Resume, SearchedPaths: []string{path}}
 		}
 	}
 	// A transcript takes exactly one writer, and this create is the newest
@@ -1249,8 +1237,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// the old L2 hub, which kept fake sessions only in an in-memory map). A fake
 	// record carries an empty claude_session_id, so it never rehydrates into a
 	// doomed --resume; it is simply the driver's handle on a transient session.
-	registrable := s.registry != nil
-	if registrable {
+	if s.registry != nil {
 		if err := s.registry.Put(registry.Record{
 			SessionID:       id,
 			CWD:             opts.CWD,
@@ -1269,12 +1256,119 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// workspace to drive, so it is registered but not brought up.
 	if opts.CWD != "" {
 		if err := s.driver.Ensure(opts.CWD); err != nil {
-			s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): bring up shim: %v", id, opts.CWD, err)
-			return
+			return "", fmt.Errorf("session %s (cwd %s): bring up shim: %w", id, opts.CWD, err)
 		}
 	}
 	dlog.Tag(s.logf, "cwd", opts.CWD)("session %s: created", id)
+	// Deliver the workspace->session binding proactively: SessionView is not a
+	// driver push (only snapshots carry it otherwise), so the UDS/webapp clients
+	// would not learn the new session's id until their next resync without this.
+	s.pushSessionView(id)
+	return id, nil
+}
 
+// DeleteSession is the shared core behind DELETE /sessions/{id} (its HTTP route
+// is superseded) and the deleteSession UDS command: mark the record terminal so
+// its id stops resolving, best-effort stop the live shim, and push the terminal
+// SessionView. A missing record returns errSessionNotFound.
+func (s *Server) DeleteSession(id string) error {
+	rec, ok := s.registry.Get(id)
+	if !ok {
+		return errSessionNotFound
+	}
+	if !rec.Terminal {
+		s.updateRegistry(id, "terminal transition", func(r *registry.Record) {
+			r.Terminal = true
+			r.DeathReason = "delete session"
+		})
+		// Best-effort stop of the live shim. A workspace with no live shim is
+		// an expected no-op, not a failure.
+		if rec.CWD != "" {
+			if err := s.driver.Hibernate(rec.CWD); err != nil {
+				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
+			}
+		}
+		// Push the terminal SessionView so frontends reap the workspace binding
+		// (the orphan/reattach sweep re-keys on it) instead of polling.
+		s.pushSessionView(id)
+	}
+	return nil
+}
+
+// DaemonView is the daemon-identity frame frontends key boot detection and
+// version-mismatch warnings on. ProtocolVersion is the frontend.v1 version
+// ("1"); DaemonBinaryMtimeMs is the boot-captured binary mtime in milliseconds
+// (binaryMTime is stored in seconds). A zero mtime means the boot-time stat
+// failed, carried honestly rather than fabricated.
+func (s *Server) DaemonView() *frontendv1.DaemonView {
+	return &frontendv1.DaemonView{
+		BootId:              s.bootID,
+		ProtocolVersion:     frontendProtocolVersion,
+		DaemonBinaryMtimeMs: s.binaryMTime * 1000,
+		DaemonVersion:       s.daemonVersion,
+	}
+}
+
+// SessionViewFromRecord builds a SessionView from a registry record plus the
+// live pending-permission ids. It is the SINGLE shaping shared by the connect
+// snapshot (cmd/claude-repld registrySessions) and the create/delete pushes, so
+// the two cannot drift. Rehydratable/Hibernated are not listed session state
+// post-cutover (driver-internal shim lifecycle) and stay false.
+func SessionViewFromRecord(rec registry.Record, pendingPermissions []string) *frontendv1.SessionView {
+	return &frontendv1.SessionView{
+		Workspace:          rec.CWD,
+		SessionId:          rec.SessionID,
+		Model:              rec.Model,
+		PermissionMode:     rec.PermissionMode,
+		ClaudeSessionId:    rec.ClaudeSessionID,
+		Cwd:                rec.CWD,
+		Terminal:           rec.Terminal,
+		DeathReason:        rec.DeathReason,
+		PendingPermissions: int64(len(pendingPermissions)),
+	}
+}
+
+// pushSessionView pushes id's current SessionView to every connected frontend.
+// Nil-safe against a Server built without a registry or frontend server (unit
+// harnesses): the push is a best-effort delivery, not a precondition.
+func (s *Server) pushSessionView(id string) {
+	if s.registry == nil || s.frontend == nil {
+		return
+	}
+	rec, ok := s.registry.Get(id)
+	if !ok {
+		s.logf("session %s: pushSessionView found no record — cannot deliver the workspace binding", id)
+		return
+	}
+	var pending []string
+	if !rec.Terminal && rec.CWD != "" && s.driver != nil {
+		pending = s.driver.PendingPermissions(rec.CWD)
+	}
+	s.frontend.PushSessionView(SessionViewFromRecord(rec, pending))
+}
+
+func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	var opts CreateOpts
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&opts); err != nil && err.Error() != "EOF" {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+			return
+		}
+	}
+	id, err := s.CreateSession(r.Context(), opts)
+	if err != nil {
+		var invalid *InvalidCreateError
+		var missing *ResumeTranscriptMissingError
+		switch {
+		case errors.As(err, &invalid):
+			httpError(w, http.StatusBadRequest, invalid.Error())
+		case errors.As(err, &missing):
+			writeResumeTranscriptMissing(w, missing.ResumeID, missing.SearchedPaths)
+		default:
+			s.httpFail(w, r, http.StatusInternalServerError, "%v", err)
+		}
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, s.logf, map[string]string{
@@ -1333,31 +1427,6 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		"protocol_version":    protocol.Layer2Version,
 		"daemon_binary_mtime": s.binaryMTime,
 	})
-}
-
-// handleDeleteSession marks the session's record terminal so its id stops
-// resolving, and best-effort stops its live shim. SUPERSEDED (S7).
-func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	rec, ok := s.registry.Get(id)
-	if !ok {
-		httpError(w, http.StatusNotFound, "no such session")
-		return
-	}
-	if !rec.Terminal {
-		s.updateRegistry(id, "terminal transition", func(r *registry.Record) {
-			r.Terminal = true
-			r.DeathReason = "DELETE /sessions"
-		})
-		// Best-effort stop of the live shim. A workspace with no live shim is
-		// an expected no-op, not a failure.
-		if rec.CWD != "" {
-			if err := s.driver.Hibernate(rec.CWD); err != nil {
-				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
-			}
-		}
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
@@ -1561,11 +1630,6 @@ func newSessionID() string {
 // process, different after every restart.
 func newBootID() string {
 	return "b_" + randomHex()
-}
-
-// newRequestID mints correlation ids for daemon-originated commands.
-func newRequestID() string {
-	return "r_" + randomHex()
 }
 
 func randomHex() string {
