@@ -519,6 +519,10 @@ export class ConversationStore {
     s.costUsd = sv.totalCostUsd;
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;
     if (sv.title !== "") s.taskSummary = sv.title;
+    // The durable resume keys feed the client-side rebind + mid-task
+    // auto-continue (main.ts); an empty value never clobbers a filled record.
+    if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
+    if (sv.cwd !== "") s.cwd = sv.cwd;
     return true;
   }
 

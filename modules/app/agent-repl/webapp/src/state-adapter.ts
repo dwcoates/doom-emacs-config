@@ -108,6 +108,10 @@ export interface SessionViewInput {
   contextWindow: number;
   permissionMode: string;
   shimAttached: boolean;
+  /** Durable CLI conversation uuid — the resume/rebind + auto-continue key. */
+  claudeSessionId: string;
+  /** Working directory a rebind's POST /sessions needs. */
+  cwd: string;
 }
 
 /** TypingDelta → the smooth.ts reveal feed's append. */
@@ -264,6 +268,8 @@ export class StateAdapter {
         contextWindow: Number(sv.contextWindow),
         permissionMode: sv.permissionMode,
         shimAttached: sv.shimAttached,
+        claudeSessionId: sv.claudeSessionId,
+        cwd: sv.cwd,
       },
     };
   }
