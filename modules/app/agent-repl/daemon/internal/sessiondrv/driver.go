@@ -386,7 +386,7 @@ func (m *Manager) ensure(workspace string) (*driven, error) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	})
 	d.consumer = cons
-	ph := permHandler{reg: m.reg, push: m.cfg.Push, workspace: workspace, sessionID: sessionID, logf: m.logf}
+	ph := permHandler{reg: m.reg, cons: cons, logf: m.logf}
 
 	runCtx, cancel := context.WithCancel(m.rootCtx)
 	d.cancel = cancel
@@ -471,28 +471,44 @@ func (m *Manager) Close() {
 }
 
 // permHandler bridges a session's canUseTool round-trip to the frontend: it
-// surfaces a permission render-state and blocks on the rendezvous until the
-// frontend answers (or teardown abandons it).
+// pushes the permission ConversationItem (its resolution lifecycle), surfaces a
+// permission render-state, and blocks on the rendezvous until the frontend
+// answers (or teardown abandons it).
 type permHandler struct {
-	reg       *permRegistry
-	push      Pusher
-	workspace string
-	sessionID string
-	logf      func(string, ...any)
+	reg  *permRegistry
+	cons *consumer
+	logf func(string, ...any)
 }
 
 func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
 	h.logf("sessiondrv: permission prompt ws=%s session=%s request_id=%s tool=%s (awaiting frontend answer)",
-		h.workspace, sessionID, req.GetRequestId(), req.GetToolName())
+		h.cons.workspace, sessionID, req.GetRequestId(), req.GetToolName())
+	// Push the pending permission ConversationItem (uuid = request_id) through
+	// the retained-ring pusher so a resync replays it (S8). It supersedes the
+	// earlier WorkspaceState-only decision but does NOT replace the PERMISSION
+	// render-state, which stays alongside.
+	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
 	// Surface a permission render-state so the frontend shows the prompt while
 	// the shim's canUseTool blocks. Eventually-consistent: the SSM re-pushes
 	// the resolved state as events flow, and a frontend resync corrects any lag.
-	h.push.PushWorkspaceState(&frontendv1.WorkspaceState{
-		Workspace: h.workspace,
-		SessionId: h.sessionID,
+	h.cons.push.PushWorkspaceState(&frontendv1.WorkspaceState{
+		Workspace: h.cons.workspace,
+		SessionId: h.cons.sessionID,
 		State:     frontendv1.RenderState_RENDER_STATE_PERMISSION,
 	})
-	ch, release := h.reg.await(req.GetRequestId(), h.workspace)
+	ch, release := h.reg.await(req.GetRequestId(), h.cons.workspace)
 	defer release()
-	return <-ch
+	resp := <-ch
+	if resp == nil {
+		// Teardown abandoned the request (no response sent; the shim re-asks on
+		// reattach). Push the ABANDONED resolution on the same uuid.
+		h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ABANDONED, ""))
+		return nil
+	}
+	res := corev1.PermissionItem_RESOLUTION_ALLOWED
+	if resp.GetDecision() == corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+		res = corev1.PermissionItem_RESOLUTION_DENIED
+	}
+	h.cons.pushPermission(permissionItem(req, res, resp.GetDenyMessage()))
+	return resp
 }
