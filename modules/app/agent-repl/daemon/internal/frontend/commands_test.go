@@ -46,6 +46,14 @@ func (m *mockHandler) Resync(_ context.Context, ws, rid string, cmd *frontendv1.
 	m.called, m.lastWorkspace, m.lastRequestID, m.lastResyncSeq = "resync", ws, rid, cmd.GetFromSeq()
 	return m.err
 }
+func (m *mockHandler) CreateSession(_ context.Context, ws, rid string, _ *frontendv1.CreateSessionCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "create_session", ws, rid
+	return m.err
+}
+func (m *mockHandler) DeleteSession(_ context.Context, ws, rid string, _ *frontendv1.DeleteSessionCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "delete_session", ws, rid
+	return m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -87,6 +95,16 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "resync",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r7", Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{FromSeq: 42}}},
 			wantHit: "resync",
+		},
+		{
+			name:    "create session",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r8", Workspace: "ws8", Command: &frontendv1.FrontendCommand_CreateSession{CreateSession: &frontendv1.CreateSessionCmd{Cwd: "ws8"}}},
+			wantHit: "create_session",
+		},
+		{
+			name:    "delete session",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r9", Workspace: "ws9", Command: &frontendv1.FrontendCommand_DeleteSession{DeleteSession: &frontendv1.DeleteSessionCmd{SessionId: "s_9"}}},
+			wantHit: "delete_session",
 		},
 	}
 	for _, tc := range tests {
