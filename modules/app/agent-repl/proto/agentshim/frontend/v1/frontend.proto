@@ -58,6 +58,7 @@ message FrontendFrame {
     DaemonView daemon_view = 9;   // Additive (S7)
     SessionInitView session_init = 10;  // Additive (S9)
     HeartbeatView heartbeat = 11;       // Additive (E4)
+    QueueView queue = 12;               // Additive (E4)
   }
 }
 
@@ -208,7 +209,83 @@ message FrontendCommand {
     DeleteSessionCmd delete_session = 11;  // Additive (S7)
     ShutdownCmd shutdown = 12;             // Additive (S9)
     ClientLogCmd client_log = 13;          // Additive (E4)
+    QueueForceCmd queue_force = 14;        // Additive (E4)
+    QueueAcceptCmd queue_accept = 15;      // Additive (E4)
+    QueueCancelCmd queue_cancel = 16;      // Additive (E4)
   }
+}
+
+// ---------------------------------------------------------------------------
+// The daemon-held prompt queue (E4).
+//
+// A prompt submitted while the session's turn is already running is NOT
+// forwarded. The daemon holds it, asks a classifier whether it is the sort of
+// thing the agent should hear NOW rather than after the turn, and either
+// interjects it (interrupt, then submit once the turn has actually ended) or
+// leaves it to be delivered FIFO when the turn ends on its own.
+//
+// EVERY message here is frontend surface, not shim wire. A queued prompt is an
+// artifact of the DAEMON's decision to hold it back — the vendor never saw it
+// and has no message for it — and the queue commands are a user-facing
+// representation of an interject, whose MECHANISM (Interrupt then SubmitPrompt)
+// is what actually crosses the shim UDS. See agent-shim/AGENTS.md, which uses
+// this feature as its worked example of the boundary.
+// ---------------------------------------------------------------------------
+
+// What the classifier decided about a queued prompt.
+enum QueueClassification {
+  // Not yet classified: the entry is queued and the classifier is running.
+  QUEUE_CLASSIFICATION_PENDING = 0;
+  // Deliver NOW: interrupt the running turn and submit once it has ended.
+  QUEUE_CLASSIFICATION_INTERJECT = 1;
+  // Deliver when the turn ends on its own; do not interrupt for it.
+  QUEUE_CLASSIFICATION_HOLD = 2;
+  // The classifier could not be believed (it answered with neither token, or
+  // both). Surfaced as its own state rather than silently defaulted to one of
+  // the real verdicts: a frontend must be able to see that nothing decided
+  // this. Delivery falls back to the ordinary turn-end drain, so an
+  // unclassifiable prompt is delayed, never dropped.
+  QUEUE_CLASSIFICATION_ERROR = 3;
+}
+
+// One prompt the daemon is holding.
+message QueueEntry {
+  string id = 1;
+  string text = 2;
+  int64 queued_at_ms = 3;
+  QueueClassification classification = 4;
+  // The classifier's stated reason, or the failure detail on ERROR. Free text
+  // for display; never parsed.
+  string rationale = 5;
+  // Set by QueueAcceptCmd: the user has seen and confirmed this entry's HOLD.
+  // View state only — it changes nothing about when the entry is delivered.
+  bool accepted = 6;
+}
+
+// The session's queue, pushed on EVERY change and carried in StateSnapshot.
+// An empty entries list is a meaningful value (the queue drained, or the
+// session died), not an absent one.
+message QueueView {
+  string workspace = 1;
+  string session_id = 2;
+  repeated QueueEntry entries = 3;
+}
+
+// Deliver this entry NOW — the user overriding the classifier, or not waiting
+// for it. Runs exactly the same interject sequence an INTERJECT verdict does.
+message QueueForceCmd {
+  string entry_id = 1;
+}
+
+// Confirm a HOLD entry. View state only: the entry is still delivered by the
+// ordinary turn-end drain, on the same schedule it already had.
+message QueueAcceptCmd {
+  string entry_id = 1;
+}
+
+// Drop an entry. It is never delivered.
+message QueueCancelCmd {
+  string entry_id = 1;
 }
 
 // The severity of a ClientLogCmd. A closed vocabulary rather than a free
@@ -316,4 +393,5 @@ message StateSnapshot {
   repeated TaskCatalog catalogs = 3;
   DaemonView daemon = 4;  // Additive (S7)
   repeated SessionInitView inits = 5;  // Additive (S9)
+  repeated QueueView queues = 6;  // Additive (E4)
 }
