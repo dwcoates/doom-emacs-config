@@ -6,7 +6,7 @@
 //   runtime resolver walks up from the stub's OWN directory (proto/gen/ts),
 //   where no node_modules exists, so a plain `tsc` emit cannot run: the stub
 //   cannot find @bufbuild/protobuf at runtime. (tsc also emits under a deep
-//   rootDir-mirrored path — dist/agent-shim/claude-shim/src/main.js — not the
+//   rootDir-mirrored path — dist/agent-shim/claude/shim/src/main.js — not the
 //   dist/main.js the daemon spawns.) esbuild fixes both: it INLINES
 //   @bufbuild/protobuf (resolved via nodePaths from THIS package's
 //   node_modules) and emits ONE file at dist/main.js — exactly the entry the

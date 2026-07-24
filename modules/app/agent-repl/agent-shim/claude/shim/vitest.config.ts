@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // root by default; allow the agent-repl subtree so the relatively-imported
 // stubs load. Runtime bare-import resolution (@bufbuild/protobuf) still
 // comes from this package's node_modules, which vite anchors at the root.
-const agentReplRoot = fileURLToPath(new URL("../../", import.meta.url));
+const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export default defineConfig({
   server: { fs: { allow: [agentReplRoot] } },

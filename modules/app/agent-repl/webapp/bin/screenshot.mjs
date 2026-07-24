@@ -8,8 +8,8 @@
  * pipeline, not a reconstruction.
  *
  * Prerequisites (all already produced by the normal build):
- *   - agent-shim/claude-shim/dist/main.js
- *                              (cd ../agent-shim/claude-shim && npm run build)
+ *   - agent-shim/claude/shim/dist/main.js
+ *                              (cd ../agent-shim/claude/shim && npm run build)
  *   - webapp/dist              (npm run build in webapp/)
  *   - a claude-repld binary    (cd ../daemon && go build ./cmd/claude-repld)
  *   - Playwright Chromium      (.agents-sandbox installs chromium-headless-shell)
@@ -35,7 +35,7 @@ function parseArgs(argv) {
     daemon: "127.0.0.1:18790",
     baseUrl: null,
     daemonBin: null,
-    shim: "../agent-shim/claude-shim/dist/main.js",
+    shim: "../agent-shim/claude/shim/dist/main.js",
     webapp: "dist",
   };
   for (let i = 0; i < argv.length; i++) {

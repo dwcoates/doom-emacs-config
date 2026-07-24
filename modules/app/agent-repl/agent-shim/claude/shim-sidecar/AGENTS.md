@@ -1,4 +1,4 @@
-# agent-shim/shim-claude-sidecar/
+# agent-shim/claude/shim-sidecar/
 
 The Claude file-plane reader (Go, singleton, launchd-managed). Responsibility:
 observe the Claude harness's on-disk artifacts (session transcripts, agent

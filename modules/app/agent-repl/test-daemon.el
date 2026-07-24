@@ -696,7 +696,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
   "The launch path names the Claude shim's relocated artifact exactly."
   (should
    (equal agent-repl--frontend-shim-entry
-          (expand-file-name "agent-shim/claude-shim/dist/main.js"
+          (expand-file-name "agent-shim/claude/shim/dist/main.js"
                             agent-repl--frontend-root))))
 
 (ert-deftest agent-repl-test-daemon-start-errors-when-binary-missing ()
@@ -713,7 +713,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
   "Starting errors before process creation when the relocated shim is absent."
   (let ((spawned nil)
         (agent-repl--frontend-daemon-bin "/artifacts/claude-repld")
-        (agent-repl--frontend-shim-entry "/artifacts/claude-shim/main.js"))
+        (agent-repl--frontend-shim-entry "/artifacts/claude/shim/main.js"))
     (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
                (lambda (path)
                  (equal path agent-repl--frontend-daemon-bin)))
@@ -738,7 +738,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
       (should (member "127.0.0.1:9999" cmd))
       (should
        (equal (cadr (member "-shim" cmd))
-              (expand-file-name "agent-shim/claude-shim/dist/main.js"
+              (expand-file-name "agent-shim/claude/shim/dist/main.js"
                                 agent-repl--frontend-root)))
       (should (member agent-repl--frontend-webapp-dir
                       (cdr (member "-webapp" cmd)))))))

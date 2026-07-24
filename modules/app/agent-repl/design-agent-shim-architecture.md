@@ -5,7 +5,7 @@ Status: **APPROVED DESIGN, IMPLEMENTATION PENDING.** This document supersedes
 It is the single design doc for the system; there is no other.
 
 Scope: `modules/app/agent-repl/` — the daemon (`daemon/`), the shim ecosystem
-(`agent-shim/`: `claude-shim/`, `shim-claude-sidecar/`, `shim-store/`), the
+(`agent-shim/`: `claude/shim/`, `claude/shim-sidecar/`, `shim-store/`), the
 protobuf protocol (`proto/`), the Emacs elisp, and the webapp (`webapp/`).
 
 Grounding: all Claude JSON shapes referenced in §5 were enumerated in a
@@ -474,7 +474,7 @@ no SDK/stream knowledge (shim's), no frontend anything.
 
 ## 8. claude-shim specification
 
-The existing shim at `agent-shim/claude-shim/` evolves in place (same
+The existing shim at `agent-shim/claude/shim/` evolves in place (same
 spawn/`--resume` model) with:
 
 1. **UDS server** replacing stdio: listens on `session-<id>.sock`; daemon
@@ -619,7 +619,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
 └── modules/app/agent-repl/
     ├── design-agent-shim-architecture.md                    A ✓
     ├── metaprompt.md                                        M ✓ (no-fallbacks rule)
-    ├── bin/build-frontend.sh                                M ✓ (SHIM_DIR → agent-shim/claude-shim; S5: SHIM_ARTIFACT is the esbuild bundle at dist/main.js)
+    ├── bin/build-frontend.sh                                M ✓ (SHIM_DIR → agent-shim/claude/shim; S5: SHIM_ARTIFACT is the esbuild bundle at dist/main.js)
     ├── proto/                                                 ✓ (G1)
     │   ├── AGENTS.md                                        A ✓
     │   ├── Makefile                                         A ✓
@@ -637,48 +637,49 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   │   ├── go.mod                                       A ✓
     │   │   ├── wire.go                                      A ✓
     │   │   └── wire_test.go                                 A ✓
-    │   ├── claude-shim/                                       (relocated here ✓; G4+G5)
-    │   │   ├── AGENTS.md                                    A ✓
-    │   │   ├── package.json                                 M ✓ (G5: @bufbuild/protobuf dep; S5: esbuild devDep + `build`→build.mjs, main=dist/main.js bundle)
-    │   │   ├── package-lock.json                            M ✓ (G5: @bufbuild/protobuf lock; S5: esbuild direct devDep)
-    │   │   ├── tsconfig.json                                M ✓ (G5: rootDir=../.., @bufbuild paths, gen/ts include)
-    │   │   ├── vitest.config.ts                             A ✓ (G5: server.fs.allow the proto/gen subtree)
-    │   │   ├── build.mjs                                    A ✓ (S5: esbuild single-file bundle → dist/main.js; inlines @bufbuild, SDK external)
-    │   │   ├── src/main.ts                                  M ✓ (S5: --uds-socket/--store-socket/--version flags; UDS-mode branch; stdio RETAINED behind default, marked SUPERSEDED)
-    │   │   ├── src/session.ts                                 (S5: UNCHANGED — reattach lives in uds-session.ts; stdio ShimSession kept intact until the daemon cutover)
-    │   │   ├── src/uds/uds-session.ts                       A ✓ (S5: UDS-mode session engine — SDK drive + convert/delta/store/control wiring; reattach lifetime)
-    │   │   ├── src/proto/convert.ts                         A ✓ (S5: + sessionSource seam for SessionStarted.source RESUME/FRESH)
-    │   │   ├── src/proto/extras.ts                          A ✓
-    │   │   ├── src/proto/delta.ts                           A ✓
-    │   │   ├── src/uds/proto.ts                             A ✓ (G5: single import site for gen/ts core stubs)
-    │   │   ├── src/uds/log.ts                               A ✓ (G5: §12 loud structured logging)
-    │   │   ├── src/uds/framing.ts                           A ✓ (G5: wire.go twin + Any-envelope + MessageConn)
-    │   │   ├── src/uds/server.ts                            A ✓ (G5)
-    │   │   ├── src/uds/store-client.ts                      A ✓ (G5)
-    │   │   ├── src/uds/control.ts                           A ✓ (G5)
-    │   │   ├── test/uds-harness.ts                          A ✓ (G5: framed-peer test helper, not a suite)
-    │   │   ├── test/uds-session.test.ts                     A ✓ (S5: UDS entry-wiring integration — routing, round-trip, reattach, permission)
-    │   │   └── test/{framing,server,store-client,control,reattach}.test.ts  A ✓ (G5)
-    │   ├── shim-claude-sidecar/                               (G3)
-    │   │   ├── AGENTS.md                                    A ✓
-    │   │   ├── go.mod                                       A ✓
-    │   │   ├── go.sum                                       A ✓
-    │   │   ├── main.go (+_test)                             A ✓
-    │   │   └── internal/
-    │   │       ├── discover/discover.go (+_test)            A ✓
-    │   │       ├── discover/watcher.go                      A ✓ (fsnotify wrapper)
-    │   │       ├── tail/tailer.go (+_test)                  A ✓
-    │   │       ├── tail/codec.go (+_test)                   A ✓
-    │   │       ├── tail/context.go                          A ✓ (Context+Kind+Handler; breaks handler↔tail cycle)
-    │   │       ├── handler/handler.go                       A ✓ (shared Context alias + event builders)
-    │   │       ├── handler/transcript.go (+_test)           A ✓
-    │   │       ├── handler/agent.go                         A ✓
-    │   │       ├── handler/journal.go                       A ✓
-    │   │       ├── handler/shell.go                         A ✓
-    │   │       ├── convert/convert.go (+_test)              A ✓
-    │   │       ├── convert/registry.go                      A ✓ (concrete-message factory)
-    │   │       ├── stale/stale.go (+_test)                  A ✓
-    │   │       └── storeclient/client.go (+_test)           A ✓
+    │   ├── claude/                                            (vendor group: the shim + its file-plane sidecar)
+    │   │   ├── shim/                                           (relocated under claude/ ✓; G4+G5)
+    │   │   │   ├── AGENTS.md                                    A ✓
+    │   │   │   ├── package.json                                 M ✓ (G5: @bufbuild/protobuf dep; S5: esbuild devDep + `build`→build.mjs, main=dist/main.js bundle)
+    │   │   │   ├── package-lock.json                            M ✓ (G5: @bufbuild/protobuf lock; S5: esbuild direct devDep)
+    │   │   │   ├── tsconfig.json                                M ✓ (G5: rootDir=../.., @bufbuild paths, gen/ts include)
+    │   │   │   ├── vitest.config.ts                             A ✓ (G5: server.fs.allow the proto/gen subtree)
+    │   │   │   ├── build.mjs                                    A ✓ (S5: esbuild single-file bundle → dist/main.js; inlines @bufbuild, SDK external)
+    │   │   │   ├── src/main.ts                                  M ✓ (S5: --uds-socket/--store-socket/--version flags; UDS-mode branch; stdio RETAINED behind default, marked SUPERSEDED)
+    │   │   │   ├── src/session.ts                                 (S5: UNCHANGED — reattach lives in uds-session.ts; stdio ShimSession kept intact until the daemon cutover)
+    │   │   │   ├── src/uds/uds-session.ts                       A ✓ (S5: UDS-mode session engine — SDK drive + convert/delta/store/control wiring; reattach lifetime)
+    │   │   │   ├── src/proto/convert.ts                         A ✓ (S5: + sessionSource seam for SessionStarted.source RESUME/FRESH)
+    │   │   │   ├── src/proto/extras.ts                          A ✓
+    │   │   │   ├── src/proto/delta.ts                           A ✓
+    │   │   │   ├── src/uds/proto.ts                             A ✓ (G5: single import site for gen/ts core stubs)
+    │   │   │   ├── src/uds/log.ts                               A ✓ (G5: §12 loud structured logging)
+    │   │   │   ├── src/uds/framing.ts                           A ✓ (G5: wire.go twin + Any-envelope + MessageConn)
+    │   │   │   ├── src/uds/server.ts                            A ✓ (G5)
+    │   │   │   ├── src/uds/store-client.ts                      A ✓ (G5)
+    │   │   │   ├── src/uds/control.ts                           A ✓ (G5)
+    │   │   │   ├── test/uds-harness.ts                          A ✓ (G5: framed-peer test helper, not a suite)
+    │   │   │   ├── test/uds-session.test.ts                     A ✓ (S5: UDS entry-wiring integration — routing, round-trip, reattach, permission)
+    │   │   │   └── test/{framing,server,store-client,control,reattach}.test.ts  A ✓ (G5)
+    │   │   └── shim-sidecar/                                    (G3)
+    │   │       ├── AGENTS.md                                    A ✓
+    │   │       ├── go.mod                                       A ✓
+    │   │       ├── go.sum                                       A ✓
+    │   │       ├── main.go (+_test)                             A ✓
+    │   │       └── internal/
+    │   │           ├── discover/discover.go (+_test)            A ✓
+    │   │           ├── discover/watcher.go                      A ✓ (fsnotify wrapper)
+    │   │           ├── tail/tailer.go (+_test)                  A ✓
+    │   │           ├── tail/codec.go (+_test)                   A ✓
+    │   │           ├── tail/context.go                          A ✓ (Context+Kind+Handler; breaks handler↔tail cycle)
+    │   │           ├── handler/handler.go                       A ✓ (shared Context alias + event builders)
+    │   │           ├── handler/transcript.go (+_test)           A ✓
+    │   │           ├── handler/agent.go                         A ✓
+    │   │           ├── handler/journal.go                       A ✓
+    │   │           ├── handler/shell.go                         A ✓
+    │   │           ├── convert/convert.go (+_test)              A ✓
+    │   │           ├── convert/registry.go                      A ✓ (concrete-message factory)
+    │   │           ├── stale/stale.go (+_test)                  A ✓
+    │   │           └── storeclient/client.go (+_test)           A ✓
     │   └── shim-store/                                        (G2)
     │       ├── AGENTS.md                                    A ✓
     │       ├── go.mod                                       A ✓
@@ -791,7 +792,7 @@ corpus.
 - `proto/agentshim/data/v1/journal.proto` — §5.3 journal table.
 - `proto/agentshim/frontend/v1/frontend.proto` — §5.4 inventory.
 - `proto/Makefile` — `protoc` codegen: Go (`daemon/`, `agent-shim/shim-store/`,
-  `agent-shim/shim-claude-sidecar/`), TS (`agent-shim/claude-shim/`, `webapp/`).
+  `agent-shim/claude/shim-sidecar/`), TS (`agent-shim/claude/shim/`, `webapp/`).
 
 **G2 `agent-shim/shim-store/` — the store service (Go module):**
 - `agent-shim/shim-store/main.go` — flags (socket path, db path), launchd entry,
@@ -813,59 +814,59 @@ corpus.
   `dedup/dedup_test.go` (table-driven, AAA; in-memory SQLite; golden
   events from G13 fixtures).
 
-**G3 `agent-shim/shim-claude-sidecar/` — the file-plane reader (Go module):**
-- `agent-shim/shim-claude-sidecar/main.go` — flags (config roots, spool root, store socket),
+**G3 `agent-shim/claude/shim-sidecar/` — the file-plane reader (Go module):**
+- `agent-shim/claude/shim-sidecar/main.go` — flags (config roots, spool root, store socket),
   launchd entry, boot sweep trigger.
-- `agent-shim/shim-claude-sidecar/internal/discover/discover.go` — §7.1 globs + fsnotify +
+- `agent-shim/claude/shim-sidecar/internal/discover/discover.go` — §7.1 globs + fsnotify +
   rescan; path→(session, file-type) classification (incl. `a*`/`b*`/`w*`
   task-id prefixes and the `<session>` path segment).
-- `agent-shim/shim-claude-sidecar/internal/tail/tailer.go` — §7.2 Layer-1 core: cursor loop,
+- `agent-shim/claude/shim-sidecar/internal/tail/tailer.go` — §7.2 Layer-1 core: cursor loop,
   truncation/rotation detection, bounded reads, batch assembly.
-- `agent-shim/shim-claude-sidecar/internal/tail/codec.go` — `JSONLCodec` + `RawTextCodec`.
-- `agent-shim/shim-claude-sidecar/internal/handler/transcript.go` — `SessionTranscriptHandler`
+- `agent-shim/claude/shim-sidecar/internal/tail/codec.go` — `JSONLCodec` + `RawTextCodec`.
+- `agent-shim/claude/shim-sidecar/internal/handler/transcript.go` — `SessionTranscriptHandler`
   (+ the shared line/envelope parser used by agent.go).
-- `agent-shim/shim-claude-sidecar/internal/handler/agent.go` — `AgentTranscriptHandler`.
-- `agent-shim/shim-claude-sidecar/internal/handler/journal.go` — `WorkflowJournalHandler`.
-- `agent-shim/shim-claude-sidecar/internal/handler/shell.go` — `ShellOutputHandler`.
-- `agent-shim/shim-claude-sidecar/internal/convert/convert.go` — JSON→proto mapping with the
+- `agent-shim/claude/shim-sidecar/internal/handler/agent.go` — `AgentTranscriptHandler`.
+- `agent-shim/claude/shim-sidecar/internal/handler/journal.go` — `WorkflowJournalHandler`.
+- `agent-shim/claude/shim-sidecar/internal/handler/shell.go` — `ShellOutputHandler`.
+- `agent-shim/claude/shim-sidecar/internal/convert/convert.go` — JSON→proto mapping with the
   §5.1 validation contract (missing-expected hard error → `UnparsedEvent`;
   unknown-field capture into `extras` + once-per-name loud log).
-- `agent-shim/shim-claude-sidecar/internal/stale/stale.go` — §7.4 vanish grace, per-kind
+- `agent-shim/claude/shim-sidecar/internal/stale/stale.go` — §7.4 vanish grace, per-kind
   silence timeouts, boot sweep, `LOST` transitions.
-- `agent-shim/shim-claude-sidecar/internal/storeclient/client.go` — UDS client:
+- `agent-shim/claude/shim-sidecar/internal/storeclient/client.go` — UDS client:
   `StoreWrite` batches, cursor recovery, heartbeats.
 - Tests: one `_test.go` per file above; conversion tests are golden-file
   driven from G13.
 
-**G4 `agent-shim/claude-shim/` converter layer (TS, inside existing shim):**
-- `agent-shim/claude-shim/src/proto/convert.ts` — SDK message→`claude.v1` proto with §5.1
+**G4 `agent-shim/claude/shim/` converter layer (TS, inside existing shim):**
+- `agent-shim/claude/shim/src/proto/convert.ts` — SDK message→`claude.v1` proto with §5.1
   validation; the complete `SDKMessage` union switch incl. observed-only
   families.
-- `agent-shim/claude-shim/src/proto/extras.ts` — unknown-field capture + once-per-name
+- `agent-shim/claude/shim/src/proto/extras.ts` — unknown-field capture + once-per-name
   loud-log helper.
-- `agent-shim/claude-shim/src/proto/delta.ts` — `stream_event`/`tool_progress` →
+- `agent-shim/claude/shim/src/proto/delta.ts` — `stream_event`/`tool_progress` →
   `ContentDelta`/`HeartbeatProgress` (EPHEMERAL) mapping.
-- Tests: `webapp`-style vitest in `agent-shim/claude-shim/test/` over G13 stream fixtures
+- Tests: `webapp`-style vitest in `agent-shim/claude/shim/test/` over G13 stream fixtures
   (every message type at least once; every union arm).
 
-**G5 `agent-shim/claude-shim/` transport layer (TS):**
-- `agent-shim/claude-shim/src/uds/framing.ts` — the `agentrepl/wire` twin
+**G5 `agent-shim/claude/shim/` transport layer (TS):**
+- `agent-shim/claude/shim/src/uds/framing.ts` — the `agentrepl/wire` twin
   (4-byte BE length prefix, 32MiB `MAX_FRAME`, clean-EOF only at a boundary,
   loud errors + decoder-poison on truncation/oversize, no resync) PLUS the
   message-multiplexing envelope: each frame payload is a serialized
   `google.protobuf.Any` (typeUrl `type.googleapis.com/agentshim.core.v1.<Msg>`)
   so several message types share one connection. This is the SAME convention
   the daemon-side shimclient (G7) uses; `MessageConn` binds a socket to it.
-- `agent-shim/claude-shim/src/uds/server.ts` — `session-<id>.sock` listener; daemon
+- `agent-shim/claude/shim/src/uds/server.ts` — `session-<id>.sock` listener; daemon
   connection lifecycle; disconnect-tolerant turn survival + reattach (a new
   connection re-handshakes; unsent events are dropped, not spilled — the store
   replays them on the next Subscribe); handshake (`ShimHello` first, then
   `DaemonHello`); heartbeats; Ack/Nack receipts.
-- `agent-shim/claude-shim/src/uds/store-client.ts` — store connection: `StoreWrite`
+- `agent-shim/claude/shim/src/uds/store-client.ts` — store connection: `StoreWrite`
   with `StoreWriteAck` accounting, `Subscribe{from_seq}` + continuous forward
   loop to an injected sink, honest sad path (drop + loud-log every event +
   `DegradedState` to an injected reporter; NO spill, NO retry-forever).
-- `agent-shim/claude-shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch onto an
+- `agent-shim/claude/shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch onto an
   injected `SdkControlTarget` (does NOT import src/session.ts); `canUseTool`→
   `PermissionRequest` round-trip blocking on a pending-request map keyed by
   `request_id`.
@@ -953,7 +954,7 @@ corpus.
 
 | File | Change |
 |---|---|
-| `agent-shim/claude-shim/src/main.ts`, `agent-shim/claude-shim/src/session.ts` | stdio→UDS rewiring; converter/transport integration; stdin-EOF no longer ends input (reattach) |
+| `agent-shim/claude/shim/src/main.ts`, `agent-shim/claude/shim/src/session.ts` | stdio→UDS rewiring; converter/transport integration; stdin-EOF no longer ends input (reattach) |
 | `daemon/internal/server/server.go` | delete HTTP frontend surface + `async_live`; wire shimclient/frontend/ssm/merge modules |
 | `daemon/internal/session/*` | delete `tailer.go`; delete prose-regex spawn parsing from `asyncsource.go` (typed events replace it); session registry gains shim-socket reattach fields |
 | `daemon/internal/workspacecmd/*` | route results through SSM + frontend push instead of Emacs sentinels |

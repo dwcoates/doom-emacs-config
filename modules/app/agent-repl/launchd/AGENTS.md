@@ -6,4 +6,4 @@ launchd user-agent plists for the two OS-managed shim-ecosystem services:
 recreated on failure). Installed idempotently by `.claude/install.sh`.
 
 Dependencies: the built `agent-shim/shim-store/` and
-`agent-shim/shim-claude-sidecar/` binaries.
+`agent-shim/claude/shim-sidecar/` binaries.

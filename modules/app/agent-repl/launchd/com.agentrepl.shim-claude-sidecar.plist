@@ -9,7 +9,7 @@
   to the invoking user's absolute $HOME when copying this file into
   ~/Library/LaunchAgents/. Do not load this template file directly.
 
-  Flag contract (must match agent-shim/shim-claude-sidecar/main.go, §14.1 G3):
+  Flag contract (must match agent-shim/claude/shim-sidecar/main.go, §14.1 G3):
     --store-socket   shim-store UDS        (~/.cache/agent-repl/sock/store.sock)
     --config-roots   comma-separated Claude config roots whose projects/*
                      transcripts + subagent spools are observed (§7.1)

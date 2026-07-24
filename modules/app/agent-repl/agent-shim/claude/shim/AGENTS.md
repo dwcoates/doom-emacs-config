@@ -1,4 +1,4 @@
-# agent-shim/claude-shim/
+# agent-shim/claude/shim/
 
 The per-session Claude shim (TypeScript/Node, one process per session).
 Responsibility: drive the Claude Agent SDK (`query()`), convert the SDK stream

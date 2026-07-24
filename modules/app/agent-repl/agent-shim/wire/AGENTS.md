@@ -7,4 +7,4 @@ framing. Oversized or truncated frames are protocol violations surfaced as
 loud errors, never absorbed.
 
 Dependencies: none (stdlib only). The TypeScript twin lives in
-`agent-shim/claude-shim/src/uds/framing.ts` (necessarily separate language).
+`agent-shim/claude/shim/src/uds/framing.ts` (necessarily separate language).

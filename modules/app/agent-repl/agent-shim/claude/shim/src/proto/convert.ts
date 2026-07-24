@@ -105,7 +105,7 @@ import {
   UserMessageSchema,
   type ClaudeStreamMessage,
   type ModelUsage,
-} from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+} from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import {
   ApiAssistantMessageSchema,
   ApiContentBlocksSchema,
@@ -135,7 +135,7 @@ import {
   WorkflowLaunchResultSchema,
   type ContentBlock,
   type ToolUseResult,
-} from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
+} from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 
 const COMPONENT = "claude-shim-convert";
 

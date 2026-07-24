@@ -372,7 +372,7 @@ AGENT_SHIM_SRC_DIR="$SCRIPT_DIR/../modules/app/agent-repl/agent-shim"
 # Each entry: MODULE_SUBDIR|BINARY_NAME|LAUNCHD_LABEL
 AGENT_SHIM_SERVICES=(
   "shim-store|shim-store|com.agentrepl.shim-store"
-  "shim-claude-sidecar|shim-claude-sidecar|com.agentrepl.shim-claude-sidecar"
+  "claude/shim-sidecar|shim-claude-sidecar|com.agentrepl.shim-claude-sidecar"
 )
 
 # Return 0 iff SRC_DIR is a Go module carrying a buildable `package main`.

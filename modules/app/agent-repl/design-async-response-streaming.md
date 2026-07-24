@@ -4,7 +4,7 @@ Status: **IMPLEMENTED.** The seam, the three renderers, and the fixes below
 all shipped; `shared/protocol.md` §1.2 (`structured`) and §2.6
 (`async-source`) are the live contract. This document is kept as the record
 of WHY, and of what was deliberately left out (§1.4, §2.5).
-Scope: `modules/app/agent-repl/` (`agent-shim/claude-shim/`, `daemon/`,
+Scope: `modules/app/agent-repl/` (`agent-shim/claude/shim/`, `daemon/`,
 `webapp/`, `shared/protocol.md`).
 
 ## Correction (post-review)
@@ -35,9 +35,9 @@ All `path:line` anchors are relative to `modules/app/agent-repl/` unless absolut
 Grounding for the SDK surface: `@anthropic-ai/claude-agent-sdk@0.1.77`, read from the
 resolved install at
 `~/.cache/agent-repl/node-store/shim-d871d1a51d2fab56/node_modules/@anthropic-ai/claude-agent-sdk/`
-(the `agent-shim/claude-shim/` directory has no local `node_modules`;
-`agent-shim/claude-shim/package.json` declares `^0.1.0` and
-`agent-shim/claude-shim/package-lock.json` pins `0.1.77`). Transcript evidence is from ~60 real
+(the `agent-shim/claude/shim/` directory has no local `node_modules`;
+`agent-shim/claude/shim/package.json` declares `^0.1.0` and
+`agent-shim/claude/shim/package-lock.json` pins `0.1.77`). Transcript evidence is from ~60 real
 `~/.claude/projects/**/*.jsonl` files modified in the last 30 days.
 
 ---
@@ -45,7 +45,7 @@ resolved install at
 ## 0. The headline finding
 
 **`SDKUserMessage.tool_use_result` is dropped by the shim and referenced nowhere in the
-repository.** `grep -rl "tool_use_result\|toolUseResult" agent-shim/claude-shim/src daemon/internal webapp/src shared/`
+repository.** `grep -rl "tool_use_result\|toolUseResult" agent-shim/claude/shim/src daemon/internal webapp/src shared/`
 returns nothing.
 
 The SDK declares it at `coreTypes.d.ts:396-413`, and its own doc comment states the purpose
@@ -57,7 +57,7 @@ verbatim:
 > tool-dependent.
 
 That is precisely the field this project needs, and it is thrown away at
-`agent-shim/claude-shim/src/session.ts:497-532` (`mapUserMessage`), which walks `msg.message.content` for
+`agent-shim/claude/shim/src/session.ts:497-532` (`mapUserMessage`), which walks `msg.message.content` for
 `tool_result` blocks and `<task-notification>` text and never looks at the `tool_use_result`
 sibling on `msg` itself.
 
@@ -85,7 +85,7 @@ unsupportable are not.
 
 This is the shape to generalize. Traced hop by hop:
 
-1. **SDK.** `realQueryOptions` sets `includePartialMessages: true` (`agent-shim/claude-shim/src/main.ts:128`). Every
+1. **SDK.** `realQueryOptions` sets `includePartialMessages: true` (`agent-shim/claude/shim/src/main.ts:128`). Every
    SDK message from inside a subagent carries `parent_tool_use_id = <spawning Agent call's
    tool_use_id>`; main-loop messages carry `null`. Present on exactly four SDK types:
    `SDKAssistantMessage`, `SDKUserMessage(Replay)`, `SDKPartialAssistantMessage`,
@@ -337,7 +337,7 @@ Steps 1–4 are each independently shippable and independently valuable.
 
 Shipped, in order:
 
-1. `agent-shim/claude-shim/src/session.ts` forwards `tool_use_result` as §1.2 `structured`, and skips replayed
+1. `agent-shim/claude/shim/src/session.ts` forwards `tool_use_result` as §1.2 `structured`, and skips replayed
    user messages (`isReplay`) — §1.5.1.
 2. `daemon/internal/session/asyncsource.go` classifies it into the §2.6 `async-source` frame.
 3. `webapp/src/store.ts` carries `ToolItem.asyncSource`.

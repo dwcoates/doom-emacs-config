@@ -1,8 +1,8 @@
 # Codegen for the agent-shim protobuf protocol.
 #
 # Outputs:
-#   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/shim-claude-sidecar/)
-#   TS  → gen/ts/...   (consumed by agent-shim/claude-shim/, webapp/)
+#   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
+#   TS  → gen/ts/...   (consumed by agent-shim/claude/shim/, webapp/)
 #
 # Requires: protoc, protoc-gen-go, and @bufbuild/protoc-gen-es (via npx).
 

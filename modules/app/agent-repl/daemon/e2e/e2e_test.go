@@ -7,8 +7,8 @@
 //
 // Prerequisites (the test SKIPS loudly, never fails, when any is absent):
 //   - node on PATH
-//   - the shim bundle built: agent-shim/claude-shim/dist/main.js
-//     (run `npm run build` in agent-shim/claude-shim/)
+//   - the shim bundle built: agent-shim/claude/shim/dist/main.js
+//     (run `npm run build` in agent-shim/claude/shim/)
 //   - a buildable agent-shim/shim-store (go build)
 package e2e
 
@@ -52,9 +52,9 @@ func repoRoot(t *testing.T) string {
 
 func shimScriptPath(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "agent-shim", "claude-shim", "dist", "main.js")
+	path := filepath.Join(repoRoot(t), "agent-shim", "claude", "shim", "dist", "main.js")
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf("shim not built (%s missing): run `npm run build` in agent-shim/claude-shim/", path)
+		t.Skipf("shim not built (%s missing): run `npm run build` in agent-shim/claude/shim/", path)
 	}
 	return path
 }

@@ -9,18 +9,18 @@ import {
   ApiKeySource,
   ClaudeStreamMessageSchema,
   type ClaudeStreamMessage,
-} from "../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+} from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 
-const streamDir = fileURLToPath(new URL("../../../testdata/corpus/stream/", import.meta.url));
-const toolResultsDir = fileURLToPath(new URL("../../../testdata/corpus/tool-results/", import.meta.url));
+const streamDir = fileURLToPath(new URL("../../../../testdata/corpus/stream/", import.meta.url));
+const toolResultsDir = fileURLToPath(new URL("../../../../testdata/corpus/tool-results/", import.meta.url));
 
 function loadStream(name: string): Record<string, unknown> {
-  const line = readFileSync(new URL(`../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
+  const line = readFileSync(new URL(`../../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return JSON.parse(line) as Record<string, unknown>;
 }
 
 function loadToolResult(name: string): unknown {
-  const line = readFileSync(new URL(`../../../testdata/corpus/tool-results/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
+  const line = readFileSync(new URL(`../../../../testdata/corpus/tool-results/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return (JSON.parse(line) as Record<string, unknown>)["toolUseResult"];
 }
 
