@@ -73,7 +73,8 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
   '(("🏷️  Identity"
      (:name :ws-id :priority :group-key))
     ("⚡ State"
-     (:agent-state :repl-state :status :stop-received
+     (:agent-state :repl-state :status :pushed-render-state
+      :pushed-render-state-meta
       :flashing :hidden :dead :bogus :merged))
     ("🌳 Project / Git"
      (:project-dir :worktree-p :source-ws-dir :source-ws-name
@@ -87,7 +88,7 @@ CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
     ("💬 Prompts"
      (:last-prompt-time :last-prompt-text :last-prompt-summary
       :last-prompt-summary-pending :deferred-prompts :pending-prompts
-      :pending-subagents :clipboard))
+      :clipboard))
     ("🔔 Notifications"
      (:done :done-acked :done-acked-at :last-notify-time))
     ("🔀 Merge"
