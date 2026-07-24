@@ -619,7 +619,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
 └── modules/app/agent-repl/
     ├── design-agent-shim-architecture.md                    A ✓
     ├── metaprompt.md                                        M ✓ (no-fallbacks rule)
-    ├── bin/build-frontend.sh                                M ✓ (SHIM_DIR → agent-shim/claude-shim)
+    ├── bin/build-frontend.sh                                M ✓ (SHIM_DIR → agent-shim/claude-shim; S5: SHIM_ARTIFACT is the esbuild bundle at dist/main.js)
     ├── proto/                                                 ✓ (G1)
     │   ├── AGENTS.md                                        A ✓
     │   ├── Makefile                                         A ✓
@@ -639,15 +639,17 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   │   └── wire_test.go                                 A ✓
     │   ├── claude-shim/                                       (relocated here ✓; G4+G5)
     │   │   ├── AGENTS.md                                    A ✓
-    │   │   ├── package.json                                 M ✓ (G5: @bufbuild/protobuf dep)
-    │   │   ├── package-lock.json                            M ✓ (G5: @bufbuild/protobuf lock)
+    │   │   ├── package.json                                 M ✓ (G5: @bufbuild/protobuf dep; S5: esbuild devDep + `build`→build.mjs, main=dist/main.js bundle)
+    │   │   ├── package-lock.json                            M ✓ (G5: @bufbuild/protobuf lock; S5: esbuild direct devDep)
     │   │   ├── tsconfig.json                                M ✓ (G5: rootDir=../.., @bufbuild paths, gen/ts include)
     │   │   ├── vitest.config.ts                             A ✓ (G5: server.fs.allow the proto/gen subtree)
-    │   │   ├── src/main.ts                                  M   (stdio→UDS rewiring)
-    │   │   ├── src/session.ts                               M   (reattach: stdin-EOF no longer ends input)
-    │   │   ├── src/proto/convert.ts                         A
-    │   │   ├── src/proto/extras.ts                          A
-    │   │   ├── src/proto/delta.ts                           A
+    │   │   ├── build.mjs                                    A ✓ (S5: esbuild single-file bundle → dist/main.js; inlines @bufbuild, SDK external)
+    │   │   ├── src/main.ts                                  M ✓ (S5: --uds-socket/--store-socket/--version flags; UDS-mode branch; stdio RETAINED behind default, marked SUPERSEDED)
+    │   │   ├── src/session.ts                                 (S5: UNCHANGED — reattach lives in uds-session.ts; stdio ShimSession kept intact until the daemon cutover)
+    │   │   ├── src/uds/uds-session.ts                       A ✓ (S5: UDS-mode session engine — SDK drive + convert/delta/store/control wiring; reattach lifetime)
+    │   │   ├── src/proto/convert.ts                         A ✓ (S5: + sessionSource seam for SessionStarted.source RESUME/FRESH)
+    │   │   ├── src/proto/extras.ts                          A ✓
+    │   │   ├── src/proto/delta.ts                           A ✓
     │   │   ├── src/uds/proto.ts                             A ✓ (G5: single import site for gen/ts core stubs)
     │   │   ├── src/uds/log.ts                               A ✓ (G5: §12 loud structured logging)
     │   │   ├── src/uds/framing.ts                           A ✓ (G5: wire.go twin + Any-envelope + MessageConn)
@@ -655,6 +657,7 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │   │   ├── src/uds/store-client.ts                      A ✓ (G5)
     │   │   ├── src/uds/control.ts                           A ✓ (G5)
     │   │   ├── test/uds-harness.ts                          A ✓ (G5: framed-peer test helper, not a suite)
+    │   │   ├── test/uds-session.test.ts                     A ✓ (S5: UDS entry-wiring integration — routing, round-trip, reattach, permission)
     │   │   └── test/{framing,server,store-client,control,reattach}.test.ts  A ✓ (G5)
     │   ├── shim-claude-sidecar/                               (G3)
     │   │   ├── AGENTS.md                                    A ✓
