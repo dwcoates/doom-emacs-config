@@ -1751,7 +1751,7 @@ fallback + filename-prefix dispatch) is unchanged machinery.
 
 ## Implementation notes
 
-> **Status**: the shim (`agent-shim/claude-shim/src/`) was rewritten from
+> **Status**: the shim (`agent-shim/claude/shim/src/`) was rewritten from
 > scratch against
 > this spec and conforms to §1 in full, including the `tool-result`
 > extension event. The earlier pre-spec scaffold (and the nine

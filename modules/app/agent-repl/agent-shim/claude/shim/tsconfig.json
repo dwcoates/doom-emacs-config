@@ -12,7 +12,7 @@
     // generated set shared by claude-shim + webapp), so a src-only rootDir
     // rejects them (TS6059). Emit layout shifts accordingly; the runtime
     // build wiring (main.ts entry, dist path) is a stitch-phase concern.
-    "rootDir": "../..",
+    "rootDir": "../../..",
     "baseUrl": ".",
     // The generated stubs import @bufbuild/protobuf and its subpath exports.
     // They resolve those from THIS package's node_modules, but NodeNext walks
@@ -36,5 +36,5 @@
   // mapping -- which resolves @bufbuild/protobuf twice and degrades
   // MessageShape<Desc> inference to the bare `Message | Message<string>`
   // constraint, producing phantom property-access errors on framed messages.
-  "include": ["src/**/*.ts", "test/**/*.ts", "../../proto/gen/ts/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../../../proto/gen/ts/**/*.ts"]
 }
