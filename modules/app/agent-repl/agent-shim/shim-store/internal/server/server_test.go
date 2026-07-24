@@ -327,6 +327,73 @@ func TestSlowConsumerHardDisconnect(t *testing.T) {
 	}
 }
 
+func recvCursorList(t *testing.T, conn net.Conn) *corev1.CursorList {
+	t.Helper()
+	m := recv(t, conn)
+	cl, ok := m.(*corev1.CursorList)
+	if !ok {
+		t.Fatalf("expected *CursorList, got %T", m)
+	}
+	return cl
+}
+
+func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
+	// Arrange: a producer commits a batch carrying a cursor advance.
+	h := start(t, 0, func(string, ...any) {})
+	prod := h.dial(t)
+	sw := write(vAssistantStream(t, "s1", "A"))
+	sw.Batch.CursorAdvance = &corev1.CursorState{FileId: "10:20", Path: "/x/y.jsonl", Offset: 42, Carry: []byte("tail")}
+	send(t, prod, sw)
+	recvAck(t, prod)
+
+	// Act: a fresh connection recovers cursors (empty file_id = all).
+	cq := h.dial(t)
+	send(t, cq, &corev1.CursorQuery{})
+	list := recvCursorList(t, cq)
+
+	// Assert
+	if len(list.GetCursors()) != 1 {
+		t.Fatalf("cursors = %d, want 1", len(list.GetCursors()))
+	}
+	c := list.GetCursors()[0]
+	if c.GetFileId() != "10:20" || c.GetOffset() != 42 || string(c.GetCarry()) != "tail" {
+		t.Fatalf("cursor = %+v", c)
+	}
+}
+
+func TestCursorQueryByFileID(t *testing.T) {
+	// Arrange: two persisted cursors.
+	h := start(t, 0, func(string, ...any) {})
+	prod := h.dial(t)
+	for _, fid := range []string{"1:1", "2:2"} {
+		sw := write(vAssistantStream(t, "s1", "E"+fid))
+		sw.Batch.CursorAdvance = &corev1.CursorState{FileId: fid, Path: "/p/" + fid, Offset: 7}
+		send(t, prod, sw)
+		recvAck(t, prod)
+	}
+	// Act: query one file_id.
+	cq := h.dial(t)
+	send(t, cq, &corev1.CursorQuery{FileId: "2:2"})
+	list := recvCursorList(t, cq)
+	// Assert: exactly that cursor.
+	if len(list.GetCursors()) != 1 || list.GetCursors()[0].GetFileId() != "2:2" {
+		t.Fatalf("by-id query = %+v, want just 2:2", list.GetCursors())
+	}
+}
+
+func TestCursorQueryEmptyWhenAbsent(t *testing.T) {
+	// Arrange: nothing persisted.
+	h := start(t, 0, func(string, ...any) {})
+	// Act
+	cq := h.dial(t)
+	send(t, cq, &corev1.CursorQuery{FileId: "nope"})
+	list := recvCursorList(t, cq)
+	// Assert
+	if len(list.GetCursors()) != 0 {
+		t.Fatalf("cursors = %d, want 0", len(list.GetCursors()))
+	}
+}
+
 func TestCloseDisconnectsLiveConnections(t *testing.T) {
 	// Arrange: an established subscriber connection.
 	h := start(t, 0, func(string, ...any) {})
