@@ -321,7 +321,9 @@ message EditResult {
   string new_string = 3;
   string original_file = 4;
   bool replace_all = 5;
-  google.protobuf.Struct structured_patch = 6;
+  // Array of hunks: [{oldStart,oldLines,newStart,newLines,lines:[string]}].
+  // Schemaless list (no fixed hunk message); corpus: tool-results/edit.jsonl.
+  google.protobuf.ListValue structured_patch = 6;
   bool user_modified = 7;
   bool stale_recovered = 8;
   bool memdir_stamped = 9;
@@ -332,7 +334,8 @@ message WriteResult {
   string file_path = 2;
   string content = 3;
   string original_file = 4;
-  google.protobuf.Struct structured_patch = 5;
+  // Same hunk-array shape as EditResult; corpus: tool-results/write.jsonl.
+  google.protobuf.ListValue structured_patch = 5;
   bool user_modified = 6;
 }
 
@@ -354,18 +357,21 @@ message TaskCreateResult {
 
 message TaskUpdateResult {
   string task_id = 1;
-  string status_change = 2;
+  // Object {from,to}; corpus: tool-results/task_update.jsonl.
+  google.protobuf.Struct status_change = 2;
   bool success = 3;
-  google.protobuf.Struct updated_fields = 4;
+  // Array of changed field names; corpus: tool-results/task_update.jsonl.
+  google.protobuf.ListValue updated_fields = 4;
 }
 
 message TaskListResult {
-  google.protobuf.Struct tasks = 1;  // list payload verbatim
+  google.protobuf.ListValue tasks = 1;  // list payload verbatim
 }
 
 message SendMessageResult {
   string message = 1;
-  bool pin = 2;
+  // Object {id,name,ref} pin descriptor; corpus: tool-results/send_message.jsonl.
+  google.protobuf.Struct pin = 2;
   bool success = 3;
   string resumed_agent_id = 4;
 }
@@ -382,19 +388,23 @@ message WebFetchResult {
 message WebSearchResult {
   double duration_seconds = 1;
   string query = 2;
-  google.protobuf.Struct results = 3;
+  // HETEROGENEOUS array (per-search result objects interleaved with plain
+  // summary strings); corpus: tool-results/web_search.jsonl.
+  google.protobuf.ListValue results = 3;
   int64 search_count = 4;
 }
 
 message AskUserQuestionResult {
-  google.protobuf.Struct questions = 1;
+  // Same element shape as AskUserQuestionInput.questions; corpus:
+  // tool-results/ask_user_question.jsonl.
+  repeated Question questions = 1;
   google.protobuf.Struct answers = 2;
   google.protobuf.Struct annotations = 3;
 }
 
 message ScheduleWakeupResult {
   int64 clamped_delay_seconds = 1;
-  string scheduled_for = 2;
+  int64 scheduled_for = 2;  // epoch millis; corpus: tool-results/schedule_wakeup.jsonl
   bool was_clamped = 3;
 }
 

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { anyUnpack } from "@bufbuild/protobuf/wkt";
+import { toJson } from "@bufbuild/protobuf";
+import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
+import { anyUnpack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
 import { convert, convertToolUseResult } from "../src/proto/convert.js";
 import { __resetExtrasSeen } from "../src/proto/extras.js";
 import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
@@ -428,6 +430,102 @@ describe("convertToolUseResult union", () => {
     expect(r.result.case).toBe("unclassified");
     if (r.result.case !== "unclassified") throw new Error("arm");
     expect(r.result.value["path"]).toBe("/tmp/coach_asset_mmap_plan.html");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Corpus-proven type corrections: the arms that could not classify while the
+// proto modeled these fields as the wrong type (Struct-for-array, string-for-
+// object, string-for-int, Struct-for-bool). Each asserts ONE corrected shape.
+// ---------------------------------------------------------------------------
+
+/** Read a ListValue field back as plain JSON for shape assertions. */
+function listJson(lv: ListValue | undefined): JsonValue {
+  expect(lv).toBeDefined();
+  return toJson(ListValueSchema, lv!);
+}
+
+describe("corrected tool-result shapes", () => {
+  it("task_list preserves the array verbatim (a Struct init silently emptied it)", () => {
+    const r = convertToolUseResult({ tasks: [{ id: "1", status: "pending" }] });
+    expect(r.result.case).toBe("taskList");
+    if (r.result.case !== "taskList") throw new Error("arm");
+    expect(listJson(r.result.value.tasks)).toEqual([{ id: "1", status: "pending" }]);
+  });
+
+  it("edit classifies and keeps structuredPatch hunks as a list", () => {
+    const r = convertToolUseResult(loadToolResult("edit"));
+    expect(r.result.case).toBe("edit");
+    if (r.result.case !== "edit") throw new Error("arm");
+    const hunks = listJson(r.result.value.structuredPatch) as JsonObject[];
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]!["oldStart"]).toBe(411);
+  });
+
+  it("write classifies with an EMPTY structuredPatch list still present", () => {
+    const r = convertToolUseResult(loadToolResult("write"));
+    expect(r.result.case).toBe("write");
+    if (r.result.case !== "write") throw new Error("arm");
+    expect(listJson(r.result.value.structuredPatch)).toEqual([]);
+  });
+
+  it("ask_user_question classifies its questions as typed Question elements", () => {
+    const r = convertToolUseResult(loadToolResult("ask_user_question"));
+    expect(r.result.case).toBe("askUserQuestion");
+    if (r.result.case !== "askUserQuestion") throw new Error("arm");
+    expect(r.result.value.questions).toHaveLength(1);
+    expect(r.result.value.questions[0]!.header).toBe("Setup");
+  });
+
+  it("ask_user_question keeps the nested QuestionOption labels", () => {
+    const r = convertToolUseResult(loadToolResult("ask_user_question"));
+    if (r.result.case !== "askUserQuestion") throw new Error("arm");
+    const opts = r.result.value.questions[0]!.options;
+    expect(opts.map((o) => o.label)).toEqual([
+      "New worktree off master (Recommended)",
+      "Switch master checkout",
+    ]);
+  });
+
+  it("web_search keeps its HETEROGENEOUS results list (objects and strings)", () => {
+    const r = convertToolUseResult(loadToolResult("web_search"));
+    expect(r.result.case).toBe("webSearch");
+    if (r.result.case !== "webSearch") throw new Error("arm");
+    const results = listJson(r.result.value.results) as JsonValue[];
+    expect(typeof results[0]).toBe("object");
+    expect(typeof results[1]).toBe("string");
+  });
+
+  it("task_update classifies its statusChange as an object", () => {
+    const r = convertToolUseResult(loadToolResult("task_update"));
+    expect(r.result.case).toBe("taskUpdate");
+    if (r.result.case !== "taskUpdate") throw new Error("arm");
+    expect(r.result.value.statusChange).toEqual({ from: "pending", to: "in_progress" });
+  });
+
+  it("task_update keeps updatedFields as a list", () => {
+    const r = convertToolUseResult(loadToolResult("task_update"));
+    if (r.result.case !== "taskUpdate") throw new Error("arm");
+    expect(listJson(r.result.value.updatedFields)).toEqual(["status"]);
+  });
+
+  it("send_message classifies its pin as an object", () => {
+    const r = convertToolUseResult(loadToolResult("send_message"));
+    expect(r.result.case).toBe("sendMessage");
+    if (r.result.case !== "sendMessage") throw new Error("arm");
+    expect(r.result.value.pin).toEqual({ id: "acd910f5fefb75908", name: "acd910f5fefb75908", ref: "2175c2" });
+  });
+
+  it("schedule_wakeup reads scheduledFor as an epoch-millis integer", () => {
+    const r = convertToolUseResult(loadToolResult("schedule_wakeup"));
+    expect(r.result.case).toBe("scheduleWakeup");
+    if (r.result.case !== "scheduleWakeup") throw new Error("arm");
+    expect(r.result.value.scheduledFor).toBe(1784408640000n);
+  });
+
+  it("a {message,success} object with no pin STAYS unclassified (send_message guard)", () => {
+    const r = convertToolUseResult(loadToolResult("unclassified-message_success"));
+    expect(r.result.case).toBe("unclassified");
   });
 });
 

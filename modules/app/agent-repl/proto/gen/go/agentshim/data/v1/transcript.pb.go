@@ -3996,9 +3996,10 @@ func (x *AgentListingDeltaAttachment) GetShowConcurrencyNote() bool {
 }
 
 type TaskReminderAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	ItemCount     int64                  `protobuf:"varint,2,opt,name=item_count,json=itemCount,proto3" json:"item_count,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Array of reminder items; corpus: attachments/task_reminder.jsonl.
+	Content       *structpb.ListValue `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	ItemCount     int64               `protobuf:"varint,2,opt,name=item_count,json=itemCount,proto3" json:"item_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4033,11 +4034,11 @@ func (*TaskReminderAttachment) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{40}
 }
 
-func (x *TaskReminderAttachment) GetContent() string {
+func (x *TaskReminderAttachment) GetContent() *structpb.ListValue {
 	if x != nil {
 		return x.Content
 	}
-	return ""
+	return nil
 }
 
 func (x *TaskReminderAttachment) GetItemCount() int64 {
@@ -4049,7 +4050,7 @@ func (x *TaskReminderAttachment) GetItemCount() int64 {
 
 type AutoModeAttachment struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	AutoModeConsentFlow *structpb.Struct       `protobuf:"bytes,1,opt,name=auto_mode_consent_flow,json=autoModeConsentFlow,proto3" json:"auto_mode_consent_flow,omitempty"`
+	AutoModeConsentFlow bool                   `protobuf:"varint,1,opt,name=auto_mode_consent_flow,json=autoModeConsentFlow,proto3" json:"auto_mode_consent_flow,omitempty"` // corpus: attachments/auto_mode.jsonl
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -4084,11 +4085,11 @@ func (*AutoModeAttachment) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{41}
 }
 
-func (x *AutoModeAttachment) GetAutoModeConsentFlow() *structpb.Struct {
+func (x *AutoModeAttachment) GetAutoModeConsentFlow() bool {
 	if x != nil {
 		return x.AutoModeConsentFlow
 	}
-	return nil
+	return false
 }
 
 type EditedTextFileAttachment struct {
@@ -4144,9 +4145,10 @@ func (x *EditedTextFileAttachment) GetSnippet() string {
 }
 
 type DiagnosticsAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Files         *structpb.Struct       `protobuf:"bytes,1,opt,name=files,proto3" json:"files,omitempty"`
-	IsNew         bool                   `protobuf:"varint,2,opt,name=is_new,json=isNew,proto3" json:"is_new,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Array of {uri, diagnostics:[…]}; corpus: attachments/diagnostics.jsonl.
+	Files         *structpb.ListValue `protobuf:"bytes,1,opt,name=files,proto3" json:"files,omitempty"`
+	IsNew         bool                `protobuf:"varint,2,opt,name=is_new,json=isNew,proto3" json:"is_new,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4181,7 +4183,7 @@ func (*DiagnosticsAttachment) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{43}
 }
 
-func (x *DiagnosticsAttachment) GetFiles() *structpb.Struct {
+func (x *DiagnosticsAttachment) GetFiles() *structpb.ListValue {
 	if x != nil {
 		return x.Files
 	}
@@ -4580,10 +4582,12 @@ func (x *NestedMemoryAttachment) GetPayload() *structpb.Struct {
 }
 
 type FileAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	DisplayPath   string                 `protobuf:"bytes,2,opt,name=display_path,json=displayPath,proto3" json:"display_path,omitempty"`
-	Filename      string                 `protobuf:"bytes,3,opt,name=filename,proto3" json:"filename,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Object {type,file:{filePath,content,numLines,startLine,totalLines}};
+	// corpus: attachments/file.jsonl.
+	Content       *structpb.Struct `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	DisplayPath   string           `protobuf:"bytes,2,opt,name=display_path,json=displayPath,proto3" json:"display_path,omitempty"`
+	Filename      string           `protobuf:"bytes,3,opt,name=filename,proto3" json:"filename,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4618,11 +4622,11 @@ func (*FileAttachment) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{52}
 }
 
-func (x *FileAttachment) GetContent() string {
+func (x *FileAttachment) GetContent() *structpb.Struct {
 	if x != nil {
 		return x.Content
 	}
-	return ""
+	return nil
 }
 
 func (x *FileAttachment) GetDisplayPath() string {
@@ -5433,18 +5437,18 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\n" +
 	"is_initial\x18\x03 \x01(\bR\tisInitial\x12#\n" +
 	"\rremoved_types\x18\x04 \x03(\tR\fremovedTypes\x122\n" +
-	"\x15show_concurrency_note\x18\x05 \x01(\bR\x13showConcurrencyNote\"Q\n" +
-	"\x16TaskReminderAttachment\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\x12\x1d\n" +
+	"\x15show_concurrency_note\x18\x05 \x01(\bR\x13showConcurrencyNote\"m\n" +
+	"\x16TaskReminderAttachment\x124\n" +
+	"\acontent\x18\x01 \x01(\v2\x1a.google.protobuf.ListValueR\acontent\x12\x1d\n" +
 	"\n" +
-	"item_count\x18\x02 \x01(\x03R\titemCount\"b\n" +
-	"\x12AutoModeAttachment\x12L\n" +
-	"\x16auto_mode_consent_flow\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x13autoModeConsentFlow\"P\n" +
+	"item_count\x18\x02 \x01(\x03R\titemCount\"I\n" +
+	"\x12AutoModeAttachment\x123\n" +
+	"\x16auto_mode_consent_flow\x18\x01 \x01(\bR\x13autoModeConsentFlow\"P\n" +
 	"\x18EditedTextFileAttachment\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x18\n" +
-	"\asnippet\x18\x02 \x01(\tR\asnippet\"]\n" +
-	"\x15DiagnosticsAttachment\x12-\n" +
-	"\x05files\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x05files\x12\x15\n" +
+	"\asnippet\x18\x02 \x01(\tR\asnippet\"`\n" +
+	"\x15DiagnosticsAttachment\x120\n" +
+	"\x05files\x18\x01 \x01(\v2\x1a.google.protobuf.ListValueR\x05files\x12\x15\n" +
 	"\x06is_new\x18\x02 \x01(\bR\x05isNew\"C\n" +
 	"\x1cCommandPermissionsAttachment\x12#\n" +
 	"\rallowed_tools\x18\x01 \x03(\tR\fallowedTools\"\xa5\x01\n" +
@@ -5465,9 +5469,9 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x14DateChangeAttachment\x121\n" +
 	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"K\n" +
 	"\x16NestedMemoryAttachment\x121\n" +
-	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"i\n" +
-	"\x0eFileAttachment\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\x12!\n" +
+	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"\x82\x01\n" +
+	"\x0eFileAttachment\x121\n" +
+	"\acontent\x18\x01 \x01(\v2\x17.google.protobuf.StructR\acontent\x12!\n" +
 	"\fdisplay_path\x18\x02 \x01(\tR\vdisplayPath\x12\x1a\n" +
 	"\bfilename\x18\x03 \x01(\tR\bfilename\"O\n" +
 	"\x1aUltrathinkEffortAttachment\x121\n" +
@@ -5613,6 +5617,7 @@ var file_agentshim_data_v1_transcript_proto_goTypes = []any{
 	(*ApiUserMessage)(nil),                 // 68: agentshim.data.v1.ApiUserMessage
 	(*ToolUseResult)(nil),                  // 69: agentshim.data.v1.ToolUseResult
 	(*ApiAssistantMessage)(nil),            // 70: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.ListValue)(nil),             // 71: google.protobuf.ListValue
 }
 var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	8,  // 0: agentshim.data.v1.TranscriptLine.user:type_name -> agentshim.data.v1.UserLine
@@ -5692,8 +5697,8 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	38, // 74: agentshim.data.v1.HookNonBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
 	38, // 75: agentshim.data.v1.HookBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
 	40, // 76: agentshim.data.v1.HookBlockingErrorAttachment.blocking_error:type_name -> agentshim.data.v1.BlockingErrorDetail
-	67, // 77: agentshim.data.v1.AutoModeAttachment.auto_mode_consent_flow:type_name -> google.protobuf.Struct
-	67, // 78: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.Struct
+	71, // 77: agentshim.data.v1.TaskReminderAttachment.content:type_name -> google.protobuf.ListValue
+	71, // 78: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.ListValue
 	6,  // 79: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
 	67, // 80: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
 	67, // 81: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
@@ -5701,17 +5706,18 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	67, // 83: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
 	67, // 84: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
 	67, // 85: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
-	67, // 86: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
-	67, // 87: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
-	67, // 88: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
-	67, // 89: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
-	67, // 90: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
-	64, // 91: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
-	92, // [92:92] is the sub-list for method output_type
-	92, // [92:92] is the sub-list for method input_type
-	92, // [92:92] is the sub-list for extension type_name
-	92, // [92:92] is the sub-list for extension extendee
-	0,  // [0:92] is the sub-list for field type_name
+	67, // 86: agentshim.data.v1.FileAttachment.content:type_name -> google.protobuf.Struct
+	67, // 87: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 88: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 89: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 90: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
+	67, // 91: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
+	64, // 92: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
+	93, // [93:93] is the sub-list for method output_type
+	93, // [93:93] is the sub-list for method input_type
+	93, // [93:93] is the sub-list for extension type_name
+	93, // [93:93] is the sub-list for extension extendee
+	0,  // [0:93] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_transcript_proto_init() }

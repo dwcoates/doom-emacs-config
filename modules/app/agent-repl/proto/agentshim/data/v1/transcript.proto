@@ -445,12 +445,13 @@ message AgentListingDeltaAttachment {
 }
 
 message TaskReminderAttachment {
-  string content = 1;
+  // Array of reminder items; corpus: attachments/task_reminder.jsonl.
+  google.protobuf.ListValue content = 1;
   int64 item_count = 2;
 }
 
 message AutoModeAttachment {
-  google.protobuf.Struct auto_mode_consent_flow = 1;
+  bool auto_mode_consent_flow = 1;  // corpus: attachments/auto_mode.jsonl
 }
 
 message EditedTextFileAttachment {
@@ -459,7 +460,8 @@ message EditedTextFileAttachment {
 }
 
 message DiagnosticsAttachment {
-  google.protobuf.Struct files = 1;
+  // Array of {uri, diagnostics:[…]}; corpus: attachments/diagnostics.jsonl.
+  google.protobuf.ListValue files = 1;
   bool is_new = 2;
 }
 
@@ -500,7 +502,9 @@ message NestedMemoryAttachment {
 }
 
 message FileAttachment {
-  string content = 1;
+  // Object {type,file:{filePath,content,numLines,startLine,totalLines}};
+  // corpus: attachments/file.jsonl.
+  google.protobuf.Struct content = 1;
   string display_path = 2;
   string filename = 3;
 }
