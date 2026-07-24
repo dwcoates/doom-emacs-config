@@ -42,6 +42,7 @@ registry, and request-id counter so tests never leak into each other."
          (agent-repl--uds-reconnect-timer nil)
          (agent-repl--uds-frame-handlers nil)
          (agent-repl--uds-request-id-counter 0)
+         (agent-repl--uds-pending-commands (make-hash-table :test 'equal))
          (agent-repl-uds-reconnect-delay 2.0)
          (agent-repl-debug nil))
      ,@body))
@@ -450,6 +451,76 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
           (b (agent-repl--uds-generate-request-id)))
       ;; Assert
       (should-not (equal a b)))))
+
+;;;; ---- command-ack tracking --------------------------------------------
+
+(ert-deftest agent-repl-test-uds-track-command-records-entry ()
+  "Tracking a command records its field + workspace under the request-id."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    ;; Assert
+    (let ((entry (gethash "req-1" agent-repl--uds-pending-commands)))
+      (should (equal (plist-get entry :field) "mergeWorkspace"))
+      (should (equal (plist-get entry :workspace) "ws1")))))
+
+(ert-deftest agent-repl-test-uds-command-ack-ok-drops-entry ()
+  "An ok=t ack drops the pending entry and returns t."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    ;; Act / Assert
+    (should (eq (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t)) t))
+    (should-not (gethash "req-1" agent-repl--uds-pending-commands))))
+
+(ert-deftest agent-repl-test-uds-command-ack-failure-surfaces-loudly ()
+  "A failed ack (ok omitted) surfaces an echo-area message and returns nil."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act — protojson omits ok=false, so a failure ack has no :ok
+        (let ((ret (agent-repl--uds-handle-command-ack
+                    '(:requestId "req-1" :error "branch not found"))))
+          ;; Assert
+          (should-not ret)
+          (should (string-match-p "mergeWorkspace" echoed))
+          (should (string-match-p "branch not found" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-failure-runs-on-failure ()
+  "A failed ack runs the tracked :on-failure callback with the error string."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (cb-arg)
+      (agent-repl--uds-track-command
+       "req-1" "mergeWorkspace" "ws1"
+       (lambda (err) (setq cb-arg err)))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--uds-handle-command-ack '(:requestId "req-1" :error "boom"))
+        ;; Assert
+        (should (equal cb-arg "boom"))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-untracked-does-not-surface ()
+  "An ack for an untracked request-id logs only — no echo-area surfacing."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act — a failure-shaped ack for a request we never tracked
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "ghost" :error "boom"))
+        ;; Assert — untracked acks are not surfaced (no pending caller cares)
+        (should-not echoed)))))
+
+(ert-deftest agent-repl-test-uds-command-ack-handler-registered ()
+  "Loading frontend-uds.el registers the commandAck handler."
+  (should (eq (cdr (assoc "commandAck" agent-repl--uds-frame-handlers))
+              #'agent-repl--uds-handle-command-ack)))
 
 (provide 'test-frontend-uds)
 

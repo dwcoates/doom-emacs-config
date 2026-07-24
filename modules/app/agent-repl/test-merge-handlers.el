@@ -7,8 +7,9 @@
 ;;   - `agent-repl--read-merge-handler-config-file' (file parsing)
 ;;   - `agent-repl--lookup-merge-handler-override' (defcustom lookup)
 ;;   - `agent-repl--resolve-merge-handler' (precedence + fallbacks)
-;;   - `agent-repl--dispatch-merge-handler' (registry invocation)
-;;   - `agent-repl--merge-handler-cherry-pick' (default handler)
+;;   - `agent-repl--dispatch-merge-handler' (registry invocation + UDS re-route)
+;;   - `agent-repl--resolve-merge-handler-symbol' (symbol-only resolution)
+;;   - the daemon-routed cherry-pick path (geometry, command shaping, resume)
 ;;   - `agent-repl--register-merge-handler' (registry mutation)
 
 ;;; Code:
@@ -38,12 +39,13 @@ The directory is created with `make-temp-file' (deleted on exit)."
     path))
 
 (defmacro agent-repl-test--with-clean-registry (&rest body)
-  "Run BODY with a registry containing only `cherry-pick'.
-Restores the prior registry on exit so tests don't bleed."
+  "Run BODY with an EMPTY merge-handler registry.
+Restores the prior registry on exit so tests don't bleed.  `cherry-pick'
+is intentionally absent: it is no longer a local handler (the daemon runs
+it), and the resolver still returns the `cherry-pick' SYMBOL as its
+default regardless of registry membership."
   (declare (indent 0))
-  `(let ((agent-repl--merge-handler-registry
-          (list (cons 'cherry-pick
-                      #'agent-repl--merge-handler-cherry-pick)))
+  `(let ((agent-repl--merge-handler-registry nil)
          (agent-repl-workspace-merge-handler-overrides nil))
      ,@body))
 
@@ -185,21 +187,17 @@ Restores the prior registry on exit so tests don't bleed."
           (should (equal (plist-get captured :ws) "DWC/foo"))
           (should (equal (plist-get captured :args) '(:hello world))))))))
 
-(ert-deftest agent-repl-test-dispatch-falls-back-to-cherry-pick ()
-  "With no config, dispatcher invokes the registered cherry-pick handler."
+(ert-deftest agent-repl-test-dispatch-cherry-pick-routes-over-uds ()
+  "With no config, dispatcher routes cherry-pick to the daemon UDS dispatcher."
   (agent-repl-test--with-clean-registry
     (let ((captured nil))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (ws silent auto-resolve)
-                   (setq captured (list :ws ws :silent silent
-                                        :auto-resolve auto-resolve))))
+      (cl-letf (((symbol-function 'agent-repl--merge-dispatch-cherry-pick-over-uds)
+                 (lambda (ws) (setq captured ws)))
                 ((symbol-function 'agent-repl--main-worktree-path)
                  (lambda (dir) dir)))
         (agent-repl-test--with-temp-repo root
           (agent-repl--dispatch-merge-handler "DWC/foo" root)
-          (should (equal (plist-get captured :ws) "DWC/foo"))
-          (should (eq (plist-get captured :silent) t))
-          (should (eq (plist-get captured :auto-resolve) t)))))))
+          (should (equal captured "DWC/foo")))))))
 
 (ert-deftest agent-repl-test-dispatch-normalises-repo-root-to-main-worktree-for-eld ()
   "Dispatcher canonicalises REPO-ROOT through `--main-worktree-path' before
@@ -264,14 +262,17 @@ Preserves legacy behaviour for tests and any non-git invocation."
           (should (equal (plist-get captured :args) '(:from root))))))))
 
 (ert-deftest agent-repl-test-dispatch-errors-on-missing-registry-entry ()
-  "Dispatcher signals user-error if resolved symbol has no fn (registry empty)."
+  "Dispatcher signals user-error if a forced non-cherry-pick symbol has no fn.
+`onto-master' is forced by the caller (not chosen by the resolver), so an
+empty registry leaves it unregistered — the defensive guard fires.  (The
+cherry-pick default no longer reaches the registry: it routes over UDS.)"
   (let ((agent-repl--merge-handler-registry nil)
         (agent-repl-workspace-merge-handler-overrides nil))
     (cl-letf (((symbol-function 'agent-repl--main-worktree-path)
                (lambda (dir) dir)))
       (agent-repl-test--with-temp-repo root
         (should-error
-         (agent-repl--dispatch-merge-handler "DWC/foo" root)
+         (agent-repl--dispatch-merge-handler "DWC/foo" root t)
          :type 'user-error)))))
 
 ;;;; ---- Tests: register-merge-handler ----
@@ -287,18 +288,171 @@ Preserves legacy behaviour for tests and any non-git invocation."
       (should (= (length matches) 1))
       (should (eq (funcall (cdr (car matches))) 'second)))))
 
-;;;; ---- Tests: cherry-pick handler ----
+;;;; ---- Tests: resolve-merge-handler-symbol ----
 
-(ert-deftest agent-repl-test-cherry-pick-handler-calls-merge-into-source ()
-  "The cherry-pick handler invokes --workspace-merge-into-source with silent + auto-resolve."
-  (let ((captured nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-               (lambda (ws silent auto-resolve)
-                 (setq captured (list ws silent auto-resolve)))))
-      (agent-repl--merge-handler-cherry-pick "DWC/foo")
-      (should (equal captured '("DWC/foo" t t))))))
+(ert-deftest agent-repl-test-resolve-symbol-defaults-to-cherry-pick ()
+  "With no config, the symbol resolver returns `cherry-pick'."
+  (agent-repl-test--with-clean-registry
+    (cl-letf (((symbol-function 'agent-repl--main-worktree-path) (lambda (dir) dir)))
+      (agent-repl-test--with-temp-repo root
+        (should (eq (agent-repl--resolve-merge-handler-symbol root) 'cherry-pick))))))
 
-;;;; ---- Tests: refresh-master-from-origin handler ----
+(ert-deftest agent-repl-test-resolve-symbol-onto-master-when-forced ()
+  "ONTO-MASTER forces the `onto-master' symbol regardless of config."
+  (agent-repl-test--with-clean-registry
+    (should (eq (agent-repl--resolve-merge-handler-symbol "/any/repo" t)
+                'onto-master))))
+
+;;;; ---- Tests: cherry-pick geometry ----
+
+(ert-deftest agent-repl-test-cherry-pick-geometry-resolves-all-three ()
+  "Geometry resolves (:source-branch :source-dir :target-dir) from the ws."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--merge-target-dir-for-ws)
+               (lambda (_ws) "/tgt"))
+              ((symbol-function 'agent-repl--workspace-branch)
+               (lambda (_ws) "DWC/foo")))
+      (let ((geom (agent-repl--merge-cherry-pick-geometry "DWC/foo")))
+        (should (equal (plist-get geom :source-branch) "DWC/foo"))
+        (should (equal (plist-get geom :source-dir) "/src"))
+        (should (equal (plist-get geom :target-dir) "/tgt"))))))
+
+(ert-deftest agent-repl-test-cherry-pick-geometry-missing-target-errors ()
+  "A nil merge target hard-errors before any command could be sent."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--merge-target-dir-for-ws)
+               (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--workspace-branch)
+               (lambda (_ws) "DWC/foo")))
+      (should-error (agent-repl--merge-cherry-pick-geometry "DWC/foo")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-cherry-pick-geometry-missing-branch-errors ()
+  "A nil source branch hard-errors (No-Silent-Fallbacks)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (cl-letf (((symbol-function 'agent-repl--merge-target-dir-for-ws)
+               (lambda (_ws) "/tgt"))
+              ((symbol-function 'agent-repl--workspace-branch)
+               (lambda (_ws) nil)))
+      (should-error (agent-repl--merge-cherry-pick-geometry "DWC/foo")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-cherry-pick-geometry-missing-source-dir-errors ()
+  "A missing :project-dir hard-errors."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--merge-target-dir-for-ws)
+               (lambda (_ws) "/tgt"))
+              ((symbol-function 'agent-repl--workspace-branch)
+               (lambda (_ws) "DWC/foo")))
+      (should-error (agent-repl--merge-cherry-pick-geometry "DWC/foo")
+                    :type 'user-error))))
+
+;;;; ---- Tests: cherry-pick dispatch over UDS ----
+
+(defmacro agent-repl-test--with-mocked-merge-geometry (&rest body)
+  "Run BODY with the cherry-pick geometry + base git wrappers stubbed.
+Source-dir /src, target-dir /tgt, branch DWC/foo, base BASE-SHA."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--merge-target-dir-for-ws)
+              (lambda (_ws) "/tgt"))
+             ((symbol-function 'agent-repl--workspace-branch)
+              (lambda (_ws) "DWC/foo"))
+             ((symbol-function 'agent-repl--cherry-pick-base)
+              (lambda (_root _branch) "BASE-SHA")))
+     ,@body))
+
+(ert-deftest agent-repl-test-cherry-pick-dispatch-shapes-command ()
+  "The daemon dispatch sends mergeWorkspace with the geometry fields."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (sent)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (field payload &optional ws &rest _)
+                     (setq sent (list :field field :payload payload :ws ws))
+                     "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (&rest _) "req-1")))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (should (equal (plist-get sent :field) "mergeWorkspace"))
+          (should (equal (plist-get sent :ws) "DWC/foo"))
+          (let ((p (plist-get sent :payload)))
+            (should (equal (plist-get p :handler) "cherry-pick"))
+            (should (equal (plist-get p :sourceBranch) "DWC/foo"))
+            (should (equal (plist-get p :sourceDir) "/src"))
+            (should (equal (plist-get p :targetDir) "/tgt"))))))))
+
+(ert-deftest agent-repl-test-cherry-pick-dispatch-stashes-geometry-and-marker ()
+  "The dispatch stashes target/branch/base + the :daemon-merge-dispatched marker."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (agent-repl-test--with-mocked-merge-geometry
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "req-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) "req-1")))
+        (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+        (should (equal (agent-repl--ws-get "DWC/foo" :resolved-target-dir) "/tgt"))
+        (should (equal (agent-repl--ws-get "DWC/foo" :merge-target-branch) "DWC/foo"))
+        (should (equal (agent-repl--ws-get "DWC/foo" :merge-base) "BASE-SHA"))
+        (should (eq (agent-repl--ws-get "DWC/foo" :daemon-merge-dispatched) t))))))
+
+(ert-deftest agent-repl-test-cherry-pick-dispatch-tracks-command ()
+  "The dispatch tracks the sent request-id for ack-failure surfacing."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (tracked)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _) "req-9"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (req field ws &optional _cb)
+                     (setq tracked (list req field ws)))))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (should (equal tracked '("req-9" "mergeWorkspace" "DWC/foo"))))))))
+
+(ert-deftest agent-repl-test-cherry-pick-dispatch-ack-failure-clears-marker ()
+  "The tracked on-failure callback clears :daemon-merge-dispatched."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (on-failure)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _) "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (_req _field _ws &optional cb) (setq on-failure cb))))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (should (eq (agent-repl--ws-get "DWC/foo" :daemon-merge-dispatched) t))
+          ;; Simulate a rejected ack
+          (funcall on-failure "branch not found")
+          (should-not (agent-repl--ws-get "DWC/foo" :daemon-merge-dispatched)))))))
+
+;;;; ---- Tests: resolve-and-continue over UDS ----
+
+(ert-deftest agent-repl-test-resume-shapes-command ()
+  "Resume sends mergeWorkspace with conflict_resolved_continue + geometry."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (sent)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (field payload &optional ws &rest _)
+                     (setq sent (list :field field :payload payload :ws ws))
+                     "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (&rest _) "req-1")))
+          (agent-repl--merge-resume-over-uds "DWC/foo")
+          (should (equal (plist-get sent :field) "mergeWorkspace"))
+          (let ((p (plist-get sent :payload)))
+            (should (eq (plist-get p :conflictResolvedContinue) t))
+            (should (equal (plist-get p :sourceBranch) "DWC/foo"))
+            (should (equal (plist-get p :sourceDir) "/src"))
+            (should (equal (plist-get p :targetDir) "/tgt"))))))))
+
+;;;; ---- Tests: DAEMON-PORT PENDING refresh-master-from-origin handler ----
 ;;
 ;; The handler now defers to the main thread to start async PR polling
 ;; rather than doing synchronous git work directly.  Tests mock
@@ -760,14 +914,15 @@ repo's `.eld' prescribes a different handler (cherry-pick)."
           (agent-repl--dispatch-merge-handler "DWC/foo" root t)
           (should (equal captured "DWC/foo")))))))
 
-(ert-deftest agent-repl-test-dispatch-without-onto-master-uses-eld ()
-  "Without the flag, dispatch still honors the repo's `.eld' handler."
+(ert-deftest agent-repl-test-dispatch-without-onto-master-uses-cherry-pick ()
+  "Without the onto-master flag, dispatch resolves the default cherry-pick and
+routes it over UDS (NOT the forced onto-master handler)."
   (agent-repl-test--with-clean-registry
     (let ((captured nil))
       (agent-repl--register-merge-handler
        'onto-master (lambda (_ws _args) (setq captured 'onto-master)))
-      (cl-letf (((symbol-function 'agent-repl--workspace-merge-into-source)
-                 (lambda (&rest _) (setq captured 'cherry-pick)))
+      (cl-letf (((symbol-function 'agent-repl--merge-dispatch-cherry-pick-over-uds)
+                 (lambda (_ws) (setq captured 'cherry-pick)))
                 ((symbol-function 'agent-repl--main-worktree-path)
                  (lambda (dir) dir)))
         (agent-repl-test--with-temp-repo root
