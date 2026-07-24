@@ -8,8 +8,13 @@
 #              and install the git pre-commit hook.  Idempotent: safe to
 #              run again.
 #   uninstall  Remove the managed skill symlinks (only ours; foreign files
-#              are left alone) and the managed git pre-commit hook.
+#              are left alone), the managed git pre-commit hook, and this
+#              module's legacy settings.json hook entries.
 #   reinstall  uninstall then install.
+#   purge-legacy-hooks
+#              Remove ONLY this module's pre-cutover Claude Code hook
+#              entries (and the orphaned scripts they invoke) from every
+#              config dir on the host.  See purge_legacy_hook_entries.
 #   help       Show usage.
 #
 # Skills: each manifest-declared skill is symlinked into ~/.claude/skills
@@ -211,12 +216,18 @@ _is_managed_precommit() {
 
 show_help() {
   cat <<USAGE
-Usage: bash $0 [install|uninstall|reinstall|help] [--with-agent-shim-services]
+Usage: bash $0 [install|uninstall|reinstall|purge-legacy-hooks|help] \\
+       [--with-agent-shim-services]
 
   install    (default) Symlink the managed skills into ~/.claude/skills
              and install the git pre-commit hook.  Idempotent.
-  uninstall  Remove the managed skill symlinks and the git pre-commit hook.
+  uninstall  Remove the managed skill symlinks and the git pre-commit hook,
+             and purge this module's legacy settings.json hook entries.
   reinstall  uninstall then install.
+  purge-legacy-hooks
+             Remove ONLY this module's pre-cutover Claude Code hook entries
+             from every discovered settings.json (and the orphaned scripts
+             they point at).  Idempotent; foreign entries are never touched.
   help       Show this message.
 
   --with-agent-shim-services
@@ -349,7 +360,157 @@ do_uninstall() {
     fi
   fi
 
+  # Anything this module ever wrote into the user's Claude Code settings
+  # comes out here too — see purge_legacy_hook_entries.
+  purge_legacy_hook_entries
+
   echo "[uninstall] Done."
+}
+
+# --- legacy Claude Code hook entries (pre-cutover) ---
+#
+# Before the sentinel cutover this module registered hook entries in the
+# user's Claude Code settings.json — one per notify script it had copied
+# into <config-dir>/hooks/ — so the shim could signal Emacs by writing
+# sentinel FILES.  The cutover replaced that whole plane with pushed
+# protobuf state, and deleted the scripts, the registrar, and the remover
+# along with it.
+#
+# Deleting the remover did not delete what it had written: on any host
+# that ran a pre-cutover install, the ENTRIES survive in settings.json and
+# keep firing on every prompt, stop, and permission request — invoking
+# scripts that either no longer exist or write sentinels nothing consumes.
+# Reinstating a settings.json *writer* is not wanted; reinstating the
+# *remover* is, because removing what this module installed is precisely
+# an uninstaller's job.  This is that remover, and it only ever subtracts.
+#
+# Scope discipline: an entry is ours ONLY when its command's basename is
+# in the table below AND the command path runs through a `hooks/` dir.
+# Foreign entries that happen to share an event (e.g. the gns hook.py on
+# Stop/UserPromptSubmit) are structurally unmatchable and never touched.
+# Every other settings.json key — auth, permissions, model, statusLine —
+# is passed through untouched by a whole-document jq round-trip.
+
+# Basenames of the notify scripts the pre-cutover installer registered.
+# NOTE: prepare-commit-msg-emoji.sh is deliberately ABSENT — it is a live
+# git hook, still in the repo, and was never a settings.json entry.
+LEGACY_HOOK_SCRIPTS=(
+  "permission-notify.sh"
+  "permission-request-notify.sh"
+  "prompt-submit-notify.sh"
+  "session-start-notify.sh"
+  "stop-failure-notify.sh"
+  "stop-notify.sh"
+  "subagent-start-notify.sh"
+  "subagent-stop-notify.sh"
+)
+
+# Print every Claude Code config dir on this host that carries a
+# settings.json: the default ~/.claude plus any sibling ~/.claude-* dir
+# (alternate accounts get their own CLAUDE_CONFIG_DIR, and the pre-cutover
+# installer provisioned hooks into each one).  No hardcoded account names.
+_legacy_hook_settings_files() {
+  local dir
+  for dir in "$HOME/.claude" "$HOME"/.claude-*; do
+    [ -d "$dir" ] || continue
+    [ -f "$dir/settings.json" ] || continue
+    echo "$dir/settings.json"
+  done
+}
+
+# jq program: drop hook objects whose command is one of ours, then prune
+# matcher groups and events left empty by the removal.  Applied to the
+# whole document so every unrelated key round-trips untouched.
+_LEGACY_HOOK_JQ_PRUNE='
+def ours($names):
+  (. // "") as $cmd
+  | ($cmd | split("/") | last) as $base
+  | (($names | index($base)) != null) and ($cmd | test("/hooks/"));
+if has("hooks") and (.hooks | type) == "object" then
+  .hooks |= (
+    with_entries(
+      .value |= (
+        map(if has("hooks") and (.hooks | type) == "array"
+            then .hooks |= map(select((.command | ours($names)) | not))
+            else . end)
+        | map(select(((.hooks // []) | length) > 0))
+      )
+    )
+    | with_entries(select((.value | length) > 0))
+  )
+else . end'
+
+# Same predicate, but listing what WOULD be removed (for the log).
+_LEGACY_HOOK_JQ_LIST='
+def ours($names):
+  (. // "") as $cmd
+  | ($cmd | split("/") | last) as $base
+  | (($names | index($base)) != null) and ($cmd | test("/hooks/"));
+(.hooks // {}) | to_entries[] | .key as $event
+| .value[]? | .hooks[]?
+| select(.command | ours($names))
+| "\($event)\t\(.command)"'
+
+# Remove this module's legacy hook entries from every discovered
+# settings.json, then delete the orphaned scripts they pointed at.
+# Idempotent: with nothing to remove it reports so and rewrites nothing.
+purge_legacy_hook_entries() {
+  echo "[purge-hooks] Removing this module's pre-cutover settings.json hook entries."
+
+  if ! command -v jq >/dev/null 2>&1; then
+    # settings.json is shared, user-owned state; editing it with anything
+    # less precise than a real JSON tool is not an option, so a missing jq
+    # is a hard failure rather than a skip.
+    echo "[purge-hooks] ERROR: 'jq' not found — refusing to edit settings.json without it." >&2
+    return 1
+  fi
+
+  local names_json
+  names_json="$(printf '%s\n' "${LEGACY_HOOK_SCRIPTS[@]}" | jq -R . | jq -s .)"
+
+  local settings removed backup tmp total=0
+  while IFS= read -r settings; do
+    [ -n "$settings" ] || continue
+
+    if ! jq -e . "$settings" >/dev/null 2>&1; then
+      echo "[purge-hooks] ERROR: $settings is not valid JSON — leaving it untouched." >&2
+      return 1
+    fi
+
+    removed="$(jq -r --argjson names "$names_json" "$_LEGACY_HOOK_JQ_LIST" "$settings")"
+    if [ -z "$removed" ]; then
+      echo "[purge-hooks] $settings: no legacy entries (nothing to do)."
+      continue
+    fi
+
+    backup="$settings.pre-purge-$(date +%Y%m%d-%H%M%S)"
+    cp "$settings" "$backup"
+    tmp="$settings.purge-tmp-$$"
+    jq --indent 2 --argjson names "$names_json" "$_LEGACY_HOOK_JQ_PRUNE" "$settings" > "$tmp"
+    mv "$tmp" "$settings"
+
+    echo "[purge-hooks] $settings: backed up to $backup"
+    printf '%s\n' "$removed" | sed 's/^/[purge-hooks]   removed: /'
+    total=$((total + $(printf '%s\n' "$removed" | wc -l | tr -d ' ')))
+  done < <(_legacy_hook_settings_files)
+
+  # The scripts themselves: installed copies under <config-dir>/hooks/ that
+  # no longer have a source in this repo.  Removed only after the entries
+  # that invoked them are gone, so no window exists where a registered hook
+  # points at a deleted file.
+  local dir script
+  for dir in "$HOME/.claude" "$HOME"/.claude-*; do
+    [ -d "$dir/hooks" ] || continue
+    for script in "${LEGACY_HOOK_SCRIPTS[@]}"; do
+      if [ -f "$dir/hooks/$script" ]; then
+        rm -f "$dir/hooks/$script"
+        echo "[purge-hooks] Removed orphaned script $dir/hooks/$script"
+      fi
+    done
+  done
+
+  echo "[purge-hooks] Done: $total entr(y/ies) removed."
+  return 0
 }
 
 # --- agent-shim supervision services (OPT-IN, OFF BY DEFAULT) ---
@@ -516,7 +677,7 @@ if [ "${INSTALL_SH_LIB:-}" != "1" ]; then
     case "$arg" in
       --with-agent-shim-services) WITH_SERVICES=1 ;;
       -h|--help|help)             show_help; exit 0 ;;
-      install|uninstall|reinstall)
+      install|uninstall|reinstall|purge-legacy-hooks)
         if [ -n "$ACTION" ]; then
           echo "[install.sh] Multiple actions given: '$ACTION' and '$arg'" >&2
           show_help
@@ -560,6 +721,9 @@ if [ "${INSTALL_SH_LIB:-}" != "1" ]; then
       if [ "$WITH_SERVICES" -eq 1 ]; then
         install_agent_shim_services
       fi
+      ;;
+    purge-legacy-hooks)
+      purge_legacy_hook_entries
       ;;
   esac
 fi
