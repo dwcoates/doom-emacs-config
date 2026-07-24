@@ -338,7 +338,6 @@ func main() {
 	srv := server.New(server.Config{
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
-		RequestShutdown: requestShutdown,
 		ForceFake:       *fake,
 		Sentinel:        sentinelWriter,
 		Remediator:      remediator,
@@ -363,7 +362,6 @@ func main() {
 	mux.Handle("/accounts", srv.Handler())
 	mux.Handle("/capabilities", srv.Handler())
 	mux.Handle("/workspaces/", srv.Handler())
-	mux.Handle("/shutdown", srv.Handler())
 	if h := webappHandler(*webappDir, log.Printf); h != nil {
 		mux.Handle("/", h)
 	}

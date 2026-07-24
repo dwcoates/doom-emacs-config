@@ -160,10 +160,7 @@ type Server struct {
 	sentinel SentinelSink
 
 	remediator Remediator
-	// requestShutdown asks the process to begin its graceful teardown, the
-	// same path SIGTERM triggers. Nil makes POST /shutdown report 501.
-	requestShutdown func()
-	registry        *registry.Registry
+	registry   *registry.Registry
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability unconfigured.
 	logins *login.Manager
@@ -213,9 +210,6 @@ type Config struct {
 	// Remediator dispatches the "session gone" analyst; nil makes
 	// POST /remediation report the capability unconfigured.
 	Remediator Remediator
-	// RequestShutdown begins the process's graceful teardown (the SIGTERM
-	// path). Nil makes POST /shutdown report the capability unconfigured (501).
-	RequestShutdown func()
 	// Registry persists session records across daemon restarts. Required: it
 	// is the source of truth for which sessions exist.
 	Registry *registry.Registry
@@ -277,7 +271,6 @@ func New(cfg Config) *Server {
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
-		requestShutdown: cfg.RequestShutdown,
 		registry:        cfg.Registry,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
@@ -346,7 +339,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/add-support", s.handleAddSupport)
 	mux.HandleFunc("POST /remediation", s.handleRemediate) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
 	mux.HandleFunc("POST /workspace-command", s.handleWorkspaceCommand)
-	mux.HandleFunc("POST /shutdown", s.handleShutdown) // SUPERSEDED (S7): dies when elisp completes its full-UDS migration
+	// POST /shutdown was DELETED in the D-phase census: Emacs bounces an
+	// adopted daemon over the shutdown FrontendCommand (frontend-uds.el) and no
+	// other surface ever called it. The graceful-teardown func it drove survives
+	// on the command handler.
 	return mux
 }
 
@@ -406,21 +402,6 @@ func (s *Server) sessionConfigDir(id string) (string, bool) {
 func (s *Server) known(id string) bool {
 	rec, ok := s.registry.Get(id)
 	return ok && !rec.Terminal
-}
-
-// handleShutdown asks the daemon to exit gracefully — the same teardown
-// SIGTERM runs. Emacs drives this to bounce a daemon it ADOPTED from another
-// Emacs, which it has no local process handle to signal. SUPERSEDED (S7).
-func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
-	if s.requestShutdown == nil {
-		httpError(w, http.StatusNotImplemented, "shutdown not supported by this daemon")
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-	if _, err := w.Write([]byte("shutting down\n")); err != nil {
-		s.logf("shutdown: writing acknowledgment failed: %v", err)
-	}
-	go s.requestShutdown()
 }
 
 // chessGameDirParts is the fixed worktree-relative directory the

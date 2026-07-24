@@ -775,36 +775,10 @@ func TestRemediationReportsAnUnconfiguredRunner(t *testing.T) {
 	}
 }
 
-// --- Shutdown -------------------------------------------------------------
-
-func TestShutdownEndpointTriggersRequestShutdown(t *testing.T) {
-	// Arrange
-	fired := make(chan struct{}, 1)
-	h := newHarnessWith(t, Config{RequestShutdown: func() { fired <- struct{}{} }})
-	// Act
-	resp, err := http.Post(h.ts.URL+"/shutdown", "application/json", nil)
-	if err != nil {
-		t.Fatalf("POST /shutdown: %v", err)
-	}
-	defer resp.Body.Close()
-	// Assert
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", resp.StatusCode)
-	}
-	<-fired
-}
-
-func TestShutdownEndpointReportsUnconfiguredWhenNoHook(t *testing.T) {
-	h := newHarness(t)
-	resp, err := http.Post(h.ts.URL+"/shutdown", "application/json", nil)
-	if err != nil {
-		t.Fatalf("POST /shutdown: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("status = %d, want 501", resp.StatusCode)
-	}
-}
+// The POST /shutdown tests were deleted with the route: the graceful-teardown
+// capability is covered on its surviving surface by
+// TestCommandHandlerShutdownRoutesToShutdownFunc and
+// TestCommandHandlerShutdownUnconfiguredErrors in frontendcmd_test.go.
 
 // --- Unknown-session routing ----------------------------------------------
 
