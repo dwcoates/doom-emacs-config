@@ -78,6 +78,14 @@ is retained here until its newline arrives.")
 (defvar agent-repl--uds-request-id-counter 0
   "Monotonic counter feeding `agent-repl--uds-generate-request-id'.")
 
+(defvar agent-repl--uds-pending-commands (make-hash-table :test 'equal)
+  "Hash of outbound `request_id' -> plist awaiting its `CommandAck'.
+Populated by `agent-repl--uds-track-command'; entries are removed by
+`agent-repl--uds-handle-command-ack' when the matching ack lands.  Each
+value plist carries `:field' (the command oneof name), `:workspace', and
+an optional `:on-failure' (a function of one arg, the error string, run
+when the ack reports failure — in addition to the loud log + echo).")
+
 ;;;; ---- Frame vocabulary ------------------------------------------------
 
 (defconst agent-repl--uds-known-frame-fields
@@ -374,6 +382,79 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
                        field request-id workspace (length json))
       (process-send-string proc (concat json "\n"))
       request-id)))
+
+;;;; ---- Command-ack tracking --------------------------------------------
+;;
+;; A `FrontendCommand' is acknowledged asynchronously by a `CommandAck'
+;; frame ({request_id, ok, error}).  Callers that need the ack outcome
+;; surfaced (e.g. the merge re-route) record the request via
+;; `agent-repl--uds-track-command'; the `commandAck' handler below matches
+;; it and, on failure, surfaces loudly (log + echo area) per
+;; No-Silent-Fallbacks — a rejected command is never dropped silently.
+
+(defun agent-repl--uds-track-command (request-id field workspace &optional on-failure)
+  "Record REQUEST-ID as an in-flight FIELD command for WORKSPACE.
+Pends until its `CommandAck' arrives (see
+`agent-repl--uds-handle-command-ack').  ON-FAILURE, when non-nil, is a
+function of one argument (the ack error string) run if the ack reports
+failure, IN ADDITION to the loud log + echo-area surfacing.  Returns
+REQUEST-ID."
+  (puthash request-id
+           (list :field field :workspace workspace :on-failure on-failure)
+           agent-repl--uds-pending-commands)
+  (agent-repl--log workspace
+                   "uds-track-command: tracking request-id=%s field=%s"
+                   request-id field)
+  request-id)
+
+(defun agent-repl--uds-handle-command-ack (ack)
+  "Handler for the `commandAck' FrontendFrame arm.  ACK is a plist.
+Reads `:requestId', `:ok', and `:error'.  protojson omits a false `ok',
+so a failed ack decodes with `:ok' nil (and usually an `:error' string).
+
+  ok=t   -> the command was accepted; log and drop the pending entry.
+  ok=nil -> the command was REJECTED; loud-log AND surface an echo-area
+            message (No-Silent-Fallbacks — never a silent drop), run any
+            tracked `:on-failure' callback, and drop the entry.
+
+An ack for an UNTRACKED request-id is logged (a command sent without
+tracking, or a duplicate ack) — informational, not an error.  Returns
+the `:ok' flag."
+  (let* ((request-id (plist-get ack :requestId))
+         (ok (plist-get ack :ok))
+         (err (plist-get ack :error))
+         (pending (and request-id
+                       (gethash request-id agent-repl--uds-pending-commands)))
+         (workspace (plist-get pending :workspace))
+         (field (plist-get pending :field)))
+    (when request-id
+      (remhash request-id agent-repl--uds-pending-commands))
+    (cond
+     ((null pending)
+      (agent-repl--log workspace
+                       "uds-command-ack: UNTRACKED request-id=%s ok=%S error=%s — ignoring"
+                       request-id ok (or err "nil")))
+     (ok
+      (agent-repl--log workspace
+                       "uds-command-ack: ACCEPTED request-id=%s field=%s"
+                       request-id field))
+     (t
+      (agent-repl--log workspace
+                       "uds-command-ack: REJECTED request-id=%s field=%s error=%s — surfacing"
+                       request-id field (or err "nil"))
+      (message "agent-repl: %s command failed: %s"
+               (or field "frontend") (or err "no error detail"))
+      (when-let ((on-failure (plist-get pending :on-failure)))
+        (condition-case cb-err
+            (funcall on-failure (or err "command rejected"))
+          (error
+           (agent-repl--log workspace
+                            "uds-command-ack: on-failure callback errored: %S"
+                            cb-err))))))
+    ok))
+
+(agent-repl--uds-register-handler "commandAck"
+                                  #'agent-repl--uds-handle-command-ack)
 
 (provide 'frontend-uds)
 
