@@ -183,16 +183,16 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 // handled the message itself (logged it, or it is a deliberate no-op) and no
 // command should be dispatched — the read loop simply reads the next message.
 // A non-nil error marks a bad frame (logged; the connection continues). It
-// lets the per-session /stream bridge accept the webapp's still-Layer-2 client
-// commands while the connection SERVES frontend.v1 frames.
+// lets the per-session /stream bridge stamp the connection's workspace onto
+// each decoded command before dispatch.
 type CommandTranslator func(raw []byte) (cmd *frontendv1.FrontendCommand, dispatch bool, err error)
 
 // ServeWSScoped upgrades an HTTP request to a WebSocket and serves it as a
 // client SCOPED to one session/workspace: only frames matching scope reach it
 // (the connect/resync snapshot is filtered likewise). translate adapts inbound
-// messages (the webapp's Layer-2 client commands) into FrontendCommands the
-// shared handler dispatches; a nil translate parses frontend.v1 commands
-// directly. This backs GET /sessions/{id}/stream.
+// messages into FrontendCommands the shared handler dispatches (the /stream
+// bridge uses it to stamp the connection's workspace); a nil translate parses
+// frontend.v1 commands directly. This backs GET /sessions/{id}/stream.
 func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Scope, translate CommandTranslator) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
