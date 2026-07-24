@@ -361,6 +361,18 @@ describe("explicit-ignore path", () => {
     expect(logs.filter(([, m]) => m.includes("commandAck"))).toHaveLength(1);
   });
 
+  it("ignores a daemonView frame (S7 unsupported shape)", () => {
+    const adapter = new StateAdapter();
+    const dv = frame({
+      daemonView: { bootId: "b_x", protocolVersion: "1", daemonBinaryMtimeMs: "1", daemonVersion: "v" },
+    });
+
+    const effects = adapter.apply(dv);
+
+    expect(effects).toEqual([{ kind: "ignored", shape: "daemonView" }]);
+    expect(adapter.ignoredCounts().get("daemonView")).toBe(1);
+  });
+
   it("ignores an unknown conversation-item kind, once per distinct name", () => {
     const logs: Array<[AdapterLogLevel, string]> = [];
     const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
