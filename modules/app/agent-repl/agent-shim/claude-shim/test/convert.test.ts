@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { anyUnpack } from "@bufbuild/protobuf/wkt";
 import { convert, convertToolUseResult } from "../src/proto/convert.js";
 import { __resetExtrasSeen } from "../src/proto/extras.js";
-import { EventClass, Plane } from "../src/uds/proto.js";
+import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
 import {
   ClaudeStreamMessageSchema,
   type ClaudeStreamMessage,
@@ -229,6 +229,30 @@ describe("lifecycle twins", () => {
     if (lifecycle[0]!.payload.case !== "sessionStarted") throw new Error("case");
     expect(lifecycle[0]!.payload.value.model).toBe("claude-haiku-4-5-20251001");
     expect(lifecycle[0]!.payload.value.vendorSessionId).toBe("f7b59684-e29e-469c-a7e7-47bbc1828fb6");
+  });
+
+  it("SessionStarted.source defaults to FRESH when no sessionSource option is given", () => {
+    // Arrange / Act: the pre-seam call site (no opts) is unchanged.
+    const { lifecycle } = convert(loadStream("system_init"));
+    // Assert
+    if (lifecycle[0]!.payload.case !== "sessionStarted") throw new Error("case");
+    expect(lifecycle[0]!.payload.value.source).toBe(SessionSource.FRESH);
+  });
+
+  it("SessionStarted.source is RESUME when the resume seam is passed", () => {
+    // Arrange / Act: the stitch phase passes this when spawned with --resume.
+    const { lifecycle } = convert(loadStream("system_init"), { sessionSource: SessionSource.RESUME });
+    // Assert
+    if (lifecycle[0]!.payload.case !== "sessionStarted") throw new Error("case");
+    expect(lifecycle[0]!.payload.value.source).toBe(SessionSource.RESUME);
+  });
+
+  it("SessionStarted.source honors an explicit FRESH option", () => {
+    // Arrange / Act
+    const { lifecycle } = convert(loadStream("system_init"), { sessionSource: SessionSource.FRESH });
+    // Assert
+    if (lifecycle[0]!.payload.case !== "sessionStarted") throw new Error("case");
+    expect(lifecycle[0]!.payload.value.source).toBe(SessionSource.FRESH);
   });
 
   it("result emits TurnEnded with stop_reason/duration/is_error", () => {
