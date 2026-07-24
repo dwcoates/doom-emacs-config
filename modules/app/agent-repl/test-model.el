@@ -2,51 +2,17 @@
 
 ;;; Commentary:
 
-;; Tests for the Agent-model mode-line segment: raw-id prettifying,
-;; jsonl tail scanning for the most recent main-chain assistant model,
-;; mtime-keyed cache, segment formatting, and mode-line attachment.
+;; Tests for the model READER: jsonl tail scanning for the most recent
+;; main-chain assistant model, the mtime-keyed cache, and the persisted
+;; value history.el snapshots.  There is deliberately no prettifying or
+;; segment-formatting coverage here — Emacs does not display the model,
+;; so model.el carries no display-formatting code to test.
 
 ;;; Code:
 
 (load (expand-file-name "test-helpers.el" (file-name-directory
                                             (or load-file-name buffer-file-name)))
       nil t)
-
-;;;; ---- Tests: prettify ----
-
-(ert-deftest agent-repl-test-model-prettify-family-major-minor ()
-  "`claude-opus-4-8' renders as `Opus 4.8'."
-  (should (equal (agent-repl--model-prettify "claude-opus-4-8") "Opus 4.8")))
-
-(ert-deftest agent-repl-test-model-prettify-sonnet ()
-  "Sonnet family is recognized and capitalized."
-  (should (equal (agent-repl--model-prettify "claude-sonnet-4-5") "Sonnet 4.5")))
-
-(ert-deftest agent-repl-test-model-prettify-haiku ()
-  "Haiku family is recognized and capitalized."
-  (should (equal (agent-repl--model-prettify "claude-haiku-3-5") "Haiku 3.5")))
-
-(ert-deftest agent-repl-test-model-prettify-major-only ()
-  "A family with only a major version omits the dotted minor."
-  (should (equal (agent-repl--model-prettify "claude-opus-4") "Opus 4")))
-
-(ert-deftest agent-repl-test-model-prettify-family-only ()
-  "A bare family id renders as the capitalized family alone."
-  (should (equal (agent-repl--model-prettify "claude-opus") "Opus")))
-
-(ert-deftest agent-repl-test-model-prettify-unknown-family-strips-prefix ()
-  "Unrecognized shapes fall back to the prefix-stripped id verbatim."
-  (should (equal (agent-repl--model-prettify "claude-experimental-x")
-                 "experimental-x")))
-
-(ert-deftest agent-repl-test-model-prettify-no-agent-prefix ()
-  "An id lacking the `claude-' prefix is used as-is (still family-matched)."
-  (should (equal (agent-repl--model-prettify "opus-4-8") "Opus 4.8")))
-
-(ert-deftest agent-repl-test-model-prettify-nil ()
-  "Nil/empty input returns nil so callers can short-circuit."
-  (should-not (agent-repl--model-prettify nil))
-  (should-not (agent-repl--model-prettify "")))
 
 ;;;; ---- Tests: extract-from-tail ----
 
