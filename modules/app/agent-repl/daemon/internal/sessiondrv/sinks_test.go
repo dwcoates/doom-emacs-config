@@ -75,17 +75,19 @@ func TestConsumeContentDeltaPushesTyping(t *testing.T) {
 		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}}},
 	})
 
-	// Assert.
+	// Assert: the ContentDelta is embedded in the TypingDelta unchanged (S9).
 	if len(push.typing) != 1 {
 		t.Fatalf("expected 1 typing push, got %d", len(push.typing))
 	}
-	if got := push.typing[0]; got.GetKind() != "text" || got.GetDelta() != "hi" {
-		t.Errorf("typing delta: got kind=%q delta=%q, want text/hi", got.GetKind(), got.GetDelta())
+	got := push.typing[0].GetDelta()
+	if got.GetUuid() != "u1" || got.GetText() != "hi" {
+		t.Errorf("embedded content delta: got uuid=%q text=%q, want u1/hi", got.GetUuid(), got.GetText())
 	}
 }
 
-func TestConsumeHeartbeatProgressPushesProgressTyping(t *testing.T) {
-	// Arrange.
+func TestConsumeHeartbeatProgressNotRelayed(t *testing.T) {
+	// Arrange: the S9 TypingDelta carries only a core.v1.ContentDelta, so a
+	// tool-progress heartbeat (not a ContentDelta) has no frontend.v1 arm.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 
@@ -95,12 +97,9 @@ func TestConsumeHeartbeatProgressPushesProgressTyping(t *testing.T) {
 		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "tu1", ElapsedSeconds: 12}},
 	})
 
-	// Assert.
-	if len(push.typing) != 1 {
-		t.Fatalf("expected 1 typing push, got %d", len(push.typing))
-	}
-	if got := push.typing[0]; got.GetKind() != "progress" || got.GetUuid() != "tu1" {
-		t.Errorf("progress typing: got kind=%q uuid=%q, want progress/tu1", got.GetKind(), got.GetUuid())
+	// Assert: no typing push (a schema-forced drop, not a relay).
+	if len(push.typing) != 0 {
+		t.Fatalf("expected heartbeat progress to not relay, got %d typing pushes", len(push.typing))
 	}
 }
 
