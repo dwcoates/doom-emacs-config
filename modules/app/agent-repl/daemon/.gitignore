@@ -1,3 +1,8 @@
 # Build output of `go build -o bin/claude-repld` (produced by
 # ../bin/build-frontend.sh). A platform-specific binary, never committed.
 bin/
+
+# Build output of a bare `go build ./cmd/claude-repld` run from this
+# directory, which drops the binary here rather than in bin/. Same
+# platform-specific artifact, equally never committed.
+/claude-repld
