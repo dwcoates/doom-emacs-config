@@ -5,28 +5,30 @@
 // stopped a second session from resuming an id an older session was
 // still live on, and the result is two CLIs appending to one file.
 //
-// That is not a cosmetic overlap. Each session's model reconciler
-// (§2.12) tail-reads that shared transcript and treats whatever it finds
-// as truth, so with two writers each reconciler reads the OTHER's model
-// back, calls it drift, and adopts it — the two mirrors flip against
-// each other on every tick, the topbar oscillates, and because a revive
-// relaunches from the mirror the corrupted value eventually becomes the
-// real CLI. The reconciler is not at fault; it is a mirror of a file
-// that had stopped having a single meaning.
-//
-// So the conflict is removed at its source rather than tolerated
+// That is not a cosmetic overlap: each session's model reconciler once
+// tail-read that shared transcript and treated whatever it found as
+// truth, so two writers made the two mirrors flip against each other.
+// The conflict is removed at its source rather than tolerated
 // downstream: a resume takes sole ownership of its transcript, and any
-// older session still holding it is shut down. The newest resume is the
+// older session still holding it is stood down. The newest resume is the
 // one the user just asked for, so it is the one that wins.
+//
+// After the agent-shim consumption cutover there is no live-session map:
+// the persistent registry is the source of truth for who holds which
+// transcript, and the per-session driver owns the live shim. Supersede
+// therefore works entirely off the registry — it marks every non-terminal
+// record contending for the same transcript terminal and stops its shim —
+// rather than reaching into a hub that no longer exists.
 
 package server
 
 import (
+	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 )
 
-// supersedeReason is the death reason a superseded session carries. It
-// reads as a planned handover in the log and in `GET /sessions` rather
+// supersedeReason is the death reason a superseded record carries. It
+// reads as a planned handover in the log and in GET /sessions rather
 // than as a conversation that died on its own.
 const supersedeReason = "superseded"
 
@@ -40,77 +42,42 @@ func transcriptOwner(configDir, cwd, claudeSessionID string) string {
 	return session.TranscriptPath(session.ClaudeConfigDir(configDir), cwd, claudeSessionID)
 }
 
-// supersedeResumeConflicts shuts down every non-terminal session already
-// appending to the transcript OPTS resumes, so the newest resume owns it
-// alone. A no-op for a fresh conversation, which has no transcript to
-// contend for yet.
+// supersedeResumeConflicts stands down every non-terminal registry record
+// already appending to the transcript OPTS resumes, so the newest resume
+// owns it alone. A no-op for a fresh conversation, which has no transcript
+// to contend for yet.
 //
-// A HIBERNATED holder is superseded too, even though it has no CLI at
-// this instant: it spawns one the moment anyone acts on it, which would
-// re-create exactly the conflict being removed here. Its history is not
-// lost — the newer session resumes the same transcript and seeds its
-// replay ring from it.
-//
-// Locking: the session map is copied under s.mu and every Info/Shutdown
-// call is made after s.mu is released. Shutdown reaches back into the
-// server (registrar -> isSwitching -> s.mu), so holding s.mu across it
-// would deadlock on a non-reentrant mutex.
+// A record with no claude_session_id has adopted no transcript, so it
+// cannot be contending for this one. A record on a DIFFERENT resolved path
+// (same uuid, different account root) is a distinct file and is left alone.
+// For every genuine conflict the record is marked terminal (so its id stops
+// resolving and the driver never brings it up again) and its shim is stopped
+// best-effort — a shim that was never brought up is a no-op Hibernate.
 func (s *Server) supersedeResumeConflicts(opts CreateOpts) {
 	if opts.Resume == "" {
 		return
 	}
 	want := transcriptOwner(opts.ConfigDir, opts.CWD, opts.Resume)
 
-	s.mu.Lock()
-	held := make([]*session.Session, 0, len(s.sessions))
-	for _, sess := range s.sessions {
-		held = append(held, sess)
-	}
-	// A dormant record is a session too — just one whose CLI has not been
-	// rebuilt since the daemon restarted. Leaving it would let the id
-	// materialize and revive into a SECOND CLI on this very transcript
-	// later, which is precisely the conflict being closed here, so it is
-	// dropped now and its holder rebinds to the session that owns the
-	// conversation instead.
-	var stale []string
-	for id, rec := range s.dormant {
-		if rec.ClaudeSessionID == "" {
+	for _, rec := range s.registry.All() {
+		if rec.Terminal || rec.ClaudeSessionID == "" {
 			continue
 		}
-		if transcriptOwner(rec.ConfigDir, rec.CWD, rec.ClaudeSessionID) == want {
-			delete(s.dormant, id)
-			stale = append(stale, id)
-		}
-	}
-	s.mu.Unlock()
-
-	for _, id := range stale {
-		s.logf("session %s: dormant record superseded by a newer resume of %s — dropping it so %s cannot gain a second writer on revive",
-			id, opts.Resume, want)
-		if err := s.registry.Delete(id); err != nil {
-			s.logf("session %s: superseded registry delete FAILED — the record may rehydrate into a second CLI on %s: %v",
-				id, want, err)
-		}
-	}
-
-	for _, sess := range held {
-		info := sess.Info()
-		// A session with no claude_session_id has not adopted a
-		// transcript yet, so it cannot be contending for this one.
-		if info.Terminal || info.ClaudeSessionID == "" {
+		if transcriptOwner(rec.ConfigDir, rec.CWD, rec.ClaudeSessionID) != want {
 			continue
 		}
-		if transcriptOwner(info.ConfigDir, info.CWD, info.ClaudeSessionID) != want {
-			continue
-		}
-		s.logf("session %s: superseded by a newer resume of %s — shutting it down so %s keeps a single writer",
-			sess.ID, opts.Resume, want)
+		s.logf("session %s: superseded by a newer resume of %s — standing it down so %s keeps a single writer",
+			rec.SessionID, opts.Resume, want)
 		// Never swallowed: a supersede that fails to land leaves the very
-		// double-writer this exists to prevent, and the surviving CLI will
-		// go on corrupting the shared transcript's model signal.
-		if err := sess.Shutdown(supersedeReason); err != nil {
-			s.logf("session %s: supersede shutdown FAILED — two CLIs may now be appending to %s: %v",
-				sess.ID, want, err)
+		// double-writer this exists to prevent.
+		s.updateRegistry(rec.SessionID, "supersede terminal", func(r *registry.Record) {
+			r.Terminal = true
+			r.DeathReason = supersedeReason
+		})
+		// Stop the old shim if the driver had brought one up. A workspace with
+		// no live driver is an expected no-op, not a failure.
+		if err := s.driver.Hibernate(rec.CWD); err != nil {
+			s.logf("session %s: supersede shim stop (ws %s): %v (expected when no live shim)", rec.SessionID, rec.CWD, err)
 		}
 	}
 }

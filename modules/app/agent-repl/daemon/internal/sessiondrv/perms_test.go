@@ -10,7 +10,7 @@ import (
 func TestPermRegistryAnswerAllow(t *testing.T) {
 	// Arrange.
 	reg := newPermRegistry(nil)
-	ch, release := reg.await("r1")
+	ch, release := reg.await("r1", "ws")
 	defer release()
 
 	// Act.
@@ -35,7 +35,7 @@ func TestPermRegistryAnswerAllow(t *testing.T) {
 func TestPermRegistryAnswerDenyCarriesMessage(t *testing.T) {
 	// Arrange.
 	reg := newPermRegistry(nil)
-	ch, release := reg.await("r2")
+	ch, release := reg.await("r2", "ws")
 	defer release()
 
 	// Act.
@@ -63,7 +63,7 @@ func TestPermRegistryAnswerUnknownIsError(t *testing.T) {
 func TestPermRegistryFailAbandonsWithNil(t *testing.T) {
 	// Arrange.
 	reg := newPermRegistry(nil)
-	ch, release := reg.await("r3")
+	ch, release := reg.await("r3", "ws")
 	defer release()
 
 	// Act.
@@ -83,7 +83,7 @@ func TestPermRegistryFailAbandonsWithNil(t *testing.T) {
 func TestPermRegistryAnswerIsOneShot(t *testing.T) {
 	// Arrange.
 	reg := newPermRegistry(nil)
-	_, release := reg.await("r4")
+	_, release := reg.await("r4", "ws")
 	defer release()
 
 	// Act + Assert: first answer wins; a second is a loud error.

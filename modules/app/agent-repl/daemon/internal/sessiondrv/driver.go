@@ -44,6 +44,11 @@ type SessionRegistrar interface {
 // spawn plumbing); injected here so the driver stays IO-narrow and testable.
 type Spawner interface {
 	EnsureShim(ctx context.Context, sessionID, socketPath string) error
+	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
+	// its child shim on hibernation, §4.4 redefined). A shim the daemon never
+	// spawned (a reattached one that outlived a prior daemon) is a no-op. A
+	// stop failure is surfaced, never swallowed.
+	StopShim(sessionID string) error
 }
 
 // SessionLocator maps a workspace to the live session id bound to it. The
@@ -287,6 +292,34 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 	return nil
 }
 
+// PendingPermissions lists the request ids of the workspace's unresolved
+// permission prompts (GET /sessions pending_permissions, SUPERSEDED S7). A
+// workspace with no live driver has none.
+func (m *Manager) PendingPermissions(workspace string) []string {
+	return m.reg.idsForWorkspace(workspace)
+}
+
+// Hibernate suspends the workspace's live session: it stops consuming the
+// stream and SIGTERMs the child shim (the redefined hibernation, §4.4). The
+// registry record stays non-terminal (the caller owns that), so the next act
+// revives it via a fresh reattach-first Ensure. A workspace with no live driver
+// is a loud error (nothing to hibernate). NEVER call this while a turn is
+// active — the SSM is the caller's guard.
+func (m *Manager) Hibernate(workspace string) error {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	if ok {
+		delete(m.byWS, workspace)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("sessiondrv: no live session for workspace %q to hibernate", workspace)
+	}
+	d.cancel() // stop consuming; the shimclient Run ends
+	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
+	return m.cfg.Spawner.StopShim(d.sessionID)
+}
+
 // existing returns the live driver for workspace, or a loud error when there is
 // none (no lazy bring-up: interrupt/resync/answer for an unbrought-up workspace
 // is a caller error, distinct from a first prompt which brings it up).
@@ -434,7 +467,7 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 		SessionId: h.sessionID,
 		State:     frontendv1.RenderState_RENDER_STATE_PERMISSION,
 	})
-	ch, release := h.reg.await(req.GetRequestId())
+	ch, release := h.reg.await(req.GetRequestId(), h.workspace)
 	defer release()
 	return <-ch
 }
