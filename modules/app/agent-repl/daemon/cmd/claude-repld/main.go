@@ -26,7 +26,6 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
 	"claude-repld/internal/replog"
-	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/shim"
@@ -168,14 +167,6 @@ func main() {
 		log.Printf("claude-repld: --shim is required (path to agent-shim/claude-shim/dist/main.js)")
 		os.Exit(2)
 	}
-
-	// Agent-state sentinel side channel (daemon -> Emacs), resolved from
-	// the inherited AGENT_REPL_STATE_DIR exactly like the hook scripts.
-	sentinelWriter, err := sentinel.NewWriter(log.Printf)
-	if err != nil {
-		log.Fatalf("claude-repld: %v", err)
-	}
-	defer sentinelWriter.Close()
 
 	// Persistent session registry: the in-memory session map dies with
 	// the process, so this write-through record store is what lets a
@@ -339,7 +330,6 @@ func main() {
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		ForceFake:       *fake,
-		Sentinel:        sentinelWriter,
 		Remediator:      remediator,
 		Registry:        sessionRegistry,
 		Logins:          logins,

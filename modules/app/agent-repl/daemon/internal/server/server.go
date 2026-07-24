@@ -119,14 +119,6 @@ type Remediator interface {
 	Start(sessionID string) (bool, error)
 }
 
-// SentinelSink receives the account-switch side-channel poke Emacs needs so
-// its per-workspace config-dir override follows a daemon-driven switch. The
-// concrete *sentinel.Writer satisfies it; the daemon uses only this one
-// method now that the L2 broadcast-tap sentinel writes are gone.
-type SentinelSink interface {
-	AccountChanged(cwd, sid string)
-}
-
 // Server routes daemon HTTP traffic.
 type Server struct {
 	daemonVersion string
@@ -155,10 +147,7 @@ type Server struct {
 	// list and idle-sweep read.
 	ssm *ssm.Manager
 	// frontend fans frontend.v1 frames to the per-session /stream WebSocket.
-	frontend *frontend.Server
-	// sentinel receives the account-switch poke; nil disables it.
-	sentinel SentinelSink
-
+	frontend   *frontend.Server
 	remediator Remediator
 	registry   *registry.Registry
 	// logins owns the interactive Claude login terminals, at most one per
@@ -205,8 +194,6 @@ type Config struct {
 	// Frontend fans frontend.v1 frames to the per-session /stream WebSocket.
 	// Required in production.
 	Frontend *frontend.Server
-	// Sentinel receives the account-switch side-channel poke; nil disables it.
-	Sentinel SentinelSink
 	// Remediator dispatches the "session gone" analyst; nil makes
 	// POST /remediation report the capability unconfigured.
 	Remediator Remediator
@@ -267,7 +254,6 @@ func New(cfg Config) *Server {
 		driver:          cfg.Driver,
 		ssm:             cfg.SSM,
 		frontend:        cfg.Frontend,
-		sentinel:        cfg.Sentinel,
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
@@ -978,12 +964,6 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	// (SessionView.config_dir now carries the switched-to root, S8). The webapp
 	// owns account switching; Emacs merely renders this pushed state.
 	s.pushSessionView(id)
-	// Poke Emacs over the sentinel side channel: its per-workspace config-dir
-	// override must follow the switch, or its own next create/reattach would
-	// put the session back on the computed default.
-	if s.sentinel != nil {
-		s.sentinel.AccountChanged(rec.CWD, csid)
-	}
 	s.respondSwitched(w, http.StatusAccepted, true, target)
 }
 
