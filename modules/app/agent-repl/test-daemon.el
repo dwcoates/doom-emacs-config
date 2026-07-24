@@ -200,36 +200,63 @@ exercising the one-shot itself re-bind it nil in their own `let'."
 
 ;;;; ---- staleness: running daemon reported mtime ----------------------------
 
-(ert-deftest agent-repl-test-daemon-running-mtime-reads-reported-field ()
-  "The running-mtime reader returns the daemon's `daemon_binary_mtime'."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-api)
-             (lambda (&rest _) '((daemon_binary_mtime . 1700000000)))))
+(defmacro agent-repl-test--with-daemon-view (connected view &rest body)
+  "Run BODY with the UDS link CONNECTED (a boolean) and VIEW stored.
+VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
+  (declare (indent 2))
+  `(let ((agent-repl--frontend-last-daemon-view ,view))
+     (cl-letf (((symbol-function 'agent-repl--uds-connected-p)
+                (lambda () ,connected)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-reads-pushed-daemon-view ()
+  "The running-mtime reader converts the pushed `daemonBinaryMtimeMs' to seconds."
+  ;; Arrange — protojson encodes the int64 field as a STRING.
+  (agent-repl-test--with-daemon-view t '(:daemonBinaryMtimeMs "1700000000000")
     ;; Act / Assert
     (should (equal 1700000000
                    (agent-repl--frontend-running-daemon-binary-mtime)))))
 
-(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-unreachable ()
-  "An unreachable daemon (the GET errors) yields nil, never a guess."
+(ert-deftest agent-repl-test-daemon-running-mtime-accepts-a-numeric-mtime ()
+  "A numerically-decoded mtime is converted to seconds just the same."
   ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-api)
-             (lambda (&rest _) (error "connection refused"))))
+  (agent-repl-test--with-daemon-view t '(:daemonBinaryMtimeMs 1700000000000)
+    ;; Act / Assert
+    (should (equal 1700000000
+                   (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-link-is-down ()
+  "A DEAD link yields nil: the stored view may describe a daemon that is gone."
+  ;; Arrange
+  (agent-repl-test--with-daemon-view nil '(:daemonBinaryMtimeMs "1700000000000")
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-no-view-pushed ()
+  "No `DaemonView' yet yields nil, never a guess."
+  ;; Arrange
+  (agent-repl-test--with-daemon-view t nil
     ;; Act / Assert
     (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
 
 (ert-deftest agent-repl-test-daemon-running-mtime-nil-when-field-absent ()
-  "A daemon predating the field (no `daemon_binary_mtime') yields nil."
+  "A daemon predating the field (no `daemonBinaryMtimeMs') yields nil."
   ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-api)
-             (lambda (&rest _) '((boot_id . "b_abc")))))
+  (agent-repl-test--with-daemon-view t '(:bootId "b_abc")
     ;; Act / Assert
     (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
 
 (ert-deftest agent-repl-test-daemon-running-mtime-nil-when-nonpositive ()
   "A zero mtime (the daemon's boot-time self-stat failed) yields nil."
   ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-api)
-             (lambda (&rest _) '((daemon_binary_mtime . 0)))))
+  (agent-repl-test--with-daemon-view t '(:daemonBinaryMtimeMs "0")
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
+
+(ert-deftest agent-repl-test-daemon-running-mtime-nil-when-unparsable ()
+  "A non-numeric mtime string yields nil rather than a coerced zero."
+  ;; Arrange
+  (agent-repl-test--with-daemon-view t '(:daemonBinaryMtimeMs "not-a-number")
     ;; Act / Assert
     (should (null (agent-repl--frontend-running-daemon-binary-mtime)))))
 
@@ -321,7 +348,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
   (agent-repl-test--with-daemon-env
    (let ((built nil)
          (fresh (agent-repl-test--make-live-daemon 777)))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) (setq built t) 0))
@@ -424,19 +451,19 @@ exercising the one-shot itself re-bind it nil in their own `let'."
          (should-not (agent-repl-test--fake-daemon-signals old)))))))
 
 (ert-deftest agent-repl-test-daemon-startup-bounces-stale-foreign-daemon ()
-  "A stale ADOPTED daemon is shut down over HTTP, then replaced once the port frees."
+  "A stale ADOPTED daemon is shut down over the UDS, then replaced once it frees."
   ;; Arrange — no tracked process, so any running daemon is foreign/adopted.
   (agent-repl-test--with-daemon-env
    (let ((foreign-alive t)
          (shutdown-called nil)
          (spawned nil)
          (agent-repl--frontend-startup-staleness-checked nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () foreign-alive))
                ((symbol-function 'agent-repl--frontend-daemon-stale-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
-                ;; The daemon exits: the port stops responding after the ask.
+                ;; The daemon exits: the socket stops answering after the ask.
                 (lambda () (setq shutdown-called t foreign-alive nil)))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) 0))
@@ -449,14 +476,14 @@ exercising the one-shot itself re-bind it nil in their own `let'."
        (should spawned)))))
 
 (ert-deftest agent-repl-test-daemon-startup-leaves-wedged-foreign-daemon ()
-  "A foreign daemon that ignores POST /shutdown is left in place, never spawned over."
-  ;; Arrange — the port stays responsive past the (zeroed) grace window.
+  "A foreign daemon that ignores the `ShutdownCmd' is left in place, never spawned over."
+  ;; Arrange — the socket stays responsive past the (zeroed) grace window.
   (agent-repl-test--with-daemon-env
    (let ((shutdown-called nil)
          (spawned nil)
          (agent-repl--frontend-startup-staleness-checked nil)
          (agent-repl-frontend-foreign-stop-grace-seconds 0))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-daemon-stale-p)
                 (lambda () t))
@@ -508,14 +535,86 @@ exercising the one-shot itself re-bind it nil in their own `let'."
        ;; Assert — the one-shot fired exactly once.
        (should (= 1 bounce-calls))))))
 
+;;;; ---- Daemon liveness probe (UDS) -----------------------------------------
+
+(ert-deftest agent-repl-test-daemon-responsive-p-delegates-to-the-uds-socket ()
+  "The liveness probe reads the UDS socket, not an HTTP port."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&optional _p) t)))
+    ;; Act / Assert
+    (should (agent-repl--frontend-daemon-responsive-p))))
+
+(ert-deftest agent-repl-test-daemon-responsive-p-nil-without-a-listener ()
+  "No listener on the UDS socket reads as no daemon."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&optional _p) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-responsive-p))))
+
+;;;; ---- Foreign-daemon shutdown (UDS `ShutdownCmd') -------------------------
+
+(ert-deftest agent-repl-test-daemon-foreign-shutdown-sends-the-shutdown-command ()
+  "The foreign-daemon shutdown is a `shutdown' FrontendCommand, not an HTTP POST."
+  ;; Arrange
+  (let (sent)
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (request-id &rest _) request-id)))
+      ;; Act
+      (agent-repl--frontend-request-foreign-shutdown)
+      ;; Assert — empty ShutdownCmd message (nil payload encodes as `{}').
+      (should (equal sent '("shutdown" nil))))))
+
+(ert-deftest agent-repl-test-daemon-foreign-shutdown-tracks-its-ack ()
+  "The shutdown command is tracked so a rejected ack surfaces loudly."
+  ;; Arrange
+  (let (tracked)
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "req-7"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (request-id field &rest _) (setq tracked (list request-id field))
+                 request-id)))
+      ;; Act
+      (agent-repl--frontend-request-foreign-shutdown)
+      ;; Assert
+      (should (equal tracked '("req-7" "shutdown"))))))
+
+(ert-deftest agent-repl-test-daemon-foreign-shutdown-dials-when-disconnected ()
+  "A down link is dialed first — the foreign daemon owns the same socket."
+  ;; Arrange
+  (let ((dials 0))
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl-uds-connect)
+               (lambda (&optional _p) (cl-incf dials) nil))
+              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (request-id &rest _) request-id)))
+      ;; Act
+      (agent-repl--frontend-request-foreign-shutdown)
+      ;; Assert
+      (should (= dials 1)))))
+
+(ert-deftest agent-repl-test-daemon-foreign-shutdown-propagates-a-send-failure ()
+  "No connection to send on signals — never a silent no-op the caller reads as sent."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+            ((symbol-function 'agent-repl-uds-connect) (lambda (&optional _p) nil))
+            ((symbol-function 'agent-repl--uds-send-command)
+             (lambda (&rest _) (user-error "agent-repl UDS: not connected"))))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-request-foreign-shutdown))))
+
 ;;;; ---- Foreign-daemon adoption + stop guard ---------------------------------
 
 (ert-deftest agent-repl-test-daemon-ensure-adopts-foreign-daemon ()
-  "A daemon answering on the port that this Emacs does not track is adopted."
+  "A daemon answering on the socket that this Emacs does not track is adopted."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((built nil) (spawned nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) (setq built t) 0))
@@ -534,7 +633,7 @@ exercising the one-shot itself re-bind it nil in their own `let'."
   (agent-repl-test--with-daemon-env
    (let ((built nil)
          (fresh (agent-repl-test--make-live-daemon 9)))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-port-responsive-p)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () t))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
                 (lambda (&optional _f) (setq built t) 0))

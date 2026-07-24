@@ -208,23 +208,30 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
   (let ((workspaces (plist-get snapshot :workspaces))
         (sessions (plist-get snapshot :sessions))
         (catalogs (plist-get snapshot :catalogs))
+        (inits (plist-get snapshot :inits))
         (daemon (plist-get snapshot :daemon)))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d catalog(s), daemon=%S (catalogs deferred to their handler)"
+                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d catalog(s), %d init(s), daemon=%S (catalogs deferred to their handler)"
                      (length workspaces) (length sessions) (length catalogs)
-                     (and daemon t))
+                     (length inits) (and daemon t))
     ;; Rebuild the session roster from scratch: the snapshot is authoritative,
     ;; so a session absent from it (a bounced daemon never heard of) must not
     ;; linger in the store where the orphan/live-p reads would still see it.
     (clrhash agent-repl--frontend-session-views)
     (dolist (view sessions)
       (agent-repl--frontend-apply-session-view view))
+    ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
+    ;; the slash-command menu source must not carry a bounced daemon's stale
+    ;; session inits.
+    (clrhash agent-repl--frontend-session-inits)
+    (dolist (view inits)
+      (agent-repl--frontend-apply-session-init view))
     (dolist (ws-state workspaces)
       (agent-repl--frontend-apply-workspace-state ws-state))
     (when daemon
       (agent-repl--frontend-apply-daemon-view daemon))
-    (agent-repl--log nil "frontend-apply-snapshot: applied %d workspace state(s), %d session(s)"
-                     (length workspaces) (length sessions))
+    (agent-repl--log nil "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s)"
+                     (length workspaces) (length sessions) (length inits))
     (length workspaces)))
 
 ;;;; ---- DegradedNotice surfacing ----------------------------------------
@@ -319,15 +326,99 @@ fields the reattach/orphan/turn-active reads consume.  Returns the id."
                      (or (plist-get view :pendingPermissions) "0"))
     id))
 
-;;;; ---- DaemonView (boot/version) ---------------------------------------
+;;;; ---- SessionInit store (slash-command menu source) -------------------
+;;
+;; The daemon pushes a `SessionInitView' (retained `SystemInit') on attach
+;; and carries the full roster in the connect snapshot's `:inits'.  This is
+;; the pushed-frame replacement for the deleted GET /commands HTTP menu: the
+;; input buffer's slash-command completion (input.el) reads the retained
+;; `SystemInit''s `slashCommands' off THIS store instead of fetching.  Keyed
+;; by session id; each value is the decoded `SystemInit' plist.
+
+(defvar agent-repl--frontend-session-inits (make-hash-table :test 'equal)
+  "Hash of session-id -> decoded `SystemInit' plist (from `SessionInitView').
+Populated by `agent-repl--frontend-apply-session-init' (per-session pushes)
+and rebuilt wholesale from the connect snapshot's `:inits'.  The source of
+truth for the slash-command menu now that Emacs no longer polls GET
+/commands.")
+
+(defun agent-repl--frontend-session-init (session-id)
+  "Return the stored `SystemInit' plist for SESSION-ID, or nil when unknown."
+  (and session-id (gethash session-id agent-repl--frontend-session-inits)))
+
+(defun agent-repl--frontend-store-session-init (view)
+  "Upsert a `SessionInitView' VIEW's `SystemInit' into the store, keyed by id.
+A view with no `:sessionId' is an invariant violation and fails loudly
+\(No-Silent-Fallbacks).  Returns the id."
+  (let ((id (plist-get view :sessionId))
+        (init (plist-get view :init)))
+    (when (or (null id) (and (stringp id) (string-empty-p id)))
+      (agent-repl--log nil
+                       "frontend-store-session-init: MISSING sessionId in %S — no fallback"
+                       view)
+      (error "agent-repl frontend: SessionInitView missing sessionId"))
+    (puthash id init agent-repl--frontend-session-inits)
+    id))
+
+(defun agent-repl--frontend-apply-session-init (view)
+  "Apply a `SessionInitView' frame VIEW (a plist).  Handler for `sessionInit'.
+Upserts its retained `SystemInit' into `agent-repl--frontend-session-inits'
+and logs the slash-command count the completion menu consumes.  Returns the
+id."
+  (let ((id (agent-repl--frontend-store-session-init view)))
+    (agent-repl--log (plist-get view :workspace)
+                     "frontend-apply-session-init: id=%s ws=%s slash-commands=%d skills=%d model=%s"
+                     id (plist-get view :workspace)
+                     (length (plist-get (plist-get view :init) :slashCommands))
+                     (length (plist-get (plist-get view :init) :skills))
+                     (or (plist-get (plist-get view :init) :model) "nil"))
+    id))
+
+;;;; ---- DaemonView (boot/version/binary mtime) --------------------------
+;;
+;; The daemon pushes a `DaemonView' in the connect snapshot's `:daemon' (and
+;; as its own frame).  It is the pushed-frame replacement for the whole
+;; daemon-IDENTITY half of the deleted GET /sessions envelope: the boot id
+;; (reattach give-up reset) and `daemon_binary_mtime_ms' (the startup
+;; staleness bounce in daemon.el), plus the protocol/daemon version strings.
+
+(defvar agent-repl--frontend-last-daemon-view nil
+  "The most recently applied `DaemonView' plist, or nil before the first frame.
+Read through `agent-repl--frontend-daemon-view', which is the source of
+truth for daemon identity now that Emacs no longer polls GET /sessions.")
+
+(defun agent-repl--frontend-daemon-view ()
+  "Return the last-pushed `DaemonView' plist, or nil before the first frame.
+Trustworthy only while the UDS link is LIVE: a dropped link leaves the last
+view behind, and after a daemon bounce it describes the PREVIOUS instance
+until the reconnect snapshot lands.  Callers that must not act on a stale
+view (readiness, binary-staleness) therefore gate on
+`agent-repl--uds-connected-p' — a disconnected link reads as \"unknown\",
+which is exactly how the old HTTP probes treated an unreachable daemon."
+  agent-repl--frontend-last-daemon-view)
+
+(defun agent-repl--frontend-daemon-view-binary-mtime-seconds ()
+  "Return the pushed daemon binary mtime as integer Unix SECONDS, or nil.
+Reads `:daemonBinaryMtimeMs' off the stored `DaemonView'.  The proto field
+is an int64, which protojson encodes as a JSON STRING, so a string is
+parsed as well as a number.  Nil when no view has been pushed, when the
+field is absent (a daemon predating it), or when the value is non-positive
+\(a daemon whose boot-time self-stat failed) — a daemon that cannot name
+its own binary is never judged stale on a guess."
+  (let* ((raw (plist-get (agent-repl--frontend-daemon-view) :daemonBinaryMtimeMs))
+         (ms (cond ((numberp raw) raw)
+                   ((and (stringp raw) (string-match-p "\\`-?[0-9]+\\'" raw))
+                    (string-to-number raw)))))
+    (and ms (> ms 0) (floor (/ ms 1000)))))
 
 (defun agent-repl--frontend-apply-daemon-view (view)
   "Apply a `DaemonView' frame VIEW (a plist).  Handler for `daemonView'.
-Routes the daemon `:bootId' into `agent-repl--frontend-note-boot-id' — the
-pushed-frame replacement for the boot id the reattach sweep used to read
-off the GET /sessions envelope, so a daemon-instance change still resets
-the reattach give-ups.  Returns the boot id."
+Stores VIEW as `agent-repl--frontend-last-daemon-view' (the daemon-identity
+store the readiness + binary-staleness reads consume) and routes the daemon
+`:bootId' into `agent-repl--frontend-note-boot-id', so a daemon-instance
+change still resets the reattach give-ups.  Returns the boot id."
   (let ((boot-id (plist-get view :bootId)))
+    (setq agent-repl--frontend-last-daemon-view view)
     (agent-repl--log nil
                      "frontend-apply-daemon-view: boot-id=%s protocol=%s version=%s mtime-ms=%s"
                      (or boot-id "nil") (plist-get view :protocolVersion)
@@ -351,6 +442,8 @@ the reattach give-ups.  Returns the boot id."
                                   #'agent-repl--frontend-apply-session-view)
 (agent-repl--uds-register-handler "daemonView"
                                   #'agent-repl--frontend-apply-daemon-view)
+(agent-repl--uds-register-handler "sessionInit"
+                                  #'agent-repl--frontend-apply-session-init)
 
 ;;;; ---- Module init: open the frontend UDS link -------------------------
 ;;

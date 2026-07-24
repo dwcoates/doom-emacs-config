@@ -811,13 +811,6 @@ StopFailure hook (magenta + ⚠).")
   "Transient face applied while a workspace is in a `agent-repl-flash-tab'
 pulse — solid blue background regardless of the underlying state.")
 
-(defface agent-repl-queued-messages
-  '((t :inherit font-lock-comment-face))
-  "Face for the queued-message count segment.
-Subdued on purpose (per §2.13's UI intent): a queued message is parked
-for later, explicitly NOT interrupting the in-flight turn, so its
-indicator must not read as an active-state badge.")
-
 (defun agent-repl--ws-flashing-p (ws)
   "Return non-nil if workspace WS is currently in a flash pulse."
   (agent-repl--ws-get ws :flashing))
@@ -1378,19 +1371,9 @@ so its only purpose is the cache-busting role."
                   name)
                 'invisible t)))
 
-(defun agent-repl--ws-queued-segment (ws)
-  "Return a status/mode-line segment naming WS's queued-message count.
-Empty string when WS has no in-flight-queued messages; otherwise a
-subdued \"⋯N queued\" indicator (faced with `agent-repl-queued-messages',
-per §2.13's parked-message affordance).  The count comes from
-`agent-repl--ws-queued-count', refreshed off the reattach sweep's
-GET /sessions poll — this only renders it."
-  (let ((n (agent-repl--ws-queued-count ws)))
-    (if (> n 0)
-        (propertize (format "⋯%d queued" n)
-                    'face 'agent-repl-queued-messages
-                    'help-echo "agent-repl: messages queued behind the in-flight turn")
-      "")))
+;; The queued-message status segment (agent-repl--ws-queued-segment) and its
+;; face were deleted in the S9 endgame along with the retired queue plane: it
+;; had no production caller and its count source (:queued-messages) is gone.
 
 ;;; Fixed-height tab-bar installation ----------------------------------------
 ;;
@@ -1683,9 +1666,10 @@ session binding exists — see `agent-repl--gui-running-p') rather than
 a live daemon health probe, and it can be transiently nil for reasons
 that are not a death (e.g. mid-reattach after a daemon restart).
 Liveness/death for a gui workspace is owned exclusively by the daemon
-\(`session_dead_*' sentinels — see `agent-repl--on-session-dead-event'),
-so this poll deliberately never marks a gui workspace dead; it only
-runs the frontend-agnostic decay + git refresh for it."
+\(pushed DEAD `WorkspaceState' — see
+`agent-repl--status-react-to-pushed-death'), so this poll deliberately
+never marks a gui workspace dead; it only runs the frontend-agnostic
+decay + git refresh for it."
   (if (or (agent-repl--ws-gui-frontend-p ws)
           (agent-repl--agent-running-p ws))
       (progn
@@ -1904,6 +1888,29 @@ dies the death event must still clear it — otherwise the tab spins
     (agent-repl--ws-put ws :repl-state :dead)
     (agent-repl--ws-put ws :agent-state nil)
     (force-mode-line-update t))))
+
+(defun agent-repl--status-react-to-pushed-death (ws new _previous)
+  "Mark WS dead when the daemon pushes a DEAD render state NEW.
+Subscriber for `agent-repl-ws-state-transition-functions' (frontend-state.el).
+
+The daemon owns session death now (design §10 sentinel endgame): the
+deleted `session_dead_' sentinel handler's SOLE effect was
+`agent-repl--mark-dead', which is re-anchored here onto the pushed DEAD
+`WorkspaceState' (the terminal/death-reason detail rides the pushed
+`SessionView').  `mark-dead' owns the guarded `:dead' transition
+\(idempotent; respects the `:merged'/`:merge-failed' precedence and the
+`:init' grace), so a non-DEAD NEW is a no-op — this subscriber only
+forwards the DEAD case that used to arrive as a daemon-written sentinel."
+  (when (eq new :dead)
+    (agent-repl--log ws "status-react-to-pushed-death: ws=%s pushed :dead — marking dead" ws)
+    (agent-repl--mark-dead ws)))
+
+;; Registered here (status.el owns `mark-dead') though the hook variable is
+;; defined later in frontend-state.el: `add-hook' auto-vivifies the unbound
+;; variable, and frontend-state.el's `defvar ... nil' does not reset an
+;; already-bound variable, so this subscriber survives the load order.
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--status-react-to-pushed-death)
 
 ;;; Frame focus handler -------------------------------------------------------
 

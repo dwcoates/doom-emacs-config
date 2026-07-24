@@ -271,8 +271,7 @@ trailing `agent-repl-codex-scan-bytes'."
     (SubagentStart     . "~/.claude/hooks/subagent-start-notify.sh")
     (SubagentStop      . "~/.claude/hooks/subagent-stop-notify.sh")
     (UserPromptSubmit  . "~/.claude/hooks/prompt-submit-notify.sh")
-    (SessionStart      . "~/.claude/hooks/session-start-notify.sh")
-    (PermissionRequest . "~/.claude/hooks/permission-request-notify.sh"))
+    (SessionStart      . "~/.claude/hooks/session-start-notify.sh"))
   "Alist (EVENT-SYMBOL . COMMAND-PATH) of managed hooks for codex.
 The SAME sentinel-writing scripts as the claude backend: codex's hook
 stdin payload carries the `session_id' and `cwd' fields they parse, and
@@ -284,10 +283,13 @@ live under `~/.claude/hooks/' — that is where `.claude/install.sh'
 installs the canonical copies, regardless of which backends consume
 them.
 
-Relative to `agent-repl--managed-hooks', codex lacks `Notification'
-\(no such event; `PermissionRequest' alone drives the `:permission'
-state) and `StopFailure' (no such event; codex stop failures are not
-surfaced).")
+Codex has no `Notification' event and no `StopFailure' event (codex stop
+failures are not surfaced).  `PermissionRequest' is gone too: the S8/S9
+sentinel endgame deleted `permission-request-notify.sh' along with every
+managed permission hook, and permission state is driven by pushed
+`frontend.v1' state (permission.el) for every backend — registering an
+event whose script no longer exists could only ever write a dangling
+command path.")
 
 (defun agent-repl-codex-install-hooks ()
   "Register the managed codex hooks in `agent-repl--codex-hooks-file'.

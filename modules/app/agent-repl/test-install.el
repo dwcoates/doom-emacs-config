@@ -116,52 +116,12 @@
     (should (agent-repl--event-has-command-p
              hooks 'Stop "/some/foreign.sh"))))
 
-;;;; ---- hooks-installed-p ----
-
-(ert-deftest agent-repl-test-hooks-installed-all-present ()
-  "Returns t when all four managed hooks are registered."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             #'test-install--json-with-all-hooks))
-    (should (agent-repl--hooks-installed-p))))
-
-;; The missing-Stop / missing-SessionStart hooks-installed-p tests were
-;; deleted in the agent-shim cutover (design §10): those hooks are no
-;; longer managed, so `agent-repl--managed-hooks' does not gate on them.
-
-(ert-deftest agent-repl-test-hooks-installed-missing-notification ()
-  "Returns nil when the permission Notification hook is absent."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'Notification))))
-    (should-not (agent-repl--hooks-installed-p))))
-
-(ert-deftest agent-repl-test-hooks-installed-missing-permission-request ()
-  "Returns nil when the PermissionRequest hook is absent.
-PermissionRequest is the real-time permission-dialog signal that drives
-the tab to `:permission' WHILE the agent is waiting on the user.  Its
-absence falls back to the lagging Notification permission_prompt path,
-so doctor must surface the missing registration."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'PermissionRequest))))
-    (should-not (agent-repl--hooks-installed-p))))
-
-(ert-deftest agent-repl-test-managed-hooks-includes-permission-request ()
-  "The managed-hooks alist must include PermissionRequest pointing at our script.
-This is the real-time signal that flips the tab to `:permission' the
-moment the permission dialog appears, so a regression that drops the
-entry would silently revert to the lagging Notification path."
-  (should (equal (cdr (assq 'PermissionRequest agent-repl--managed-hooks))
-                 "~/.claude/hooks/permission-request-notify.sh")))
-
-(ert-deftest agent-repl-test-hooks-installed-settings-absent ()
-  "Returns nil when settings.json cannot be read."
-  (cl-letf (((symbol-function 'agent-repl--settings-json) (lambda () nil)))
-    (should-not (agent-repl--hooks-installed-p))))
-
-(ert-deftest agent-repl-test-hooks-installed-foreign-coresident ()
-  "Returns t even when foreign hooks co-exist under our event keys."
-  (cl-letf (((symbol-function 'agent-repl--settings-json)
-             #'test-install--json-with-foreign-stop))
-    (should (agent-repl--hooks-installed-p))))
+;; The hooks-installed-p / managed-hooks-includes-permission-request tests
+;; were deleted in the S8/S9 sentinel endgame: Emacs manages no Claude Code
+;; hooks any more, so there is no `agent-repl--managed-hooks' alist and no
+;; `agent-repl--hooks-installed-p' predicate to gate on.  The generic
+;; settings-writer `agent-repl--event-has-command-p' (codex-shared) is still
+;; covered above; the codex hook set is covered in test-codex.el.
 
 ;;;; ---- run-install-action dispatch ----
 
@@ -295,172 +255,20 @@ entry would silently revert to the lagging Notification path."
   (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t)))
     (should-not (agent-repl--doctor-issues))))
 
-(ert-deftest agent-repl-test-doctor-missing-settings ()
-  "Settings missing or unreadable produces a single top-level error."
+(ert-deftest agent-repl-test-doctor-all-skills-present-no-issues ()
+  "With every managed skill link healthy and no stale links, doctor is clean."
   (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json) (lambda () nil))
-            ((symbol-function 'agent-repl--check-skill-links)
-             (lambda (_issues) nil))
-            ((symbol-function 'agent-repl--check-unmanaged-broken-links)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (= 1 (length issues)))
-      (should (eq 'error (car (car issues))))
-      (should (string-match-p "missing or unreadable"
-                              (cdr (car issues)))))))
-
-(ert-deftest agent-repl-test-doctor-all-present ()
-  "With all hooks registered and scripts on disk matching source, no issues."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             #'test-install--json-with-all-hooks)
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil))
             ((symbol-function 'agent-repl--check-skill-links)
              (lambda (_issues) nil))
             ((symbol-function 'agent-repl--check-unmanaged-broken-links)
              (lambda (_issues) nil)))
     (should-not (agent-repl--doctor-issues))))
 
-;; The missing-Stop / SessionStart / UserPromptSubmit doctor-severity
-;; tests were deleted in the agent-shim cutover (design §10): those hooks
-;; are no longer managed, so doctor no longer reports on them.
-
-(ert-deftest agent-repl-test-doctor-missing-notification-warns ()
-  "Missing Notification is warn-level (❓ badge absent but module works)."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--settings-json)
-             (lambda () (test-install--json-missing-one 'Notification)))
-            ((symbol-function 'agent-repl--check-script-files)
-             (lambda (_issues) nil)))
-    (let ((issues (agent-repl--doctor-issues)))
-      (should (test-install--doctor-find issues "Notification"))
-      (should (eq 'warn
-                  (car (test-install--doctor-find issues "Notification")))))))
-
-;; The missing-StopFailure / SubagentStart / SubagentStop doctor-severity
-;; tests were deleted in the agent-shim cutover (design §10): those hooks
-;; are no longer managed.
-
-(ert-deftest agent-repl-test-doctor-settings-skip-short-circuits-script-checks ()
-  "When settings.json is missing, script-file checks are not performed."
-  (let ((script-checks-called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--settings-json) (lambda () nil))
-              ((symbol-function 'agent-repl--check-script-files)
-               (lambda (_) (setq script-checks-called t))))
-      (agent-repl--doctor-issues)
-      (should-not script-checks-called))))
-
-;; Script-file checks — use tmpfile fixtures so the real file predicates work.
-
-(defun test-install--with-fake-hooks-dir (contents body-fn)
-  "Run BODY-FN with agent-repl--hooks-dest-dir rebound to a tmpdir.
-CONTENTS is an alist ((SCRIPT-NAME . (MODE . TEXT)) ...): writes each
-script with the given unix MODE permissions and TEXT content.  A
-SCRIPT-NAME with `:missing' means leave that script absent."
-  (let ((tmpdir (file-name-as-directory
-                 (make-temp-file "agent-repl-doctor-" t))))
-    (unwind-protect
-        (progn
-          (dolist (entry contents)
-            (let ((name (car entry))
-                  (mode-content (cdr entry)))
-              (unless (eq mode-content :missing)
-                (let ((path (expand-file-name name tmpdir)))
-                  (with-temp-file path
-                    (insert (cdr mode-content)))
-                  (set-file-modes path (car mode-content))))))
-          (cl-letf (((symbol-function 'agent-repl--installed-script-path)
-                     (lambda (cmd)
-                       (expand-file-name
-                        (file-name-nondirectory cmd) tmpdir))))
-            (funcall body-fn tmpdir)))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-doctor-script-missing-errors ()
-  "A missing installed script emits an error-level issue.
-Targets a MANAGED script (permission-notify.sh) — post-cutover the
-status scripts are no longer managed, so doctor only checks the two
-permission scripts."
-  (test-install--with-fake-hooks-dir
-   `(("permission-notify.sh" . :missing)
-     ("permission-request-notify.sh" . (#o755 . "x")))
-   (lambda (_tmp)
-     (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-               ((symbol-function 'agent-repl--settings-json)
-                #'test-install--json-with-all-hooks)
-               ((symbol-function 'agent-repl--script-drift-p)
-                (lambda (_) nil)))
-       (let* ((issues (agent-repl--doctor-issues))
-              (found (test-install--doctor-find
-                      issues "missing:.*permission-notify\\.sh")))
-         (should found)
-         (should (eq 'error (car found))))))))
-
-(ert-deftest agent-repl-test-doctor-script-not-executable-errors ()
-  "A non-executable installed script emits an error-level issue."
-  (test-install--with-fake-hooks-dir
-   `(("permission-notify.sh" . (#o644 . "x"))
-     ("permission-request-notify.sh" . (#o755 . "x")))
-   (lambda (_tmp)
-     (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-               ((symbol-function 'agent-repl--settings-json)
-                #'test-install--json-with-all-hooks)
-               ((symbol-function 'agent-repl--script-drift-p)
-                (lambda (_) nil)))
-       (let* ((issues (agent-repl--doctor-issues))
-              (found (test-install--doctor-find issues "not executable")))
-         (should found)
-         (should (eq 'error (car found))))))))
-
-(ert-deftest agent-repl-test-doctor-script-drift-warns ()
-  "A drifted installed script emits a warn-level issue."
-  (test-install--with-fake-hooks-dir
-   `(("permission-notify.sh" . (#o755 . "x"))
-     ("permission-request-notify.sh" . (#o755 . "x")))
-   (lambda (_tmp)
-     (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-               ((symbol-function 'agent-repl--settings-json)
-                #'test-install--json-with-all-hooks)
-               ((symbol-function 'agent-repl--script-drift-p)
-                (lambda (cmd)
-                  (equal (file-name-nondirectory cmd)
-                         "permission-notify.sh"))))
-       (let* ((issues (agent-repl--doctor-issues))
-              (found (test-install--doctor-find issues "drift")))
-         (should found)
-         (should (eq 'warn (car found))))))))
-
-(ert-deftest agent-repl-test-script-drift-p-match ()
-  "script-drift-p is nil when installed bytes match source."
-  (let* ((src (make-temp-file "crd-src-")) (dest (make-temp-file "crd-dst-")))
-    (unwind-protect
-        (progn
-          (with-temp-file src (insert "identical"))
-          (with-temp-file dest (insert "identical"))
-          (cl-letf (((symbol-function 'agent-repl--installed-script-path)
-                     (lambda (_) dest))
-                    ((symbol-function 'agent-repl--source-script-path)
-                     (lambda (_) src)))
-            (should-not
-             (agent-repl--script-drift-p "~/.claude/hooks/anything.sh"))))
-      (delete-file src) (delete-file dest))))
-
-(ert-deftest agent-repl-test-script-drift-p-mismatch ()
-  "script-drift-p is non-nil when installed bytes differ from source."
-  (let* ((src (make-temp-file "crd-src-")) (dest (make-temp-file "crd-dst-")))
-    (unwind-protect
-        (progn
-          (with-temp-file src (insert "source-content"))
-          (with-temp-file dest (insert "tampered-content"))
-          (cl-letf (((symbol-function 'agent-repl--installed-script-path)
-                     (lambda (_) dest))
-                    ((symbol-function 'agent-repl--source-script-path)
-                     (lambda (_) src)))
-            (should (agent-repl--script-drift-p
-                     "~/.claude/hooks/anything.sh"))))
-      (delete-file src) (delete-file dest))))
+;; The settings.json / hook-registration / hook-script doctor tests
+;; (missing-settings, missing-notification-warns, script-missing/not-
+;; executable/drift, script-drift-p, settings-skip-short-circuit) were
+;; deleted in the S8/S9 sentinel endgame: doctor-issues no longer inspects
+;; Claude Code hook registrations or scripts — only managed skill symlinks.
 
 ;;;; ---- Bash-integration tests: intentionally not present ----
 ;;
@@ -951,61 +759,27 @@ That case is already covered by `agent-repl--check-skill-links'."
     ;; Add an unmanaged broken symlink.
     (make-symbolic-link "/nonexistent/stale-skill"
                         (expand-file-name "stale-skill" dest))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--settings-json)
-               #'test-install--json-with-all-hooks)
-              ((symbol-function 'agent-repl--check-script-files)
-               (lambda (_issues) nil)))
+    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
       (let ((issues (agent-repl--doctor-issues)))
         (should (test-install--doctor-find issues "Unmanaged broken symlink"))))))
 
-;;;; ---- Tests: alt-account config-dir provisioning ----
-
-(defun test-install--all-hooks-registered-p (settings-file)
-  "Return non-nil when every managed hook is registered in SETTINGS-FILE."
-  (let* ((json (agent-repl--read-settings-alist (expand-file-name settings-file)))
-         (hooks (cdr (assq 'hooks json))))
-    (cl-every (lambda (pair)
-                (agent-repl--event-has-command-p hooks (car pair) (cdr pair)))
-              agent-repl--managed-hooks)))
-
-(ert-deftest agent-repl-test-config-dirs-to-provision-excludes-default ()
-  "config-dirs-to-provision excludes the default ~/.claude."
-  (let ((agent-repl-multi-repo-config-dir "~/.claude-chesscom")
-        (agent-repl-default-config-dir nil))
-    (should-not (member (file-name-as-directory (expand-file-name "~/.claude"))
-                        (agent-repl--config-dirs-to-provision)))))
-
-(ert-deftest agent-repl-test-config-dirs-to-provision-includes-multi-repo ()
-  "config-dirs-to-provision includes the multi-repo config dir."
-  (let ((agent-repl-multi-repo-config-dir "~/.claude-chesscom")
-        (agent-repl-default-config-dir nil))
-    (should (member (file-name-as-directory (expand-file-name "~/.claude-chesscom"))
-                    (agent-repl--config-dirs-to-provision)))))
-
-(ert-deftest agent-repl-test-provision-registers-into-each-config-dir ()
-  "provision-config-dirs registers the managed hooks into every selected dir's settings.json."
-  (let* ((root (make-temp-file "claude-provision-" t))
-         (multi (expand-file-name "chesscom" root))
-         (other (expand-file-name "personal" root)))
-    (unwind-protect
-        (let ((agent-repl-multi-repo-config-dir multi)
-              (agent-repl-default-config-dir other))
-          (agent-repl--provision-config-dirs)
-          (should (test-install--all-hooks-registered-p
-                   (expand-file-name "settings.json" multi)))
-          (should (test-install--all-hooks-registered-p
-                   (expand-file-name "settings.json" other))))
-      (delete-directory root t))))
+;;;; ---- Tests: settings-writer (codex-shared) ----
+;;
+;; The alt-account config-dir provisioning tests (config-dirs-to-provision,
+;; provision-registers-into-each-config-dir) were deleted in the S8/S9
+;; sentinel endgame: Emacs no longer provisions Claude Code hooks into any
+;; CLAUDE_CONFIG_DIR.  `agent-repl--register-hooks-in-settings' survives only
+;; as the codex-shared writer and is exercised below with explicit alists.
 
 (ert-deftest agent-repl-test-register-hooks-idempotent ()
   "register-hooks-in-settings is a no-op on a second run (returns nil, no double-register)."
   (let* ((dir (make-temp-file "agent-register-" t))
-         (settings (expand-file-name "settings.json" dir)))
+         (settings (expand-file-name "settings.json" dir))
+         (hooks '((Stop . "/x/stop.sh"))))
     (unwind-protect
         (progn
-          (should (agent-repl--register-hooks-in-settings settings))
-          (should-not (agent-repl--register-hooks-in-settings settings)))
+          (should (agent-repl--register-hooks-in-settings settings hooks))
+          (should-not (agent-repl--register-hooks-in-settings settings hooks)))
       (delete-directory dir t))))
 
 (ert-deftest agent-repl-test-register-hooks-custom-alist ()
@@ -1036,22 +810,23 @@ only the supplied events appear, with the supplied matcher."
     (unwind-protect
         (progn
           (with-temp-file settings (insert "{\"model\":\"opus\"}"))
-          (agent-repl--register-hooks-in-settings settings)
+          (agent-repl--register-hooks-in-settings settings '((Stop . "/x/stop.sh")))
           (let ((json (agent-repl--read-settings-alist settings)))
             (should (equal (cdr (assq 'model json)) "opus"))
             (should (cdr (assq 'hooks json)))))
       (delete-directory dir t))))
 
-(ert-deftest agent-repl-test-register-hooks-notification-matcher ()
-  "register-hooks-in-settings writes the permission_prompt matcher for Notification."
+(ert-deftest agent-repl-test-register-hooks-matcher ()
+  "register-hooks-in-settings writes a supplied matcher for its event."
   (let* ((dir (make-temp-file "agent-register-" t))
          (settings (expand-file-name "settings.json" dir)))
     (unwind-protect
         (progn
-          (agent-repl--register-hooks-in-settings settings)
+          (agent-repl--register-hooks-in-settings
+           settings '((Notification . "/x/n.sh")) '((Notification . "some_matcher")))
           (let* ((json (agent-repl--read-settings-alist settings))
                  (entries (cdr (assq 'Notification (cdr (assq 'hooks json))))))
-            (should (seq-some (lambda (e) (equal (cdr (assq 'matcher e)) "permission_prompt"))
+            (should (seq-some (lambda (e) (equal (cdr (assq 'matcher e)) "some_matcher"))
                               entries))))
       (delete-directory dir t))))
 
@@ -1062,7 +837,8 @@ only the supplied events appear, with the supplied matcher."
     (unwind-protect
         (progn
           (with-temp-file settings (insert "{not json"))
-          (should-error (agent-repl--register-hooks-in-settings settings)))
+          (should-error
+           (agent-repl--register-hooks-in-settings settings '((Stop . "/x/stop.sh")))))
       (delete-directory dir t))))
 
 ;;; test-install.el ends here

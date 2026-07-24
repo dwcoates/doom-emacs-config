@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# install.sh — manage agent-repl hooks in ~/.claude/settings.json and
-# install the workspace-* / local skills as symlinks under ~/.claude/skills.
+# install.sh — install the workspace-* / local skills as symlinks under
+# ~/.claude/skills and install the managed git pre-commit hook into the
+# repo's git hooks dir.
 #
 # Subcommands:
-#   install    (default) Copy managed hook scripts and register them in
-#              ~/.claude/settings.json.  Idempotent: safe to run again.
-#              Managed entries are identified by the exact command path
-#              "~/.claude/hooks/<script>"; foreign entries under the same
-#              event keys are preserved.
-#   uninstall  Remove managed registrations (preserving foreign entries)
-#              and delete the managed hook scripts from ~/.claude/hooks/.
-#              Drops an event key when its array becomes empty.
-#   reinstall  uninstall then install.  Useful after editing a checked-in
-#              managed script.
+#   install    (default) Symlink the managed skills into ~/.claude/skills
+#              and install the git pre-commit hook.  Idempotent: safe to
+#              run again.
+#   uninstall  Remove the managed skill symlinks (only ours; foreign files
+#              are left alone) and the managed git pre-commit hook.
+#   reinstall  uninstall then install.
 #   help       Show usage.
 #
 # Skills: each manifest-declared skill is symlinked into ~/.claude/skills
@@ -21,8 +18,9 @@
 # silently linking a stale copy.  A skill is always the live in-tree
 # source, so edits go live with no reinstall.
 #
-# Backs up ~/.claude/settings.json to settings.json.bak.<unix-ts> before
-# any mutation.
+# Git pre-commit hook: a managed ERT + external-boundary gate is installed
+# into the repo's git hooks dir, identified by a marker so a foreign
+# pre-commit hook is never trampled.
 #
 # Opt-in agent-shim services (OFF by default):
 #   --with-agent-shim-services  Also build + launchd-install the shim-store
@@ -34,7 +32,7 @@
 #   bash .claude/install.sh [install|uninstall|reinstall|help] \
 #        [--with-agent-shim-services]
 #
-# Requires: jq, bash 4+.  (--with-agent-shim-services also needs go + launchctl.)
+# Requires: bash 4+.  (--with-agent-shim-services also needs go + launchctl.)
 set -euo pipefail
 
 # --- Shared constants + helpers (needed by both the sandbox repair path
@@ -156,7 +154,7 @@ link_skill_to_impl() {
 # relinking to the SAME canonical impl the host uses.  There is NO cache
 # fallback: if a canonical impl is absent we FAIL HARD so a broken
 # environment surfaces loudly instead of silently serving stale code.
-# Hooks/settings setup is still skipped — only skills are repaired.
+# Only skill symlinks are repaired on this path.
 if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
    && [ "${INSTALL_SH_SKIP_SANDBOX_DETECT:-}" != "1" ] \
    && [ "${INSTALL_SH_LIB:-}" != "1" ]; then
@@ -187,36 +185,10 @@ if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
 fi
 
 # --- Constants (full install path) ---
-SETTINGS="$HOME/.claude/settings.json"
-HOOKS_DIR="$HOME/.claude/hooks"
-HOOK_SCRIPTS_SRC="$SCRIPT_DIR/../modules/app/agent-repl/hooks"
 
 # Pre-commit hook (ERT + boundary gate) installed into the repo's git
 # hooks dir by do_install below.
 GITHOOKS_DIR="$(_canonpath "$SCRIPT_DIR/../.githooks")"
-
-# Each entry: EVENT_KEY|SCRIPT_NAME|MATCHER
-# MATCHER is optional (only used for Notification hooks).
-#
-# The six status hooks (Stop, StopFailure, SubagentStart, SubagentStop,
-# UserPromptSubmit, SessionStart) were removed here in the agent-shim cutover
-# (design §10): agent/session/task state is now resolved by the daemon's SSM
-# and pushed as frontend.v1 WorkspaceState frames, so Emacs no longer derives
-# it from these managed settings hooks. Only the permission hooks remain —
-# they surface the real-time `:permission' signal the tab-bar needs. Any stale
-# status-hook entries a prior install left in settings.json are tolerated by
-# the Emacs drain list; do_uninstall no longer removes them because they are
-# no longer in HOOKS (a foreign entry to the trimmed set).
-HOOKS=(
-  "Notification|permission-notify.sh|permission_prompt"
-  # PermissionRequest fires at the moment the permission dialog appears,
-  # BEFORE the user answers — that's the real-time signal the tab-bar
-  # needs to show `:permission' WHILE Claude is waiting on the user.
-  # The older Notification hook above is kept as a fallback (and for the
-  # 60s-idle nudge that arrives under the same `permission_prompt'
-  # notification type).
-  "PermissionRequest|permission-request-notify.sh|"
-)
 
 # Marker identifying our managed pre-commit hook so install/uninstall can
 # refresh or remove it without touching a foreign pre-commit hook.
@@ -237,10 +209,9 @@ show_help() {
   cat <<USAGE
 Usage: bash $0 [install|uninstall|reinstall|help] [--with-agent-shim-services]
 
-  install    (default) Copy managed hook scripts and register them in
-             ~/.claude/settings.json.  Idempotent.
-  uninstall  Remove managed registrations (preserving foreign entries)
-             and delete the managed hook scripts.
+  install    (default) Symlink the managed skills into ~/.claude/skills
+             and install the git pre-commit hook.  Idempotent.
+  uninstall  Remove the managed skill symlinks and the git pre-commit hook.
   reinstall  uninstall then install.
   help       Show this message.
 
@@ -254,74 +225,9 @@ Usage: bash $0 [install|uninstall|reinstall|help] [--with-agent-shim-services]
 USAGE
 }
 
-# Back up settings.json if present.  First arg is the log tag.
-backup_settings() {
-  if [ -f "$SETTINGS" ]; then
-    local backup="$SETTINGS.bak.$(date +%s)"
-    cp "$SETTINGS" "$backup"
-    echo "[$1] Backed up $SETTINGS -> $backup"
-  fi
-}
-
 # --- Install ---
 
 do_install() {
-  mkdir -p "$(dirname "$SETTINGS")"
-  if [ -f "$SETTINGS" ]; then
-    backup_settings install
-  else
-    echo '{}' > "$SETTINGS"
-  fi
-  mkdir -p "$HOOKS_DIR"
-
-  # Copy managed scripts from the checked-in source tree.
-  if [ -d "$HOOK_SCRIPTS_SRC" ]; then
-    for src in "$HOOK_SCRIPTS_SRC"/*.sh; do
-      [ -f "$src" ] || continue
-      dest="$HOOKS_DIR/$(basename "$src")"
-      cp "$src" "$dest"
-      chmod +x "$dest"
-      echo "[install] Copied $(basename "$src") -> $dest"
-    done
-  else
-    echo "[install] WARNING: hook scripts source dir not found: $HOOK_SCRIPTS_SRC"
-    echo "[install] Hook scripts must already be in $HOOKS_DIR"
-  fi
-
-  # Idempotency rule: a managed hook is identified by the exact command
-  # path "~/.claude/hooks/<script>".  Look for it inside the existing event
-  # array; if found, skip.  Otherwise append, preserving foreign entries.
-  for entry in "${HOOKS[@]}"; do
-    IFS='|' read -r event script matcher <<< "$entry"
-    script_path="~/.claude/hooks/$script"
-
-    already=$(jq -r --arg event "$event" --arg cmd "$script_path" \
-      '.hooks[$event] // [] | [.[].hooks[]?.command] | index($cmd)' \
-      "$SETTINGS")
-    if [ "$already" != "null" ]; then
-      echo "[install] Hook already registered: $event -> $script (skipped)"
-      continue
-    fi
-
-    if [ -n "$matcher" ]; then
-      hook_entry=$(jq -n --arg cmd "$script_path" --arg match "$matcher" \
-        '{"matcher": $match, "hooks": [{"type": "command", "command": $cmd}]}')
-    else
-      hook_entry=$(jq -n --arg cmd "$script_path" \
-        '{"hooks": [{"type": "command", "command": $cmd}]}')
-    fi
-
-    jq --arg event "$event" --argjson entry "$hook_entry" \
-      '
-      .hooks //= {}
-      | .hooks[$event] //= []
-      | .hooks[$event] += [$entry]
-      ' "$SETTINGS" > "$SETTINGS.tmp" \
-      && mv "$SETTINGS.tmp" "$SETTINGS"
-
-    echo "[install] Registered hook: $event -> $script"
-  done
-
   # Cached workspace-* skills.  Each is symlinked straight to its
   # canonical impl from the manifest.  NO fallback: a missing impl is a
   # hard error (fail loudly rather than serve a stale copy).  A real file
@@ -390,46 +296,12 @@ do_install() {
     exit 1
   fi
 
-  echo "[install] Done. Hooks registered in $SETTINGS"
+  echo "[install] Done."
 }
 
 # --- Uninstall ---
 
 do_uninstall() {
-  if [ ! -f "$SETTINGS" ]; then
-    echo "[uninstall] No settings.json at $SETTINGS; nothing to uninstall."
-  else
-    backup_settings uninstall
-
-    for entry in "${HOOKS[@]}"; do
-      IFS='|' read -r event script matcher <<< "$entry"
-      script_path="~/.claude/hooks/$script"
-
-      # Drop any entries whose inner .hooks[].command equals ours.  If the
-      # event's array becomes empty, delete the event key entirely.
-      jq --arg event "$event" --arg cmd "$script_path" '
-        if .hooks[$event] then
-          .hooks[$event] |= map(select(
-            ([.hooks[]?.command] | index($cmd)) | not
-          ))
-          | if .hooks[$event] == [] then del(.hooks[$event]) else . end
-        else . end
-      ' "$SETTINGS" > "$SETTINGS.tmp" \
-        && mv "$SETTINGS.tmp" "$SETTINGS"
-
-      echo "[uninstall] Removed registration: $event -> $script"
-    done
-  fi
-
-  # Delete managed scripts from the install location.
-  for entry in "${HOOKS[@]}"; do
-    IFS='|' read -r _event script _matcher <<< "$entry"
-    if [ -f "$HOOKS_DIR/$script" ]; then
-      rm -f "$HOOKS_DIR/$script"
-      echo "[uninstall] Removed $HOOKS_DIR/$script"
-    fi
-  done
-
   # Remove cached-skill symlinks — only ours (pointing at the canonical
   # impl declared in the manifest).  Foreign files are left alone.
   if [ -f "$SKILLS_MANIFEST" ]; then

@@ -1068,30 +1068,10 @@ itself."
     (unless ws (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
     (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ws)) ws)))
 
-;;;; Alt-account config-dir hook provisioning
-;;
-;; The per-account launch logic (`agent-repl--compute-config-dir') can
-;; select CLAUDE_CONFIG_DIRs OTHER than the default ~/.claude — at minimum
-;; `agent-repl-multi-repo-config-dir' (~/.claude-chesscom).  The
-;; agent-repl readiness handshake depends on the SessionStart hook (and the
-;; rest of the managed hooks) being registered in the settings.json of
-;; whichever account launches the workspace, so those alt dirs must carry
-;; the SAME managed-hook registrations as ~/.claude.  install.sh owns
-;; ~/.claude; `agent-repl--provision-config-dirs' (install.el) writes the
-;; registrations into every alt dir the account logic can select, deriving
-;; the set from the defcustoms above.
-;;
-;; Runs at load, guarded exactly like `agent-repl--maybe-install-hooks':
-;; no-op in a `noninteractive' (batch/ERT) session or inside the sandbox,
-;; and a failure is logged (never swallowed silently — the underlying
-;; `agent-repl--provision-config-dirs' still signals loudly when called
-;; directly, e.g. from tests).  Deferred to this point (rather than
-;; install.el's own load) because the config-dir defcustoms are defined
-;; above in THIS file, which loads after install.el.
-(when (and (not noninteractive)
-           (fboundp 'agent-repl--provision-config-dirs)
-           (not (agent-repl--in-sandbox-p)))
-  (condition-case err
-      (agent-repl--provision-config-dirs)
-    (error
-     (agent-repl--log nil "provision-config-dirs failed: %S" err))))
+;; Alt-account config-dir HOOK provisioning was removed in the S8/S9
+;; sentinel endgame: Emacs manages no Claude Code hooks, so there is
+;; nothing to replicate into a per-account CLAUDE_CONFIG_DIR's
+;; settings.json.  The per-account launch logic
+;; (`agent-repl--compute-config-dir') still selects the right config dir
+;; for the session (createSession's `configDir'); the daemon owns the
+;; session's harness behavior from there.

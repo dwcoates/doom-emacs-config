@@ -139,14 +139,16 @@ post-nuke render passes don't paint a stale flash on a tombstoned tab."
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-get "ws1" :flashing))))
 
-(ert-deftest agent-repl-test-ws-del-clears-queued-messages ()
-  "ws-del clears `:queued-messages' — a daemon-snapshot runtime key tied
-to the session binding, so it must not outlive the tombstone."
+(ert-deftest agent-repl-test-ws-del-clears-pushed-render-state ()
+  "ws-del clears `:pushed-render-state' — a daemon-pushed runtime key tied
+to the session, so it must not outlive the tombstone.
+\(The former :queued-messages runtime key was removed in the S9 queue-plane
+endgame; this covers the same tombstone-clearing contract on a live key.)"
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :queued-messages '((:queue-id "q_1")))
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
     (agent-repl--ws-del "ws1")
-    (should-not (agent-repl--ws-get "ws1" :queued-messages))))
+    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
 
 (ert-deftest agent-repl-test-ws-del-clears-incoming-session-id ()
   "ws-del clears `:incoming-session-id' — a staged id belongs to the

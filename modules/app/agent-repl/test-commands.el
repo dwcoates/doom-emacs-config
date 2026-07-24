@@ -918,92 +918,10 @@ is handed back."
     (agent-repl--restore-retracted-prompt "test-ws")
     (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
 
-;;;; ---- agent-repl queue commands (§2.13) ----
-
-(ert-deftest agent-repl-cmd-test-queue-item-label/combines-preview-and-id ()
-  "The picker label combines the content preview with the queue id."
-  (should (equal (agent-repl--queue-item-label
-                  '(:queue-id "q_2" :content-preview "second msg"))
-                 "second msg  (q_2)")))
-
-(ert-deftest agent-repl-cmd-test-queue-act/errors-without-session ()
-  "queue-act signals `user-error' when the workspace has no bound session."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :queued-messages '((:queue-id "q_1")))
-    (should-error (agent-repl--queue-act "test-ws" "cancel" #'ignore)
-                  :type 'user-error)))
-
-(ert-deftest agent-repl-cmd-test-queue-run-now/errors-when-none-queued ()
-  "run-now signals `user-error' when the workspace has no queued messages."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-      (should-error (agent-repl-queue-run-now) :type 'user-error))))
-
-(ert-deftest agent-repl-cmd-test-queue-run-now/acts-on-sole-item ()
-  "run-now escalates the sole queued item via the frontend run-now route."
-  (let (routed)
-    (agent-repl-test--with-clean-state
-      (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-      (agent-repl--ws-put "test-ws" :queued-messages
-                          '((:queue-id "q_1" :content-preview "only")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--frontend-queue-run-now)
-                 (lambda (sid qid) (setq routed (list sid qid)))))
-        (agent-repl-queue-run-now)
-        (should (equal routed '("s_1" "q_1")))))))
-
-(ert-deftest agent-repl-cmd-test-queue-run-now/prompts-when-several ()
-  "run-now prompts via completing-read and escalates the chosen item."
-  (let (routed)
-    (agent-repl-test--with-clean-state
-      (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-      (agent-repl--ws-put "test-ws" :queued-messages
-                          '((:queue-id "q_1" :content-preview "first")
-                            (:queue-id "q_2" :content-preview "second")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) "second  (q_2)"))
-                ((symbol-function 'agent-repl--frontend-queue-run-now)
-                 (lambda (sid qid) (setq routed (list sid qid)))))
-        (agent-repl-queue-run-now)
-        (should (equal routed '("s_1" "q_2")))))))
-
-(ert-deftest agent-repl-cmd-test-queue-cancel/errors-when-none-queued ()
-  "cancel signals `user-error' when the workspace has no queued messages."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
-      (should-error (agent-repl-queue-cancel) :type 'user-error))))
-
-(ert-deftest agent-repl-cmd-test-queue-cancel/acts-on-sole-item ()
-  "cancel removes the sole queued item via the frontend cancel route."
-  (let (routed)
-    (agent-repl-test--with-clean-state
-      (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-      (agent-repl--ws-put "test-ws" :queued-messages
-                          '((:queue-id "q_1" :content-preview "only")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--frontend-queue-cancel)
-                 (lambda (sid qid) (setq routed (list sid qid)))))
-        (agent-repl-queue-cancel)
-        (should (equal routed '("s_1" "q_1")))))))
-
-(ert-deftest agent-repl-cmd-test-queue-cancel/prompts-when-several ()
-  "cancel prompts via completing-read and removes the chosen item."
-  (let (routed)
-    (agent-repl-test--with-clean-state
-      (agent-repl--ws-put "test-ws" :frontend-session-id "s_1")
-      (agent-repl--ws-put "test-ws" :queued-messages
-                          '((:queue-id "q_1" :content-preview "first")
-                            (:queue-id "q_2" :content-preview "second")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) "first  (q_1)"))
-                ((symbol-function 'agent-repl--frontend-queue-cancel)
-                 (lambda (sid qid) (setq routed (list sid qid)))))
-        (agent-repl-queue-cancel)
-        (should (equal routed '("s_1" "q_1")))))))
+;; The §2.13 queue-command tests (queue-item-label, queue-act,
+;; agent-repl-queue-run-now / agent-repl-queue-cancel) were deleted in the S9
+;; endgame: the queue plane is retired daemon-side and the webapp owns the
+;; queued-message UI.
 
 ;;;; ---- agent-repl-update-pr ----
 

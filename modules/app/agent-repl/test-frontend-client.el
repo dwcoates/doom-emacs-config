@@ -2,9 +2,11 @@
 
 ;;; Commentary:
 
-;; Tests for the daemon HTTP session client.  The single external
-;; boundary (`agent-repl--frontend-http-request') is shadowed via
-;; `cl-letf' in every test that reaches it, so no real HTTP ever fires.
+;; Tests for the daemon session client.  Emacs speaks no HTTP to the
+;; daemon: session CRUD travels as UDS commands and every read comes off
+;; pushed frames, so the boundaries shadowed here are
+;; `agent-repl--uds-send-command' / `--uds-track-command' /
+;; `--uds-connected-p' — no real socket ever opens.
 ;;
 ;; Run with:
 ;;   emacs -batch -Q -l ert -l test-frontend-client.el -f ert-run-tests-batch-and-exit
@@ -16,26 +18,6 @@
       nil t)
 
 (require 'cl-lib)
-
-;;;; ---- Request capture helper ------------------------------------------------
-
-(defmacro agent-repl-test--with-http (responder &rest body)
-  "Run BODY with the HTTP boundary shadowed by RESPONDER.
-RESPONDER is called with (METHOD URL PAYLOAD) and returns (STATUS . BODY).
-Captured requests accumulate in the anaphoric variable `requests' as
-\(METHOD URL PAYLOAD) lists, newest last."
-  (declare (indent 1))
-  `(let ((requests '()))
-     (ignore requests)
-     (cl-letf (((symbol-function 'agent-repl--frontend-http-request)
-                (lambda (method url &optional payload)
-                  (setq requests (append requests (list (list method url payload))))
-                  (funcall ,responder method url payload))))
-       ,@body)))
-
-(defun agent-repl-test--json-ok (obj)
-  "Return a (200 . BODY) response carrying OBJ as JSON."
-  (cons 200 (json-encode obj)))
 
 ;;;; ---- UDS command capture helpers -------------------------------------------
 ;;
@@ -90,43 +72,15 @@ and the SessionView store is cleared first so tests do not contaminate."
                 (lambda (predicate &rest _) (funcall predicate))))
        ,@body)))
 
-;;;; ---- api core -----------------------------------------------------------
+;;;; ---- webview URL ---------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-api-parses-json-body ()
-  "A 2xx JSON body parses into an alist."
+(ert-deftest agent-repl-test-frontend-base-url-is-the-webview-address ()
+  "The one surviving URL builder addresses the daemon's served webapp.
+Emacs itself issues no HTTP; this URL is handed to the embedded browser."
   ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (agent-repl-test--json-ok '((hello . "world"))))
-    ;; Act
-    (let ((resp (agent-repl--frontend-api "GET" "/sessions")))
-      ;; Assert
-      (should (equal (alist-get 'hello resp) "world")))))
-
-(ert-deftest agent-repl-test-frontend-api-errors-on-non-2xx ()
-  "A non-2xx status signals with the daemon's error text included."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 400 "invalid permission_mode"))
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
     ;; Act / Assert
-    (let ((err (should-error (agent-repl--frontend-api "POST" "/sessions"))))
-      (should (string-match-p "invalid permission_mode"
-                              (error-message-string err))))))
-
-(ert-deftest agent-repl-test-frontend-api-errors-on-bad-json ()
-  "An undecodable 2xx body signals rather than returning garbage."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 200 "{not json"))
-    ;; Act / Assert
-    (should-error (agent-repl--frontend-api "GET" "/sessions"))))
-
-(ert-deftest agent-repl-test-frontend-api-nil-for-empty-body ()
-  "An empty body (DELETE's 204) returns nil rather than erroring."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 204 ""))
-    ;; Act / Assert
-    (should (null (agent-repl--frontend-api "DELETE" "/sessions/s1")))))
+    (should (equal (agent-repl--frontend-base-url) "http://127.0.0.1:9999"))))
 
 ;;;; ---- create (UDS `createSession') -----------------------------------------
 
@@ -429,25 +383,111 @@ Isolates the module-global `agent-repl--frontend-session-views' per test."
 
 ;;;; ---- wait-ready -------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-wait-ready-retries-then-succeeds ()
-  "Readiness polling retries failed probes until one succeeds."
-  ;; Arrange — first two probes fail, third answers.
-  (let ((calls 0)
-        (sleeps '()))
-    (cl-letf (((symbol-function 'sleep-for)
-               (lambda (secs) (push secs sleeps))))
-      (agent-repl-test--with-http
-          (lambda (&rest _)
-            (setq calls (1+ calls))
-            (if (< calls 3)
-                (error "connection refused")
-              (agent-repl-test--json-ok '((sessions . [])))))
-        ;; Act / Assert
+(defmacro agent-repl-test--with-readiness (connected-fn &rest body)
+  "Run BODY with the UDS readiness inputs shadowed.
+CONNECTED-FN is the nullary stand-in for `agent-repl--uds-connected-p'.
+`agent-repl-uds-connect' dials are counted into the anaphoric `dials',
+`accept-process-output' pumps into `pumps', and blocking `sleep-for'
+waits into `sleeps' (newest last).  The DaemonView store starts EMPTY so
+each test drives it explicitly."
+  (declare (indent 1))
+  `(let ((dials 0) (pumps 0) (sleeps '())
+         (agent-repl--frontend-last-daemon-view nil))
+     (ignore dials pumps sleeps)
+     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) ,connected-fn)
+               ((symbol-function 'agent-repl-uds-connect)
+                (lambda (&optional _p) (cl-incf dials) nil))
+               ((symbol-function 'accept-process-output)
+                (lambda (&rest _) (cl-incf pumps) nil))
+               ((symbol-function 'sleep-for)
+                (lambda (secs) (setq sleeps (append sleeps (list secs))) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-ready-p-false-without-a-daemon-view ()
+  "A live link with no pushed `DaemonView' is NOT ready.
+The connection can be accepted a beat before the snapshot is composed."
+  ;; Arrange
+  (agent-repl-test--with-readiness (lambda () t)
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-ready-p))))
+
+(ert-deftest agent-repl-test-frontend-ready-p-false-when-link-is-down ()
+  "A stored `DaemonView' with a DEAD link is NOT ready.
+The view outlives the connection that delivered it, so it describes a
+daemon that may be gone."
+  ;; Arrange
+  (agent-repl-test--with-readiness (lambda () nil)
+    (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-ready-p))))
+
+(ert-deftest agent-repl-test-frontend-ready-p-true-with-link-and-view ()
+  "A live link plus a pushed `DaemonView' is ready."
+  ;; Arrange
+  (agent-repl-test--with-readiness (lambda () t)
+    (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
+    ;; Act / Assert
+    (should (agent-repl--frontend-daemon-ready-p))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-returns-immediately-when-ready ()
+  "An already-ready link neither dials nor pumps."
+  ;; Arrange
+  (agent-repl-test--with-readiness (lambda () t)
+    (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
+    ;; Act
+    (should (agent-repl--frontend-wait-ready))
+    ;; Assert
+    (should (= dials 0))
+    (should (= pumps 0))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-dials-while-the-link-is-down ()
+  "Each attempt against a DOWN link dials, and paces with a blocking sleep."
+  ;; Arrange — the first two dials fail; the third connects with a view.
+  (let ((attempts 0))
+    (agent-repl-test--with-readiness (lambda () (>= attempts 3))
+      (cl-letf (((symbol-function 'agent-repl-uds-connect)
+                 (lambda (&optional _p)
+                   (cl-incf attempts)
+                   (when (>= attempts 3)
+                     (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
+                   nil)))
+        ;; Act
         (should (agent-repl--frontend-wait-ready))
-        (should (= calls 3))
-        ;; Pacing: one 0.2s blocking sleep per FAILED probe, none after
-        ;; the success.
+        ;; Assert — one dial per attempt, one 0.2s pacing sleep per FAILED dial.
+        (should (= attempts 3))
         (should (equal sleeps '(0.2 0.2)))))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-pumps-a-live-link-for-the-view ()
+  "A live link with no view yet is PUMPED until the snapshot lands."
+  ;; Arrange — connected throughout; the view arrives on the 2nd pump.
+  (let ((pumped 0))
+    (agent-repl-test--with-readiness (lambda () t)
+      (cl-letf (((symbol-function 'accept-process-output)
+                 (lambda (&rest _)
+                   (cl-incf pumped)
+                   (when (>= pumped 2)
+                     (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
+                   nil)))
+        ;; Act
+        (should (agent-repl--frontend-wait-ready))
+        ;; Assert — pumped, never slept (a live link needs no pacing sleep).
+        (should (= pumped 2))
+        (should (null sleeps))))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-never-dials-a-live-link ()
+  "A live link is never re-dialed while waiting for its snapshot."
+  ;; Arrange
+  (let ((pumped 0))
+    (agent-repl-test--with-readiness (lambda () t)
+      (cl-letf (((symbol-function 'accept-process-output)
+                 (lambda (&rest _)
+                   (cl-incf pumped)
+                   (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
+                   nil)))
+        ;; Act
+        (agent-repl--frontend-wait-ready)
+        ;; Assert
+        (should (= dials 0))))))
 
 (defmacro agent-repl-test--with-ws (ws plist &rest body)
   "Register workspace WS with PLIST for BODY, cleaning up after."
@@ -475,15 +515,34 @@ the retry budget on a misleading error."
           (should (string-match-p "not started" (error-message-string err)))
           (should-not polled))))))
 
-(ert-deftest agent-repl-test-frontend-wait-ready-errors-after-attempts ()
-  "Readiness polling gives up loudly after the attempt budget."
+(ert-deftest agent-repl-test-frontend-wait-ready-errors-when-never-connected ()
+  "A link that never comes up gives up loudly after the attempt budget."
   ;; Arrange
   (let ((agent-repl-frontend-ready-attempts 3))
-    (cl-letf (((symbol-function 'sleep-for) #'ignore))
-      (agent-repl-test--with-http
-          (lambda (&rest _) (error "connection refused"))
-        ;; Act / Assert
-        (should-error (agent-repl--frontend-wait-ready))))))
+    (agent-repl-test--with-readiness (lambda () nil)
+      ;; Act / Assert
+      (let ((err (should-error (agent-repl--frontend-wait-ready))))
+        (should (string-match-p "connected=no" (error-message-string err)))))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-errors-when-no-view-arrives ()
+  "A live link that never pushes a `DaemonView' gives up loudly too.
+Distinct failure mode from an unreachable socket, and the error says so."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 3))
+    (agent-repl-test--with-readiness (lambda () t)
+      ;; Act / Assert
+      (let ((err (should-error (agent-repl--frontend-wait-ready))))
+        (should (string-match-p "daemon-view=no" (error-message-string err)))))))
+
+(ert-deftest agent-repl-test-frontend-wait-ready-honors-the-attempt-budget ()
+  "The give-up happens after exactly `agent-repl-frontend-ready-attempts' tries."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 3))
+    (agent-repl-test--with-readiness (lambda () nil)
+      ;; Act
+      (ignore-errors (agent-repl--frontend-wait-ready))
+      ;; Assert — one dial per attempt, no more.
+      (should (= dials 3)))))
 
 ;;;; ---- ensure-session ----------------------------------------------------------
 
@@ -642,10 +701,8 @@ in-memory instantiation with staler on-disk state."
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
               ((symbol-function 'agent-repl--resolve-current-git-root)
                (lambda () (user-error "not inside a git repository"))))
-      (agent-repl-test--with-http
-          (lambda (&rest _) (agent-repl-test--json-ok '((sessions . []))))
-        ;; Act / Assert
-        (should-error (agent-repl--frontend-ensure-session "ws1") :type 'user-error)))))
+      ;; Act / Assert
+      (should-error (agent-repl--frontend-ensure-session "ws1") :type 'user-error))))
 
 ;;;; ---- gui-adopt-session ----------------------------------------------------------
 
@@ -692,59 +749,10 @@ the workspace's model.  Fails against that hardcoded nil, since
 ;; is now covered by `agent-repl-test-frontend-send-user-message-*' and the
 ;; interrupt by `agent-repl-test-gui-interrupt-*'.
 
-;;;; ---- in-flight message queue (§2.13) ----------------------------------------
-
-(ert-deftest agent-repl-test-frontend-queue-run-now-posts-route ()
-  "Run-now POSTs the session/queue run-now override route."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 200 ""))
-    ;; Act
-    (agent-repl--frontend-queue-run-now "s_1" "q_9")
-    ;; Assert
-    (pcase-let ((`(,method ,url ,_) (car requests)))
-      (should (equal method "POST"))
-      (should (string-suffix-p "/sessions/s_1/queue/q_9/run-now" url)))))
-
-(ert-deftest agent-repl-test-frontend-queue-cancel-posts-route ()
-  "Cancel POSTs the session/queue cancel override route."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 200 ""))
-    ;; Act
-    (agent-repl--frontend-queue-cancel "s_1" "q_9")
-    ;; Assert
-    (pcase-let ((`(,method ,url ,_) (car requests)))
-      (should (equal method "POST"))
-      (should (string-suffix-p "/sessions/s_1/queue/q_9/cancel" url)))))
-
-;; The queue SNAPSHOT readers (`--frontend-queue-content-preview',
-;; `--frontend-session-queue', `--frontend-capture-queues') were removed in the
-;; S7 cutover: the daemon no longer carries a `queue' array on GET /sessions and
-;; the frontend.v1 SessionView has no queue field, so nothing populates
-;; `:queued-messages' anymore.  The accessors below remain (they now always read
-;; the empty queue), covering the retired plane's read side.
-
-(ert-deftest agent-repl-test-ws-queued-messages-reads-plist ()
-  "The messages accessor returns the stored queue list verbatim."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:queued-messages ((:queue-id "q_1")))
-    ;; Act / Assert
-    (should (equal (agent-repl--ws-queued-messages "ws1") '((:queue-id "q_1"))))))
-
-(ert-deftest agent-repl-test-ws-queued-count-counts-items ()
-  "The count accessor returns the number of queued items."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:queued-messages ((:queue-id "q_1") (:queue-id "q_2")))
-    ;; Act / Assert
-    (should (= 2 (agent-repl--ws-queued-count "ws1")))))
-
-(ert-deftest agent-repl-test-ws-queued-count-zero-when-unset ()
-  "The count accessor returns 0 when no queue has been captured."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    ;; Act / Assert
-    (should (= 0 (agent-repl--ws-queued-count "ws1")))))
+;; The §2.13 in-flight-message-queue tests (the queue-run-now / queue-cancel
+;; POST routes and the :queued-messages / queued-count accessors) were deleted
+;; in the S9 endgame: the queue plane is retired daemon-side and the
+;; perpetually-empty accessors are gone.
 
 (ert-deftest agent-repl-test-gui-running-p-tracks-session-binding ()
   "The gui liveness capability is exactly the presence of :frontend-session-id."
@@ -1270,52 +1278,10 @@ the wire would deprive the agent of the directive it must read."
     (should (equal (agent-repl--frontend-session-url "s_9")
                    "http://127.0.0.1:9999/?session=s_9"))))
 
-;;;; ---- slash commands -------------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-fetch-commands-gets-the-menu ()
-  "Fetch GETs the session's commands endpoint and returns the list."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _)
-        (agent-repl-test--json-ok
-         '((commands . (((name . "debug-logs") (description . "d") (argumentHint . "")))))))
-    ;; Act
-    (let ((cmds (agent-repl--frontend-fetch-commands "s1")))
-      ;; Assert
-      (should (equal (alist-get 'name (car cmds)) "debug-logs"))
-      (pcase-let ((`(,method ,url ,_payload) (car requests)))
-        (should (equal method "GET"))
-        (should (string-suffix-p "/sessions/s1/commands" url))))))
-
-(ert-deftest agent-repl-test-frontend-fetch-commands-empty-menu ()
-  "An unresolved menu (the daemon's `{\"commands\":[]}') is returned as nil,
-not an error."
-  ;; Arrange — feed the daemon's literal empty-array body, since that is
-  ;; exactly what an unresolved menu serializes to (never JSON null).
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 200 "{\"commands\":[]}"))
-    ;; Act / Assert
-    (should (null (agent-repl--frontend-fetch-commands "s1")))))
-
-(ert-deftest agent-repl-test-frontend-refresh-commands-posts-to-refresh ()
-  "Refresh POSTs to the session's commands/refresh endpoint."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 202 ""))
-    ;; Act
-    (agent-repl--frontend-refresh-commands "s1")
-    ;; Assert
-    (pcase-let ((`(,method ,url ,_payload) (car requests)))
-      (should (equal method "POST"))
-      (should (string-suffix-p "/sessions/s1/commands/refresh" url)))))
-
-(ert-deftest agent-repl-test-frontend-refresh-commands-errors-on-non-2xx ()
-  "A refresh that the daemon rejects signals rather than reporting success."
-  ;; Arrange
-  (agent-repl-test--with-http
-      (lambda (&rest _) (cons 404 "no such session"))
-    ;; Act / Assert
-    (should-error (agent-repl--frontend-refresh-commands "s1"))))
+;; The GET /commands fetch + POST /commands/refresh tests were deleted in
+;; the S9 slash-menu cutover: those HTTP calls are gone.  The slash-command
+;; menu is now the pushed `SessionInitView' (covered in test-frontend-state.el
+;; for the store and test-input.el for the completion source).
 
 ;;;; ---- origin-tagged sends (merge-remediation) -----------------------------
 ;;

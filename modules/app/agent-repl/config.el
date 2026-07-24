@@ -347,6 +347,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; supersede the sentinel/hook-derived render-status inputs the cutover deletes.
 (agent-repl--load-module "frontend-uds")
 (agent-repl--load-module "frontend-state")
+;; WHY: permission.el registers the `conversationDelta' frame handler on the
+;; transport (frontend-uds), so it must load after it; it drives the
+;; permission UX (prompt bookkeeping + desktop notification + answer
+;; round-trip) entirely from pushed `frontend.v1' state, replacing the
+;; deleted permission sentinels/hooks (S8/S9).  Needs notifications.el and
+;; workspace.el (both loaded above) for `--notify' and the ws accessors.
+(agent-repl--load-module "permission")
 (agent-repl--load-module "frontend")
 ;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
 ;; view groups workspaces under, persisting via history.el's sexp-file

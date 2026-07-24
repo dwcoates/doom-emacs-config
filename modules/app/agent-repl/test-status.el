@@ -1555,20 +1555,8 @@ purpose is the alternating-space cache-bust."
              (r-on (agent-repl-current-workspace-name-segment)))
         (should-not (equal r-off r-on))))))
 
-;;;; ---- Tests: ws-queued-segment (§2.13 queued-message indicator) ----
-
-(ert-deftest agent-repl-test-ws-queued-segment-empty-when-zero ()
-  "The queued segment is the empty string when nothing is queued."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/w")
-    (should (equal (agent-repl--ws-queued-segment "ws1") ""))))
-
-(ert-deftest agent-repl-test-ws-queued-segment-shows-count-when-nonzero ()
-  "The queued segment reads `⋯N queued' when N messages are queued."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :queued-messages
-                        '((:queue-id "q_1") (:queue-id "q_2") (:queue-id "q_3")))
-    (should (string-match-p "⋯3 queued" (agent-repl--ws-queued-segment "ws1")))))
+;; The ws-queued-segment tests were deleted in the S9 endgame: the queued-
+;; message status segment and the queue plane it rendered are retired.
 
 ;;;; ---- Tests: wconf-has-agent-p ----
 
@@ -2060,6 +2048,35 @@ this clobbered :init with :dead.  The :init guard prevents that."
     (agent-repl--mark-dead "ws1")
     (should (eq (agent-repl--ws-agent-state "ws1") :init))
     (should-not (agent-repl--ws-repl-state "ws1"))))
+
+;;;; ---- Tests: status-react-to-pushed-death ----
+
+(ert-deftest agent-repl-test-react-to-pushed-death-marks-dead ()
+  "A pushed DEAD render state marks the workspace dead (session_dead_ parity)."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    ;; Act — the transition subscriber receives (ws :dead previous)
+    (agent-repl--status-react-to-pushed-death "ws1" :dead :thinking)
+    ;; Assert — mark-dead's effect: :repl-state :dead, cleared agent-state
+    (should (eq (agent-repl--ws-repl-state "ws1") :dead))
+    (should-not (agent-repl--ws-agent-state "ws1"))))
+
+(ert-deftest agent-repl-test-react-to-pushed-death-noop-when-not-dead ()
+  "A non-DEAD pushed render state does not mark the workspace dead."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    ;; Act
+    (agent-repl--status-react-to-pushed-death "ws1" :idle :thinking)
+    ;; Assert — untouched
+    (should-not (agent-repl--ws-repl-state "ws1"))
+    (should (eq (agent-repl--ws-agent-state "ws1") :thinking))))
+
+(ert-deftest agent-repl-test-react-to-pushed-death-registered-on-hook ()
+  "The death reactor is registered on `agent-repl-ws-state-transition-functions'."
+  (should (memq #'agent-repl--status-react-to-pushed-death
+                agent-repl-ws-state-transition-functions)))
 
 ;;;; ---- Tests: on-frame-focus ----
 

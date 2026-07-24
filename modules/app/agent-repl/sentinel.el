@@ -5,10 +5,6 @@
 (require 'filenotify)
 
 (declare-function agent-repl--do-log "core")
-(declare-function agent-repl--mark-ws-thinking "input")
-(declare-function agent-repl--mark-dead "status")
-(declare-function agent-repl--frontend-api "frontend-client")
-(declare-function agent-repl--state-save "history")
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -376,123 +372,35 @@ session-start callback was deleted in the agent-shim cutover, design §10)."
                               (list (plist-get handler :name)
                                     (file-name-nondirectory file) dir ws err))))))))
 
-(defun agent-repl--on-permission-event (ws _dir)
-  "Set :permission status on workspace WS.
-Callback for both sentinel sources that signal a permission prompt:
-
-  * `permission_request' — written by the PermissionRequest hook, which
-    Claude Code fires the moment the permission dialog appears (before
-    the user answers).  This is the real-time signal; it's what flips
-    the tab to `:permission' WHILE the agent is waiting on the user.
-
-  * `permission_prompt' — written by the Notification hook for
-    `notification_type=permission_prompt'.  That notification can lag
-    the dialog (Claude Code dispatches it when sending a notification
-    ABOUT the prompt — historically including the 60s-idle \"Claude
-    Code needs your attention\" nudge under the same type), so by the
-    time it arrives the user may already have answered.  Kept as a
-    fallback for older Claude Code versions that don't emit
-    PermissionRequest.
-
-Whichever arrives first wins; the second is a no-op thanks to the
-`:thinking' gate below.
-
-The Notification hook fires for both real permission prompts and the
-60s-idle \"Claude Code needs your attention\" nudge under the same
-notification_type=permission_prompt.  We can't distinguish them by
-message text alone (Claude Code uses the attention wording for some
-real permission prompts too), so we gate on `:agent-state' instead:
-mid-turn (`:thinking') means the agent is actively working and a
-notification at this point is a real permission prompt; any other
-state (`:idle' / `:done' / `:permission' / `:init' / nil) means the
-turn is settled or already attention-flagged, so the notification is
-either a stale idle nudge or a duplicate, and we leave state alone."
-  (let ((before (agent-repl--ws-get ws :agent-state)))
-    (agent-repl--log-verbose ws "on-permission-event: ws=%s status-BEFORE=%s" ws before)
-    (cond
-     ((eq before :thinking)
-      (agent-repl--ws-set-agent-state ws :permission)
-      (agent-repl--log-verbose ws "on-permission-event: ws=%s status-AFTER=%s" ws (agent-repl--ws-get ws :agent-state)))
-     (t
-      (agent-repl--log ws "on-permission-event: ws=%s ignoring notification (state=%s, not :thinking)" ws before)))))
-
-(defun agent-repl--on-permission-resolved-event (ws _dir)
-  "Flip WS back to `:thinking' after a permission prompt was resolved.
-Callback for `permission_resolved_*' sentinels, written by the DAEMON
-\(never by a hook): the user answers permission prompts in the webview,
-so the daemon's permission-resolved frame is the only resolution
-signal Emacs ever receives for it.
-
-Gates on `:permission' exactly as `agent-repl--on-permission-event'
-gates on `:thinking' — the gate is what makes the daemon's
-turn-end/close auto-cancel resolutions order-independent against the
-Stop hook's `:done' (whichever lands second finds a non-`:permission'
-state and no-ops)."
-  (let ((before (agent-repl--ws-get ws :agent-state)))
-    (cond
-     ((eq before :permission)
-      (agent-repl--log ws "on-permission-resolved-event: ws=%s :permission -> :thinking" ws)
-      (agent-repl--mark-ws-thinking ws))
-     (t
-      (agent-repl--log ws "on-permission-resolved-event: ws=%s ignoring (state=%s, not :permission)" ws before)))))
-
-(defun agent-repl--on-session-dead-event (ws _dir)
-  "Record that WS's agent backend died (daemon-written shim death).
-Callback for `session_dead_*' sentinels, written by the DAEMON when a
-gui session's shim dies abnormally (SIGKILL/crash/fatal_error) — the
-gui counterpart of the old vterm process sentinel, and the only death
-signal a gui workspace ever gets (the 1Hz poll deliberately never
-marks gui workspaces dead).
-
-Delegates to `agent-repl--mark-dead', which owns the guarded `:dead'
-transition (idempotent, respects `:merged'/`:merge-failed' precedence
-and the `:init' grace)."
-  (agent-repl--log ws "on-session-dead-event: ws=%s agent-state=%s" ws (agent-repl--ws-get ws :agent-state))
-  (agent-repl--mark-dead ws))
-
-(defun agent-repl--on-account-changed-event (ws _dir)
-  "Adopt WS's new account root after a daemon-side switch.
-Callback for `account_changed_*' sentinels, written by the DAEMON after
-the gui's account menu moved the session onto another canonical config
-root.  The sentinel is a POKE, not a payload: the authoritative config
-dir is fetched back off the daemon (`GET /sessions/{id}/account'), so
-the two sides can never disagree about what the new account is.
-
-Stores the result as `:config-dir-override' — a config-dir string, or
-`:default' for the daemon's empty answer (the CLI's own ~/.claude root),
-which `agent-repl--compute-config-dir' reads ahead of its path-derived
-account — then persists it via `agent-repl--state-save' so the override
-survives an Emacs restart.  A fetch failure warns and leaves the
-override untouched: acting on a guess could pin the workspace to the
-wrong account, which is the exact failure the override exists to
-prevent."
-  (let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-    (if (null sid)
-        (agent-repl--warn ws "account-changed sentinel for ws=%s with no :frontend-session-id" ws)
-      (condition-case err
-          (let* ((resp (agent-repl--frontend-api "GET" (format "/sessions/%s/account" sid)))
-                 (dir (alist-get 'config_dir resp))
-                 (override (if (or (null dir) (string-empty-p dir)) :default dir)))
-            (agent-repl--ws-put ws :config-dir-override override)
-            (agent-repl--log ws "on-account-changed-event: ws=%s override=%S email=%S"
-                              ws override (alist-get 'email resp))
-            (agent-repl--state-save ws))
-        (error
-         (agent-repl--warn ws "account-changed: config-dir fetch failed for ws=%s: %S" ws err))))))
-
-;; The status-hook dispatch handlers for stop_ / stop_failure_ /
-;; subagent_start_ / subagent_stop_ / prompt_submit_ / session_start_ were
-;; DELETED in the agent-shim cutover (design §10).  Render-state is now
-;; resolved by the daemon's SSM and pushed as `frontend.v1' WorkspaceState
-;; frames (see `frontend-state.el' / `agent-repl--ws-render-status'); the
-;; managed Claude Code hooks that wrote those sentinels are removed from
-;; `agent-repl--managed-hooks' in `install.el', so the sentinels are no
-;; longer written at all.  The non-status daemon-written sentinels
-;; (permission_request/prompt/resolved, session_dead_, account_changed_)
-;; are kept above.  The prior session_start orchestration (pending-prompt
-;; drain, the `:agent-ready' half of the ws-fully-loaded latch,
-;; after-ready hooks, and the compaction metaprompt re-fire) moved to the
-;; daemon, which now owns prompt submission and session-ready reporting.
+;; SENTINEL ENDGAME (design §10, S8/S9): Emacs no longer ACTS on any
+;; sentinel file.  Every live handler is gone:
+;;
+;;   * The STATUS handlers (stop_ / stop_failure_ / subagent_start_ /
+;;     subagent_stop_ / prompt_submit_ / session_start_) were deleted in
+;;     the agent-shim cutover (S2).  Render-state is resolved by the
+;;     daemon's SSM and pushed as `frontend.v1' WorkspaceState frames.
+;;
+;;   * The PERMISSION handlers (permission_request / permission_prompt /
+;;     permission_resolved) are deleted here.  The permission UX is driven
+;;     entirely by the pushed `PermissionItem' (conversationDelta) plus the
+;;     pushed `:permission' WorkspaceState — see `permission.el'.
+;;
+;;   * `session_dead_' is deleted here.  Session death is the pushed DEAD
+;;     WorkspaceState + SessionView terminal/death-reason fields; the
+;;     `agent-repl--mark-dead' effect is re-anchored on the state-transition
+;;     hook (see `agent-repl--status-react-to-pushed-death' in status.el).
+;;
+;;   * `account_changed_' (and its GET /sessions/{id}/account plumbing) is
+;;     deleted here.  Emacs is out of account switching entirely: the webapp
+;;     initiates it, the daemon executes it, and Emacs merely renders the
+;;     pushed SessionView (config_dir).
+;;
+;; The managed Claude Code hooks that once wrote the permission sentinels are
+;; removed from `install.el', so those files are no longer written at all;
+;; every retired prefix is DRAINED (see
+;; `agent-repl--deprecated-sentinel-prefixes') so a stale daemon binary or
+;; older shim that still emits one does not spam the poll log.  The
+;; `agent-repl--sentinel-dispatch-alist' is consequently EMPTY.
 
 (defvar agent-repl-ws-fully-loaded-functions nil
   "Hook run when a Agent REPL workspace is fully loaded.
@@ -563,55 +471,14 @@ running but its load cycle has logically ended)."
 ;;; Event dispatch
 
 (defconst agent-repl--sentinel-dispatch-alist
-  ;; ORDER MATTERS: prefixes are matched via `string-prefix-p' in the
-  ;; order they appear here, so a longer entry must come before a shorter
-  ;; one whenever the longer is itself prefixed by the shorter.  All the
-  ;; status prefixes (stop_ / stop_failure_ / subagent_start_ /
-  ;; subagent_stop_ / prompt_submit_ / session_start_) were deleted in the
-  ;; agent-shim cutover (design §10); every surviving entry is a
-  ;; daemon-written NON-status channel and no two collide by prefix.
-  '(;; ORDER MATTERS for this pair too: `permission_request' is itself
-    ;; prefixed by `permission_' just like `permission_prompt' is, but
-    ;; since neither prefix is a prefix of the other (they diverge at
-    ;; the underscore after "permission_"), order between THEM doesn't
-    ;; matter.  `permission_request' is listed first because it's the
-    ;; canonical/primary signal (real-time PermissionRequest hook) and
-    ;; `permission_prompt' is the lagging fallback (Notification hook).
-    ("permission_request" . (:callback agent-repl--on-permission-event
-                             :warning  "[agent-repl] WARNING: permission-request dir=%s matched no workspace"
-                             :name     "handle-permission-request"))
-    ("permission_prompt"  . (:callback agent-repl--on-permission-event
-                             :warning  "[agent-repl] WARNING: permission dir=%s matched no workspace"
-                             :name     "handle-permission"))
-    ;; `permission_resolved' shares the `permission_' stem with the two
-    ;; entries above but diverges before either is a prefix of the
-    ;; other's filenames, so order among the permission_* trio doesn't
-    ;; matter.  Written ONLY by the daemon (permission_resolved_<sid>_<reqid>).
-    ("permission_resolved" . (:callback agent-repl--on-permission-resolved-event
-                              :warning  "[agent-repl] WARNING: permission-resolved dir=%s matched no workspace"
-                              :name     "handle-permission-resolved"))
-    ;; `session_dead_' vs `session_start_' diverge at "session_d"/"session_s",
-    ;; so neither prefixes the other.  Written ONLY by the daemon
-    ;; (session_dead_<sid>) on abnormal shim death.
-    ("session_dead_"      . (:callback agent-repl--on-session-dead-event
-                             :warning  "[agent-repl] WARNING: session-dead dir=%s matched no workspace"
-                             :name     "handle-session-dead"))
-    ;; `account_changed_' shares no stem with any other entry.  Written
-    ;; ONLY by the daemon (account_changed_<sid>) after an account switch
-    ;; relaunches the session under another canonical config root.
-    ("account_changed_"   . (:callback agent-repl--on-account-changed-event
-                             :warning  "[agent-repl] WARNING: account-changed dir=%s matched no workspace"
-                             :name     "handle-account-changed"))
-    ;; There is no `login_request_' handler here any more.  The gui login
-    ;; used to be relayed to Emacs on this channel because the OAuth flow
-    ;; needs a TTY and Emacs was the only TTY host in the system.  That
-    ;; premise was wrong: the daemon can open a pty of its own, so it now
-    ;; runs the login itself and streams the terminal to the webapp, which
-    ;; renders it.  See daemon/internal/login.  A stale daemon binary or
-    ;; older shim may still emit `login_request_' files, so the prefix is
-    ;; listed in `agent-repl--deprecated-sentinel-prefixes' below and drained
-    ;; rather than left to spam the log every poll cycle.
-    )
+  ;; EMPTY (design §10, S8/S9 sentinel endgame): every live handler was
+  ;; deleted.  Status channels went in S2; permission_request /
+  ;; permission_prompt / permission_resolved / session_dead_ /
+  ;; account_changed_ go here.  Render-state, permission UX, session death,
+  ;; and account identity are all driven by pushed `frontend.v1' state now,
+  ;; so Emacs acts on NO sentinel file.  Every retired prefix is in
+  ;; `agent-repl--deprecated-sentinel-prefixes' below and drained.
+  '()
   "Alist mapping filename prefixes to handler plists.
 Each entry is (PREFIX . PLIST) where PLIST has keys:
   :callback  - function called with (WS DIR) on match
@@ -619,10 +486,10 @@ Each entry is (PREFIX . PLIST) where PLIST has keys:
                (interpolates DIR via %s)
   :name      - handler name for debug logging
 
-Every entry is a daemon-written NON-status channel; the status
-channels (stop_ / stop_failure_ / subagent_* / prompt_submit_ /
-session_start_) were deleted in the agent-shim cutover (design §10)
-and no surviving prefix collides with another.")
+EMPTY after the S8/S9 sentinel endgame: there are no live sentinel
+handlers left.  A sentinel file is either drained (a retired prefix in
+`agent-repl--deprecated-sentinel-prefixes') or warned about (a truly
+unknown prefix, left on disk for forward compatibility).")
 
 (defconst agent-repl--deprecated-sentinel-prefixes
   '("login_request_"
@@ -632,12 +499,21 @@ and no surviving prefix collides with another.")
     ;; hook install or an older shim could still emit them, so drain them
     ;; rather than let the dispatch path re-warn "no handler" every poll.
     ;; `stop_' covers `stop_failure_'; `subagent_' covers both subagent
-    ;; variants.  `session_start_' does NOT match the kept `session_dead_'
-    ;; handler (which is checked first anyway).
+    ;; variants.
     "stop_"
     "subagent_"
     "prompt_submit_"
-    "session_start_")
+    "session_start_"
+    ;; Retired NON-status daemon channels (S8/S9 sentinel endgame).  The
+    ;; permission UX, session death, and account identity are all driven by
+    ;; pushed `frontend.v1' state now, so these are drained too.  Each of
+    ;; the three permission_* prefixes is listed explicitly (rather than a
+    ;; bare `permission_') so the retirement of each channel is auditable.
+    "permission_request"
+    "permission_prompt"
+    "permission_resolved"
+    "session_dead_"
+    "account_changed_")
   "Filename prefixes for sentinel channels Emacs no longer acts on.
 A file matching one of these is DRAINED (deleted and dropped) rather than
 warned about.  It is deliberately NOT in `agent-repl--sentinel-dispatch-alist':

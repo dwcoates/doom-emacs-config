@@ -66,157 +66,62 @@ Symmetric to the filter in `agent-repl--poll-workspace-notifications'."
 
 ;;;; ---- Tests: dispatch-sentinel-file prefix matching ----
 
-(ert-deftest agent-repl-test-sentinel-dispatches-permission ()
-  "A file named permission_prompt should dispatch to the permission handler."
+;; The permission_request / permission_prompt / permission_resolved /
+;; session_dead_ / account_changed_ DISPATCH-to-handler tests were deleted
+;; in the S8/S9 sentinel endgame: those handlers are gone and the dispatch
+;; alist is empty.  Each retired prefix now DRAINS — asserted per-channel
+;; below (mirroring `agent-repl-test-sentinel-drains-retired-status-prefix'
+;; for the status prefixes).  The account-changed handler tests
+;; (`agent-repl--on-account-changed-event') went with the handler: Emacs is
+;; out of account switching entirely.
+
+(defun agent-repl-test--assert-drains (file)
+  "Assert that dispatching FILE drains it: returns t, deletes it, no warn/process."
+  (let ((deleted nil)
+        (processed nil))
+    (cl-letf (((symbol-function 'delete-file)
+               (lambda (f) (setq deleted f)))
+              ((symbol-function 'agent-repl--process-sentinel-file)
+               (lambda (&rest _) (setq processed t)))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (&rest _) (ert-fail "retired prefix must not warn"))))
+      (should (eq t (agent-repl--dispatch-sentinel-file file)))
+      (should (equal deleted file))
+      (should-not processed))))
+
+(ert-deftest agent-repl-test-sentinel-drains-permission-prompt ()
+  "A retired permission_prompt file is drained, not dispatched or warned."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/permission_prompt")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-permission-event))))))
+    (agent-repl-test--assert-drains "/dir/permission_prompt")))
 
-(ert-deftest agent-repl-test-sentinel-dispatches-permission-request ()
-  "A file named permission_request should dispatch to the permission handler.
-This is the real-time PermissionRequest signal Claude Code emits at the
-moment the permission dialog appears; the dispatch entry must share its
-callback with the older `permission_prompt' Notification fallback so
-both paths flip the tab to `:permission' through the same gate."
+(ert-deftest agent-repl-test-sentinel-drains-permission-request ()
+  "A retired permission_request_<sid>_<reqid> file is drained."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/permission_request")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-permission-event))))))
+    (agent-repl-test--assert-drains "/dir/permission_request_abc123_req42")))
 
-;; The stop_ / prompt_submit_ dispatch tests were deleted in the
-;; agent-shim cutover (design §10): those status prefixes no longer have
-;; handlers.  A retired status prefix now DRAINS — see
-;; `agent-repl-test-sentinel-drains-retired-status-prefix' below.
-
-(ert-deftest agent-repl-test-sentinel-dispatches-suffixed-permission-request ()
-  "A daemon-written permission_request_<sid>_<reqid> file dispatches to the permission handler.
-The daemon suffixes sid/reqid for per-file uniqueness; the entry is
-prefix-matched so the suffixed name must reach the same callback as the
-hook's fixed-name file."
+(ert-deftest agent-repl-test-sentinel-drains-permission-resolved ()
+  "A retired permission_resolved_<sid>_<reqid> file is drained."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/permission_request_abc123_req42")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-permission-event))))))
+    (agent-repl-test--assert-drains "/dir/permission_resolved_abc123_req42")))
 
-(ert-deftest agent-repl-test-sentinel-dispatches-permission-resolved ()
-  "A permission_resolved_<sid>_<reqid> file dispatches to the resolved handler.
-Must NOT be shadowed by the permission_request/permission_prompt
-entries that share the permission_ stem."
+(ert-deftest agent-repl-test-sentinel-drains-session-dead ()
+  "A retired session_dead_<sid> file is drained (death is pushed DEAD state now)."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/permission_resolved_abc123_req42")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-permission-resolved-event))))))
+    (agent-repl-test--assert-drains "/dir/session_dead_abc123")))
 
-(ert-deftest agent-repl-test-sentinel-dispatches-session-dead ()
-  "A session_dead_<sid> file dispatches to the session-dead handler.
-Must NOT be shadowed by session_start_ (they diverge at session_d/session_s)."
+(ert-deftest agent-repl-test-sentinel-drains-account-changed ()
+  "A retired account_changed_<sid> file is drained (Emacs is out of account switching)."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/session_dead_abc123")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-session-dead-event))))))
+    (agent-repl-test--assert-drains "/dir/account_changed_abc123")))
 
-(ert-deftest agent-repl-test-sentinel-dispatches-account-changed ()
-  "An account_changed_<sid> file dispatches to the account-changed handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/account_changed_abc123")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-account-changed-event))))))
-
-;;;; ---- Tests: agent-repl--on-account-changed-event ----
-
-(ert-deftest agent-repl-test-account-changed-stores-string-override ()
-  "The handler stores the daemon's config dir as the workspace override
-and persists it via state-save."
-  (agent-repl-test--with-clean-state
-    (let ((saved nil))
-      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
-      (cl-letf (((symbol-function 'agent-repl--frontend-api)
-                 (lambda (_method path)
-                   (should (equal path "/sessions/s_1/account"))
-                   '((config_dir . "/home/u/.claude-chesscom") (email . "dodge@chess.com"))))
-                ((symbol-function 'agent-repl--state-save)
-                 (lambda (ws) (setq saved ws))))
-        (agent-repl--on-account-changed-event "ws1" "/dir")
-        (should (equal (agent-repl--ws-get "ws1" :config-dir-override)
-                       "/home/u/.claude-chesscom"))
-        (should (equal saved "ws1"))))))
-
-(ert-deftest agent-repl-test-account-changed-maps-empty-dir-to-default ()
-  "The daemon's empty config dir (the CLI's own root) stores as :default,
-distinguishable from the nil of no-override-at-all."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
-    (cl-letf (((symbol-function 'agent-repl--frontend-api)
-               (lambda (_method _path) '((config_dir . "") (email . "a@b.c"))))
-              ((symbol-function 'agent-repl--state-save) #'ignore))
-      (agent-repl--on-account-changed-event "ws1" "/dir")
-      (should (eq (agent-repl--ws-get "ws1" :config-dir-override) :default)))))
-
-(ert-deftest agent-repl-test-account-changed-fetch-failure-leaves-override ()
-  "A failed config-dir fetch warns and leaves the override untouched —
-acting on a guess could pin the workspace to the wrong account."
-  (agent-repl-test--with-clean-state
-    (let ((warned nil))
-      (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
-      (agent-repl--ws-put "ws1" :config-dir-override "/old/root")
-      (cl-letf (((symbol-function 'agent-repl--frontend-api)
-                 (lambda (_method _path) (error "daemon unreachable")))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        (agent-repl--on-account-changed-event "ws1" "/dir")
-        (should warned)
-        (should (equal (agent-repl--ws-get "ws1" :config-dir-override) "/old/root"))))))
-
-(ert-deftest agent-repl-test-account-changed-without-session-id-warns ()
-  "A workspace with no :frontend-session-id warns instead of fetching."
-  (agent-repl-test--with-clean-state
-    (let ((warned nil)
-          (fetched nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-api)
-                 (lambda (&rest _) (setq fetched t)))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        (agent-repl--on-account-changed-event "ws1" "/dir")
-        (should warned)
-        (should-not fetched)
-        (should-not (agent-repl--ws-get "ws1" :config-dir-override))))))
+(ert-deftest agent-repl-test-sentinel-dispatch-alist-empty ()
+  "The dispatch alist is empty after the sentinel endgame — no live handlers."
+  (should-not agent-repl--sentinel-dispatch-alist))
 
 (ert-deftest agent-repl-test-sentinel-dispatch-returns-nil-for-unknown ()
   "dispatch-sentinel-file should return nil for an unrecognized filename."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--dispatch-sentinel-file "/dir/unknown_file"))))
-
-(ert-deftest agent-repl-test-sentinel-dispatch-returns-t-for-known ()
-  "dispatch-sentinel-file should return t when a handler is found."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-               (lambda (&rest _) nil)))
-      (should (eq t (agent-repl--dispatch-sentinel-file "/dir/session_dead_abc"))))))
 
 (ert-deftest agent-repl-test-sentinel-drains-retired-status-prefix ()
   "A retired STATUS-hook sentinel (stop_/subagent_/prompt_submit_/session_start_)
@@ -513,64 +418,12 @@ propagate (a hard error would kill the file-notify watcher)."
 ;; exist.  Turn-finished / subagent-in-flight resolution is owned by the
 ;; daemon's SSM and pushed as `frontend.v1' WorkspaceState frames now.
 
-;;;; ---- Tests: on-permission-event handler ----
-
-(ert-deftest agent-repl-test-on-permission-event-sets-permission-from-thinking ()
-  "on-permission-event should call ws-set-agent-state with :permission when state is :thinking.
-Mid-turn (:thinking) is the only state where a permission_prompt notification
-is treated as a real permission request; see on-permission-event docstring."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :thinking)
-    (let ((set-args nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (ws state) (setq set-args (list ws state)))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should (equal set-args '("ws1" :permission)))))))
-
-;;;; ---- Tests: on-permission-resolved-event handler ----
-
-(ert-deftest agent-repl-test-on-permission-resolved-flips-to-thinking ()
-  "on-permission-resolved-event flips :permission back to :thinking.
-For gui sessions the user answers in the webview, so the daemon's
-resolved sentinel is the only resolution signal."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :permission)
-    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))))
-
-(ert-deftest agent-repl-test-on-permission-resolved-noop-from-done ()
-  "on-permission-resolved-event is a no-op when state is not :permission.
-The gate makes turn-end auto-cancel resolutions order-independent
-against the Stop hook's :done."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
-
-(ert-deftest agent-repl-test-on-permission-resolved-noop-from-nil ()
-  "on-permission-resolved-event is a no-op when no agent-state is set."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--on-permission-resolved-event "ws1" "/some/dir")
-    (should-not (agent-repl--ws-get "ws1" :agent-state))))
-
-;;;; ---- Tests: on-session-dead-event handler ----
-
-(ert-deftest agent-repl-test-on-session-dead-marks-dead ()
-  "on-session-dead-event sets :repl-state :dead and clears :agent-state."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
-    (agent-repl--on-session-dead-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-get "ws1" :repl-state) :dead))
-    (should-not (agent-repl--ws-get "ws1" :agent-state))))
-
-(ert-deftest agent-repl-test-on-session-dead-respects-merged ()
-  "on-session-dead-event must not clobber a :merged badge.
-Inherits mark-dead's precedence guard."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :repl-state :merged)
-    (agent-repl--on-session-dead-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-get "ws1" :repl-state) :merged))))
+;; The on-permission-event / on-permission-resolved-event /
+;; on-session-dead-event handler tests were deleted in the S8/S9 sentinel
+;; endgame along with their handlers.  The permission UX is now covered by
+;; test-permission.el (pushed PermissionItem present/clear/notify/answer);
+;; session-death parity (pushed DEAD -> mark-dead) is covered by
+;; `agent-repl-test-react-to-pushed-death-*' in test-status.el.
 
 ;;;; ---- Tests: read-sentinel-file ----
 
@@ -1130,29 +983,10 @@ lookup is never dropped."
 
 ;;;; ---- Tests: end-to-end dispatch through process-sentinel-file ----
 
-(ert-deftest agent-repl-test-end-to-end-permission-dispatch ()
-  "Full dispatch: permission_prompt file -> on-permission-event -> ws-set-agent-state :permission.
-ws-get is mocked to return :thinking so the elisp state-gate in
-on-permission-event treats the notification as a real permission prompt."
-  (agent-repl-test--with-clean-state
-    (let ((set-args nil))
-      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
-                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
-                ((symbol-function 'agent-repl--ws-for-dir)
-                 (lambda (_d) "test-ws"))
-                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
-                 #'ignore)
-                ((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (ws state) (setq set-args (list ws state))))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (_ws _key) :thinking))
-                ((symbol-function 'delete-file) #'ignore))
-        (agent-repl--dispatch-sentinel-file "/dir/permission_prompt")
-        (should (equal set-args '("test-ws" :permission)))))))
-
-;; The end-to-end stop_ / prompt_submit_ dispatch tests were deleted in
-;; the agent-shim cutover (design §10): those prefixes drain now (there is
-;; no handler to reach end-to-end).
+;; The end-to-end permission / stop_ / prompt_submit_ dispatch tests were
+;; deleted in the sentinel endgame (design §10, S8/S9): every prefix drains
+;; now — there is no handler to reach end-to-end.  Drain coverage lives in
+;; the per-channel `agent-repl-test-sentinel-drains-*' tests above.
 
 ;;;; ---- Tests: ws-for-dir-fast uncovered edge cases ----
 
@@ -1372,112 +1206,24 @@ is still skipped and the file is still deleted."
         ;; File should still be deleted
         (should (equal deleted-file "/tmp/stop_nowarn"))))))
 
-;;;; ---- Tests: on-permission-event uncovered edge cases ----
-
-(ert-deftest agent-repl-test-on-permission-event-nil-ws-errors ()
-  "on-permission-event with nil ws and :thinking state should error in ws-set.
-The state-gate runs `agent-repl--ws-get' first (which tolerates a nil ws),
-so we have to engineer the gate to pass before the nil-ws error surfaces.
-We do that by stubbing ws-get to return :thinking unconditionally."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-get)
-               (lambda (_ws _key) :thinking)))
-      (should-error (agent-repl--on-permission-event nil "/some/dir")))))
-
-(ert-deftest agent-repl-test-on-permission-event-already-permission-no-op ()
-  "on-permission-event should NOT re-set state when ws is already :permission.
-A duplicate or stale Notification arriving while we're still in :permission
-must not call ws-set-agent-state — the gate accepts only :thinking."
-  (agent-repl-test--with-clean-state
-    (let ((set-called nil))
-      (agent-repl--ws-set "ws1" :permission)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (_ws _state) (setq set-called t))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should-not set-called)))))
-
-(ert-deftest agent-repl-test-on-permission-event-idle-no-op ()
-  "on-permission-event must no-op when state is :idle (post-turn idle nudge).
-This is the regression guard for phantom ❓ appearing after the user is done."
-  (agent-repl-test--with-clean-state
-    (let ((set-called nil))
-      (agent-repl--ws-set "ws1" :idle)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (_ws _state) (setq set-called t))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should-not set-called)
-        (should (eq (agent-repl--ws-state "ws1") :idle))))))
-
-(ert-deftest agent-repl-test-on-permission-event-done-no-op ()
-  "on-permission-event must no-op when state is :done (post-turn idle nudge)."
-  (agent-repl-test--with-clean-state
-    (let ((set-called nil))
-      (agent-repl--ws-set "ws1" :done)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (_ws _state) (setq set-called t))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should-not set-called)
-        (should (eq (agent-repl--ws-state "ws1") :done))))))
-
-(ert-deftest agent-repl-test-on-permission-event-init-no-op ()
-  "on-permission-event must no-op when state is :init (the agent not yet ready)."
-  (agent-repl-test--with-clean-state
-    (let ((set-called nil))
-      (agent-repl--ws-set "ws1" :init)
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (_ws _state) (setq set-called t))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should-not set-called)
-        (should (eq (agent-repl--ws-state "ws1") :init))))))
-
-(ert-deftest agent-repl-test-on-permission-event-nil-state-no-op ()
-  "on-permission-event must no-op when state is nil (workspace has no agent session)."
-  (agent-repl-test--with-clean-state
-    (let ((set-called nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-set-agent-state)
-                 (lambda (_ws _state) (setq set-called t))))
-        (agent-repl--on-permission-event "ws1" "/some/dir")
-        (should-not set-called)))))
-
-;; The on-stop-event / on-prompt-submit-event edge-case tests were deleted
-;; in the agent-shim cutover (design §10): both handlers are gone.
+;; The on-permission-event / on-stop-event / on-prompt-submit-event
+;; edge-case tests were deleted in the sentinel endgame (design §10): those
+;; handlers are gone.  Permission-state gating now lives in the daemon's SSM
+;; (pushed :permission WorkspaceState); the Emacs-side permission UX is
+;; covered by test-permission.el.
 
 ;;;; ---- Tests: dispatch-sentinel-file uncovered edge cases ----
 
 (ert-deftest agent-repl-test-dispatch-sentinel-file-no-directory-component ()
-  "dispatch-sentinel-file should work with a bare filename (no directory)."
+  "dispatch-sentinel-file drains a bare (no-directory) retired filename."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "session_dead_123")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-session-dead-event))))))
+    (agent-repl-test--assert-drains "session_dead_123")))
 
 (ert-deftest agent-repl-test-dispatch-sentinel-file-exact-prefix ()
-  "dispatch-sentinel-file should match a filename that is exactly a prefix (no suffix)."
+  "dispatch-sentinel-file drains a filename that is exactly a retired prefix (no suffix)."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        ;; "session_dead_" is a prefix in the dispatch alist; file is exactly it.
-        (agent-repl--dispatch-sentinel-file "/dir/session_dead_")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-session-dead-event))))))
-
-(ert-deftest agent-repl-test-dispatch-sentinel-file-first-prefix-wins ()
-  "dispatch-sentinel-file should use the first matching prefix when multiple could match."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        ;; "permission_prompt" is the first entry; it should match before any other
-        (agent-repl--dispatch-sentinel-file "/dir/permission_prompt")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-permission-event))))))
+    ;; "session_dead_" is a retired drain prefix; the file is exactly it.
+    (agent-repl-test--assert-drains "/dir/session_dead_")))
 
 ;;;; ---- Tests: dispatch-sentinel-event uncovered edge cases ----
 
@@ -1544,23 +1290,9 @@ This is the regression guard for phantom ❓ appearing after the user is done."
         ;; Only the non-hidden file was dispatched
         (should (= (length dispatched-files) 1))))))
 
-;;;; ---- Tests: sentinel event edge cases (status transitions .md) ----
-
-(ert-deftest agent-repl-test-on-permission-event-leaves-done-alone ()
-  "Permission event must NOT overwrite :done — the notification is an idle nudge.
-Regression guard for the phantom ❓-after-done bug; the prior behavior
-overwrote :done with :permission, which is exactly what we no longer want."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :done)
-    (agent-repl--on-permission-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-state "ws1") :done))))
-
-(ert-deftest agent-repl-test-on-permission-event-overwrites-thinking ()
-  "Permission event should overwrite :thinking status with :permission."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :thinking)
-    (agent-repl--on-permission-event "ws1" "/some/dir")
-    (should (eq (agent-repl--ws-state "ws1") :permission))))
+;; The on-permission-event status-transition edge-case tests (leaves-:done,
+;; overwrites-:thinking) were deleted in the sentinel endgame: permission
+;; state gating moved to the daemon SSM (pushed :permission WorkspaceState).
 
 ;;;; ---- Tests: agent-repl-reset-sentinel-watchers ----
 
@@ -1797,98 +1529,6 @@ watchdog path to signal `:timed-out'."
         (agent-repl--ws-put "ws1" :agent-ready t)
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should second-called)))))
-
-;;;; ---- Tests: permission-notify.sh sentinel writing ----
-;;
-;; Claude Code's Notification hook fires for two distinct semantics under
-;; the same notification_type=permission_prompt — real permission/approval
-;; prompts AND a 60s-idle "needs your attention" nudge.  Earlier versions
-;; of the script filtered the idle nudge in bash, but Claude Code also
-;; uses the "needs your attention" wording for some real permission
-;; prompts, so the filter caused real prompts to be missed.  The script
-;; now writes the sentinel unconditionally and discrimination is done in
-;; elisp by `agent-repl--on-permission-event' (state-gated on
-;; `:thinking').  These tests drive the actual shell script end-to-end.
-
-(defconst agent-repl-test--permission-hook-path
-  ;; Captured at load time — `load-file-name' is nil inside ERT test bodies.
-  (expand-file-name
-   "hooks/permission-notify.sh"
-   (file-name-directory (or load-file-name buffer-file-name)))
-  "Absolute path to the checked-in permission-notify.sh script.")
-
-(defun agent-repl-test--run-permission-hook (json-input)
-  "Run permission-notify.sh under an isolated state dir.
-Returns (:exit CODE :sentinel-exists BOOL :sentinel-content STRING).
-The hook resolves its sentinel dir from `AGENT_REPL_STATE_DIR' (which
-`test-helpers.el' points at a shared session temp dir), so this helper
-rebinds that variable locally at a throwaway path — per the guidance in
-that fixture — and checks the sentinel there."
-  (let* ((tmp-home (make-temp-file "agent-repl-permission-hook-" t))
-         (state-dir (expand-file-name ".claude-emacs" tmp-home))
-         (script agent-repl-test--permission-hook-path)
-         (sentinel (expand-file-name
-                    "workspace-notifications/permission_prompt"
-                    state-dir))
-         (process-environment (append
-                               (list (format "HOME=%s" tmp-home)
-                                     (format "AGENT_REPL_STATE_DIR=%s" state-dir))
-                               process-environment))
-         (default-directory tmp-home)
-         (exit (with-temp-buffer
-                 (insert json-input)
-                 (call-process-region (point-min) (point-max)
-                                      "bash" nil nil nil script)))
-         (exists (file-exists-p sentinel))
-         (content (when exists
-                    (with-temp-buffer
-                      (insert-file-contents sentinel)
-                      (buffer-string)))))
-    (ignore-errors (delete-directory tmp-home t))
-    (list :exit exit :sentinel-exists exists :sentinel-content content)))
-
-(ert-deftest agent-repl-test-permission-hook-bash-permission-writes-sentinel ()
-  "A real \"Claude needs your permission to use Bash\" message writes the sentinel."
-  (let* ((input "{\"cwd\":\"/some/dir\",\"session_id\":\"sess-1\",\"message\":\"Claude needs your permission to use Bash\",\"notification_type\":\"permission_prompt\"}")
-         (result (agent-repl-test--run-permission-hook input)))
-    (should (= 0 (plist-get result :exit)))
-    (should (plist-get result :sentinel-exists))
-    (should (string-match-p "/some/dir" (plist-get result :sentinel-content)))
-    (should (string-match-p "sess-1" (plist-get result :sentinel-content)))))
-
-(ert-deftest agent-repl-test-permission-hook-plan-approval-writes-sentinel ()
-  "A \"Claude Code needs your approval for the plan\" message writes the sentinel."
-  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your approval for the plan\",\"notification_type\":\"permission_prompt\"}")
-         (result (agent-repl-test--run-permission-hook input)))
-    (should (= 0 (plist-get result :exit)))
-    (should (plist-get result :sentinel-exists))))
-
-(ert-deftest agent-repl-test-permission-hook-skill-permission-writes-sentinel ()
-  "\"Claude needs your permission to use Skill\" message writes the sentinel."
-  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude needs your permission to use Skill\",\"notification_type\":\"permission_prompt\"}")
-         (result (agent-repl-test--run-permission-hook input)))
-    (should (= 0 (plist-get result :exit)))
-    (should (plist-get result :sentinel-exists))))
-
-(ert-deftest agent-repl-test-permission-hook-attention-writes-sentinel ()
-  "A \"Claude Code needs your attention\" message ALSO writes the sentinel.
-Claude Code uses that wording for some real permission prompts, so the
-hook no longer filters on .message; discrimination between real prompts
-and 60s-idle nudges happens elisp-side in
-`agent-repl--on-permission-event' by gating on `:agent-state'."
-  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"message\":\"Claude Code needs your attention\",\"notification_type\":\"permission_prompt\"}")
-         (result (agent-repl-test--run-permission-hook input)))
-    (should (= 0 (plist-get result :exit)))
-    (should (plist-get result :sentinel-exists))))
-
-(ert-deftest agent-repl-test-permission-hook-empty-message-writes-sentinel ()
-  "An empty or missing .message field still writes the sentinel.
-Same rationale as the attention-writes-sentinel test: elisp gates on
-state, so the shell hook is now message-agnostic."
-  (let* ((input "{\"cwd\":\"/d\",\"session_id\":\"s\",\"notification_type\":\"permission_prompt\"}")
-         (result (agent-repl-test--run-permission-hook input)))
-    (should (= 0 (plist-get result :exit)))
-    (should (plist-get result :sentinel-exists))))
 
 (provide 'test-sentinel)
 
