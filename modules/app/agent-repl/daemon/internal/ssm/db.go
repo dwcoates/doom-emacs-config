@@ -21,7 +21,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 1
+const schemaVersion = 2
 
 // defaultDBPath is the SSM's own database, distinct from the shim-store
 // (§9.2: "own SQLite DB").
@@ -88,6 +88,17 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}
 
+	// v2: task_id on the task_started/task_ended rows, so live_task_count can
+	// count DISTINCT tasks instead of summing rows. Without it a second
+	// TaskEnded for the same task (a spool's EXIT= marker after a TaskStop
+	// tool result, say) decrements the counter twice and can drive it
+	// negative. Added out-of-band because ALTER TABLE ADD COLUMN is not
+	// idempotent in SQLite; an existing column is the migration's success
+	// condition, not an error.
+	if err := addTaskIDColumn(db); err != nil {
+		return err
+	}
+
 	var version sql.NullInt64
 	if err := db.QueryRow(`SELECT version FROM schema_meta LIMIT 1`).Scan(&version); err != nil {
 		if err != sql.ErrNoRows {
@@ -103,23 +114,77 @@ func migrate(db *sql.DB) error {
 	if version.Int64 > schemaVersion {
 		return fmt.Errorf("ssm: db schema version %d is newer than this binary understands (%d); refusing to open", version.Int64, schemaVersion)
 	}
-	// version.Int64 < schemaVersion would run forward migrations here as
-	// they are introduced. Nothing to do at v1.
+	if version.Int64 < schemaVersion {
+		// Every forward migration to date is idempotent and already ran above;
+		// record the new version so the stamp keeps describing the DB. Leaving
+		// it stale would make the version meaningless as a guard.
+		if _, err := db.Exec(`UPDATE schema_meta SET version = ?`, schemaVersion); err != nil {
+			return fmt.Errorf("ssm: record schema version %d: %w", schemaVersion, err)
+		}
+	}
 	return nil
+}
+
+// addTaskIDColumn adds workspace_state.task_id when it is absent. SQLite has
+// no ADD COLUMN IF NOT EXISTS, so the column list is inspected first: a DB
+// already carrying the column is the migration having run, not a failure.
+// Any OTHER error still propagates.
+func addTaskIDColumn(db *sql.DB) error {
+	has, err := hasColumn(db, "workspace_state", "task_id")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE workspace_state ADD COLUMN task_id TEXT`); err != nil {
+		return fmt.Errorf("ssm: add workspace_state.task_id: %w", err)
+	}
+	return nil
+}
+
+// hasColumn reports whether table carries column.
+func hasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, fmt.Errorf("ssm: inspect %s columns: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, fmt.Errorf("ssm: scan %s column name: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("ssm: iterate %s columns: %w", table, err)
+	}
+	return false, nil
 }
 
 // appendRow appends one signal to the log. causeSeq is invalid (NULL) for
 // daemon-local transitions with no store seq. `at` MUST be strictly
 // increasing per workspace (the caller's monotonic clock guarantees it),
 // so the (workspace, at) primary key never collides.
-func appendRow(db *sql.DB, workspace, sessionID, state, causeKind string, causeSeq sql.NullInt64, at int64) error {
+//
+// taskID identifies the task a task_started/task_ended row is about, and is
+// empty for every other signal. It is what makes the live-task counter
+// idempotent per task rather than per row.
+func appendRow(db *sql.DB, workspace, sessionID, state, causeKind string, causeSeq sql.NullInt64, at int64, taskID string) error {
 	var sid any
 	if sessionID != "" {
 		sid = sessionID
 	}
+	var tid any
+	if taskID != "" {
+		tid = taskID
+	}
 	_, err := db.Exec(
-		`INSERT INTO workspace_state(workspace, session_id, state, cause_kind, cause_seq, at) VALUES (?,?,?,?,?,?)`,
-		workspace, sid, state, causeKind, causeSeq, at)
+		`INSERT INTO workspace_state(workspace, session_id, state, cause_kind, cause_seq, at, task_id) VALUES (?,?,?,?,?,?,?)`,
+		workspace, sid, state, causeKind, causeSeq, at, tid)
 	if err != nil {
 		return fmt.Errorf("ssm: append %q for workspace %q: %w", state, workspace, err)
 	}

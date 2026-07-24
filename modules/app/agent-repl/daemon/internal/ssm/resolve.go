@@ -127,7 +127,7 @@ WITH
     ('idle','agent',14,0)
   ),
   rows AS (
-    SELECT workspace, session_id, state, cause_kind, cause_seq, at
+    SELECT workspace, session_id, state, cause_kind, cause_seq, at, task_id
     FROM workspace_state WHERE workspace = (SELECT w FROM ws)
   ),
   latest_agent AS (
@@ -158,8 +158,10 @@ WITH
   )
 SELECT
   w.state, w.cause_kind, w.cause_seq, w.at,
-  COALESCE((SELECT SUM(CASE state WHEN 'task_started' THEN 1 WHEN 'task_ended' THEN -1 ELSE 0 END)
-            FROM rows WHERE state IN ('task_started','task_ended')), 0) AS live_task_count,
+  COALESCE(
+    (SELECT COUNT(DISTINCT COALESCE(task_id, 'row:' || at)) FROM rows WHERE state = 'task_started')
+    - (SELECT COUNT(DISTINCT COALESCE(task_id, 'row:' || at)) FROM rows WHERE state = 'task_ended'),
+    0) AS live_task_count,
   (SELECT cause_kind FROM latest_agent) AS agent_cause_kind,
   (SELECT state FROM latest_merge) AS merge_state,
   COALESCE((SELECT session_id FROM latest_agent),

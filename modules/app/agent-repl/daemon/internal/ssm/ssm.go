@@ -189,7 +189,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	}
 
 	at := m.nextAt()
-	if err := appendRow(m.db, ws, sid, state, causeKind, sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, at); err != nil {
+	if err := appendRow(m.db, ws, sid, state, causeKind, sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, at, taskIDOf(ev)); err != nil {
 		return err
 	}
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
@@ -217,8 +217,9 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 	defer m.mu.Unlock()
 
 	at := m.nextAt()
-	// Daemon-local: no store seq, cause_seq stays NULL.
-	if err := appendRow(m.db, workspace, "", token, causeKind, sql.NullInt64{}, at); err != nil {
+	// Daemon-local: no store seq, cause_seq stays NULL, and a merge is not a
+	// task so it carries no task id.
+	if err := appendRow(m.db, workspace, "", token, causeKind, sql.NullInt64{}, at, ""); err != nil {
 		return err
 	}
 	return m.reresolveLocked(workspace, causeKind, 0)
@@ -360,6 +361,22 @@ func (r resolved) toProto(workspace string) *frontendv1.WorkspaceState {
 		CauseKind:     r.causeKind,
 		CauseSeq:      r.causeSeq,
 		AtMs:          r.atMs,
+	}
+}
+
+// taskIDOf returns the task id a task-lifecycle event is about, or "" for
+// every other event. It is what lets the live-task counter dedupe per task:
+// the same task ending twice (a spool's EXIT= marker after a TaskStop tool
+// result, or twin planes reporting the same completion) must decrement the
+// counter once, not once per event.
+func taskIDOf(ev *corev1.Event) string {
+	switch p := ev.GetPayload().(type) {
+	case *corev1.Event_TaskStarted:
+		return p.TaskStarted.GetTaskId()
+	case *corev1.Event_TaskEnded:
+		return p.TaskEnded.GetTaskId()
+	default:
+		return ""
 	}
 }
 

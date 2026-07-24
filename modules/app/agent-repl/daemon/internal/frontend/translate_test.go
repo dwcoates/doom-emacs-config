@@ -515,6 +515,41 @@ func TestBuildTaskCatalog(t *testing.T) {
 	}
 }
 
+func TestBuildTaskCatalogFoldsADuplicateTaskEndedOntoOneEntry(t *testing.T) {
+	// Arrange — one task ended twice, which a shell spool's EXIT= marker makes
+	// real: the marker can report a completion another plane already reported.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL}}},
+		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+		{ProducedAtMs: 250, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert — one entry, not two.
+	if len(got.GetTasks()) != 1 {
+		t.Fatalf("catalog holds %d entries for one task, want 1", len(got.GetTasks()))
+	}
+}
+
+func TestBuildTaskCatalogKeepsTheTaskEndedOnADuplicate(t *testing.T) {
+	// Arrange — a duplicate end must not reopen a settled task.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL}}},
+		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
+		{ProducedAtMs: 250, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR}}},
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	if s := got.GetTasks()[0].GetStatus(); s != "error" {
+		t.Fatalf("status after a duplicate end = %q, want error", s)
+	}
+}
+
 // --- BuildSessionView -------------------------------------------------------
 
 func TestBuildSessionView(t *testing.T) {

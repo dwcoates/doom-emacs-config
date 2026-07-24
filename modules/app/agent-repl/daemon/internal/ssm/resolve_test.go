@@ -21,14 +21,22 @@ func newTestDB(t *testing.T) *sql.DB {
 }
 
 // seedSignal appends one raw signal row at a caller-chosen `at`, so tests
-// can control latest-per-axis ordering deterministically.
+// can control latest-per-axis ordering deterministically. The row carries no
+// task id; use seedTaskSignal for the live-task counter.
 func seedSignal(t *testing.T, db *sql.DB, ws, sid, state, cause string, seq int64, at int64) {
+	t.Helper()
+	seedTaskSignal(t, db, ws, sid, state, cause, seq, at, "")
+}
+
+// seedTaskSignal is seedSignal with an explicit task id, for the live-task
+// counter's per-task dedup.
+func seedTaskSignal(t *testing.T, db *sql.DB, ws, sid, state, cause string, seq int64, at int64, taskID string) {
 	t.Helper()
 	cs := sql.NullInt64{}
 	if seq >= 0 {
 		cs = sql.NullInt64{Int64: seq, Valid: true}
 	}
-	if err := appendRow(db, ws, sid, state, cause, cs, at); err != nil {
+	if err := appendRow(db, ws, sid, state, cause, cs, at, taskID); err != nil {
 		t.Fatalf("appendRow(%s): %v", state, err)
 	}
 }
