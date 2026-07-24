@@ -123,6 +123,14 @@ func isStruct(fd protoreflect.FieldDescriptor) bool {
 		fd.Message().FullName() == "google.protobuf.Struct"
 }
 
+// isListValue reports whether fd is a singular google.protobuf.ListValue field
+// (a schemaless array home). Repeated ListValue fields are handled by the list
+// path; only the singular case needs the array-subtree absorption here.
+func isListValue(fd protoreflect.FieldDescriptor) bool {
+	return fd.Kind() == protoreflect.MessageKind && !fd.IsList() &&
+		fd.Message().FullName() == "google.protobuf.ListValue"
+}
+
 // assign populates msg from obj, routing every key. ignore names (canonical) are
 // consumed silently (structural discriminators like "type"/"role"). Unmapped
 // keys land in cap under path.
@@ -183,6 +191,24 @@ func (c *Converter) setField(msg protoreflect.Message, fd protoreflect.FieldDesc
 			return
 		}
 		msg.Set(fd, protoreflect.ValueOfMessage(s.ProtoReflect()))
+		return
+	}
+	// A singular google.protobuf.ListValue field absorbs a JSON array subtree
+	// losslessly (e.g. ApiUsage.iterations, whose disk value is an array of
+	// heterogeneous per-iteration objects with no fixed schema).
+	if isListValue(fd) {
+		arr, ok := v.([]any)
+		if !ok {
+			cap.add(path, v)
+			return
+		}
+		lv, err := structpb.NewList(arr)
+		if err != nil {
+			cap.add(path, v)
+			return
+		}
+		msg.Set(fd, protoreflect.ValueOfMessage(lv.ProtoReflect()))
+		c.markSet(msg, fd)
 		return
 	}
 	if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
@@ -520,11 +546,29 @@ func (c *Converter) attachmentLine(m protoreflect.Message, obj map[string]any, c
 	}
 	payload := m.NewField(attFd)
 	// hook_non_blocking_error / hook_blocking_error wrap a shared "fields" set.
+	// Any OTHER typed field the outer attachment declares (e.g.
+	// HookBlockingErrorAttachment.blocking_error) is routed to the outer message;
+	// the remaining keys populate the wrapped HookSuccessAttachment.
 	if wrapFd := payload.Message().Descriptor().Fields().ByName("fields"); wrapFd != nil &&
 		wrapFd.Kind() == protoreflect.MessageKind {
-		inner := payload.Message().NewField(wrapFd)
-		c.assign(inner.Message(), att, string(attFd.Name())+".fields", cap, map[string]bool{"type": true})
-		payload.Message().Set(wrapFd, inner)
+		pm := payload.Message()
+		outerIdx := fieldIndex(pm.Descriptor())
+		delete(outerIdx, "fields")
+		inner := pm.NewField(wrapFd)
+		wrapped := make(map[string]any, len(att))
+		for k, v := range att {
+			ck := canon(k)
+			if ck == "type" {
+				continue
+			}
+			if fd, ok := outerIdx[ck]; ok {
+				c.setField(pm, fd, v, joinPath(string(attFd.Name()), k), cap)
+				continue
+			}
+			wrapped[k] = v
+		}
+		c.assign(inner.Message(), wrapped, string(attFd.Name())+".fields", cap, map[string]bool{"type": true})
+		pm.Set(wrapFd, inner)
 	} else {
 		c.fillMessage(payload.Message(), att, string(attFd.Name()), cap, map[string]bool{"type": true})
 	}
