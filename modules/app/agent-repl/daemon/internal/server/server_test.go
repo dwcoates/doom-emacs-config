@@ -131,7 +131,10 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	}
 	t.Cleanup(driver.Close)
 
-	handler, err := newCommandHandler(driver, stubMerge{}, stubLifecycle{}, driver, logf)
+	// The command handler needs the session-lifecycle binding, whose *Server
+	// target does not exist until New below — bind it after (mirrors main).
+	binding := &SessionCommandBinding{Logf: logf}
+	handler, err := newCommandHandler(driver, stubMerge{}, stubLifecycle{}, driver, binding, logf)
 	if err != nil {
 		t.Fatalf("command handler: %v", err)
 	}
@@ -145,6 +148,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	cfg.SSM = mgr
 	cfg.Frontend = fe
 	srv := New(cfg)
+	binding.SetTarget(srv)
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -367,6 +371,56 @@ func TestListSessionsEnvelopeReportsBinaryMTime(t *testing.T) {
 	}
 }
 
+// --- DaemonView / SessionView shaping (S7) --------------------------------
+
+func TestDaemonViewCarriesIdentity(t *testing.T) {
+	// Arrange — a Server with a known version + binary mtime (seconds).
+	srv := New(Config{DaemonVersion: "v9", BinaryMTime: 5})
+	// Act
+	dv := srv.DaemonView()
+	// Assert — boot id, the frontend.v1 protocol version "1", mtime in millis.
+	if !strings.HasPrefix(dv.GetBootId(), "b_") {
+		t.Errorf("boot_id = %q, want a b_ id", dv.GetBootId())
+	}
+	if dv.GetProtocolVersion() != "1" {
+		t.Errorf("protocol_version = %q, want 1", dv.GetProtocolVersion())
+	}
+	if dv.GetDaemonBinaryMtimeMs() != 5000 {
+		t.Errorf("daemon_binary_mtime_ms = %d, want 5000 (seconds*1000)", dv.GetDaemonBinaryMtimeMs())
+	}
+	if dv.GetDaemonVersion() != "v9" {
+		t.Errorf("daemon_version = %q, want v9", dv.GetDaemonVersion())
+	}
+}
+
+func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
+	// Arrange — a terminal record with a death reason plus two pending perms.
+	rec := registry.Record{
+		SessionID:       "s1",
+		CWD:             "/w",
+		Model:           "sonnet",
+		PermissionMode:  "plan",
+		ClaudeSessionID: "cli-1",
+		Terminal:        true,
+		DeathReason:     "delete session",
+	}
+	// Act
+	v := SessionViewFromRecord(rec, []string{"p1", "p2"})
+	// Assert — the S7 parity fields plus the pending-permission COUNT.
+	if !v.GetTerminal() || v.GetDeathReason() != "delete session" {
+		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeathReason())
+	}
+	if v.GetPendingPermissions() != 2 {
+		t.Errorf("pending_permissions = %d, want 2", v.GetPendingPermissions())
+	}
+	if v.GetWorkspace() != "/w" || v.GetSessionId() != "s1" || v.GetModel() != "sonnet" {
+		t.Errorf("core fields = %+v", v)
+	}
+	if v.GetRehydratable() || v.GetHibernated() {
+		t.Errorf("rehydratable/hibernated should stay false post-cutover")
+	}
+}
+
 // --- Delete ---------------------------------------------------------------
 
 func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
@@ -385,8 +439,8 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
 	}
 	rec, _ := h.reg.Get(id)
-	if !rec.Terminal || rec.DeathReason != "DELETE /sessions" {
-		t.Errorf("record = %+v, want terminal with the DELETE death reason", rec)
+	if !rec.Terminal || rec.DeathReason != "delete session" {
+		t.Errorf("record = %+v, want terminal with the delete death reason", rec)
 	}
 }
 

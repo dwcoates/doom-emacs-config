@@ -307,14 +307,20 @@ func main() {
 	// Agent-shim frontend.v1 surface (design §9.1, §14.2): the SSM-backed
 	// snapshot + merge Engine + frontend Server. Always on post-cutover — it is
 	// the daemon's consumption plane, not an optional add.
+	// sessionCommands is the late-bound daemon-core surface (session
+	// create/delete + DaemonView) the frontend command handler and snapshot
+	// provider need. Its *Server target does not exist until server.New below,
+	// so bind it after — the same late-bind shape as forwarder.
+	sessionCommands := &server.SessionCommandBinding{Logf: log.Printf}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		SSM:       ssmMgr,
-		Prompts:   driver,
-		MergeDirs: pendingMergeDirs{},
-		Lifecycle: pendingLifecycle{},
-		Sessions:  registrySessions{reg: sessionRegistry},
-		Resyncer:  driver,
-		Logf:      log.Printf,
+		SSM:             ssmMgr,
+		Prompts:         driver,
+		MergeDirs:       pendingMergeDirs{},
+		Lifecycle:       pendingLifecycle{},
+		Sessions:        registrySessions{reg: sessionRegistry, driver: driver},
+		SessionCommands: sessionCommands,
+		Resyncer:        driver,
+		Logf:            log.Printf,
 	})
 	if err != nil {
 		log.Fatalf("claude-repld: frontend surface: %v", err)
@@ -344,6 +350,9 @@ func main() {
 		SSM:             ssmMgr,
 		Frontend:        agentShim.Server,
 	})
+	// Bind the session-command surface now that the *Server exists (createSession
+	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).
+	sessionCommands.SetTarget(srv)
 
 	mux := http.NewServeMux()
 	mux.Handle("/sessions", srv.Handler())

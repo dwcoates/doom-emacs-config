@@ -7,6 +7,8 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/server"
+	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -27,28 +29,33 @@ import (
 // registrySessions (the SessionView metadata source) IS real: it reads the
 // persistent registry, so snapshots carry live per-session model/workspace.
 
-// registrySessions supplies SessionView metadata from the persistent registry.
-type registrySessions struct{ reg *registry.Registry }
+// registrySessions supplies SessionView metadata from the persistent registry
+// plus the driver's live pending-permission counts. It reads the SAME registry
+// GET /sessions did, and now carries the S7 parity fields (terminal,
+// death_reason, pending_permissions) so Emacs can drop the HTTP poller: TERMINAL
+// records are included too (the orphan/reattach sweep re-keys on them), whereas
+// a workspace-less record (empty cwd) has no workspace to key by and is skipped.
+type registrySessions struct {
+	reg    *registry.Registry
+	driver *sessiondrv.Manager
+}
 
 func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 	var out []*frontendv1.SessionView
 	for _, rec := range r.reg.All() {
-		if rec.Terminal || rec.CWD == "" {
+		if rec.CWD == "" {
 			continue
 		}
-		// Populate the SessionView from the registry record: model +
-		// permission mode, plus the claude_session_id and cwd proto fields
-		// (design §14.2 step 3). Slug/title are not carried in the registry
-		// record (they arrive from ai-title/slug events the SSM does not yet
-		// retain), so they stay blank here rather than being faked.
-		out = append(out, &frontendv1.SessionView{
-			Workspace:       rec.CWD,
-			SessionId:       rec.SessionID,
-			Model:           rec.Model,
-			PermissionMode:  rec.PermissionMode,
-			ClaudeSessionId: rec.ClaudeSessionID,
-			Cwd:             rec.CWD,
-		})
+		// Live pending-permission ids only for a non-terminal session with a
+		// driver; a terminal/hibernated one has none. Slug/title stay blank
+		// (they arrive from ai-title/slug events the SSM does not retain), never
+		// faked. server.SessionViewFromRecord is the single shaping shared with
+		// the create/delete pushes, so the snapshot and pushes cannot drift.
+		var pending []string
+		if !rec.Terminal && r.driver != nil {
+			pending = r.driver.PendingPermissions(rec.CWD)
+		}
+		out = append(out, server.SessionViewFromRecord(rec, pending))
 	}
 	return out
 }
