@@ -29,9 +29,15 @@ import (
 	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
+	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/stateroot"
 )
+
+// shimProtocolVersion is the agent-shim wire protocol version the daemon's
+// per-session shimclient negotiates in DaemonHello; it must equal the shim's.
+const shimProtocolVersion = "1"
 
 const daemonVersion = "0.1.0"
 
@@ -300,17 +306,89 @@ func main() {
 	// default daemon keeps its existing behavior untouched.
 	var agentShim *server.AgentShim
 	if *frontendUDS {
+		// The SSM is opened HERE (not inside WireAgentShim) because the same
+		// instance backs BOTH the frontend snapshot/merge push loop AND the
+		// per-session driver's lifecycle-event application; one owner opens and
+		// closes it once.
+		ssmMgr, ssmErr := ssm.Open(ssm.Options{
+			Resolver: server.NewRegistryResolver(sessionRegistry),
+			Logf:     log.Printf,
+		})
+		if ssmErr != nil {
+			log.Fatalf("claude-repld: open SSM: %v", ssmErr)
+		}
+		defer ssmMgr.Close()
+
+		// The per-session shim-driver consumes each session's UDS shim stream
+		// and renders it onto the frontend surface + SSM. Its push target (the
+		// frontend.Server) does not exist until WireAgentShim returns, so it
+		// pushes through a late-bound forwarder whose target is set below.
+		forwarder := &server.PushForwarder{Logf: log.Printf}
+		// The driver spawns a fresh UDS-mode shim when no live one is listening.
+		// The exec stays here (main owns node/shim paths); production omits
+		// --store-socket so the shim defaults to the launchd singleton store.
+		udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) error {
+			argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, socketPath)
+			if *claudeBin != "" {
+				argv = append(argv, "--claude-bin", *claudeBin)
+			}
+			done := dlog.Call(log.Printf, "uds shim spawn",
+				"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
+				"config_dir", opts.ConfigDir, "socket", socketPath)
+			proc, spawnErr := shim.Spawn(shim.Options{
+				Argv:     argv,
+				Dir:      opts.CWD,
+				ExtraEnv: server.ShimEnv(opts, *addr),
+				Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
+			})
+			if spawnErr != nil {
+				done("", spawnErr)
+				return spawnErr
+			}
+			done(strings.Join(argv, " "), nil)
+			// In UDS mode the shim streams over its socket, not stdout, so its
+			// stdout event channel stays empty — drain it so the stdout pump
+			// never blocks, and reap the process when it exits.
+			go func() {
+				for range proc.Events() { //nolint:revive
+				}
+			}()
+			go func() {
+				if werr := proc.Wait(); werr != nil {
+					log.Printf("claude-repld: UDS shim for session %s exited: %v", sessionID, werr)
+				}
+			}()
+			return nil
+		}
+		driver, drvErr := sessiondrv.New(sessiondrv.Config{
+			Push:            forwarder,
+			SSM:             ssmMgr,
+			Spawner:         server.NewShimSpawner(sessionRegistry, nil, udsSpawn, log.Printf),
+			Locator:         &server.SessionLocator{Reg: sessionRegistry},
+			SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
+			DaemonVersion:   daemonVersion,
+			ProtocolVersion: shimProtocolVersion,
+			Logf:            log.Printf,
+		})
+		if drvErr != nil {
+			log.Fatalf("claude-repld: build session driver: %v", drvErr)
+		}
+		defer driver.Close()
+
 		agentShim, err = server.WireAgentShim(server.AgentShimConfig{
-			Resolver:  server.NewRegistryResolver(sessionRegistry),
-			Prompts:   pendingPrompts{},
+			SSM:       ssmMgr,
+			Prompts:   driver,
 			MergeDirs: pendingMergeDirs{},
 			Lifecycle: pendingLifecycle{},
 			Sessions:  registrySessions{reg: sessionRegistry},
+			Resyncer:  driver,
 			Logf:      log.Printf,
 		})
 		if err != nil {
 			log.Fatalf("claude-repld: frontend surface: %v", err)
 		}
+		// Bind the driver's push target now that the frontend server exists.
+		forwarder.SetTarget(agentShim.Server)
 		defer func() {
 			if cerr := agentShim.Close(); cerr != nil {
 				log.Printf("claude-repld: frontend surface close: %v", cerr)

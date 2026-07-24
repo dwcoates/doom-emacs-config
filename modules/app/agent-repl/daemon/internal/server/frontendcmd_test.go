@@ -9,10 +9,27 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// openTestSSM opens an isolated SSM over a temp db bound to reg, closed at
+// test end. main opens the SSM in production; WireAgentShim now takes it
+// injected, so the tests open their own.
+func openTestSSM(t *testing.T, reg *registry.Registry) *ssm.Manager {
+	t.Helper()
+	mgr, err := ssm.Open(ssm.Options{
+		DBPath:   filepath.Join(t.TempDir(), "state.db"),
+		Resolver: NewRegistryResolver(reg),
+	})
+	if err != nil {
+		t.Fatalf("open ssm: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Close() })
+	return mgr
+}
 
 // --- fakes ----------------------------------------------------------------
 
@@ -67,7 +84,7 @@ func (f *fakeLifecycle) Open(_ context.Context, ws string) error {
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil)
+	h, err := newCommandHandler(p, m, l, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -149,7 +166,7 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil)
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -163,7 +180,7 @@ func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 
 func TestNewCommandHandlerRejectsNilDeps(t *testing.T) {
 	// Arrange / Act / Assert
-	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil); err == nil {
+	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, nil); err == nil {
 		t.Fatal("want error for nil PromptRouter")
 	}
 }
@@ -181,8 +198,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSMDBPath: filepath.Join(t.TempDir(), "state.db"),
-		Resolver:  NewRegistryResolver(reg),
+		SSM:       openTestSSM(t, reg),
 		Prompts:   &fakePrompts{},
 		MergeDirs: fakeMergeDirs{},
 		Lifecycle: &fakeLifecycle{},
@@ -240,10 +256,11 @@ func (noopSink) RecordMergeTransition(string, merge.Phase, string) error { retur
 
 // --- wire assembly --------------------------------------------------------
 
-func TestWireAgentShimRejectsNilResolver(t *testing.T) {
-	// Arrange / Act / Assert
+func TestWireAgentShimRejectsNilSSM(t *testing.T) {
+	// Arrange / Act / Assert — the SSM is now injected; a nil one is a
+	// construction error rather than a nil-deref later.
 	if _, err := WireAgentShim(AgentShimConfig{MergeDirs: fakeMergeDirs{}}); err == nil {
-		t.Fatal("want error for nil Resolver")
+		t.Fatal("want error for nil SSM")
 	}
 }
 
@@ -251,8 +268,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	// Arrange
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSMDBPath: filepath.Join(t.TempDir(), "state.db"),
-		Resolver:  NewRegistryResolver(reg),
+		SSM:       openTestSSM(t, reg),
 		Prompts:   &fakePrompts{},
 		MergeDirs: fakeMergeDirs{},
 		Lifecycle: &fakeLifecycle{},
