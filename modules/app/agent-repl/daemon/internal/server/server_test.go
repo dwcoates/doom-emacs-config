@@ -14,7 +14,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/gorilla/websocket"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -93,6 +97,8 @@ type harness struct {
 	reg     *registry.Registry
 	driver  *sessiondrv.Manager
 	spawner *fakeSpawner
+	ssm     *ssm.Manager
+	fe      *frontend.Server
 }
 
 func newHarness(t *testing.T) *harness {
@@ -156,7 +162,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	return &harness{ts: ts, srv: srv, reg: reg, driver: driver, spawner: spawner}
+	return &harness{ts: ts, srv: srv, reg: reg, driver: driver, spawner: spawner, ssm: mgr, fe: fe}
 }
 
 // postCreate POSTs body to /sessions and returns the new session id.
@@ -422,6 +428,142 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 	if v.GetRehydratable() || v.GetHibernated() {
 		t.Errorf("rehydratable/hibernated should stay false post-cutover")
 	}
+}
+
+func TestSessionViewFromRecordCarriesConfigDir(t *testing.T) {
+	// Arrange — a record whose shim runs under a non-default account root.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg-work"}
+
+	// Act.
+	v := SessionViewFromRecord(rec, nil)
+
+	// Assert — the account root rides on the SessionView (S8).
+	if v.GetConfigDir() != "/cfg-work" {
+		t.Fatalf("config_dir = %q, want /cfg-work", v.GetConfigDir())
+	}
+}
+
+// --- Account switch (S8: webapp-initiated, daemon-executed) ----------------
+
+// accountRoster is the two-account roster the switch tests use.
+func accountRoster() []Account {
+	return []Account{{Label: "personal", ConfigDir: ""}, {Label: "work", ConfigDir: "/cfg-work"}}
+}
+
+// postAccountSwitch POSTs a switch to configDir and returns the response.
+func postAccountSwitch(t *testing.T, h *harness, id, configDir string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(h.ts.URL+"/sessions/"+id+"/account", "application/json",
+		bytes.NewBufferString(fmt.Sprintf(`{"config_dir":%q}`, configDir)))
+	if err != nil {
+		t.Fatalf("POST account: %v", err)
+	}
+	return resp
+}
+
+func TestAccountSwitchGuardsTurnActive(t *testing.T) {
+	// Arrange — a session with a turn in flight (the SSM guard).
+	h := newHarnessWith(t, Config{Accounts: accountRoster()})
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+	if err := h.ssm.Apply(&corev1.Event{SessionId: id, Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{PromptPreview: "go"}}}); err != nil {
+		t.Fatalf("apply turn started: %v", err)
+	}
+
+	// Act.
+	resp := postAccountSwitch(t, h, id, "/cfg-work")
+	defer resp.Body.Close()
+
+	// Assert — 409 and the account is unchanged: a turn is never interrupted by
+	// a shim restart.
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (turn in flight)", resp.StatusCode)
+	}
+	rec, _ := h.reg.Get(id)
+	if rec.ConfigDir != "" {
+		t.Fatalf("config_dir = %q, want unchanged while turn active", rec.ConfigDir)
+	}
+}
+
+func TestAccountSwitchUpdatesConfigDirAndRespawns(t *testing.T) {
+	// Arrange — an idle session under the default account.
+	h := newHarnessWith(t, Config{Accounts: accountRoster()})
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+
+	// Act.
+	resp := postAccountSwitch(t, h, id, "/cfg-work")
+	defer resp.Body.Close()
+
+	// Assert — 202, the registry root is updated, and the shim was re-ensured
+	// under the new root (a fresh UDS spawn with --resume).
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	rec, _ := h.reg.Get(id)
+	if rec.ConfigDir != "/cfg-work" {
+		t.Fatalf("registry config_dir = %q, want /cfg-work", rec.ConfigDir)
+	}
+	if n := len(h.spawner.ensuredIDs()); n < 2 {
+		t.Fatalf("EnsureShim calls = %d, want >=2 (create + account-switch respawn)", n)
+	}
+}
+
+func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
+	// Arrange — a session created under the default account, plus a frontend
+	// client connected AFTER create so it only observes the switch's push.
+	h := newHarnessWith(t, Config{Accounts: accountRoster()})
+	id := postCreate(t, h, `{"cwd":"/w"}`)
+	feSrv := httptest.NewServer(http.HandlerFunc(h.fe.ServeWS))
+	defer feSrv.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(feSrv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer conn.Close()
+	if snap := readServerWSFrame(t, conn); snap.GetSnapshot() == nil {
+		t.Fatalf("first frame was not the connect snapshot: %v", snap)
+	}
+
+	// Act — the switch pushes the updated SessionView synchronously before the
+	// 202 response returns.
+	resp := postAccountSwitch(t, h, id, "/cfg-work")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+
+	// Assert — a SessionView carrying the switched config_dir reaches the client.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("did not receive the switched SessionView: %v", err)
+		}
+		frame := &frontendv1.FrontendFrame{}
+		if err := protojson.Unmarshal(data, frame); err != nil {
+			t.Fatalf("unmarshal frame: %v", err)
+		}
+		if v := frame.GetSessionView(); v != nil && v.GetSessionId() == id {
+			if v.GetConfigDir() != "/cfg-work" {
+				t.Fatalf("pushed SessionView config_dir = %q, want /cfg-work", v.GetConfigDir())
+			}
+			return
+		}
+	}
+}
+
+// readServerWSFrame reads and decodes one protojson FrontendFrame from a WS
+// connection (the server-package twin of the frontend package's readWSFrame).
+func readServerWSFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendFrame {
+	t.Helper()
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ws read: %v", err)
+	}
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(data, frame); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	return frame
 }
 
 // --- Delete (S7: the DELETE /sessions/{id} HTTP route was removed; the
