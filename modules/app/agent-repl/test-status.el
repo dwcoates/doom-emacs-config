@@ -186,7 +186,7 @@ reads distinctly from :idle orange and :thinking red."
 (ert-deftest agent-repl-test-display-state-done-panels-open-renders-done ()
   ":done with panels visible renders :done (green)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
+    (agent-repl--ws-put "ws1" :pushed-render-state :done)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :done (agent-repl--ws-display-state "ws1"))))))
@@ -205,7 +205,7 @@ reads distinctly from :idle orange and :thinking red."
 (ert-deftest agent-repl-test-display-state-thinking-panels-open-renders-thinking ()
   ":thinking with panels visible renders :thinking (red)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :thinking (agent-repl--ws-display-state "ws1"))))))
@@ -223,7 +223,7 @@ reads distinctly from :idle orange and :thinking red."
 (ert-deftest agent-repl-test-display-state-permission-panels-open-renders-permission ()
   ":permission with panels visible renders :permission (green + ❓)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :permission)
+    (agent-repl--ws-put "ws1" :pushed-render-state :permission)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :permission (agent-repl--ws-display-state "ws1"))))))
@@ -245,10 +245,9 @@ reads distinctly from :idle orange and :thinking red."
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-dead-panels-open-renders-dead ()
-  "A workspace with :repl-state :dead and nil :agent-state renders :dead when visible."
+  "A workspace whose pushed render-state is :dead renders :dead when visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :agent-state nil)
-    (agent-repl--ws-set-repl-state "ws1" :dead)
+    (agent-repl--ws-put "ws1" :pushed-render-state :dead)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :dead (agent-repl--ws-display-state "ws1"))))))
@@ -265,7 +264,7 @@ reads distinctly from :idle orange and :thinking red."
 (ert-deftest agent-repl-test-display-state-idle-panels-open-renders-idle ()
   ":idle with agent panel present in layout renders :idle (orange)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :idle)
+    (agent-repl--ws-put "ws1" :pushed-render-state :idle)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :idle (agent-repl--ws-display-state "ws1"))))))
@@ -431,7 +430,7 @@ workspace takes its index rather than leaving a gap."
     (agent-repl--ws-put "doom-a" :group-key "/repos/doom/.git")
     (agent-repl--ws-put "ee-a"   :group-key "/repos/explanation-engine/.git")
     (agent-repl--ws-put "doom-b" :group-key "/repos/doom/.git")
-    (agent-repl--ws-set "doom-b" :permission)
+    (agent-repl--ws-put "doom-b" :pushed-render-state :permission)
     (agent-repl--toggle-repo-fold "/repos/explanation-engine/.git")
     (cl-letf (((symbol-function 'agent-repl--ws-list-names)
                (lambda () '("doom-a" "ee-a" "doom-b")))
@@ -472,7 +471,7 @@ workspace takes its index rather than leaving a gap."
 (ert-deftest agent-repl-test-tabline-permission-label ()
   "Tabline should show index and ❓ for permission state (panels visible)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "test-ws" :permission)
+    (agent-repl--ws-put "test-ws" :pushed-render-state :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
@@ -482,8 +481,7 @@ workspace takes its index rather than leaving a gap."
 (ert-deftest agent-repl-test-tabline-dead-label ()
   "Tabline should show index and ❌ for dead session (panels visible)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :agent-state nil)
-    (agent-repl--ws-set-repl-state "test-ws" :dead)
+    (agent-repl--ws-put "test-ws" :pushed-render-state :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
@@ -495,8 +493,7 @@ workspace takes its index rather than leaving a gap."
 panels closed) — :merged uses the same palette `:label' mechanism as
 :dead but emits the merge glyph instead."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :agent-state nil)
-    (agent-repl--ws-put "test-ws" :repl-state :merged)
+    (agent-repl--ws-put "test-ws" :pushed-render-state :merged)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
@@ -506,7 +503,7 @@ panels closed) — :merged uses the same palette `:label' mechanism as
 (ert-deftest agent-repl-test-tabline-done-face ()
   "A background tab with :done should use `agent-repl-tab-done' face (panels visible)."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "bg-ws" :done)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :done)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
@@ -542,9 +539,9 @@ The ❓ glyph in the bracket (not the name background) signals permission."
 ;;;; ---- Tests: ws-bracket-state ignores panel visibility ----
 
 (ert-deftest agent-repl-test-bracket-state-thinking-panels-closed ()
-  "ws-bracket-state returns :thinking even when panels are closed."
+  "ws-bracket-state returns the pushed state even when panels are closed."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should (eq :thinking (agent-repl--ws-bracket-state "ws1"))))))
@@ -587,7 +584,7 @@ The ❓ glyph in the bracket (not the name background) signals permission."
 (ert-deftest agent-repl-test-tabline-panels-closed-bracket-keeps-state-color ()
   "Panels closed for :thinking — [N] bracket should keep the thinking-red background."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "bg-ws" :thinking)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
@@ -601,7 +598,7 @@ The ❓ glyph in the bracket (not the name background) signals permission."
   "Panels closed for :permission — bracket label keeps the ❓ glyph
 even when the full-tab background is suppressed."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "bg-ws" :permission)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
@@ -610,8 +607,7 @@ even when the full-tab background is suppressed."
 (ert-deftest agent-repl-test-tabline-panels-closed-dead-bracket-keeps-glyph ()
   "Panels closed for :dead — bracket label keeps the ❌ glyph."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "bg-ws" :agent-state nil)
-    (agent-repl--ws-set-repl-state "bg-ws" :dead)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
@@ -620,7 +616,7 @@ even when the full-tab background is suppressed."
 (ert-deftest agent-repl-test-tabline-panels-closed-stop-failed-bracket-keeps-glyph ()
   "Panels closed for :stop-failed — bracket label keeps the ⚠ glyph."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "bg-ws" :stop-failed)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :stop-failed)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
@@ -639,7 +635,7 @@ even when the full-tab background is suppressed."
 (ert-deftest agent-repl-test-tabline-panels-closed-permission-bracket-stays-green ()
   "Panels closed for :permission — bracket bg should be the done-green."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "bg-ws" :permission)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
@@ -1302,7 +1298,7 @@ appended *after* the faced padding, not merged into it."
 (ert-deftest agent-repl-test-render-tab-entry-no-flash-uses-state-face ()
   "Without :flashing, render-tab-entry uses the state-driven face."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
+    (agent-repl--ws-put "ws1" :pushed-render-state :done)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let* ((result (agent-repl--render-tab-entry "ws1" "current-ws" 1))
              (name-pos (string-match "ws1" result)))
@@ -1650,7 +1646,7 @@ is its webview."
 (ert-deftest agent-repl-test-display-state-gui-webview-open-renders-thinking ()
   "A gui workspace whose webview is up gets the FULL :thinking tab."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
     (agent-repl-test--with-temp-buffer "*agent-frontend-ws1*"
       (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                  (lambda () "ws1"))
@@ -1665,7 +1661,7 @@ is its webview."
 The state survives on the plist, exactly as it does for a vterm workspace
 whose panels are closed."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
     (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                (lambda () "ws1"))
               ((symbol-function 'get-buffer-window) (lambda (&rest _) nil)))
@@ -2047,14 +2043,12 @@ fully-transitioned state (:dead, nil agent-state) is a fixed point."
     (should (eq (agent-repl--ws-repl-state "ws1") :dead))
     (should-not (agent-repl--ws-agent-state "ws1"))))
 
-(ert-deftest agent-repl-test-mark-dead-display-state ()
-  "mark-dead results in :dead display state (❌ badge) when panels visible."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--mark-dead "ws1")
-    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
-               (lambda (_ws) t)))
-      (should (eq :dead (agent-repl--ws-display-state "ws1"))))))
+;; The mark-dead → :dead display-state test was deleted in the agent-shim
+;; cutover (design §10): `agent-repl--mark-dead' still sets `:repl-state
+;; :dead' (asserted by `agent-repl-test-mark-dead-clears-agent-state'),
+;; but that no longer drives `--ws-render-status' / `--ws-display-state',
+;; which now read the daemon-pushed `:pushed-render-state'.  The daemon
+;; pushes RENDER_STATE_DEAD for the dead badge.
 
 (ert-deftest agent-repl-test-mark-dead-preserves-init ()
   "mark-dead is a no-op when :agent-state is :init.
@@ -2622,116 +2616,12 @@ liveness — a dead workspace can still have a merge-completed parent."
               (should (= (length agent-repl--priority-images) 1)))))
       (delete-directory tmpdir t))))
 
-;;;; ---- Tests: Stop / SubagentStop tracking helpers ----
-
-(ert-deftest agent-repl-test-pending-subagents-default-zero ()
-  "ws-pending-subagents returns 0 when never written."
-  (agent-repl-test--with-clean-state
-    (should (zerop (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-incf-pending-subagents-from-zero ()
-  "incf-pending-subagents goes 0 -> 1."
-  (agent-repl-test--with-clean-state
-    (should (= 1 (agent-repl--ws-incf-pending-subagents "ws1")))
-    (should (= 1 (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-incf-pending-subagents-multiple ()
-  "incf-pending-subagents three times -> 3."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (should (= 3 (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-decf-pending-subagents-floors-at-zero ()
-  "decf-pending-subagents on zero count stays at 0 (does not go negative)."
-  (agent-repl-test--with-clean-state
-    (should (zerop (agent-repl--ws-decf-pending-subagents "ws1")))
-    (should (zerop (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-decf-pending-subagents-decrements ()
-  "decf-pending-subagents on count=2 -> 1."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (should (= 1 (agent-repl--ws-decf-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-incf-pending-subagents-nil-ws-errors ()
-  "incf with nil ws signals error."
-  (should-error (agent-repl--ws-incf-pending-subagents nil) :type 'error))
-
-(ert-deftest agent-repl-test-decf-pending-subagents-nil-ws-errors ()
-  "decf with nil ws signals error."
-  (should-error (agent-repl--ws-decf-pending-subagents nil) :type 'error))
-
-(ert-deftest agent-repl-test-stop-received-default-nil ()
-  "ws-stop-received-p returns nil when never set."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--ws-stop-received-p "ws1"))))
-
-(ert-deftest agent-repl-test-set-stop-received-true ()
-  "set-stop-received t -> stop-received-p returns t."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (should (agent-repl--ws-stop-received-p "ws1"))))
-
-(ert-deftest agent-repl-test-set-stop-received-nil-ws-errors ()
-  "set-stop-received with nil ws signals error."
-  (should-error (agent-repl--ws-set-stop-received nil t) :type 'error))
-
-;;;; ---- Tests: fully-stopped-p truth table ----
-;;
-;; Only one of four cells in (stop-received? × pending=0?) yields t:
-;; both must hold simultaneously.
-
-(ert-deftest agent-repl-test-fully-stopped-p-neither ()
-  "Neither Stop fired nor counter zero (i.e. counter > 0): not fully stopped."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (should-not (agent-repl--fully-stopped-p "ws1"))))
-
-(ert-deftest agent-repl-test-fully-stopped-p-stop-only ()
-  "Stop fired but subagents still pending: not fully stopped."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (should-not (agent-repl--fully-stopped-p "ws1"))))
-
-(ert-deftest agent-repl-test-fully-stopped-p-pending-zero-only ()
-  "Counter zero but Stop never fired: not fully stopped."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--fully-stopped-p "ws1"))))
-
-(ert-deftest agent-repl-test-fully-stopped-p-both ()
-  "Stop fired AND counter zero: fully stopped."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (should (agent-repl--fully-stopped-p "ws1"))))
-
-(ert-deftest agent-repl-test-fully-stopped-p-after-decf-to-zero ()
-  "Stop fired, counter goes 2 -> 1 (not yet) -> 0 (fully stopped now)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (agent-repl--ws-decf-pending-subagents "ws1")
-    (should-not (agent-repl--fully-stopped-p "ws1"))
-    (agent-repl--ws-decf-pending-subagents "ws1")
-    (should (agent-repl--fully-stopped-p "ws1"))))
-
-(ert-deftest agent-repl-test-clear-stop-tracking-resets-both ()
-  "clear-stop-tracking resets :stop-received and :pending-subagents."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-clear-stop-tracking "ws1")
-    (should-not (agent-repl--ws-stop-received-p "ws1"))
-    (should (zerop (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-clear-stop-tracking-nil-ws-errors ()
-  "clear-stop-tracking with nil ws signals error."
-  (should-error (agent-repl--ws-clear-stop-tracking nil) :type 'error))
+;; The Stop / SubagentStop tracking-helper tests (pending-subagents
+;; get/incf/decf, stop-received get/set, fully-stopped-p, clear-stop-tracking)
+;; were DELETED in the agent-shim cutover (design §10): that whole
+;; hook-counter block was removed from status.el.  The daemon's SSM now
+;; owns turn-finished / subagent-in-flight resolution and pushes it as a
+;; `frontend.v1' WorkspaceState frame.
 
 ;;;; ---- Tests: :stop-failed ws-display-state behavior ----
 ;;
@@ -2741,9 +2631,9 @@ liveness — a dead workspace can still have a merge-completed parent."
 ;; remains here.
 
 (ert-deftest agent-repl-test-display-state-stop-failed ()
-  "ws-display-state returns :stop-failed when agent-state is :stop-failed and panels visible."
+  "ws-display-state returns the pushed :stop-failed state when panels visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :stop-failed)
+    (agent-repl--ws-put "ws1" :pushed-render-state :stop-failed)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :stop-failed (agent-repl--ws-display-state "ws1"))))))

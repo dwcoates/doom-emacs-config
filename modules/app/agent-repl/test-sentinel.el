@@ -92,27 +92,10 @@ both paths flip the tab to `:permission' through the same gate."
         (should (eq (plist-get dispatched-handler :callback)
                     'agent-repl--on-permission-event))))))
 
-(ert-deftest agent-repl-test-sentinel-dispatches-stop ()
-  "A file named stop_12345 should dispatch to the stop handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/stop_12345")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-stop-event))))))
-
-(ert-deftest agent-repl-test-sentinel-dispatches-prompt-submit ()
-  "A file named prompt_submit_99 should dispatch to the prompt-submit handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/prompt_submit_99")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-prompt-submit-event))))))
+;; The stop_ / prompt_submit_ dispatch tests were deleted in the
+;; agent-shim cutover (design §10): those status prefixes no longer have
+;; handlers.  A retired status prefix now DRAINS — see
+;; `agent-repl-test-sentinel-drains-retired-status-prefix' below.
 
 (ert-deftest agent-repl-test-sentinel-dispatches-suffixed-permission-request ()
   "A daemon-written permission_request_<sid>_<reqid> file dispatches to the permission handler.
@@ -152,18 +135,6 @@ Must NOT be shadowed by session_start_ (they diverge at session_d/session_s)."
         (should dispatched-handler)
         (should (eq (plist-get dispatched-handler :callback)
                     'agent-repl--on-session-dead-event))))))
-
-(ert-deftest agent-repl-test-sentinel-session-start-not-shadowed-by-dead ()
-  "A session_start_<pid> file still dispatches to the session-start handler.
-Guards the reverse shadowing direction of the new session_dead_ entry."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/session_start_777")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-session-start-event))))))
 
 (ert-deftest agent-repl-test-sentinel-dispatches-account-changed ()
   "An account_changed_<sid> file dispatches to the account-changed handler."
@@ -245,7 +216,25 @@ acting on a guess could pin the workspace to the wrong account."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
                (lambda (&rest _) nil)))
-      (should (eq t (agent-repl--dispatch-sentinel-file "/dir/stop_abc"))))))
+      (should (eq t (agent-repl--dispatch-sentinel-file "/dir/session_dead_abc"))))))
+
+(ert-deftest agent-repl-test-sentinel-drains-retired-status-prefix ()
+  "A retired STATUS-hook sentinel (stop_/subagent_/prompt_submit_/session_start_)
+is DRAINED, not dispatched to a handler and not warned about — the
+agent-shim cutover deleted those handlers, and a stale hook install
+could still emit the files."
+  (agent-repl-test--with-clean-state
+    (let ((deleted nil)
+          (processed nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (f) (setq deleted f)))
+                ((symbol-function 'agent-repl--process-sentinel-file)
+                 (lambda (&rest _) (setq processed t)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (ert-fail "retired status prefix must not warn"))))
+        (should (eq t (agent-repl--dispatch-sentinel-file "/dir/stop_12345")))
+        (should (equal deleted "/dir/stop_12345"))
+        (should-not processed)))))
 
 ;;;; ---- Tests: deprecated-prefix drain ----
 
@@ -348,31 +337,15 @@ would adopt it into a workspace; the drain only deletes."
         (should (equal callback-args '("ws1" "/some/dir")))
         (should (equal deleted-file "/tmp/stop_123"))))))
 
-(ert-deftest agent-repl-test-process-sentinel-file-threads-source-to-arity-3-callback ()
-  "process-sentinel-file passes the sentinel `:source' to a callback that accepts it.
-Only a callback whose arity admits a third argument (the session-start
-handler) receives the SessionStart origin."
-  (agent-repl-test--with-clean-state
-    (let ((callback-args nil))
-      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
-                 (lambda (_f) '(:dir "/some/dir" :session-id "sid-1" :source "compact")))
-                ((symbol-function 'agent-repl--ws-for-dir)
-                 (lambda (_d) "ws1"))
-                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
-                 #'ignore)
-                ((symbol-function 'delete-file) #'ignore))
-        (agent-repl--process-sentinel-file
-         "/tmp/session_start_1"
-         (list :callback (lambda (ws dir &optional source)
-                           (setq callback-args (list ws dir source)))
-               :warning "warn %s"
-               :name "handle-session-start"))
-        (should (equal callback-args '("ws1" "/some/dir" "compact")))))))
+;; The three-argument (source-threading) callback path was deleted in the
+;; agent-shim cutover (design §10): the only 3-arg handler was
+;; `--on-session-start-event'.  Every surviving handler takes (ws dir),
+;; verified by the test below.
 
 (ert-deftest agent-repl-test-process-sentinel-file-omits-source-for-arity-2-callback ()
   "process-sentinel-file calls a two-argument callback with (ws dir) only.
-Passing the `:source' as a third arg would signal `wrong-number-of-arguments',
-so the arity guard must withhold it from the fixed two-argument handlers."
+SOURCE is consumed by `--update-session-id-from-sentinel', never passed
+to the handler callback (the 3-arg session-start callback was deleted)."
   (agent-repl-test--with-clean-state
     (let ((callback-args nil))
       (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
@@ -532,216 +505,13 @@ propagate (a hard error would kill the file-notify watcher)."
         ;; And the failure was surfaced on the log channel, not swallowed.
         (should (string-match-p "ERRORED" surfaced))))))
 
-;;;; ---- Tests: on-stop-event handler ----
-
-(ert-deftest agent-repl-test-on-stop-event-calls-finished-when-no-subagents ()
-  "on-stop-event with no pending subagents finalizes immediately."
-  (agent-repl-test--with-clean-state
-    (let ((finished-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (ws) (setq finished-ws ws))))
-        (agent-repl--on-stop-event "ws1" "/some/dir")
-        (should (equal finished-ws "ws1"))))))
-
-(ert-deftest agent-repl-test-on-stop-event-defers-when-subagents-pending ()
-  "on-stop-event with pending subagents records stop-received but does NOT finalize."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (_ws) (setq finished-called t))))
-        (agent-repl--on-stop-event "ws1" "/some/dir")
-        (should-not finished-called)
-        (should (agent-repl--ws-stop-received-p "ws1"))))))
-
-(ert-deftest agent-repl-test-on-stop-event-sets-stop-received ()
-  "on-stop-event always records that Stop fired (independent of finalization)."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished) #'ignore))
-      (agent-repl--on-stop-event "ws1" "/some/dir")
-      ;; After a successful finalize, clear-stop-tracking resets it.
-      ;; This confirms set-stop-received fired before clear ran.
-      (should-not (agent-repl--ws-stop-received-p "ws1")))))
-
-(ert-deftest agent-repl-test-on-stop-event-clears-tracking-after-finalize ()
-  "on-stop-event clears tracking after successful finalize so the next
-turn starts from a clean slate."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished) #'ignore))
-      (agent-repl--on-stop-event "ws1" "/some/dir")
-      (should-not (agent-repl--ws-stop-received-p "ws1"))
-      (should (zerop (agent-repl--ws-pending-subagents "ws1"))))))
-
-(ert-deftest agent-repl-test-on-stop-event-tolerates-nil-workspace ()
-  "on-stop-event via process-sentinel-file should not error when ws-for-dir returns nil."
-  (agent-repl-test--with-clean-state
-    (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
-                 (lambda (_f) '(:dir "/unknown/dir" :session-id nil)))
-                ((symbol-function 'agent-repl--ws-for-dir)
-                 (lambda (_d) nil))
-                ((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (_ws) (setq finished-called t)))
-                ((symbol-function 'delete-file) #'ignore))
-        (agent-repl--process-sentinel-file
-         "/tmp/stop_456"
-         (cdr (assoc "stop_" agent-repl--sentinel-dispatch-alist)))
-        (should-not finished-called)))))
-
-;;;; ---- Tests: on-subagent-start-event handler ----
-
-(ert-deftest agent-repl-test-on-subagent-start-event-increments-counter ()
-  "on-subagent-start-event bumps the pending-subagent counter by 1."
-  (agent-repl-test--with-clean-state
-    (agent-repl--on-subagent-start-event "ws1" "/some/dir")
-    (should (= 1 (agent-repl--ws-pending-subagents "ws1")))
-    (agent-repl--on-subagent-start-event "ws1" "/some/dir")
-    (should (= 2 (agent-repl--ws-pending-subagents "ws1")))))
-
-;;;; ---- Tests: on-subagent-stop-event handler ----
-
-(ert-deftest agent-repl-test-on-subagent-stop-event-decrements-counter ()
-  "on-subagent-stop-event decrements the counter."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
-    (should (= 1 (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-on-subagent-stop-event-no-finalize-without-stop ()
-  "Counter draining to zero without Stop having fired must NOT finalize."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (_ws) (setq finished-called t))))
-        (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
-        (should-not finished-called)))))
-
-(ert-deftest agent-repl-test-on-subagent-stop-event-finalizes-when-last-with-stop ()
-  "Last SubagentStop after Stop already fired drives the deferred finalize."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (let ((finished-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (ws) (setq finished-ws ws))))
-        (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
-        (should (equal finished-ws "ws1"))))))
-
-(ert-deftest agent-repl-test-on-subagent-stop-event-no-finalize-when-others-pending ()
-  "SubagentStop while other subagents still pending must NOT finalize."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (_ws) (setq finished-called t))))
-        (agent-repl--on-subagent-stop-event "ws1" "/some/dir")
-        (should-not finished-called)
-        (should (= 1 (agent-repl--ws-pending-subagents "ws1")))
-        ;; Still waiting on the next subagent — stop-received not cleared.
-        (should (agent-repl--ws-stop-received-p "ws1"))))))
-
-;;;; ---- Tests: on-stop-failure-event handler ----
-
-(ert-deftest agent-repl-test-on-stop-failure-event-sets-stop-failed ()
-  "on-stop-failure-event writes :agent-state :stop-failed."
-  (agent-repl-test--with-clean-state
-    (agent-repl--on-stop-failure-event "ws1" "/some/dir")
-    (should (eq :stop-failed (agent-repl--ws-agent-state "ws1")))))
-
-(ert-deftest agent-repl-test-on-stop-failure-event-clears-stop-tracking ()
-  "on-stop-failure-event clears any in-flight Stop / SubagentStop bookkeeping
-so a subsequent successful turn isn't gated on a stale counter."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-stop-received "ws1" t)
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--ws-incf-pending-subagents "ws1")
-    (agent-repl--on-stop-failure-event "ws1" "/some/dir")
-    (should-not (agent-repl--ws-stop-received-p "ws1"))
-    (should (zerop (agent-repl--ws-pending-subagents "ws1")))))
-
-(ert-deftest agent-repl-test-on-stop-failure-event-arms-no-retry-timer ()
-  "on-stop-failure-event does NOT schedule any automatic retry timer.
-The auto `try again' retry was removed because StopFailure is not
-guaranteed to fire only on genuine API errors."
-  (agent-repl-test--with-clean-state
-    (let ((timer-armed nil))
-      (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (&rest _args) (setq timer-armed t) nil)))
-        (agent-repl--on-stop-failure-event "ws1" "/some/dir"))
-      (should-not timer-armed))))
-
-(ert-deftest agent-repl-test-on-stop-failure-event-sends-no-auto-input ()
-  "on-stop-failure-event does NOT auto-send any prompt to the agent.
-Recovery from a stop-failure is left entirely to the user."
-  (agent-repl-test--with-clean-state
-    (let ((input-sent nil))
-      (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (&rest _args) (setq input-sent t))))
-        (agent-repl--on-stop-failure-event "ws1" "/some/dir"))
-      (should-not input-sent))))
-
-;;;; ---- Tests: dispatch-alist routes new prefixes ----
-
-(ert-deftest agent-repl-test-sentinel-dispatches-subagent-start ()
-  "A file named subagent_start_NNN dispatches to the subagent-start handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/subagent_start_123")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-subagent-start-event))))))
-
-(ert-deftest agent-repl-test-sentinel-dispatches-subagent-stop ()
-  "A file named subagent_stop_NNN dispatches to the subagent-stop handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/subagent_stop_456")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-subagent-stop-event))))))
-
-(ert-deftest agent-repl-test-sentinel-dispatches-stop-failure ()
-  "A file named stop_failure_NNN dispatches to the stop-failure handler.
-The bare `stop_' prefix is also a prefix of `stop_failure_', so the
-ordering of the dispatch alist matters: stop_failure_ must be tried
-first.  This test pins that ordering."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/stop_failure_789")
-        (should dispatched-handler)
-        (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-stop-failure-event))))))
-
-(ert-deftest agent-repl-test-sentinel-stop-failure-not-confused-with-stop ()
-  "Order regression: stop_failure_NNN must NOT dispatch to the stop handler."
-  (agent-repl-test--with-clean-state
-    (let ((dispatched-handler nil))
-      (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
-                 (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "/dir/stop_failure_001")
-        (should-not (eq (plist-get dispatched-handler :callback)
-                        'agent-repl--on-stop-event))))))
-
-;;;; ---- Tests: on-prompt-submit-event handler ----
-
-(ert-deftest agent-repl-test-on-prompt-submit-event-sets-thinking ()
-  "on-prompt-submit-event should call mark-ws-thinking."
-  (agent-repl-test--with-clean-state
-    (let ((thinking-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--mark-ws-thinking)
-                 (lambda (ws) (setq thinking-ws ws))))
-        (agent-repl--on-prompt-submit-event "ws1" "/some/dir")
-        (should (equal thinking-ws "ws1"))))))
+;; The status-handler tests (on-stop-event / on-subagent-start-event /
+;; on-subagent-stop-event / on-stop-failure-event / on-prompt-submit-event
+;; and the stop_/subagent_/prompt_submit_ dispatch-routing tests) were
+;; DELETED in the agent-shim cutover (design §10): those handlers and the
+;; `:pending-subagents' / `:stop-received' machinery they drove no longer
+;; exist.  Turn-finished / subagent-in-flight resolution is owned by the
+;; daemon's SSM and pushed as `frontend.v1' WorkspaceState frames now.
 
 ;;;; ---- Tests: on-permission-event handler ----
 
@@ -1380,41 +1150,9 @@ on-permission-event treats the notification as a real permission prompt."
         (agent-repl--dispatch-sentinel-file "/dir/permission_prompt")
         (should (equal set-args '("test-ws" :permission)))))))
 
-(ert-deftest agent-repl-test-end-to-end-stop-dispatch ()
-  "Full dispatch: stop_* file -> on-stop-event -> handle-finished.
-With no pending subagents, on-stop-event finalizes immediately on the
-single Stop fire."
-  (agent-repl-test--with-clean-state
-    (let ((finished nil))
-      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
-                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
-                ((symbol-function 'agent-repl--ws-for-dir)
-                 (lambda (_d) "test-ws"))
-                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
-                 #'ignore)
-                ((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (ws) (setq finished ws)))
-                ((symbol-function 'delete-file) #'ignore))
-        (agent-repl--dispatch-sentinel-file "/dir/stop_123")
-        (should (equal finished "test-ws"))))))
-
-(ert-deftest agent-repl-test-end-to-end-prompt-submit-dispatch ()
-  "Full dispatch: prompt_submit_* file -> on-prompt-submit-event -> mark-ws-thinking."
-  (agent-repl-test--with-clean-state
-    (let ((thinking-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--read-sentinel-file)
-                 (lambda (_f) '(:dir "/project/dir" :session-id "test-sid")))
-                ((symbol-function 'agent-repl--ws-for-dir)
-                 (lambda (_d) "test-ws"))
-                ((symbol-function 'agent-repl--update-session-id-from-sentinel)
-                 #'ignore)
-                ((symbol-function 'agent-repl--mark-ws-thinking)
-                 (lambda (ws) (setq thinking-ws ws)))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (_ws _key) nil))
-                ((symbol-function 'delete-file) #'ignore))
-        (agent-repl--dispatch-sentinel-file "/dir/prompt_submit_456")
-        (should (equal thinking-ws "test-ws"))))))
+;; The end-to-end stop_ / prompt_submit_ dispatch tests were deleted in
+;; the agent-shim cutover (design §10): those prefixes drain now (there is
+;; no handler to reach end-to-end).
 
 ;;;; ---- Tests: ws-for-dir-fast uncovered edge cases ----
 
@@ -1701,36 +1439,8 @@ This is the regression guard for phantom ❓ appearing after the user is done."
         (agent-repl--on-permission-event "ws1" "/some/dir")
         (should-not set-called)))))
 
-;;;; ---- Tests: on-stop-event uncovered edge cases ----
-
-(ert-deftest agent-repl-test-on-stop-event-handle-finished-error ()
-  "on-stop-event should propagate error from handle-agent-finished."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-               (lambda (_ws) (error "finished handler boom"))))
-      (should-error (agent-repl--on-stop-event "ws1" "/some/dir")))))
-
-;;;; ---- Tests: on-prompt-submit-event uncovered edge cases ----
-
-(ert-deftest agent-repl-test-on-prompt-submit-event-nil-ws ()
-  "on-prompt-submit-event with nil ws passes nil to mark-ws-thinking."
-  (agent-repl-test--with-clean-state
-    (let ((thinking-ws :not-called))
-      (cl-letf (((symbol-function 'agent-repl--mark-ws-thinking)
-                 (lambda (ws) (setq thinking-ws ws))))
-        (agent-repl--on-prompt-submit-event nil "/some/dir")
-        (should (eq thinking-ws nil))))))
-
-(ert-deftest agent-repl-test-on-prompt-submit-event-already-thinking ()
-  "on-prompt-submit-event should still call mark-ws-thinking even if ws is already thinking."
-  (agent-repl-test--with-clean-state
-    (let ((thinking-ws nil))
-      (cl-letf (((symbol-function 'agent-repl--mark-ws-thinking)
-                 (lambda (ws) (setq thinking-ws ws))))
-        ;; Set thinking first, then submit again
-        (agent-repl--ws-set "ws1" :thinking)
-        (agent-repl--on-prompt-submit-event "ws1" "/some/dir")
-        (should (equal thinking-ws "ws1"))))))
+;; The on-stop-event / on-prompt-submit-event edge-case tests were deleted
+;; in the agent-shim cutover (design §10): both handlers are gone.
 
 ;;;; ---- Tests: dispatch-sentinel-file uncovered edge cases ----
 
@@ -1740,10 +1450,10 @@ This is the regression guard for phantom ❓ appearing after the user is done."
     (let ((dispatched-handler nil))
       (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
                  (lambda (_file handler) (setq dispatched-handler handler))))
-        (agent-repl--dispatch-sentinel-file "stop_123")
+        (agent-repl--dispatch-sentinel-file "session_dead_123")
         (should dispatched-handler)
         (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-stop-event))))))
+                    'agent-repl--on-session-dead-event))))))
 
 (ert-deftest agent-repl-test-dispatch-sentinel-file-exact-prefix ()
   "dispatch-sentinel-file should match a filename that is exactly a prefix (no suffix)."
@@ -1751,11 +1461,11 @@ This is the regression guard for phantom ❓ appearing after the user is done."
     (let ((dispatched-handler nil))
       (cl-letf (((symbol-function 'agent-repl--process-sentinel-file)
                  (lambda (_file handler) (setq dispatched-handler handler))))
-        ;; "stop_" is a prefix in the dispatch alist; file is exactly "stop_"
-        (agent-repl--dispatch-sentinel-file "/dir/stop_")
+        ;; "session_dead_" is a prefix in the dispatch alist; file is exactly it.
+        (agent-repl--dispatch-sentinel-file "/dir/session_dead_")
         (should dispatched-handler)
         (should (eq (plist-get dispatched-handler :callback)
-                    'agent-repl--on-stop-event))))))
+                    'agent-repl--on-session-dead-event))))))
 
 (ert-deftest agent-repl-test-dispatch-sentinel-file-first-prefix-wins ()
   "dispatch-sentinel-file should use the first matching prefix when multiple could match."
@@ -1835,16 +1545,6 @@ This is the regression guard for phantom ❓ appearing after the user is done."
         (should (= (length dispatched-files) 1))))))
 
 ;;;; ---- Tests: sentinel event edge cases (status transitions .md) ----
-
-(ert-deftest agent-repl-test-on-stop-event-delegates-regardless-of-state ()
-  "Stop event delegates to handle-finished regardless of the current agent-state."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :permission)
-    (let ((finished-called nil))
-      (cl-letf (((symbol-function 'agent-repl--handle-agent-finished)
-                 (lambda (ws) (setq finished-called ws))))
-        (agent-repl--on-stop-event "ws1" "/some/dir")
-        (should (equal finished-called "ws1"))))))
 
 (ert-deftest agent-repl-test-on-permission-event-leaves-done-alone ()
   "Permission event must NOT overwrite :done — the notification is an idle nudge.
@@ -2005,138 +1705,13 @@ the module does not manage."
       (agent-repl--update-session-id-from-sentinel "ws1" "new-sid" t)
       (should (equal (agent-repl-instantiation-session-id inst) "new-sid")))))
 
-;;;; ---- Tests: on-session-start-event ----
-
-(ert-deftest agent-repl-test-on-session-start-event-fires-after-ready-hook ()
-  "on-session-start-event runs `agent-repl-after-ready-functions' with the ws name."
-  (agent-repl-test--with-clean-state
-    (let ((hook-called-with nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-        (let ((agent-repl-after-ready-functions
-               (list (lambda (ws) (push ws hook-called-with)))))
-          (agent-repl--on-session-start-event "ws1" "/some/dir")
-          (should (equal hook-called-with '("ws1"))))))))
-
-(ert-deftest agent-repl-test-on-session-start-event-hook-handler-error-isolated ()
-  "A broken after-ready handler must not prevent later handlers from running."
-  (agent-repl-test--with-clean-state
-    (let ((second-called nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-        (let ((agent-repl-after-ready-functions
-               (list (lambda (_ws) (error "boom"))
-                     (lambda (_ws) (setq second-called t)))))
-          (agent-repl--on-session-start-event "ws1" "/some/dir")
-          (should second-called))))))
-
-(ert-deftest agent-repl-test-on-session-start-gui-no-error-spam ()
-  "on-session-start-event must NOT emit the vterm-inconsistency ERROR for gui.
-A gui workspace has no vterm buffer by design, so the structural
-inconsistency branch does not apply."
-  (agent-repl-test--with-clean-state
-    (let ((messages '()))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-put "ws1" :frontend 'gui)
-      (cl-letf (((symbol-function 'message)
-                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
-                ((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not (cl-find-if (lambda (m) (string-match-p "ERROR" m)) messages))))))
-
-(ert-deftest agent-repl-test-on-session-start-gui-sets-idle ()
-  "on-session-start-event flips a fresh gui workspace to :idle."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :frontend 'gui)
-    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-      (agent-repl--on-session-start-event "ws1" "/some/dir")
-      (should (eq (agent-repl--ws-get "ws1" :agent-state) :idle)))))
-
-(ert-deftest agent-repl-test-on-session-start-gui-preserves-in-flight-turn ()
-  "A lagging/re-fired session_start must not clobber a gui turn in flight.
-The :idle flip is gated to nil/:init agent-states."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :frontend 'gui)
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
-    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-      (agent-repl--on-session-start-event "ws1" "/some/dir")
-      (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking)))))
-
-(ert-deftest agent-repl-test-on-session-start-gui-fires-ready-latch ()
-  "on-session-start-event flips the :agent-ready latch bit for gui.
-Without this, gui ws-fully-loaded only ever fired via the watchdog."
-  (agent-repl-test--with-clean-state
-    (let ((latched nil)
-          (hook-called-with nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-put "ws1" :frontend 'gui)
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
-                 (lambda (ws bit) (setq latched (list ws bit)))))
-        (let ((agent-repl-after-ready-functions
-               (list (lambda (ws) (push ws hook-called-with)))))
-          (agent-repl--on-session-start-event "ws1" "/some/dir")
-          (should (equal latched '("ws1" :agent-ready)))
-          (should (equal hook-called-with '("ws1"))))))))
-
-(ert-deftest agent-repl-test-on-session-start-gui-drains-pending-prompts ()
-  "The gui branch drains :pending-prompts when the session comes up.
-The workspace-generation dispatch parks the new workspace's initial
-prompt there; without the drain the dispatch silently never executes."
-  (agent-repl-test--with-clean-state
-    (let ((drained nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-put "ws1" :frontend 'gui)
-      (agent-repl--ws-put "ws1" :pending-prompts '("do the task"))
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-prompts)
-                 (lambda (ws) (setq drained ws))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should (equal drained "ws1"))))))
-
-(ert-deftest agent-repl-test-on-session-start-event-sets-idle ()
-  "on-session-start-event writes :agent-state :idle (transition from :init)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-set-agent-state "ws1" :init)
-    (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore))
-      (agent-repl--on-session-start-event "ws1" "/some/dir")
-      (should (eq (agent-repl--ws-agent-state "ws1") :idle)))))
-
-(ert-deftest agent-repl-test-on-session-start-compact-fires-metaprompt-read ()
-  "A `compact'-origin session_start re-fires the metaprompt read-directive."
-  (agent-repl-test--with-clean-state
-    (let ((fired nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
-                ((symbol-function 'agent-repl--fire-metaprompt-read)
-                 (lambda (ws) (setq fired ws))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir" "compact")
-        (should (equal fired "ws1"))))))
-
-(ert-deftest agent-repl-test-on-session-start-startup-does-not-fire-metaprompt-read ()
-  "A `startup'-origin session_start does NOT re-fire the metaprompt read.
-A fresh session's first user prompt already carries the counter-0 injection."
-  (agent-repl-test--with-clean-state
-    (let ((fired nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
-                ((symbol-function 'agent-repl--fire-metaprompt-read)
-                 (lambda (ws) (setq fired ws))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir" "startup")
-        (should-not fired)))))
-
-(ert-deftest agent-repl-test-on-session-start-nil-source-does-not-fire-metaprompt-read ()
-  "A session_start with no source (older hook / non-session-start writer) is inert."
-  (agent-repl-test--with-clean-state
-    (let ((fired nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded) #'ignore)
-                ((symbol-function 'agent-repl--fire-metaprompt-read)
-                 (lambda (ws) (setq fired ws))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        (should-not fired)))))
+;; The on-session-start-event tests were DELETED in the agent-shim
+;; cutover (design §10): the handler is gone (the SessionStart managed
+;; hook is removed and the daemon owns session-ready reporting / prompt
+;; submission / metaprompt re-fire).  The ws-fully-loaded LATCH itself
+;; (`agent-repl--latch-and-maybe-fire-loaded') is retained — its
+;; `:ws-loaded' callers (commands.el / panels.el) still drive it — so its
+;; tests remain below.
 
 ;;;; ---- Tests: ws-fully-loaded latch ----
 
@@ -2222,30 +1797,6 @@ watchdog path to signal `:timed-out'."
         (agent-repl--ws-put "ws1" :agent-ready t)
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should second-called)))))
-
-(ert-deftest agent-repl-test-on-session-start-event-flips-agent-ready ()
-  "on-session-start-event flips the `:agent-ready' latch bit on the ws plist."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--on-session-start-event "ws1" "/some/dir")
-    ;; :ws-loaded is nil, so the latch shouldn't have fired+cleared yet.
-    (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))
-
-(ert-deftest agent-repl-test-on-session-start-event-duplicate-still-fires-hooks ()
-  "Even when `:agent-state' has already left `:init' (duplicate session_start),
-both `after-ready-functions' and the `:agent-ready' latch flip still fire.
-This is the stall fix: a swallowed duplicate must not block loader advance."
-  (agent-repl-test--with-clean-state
-    (let ((after-ready-fires 0))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-      (agent-repl--ws-set-agent-state "ws1" :idle)
-      (let ((agent-repl-after-ready-functions
-             (list (lambda (_ws) (cl-incf after-ready-fires)))))
-        (agent-repl--on-session-start-event "ws1" "/some/dir")
-        ;; Hook fired despite duplicate.
-        (should (= after-ready-fires 1))
-        ;; Latch bit set despite duplicate.
-        (should (eq (agent-repl--ws-get "ws1" :agent-ready) t))))))
 
 ;;;; ---- Tests: permission-notify.sh sentinel writing ----
 ;;

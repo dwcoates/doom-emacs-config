@@ -176,12 +176,12 @@ debug logging on."
 
 (defconst agent-repl--ws-runtime-keys
   '(:agent-state :repl-state :input-buffer
-    :ready-timer :git-proc :flashing :pending-subagents :pending-show-panels
+    :ready-timer :git-proc :flashing :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
     :frontend-buffer :frontend-buffer-session-id :queued-messages
-    :incoming-session-id)
+    :incoming-session-id :pushed-render-state :pushed-render-state-meta)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
@@ -599,157 +599,80 @@ contiguous as repos fold and unfold."
   (agent-repl--filter-folded-names (agent-repl--ws-list-names)
                                    (agent-repl--ws-current-name)))
 
-;;;; ---- Render-state unification ----------------------------------------
+;;;; ---- Render-state: daemon-pushed lookup ------------------------------
 ;;
 ;; `agent-repl--ws-render-status' is the single source of truth for
 ;; what visual state every renderer (tab-bar composed-state, project
-;; picker emoji) should display for a workspace.  Renderers used to
-;; each re-derive this from `:agent-state' + `:repl-state' + the
-;; `:merging' / `:merge-completed' plist keys, and they disagreed:
-;; some had merge-state dominating agent-state, the tab-bar's
-;; precedence had agent-state dominating merge-state, and the
-;; `:merging' (in-flight) workflow signal had no visual at all.  The
-;; unified function below is the new canonical precedence; the
-;; rendering convergence is intentional.
-
-(defun agent-repl--ws-async-live-p (ws)
-  "Return non-nil when WS has detached background tasks still running.
-Read from `:async-live', the count the reattach sweep captures off
-GET /sessions' `async_live': a positive count means the session is
-idle-but-working (its turn is done, but backgrounded tasks continue)."
-  (let ((n (agent-repl--ws-get ws :async-live)))
-    (and (integerp n) (> n 0))))
+;; picker emoji) should display for a workspace.  Per the agent-shim
+;; cutover (design-agent-shim-architecture.md §10) Emacs is a DUMB
+;; RENDERER: it no longer derives status from `:agent-state' /
+;; `:repl-state' / `:merging' / `:merge-completed'.  The daemon's SSM
+;; resolves THE render-state and pushes it as a `frontend.v1'
+;; WorkspaceState frame; `frontend-state.el' maps the pushed RenderState
+;; enum to a keyword and stores it under the `:pushed-render-state'
+;; workspace key.  This function is now a pure lookup of that key.  The
+;; old local precedence `cond' ladder — and its `:async-live' helper —
+;; are deleted: there is exactly one status mechanism now (no redundancy,
+;; per AGENTS.md).
 
 (defun agent-repl--ws-render-status (ws)
   "Return the closed-set render-state keyword for workspace WS.
 This is the SINGLE SOURCE OF TRUTH for what renderers (tab-bar,
-project picker, mode-line) should display for a workspace's
-status.  Every renderer reads this — none should re-derive status
-from `:agent-state' / `:repl-state' / `:merging' / `:merge-completed'
-on its own.
+project picker, mode-line) should display for a workspace's status.
+Every renderer reads this; none re-derives status on its own.
+
+The value is the daemon-pushed render-state (design §10): the SSM
+resolves it and pushes a WorkspaceState frame that `frontend-state.el'
+stores under the `:pushed-render-state' key (already mapped to the
+closed keyword vocabulary of `agent-repl-ws-state-icons').  This
+function only looks it up.
 
 Precondition: WS must be `--ws-known-p'.  Unknown WS signals
 `user-error' via `--ws-require-known' — there is no silent fallback
 per AGENTS.md.
 
-Returns one of (in precedence order; first match wins):
+Returns:
 
-  :merge-conflict — `:repl-state' is `:merge-conflict' (cherry-pick
-                    hit a non-orthogonal conflict; user action
-                    required).  Dominates everything else because it
-                    is the most actionable signal.
+  nil    — tombstoned workspace (`--ws-tombstoned-p' t, regardless of
+           REASON marker such as `:hidden-project-dir').  A tombstone
+           is a workspace closed LOCALLY in Emacs; even if the daemon
+           pushed a state before the close, rendering it would
+           resurrect a closed workspace's badge.  The `--live-ws-names'
+           filter already excludes tombstones before most renderers
+           reach this function; this guard keeps the contract explicit
+           for any caller that does not pre-filter.  This is the one
+           purely-Emacs-side state decision that survives the cutover
+           — it is about local UI membership, not agent status.
 
-  :merge-failed   — `:repl-state' is `:merge-failed' (silent
-                    cherry-pick abort, no CHERRY_PICK_HEAD remaining).
-                    Same actionable rationale as :merge-conflict.
+  :init  — a KNOWN, LIVE workspace for which no state has been pushed
+           yet.  WHY: a just-created workspace legitimately predates
+           its first daemon push (the UDS connect + StateSnapshot
+           resync, or the first WorkspaceState delta, has not landed).
+           `:init' is the honest \"registered but not yet reported on\"
+           badge (⏳); returning nil here would make a fresh workspace
+           indistinguishable from a tombstoned one, and hard-erroring
+           would break the tab-bar on every brand-new workspace.
 
-  :merged         — `:repl-state' is `:merged' OR `:merge-completed'
-                    is t AND no active `:agent-state' is present
-                    (workspace's branch landed in its source; terminal
-                    positive).  The setter writes both in lockstep —
-                    either signal alone suffices.  Accepting
-                    `:merge-completed' as equivalent here keeps merged
-                    rendering intact across the brief transition
-                    window where `:merge-completed t' is set before
-                    `:repl-state :merged' has been written (and where
-                    `:merging' may not yet be cleared).
-                    When an active `:agent-state' is present the
-                    merged badge is suppressed and the agent-state
-                    wins: a merged workspace that resumes work (unusual
-                    but possible) should surface the live run-state
-                    rather than the stale merge badge.
-
-  :merging        — `:merging' plist key is `t' (worker thread is
-                    actively running cherry-pick).  Beats :dead so a
-                    workspace whose agent session has been torn down
-                    (the standard pre-merge `--close-workspace'
-                    `preserve-entry' path) still surfaces the
-                    in-flight signal until cherry-pick resolves.
-
-  :merge-queued   — `:repl-state' is `:merge-queued' (parked on
-                    `agent-repl--merge-queue' waiting for an
-                    in-flight cherry-pick to clear).
-
-  :dead           — `:repl-state' is `:dead' (agent process is gone).
-                    Ranks below merge-states because merge state is
-                    more actionable; ranks above agent-states
-                    because no live process means no agent activity
-                    to color over.
-
-  Agent-states (when no merge or dead signal applies):
-    :thinking, :permission, :init, :done, :stop-failed, :idle
-    — read from `:agent-state' in order of precedence.  Each is set
-    by `agent-repl--ws-set-agent-state' through the typed setter.
-
-  nil             — tombstoned workspace (`--ws-tombstoned-p' t,
-                    regardless of REASON marker such as
-                    `:hidden-project-dir'), or no session / unborn
-                    (every signal above absent).  The cases are
-                    intentionally collapsed: every renderer skips them
-                    equally (the `--live-ws-names' filter already
-                    excludes tombstones before this function
-                    is called, and callers that need to distinguish
-                    nuke-tombstoned from hide-tombstoned use the
-                    reason-specific predicate
-                    `--ws-hide-tombstoned-p').
-
-Precedence rationale: a workspace whose agent session crashed *while a
-merge was in flight* still needs to surface the merge signal — the
-merge is the actionable concern.  Same logic stacks all the way up:
-merge-conflict is more important than merge-failed (an active
-conflict can be resolved; a silent abort has already aborted), and
-both dominate agent-state (an active conflict is more important
-than whether the agent was thinking when the merge hit it)."
+  otherwise — the pushed keyword verbatim (one of the
+           `agent-repl-ws-state-icons' keys)."
   (agent-repl--ws-require-known ws "ws-render-status")
   (cond
    ((agent-repl--ws-tombstoned-p ws) nil)
    (t
-    (let ((repl       (agent-repl--ws-get ws :repl-state))
-          (claude     (agent-repl--ws-get ws :agent-state))
-          (merging    (agent-repl--ws-get ws :merging))
-          (completed  (agent-repl--ws-get ws :merge-completed)))
-      (cond
-       ((eq repl :merge-conflict)         :merge-conflict)
-       ((eq repl :merge-failed)           :merge-failed)
-       ;; `:merge-completed t' is accepted as equivalent to
-       ;; `:repl-state :merged' so the transition window between the
-       ;; two writes (and any tests fixtures that set only one of
-       ;; them) still resolves to :merged.  See `--ws-render-status'
-       ;; docstring for the rationale.
-       ;; Guard: when an active `:agent-state' is present the merged
-       ;; badge is suppressed so a merged workspace that resumes work
-       ;; surfaces its live run-state rather than the stale merge
-       ;; badge.  Without the (null claude) guard this arm would fire
-       ;; even when claude is :thinking / :done / etc., hiding those
-       ;; states behind the static 🔀 label.
-       ((and (or (eq repl :merged) (eq completed t)) (null claude)) :merged)
-       ;; :merging plist key (in-flight worker) dominates :dead so
-       ;; the merge UI signal survives the pre-merge UI teardown.
-       ((eq merging t)                    :merging)
-       ((eq repl :merge-queued)           :merge-queued)
-       ((eq repl :dead)                   :dead)
-       ((eq claude :thinking)             :thinking)
-       ((eq claude :permission)           :permission)
-       ((eq claude :init)                 :init)
-       ((eq claude :done)                 :done)
-       ((eq claude :stop-failed)          :stop-failed)
-       ;; An idle (available) workspace whose session still has detached
-       ;; background work running surfaces the amber :idle-async state,
-       ;; mirroring the webapp's amber async bubble border. Only reached
-       ;; when no merge/dead/thinking/etc. signal above wins.
-       ((eq claude :idle)
-        (if (agent-repl--ws-async-live-p ws) :idle-async :idle))
-       (t                                 nil))))))
+    (or (agent-repl--ws-get ws :pushed-render-state)
+        :init))))
 
 (defcustom agent-repl-ws-state-icons
   '((:init           . "⏳")
     (:thinking       . "⌛")
     (:done           . "✅")
     (:idle           . "💤")
+    (:idle-async     . "🌙")
     (:permission     . "❓")
     (:stop-failed    . "❗")
     (:start-failed   . "🚫")
     (:dead           . "❌")
+    (:degraded       . "📡")
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
     (:merge-conflict . "💥")

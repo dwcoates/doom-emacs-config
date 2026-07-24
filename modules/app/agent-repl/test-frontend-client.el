@@ -911,15 +911,10 @@ the workspace's model.  Fails against that hardcoded nil, since
         (should (= 1 (length q)))
         (should (equal (plist-get (car q) :queue-id) "q_1"))))))
 
-(ert-deftest agent-repl-test-frontend-capture-queues-stores-async-live ()
-  "Capture stores the entry's async_live count under :async-live."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
-    (let ((sessions '(((session_id . "s_1") (async_live . 3)))))
-      ;; Act
-      (agent-repl--frontend-capture-queues sessions)
-      ;; Assert
-      (should (= 3 (agent-repl--ws-get "ws1" :async-live))))))
+;; The async_live capture test was deleted in the agent-shim cutover
+;; (design §10): capture-queues no longer writes :async-live — the
+;; idle-but-working (:idle-async) render-state is resolved by the daemon
+;; SSM and pushed as a WorkspaceState frame.
 
 (ert-deftest agent-repl-test-frontend-capture-queues-clears-when-absent ()
   "Capture clears :queued-messages when the bound session is not listed."
