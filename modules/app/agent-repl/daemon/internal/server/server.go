@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -1424,82 +1425,29 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// ServeWSScoped upgrades the socket itself and serves frontend.v1 frames
-	// scoped to this session/workspace, translating the webapp's still-Layer-2
-	// client commands into FrontendCommands the shared handler dispatches.
-	s.frontend.ServeWSScoped(w, r, frontend.Scope{SessionID: id, Workspace: cwd}, s.streamCommandTranslator(cwd))
+	// scoped to this session/workspace. Inbound is command-strict (S9): the
+	// webapp sends FrontendCommand protojson frames, routed through the SAME
+	// handler as the Emacs UDS surface. The translator only stamps the scoped
+	// workspace when a command omits it (the URL already scopes the connection).
+	s.frontend.ServeWSScoped(w, r, frontend.Scope{SessionID: id, Workspace: cwd}, s.frontendCommandTranslator(cwd))
 }
 
-// commandText renders a user-message's content field as plain text: a JSON
-// string is unquoted; anything else (a structured content block) is passed
-// through as its raw JSON so nothing is silently dropped.
-func commandText(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	return string(raw)
-}
-
-// streamCommandTranslator adapts the webapp's Layer-2 client command JSON into
-// the FrontendCommand the shared frontend handler dispatches, for the
-// per-session /stream WebSocket. The webapp features that regressed under the
-// cutover (set-permission-mode, set-model, queue overrides, replay-request,
-// shutdown) become loud no-ops rather than silent drops. An undecodable frame
-// surfaces an error so the frontend read loop logs and continues.
-func (s *Server) streamCommandTranslator(workspace string) frontend.CommandTranslator {
+// frontendCommandTranslator decodes an inbound FrontendCommand protojson frame
+// on the per-session /stream WebSocket (command-strict, S9). It stamps the
+// scoped workspace only when the command omits it, so the webapp can send a
+// bare-workspace command on a session-scoped stream and still route correctly.
+// A malformed frame surfaces an error (the frontend read loop logs it and
+// continues) rather than being silently dropped.
+func (s *Server) frontendCommandTranslator(workspace string) frontend.CommandTranslator {
 	return func(raw []byte) (*frontendv1.FrontendCommand, bool, error) {
-		cmd, err := protocol.DecodeCommand(raw)
-		if err != nil {
-			return nil, false, err
+		cmd := &frontendv1.FrontendCommand{}
+		if err := protojson.Unmarshal(raw, cmd); err != nil {
+			return nil, false, fmt.Errorf("server: stream: decode FrontendCommand: %w", err)
 		}
-		if cmd == nil {
-			// Unknown-but-well-formed type: forward-compat, drop quietly.
-			return nil, false, nil
+		if cmd.GetWorkspace() == "" {
+			cmd.Workspace = workspace
 		}
-		switch cmd.Type {
-		case "user-message":
-			return &frontendv1.FrontendCommand{
-				Workspace: workspace,
-				RequestId: cmd.RequestID,
-				Command: &frontendv1.FrontendCommand_SubmitPrompt{
-					SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: commandText(cmd.Content)},
-				},
-			}, true, nil
-		case "interrupt":
-			return &frontendv1.FrontendCommand{
-				Workspace: workspace,
-				RequestId: cmd.RequestID,
-				Command:   &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{Hard: false}},
-			}, true, nil
-		case "permission-decision":
-			allow := cmd.Decision != nil && cmd.Decision.Behavior == "allow"
-			deny := ""
-			if cmd.Decision != nil {
-				deny = cmd.Decision.Message
-			}
-			return &frontendv1.FrontendCommand{
-				Workspace: workspace,
-				RequestId: cmd.RequestID,
-				Command: &frontendv1.FrontendCommand_PermissionAnswer{
-					PermissionAnswer: &frontendv1.PermissionAnswerCmd{
-						PermissionRequestId: cmd.RequestID,
-						Allow:               allow,
-						DenyMessage:         deny,
-					},
-				},
-			}, true, nil
-		case "client-log":
-			s.logf("server: stream client-log ws=%s level=%s: %s", workspace, cmd.Level, cmd.Message)
-			return nil, false, nil
-		default:
-			// set-permission-mode, set-model, queue-run-now, queue-cancel,
-			// replay-request, shutdown, refresh-*: regressed to loud no-ops.
-			s.logf("server: SUPERSEDED (S7): %s not routed over the UDS driver plane (ws=%s)", cmd.Type, workspace)
-			return nil, false, nil
-		}
+		return cmd, true, nil
 	}
 }
 
