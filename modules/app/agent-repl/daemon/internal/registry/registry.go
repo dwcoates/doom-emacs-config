@@ -45,6 +45,14 @@ type Record struct {
 	// deliberately leaves records non-terminal so they rehydrate.
 	Terminal    bool   `json:"terminal,omitempty"`
 	DeathReason string `json:"death_reason,omitempty"`
+	// LastSeq is the highest agent-shim store seq the daemon has durably
+	// observed for this session — the shimclient replay high-water mark
+	// (design §4.4). Persisting it here (rather than in the shimclient,
+	// which persists nothing itself) is what lets a restarted daemon
+	// re-Subscribe from where it left off and reattach without re-replaying
+	// or losing events. Zero means "never subscribed"; a fresh subscribe
+	// from seq 0 then replays the whole session. See server.RegistrySeqStore.
+	LastSeq uint64 `json:"last_seq,omitempty"`
 }
 
 // fileShape is the on-disk JSON document.
