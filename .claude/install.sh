@@ -193,10 +193,14 @@ GITHOOKS_DIR="$(_canonpath "$SCRIPT_DIR/../.githooks")"
 # Marker identifying our managed pre-commit hook so install/uninstall can
 # refresh or remove it without touching a foreign pre-commit hook.
 PRECOMMIT_MARKER="AGENT_REPL_MANAGED_HOOK: agent-repl-precommit"
-# Legacy marker from before the agent-repl -> agent-repl rename; installed
+# Legacy marker from before the claude-repl -> agent-repl rename; installed
 # copies in existing repos still carry it, so refresh/uninstall must keep
-# recognizing it as managed rather than warning "foreign".
-PRECOMMIT_MARKER_LEGACY="AGENT_REPL_MANAGED_HOOK: agent-repl-precommit"
+# recognizing it as managed rather than warning "foreign".  (The blanket
+# rename had rewritten this constant to the CURRENT spelling, which made it
+# a duplicate: every pre-rename installed hook was then misreported as
+# foreign and never refreshed, silently freezing the ERT gate at whatever
+# copy predated the rename.)
+PRECOMMIT_MARKER_LEGACY="CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit"
 
 # Return 0 iff FILE carries either the current or the legacy managed marker.
 _is_managed_precommit() {
