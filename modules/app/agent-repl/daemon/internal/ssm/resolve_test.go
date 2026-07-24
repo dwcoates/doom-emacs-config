@@ -146,8 +146,8 @@ func TestResolvePrecedence(t *testing.T) {
 // winner with live background tasks promotes; without tasks it stays idle.
 func TestResolveIdleAsyncPromotion(t *testing.T) {
 	tests := []struct {
-		name     string
-		tasks    []string // sequence of task signals
+		name      string
+		tasks     []string // sequence of task signals
 		wantState frontendv1.RenderState
 		wantCount int64
 	}{
