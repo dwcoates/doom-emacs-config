@@ -1,6 +1,6 @@
 // Package frontend is the daemon's frontend surface. It serves
 // agentshim.frontend.v1 frames as protojson over a UDS listener (Emacs) and a
-// WebSocket endpoint (webapp), translates internal agentshim.core.v1 /
+// WebSocket endpoint (webapp), CURATES internal agentshim.core.v1 /
 // agentshim.data.v1 events into the resolved frontend vocabulary, and
 // dispatches inbound FrontendCommands with CommandAcks.
 //
@@ -9,60 +9,42 @@
 // and fan-out; commands.go owns inbound dispatch.
 //
 // ---------------------------------------------------------------------------
-// ConversationDelta item vocabulary (the contract the webapp adapter consumes)
+// ConversationDelta item vocabulary (the S9 recomposition)
 // ---------------------------------------------------------------------------
 //
-// ConversationDelta.items is a repeated google.protobuf.Struct. Each Struct is
-// ONE rendered item the webapp's state-adapter (webapp/src/state-adapter.ts,
-// `buildConversationItem`/`buildToolItem`) materializes into a store
-// ConversationItem. That receiving contract is ALREADY LOCKED by merged webapp
-// tests; this file is the emitting half that matches it. Every item carries a
-// "kind" discriminator (NOT the old "type"/"role" vocabulary), and every field
-// name is camelCase — protojson serializes the surrounding frame with default
-// lowerCamelCase names, and the Struct interiors are authored camelCase here.
+// ConversationDelta.items is a repeated frontendv1.ConversationItem: a THIN
+// envelope (uuid / ts_ms / request_id) around the typed agent payload, carried
+// through into the matching oneof arm. translate.go is a CURATOR, not a
+// re-encoder: it selects WHICH store events carry visible conversation content
+// and passes the typed data.v1 payload through UNCHANGED — it never re-types a
+// payload into a webapp-specific struct vocabulary. Frontends render the typed
+// payload; they never re-interpret facts the daemon already resolved.
 //
-// The closed set of kinds and their fields (required unless noted optional):
+// Payload → ConversationItem arm (the closed curated set):
 //
-//	user-turn        a user prompt bubble
-//	  kind, requestId, content(array of ContentBlock-shaped structs), ts,
-//	  origin(optional)
-//	text             a complete assistant/user text block
-//	  kind, blockId, messageId, text, done(true — store-round-tripped), ts,
-//	  parentToolUseId(optional), error(optional)
-//	thinking         a complete extended-thinking block
-//	  kind, blockId, messageId, text, done(true), signature(optional),
-//	  parentToolUseId(optional)
-//	tool             a tool call card (its tool_use, and — on the paired
-//	                 tool_result — its result)
-//	  kind, toolUseId, toolName, messageId, ts, inputJson, inputDone,
-//	  input(optional object), result(optional {isError, content}),
-//	  resultTs(optional), parentToolUseId(optional), …
-//	result           an end-of-turn marker
-//	  kind, subtype, durationMs, sincePrevFinalMs, numTurns, totalCostUsd,
-//	  usage(object, snake_case interior), isError, resultText(optional),
-//	  context(null ok — omitted here)
-//	compact-boundary a context-compaction boundary
-//	  kind, trigger("auto"|"manual"), preTokens, postTokens
-//	error            a surfaced API error
-//	  kind, code, message, recoverable
-//	retry            an API retry-in-progress notice
-//	  kind, attempt, reason, fatal
-//	system           a system note (kind, subtype) — not emitted by this file
-//	permission       a permission prompt — sourced from the control plane, not
-//	                 this file
+//	AssistantMessage / AssistantLine   assistant_message (ApiAssistantMessage)
+//	UserMessage / UserLine             user_message      (ApiUserMessage)
+//	ResultMessage                      result            (ResultMessage)
+//	CompactBoundary (stream)           compact_boundary  (CompactBoundary)
+//	SystemLine.CompactBoundary (disk)  compact_boundary_line (CompactBoundaryLine)
+//	SystemLine.ApiError (disk)         api_error         (ApiErrorLine)
 //
-// Reconciliation contract: text/thinking items carry blockId = `${uuid}:${blockIndex}`
-// and messageId = uuid, matching the TypingDelta preview key (state-adapter's
-// typingEffect derives the same `${uuid}:${blockIndex}`). tool items key on
-// toolUseId. A TypingDelta preview is REPLACED when the ConversationDelta item
-// for that block arrives.
+// The tool_use / tool_result blocks ride INSIDE their carrying message: a
+// tool call's tool_use block travels in the assistant_message item and its
+// tool_result block travels in the user_message item — two items the webapp
+// merges by tool_use_id (the old two-item behavior, preserved). A payload with
+// no visual value (an empty message, a known-but-non-conversational stream arm,
+// a metadata transcript line) is simply not pushed rather than emitted empty.
+//
+// Reconciliation contract: a message item's uuid is the claude message uuid the
+// TypingDelta previews key on (state-adapter derives `${uuid}:${blockIndex}`);
+// a permission item's uuid is the permission request_id (sourced from the
+// control plane in sinks.go / driver.go, not this file). A TypingDelta preview
+// is REPLACED when the ConversationDelta item for that message arrives.
 //
 // Detached-task lifecycle is NOT a conversation item: it flows via TaskCatalog
 // (BuildTaskCatalog), which the webapp roster renders. The webapp has no `task`
 // conversation kind, so TaskStarted/TaskEnded route nothing here.
-//
-// Fields whose source value is absent are omitted from the Struct (protojson
-// then omits them too) rather than emitted as zero values.
 package frontend
 
 import (
@@ -74,19 +56,6 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
-)
-
-// Conversation item kind discriminators (the webapp's ConversationItem union).
-const (
-	itemKindUserTurn        = "user-turn"
-	itemKindText            = "text"
-	itemKindThinking        = "thinking"
-	itemKindTool            = "tool"
-	itemKindResult          = "result"
-	itemKindCompactBoundary = "compact-boundary"
-	itemKindError           = "error"
-	itemKindRetry           = "retry"
 )
 
 // ---------------------------------------------------------------------------
@@ -134,39 +103,30 @@ func DegradedNoticeFrame(n *frontendv1.DegradedNotice) *frontendv1.FrontendFrame
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_DegradedNotice{DegradedNotice: n}}
 }
 
+// SessionInitViewFrame wraps a SessionInitView (S9): the session's retained
+// SystemInit (slash commands, tools, skills, model list).
+func SessionInitViewFrame(v *frontendv1.SessionInitView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_SessionInit{SessionInit: v}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------
 
-// TypingDeltaFromContentDelta maps a core.ContentDelta to the ephemeral
-// TypingDelta relay. It returns nil for delta arms that carry no visible typing
-// preview (signature deltas are cryptographic, not display text) — a designed
-// classification, not a swallowed value: the block is still delivered in full
-// via the ConversationDelta round-trip.
+// TypingDeltaFromContentDelta relays a core.ContentDelta as the ephemeral
+// TypingDelta preview, embedding the delta UNCHANGED (S9): the frontend keys on
+// delta.uuid/delta.block_index and reconciles against the ConversationDelta
+// round-trip. It is a faithful passthrough — the curation of what streams lives
+// upstream (the shim only emits deltas worth previewing), so this layer never
+// re-types the delta into per-arm strings.
 func TypingDeltaFromContentDelta(workspace, sessionID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
 	if cd == nil {
 		return nil
 	}
-	var kind, delta string
-	switch d := cd.GetDelta().(type) {
-	case *corev1.ContentDelta_Text:
-		kind, delta = "text", d.Text
-	case *corev1.ContentDelta_Thinking:
-		kind, delta = "thinking", d.Thinking
-	case *corev1.ContentDelta_InputJson:
-		kind, delta = "input_json", d.InputJson
-	case *corev1.ContentDelta_Signature:
-		return nil // signature: no visible typing preview
-	default:
-		return nil
-	}
 	return &frontendv1.TypingDelta{
-		Workspace:  workspace,
-		SessionId:  sessionID,
-		Uuid:       cd.GetUuid(),
-		BlockIndex: cd.GetBlockIndex(),
-		Kind:       kind,
-		Delta:      delta,
+		Workspace: workspace,
+		SessionId: sessionID,
+		Delta:     cd,
 	}
 }
 
@@ -190,14 +150,14 @@ func DegradedNoticeFromState(ds *corev1.DegradedState, atMs int64) *frontendv1.D
 }
 
 // ---------------------------------------------------------------------------
-// Events -> ConversationDelta items
+// Events -> ConversationDelta items (the curator)
 // ---------------------------------------------------------------------------
 
-// ConversationDeltaFromEvent translates one core.Event into a ConversationDelta
-// carrying the rendered items for that event, or nil when the event yields no
-// conversation content (a turn/task-lifecycle event, or a known-but-non-
-// conversational vendor payload — those feed WorkspaceState/SessionView/
-// TaskCatalog instead).
+// ConversationDeltaFromEvent curates one core.Event into a ConversationDelta
+// carrying the typed ConversationItems for that event, or nil when the event
+// yields no visible conversation content (a turn/task-lifecycle event, or a
+// known-but-non-conversational vendor payload — those feed WorkspaceState/
+// SessionView/TaskCatalog instead).
 //
 // It hard-errors (no silent fallback) when a vendor payload cannot be
 // unmarshaled or carries a type URL unknown to the compiled schema set — those
@@ -206,7 +166,7 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 	if ev == nil {
 		return nil, nil
 	}
-	var items []*structpb.Struct
+	var items []*frontendv1.ConversationItem
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_Vendor:
 		vitems, err := conversationItemsFromVendor(p.Vendor, ev.GetProducedAtMs(), ev.GetRequestId())
@@ -232,12 +192,12 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 }
 
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
-// conversation items. It handles both observation planes: the stream plane
-// (ClaudeStreamMessage and its bare inner messages) and the file plane
-// (TranscriptLine). producedAtMs stamps the item `ts` on the stream plane;
-// transcript lines prefer their own on-disk envelope timestamp. requestID is
-// the Event's control-request correlation, carried onto user-turn items.
-func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*structpb.Struct, error) {
+// curated conversation items. It handles both observation planes: the stream
+// plane (ClaudeStreamMessage and its bare inner messages) and the file plane
+// (TranscriptLine). producedAtMs stamps ts_ms on the stream plane; transcript
+// lines prefer their own on-disk envelope timestamp. requestID is the Event's
+// control-request correlation, carried onto every item's envelope.
+func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -245,31 +205,30 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 	if err != nil {
 		return nil, fmt.Errorf("frontend: unmarshal vendor Any (type=%q): %w", a.GetTypeUrl(), err)
 	}
-	streamTs := tsFromMs(producedAtMs)
 	switch m := msg.(type) {
 	case *datav1.ClaudeStreamMessage:
 		switch inner := m.GetMsg().(type) {
 		case *datav1.ClaudeStreamMessage_Assistant:
-			return assistantItems(inner.Assistant, streamTs), nil
+			return assistantItems(inner.Assistant, producedAtMs, requestID), nil
 		case *datav1.ClaudeStreamMessage_User:
-			return userItems(inner.User, streamTs, requestID), nil
+			return userItems(inner.User, producedAtMs, requestID), nil
 		case *datav1.ClaudeStreamMessage_Result:
-			return resultItems(inner.Result), nil
+			return resultItems(inner.Result, producedAtMs, requestID), nil
 		case *datav1.ClaudeStreamMessage_CompactBoundary:
-			return compactBoundaryStreamItems(inner.CompactBoundary), nil
+			return compactBoundaryItems(inner.CompactBoundary, producedAtMs, requestID), nil
 		default:
 			return nil, nil // known envelope, non-conversational arm
 		}
 	case *datav1.AssistantMessage:
-		return assistantItems(m, streamTs), nil
+		return assistantItems(m, producedAtMs, requestID), nil
 	case *datav1.UserMessage:
-		return userItems(m, streamTs, requestID), nil
+		return userItems(m, producedAtMs, requestID), nil
 	case *datav1.ResultMessage:
-		return resultItems(m), nil
+		return resultItems(m, producedAtMs, requestID), nil
 	case *datav1.CompactBoundary:
-		return compactBoundaryStreamItems(m), nil
+		return compactBoundaryItems(m, producedAtMs, requestID), nil
 	case *datav1.TranscriptLine:
-		return transcriptLineItems(m, streamTs, requestID), nil
+		return transcriptLineItems(m, producedAtMs, requestID), nil
 	default:
 		return nil, nil // known data.v1 message, not rendered as conversation
 	}
@@ -277,334 +236,130 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 
 // --- transcript (file) plane -----------------------------------------------
 
-// transcriptLineItems renders the conversation-bearing on-disk line types.
-func transcriptLineItems(tl *datav1.TranscriptLine, streamTs, requestID string) []*structpb.Struct {
+// transcriptLineItems curates the conversation-bearing on-disk line types.
+func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) []*frontendv1.ConversationItem {
 	switch line := tl.GetLine().(type) {
 	case *datav1.TranscriptLine_Assistant:
 		al := line.Assistant
 		env := al.GetEnvelope()
-		return assistantContentItems(env.GetUuid(), transcriptTs(env, streamTs), al.GetMessage().GetContent())
+		return assistantMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, al.GetMessage())
 	case *datav1.TranscriptLine_User:
 		ul := line.User
 		env := ul.GetEnvelope()
-		return userContentItems(env.GetUuid(), transcriptTs(env, streamTs), requestID, ul.GetMessage())
+		return userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, ul.GetMessage())
 	case *datav1.TranscriptLine_System:
-		return systemLineItems(line.System)
+		return systemLineItems(line.System, producedAtMs, requestID)
 	default:
 		return nil // non-conversational metadata line
 	}
 }
 
-// systemLineItems renders the system-line subtypes the webapp has a
-// conversation kind for: compaction boundaries, and API errors/retries.
-func systemLineItems(sl *datav1.SystemLine) []*structpb.Struct {
+// systemLineItems curates the system-line subtypes the webapp renders:
+// compaction boundaries and API errors/retries. Their typed payloads pass
+// through — the webapp splits a mid-backoff api_error into a retry chip from
+// the ApiErrorLine's own retry fields, so no daemon re-typing is needed.
+func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*frontendv1.ConversationItem {
+	uuid := sl.GetEnvelope().GetUuid()
 	switch sub := sl.GetSubtype().(type) {
 	case *datav1.SystemLine_CompactBoundary:
-		if it := compactBoundaryLineItem(sub.CompactBoundary); it != nil {
-			return []*structpb.Struct{it}
+		if sub.CompactBoundary == nil {
+			return nil
 		}
+		return []*frontendv1.ConversationItem{{
+			Uuid: uuid, TsMs: tsMs, RequestId: requestID,
+			Item: &frontendv1.ConversationItem_CompactBoundaryLine{CompactBoundaryLine: sub.CompactBoundary},
+		}}
 	case *datav1.SystemLine_ApiError:
-		if it := apiErrorItem(sub.ApiError); it != nil {
-			return []*structpb.Struct{it}
+		if sub.ApiError == nil {
+			return nil
 		}
+		return []*frontendv1.ConversationItem{{
+			Uuid: uuid, TsMs: tsMs, RequestId: requestID,
+			Item: &frontendv1.ConversationItem_ApiError{ApiError: sub.ApiError},
+		}}
+	default:
+		return nil
 	}
-	return nil
 }
 
-// --- assistant / user content ----------------------------------------------
+// --- assistant / user / result / compaction items --------------------------
 
-func assistantItems(a *datav1.AssistantMessage, ts string) []*structpb.Struct {
+func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if a == nil {
 		return nil
 	}
-	return assistantContentItems(a.GetUuid(), ts, a.GetMessage().GetContent())
+	return assistantMessageItem(a.GetUuid(), tsMs, requestID, a.GetMessage())
 }
 
-// assistantContentItems renders an assistant message's content blocks. An
-// assistant message carries text, thinking, and tool_use blocks; other block
-// kinds do not occur on the assistant side and yield no item.
-func assistantContentItems(uuid, ts string, content []*datav1.ContentBlock) []*structpb.Struct {
-	var out []*structpb.Struct
-	for i, block := range content {
-		switch b := block.GetBlock().(type) {
-		case *datav1.ContentBlock_Text:
-			out = append(out, textItem(uuid, i, b.Text.GetText(), ts))
-		case *datav1.ContentBlock_Thinking:
-			out = append(out, thinkingItem(uuid, i, b.Thinking))
-		case *datav1.ContentBlock_ToolUse:
-			out = append(out, toolUseItem(uuid, b.ToolUse, ts))
-		}
+// assistantMessageItem passes an ApiAssistantMessage (text / thinking / tool_use
+// blocks) through into the assistant_message arm. An assistant message with no
+// content blocks has no visual value and is dropped rather than pushed empty.
+func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiAssistantMessage) []*frontendv1.ConversationItem {
+	if msg == nil || len(msg.GetContent()) == 0 {
+		return nil
 	}
-	return out
+	return []*frontendv1.ConversationItem{{
+		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
+		Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
+	}}
 }
 
-func userItems(u *datav1.UserMessage, ts, requestID string) []*structpb.Struct {
+func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if u == nil {
 		return nil
 	}
-	return userContentItems(u.GetUuid(), ts, requestID, u.GetMessage())
+	return userMessageItem(u.GetUuid(), tsMs, requestID, u.GetMessage())
 }
 
-// userContentItems splits a user message into its conversation items: a
-// tool_result block becomes a `tool` item (paired to its tool_use by
-// toolUseId), and the remaining content (a prompt string, text, or other
-// blocks) becomes a single `user-turn` bubble. A pure tool-result feedback
-// message thus yields only tool items and no user-turn.
-func userContentItems(uuid, ts, requestID string, msg *datav1.ApiUserMessage) []*structpb.Struct {
+// userMessageItem passes an ApiUserMessage (a prompt string, text, or
+// tool_result blocks) through into the user_message arm. A user message with no
+// content (empty string, no blocks) has no visual value and is dropped; a pure
+// tool_result feedback message still carries its blocks, so it is pushed and the
+// webapp renders only the tool result (no user bubble).
+func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiUserMessage) []*frontendv1.ConversationItem {
+	if !hasUserContent(msg) {
+		return nil
+	}
+	return []*frontendv1.ConversationItem{{
+		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: msg},
+	}}
+}
+
+// hasUserContent reports whether a user message carries any renderable content:
+// a non-empty content string or at least one content block.
+func hasUserContent(msg *datav1.ApiUserMessage) bool {
 	switch c := msg.GetContent().(type) {
 	case *datav1.ApiUserMessage_ContentString:
-		if c.ContentString == "" {
-			return nil
-		}
-		content := []any{map[string]any{"type": "text", "text": c.ContentString}}
-		return []*structpb.Struct{userTurnItem(requestID, content, ts)}
+		return c.ContentString != ""
 	case *datav1.ApiUserMessage_ContentBlocks:
-		var tools []*structpb.Struct
-		var content []any
-		for _, block := range c.ContentBlocks.GetBlocks() {
-			if tr, ok := block.GetBlock().(*datav1.ContentBlock_ToolResult); ok {
-				tools = append(tools, toolResultItem(uuid, tr.ToolResult, ts))
-				continue
-			}
-			if cb := userContentBlock(block); cb != nil {
-				content = append(content, cb)
-			}
-		}
-		var out []*structpb.Struct
-		if len(content) > 0 {
-			out = append(out, userTurnItem(requestID, content, ts))
-		}
-		out = append(out, tools...)
-		return out
+		return len(c.ContentBlocks.GetBlocks()) > 0
 	default:
-		return nil
+		return false
 	}
 }
 
-// userContentBlock shapes one non-tool_result user block into a ContentBlock
-// struct for a user-turn's `content` array. Text blocks map to the API
-// {type:"text", text} shape; any other block is preserved by its type name so
-// it is never silently dropped from the prompt bubble.
-func userContentBlock(block *datav1.ContentBlock) map[string]any {
-	switch b := block.GetBlock().(type) {
-	case *datav1.ContentBlock_Text:
-		return map[string]any{"type": "text", "text": b.Text.GetText()}
-	case *datav1.ContentBlock_Image:
-		m := map[string]any{"type": "image"}
-		if src := b.Image.GetSource(); src != nil {
-			m["media_type"] = src.GetMediaType()
-		}
-		return m
-	case *datav1.ContentBlock_ToolUse:
-		return map[string]any{"type": "tool_use", "id": b.ToolUse.GetId(), "name": b.ToolUse.GetName()}
-	default:
-		return nil
-	}
-}
-
-// --- item builders ----------------------------------------------------------
-
-func userTurnItem(requestID string, content []any, ts string) *structpb.Struct {
-	return mustStruct(map[string]any{
-		"kind":      itemKindUserTurn,
-		"requestId": requestID,
-		"content":   content,
-		"ts":        ts,
-	})
-}
-
-func textItem(uuid string, idx int, text, ts string) *structpb.Struct {
-	return mustStruct(map[string]any{
-		"kind":      itemKindText,
-		"blockId":   blockID(uuid, idx),
-		"messageId": uuid,
-		"text":      text,
-		// A store-round-tripped block is complete: it is delivered whole, never
-		// mid-stream, so it always renders done (its TypingDelta preview, keyed
-		// by the same blockId, is replaced by this item).
-		"done": true,
-		"ts":   ts,
-	})
-}
-
-func thinkingItem(uuid string, idx int, t *datav1.ThinkingBlock) *structpb.Struct {
-	m := map[string]any{
-		"kind":      itemKindThinking,
-		"blockId":   blockID(uuid, idx),
-		"messageId": uuid,
-		"text":      t.GetThinking(),
-		"done":      true,
-	}
-	if sig := t.GetSignature(); sig != "" {
-		m["signature"] = sig
-	}
-	return mustStruct(m)
-}
-
-func toolUseItem(uuid string, tu *datav1.ToolUseBlock, ts string) *structpb.Struct {
-	m := map[string]any{
-		"kind":      itemKindTool,
-		"toolUseId": tu.GetId(),
-		"toolName":  tu.GetName(),
-		"messageId": uuid,
-		"ts":        ts,
-		// The input arrived whole with the round-tripped message.
-		"inputDone": true,
-	}
-	if in := tu.GetInput(); in != nil {
-		m["input"] = in.AsMap()
-	} else {
-		m["input"] = map[string]any{}
-	}
-	return mustStruct(m)
-}
-
-// toolResultItem renders a tool_result block as a `tool` item carrying the
-// call's result, keyed to its tool_use by toolUseId (the webapp store's join
-// key). toolName is empty: a bare tool_result does not carry the tool's name,
-// and the store already holds it on the tool_use item this reconciles onto.
-func toolResultItem(uuid string, tr *datav1.ToolResultBlock, ts string) *structpb.Struct {
-	result := map[string]any{"isError": tr.GetIsError()}
-	switch c := tr.GetContent().(type) {
-	case *datav1.ToolResultBlock_ContentString:
-		result["content"] = c.ContentString
-	case *datav1.ToolResultBlock_ContentBlocks:
-		var blocks []any
-		for _, bl := range c.ContentBlocks.GetBlocks() {
-			blocks = append(blocks, toolResultContentBlock(bl))
-		}
-		result["content"] = blocks
-	default:
-		// No content arm set: an empty result body, not an error to swallow.
-		result["content"] = ""
-	}
-	return mustStruct(map[string]any{
-		"kind":      itemKindTool,
-		"toolUseId": tr.GetToolUseId(),
-		"toolName":  "",
-		"messageId": uuid,
-		"ts":        ts,
-		"inputDone": true,
-		"resultTs":  ts,
-		"result":    result,
-	})
-}
-
-// toolResultContentBlock shapes one nested tool-result block into the webapp's
-// {type:"text", text} result-content entry. A non-text nested block is labeled
-// by its kind rather than dropped (the webapp result.content type is text-only,
-// so a faithful non-text rendering has no home; the label keeps it visible).
-func toolResultContentBlock(block *datav1.ContentBlock) map[string]any {
-	switch b := block.GetBlock().(type) {
-	case *datav1.ContentBlock_Text:
-		return map[string]any{"type": "text", "text": b.Text.GetText()}
-	case *datav1.ContentBlock_Image:
-		return map[string]any{"type": "text", "text": "[image block]"}
-	default:
-		return map[string]any{"type": "text", "text": "[non-text block]"}
-	}
-}
-
-func resultItems(r *datav1.ResultMessage) []*structpb.Struct {
+// resultItems passes an end-of-turn ResultMessage through into the result arm.
+func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if r == nil {
 		return nil
 	}
-	m := map[string]any{
-		"kind":       itemKindResult,
-		"subtype":    resultSubtypeString(r.GetSubtype()),
-		"durationMs": float64(r.GetDurationMs()),
-		// sincePrevFinalMs measures from the session's PREVIOUS turn boundary,
-		// which is cross-event session state this stateless per-event translator
-		// does not hold. Emit 0; the store re-derives the real figure from its
-		// own stamps (see store.ts `result` reducer) on adoption.
-		"sincePrevFinalMs": float64(0),
-		"numTurns":         float64(r.GetNumTurns()),
-		"totalCostUsd":     r.GetTotalCostUsd(),
-		"usage":            usageStruct(r.GetUsage()),
-		"isError":          r.GetIsError(),
-		// context is likewise session state (last-reported size + delta): omit
-		// it so the adapter reads null, exactly as it does for a turn whose size
-		// is unknown.
-	}
-	if txt := r.GetResult(); txt != "" {
-		m["resultText"] = txt
-	}
-	return []*structpb.Struct{mustStruct(m)}
+	return []*frontendv1.ConversationItem{{
+		TsMs: tsMs, RequestId: requestID,
+		Item: &frontendv1.ConversationItem_Result{Result: r},
+	}}
 }
 
-// usageStruct shapes a data.v1 Usage into the webapp's snake_case Usage object
-// (the API-shaped token block the store reads verbatim). The cache fields are
-// omitted when zero, matching the absent-fields-omitted convention.
-func usageStruct(u *datav1.Usage) map[string]any {
-	m := map[string]any{
-		"input_tokens":  float64(u.GetInputTokens()),
-		"output_tokens": float64(u.GetOutputTokens()),
-	}
-	if v := u.GetCacheReadInputTokens(); v != 0 {
-		m["cache_read_input_tokens"] = float64(v)
-	}
-	if v := u.GetCacheCreationInputTokens(); v != 0 {
-		m["cache_creation_input_tokens"] = float64(v)
-	}
-	return m
-}
-
-// compactBoundaryStreamItems renders the STREAM CompactBoundary. The stream
-// boundary carries the pre-compaction size but NOT the post-compaction one
-// (only the on-disk CompactBoundaryLine's metadata records post_tokens), so
-// postTokens is 0 here — honestly unknown, never a fabricated estimate.
-func compactBoundaryStreamItems(cb *datav1.CompactBoundary) []*structpb.Struct {
+// compactBoundaryItems passes a STREAM CompactBoundary through into the
+// compact_boundary arm (the on-disk twin uses the compact_boundary_line arm).
+func compactBoundaryItems(cb *datav1.CompactBoundary, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if cb == nil {
 		return nil
 	}
-	return []*structpb.Struct{mustStruct(map[string]any{
-		"kind":       itemKindCompactBoundary,
-		"trigger":    compactTriggerString(cb.GetTrigger()),
-		"preTokens":  float64(cb.GetPreTokens()),
-		"postTokens": float64(0),
-	})}
-}
-
-// compactBoundaryLineItem renders the on-disk CompactBoundaryLine, whose
-// metadata records both the pre- and post-compaction sizes.
-func compactBoundaryLineItem(cbl *datav1.CompactBoundaryLine) *structpb.Struct {
-	md := cbl.GetCompactMetadata()
-	return mustStruct(map[string]any{
-		"kind":       itemKindCompactBoundary,
-		"trigger":    normalizeTrigger(md.GetTrigger()),
-		"preTokens":  float64(md.GetPreTokens()),
-		"postTokens": float64(md.GetPostTokens()),
-	})
-}
-
-// apiErrorItem renders an on-disk ApiErrorLine as either a `retry` item (an
-// in-progress backoff: the SDK is retrying) or an `error` item (a terminal API
-// failure with no further retry). The split keys on the line's retry state.
-func apiErrorItem(ae *datav1.ApiErrorLine) *structpb.Struct {
-	detail := ae.GetError()
-	reason := detail.GetMessage()
-	if reason == "" {
-		reason = detail.GetFormatted()
-	}
-	attempt := ae.GetRetryAttempt()
-	if attempt > 0 || ae.GetRetryInMs() > 0 {
-		fatal := detail.GetIsNetworkDown()
-		if max := ae.GetMaxRetries(); max > 0 && attempt >= max {
-			fatal = true
-		}
-		return mustStruct(map[string]any{
-			"kind":    itemKindRetry,
-			"attempt": float64(attempt),
-			"reason":  reason,
-			"fatal":   fatal,
-		})
-	}
-	return mustStruct(map[string]any{
-		"kind":        itemKindError,
-		"code":        "api_error",
-		"message":     reason,
-		"recoverable": false,
-	})
+	return []*frontendv1.ConversationItem{{
+		TsMs: tsMs, RequestId: requestID,
+		Item: &frontendv1.ConversationItem_CompactBoundary{CompactBoundary: cb},
+	}}
 }
 
 // ---------------------------------------------------------------------------
@@ -709,7 +464,8 @@ func applyResultUsage(view *frontendv1.SessionView, a *anypb.Any) {
 }
 
 // ---------------------------------------------------------------------------
-// Enum/value-to-string mappings (the frontend vocabulary uses lowercase strings)
+// Enum/value-to-string mappings (the frontend TaskCatalog vocabulary uses
+// lowercase strings; conversation payloads carry their typed enums through)
 // ---------------------------------------------------------------------------
 
 func taskKindString(k corev1.TaskKind) string {
@@ -742,85 +498,19 @@ func terminalStatusString(s corev1.TerminalStatus) string {
 	}
 }
 
-// resultSubtypeString maps the data.v1 ResultSubtype to the webapp's subtype
-// string. The two budget/structured-output subtypes exceed the webapp's
-// declared ResultSubtype union (which the adapter adopts without validating);
-// emitting their faithful string is more honest than collapsing them onto a
-// wrong neighbor.
-func resultSubtypeString(s datav1.ResultSubtype) string {
-	switch s {
-	case datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS:
-		return "success"
-	case datav1.ResultSubtype_RESULT_SUBTYPE_ERROR_DURING_EXECUTION:
-		return "error_during_execution"
-	case datav1.ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_TURNS:
-		return "error_max_turns"
-	case datav1.ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD:
-		return "error_max_budget_usd"
-	case datav1.ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES:
-		return "error_max_structured_output_retries"
-	default:
-		return ""
-	}
-}
-
-func compactTriggerString(t datav1.CompactTrigger) string {
-	switch t {
-	case datav1.CompactTrigger_COMPACT_TRIGGER_AUTO:
-		return "auto"
-	case datav1.CompactTrigger_COMPACT_TRIGGER_MANUAL:
-		return "manual"
-	default:
-		return ""
-	}
-}
-
-// normalizeTrigger passes through the on-disk trigger string ("auto"|"manual"),
-// mapping anything else to empty rather than guessing.
-func normalizeTrigger(t string) string {
-	switch t {
-	case "auto", "manual":
-		return t
-	default:
-		return ""
-	}
-}
-
 // ---------------------------------------------------------------------------
 // small helpers
 // ---------------------------------------------------------------------------
 
-// blockID is the stable block key `${uuid}:${blockIndex}` that both this item
-// and its TypingDelta preview share, so the store reconciles them.
-func blockID(uuid string, idx int) string {
-	return fmt.Sprintf("%s:%d", uuid, idx)
-}
-
-// tsFromMs formats a producer wall-clock (unix millis) as an RFC3339 stamp, or
-// "" when unset (0) — an absent stamp, not a fabricated one.
-func tsFromMs(ms int64) string {
-	if ms == 0 {
-		return ""
-	}
-	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
-}
-
-// transcriptTs prefers a transcript line's own on-disk envelope timestamp
-// (already ISO-8601), falling back to the Event's producer stamp.
-func transcriptTs(env *datav1.LineEnvelope, fallback string) string {
+// transcriptTsMs prefers a transcript line's own on-disk envelope timestamp
+// (ISO-8601), parsed to unix millis, falling back to the Event's producer stamp
+// when the envelope carries no timestamp or an unparseable one — the honest
+// producer stamp, never a fabricated one.
+func transcriptTsMs(env *datav1.LineEnvelope, fallbackMs int64) int64 {
 	if ts := env.GetTimestamp(); ts != "" {
-		return ts
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			return t.UnixMilli()
+		}
 	}
-	return fallback
-}
-
-// mustStruct builds a structpb.Struct from a JSON-compatible map. The inputs are
-// all constructed in this file from typed protos, so a failure is a programmer
-// error, not runtime data — hence the panic (loud, never a silent zero value).
-func mustStruct(m map[string]any) *structpb.Struct {
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		panic(fmt.Sprintf("frontend: build conversation item struct: %v", err))
-	}
-	return s
+	return fallbackMs
 }

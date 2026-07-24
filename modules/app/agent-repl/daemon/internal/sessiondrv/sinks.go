@@ -1,7 +1,6 @@
 package sessiondrv
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -161,7 +160,13 @@ func (c *consumer) Consume(ev *corev1.Event) {
 			c.push.PushTypingDelta(td)
 		}
 	case *corev1.Event_HeartbeatProgress:
-		c.push.PushTypingDelta(heartbeatTypingDelta(c.workspace, c.sessionID, p.HeartbeatProgress))
+		// The S9 TypingDelta carries only a core.v1.ContentDelta; a tool-progress
+		// heartbeat is not a ContentDelta and has no other frontend.v1 arm, so it
+		// is intentionally not relayed (a schema-forced drop, loud-logged once so
+		// the gap is visible rather than silent). It stays an EPHEMERAL event the
+		// store never persists, so nothing durable is lost.
+		c.logf("sessiondrv: heartbeat progress not relayed (no frontend.v1 arm under S9) session=%s tool=%s",
+			c.sessionID, p.HeartbeatProgress.GetToolUseId())
 	case *corev1.Event_Vendor:
 		if si := systemInitFromVendor(p.Vendor); si != nil {
 			c.mu.Lock()
@@ -232,21 +237,6 @@ func (c *consumer) resync(fromSeq uint64) {
 		if ev.GetVendor() != nil {
 			c.pushConversation(ev)
 		}
-	}
-}
-
-// heartbeatTypingDelta relays a tool-progress heartbeat as an ephemeral
-// TypingDelta of kind "progress" (task step 1: HeartbeatProgress -> typing). It
-// carries the tool_use_id as the uuid and the elapsed seconds as the delta so a
-// frontend that renders progress can, while one that does not ignores the
-// unknown kind (never crashes on it).
-func heartbeatTypingDelta(workspace, sessionID string, hp *corev1.HeartbeatProgress) *frontendv1.TypingDelta {
-	return &frontendv1.TypingDelta{
-		Workspace: workspace,
-		SessionId: sessionID,
-		Uuid:      hp.GetToolUseId(),
-		Kind:      "progress",
-		Delta:     fmt.Sprintf("%.0fs", hp.GetElapsedSeconds()),
 	}
 }
 

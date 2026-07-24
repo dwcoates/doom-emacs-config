@@ -11,12 +11,13 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // shortSock returns a unix-socket path short enough for the platform's
@@ -252,9 +253,23 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 		{"session_view", SessionViewFrame(&frontendv1.SessionView{Workspace: "w", Model: "m", TotalTokens: 9, TotalCostUsd: 1.5})},
 		{"conversation_delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{
 			Workspace: "w", SessionId: "s", ThroughSeq: 4,
-			Items: []*structpb.Struct{mustStructT(t, map[string]any{"type": "text", "text": "hi", "block_index": float64(0)})},
+			Items: []*frontendv1.ConversationItem{{
+				Uuid: "u1", TsMs: 5,
+				Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{
+					Content: []*datav1.ContentBlock{
+						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hi"}}},
+					},
+				}},
+			}},
 		})},
-		{"typing_delta", TypingDeltaFrame(&frontendv1.TypingDelta{Workspace: "w", Uuid: "u", Kind: "text", Delta: "ab"})},
+		{"typing_delta", TypingDeltaFrame(&frontendv1.TypingDelta{
+			Workspace: "w",
+			Delta:     &corev1.ContentDelta{Uuid: "u", BlockIndex: 0, Delta: &corev1.ContentDelta_Text{Text: "ab"}},
+		})},
+		{"session_init", SessionInitViewFrame(&frontendv1.SessionInitView{
+			Workspace: "w", SessionId: "s",
+			Init: &datav1.SystemInit{Model: "claude-x"},
+		})},
 		{"task_catalog", TaskCatalogFrame(&frontendv1.TaskCatalog{Workspace: "w", Tasks: []*frontendv1.TaskEntry{{TaskId: "t", Kind: "agent", Status: "running"}}})},
 		{"command_ack", CommandAckFrame(&frontendv1.CommandAck{RequestId: "r", Ok: true})},
 		{"degraded_notice", DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "c", Reason: "r", AtMs: 5})},
