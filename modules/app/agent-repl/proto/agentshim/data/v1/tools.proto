@@ -159,6 +159,10 @@ message ApiUsage {
   google.protobuf.Struct cache_creation = 5;
   google.protobuf.Struct server_tool_use = 6;
   string service_tier = 7;
+  // [corpus] observed on newer CC versions:
+  google.protobuf.ListValue iterations = 8;  // per-model iteration breakdown
+  string speed = 9;                          // e.g. "standard"
+  string inference_geo = 10;                 // e.g. "global"
 }
 
 // ---------------------------------------------------------------------------
