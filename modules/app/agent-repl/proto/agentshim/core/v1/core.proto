@@ -293,6 +293,22 @@ message PermissionResponse {
   string deny_message = 4;
 }
 
+// Daemon-composed permission state (the request plus its resolution
+// lifecycle), pushed to frontends as a conversation item. Lives beside the
+// request/response vocabulary it composes (S8/S9).
+message PermissionItem {
+  PermissionRequest request = 1;
+  enum Resolution {
+    RESOLUTION_UNSPECIFIED = 0;
+    RESOLUTION_PENDING = 1;
+    RESOLUTION_ALLOWED = 2;
+    RESOLUTION_DENIED = 3;
+    RESOLUTION_ABANDONED = 4;
+  }
+  Resolution resolution = 2;
+  string deny_message = 3;  // set when RESOLUTION_DENIED
+}
+
 message Heartbeat {
   int64 sent_at_ms = 1;
 }
