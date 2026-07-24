@@ -3226,123 +3226,106 @@ called and verifies the advice runs cleanly."
     (let ((result (agent-repl--workspace-message-body-advice "ok" 'success)))
       (should (equal (substring-no-properties result) "ok")))))
 
-;;;; ---- Tests: Redisplay-storm circuit breaker ----
+;;;; ---- Tests: fixed-height tab-bar livelock prevention ----
 
-(defmacro agent-repl-test--with-storm-state (&rest body)
-  "Run BODY with all storm-breaker state let-bound to a clean baseline.
-Baseline: watchdog armed (`auto-resize-tab-bars' t, heartbeat tick just
-fired), zero starved passes, zero trips, and `run-with-timer' stubbed to
-record its args in the anaphoric variable `scheduled' instead of
-creating a real timer."
-  (declare (indent 0))
-  `(let ((auto-resize-tab-bars t)
-         (agent-repl--storm-last-tick (float-time))
-         (agent-repl--storm-starved-passes 0)
-         (agent-repl--storm-trips 0)
-         (agent-repl--storm-saved-auto-resize nil)
-         (agent-repl--storm-reenable-timer nil)
-         (scheduled nil))
-     (ignore scheduled)
-     (cl-letf (((symbol-function 'run-with-timer)
-                (lambda (&rest args) (setq scheduled args) 'fake-timer)))
-       ,@body)))
+(ert-deftest agent-repl-test-retire-storm-watchdog-cancels-old-timer ()
+  "Hot reload cancels the old reactive watchdog heartbeat timer."
+  (let ((agent-repl--storm-tick-timer 'old-timer)
+        (agent-repl--timers '(other-timer old-timer))
+        (pre-redisplay-function nil)
+        (cancelled nil))
+    (cl-letf (((symbol-function 'timerp) (lambda (timer) (eq timer 'old-timer)))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer) (setq cancelled timer))))
+      (let ((result (agent-repl--retire-redisplay-storm-watchdog)))
+        (should (eq cancelled 'old-timer))
+        (should-not agent-repl--storm-tick-timer)
+        (should (equal agent-repl--timers '(other-timer)))
+        (should (plist-get result :timer-cancelled))))))
 
-(ert-deftest agent-repl-test-storm-watchdog-not-starved-no-count ()
-  "Watchdog does not count passes while the heartbeat tick is recent."
-  (agent-repl-test--with-storm-state
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should (= agent-repl--storm-starved-passes 0))))
+(ert-deftest agent-repl-test-retire-storm-watchdog-removes-old-hook ()
+  "Hot reload removes the old watchdog from `pre-redisplay-function'."
+  (let ((pre-redisplay-function nil)
+        (agent-repl--storm-tick-timer nil))
+    (add-function :after pre-redisplay-function
+                  #'agent-repl--redisplay-storm-watchdog)
+    (let ((result (agent-repl--retire-redisplay-storm-watchdog)))
+      (should (plist-get result :hook-present))
+      (should-not pre-redisplay-function))))
 
-(ert-deftest agent-repl-test-storm-watchdog-starved-counts ()
-  "Watchdog counts a pass when the heartbeat tick is starved."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-last-tick
-          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should (= agent-repl--storm-starved-passes 1))))
+(ert-deftest agent-repl-test-fixed-height-tab-bar-disables-native-resize ()
+  "Installation disables auto-resize and pins existing and future frames.
+This is the regression contract for the macOS 100%-CPU livelock:
+`redisplay_tab_bar' must never enter its dynamic height path."
+  (let ((auto-resize-tab-bars 'grow-only)
+        (default-frame-alist '((tab-bar-lines . 1) (width . 100)))
+        (frame-inhibit-implied-resize nil)
+        (tab-bar-format nil)
+        (tab-bar-show nil)
+        (tab-bar-close-button-show t)
+        (tab-bar-new-button-show t)
+        (frame-lines '((frame-a . 1) (frame-b . 3)))
+        (tab-bar-mode-arg nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'frame-list)
+               (lambda () '(frame-a frame-b)))
+              ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+              ((symbol-function 'frame-parameter)
+               (lambda (frame parameter)
+                 (and (eq parameter 'tab-bar-lines)
+                      (alist-get frame frame-lines))))
+              ((symbol-function 'set-frame-parameter)
+               (lambda (frame parameter value)
+                 (should (eq parameter 'tab-bar-lines))
+                 (setf (alist-get frame frame-lines) value)))
+              ((symbol-function 'tab-bar-mode)
+               (lambda (arg)
+                 (setq tab-bar-mode-arg arg)
+                 ;; Emulate Emacs 30.2: enabling the mode resets the future
+                 ;; frame default to one line.
+                 (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
+              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+               (lambda () '(:timer-cancelled nil :hook-present nil)))
+              ((symbol-function 'agent-repl--log)
+               (lambda (&rest args) (setq logged args)))
+              ((symbol-function 'run-with-timer)
+               (lambda (&rest _)
+                 (error "fixed-height install must not schedule recovery timers"))))
+      (agent-repl--install-fixed-height-tab-bar)
+      (should-not auto-resize-tab-bars)
+      (should (eq tab-bar-mode-arg 1))
+      (should (= (alist-get 'tab-bar-lines default-frame-alist)
+                 agent-repl--tabline-row-count))
+      (should (= (alist-get 'frame-a frame-lines)
+                 agent-repl--tabline-row-count))
+      (should (= (alist-get 'frame-b frame-lines)
+                 agent-repl--tabline-row-count))
+      (should (memq 'tab-bar-lines frame-inhibit-implied-resize))
+      (should (equal tab-bar-format
+                     '(agent-repl-workspace-tabline-formatted
+                       tab-bar-format-align-right
+                       agent-repl-current-workspace-name-segment)))
+      (should-not tab-bar-close-button-show)
+      (should-not tab-bar-new-button-show)
+      (should logged))))
 
-(ert-deftest agent-repl-test-storm-watchdog-below-threshold-no-trip ()
-  "Watchdog does not trip while the starved-pass count is below threshold."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-last-tick
-          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should auto-resize-tab-bars)))
-
-(ert-deftest agent-repl-test-storm-watchdog-trips-at-threshold ()
-  "Watchdog trips the breaker on the pass that reaches the threshold."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-last-tick
-          (- (float-time) (1+ agent-repl--storm-starvation-secs))
-          agent-repl--storm-starved-passes
-          (1- agent-repl--storm-pass-threshold))
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should-not auto-resize-tab-bars)))
-
-(ert-deftest agent-repl-test-storm-watchdog-inert-when-auto-resize-nil ()
-  "Watchdog is inert while `auto-resize-tab-bars' is already nil."
-  (agent-repl-test--with-storm-state
-    (setq auto-resize-tab-bars nil
-          agent-repl--storm-last-tick
-          (- (float-time) (1+ agent-repl--storm-starvation-secs)))
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should (= agent-repl--storm-starved-passes 0))))
-
-(ert-deftest agent-repl-test-storm-watchdog-inert-before-first-tick ()
-  "Watchdog is inert until the first heartbeat tick has fired."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-last-tick nil)
-    (agent-repl--redisplay-storm-watchdog nil)
-    (should (= agent-repl--storm-starved-passes 0))))
-
-(ert-deftest agent-repl-test-storm-trip-disables-auto-resize ()
-  "Trip nils `auto-resize-tab-bars' and saves the prior value."
-  (agent-repl-test--with-storm-state
-    (setq auto-resize-tab-bars 'grow-only)
-    (agent-repl--storm-trip)
-    (should-not auto-resize-tab-bars)
-    (should (eq agent-repl--storm-saved-auto-resize 'grow-only))))
-
-(ert-deftest agent-repl-test-storm-trip-resets-pass-count ()
-  "Trip resets the starved-pass counter."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-starved-passes agent-repl--storm-pass-threshold)
-    (agent-repl--storm-trip)
-    (should (= agent-repl--storm-starved-passes 0))))
-
-(ert-deftest agent-repl-test-storm-trip-schedules-reenable-below-max ()
-  "Trip below the max-trips limit schedules the cooldown re-enable timer."
-  (agent-repl-test--with-storm-state
-    (agent-repl--storm-trip)
-    (should (equal scheduled
-                   (list agent-repl--storm-cooldown-secs nil
-                         #'agent-repl--storm-reenable)))))
-
-(ert-deftest agent-repl-test-storm-trip-final-no-reenable ()
-  "Trip that reaches max-trips does not schedule a re-enable timer."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-trips (1- agent-repl--storm-max-trips))
-    (agent-repl--storm-trip)
-    (should-not scheduled)))
-
-(ert-deftest agent-repl-test-storm-reenable-restores-saved ()
-  "Re-enable restores `auto-resize-tab-bars' to the value saved at trip."
-  (agent-repl-test--with-storm-state
-    (setq auto-resize-tab-bars nil
-          agent-repl--storm-saved-auto-resize 'grow-only
-          agent-repl--storm-reenable-timer 'fake-timer)
-    (agent-repl--storm-reenable)
-    (should (eq auto-resize-tab-bars 'grow-only))
-    (should-not agent-repl--storm-reenable-timer)))
-
-(ert-deftest agent-repl-test-storm-tick-resets ()
-  "Heartbeat tick refreshes the liveness stamp and resets the pass count."
-  (agent-repl-test--with-storm-state
-    (setq agent-repl--storm-last-tick 0.0
-          agent-repl--storm-starved-passes 7)
-    (agent-repl--storm-tick)
-    (should (> agent-repl--storm-last-tick 0.0))
-    (should (= agent-repl--storm-starved-passes 0))))
+(ert-deftest agent-repl-test-fixed-height-tab-bar-default-covers-future-frames ()
+  "Installation pins `default-frame-alist' even with no current GUI frame."
+  (let ((auto-resize-tab-bars t)
+        (default-frame-alist nil)
+        (frame-inhibit-implied-resize t))
+    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
+              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
+              ((symbol-function 'tab-bar-mode)
+               (lambda (_arg)
+                 (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
+              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+               (lambda () '(:timer-cancelled nil :hook-present nil)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      (agent-repl--install-fixed-height-tab-bar)
+      (should-not auto-resize-tab-bars)
+      (should (= (alist-get 'tab-bar-lines default-frame-alist)
+                 agent-repl--tabline-row-count)))))
 
 (provide 'test-status)
 
