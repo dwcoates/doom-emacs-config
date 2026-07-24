@@ -57,6 +57,8 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
       contextWindow: 0,
       permissionMode: "",
       shimAttached: true,
+      claudeSessionId: "",
+      cwd: "",
       ...over,
     },
   };
@@ -271,6 +273,27 @@ describe("ingest session-view", () => {
     store.ingest([sessionEffect({ title: "" })]);
     // Assert
     expect(store.state.taskSummary).toBe("first");
+  });
+
+  it("adopts the resume keys (claudeSessionId + cwd) for rebind/auto-continue", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([sessionEffect({ claudeSessionId: "cli-uuid", cwd: "/work/ws" })]);
+    // Assert
+    expect(store.state.claudeSessionId).toBe("cli-uuid");
+    expect(store.state.cwd).toBe("/work/ws");
+  });
+
+  it("keeps the last resume keys when the view carries none", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([sessionEffect({ claudeSessionId: "cli-uuid", cwd: "/work/ws" })]);
+    // Act
+    store.ingest([sessionEffect({ claudeSessionId: "", cwd: "" })]);
+    // Assert
+    expect(store.state.claudeSessionId).toBe("cli-uuid");
+    expect(store.state.cwd).toBe("/work/ws");
   });
 });
 

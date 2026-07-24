@@ -99,6 +99,10 @@ export interface SessionView {
   contextWindow: number;
   permissionMode: string;
   shimAttached: boolean;
+  /** Durable CLI conversation uuid — the resume/rebind key (protojson camelCase). */
+  claudeSessionId: string;
+  /** Working directory a rebind's POST /sessions needs. */
+  cwd: string;
 }
 
 export interface ConversationDelta {
@@ -319,6 +323,8 @@ const SESSION_VIEW_KEYS = new Set([
   "contextWindow",
   "permissionMode",
   "shimAttached",
+  "claudeSessionId",
+  "cwd",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -334,6 +340,10 @@ function decodeSessionView(v: unknown): SessionView {
     contextWindow: num(o, "contextWindow", "SessionView"),
     permissionMode: str(o, "permissionMode", "SessionView"),
     shimAttached: bool(o, "shimAttached", "SessionView"),
+    // Optional resume keys: absent in a SessionView that predates them decodes
+    // to "" (str default), so the rebind path simply has nothing to persist.
+    claudeSessionId: str(o, "claudeSessionId", "SessionView"),
+    cwd: str(o, "cwd", "SessionView"),
   };
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");

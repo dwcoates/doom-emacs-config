@@ -53,7 +53,8 @@ import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
 import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
-import { rebindSession } from "./rebind.js";
+import { rebindSession, rememberResumeKeys } from "./rebind.js";
+import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { fetchStatus, refreshStatus } from "./status.js";
@@ -109,6 +110,17 @@ async function boot(): Promise<void> {
   // binding.
   let activeSessionId: string = joined;
   let ws: WsClient;
+
+  // Resume/rebind + auto-continue tracking, re-fed by the SessionView plane
+  // (via the store) now that the frontend.v1 cutover routes it through the
+  // adapter. Reset on a rebind so a successor session starts fresh.
+  //   - rememberedClaudeId: last durable CLI uuid persisted for rebind.
+  //   - midTaskActive: last turn-in-flight value written to the mid-task marker.
+  //   - autoContinueChecked: whether this connection's fresh-join nudge was
+  //     already evaluated (checked once, before the marker is rewritten).
+  let rememberedClaudeId = "";
+  let midTaskActive = false;
+  let autoContinueChecked = false;
 
   // Delivery-path diagnostics (§2.15): console always, mirrored to the
   // daemon's disk log best-effort. Reads `ws` at call time — before the
@@ -486,6 +498,11 @@ async function boot(): Promise<void> {
     clog("warn", `session rebind: ${activeSessionId} -> ${next}`);
     ws.close();
     activeSessionId = next;
+    // The successor is a fresh conversation view: its own claude session id,
+    // its own mid-task marker, its own fresh-join auto-continue evaluation.
+    rememberedClaudeId = "";
+    midTaskActive = false;
+    autoContinueChecked = false;
     // A paint scheduled against the dead session would render the
     // just-reset (empty) store; the successor's hello drives the next one.
     frames.cancel();
@@ -553,6 +570,54 @@ async function boot(): Promise<void> {
           if (effect.kind === "degraded") showDegraded(effect.value);
         }
         const result = store.ingest(effects);
+        // Resume/rebind + auto-continue, re-fed from the SessionView plane the
+        // store now populates (claude_session_id/cwd). Skipped entirely until a
+        // durable CLI uuid is known (pre-init frames carry none).
+        const claudeId = store.state.claudeSessionId;
+        if (claudeId !== "") {
+          if (claudeId !== rememberedClaudeId) {
+            // The SessionView supplied (or updated) the durable CLI uuid:
+            // persist it + cwd so a future "session gone" can rebind this
+            // conversation instead of dead-ending at remediation.
+            rememberedClaudeId = claudeId;
+            try {
+              rememberResumeKeys(localStorage, activeSessionId, {
+                claudeSessionId: claudeId,
+                cwd: store.state.cwd,
+              });
+            } catch (err) {
+              clog("error", `rememberResumeKeys failed: ${String(err)}`);
+              throw err;
+            }
+          }
+          if (!autoContinueChecked) {
+            // Fresh-join auto-resume: the first time this connection learns the
+            // claude session id, a mid-task marker that outlived a killed turn
+            // (with the rehydrated turn NOT live) means the task was stopped
+            // mid-flight — nudge it to continue without drawing a bubble. Read
+            // BEFORE the marker rewrite below so it sees the pre-boot value.
+            autoContinueChecked = true;
+            if (shouldAutoContinue(localStorage, claudeId, store.state.turnInFlight)) {
+              ws.send({
+                type: "user-message",
+                request_id: crypto.randomUUID(),
+                content: hiddenContinueMessage(),
+              });
+            }
+          }
+          // Track turn-in-flight transitions so a kill mid-task leaves the
+          // marker set for the next boot's auto-resume. Written only at a turn
+          // boundary, not on every delta.
+          if (store.state.turnInFlight !== midTaskActive) {
+            midTaskActive = store.state.turnInFlight;
+            try {
+              rememberMidTask(localStorage, claudeId, store.state.turnInFlight);
+            } catch (err) {
+              clog("error", `rememberMidTask failed: ${String(err)}`);
+              throw err;
+            }
+          }
+        }
         if (result.changed) {
           // One paint per animation frame, however many effects land before
           // it. The coalescer decides chrome-only vs full feed when it fires.
