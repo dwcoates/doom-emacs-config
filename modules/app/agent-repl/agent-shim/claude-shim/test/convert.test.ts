@@ -6,6 +6,7 @@ import { convert, convertToolUseResult } from "../src/proto/convert.js";
 import { __resetExtrasSeen } from "../src/proto/extras.js";
 import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
 import {
+  ApiKeySource,
   ClaudeStreamMessageSchema,
   type ClaudeStreamMessage,
 } from "../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
@@ -174,8 +175,28 @@ describe("system_init", () => {
   };
   it("maps cwd", () => expect(csm().cwd).toBe("/private/tmp/sdk-probe"));
   it("maps camelCase permissionMode", () => expect(csm().permissionMode).toBe("default"));
-  it("maps apiKeySource 'none' → UNSPECIFIED", () => expect(csm().apiKeySource).toBe(0));
+  it("maps apiKeySource 'none' → NONE", () => expect(csm().apiKeySource).toBe(ApiKeySource.NONE));
   it("maps tools list", () => expect(csm().tools).toContain("Bash"));
+  it("maps capabilities as a typed list (not extras)", () => {
+    const result = convert(loadStream("system_init"));
+    expect(csm().capabilities).toContain("interrupt_receipt_v1");
+    expect(result.vendor.extras?.["capabilities"]).toBeUndefined();
+    expect(result.loggedExtras).toEqual([]);
+  });
+  it("maps analytics_disabled/product_feedback_disabled as typed bools", () => {
+    expect(csm().analyticsDisabled).toBe(false);
+    expect(csm().productFeedbackDisabled).toBe(false);
+  });
+  it("maps memory_paths as a typed string map (not extras)", () => {
+    const result = convert(loadStream("system_init"));
+    expect(csm().memoryPaths["auto"]).toContain("/memory/");
+    expect(result.vendor.extras?.["memory_paths"]).toBeUndefined();
+  });
+  it("maps plugin source/version as typed PluginRef fields", () => {
+    const p = csm().plugins[0]!;
+    expect(p.source).toBe("gns-cowork@chesscom-gns");
+    expect(p.version).toBe("9.8.1");
+  });
 });
 
 describe("rate_limit_event (camelCase nested fields)", () => {
@@ -208,11 +229,15 @@ describe("user", () => {
   it("maps content string-or-blocks (blocks arm)", () => {
     expect(csm().message!.content.case).toBe("contentBlocks");
   });
-  it("carries subagent_type into extras without dropping it", () => {
+  it("maps subagent_type as a typed UserMessage field (not extras)", () => {
     const result = convert(loadStream("user"));
-    expect(result.vendor.extras?.["subagent_type"]).toBe("claude");
+    expect(csm().subagentType).toBe("claude");
+    expect(result.vendor.extras?.["subagent_type"]).toBeUndefined();
   });
-  it("still logs ZERO unknown fields despite the carried subagent context", () => {
+  it("maps task_description as a typed UserMessage field", () => {
+    expect(csm().taskDescription).toBe("sync echo probe");
+  });
+  it("still logs ZERO unknown fields with subagent context now typed", () => {
     expect(convert(loadStream("user")).loggedExtras).toEqual([]);
   });
 });
@@ -356,9 +381,12 @@ describe("StreamEvent content_block_delta arms", () => {
     expect(ev.value.delta.value.partialJson).toBe("{\"a\":");
   });
 
-  it("message_start carries ttft_ms into extras (recognized, not logged)", () => {
+  it("message_start maps ttft_ms as a typed StreamEvent field (not extras)", () => {
     const result = convert(loadStream("stream_event-message_start"));
-    expect(result.vendor.extras?.["ttft_ms"]).toBe(865);
+    const m = vendor(result);
+    if (m.msg.case !== "streamEvent") throw new Error("case");
+    expect(m.msg.value.ttftMs).toBe(865n);
+    expect(result.vendor.extras?.["ttft_ms"]).toBeUndefined();
     expect(result.loggedExtras).toEqual([]);
   });
 });

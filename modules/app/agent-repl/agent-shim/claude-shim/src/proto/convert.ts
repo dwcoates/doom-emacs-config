@@ -372,12 +372,6 @@ function buildUser(message: Record<string, unknown>, r: Reader): Built {
   const toolUseResult = r.has("tool_use_result", "toolUseResult")
     ? convertToolUseResult(r.val("tool_use_result", "toolUseResult"), r.str("session_id", "sessionId"))
     : undefined;
-  // Subagent user messages carry `subagent_type`/`task_description` context the
-  // UserMessage proto does not model; the subagent linkage lives on
-  // `parent_tool_use_id`. Preserve them into extras (not dropped) without a
-  // loud "unknown field" — they are recognized, expected observed fields.
-  r.carry("subagent_type", "task_description");
-
   const userMsg = create(UserMessageSchema, {
     message: content,
     parentToolUseId: r.str("parent_tool_use_id", "parentToolUseId"),
@@ -386,6 +380,11 @@ function buildUser(message: Record<string, unknown>, r: Reader): Built {
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
     isReplay: r.bool("is_replay", "isReplay"),
+    // Subagent user messages stamp `subagent_type`/`task_description` context
+    // the UserMessage proto now models as typed fields (the subagent linkage
+    // itself lives on `parent_tool_use_id`).
+    subagentType: r.str("subagent_type", "subagentType"),
+    taskDescription: r.str("task_description", "taskDescription"),
   });
 
   // A user message that is NOT a tool-result carrier is a genuine prompt turn.
@@ -465,16 +464,15 @@ function buildStreamEvent(message: Record<string, unknown>, r: Reader): Built {
   if (rawEvent === undefined) {
     throw new MissingFieldError("stream_event missing `event`");
   }
-  // `ttft_ms` rides some message_start frames as pure transport telemetry the
-  // StreamEvent proto does not model; preserve into extras (not dropped)
-  // without a loud "unknown field" — stream_events are EPHEMERAL and their
-  // telemetry is never part of the durable record.
-  r.carry("ttft_ms", "ttftMs");
   const streamEvent = create(StreamEventSchema, {
     event: convertRawStreamEvent(rawEvent),
     parentToolUseId: r.str("parent_tool_use_id", "parentToolUseId"),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    // `ttft_ms` rides some message_start frames as time-to-first-token
+    // telemetry the StreamEvent proto now models as a typed field. (The Event
+    // itself remains EPHEMERAL; the delta bypass still governs live routing.)
+    ttftMs: r.big("ttft_ms", "ttftMs"),
   });
   return { csm: csm({ case: "streamEvent", value: streamEvent }), lifecyclePayloads: [], typeLabel: "stream_event", ephemeral: true };
 }
@@ -563,11 +561,12 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
     fastModeState: r.str("fast_mode_state", "fastModeState"),
+    // Corpus-observed init fields the SystemInit proto now models as typed data.
+    capabilities: r.strList("capabilities"),
+    analyticsDisabled: r.bool("analytics_disabled", "analyticsDisabled"),
+    productFeedbackDisabled: r.bool("product_feedback_disabled", "productFeedbackDisabled"),
+    memoryPaths: strMap(r.obj("memory_paths", "memoryPaths")),
   });
-  // Observed system:init fields the SystemInit proto does not (yet) model —
-  // preserved into extras (never dropped) without a loud "unknown field",
-  // since they are recognized samples in the golden corpus, not schema drift.
-  r.carry("capabilities", "analytics_disabled", "product_feedback_disabled", "memory_paths");
   const sessionStarted = create(SessionStartedSchema, {
     source: opts?.sessionSource ?? SessionSource.FRESH,
     model: init.model,
@@ -996,9 +995,24 @@ function convertMcpServers(raw: unknown[] | undefined) {
   }));
 }
 
+/** Coerce a JSON object into a proto map<string,string>; non-string values drop. */
+function strMap(o: Record<string, unknown> | undefined): { [k: string]: string } {
+  const out: { [k: string]: string } = {};
+  if (o === undefined) return out;
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
 function convertPlugins(raw: unknown[] | undefined) {
   if (raw === undefined) return [];
-  return raw.filter(isObject).map((p) => create(PluginRefSchema, { name: strOf(pick(p, "name")), path: strOf(pick(p, "path")) }));
+  return raw.filter(isObject).map((p) => create(PluginRefSchema, {
+    name: strOf(pick(p, "name")),
+    path: strOf(pick(p, "path")),
+    source: strOf(pick(p, "source")),
+    version: strOf(pick(p, "version")),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,6 +1047,7 @@ function apiKeySourceEnum(s: string): ApiKeySource {
     case "project": return ApiKeySource.PROJECT;
     case "org": return ApiKeySource.ORG;
     case "temporary": return ApiKeySource.TEMPORARY;
+    case "none": return ApiKeySource.NONE;
     default: return ApiKeySource.UNSPECIFIED;
   }
 }
