@@ -92,25 +92,35 @@ class FakeQuery implements QueryLike {
 
 interface FakeStore {
   socketPath: string;
+  /** The first accepted connection (the producer conn). */
   peer: () => FramedPeer;
+  /** The most recently accepted connection (the newest subscription conn). */
+  latest: () => FramedPeer;
+  count: () => number;
   close: () => void;
 }
 
 function fakeStore(): Promise<FakeStore> {
   const socketPath = tmpSocketPath();
-  let accepted: FramedPeer | null = null;
+  const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
-    const server = net.createServer((s) => (accepted = new FramedPeer(s)));
+    const server = net.createServer((s) => accepted.push(new FramedPeer(s)));
     server.once("error", reject);
     server.listen(socketPath, () =>
       resolve({
         socketPath,
         peer: () => {
-          if (!accepted) throw new Error("store: no connection accepted");
-          return accepted;
+          if (!accepted[0]) throw new Error("store: no connection accepted");
+          return accepted[0];
         },
+        latest: () => {
+          const last = accepted[accepted.length - 1];
+          if (!last) throw new Error("store: no connection accepted");
+          return last;
+        },
+        count: () => accepted.length,
         close: () => {
-          accepted?.destroy();
+          accepted.forEach((p) => p.destroy());
           server.close();
         },
       }),
@@ -184,7 +194,9 @@ async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } 
 
   if (opts.subscribe) {
     daemon.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 0n }));
-    await store.peer().next(SubscribeSchema);
+    // The subscription rides its own store connection (single-role store).
+    await until(() => store.count() >= 2);
+    await store.latest().next(SubscribeSchema);
   }
   return { session, query, store, daemon, udsSocketPath };
 }
@@ -246,8 +258,8 @@ describe("UdsSession events: store round-trip and sad path", () => {
   it("forwards a merged store Event to the daemon (onMerged)", async () => {
     // Arrange
     const { store, daemon } = await rig({ subscribe: true });
-    // Act: the store emits a merged, seq-stamped event.
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 5n }));
+    // Act: the store emits a merged, seq-stamped event on the subscription conn.
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 5n }));
     const evt = await daemon.next(EventSchema);
     // Assert
     expect(evt.seq).toBe(5n);
@@ -287,9 +299,10 @@ describe("UdsSession lifetime: reattach", () => {
     daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
     await until(() => session.isConnected());
     daemon2.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 2n }));
-    const sub2 = await store.peer().next(SubscribeSchema);
+    await until(() => store.count() >= 3);
+    const sub2 = await store.latest().next(SubscribeSchema);
     expect(sub2.fromSeq).toBe(2n);
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
     const e3 = await daemon2.next(EventSchema);
     expect(e3.seq).toBe(3n);
   });

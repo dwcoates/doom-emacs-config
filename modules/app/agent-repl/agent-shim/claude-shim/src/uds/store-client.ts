@@ -1,13 +1,15 @@
 /**
- * The shim's connection to the shim-store.
+ * The shim's connections to the shim-store.
  *
- * Two jobs over one UDS connection:
- * 1. WRITE PERSISTENT event batches (`StoreWrite`) and reconcile each
- *    `StoreWriteAck` (accepted / deduped / error accounting).
- * 2. SUBSCRIBE (`Subscribe{session_id, from_seq}`) and run a continuous read
- *    loop handing every store-merged `Event` to an injected sink (which the
- *    stitch phase wires to `SessionServer.sendEvent`, forwarding to the
- *    daemon verbatim).
+ * Two SINGLE-ROLE connections to the same socket — the store classifies every
+ * connection by its FIRST frame, so the two jobs cannot share one conn:
+ * 1. The PRODUCER connection (connect()): WRITE persistent event batches
+ *    (`StoreWrite`) and reconcile each `StoreWriteAck` (accepted / deduped /
+ *    error accounting).
+ * 2. The SUBSCRIPTION connection (subscribe(), reopened per call): first
+ *    frame `Subscribe{session_id, from_seq}`, then a continuous read loop
+ *    handing every store-merged `Event` to an injected sink (wired to
+ *    `SessionServer.sendEvent`, forwarding to the daemon verbatim).
  *
  * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): if the
  * store is unreachable or rejects a batch, every event in that batch is
@@ -59,6 +61,7 @@ interface PendingWrite {
 
 export class StoreClient {
   private conn: MessageConn | null = null;
+  private subConn: MessageConn | null = null;
   private connected = false;
   private sink: StoreSink | null = null;
   private reporter: DegradedReporter | null = null;
@@ -112,17 +115,41 @@ export class StoreClient {
    * Open (or reopen) the merged-event subscription at `fromSeq` (EXCLUSIVE).
    * The store replays persisted events with seq > fromSeq then live-tails;
    * this is exactly the reattach replay path (§4.4).
+   *
+   * The subscription rides its OWN connection whose first frame is the
+   * Subscribe: the store's single-role protocol rejects a Subscribe sent down
+   * the producer connection.
    */
   subscribe(fromSeq: bigint): void {
-    if (!this.connected || !this.conn) {
-      this.degrade(`cannot subscribe: store connection is down`, 0);
-      return;
+    if (this.subConn) {
+      // Reopen: replace the old subscription deliberately. Nulling the field
+      // first lets onSubClose tell replacement from a genuine drop.
+      const old = this.subConn;
+      this.subConn = null;
+      old.close();
     }
-    this.conn.send(SubscribeSchema, create(SubscribeSchema, {
-      sessionId: this.opts.sessionId,
-      fromSeq,
-    }));
-    shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: fromSeq }, `subscribed to store`);
+    const socket = net.connect(this.opts.socketPath);
+    const onDialError = (err: Error) => {
+      this.degrade(`cannot subscribe: ${err.message}`, 0);
+    };
+    socket.once("error", onDialError);
+    socket.once("connect", () => {
+      socket.removeListener("error", onDialError);
+      const conn: MessageConn = new MessageConn(
+        socket,
+        {
+          onMessage: (msg) => this.onSubMessage(msg),
+          onClose: (err) => this.onSubClose(conn, err),
+        },
+        COMPONENT,
+      );
+      this.subConn = conn;
+      conn.send(SubscribeSchema, create(SubscribeSchema, {
+        sessionId: this.opts.sessionId,
+        fromSeq,
+      }));
+      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: fromSeq }, `subscribed to store`);
+    });
   }
 
   /**
@@ -144,10 +171,15 @@ export class StoreClient {
     });
   }
 
-  /** Close the connection deliberately (not an error path). */
+  /** Close both connections deliberately (not an error path). */
   close(): void {
     this.stopHeartbeat();
     this.connected = false;
+    if (this.subConn) {
+      const sub = this.subConn;
+      this.subConn = null;
+      sub.close();
+    }
     if (this.conn) {
       this.conn.close();
       this.conn = null;
@@ -160,6 +192,11 @@ export class StoreClient {
       this.onAck(ack);
       return;
     }
+    if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
+    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled store message ${envelopeType(msg)}`);
+  }
+
+  private onSubMessage(msg: Any): void {
     const evt = unpackAs(msg, EventSchema);
     if (evt) {
       if (this.sink) {
@@ -170,7 +207,15 @@ export class StoreClient {
       return;
     }
     if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled store message ${envelopeType(msg)}`);
+    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled store subscription message ${envelopeType(msg)}`);
+  }
+
+  private onSubClose(conn: MessageConn, err: Error | null): void {
+    if (this.subConn !== conn) return; // superseded or deliberately closed
+    this.subConn = null;
+    const reason = err ? `store subscription lost: ${err.message}` : `store subscription closed`;
+    // The daemon's view goes stale without the tail; report honestly.
+    this.degrade(reason, 0);
   }
 
   private onAck(ack: StoreWriteAck): void {
@@ -234,7 +279,9 @@ export class StoreClient {
     if (this.heartbeatIntervalMs <= 0) return;
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.conn?.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: BigInt(Date.now()) } as Heartbeat));
+      const hb = create(HeartbeatSchema, { sentAtMs: BigInt(Date.now()) } as Heartbeat);
+      this.conn?.send(HeartbeatSchema, hb);
+      this.subConn?.send(HeartbeatSchema, hb);
     }, this.heartbeatIntervalMs);
     this.heartbeatTimer.unref?.();
   }

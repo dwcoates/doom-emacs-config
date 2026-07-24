@@ -12,30 +12,40 @@ import {
 } from "../src/uds/proto.js";
 import { FramedPeer, tmpSocketPath, until } from "./uds-harness.js";
 
-/** A controllable fake shim-store: one accepted connection, framed. */
+/** A controllable fake shim-store: framed, one accepted connection per role. */
 interface FakeStore {
   socketPath: string;
+  /** The first accepted connection (the producer conn). */
   peer: () => FramedPeer;
+  /** The most recently accepted connection (the newest subscription conn). */
+  latest: () => FramedPeer;
+  count: () => number;
   close: () => void;
 }
 
 function fakeStore(): Promise<FakeStore> {
   const socketPath = tmpSocketPath();
-  let accepted: FramedPeer | null = null;
+  const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
-      accepted = new FramedPeer(socket);
+      accepted.push(new FramedPeer(socket));
     });
     server.once("error", reject);
     server.listen(socketPath, () => {
       resolve({
         socketPath,
         peer: () => {
-          if (!accepted) throw new Error("no store connection accepted yet");
-          return accepted;
+          if (!accepted[0]) throw new Error("no store connection accepted yet");
+          return accepted[0];
         },
+        latest: () => {
+          const last = accepted[accepted.length - 1];
+          if (!last) throw new Error("no store connection accepted yet");
+          return last;
+        },
+        count: () => accepted.length,
         close: () => {
-          accepted?.destroy();
+          accepted.forEach((p) => p.destroy());
           server.close();
         },
       });
@@ -68,14 +78,15 @@ async function connectedClient(store: FakeStore, sink?: (e: Event) => void, degr
 }
 
 describe("StoreClient subscribe/write happy path", () => {
-  it("sends Subscribe{session_id, from_seq}", async () => {
+  it("sends Subscribe{session_id, from_seq} first on a dedicated connection", async () => {
     // Arrange
     const store = await fakeStore();
     stores.push(store);
     const client = await connectedClient(store);
     // Act
     client.subscribe(5n);
-    const sub = await store.peer().next(SubscribeSchema);
+    await until(() => store.count() === 2);
+    const sub = await store.latest().next(SubscribeSchema);
     // Assert
     expect(sub.sessionId).toBe("sess-1");
     expect(sub.fromSeq).toBe(5n);
@@ -104,13 +115,68 @@ describe("StoreClient subscribe/write happy path", () => {
     const received: Event[] = [];
     const client = await connectedClient(store, (e) => received.push(e));
     client.subscribe(0n);
-    await store.peer().next(SubscribeSchema);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
     // Act
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
     await until(() => received.length === 2);
     // Assert
     expect(received.map((e) => e.seq)).toEqual([1n, 2n]);
+  });
+});
+
+describe("StoreClient subscription connection (single-role store)", () => {
+  it("keeps writes on the producer connection after subscribing", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+    // Act
+    const ackP = client.write([create(EventSchema, { sessionId: "sess-1" })]);
+    const write = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
+    await ackP;
+    // Assert
+    expect(write.producer).toBe("claude-shim:sess-1");
+  });
+
+  it("reports DegradedState but stays write-connected when the subscription drops", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+    // Act
+    store.latest().destroy();
+    await until(() => degradations.length >= 1);
+    // Assert
+    expect(degradations[0]!.reason).toContain("subscription");
+    expect(client.isConnected()).toBe(true);
+  });
+
+  it("re-subscribing replaces the subscription connection without a degrade", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+    // Act
+    client.subscribe(7n);
+    await until(() => store.count() === 3);
+    const sub2 = await store.latest().next(SubscribeSchema);
+    // Assert
+    expect(sub2.fromSeq).toBe(7n);
+    expect(degradations).toHaveLength(0);
   });
 });
 
