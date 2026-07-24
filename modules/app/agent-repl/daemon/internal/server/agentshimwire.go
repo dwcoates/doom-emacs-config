@@ -15,16 +15,17 @@ import (
 	"claude-repld/internal/workspace/merge"
 )
 
-// AgentShimConfig injects everything WireAgentShim binds. Resolver, DBPath and
-// Logf configure the SSM; the three routers back the frontend command handler;
-// MergeDirs resolves a workspace to the cherry-pick request the merge Engine
-// runs; Sessions supplies SessionView metadata for snapshots.
+// AgentShimConfig injects everything WireAgentShim binds. SSM is opened by the
+// caller (main) and injected so its lifecycle — and the per-session driver that
+// also feeds it — is owned in one place; the three routers back the frontend
+// command handler; MergeDirs resolves a workspace to the cherry-pick request
+// the merge Engine runs; Sessions supplies SessionView metadata for snapshots.
 type AgentShimConfig struct {
-	// SSMDBPath is the SSM database path (empty uses the ssm package default,
-	// ~/.cache/agent-repl/ssm/state.db).
-	SSMDBPath string
-	// Resolver binds session ids to workspaces for the SSM (RegistryResolver).
-	Resolver ssm.Resolver
+	// SSM is the session-state manager, opened and owned by the caller (main).
+	// Required: the frontend snapshot and the merge-transition push loop both
+	// read/write it. WireAgentShim does NOT close it — main does (the same SSM
+	// is shared with the per-session driver, so one owner closes it once).
+	SSM *ssm.Manager
 	// Prompts routes prompt/interrupt/permission to the session shim.
 	Prompts PromptRouter
 	// MergeDirs resolves a workspace to its merge.Request (source/target
@@ -34,6 +35,10 @@ type AgentShimConfig struct {
 	Lifecycle WorkspaceLifecycle
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
+	// Resyncer replays a workspace's retained conversation deltas on a frontend
+	// resync (design §5.4). Nil-safe: a nil Resyncer makes Resync a documented
+	// no-op (the server still re-sends the StateSnapshot independently).
+	Resyncer Resyncer
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 }
@@ -46,8 +51,9 @@ type MergeDirResolver interface {
 }
 
 // AgentShim is the assembled frontend surface. Server is mounted by main.go
-// (ServeUDS + ServeWS); Close tears down the push loop, the frontend server,
-// and the SSM database.
+// (ServeUDS + ServeWS); Close tears down the push loop and the frontend server.
+// The SSM is injected and owned by main (Close does NOT close it), because the
+// same SSM instance also backs the per-session driver.
 type AgentShim struct {
 	Server *frontend.Server
 	SSM    *ssm.Manager
@@ -102,26 +108,20 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		logf = func(string, ...any) {}
 	}
 	switch {
-	case cfg.Resolver == nil:
-		return nil, fmt.Errorf("server: WireAgentShim needs a Resolver")
+	case cfg.SSM == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs an SSM")
 	case cfg.MergeDirs == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a MergeDirResolver")
 	}
-
-	mgr, err := ssm.Open(ssm.Options{DBPath: cfg.SSMDBPath, Resolver: cfg.Resolver, Logf: logf})
-	if err != nil {
-		return nil, fmt.Errorf("server: open SSM: %w", err)
-	}
+	mgr := cfg.SSM
 
 	engine, err := merge.NewEngine(merge.Config{Logf: logf, Sink: mergeSink{mgr}})
 	if err != nil {
-		mgr.Close()
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, logf)
 	if err != nil {
-		mgr.Close()
 		return nil, err
 	}
 
@@ -143,8 +143,10 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	return &AgentShim{Server: srv, SSM: mgr, Merge: engine, cancelPush: cancel, logf: logf}, nil
 }
 
-// Close stops the push loop, closes the frontend server (disconnecting
-// clients), and closes the SSM database. Idempotent-safe for a single call.
+// Close stops the push loop and closes the frontend server (disconnecting
+// clients). It does NOT close the SSM: main opened it and owns its lifecycle
+// (the per-session driver shares the same instance), so main closes it exactly
+// once. Idempotent-safe for a single call.
 func (a *AgentShim) Close() error {
 	if a.cancelPush != nil {
 		a.cancelPush()
@@ -153,9 +155,6 @@ func (a *AgentShim) Close() error {
 		if err := a.Server.Close(); err != nil {
 			a.logf("server: frontend close: %v", err)
 		}
-	}
-	if a.SSM != nil {
-		return a.SSM.Close()
 	}
 	return nil
 }
