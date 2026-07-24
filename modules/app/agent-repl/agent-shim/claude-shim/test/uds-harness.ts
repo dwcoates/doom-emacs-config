@@ -25,13 +25,43 @@ export function tmpSocketPath(): string {
   return path.join(dir, `s-${randomUUID().slice(0, 8)}.sock`);
 }
 
-/** Await a predicate without wall-clock sleeps (advances the event loop). */
-export async function until(pred: () => boolean, label = "condition"): Promise<void> {
-  for (let i = 0; i < 2000; i++) {
+/**
+ * Default budget for the poll helpers below. Deliberately a WALL-CLOCK budget
+ * rather than an event-loop-turn count: a turn count is load-sensitive, since
+ * a spinning `setImmediate` loop burns its whole budget in single-digit
+ * milliseconds when the machine is busy, long before a pending connect() or
+ * socket write has been delivered. Under a parallel vitest run that made
+ * genuinely-correct code fail. Kept under vitest's 5s default testTimeout so
+ * the labeled error below wins the race and names the missing condition.
+ */
+const POLL_BUDGET_MS = 4000;
+
+/**
+ * Poll `pred` until it holds or the budget expires, yielding to the event loop
+ * between checks so pending I/O can land. Returns as soon as the condition is
+ * met -- the budget is only a failure deadline, never a synchronization delay.
+ * The first turns yield via setImmediate (cheap, sub-millisecond) and later
+ * ones via setTimeout so a doomed wait cannot hot-spin a core for seconds and
+ * starve the sibling workers it shares the machine with.
+ */
+async function pollFor(pred: () => boolean, describe: () => string, budgetMs: number): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  for (let turn = 0; ; turn++) {
     if (pred()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (Date.now() >= deadline) throw new Error(describe());
+    await (turn < 200
+      ? new Promise<void>((resolve) => setImmediate(resolve))
+      : new Promise<void>((resolve) => setTimeout(resolve, 1)));
   }
-  throw new Error(`until(): ${label} never became true`);
+}
+
+/** Await a predicate without wall-clock sleeps (advances the event loop). */
+export async function until(
+  pred: () => boolean,
+  label = "condition",
+  budgetMs = POLL_BUDGET_MS,
+): Promise<void> {
+  await pollFor(pred, () => `until(): ${label} never became true within ${budgetMs}ms`, budgetMs);
 }
 
 /**
@@ -64,16 +94,19 @@ export class FramedPeer {
   }
 
   /** Resolve the next inbound message decodable as `schema` (consumes it). */
-  async next<Desc extends DescMessage>(schema: Desc, label?: string): Promise<MessageShape<Desc>> {
-    for (let i = 0; i < 2000; i++) {
-      const idx = this.inbox.findIndex((a) => unpackAs(a, schema) !== undefined);
-      if (idx >= 0) {
-        const [any] = this.inbox.splice(idx, 1);
-        return unpackAs(any!, schema)!;
-      }
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    throw new Error(`FramedPeer.next(): no ${label ?? schema.typeName} arrived`);
+  async next<Desc extends DescMessage>(
+    schema: Desc,
+    label?: string,
+    budgetMs = POLL_BUDGET_MS,
+  ): Promise<MessageShape<Desc>> {
+    const indexOfMatch = () => this.inbox.findIndex((a) => unpackAs(a, schema) !== undefined);
+    await pollFor(
+      () => indexOfMatch() >= 0,
+      () => `FramedPeer.next(): no ${label ?? schema.typeName} arrived within ${budgetMs}ms`,
+      budgetMs,
+    );
+    const [any] = this.inbox.splice(indexOfMatch(), 1);
+    return unpackAs(any!, schema)!;
   }
 
   count<Desc extends DescMessage>(schema: Desc): number {

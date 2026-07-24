@@ -23,25 +23,35 @@ import { FramedPeer, connectPeer, tmpSocketPath, until } from "./uds-harness.js"
 
 interface FakeStore {
   socketPath: string;
+  /** The first accepted connection (the producer conn). */
   peer: () => FramedPeer;
+  /** The most recently accepted connection (the newest subscription conn). */
+  latest: () => FramedPeer;
+  count: () => number;
   close: () => void;
 }
 
 function fakeStore(): Promise<FakeStore> {
   const socketPath = tmpSocketPath();
-  let accepted: FramedPeer | null = null;
+  const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
-    const server = net.createServer((s) => (accepted = new FramedPeer(s)));
+    const server = net.createServer((s) => accepted.push(new FramedPeer(s)));
     server.once("error", reject);
     server.listen(socketPath, () =>
       resolve({
         socketPath,
         peer: () => {
-          if (!accepted) throw new Error("store: no connection accepted");
-          return accepted;
+          if (!accepted[0]) throw new Error("store: no connection accepted");
+          return accepted[0];
         },
+        latest: () => {
+          const last = accepted[accepted.length - 1];
+          if (!last) throw new Error("store: no connection accepted");
+          return last;
+        },
+        count: () => accepted.length,
         close: () => {
-          accepted?.destroy();
+          accepted.forEach((p) => p.destroy());
           server.close();
         },
       }),
@@ -99,11 +109,13 @@ describe("daemon reattach with from_seq continuation", () => {
     await until(() => server.isConnected());
     daemon1.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 0n }));
 
-    // The store sees the subscribe and streams the first two events.
-    const sub1 = await store.peer().next(SubscribeSchema);
+    // The store sees the subscribe arrive on its own subscriber connection
+    // (single-role store) and streams the first two events there.
+    await until(() => store.count() >= 2);
+    const sub1 = await store.latest().next(SubscribeSchema);
     expect(sub1.fromSeq).toBe(0n);
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
 
     const e1 = await daemon1.next(EventSchema);
     const e2 = await daemon1.next(EventSchema);
@@ -122,12 +134,14 @@ describe("daemon reattach with from_seq continuation", () => {
     await until(() => server.isConnected());
     daemon2.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 2n }));
 
-    // The store re-serves from seq>2 (from_seq is exclusive).
-    const sub2 = await store.peer().next(SubscribeSchema);
+    // The store re-serves from seq>2 (from_seq is exclusive) on a FRESH
+    // subscriber connection (the client deliberately replaced the old one).
+    await until(() => store.count() >= 3);
+    const sub2 = await store.latest().next(SubscribeSchema);
     expect(sub2.fromSeq).toBe(2n);
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 4n }));
-    store.peer().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 5n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 4n }));
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 5n }));
 
     const e3 = await daemon2.next(EventSchema);
     const e4 = await daemon2.next(EventSchema);
