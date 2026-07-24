@@ -28,7 +28,6 @@ import (
 	"claude-repld/internal/replog"
 	"claude-repld/internal/sentinel"
 	"claude-repld/internal/server"
-	"claude-repld/internal/session"
 	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/ssm"
@@ -150,18 +149,12 @@ func main() {
 		claudeBin      = flag.String("claude-bin", "", "path to the claude CLI the SDK drives (empty = SDK-bundled cli.js)")
 		shimScript     = flag.String("shim", "", "path to the shim entrypoint (agent-shim/claude-shim/dist/main.js)")
 		fake           = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
-		retention      = flag.Int("retention", 4096, "per-session frame retention window for replay")
-		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "hibernate a session (free its node+CLI pair, keep it replayable) after this long without a real act; 0 disables")
+		idleTimeout    = flag.Duration("idle-timeout", 10*time.Minute, "hibernate a session (SIGTERM its UDS shim; keep the record rehydratable) after this long without a real act; 0 disables")
 		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
 		widgetAssets   = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
-		classifyQueue  = flag.Bool("classify-queue", envBool("AGENT_REPL_CLASSIFY_QUEUE", true), "classify a message submitted mid-turn (interrupt vs wait) via a headless model (§2.13)")
-		classifierMdl  = flag.String("classifier-model", envStr("AGENT_REPL_CLASSIFIER_MODEL", "haiku"), "model for the in-flight-queue classifier")
-		summarizeTurns = flag.Bool("summarize-turns", envBool("AGENT_REPL_SUMMARIZE_TURNS", true), "summarize each completed turn into the one-line topbar objective via a headless model (§2.14)")
-		summaryMdl     = flag.String("summary-model", envStr("AGENT_REPL_SUMMARY_MODEL", "haiku"), "model for the per-turn objective summarizer")
 		accountsFlag   = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
-		frontendUDS    = flag.Bool("frontend-uds", envBool("AGENT_REPL_FRONTEND_UDS", false), "mount the agent-shim frontend.v1 surface: a UDS listener (Emacs) at ~/.cache/agent-repl/sock/daemon-frontend.sock + a WS endpoint at /frontend, both serving SSM-resolved state. Off by default during the cutover: the command backends (prompt/merge/lifecycle) are not fully connected until the coupled shim/elisp/webapp tasks land (see cmd/claude-repld/frontend.go)")
 	)
 	flag.Parse()
 
@@ -174,43 +167,6 @@ func main() {
 	if *shimScript == "" {
 		log.Printf("claude-repld: --shim is required (path to agent-shim/claude-shim/dist/main.js)")
 		os.Exit(2)
-	}
-
-	spawn := func(sessionID string, opts server.CreateOpts) (session.ShimHandle, error) {
-		argv := server.ShimArgv(*nodeBin, *shimScript, sessionID, *fake, opts)
-		if *claudeBin != "" {
-			argv = append(argv, "--claude-bin", *claudeBin)
-		}
-		// This is the primary Claude-driving process: log its start
-		// (dlog.Call, per the "the shim itself" example in dlog.go) so a
-		// session's launch parameters are on record, and pair every shim
-		// stderr/stdout-pump line (via Options.Logf) with the same
-		// session+cwd context.
-		done := dlog.Call(log.Printf, "shim spawn",
-			"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
-			"config_dir", opts.ConfigDir, "fake", *fake || opts.Fake)
-		proc, err := shim.Spawn(shim.Options{
-			Argv: argv,
-			Dir:  opts.CWD,
-			// The SDK's claude subprocess inherits this overlay: the
-			// ownership marker (whose hook scripts stamp sentinel line 3,
-			// so Emacs accepts session-id updates from this CLI), the
-			// session's CLAUDE_CONFIG_DIR (which account it runs as), and
-			// this daemon's own addr (so a session's tools can probe it).
-			ExtraEnv: server.ShimEnv(opts, *addr),
-			Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
-		})
-		if err != nil {
-			done("", err)
-			return nil, err
-		}
-		done(strings.Join(argv, " "), nil)
-		go func() {
-			if err := proc.Wait(); err != nil {
-				log.Printf("claude-repld: shim for session %s exited: %v", sessionID, err)
-			}
-		}()
-		return proc, nil
 	}
 
 	// Agent-state sentinel side channel (daemon -> Emacs), resolved from
@@ -278,123 +234,116 @@ func main() {
 	var shutdownOnce sync.Once
 	requestShutdown := func() { shutdownOnce.Do(func() { close(shutdownReq) }) }
 
+	// The SSM (resolved per-workspace state) is opened here and shared by BOTH
+	// the frontend snapshot/merge push loop AND the per-session driver's
+	// lifecycle-event application; one owner (main) closes it once.
+	ssmMgr, err := ssm.Open(ssm.Options{
+		Resolver: server.NewRegistryResolver(sessionRegistry),
+		Logf:     log.Printf,
+	})
+	if err != nil {
+		log.Fatalf("claude-repld: open SSM: %v", err)
+	}
+	defer ssmMgr.Close()
+
+	// The per-session shim-driver consumes each session's UDS shim stream and
+	// renders it onto the frontend surface + SSM. Its push target (the
+	// frontend.Server) does not exist until WireAgentShim returns, so it pushes
+	// through a late-bound forwarder whose target is set below.
+	forwarder := &server.PushForwarder{Logf: log.Printf}
+	// The driver spawns a fresh UDS-mode shim when no live one is listening. The
+	// exec stays here (main owns node/shim paths); production omits
+	// --store-socket so the shim defaults to the launchd singleton store. The
+	// returned stop func SIGTERMs the shim on hibernation.
+	udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) (func() error, error) {
+		argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, socketPath)
+		if *claudeBin != "" {
+			argv = append(argv, "--claude-bin", *claudeBin)
+		}
+		done := dlog.Call(log.Printf, "uds shim spawn",
+			"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
+			"config_dir", opts.ConfigDir, "socket", socketPath)
+		proc, spawnErr := shim.Spawn(shim.Options{
+			Argv:     argv,
+			Dir:      opts.CWD,
+			ExtraEnv: server.ShimEnv(opts, *addr),
+			Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
+		})
+		if spawnErr != nil {
+			done("", spawnErr)
+			return nil, spawnErr
+		}
+		done(strings.Join(argv, " "), nil)
+		// In UDS mode the shim streams over its socket, not stdout, so its
+		// stdout event channel stays empty — drain it so the stdout pump never
+		// blocks, and reap the process when it exits.
+		go func() {
+			for range proc.Events() { //nolint:revive
+			}
+		}()
+		go func() {
+			if werr := proc.Wait(); werr != nil {
+				log.Printf("claude-repld: UDS shim for session %s exited: %v", sessionID, werr)
+			}
+		}()
+		return func() error { return proc.Terminate() }, nil
+	}
+	driver, err := sessiondrv.New(sessiondrv.Config{
+		Push:            forwarder,
+		SSM:             ssmMgr,
+		Spawner:         server.NewShimSpawner(sessionRegistry, nil, udsSpawn, log.Printf),
+		Locator:         &server.SessionLocator{Reg: sessionRegistry},
+		SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
+		Registrar:       server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf},
+		DaemonVersion:   daemonVersion,
+		ProtocolVersion: shimProtocolVersion,
+		Logf:            log.Printf,
+	})
+	if err != nil {
+		log.Fatalf("claude-repld: build session driver: %v", err)
+	}
+	defer driver.Close()
+
+	// Agent-shim frontend.v1 surface (design §9.1, §14.2): the SSM-backed
+	// snapshot + merge Engine + frontend Server. Always on post-cutover — it is
+	// the daemon's consumption plane, not an optional add.
+	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		SSM:       ssmMgr,
+		Prompts:   driver,
+		MergeDirs: pendingMergeDirs{},
+		Lifecycle: pendingLifecycle{},
+		Sessions:  registrySessions{reg: sessionRegistry},
+		Resyncer:  driver,
+		Logf:      log.Printf,
+	})
+	if err != nil {
+		log.Fatalf("claude-repld: frontend surface: %v", err)
+	}
+	// Bind the driver's push target now that the frontend server exists.
+	forwarder.SetTarget(agentShim.Server)
+	defer func() {
+		if cerr := agentShim.Close(); cerr != nil {
+			log.Printf("claude-repld: frontend surface close: %v", cerr)
+		}
+	}()
+
 	srv := server.New(server.Config{
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		RequestShutdown: requestShutdown,
-		Retention:       *retention,
 		ForceFake:       *fake,
-		Spawn:           spawn,
 		Sentinel:        sentinelWriter,
 		Remediator:      remediator,
 		Registry:        sessionRegistry,
 		Logins:          logins,
-		ClassifyQueue:   *classifyQueue,
-		ClassifierModel: *classifierMdl,
-		SummarizeTurns:  *summarizeTurns,
-		SummaryModel:    *summaryMdl,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
+		Driver:          driver,
+		SSM:             ssmMgr,
+		Frontend:        agentShim.Server,
 	})
-
-	// Agent-shim frontend.v1 surface (design §9.1 ADD, §14.2): the SSM +
-	// merge Engine + frontend Server, mounted as a UDS listener (Emacs) and a
-	// WS endpoint (webapp). Constructed only when enabled: during the cutover
-	// its command backends are not fully connected (see frontend.go), so the
-	// default daemon keeps its existing behavior untouched.
-	var agentShim *server.AgentShim
-	if *frontendUDS {
-		// The SSM is opened HERE (not inside WireAgentShim) because the same
-		// instance backs BOTH the frontend snapshot/merge push loop AND the
-		// per-session driver's lifecycle-event application; one owner opens and
-		// closes it once.
-		ssmMgr, ssmErr := ssm.Open(ssm.Options{
-			Resolver: server.NewRegistryResolver(sessionRegistry),
-			Logf:     log.Printf,
-		})
-		if ssmErr != nil {
-			log.Fatalf("claude-repld: open SSM: %v", ssmErr)
-		}
-		defer ssmMgr.Close()
-
-		// The per-session shim-driver consumes each session's UDS shim stream
-		// and renders it onto the frontend surface + SSM. Its push target (the
-		// frontend.Server) does not exist until WireAgentShim returns, so it
-		// pushes through a late-bound forwarder whose target is set below.
-		forwarder := &server.PushForwarder{Logf: log.Printf}
-		// The driver spawns a fresh UDS-mode shim when no live one is listening.
-		// The exec stays here (main owns node/shim paths); production omits
-		// --store-socket so the shim defaults to the launchd singleton store.
-		udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) error {
-			argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, socketPath)
-			if *claudeBin != "" {
-				argv = append(argv, "--claude-bin", *claudeBin)
-			}
-			done := dlog.Call(log.Printf, "uds shim spawn",
-				"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
-				"config_dir", opts.ConfigDir, "socket", socketPath)
-			proc, spawnErr := shim.Spawn(shim.Options{
-				Argv:     argv,
-				Dir:      opts.CWD,
-				ExtraEnv: server.ShimEnv(opts, *addr),
-				Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
-			})
-			if spawnErr != nil {
-				done("", spawnErr)
-				return spawnErr
-			}
-			done(strings.Join(argv, " "), nil)
-			// In UDS mode the shim streams over its socket, not stdout, so its
-			// stdout event channel stays empty — drain it so the stdout pump
-			// never blocks, and reap the process when it exits.
-			go func() {
-				for range proc.Events() { //nolint:revive
-				}
-			}()
-			go func() {
-				if werr := proc.Wait(); werr != nil {
-					log.Printf("claude-repld: UDS shim for session %s exited: %v", sessionID, werr)
-				}
-			}()
-			return nil
-		}
-		driver, drvErr := sessiondrv.New(sessiondrv.Config{
-			Push:            forwarder,
-			SSM:             ssmMgr,
-			Spawner:         server.NewShimSpawner(sessionRegistry, nil, udsSpawn, log.Printf),
-			Locator:         &server.SessionLocator{Reg: sessionRegistry},
-			SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
-			DaemonVersion:   daemonVersion,
-			ProtocolVersion: shimProtocolVersion,
-			Logf:            log.Printf,
-		})
-		if drvErr != nil {
-			log.Fatalf("claude-repld: build session driver: %v", drvErr)
-		}
-		defer driver.Close()
-
-		agentShim, err = server.WireAgentShim(server.AgentShimConfig{
-			SSM:       ssmMgr,
-			Prompts:   driver,
-			MergeDirs: pendingMergeDirs{},
-			Lifecycle: pendingLifecycle{},
-			Sessions:  registrySessions{reg: sessionRegistry},
-			Resyncer:  driver,
-			Logf:      log.Printf,
-		})
-		if err != nil {
-			log.Fatalf("claude-repld: frontend surface: %v", err)
-		}
-		// Bind the driver's push target now that the frontend server exists.
-		forwarder.SetTarget(agentShim.Server)
-		defer func() {
-			if cerr := agentShim.Close(); cerr != nil {
-				log.Printf("claude-repld: frontend surface close: %v", cerr)
-			}
-		}()
-	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/sessions", srv.Handler())
@@ -414,21 +363,21 @@ func main() {
 	if *widgetAssets != "" {
 		mux.Handle("/widget-assets/", http.StripPrefix("/widget-assets/", http.FileServer(http.Dir(*widgetAssets))))
 	}
-	// Frontend WS endpoint (webapp) on the existing mux, and the UDS listener
-	// (Emacs) on its own goroutine, both serving frontend.v1 protojson frames.
-	if agentShim != nil {
-		mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
-		sockPath, perr := frontend.DefaultSocketPath()
-		if perr != nil {
-			log.Fatalf("claude-repld: frontend socket path: %v", perr)
-		}
-		go func() {
-			log.Printf("claude-repld: frontend UDS listening on %s", sockPath)
-			if serveErr := agentShim.Server.ServeUDS(sockPath); serveErr != nil {
-				log.Printf("claude-repld: frontend UDS serve ended: %v", serveErr)
-			}
-		}()
+	// Unfiltered frontend.v1 consumers: the /frontend WS endpoint and the Emacs
+	// UDS listener, both serving every workspace's frames. (The webapp's
+	// per-session view rides GET /sessions/{id}/stream, scope-filtered by the
+	// server handler.)
+	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
+	sockPath, perr := frontend.DefaultSocketPath()
+	if perr != nil {
+		log.Fatalf("claude-repld: frontend socket path: %v", perr)
 	}
+	go func() {
+		log.Printf("claude-repld: frontend UDS listening on %s", sockPath)
+		if serveErr := agentShim.Server.ServeUDS(sockPath); serveErr != nil {
+			log.Printf("claude-repld: frontend UDS serve ended: %v", serveErr)
+		}
+	}()
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
 

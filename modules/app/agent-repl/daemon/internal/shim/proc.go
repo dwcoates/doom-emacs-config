@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 
 	"claude-repld/internal/protocol"
 )
@@ -176,6 +177,16 @@ func (p *Proc) CloseStdin() error {
 func (p *Proc) Kill() error {
 	if err := p.cmd.Process.Kill(); err != nil {
 		return fmt.Errorf("shim: kill: %w", err)
+	}
+	return nil
+}
+
+// Terminate sends SIGTERM so the shim can stop cleanly (flush its transcript,
+// close its listener) — the cooperative stop the daemon uses to hibernate a
+// UDS shim. The caller reaps it via Wait separately.
+func (p *Proc) Terminate() error {
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("shim: terminate: %w", err)
 	}
 	return nil
 }

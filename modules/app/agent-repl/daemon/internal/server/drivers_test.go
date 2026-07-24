@@ -62,7 +62,7 @@ func TestShimSpawnerReattachesWithoutSpawning(t *testing.T) {
 	spawned := 0
 	sp := NewShimSpawner(reg,
 		func(context.Context, string) (bool, error) { return true, nil },
-		func(string, CreateOpts, string) error { spawned++; return nil },
+		func(string, CreateOpts, string) (func() error, error) { spawned++; return nil, nil },
 		nil)
 
 	// Act
@@ -90,7 +90,10 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNoListener(t *testing.T) {
 	var gotSock string
 	sp := NewShimSpawner(reg,
 		func(context.Context, string) (bool, error) { return false, nil },
-		func(_ string, opts CreateOpts, sock string) error { gotOpts, gotSock = opts, sock; return nil },
+		func(_ string, opts CreateOpts, sock string) (func() error, error) {
+			gotOpts, gotSock = opts, sock
+			return nil, nil
+		},
 		nil)
 
 	// Act
@@ -113,7 +116,7 @@ func TestShimSpawnerSurfacesProbeError(t *testing.T) {
 	spawned := 0
 	sp := NewShimSpawner(reg,
 		func(context.Context, string) (bool, error) { return false, errors.New("bad hello") },
-		func(string, CreateOpts, string) error { spawned++; return nil },
+		func(string, CreateOpts, string) (func() error, error) { spawned++; return nil, nil },
 		nil)
 
 	// Act
@@ -134,7 +137,7 @@ func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 	reg := openTestRegistry(t)
 	sp := NewShimSpawner(reg,
 		func(context.Context, string) (bool, error) { return false, nil },
-		func(string, CreateOpts, string) error { return nil },
+		func(string, CreateOpts, string) (func() error, error) { return nil, nil },
 		nil)
 
 	// Act

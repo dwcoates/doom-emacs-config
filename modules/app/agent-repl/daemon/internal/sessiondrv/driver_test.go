@@ -21,9 +21,10 @@ func (f *fakeSeqStore) LastSeq(id string) uint64       { return f.seq[id] }
 func (f *fakeSeqStore) SetLastSeq(id string, s uint64) { f.seq[id] = s }
 
 type fakeSpawner struct {
-	mu    sync.Mutex
-	calls []string
-	err   error
+	mu      sync.Mutex
+	calls   []string
+	stopped []string
+	err     error
 }
 
 func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID, _ string) error {
@@ -31,6 +32,13 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID, _ string) error {
 	s.calls = append(s.calls, sessionID)
 	s.mu.Unlock()
 	return s.err
+}
+
+func (s *fakeSpawner) StopShim(sessionID string) error {
+	s.mu.Lock()
+	s.stopped = append(s.stopped, sessionID)
+	s.mu.Unlock()
+	return nil
 }
 
 type fakeLocator struct{ m map[string]string }
@@ -194,7 +202,7 @@ func TestInterruptRequiresLiveSession(t *testing.T) {
 func TestAnswerPermissionRoutesToRegistry(t *testing.T) {
 	// Arrange.
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
-	ch, release := m.reg.await("r1")
+	ch, release := m.reg.await("r1", "ws")
 	defer release()
 
 	// Act.
