@@ -378,10 +378,19 @@ message TaskListResult {
   google.protobuf.ListValue tasks = 1;  // list payload verbatim
 }
 
+// The pin a SendMessage result hands back for the addressed agent: the handle
+// the user refers to it by (`id`/`name`) plus the short display `ref`. Corpus:
+// tool-results/send_message.jsonl.
+message MessagePin {
+  string id = 1;
+  string name = 2;
+  string ref = 3;
+}
+
 message SendMessageResult {
   string message = 1;
-  // Object {id,name,ref} pin descriptor; corpus: tool-results/send_message.jsonl.
-  google.protobuf.Struct pin = 2;
+  // The addressed agent's pin; corpus: tool-results/send_message.jsonl.
+  MessagePin pin = 2;
   bool success = 3;
   string resumed_agent_id = 4;
 }

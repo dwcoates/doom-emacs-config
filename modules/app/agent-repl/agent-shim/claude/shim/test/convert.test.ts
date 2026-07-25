@@ -517,11 +517,20 @@ describe("corrected tool-result shapes", () => {
     expect(r.result.value.updatedFields).toEqual(["status"]);
   });
 
-  it("send_message classifies its pin as an object", () => {
+  it("send_message reads its pin as a typed MessagePin", () => {
     const r = convertToolUseResult(loadToolResult("send_message"));
     expect(r.result.case).toBe("sendMessage");
     if (r.result.case !== "sendMessage") throw new Error("arm");
-    expect(r.result.value.pin).toEqual({ id: "acd910f5fefb75908", name: "acd910f5fefb75908", ref: "2175c2" });
+    expect(r.result.value.pin?.id).toBe("acd910f5fefb75908");
+    expect(r.result.value.pin?.name).toBe("acd910f5fefb75908");
+    expect(r.result.value.pin?.ref).toBe("2175c2");
+  });
+
+  it("send_message leaves pin absent when the raw value is not an object", () => {
+    const r = convertToolUseResult({ pin: "2175c2", message: "hi" });
+    expect(r.result.case).toBe("sendMessage");
+    if (r.result.case !== "sendMessage") throw new Error("arm");
+    expect(r.result.value.pin).toBeUndefined();
   });
 
   it("schedule_wakeup reads scheduledFor as an epoch-millis integer", () => {

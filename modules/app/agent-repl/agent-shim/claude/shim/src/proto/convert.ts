@@ -120,6 +120,7 @@ import {
   FallbackModelRefSchema,
   ImageBlockSchema,
   ImageSourceSchema,
+  MessagePinSchema,
   MonitorResultSchema,
   QuestionOptionSchema,
   QuestionSchema,
@@ -144,6 +145,7 @@ import {
   WorkflowLaunchResultSchema,
   WriteResultSchema,
   type ContentBlock,
+  type MessagePin,
   type Question,
   type TaskStatusChange,
   type ToolUseResult,
@@ -973,7 +975,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   if (has("pin")) {
     return { case: "sendMessage", value: create(SendMessageResultSchema, {
       message: strOf(o["message"]),
-      pin: asStructOpt(o["pin"]),
+      pin: pinOf(o["pin"]),
       success: o["success"] === true,
       resumedAgentId: strOf(pick(o, "resumed_agent_id", "resumedAgentId")),
     }) };
@@ -1263,6 +1265,20 @@ function questionsOf(v: unknown): Question[] {
 function statusChangeOf(v: unknown): TaskStatusChange | undefined {
   if (!isObject(v)) return undefined;
   return create(TaskStatusChangeSchema, { from: strOf(v["from"]), to: strOf(v["to"]) });
+}
+
+/**
+ * Map a raw `pin` onto the typed `MessagePin` (corpus:
+ * tool-results/send_message). A non-object is not a pin and yields undefined
+ * rather than an all-empty pin that would read as a real one downstream.
+ */
+function pinOf(v: unknown): MessagePin | undefined {
+  if (!isObject(v)) return undefined;
+  return create(MessagePinSchema, {
+    id: strOf(v["id"]),
+    name: strOf(v["name"]),
+    ref: strOf(v["ref"]),
+  });
 }
 
 function uuidOf(message: Record<string, unknown>): string {

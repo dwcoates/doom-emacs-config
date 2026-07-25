@@ -80,7 +80,7 @@ func corpusRoot(t *testing.T) string {
 //   tasks                → TaskListResult.tasks (ListValue)
 //   updatedfields        → TaskUpdateResult.updated_fields (repeated string)
 //   statuschange         → TaskUpdateResult.status_change (TaskStatusChange)
-//   pin                  → SendMessageResult.pin (Struct)
+//   pin                  → SendMessageResult.pin (MessagePin)
 //   scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
 //   automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
 //   files                → DiagnosticsAttachment.files (ListValue)
@@ -474,6 +474,18 @@ func TestTypedToolResultShapes(t *testing.T) {
 				got := r.GetTaskUpdate().GetUpdatedFields()
 				if len(got) != 1 || got[0] != "status" {
 					t.Fatalf("updated_fields = %v, want [status]", got)
+				}
+			},
+		},
+		{
+			name:    "send_message pin decodes as MessagePin",
+			fixture: "send_message.jsonl",
+			assert: func(t *testing.T, r *datav1.ToolUseResult) {
+				pin := r.GetSendMessage().GetPin()
+				if pin.GetId() != "acd910f5fefb75908" ||
+					pin.GetName() != "acd910f5fefb75908" ||
+					pin.GetRef() != "2175c2" {
+					t.Fatalf("pin = %+v, want {id/name:acd910f5fefb75908 ref:2175c2}", pin)
 				}
 			},
 		},
