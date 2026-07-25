@@ -86,10 +86,21 @@
 
 ;;;; ---- WorkspaceState application --------------------------------------
 
+(defun agent-repl-test--register-ws (name &optional dir)
+  "Register live workspace NAME owning DIR, so a pushed frame resolves to it.
+The daemon names workspaces by CWD; `agent-repl--frontend-ws-name' maps that
+back to the persp NAME, and a name with no live workspace behind it is
+dropped rather than stub-created."
+  (agent-repl--ws-put name :project-dir (or dir (concat "/tmp/" name))))
+
 (ert-deftest agent-repl-test-apply-workspace-state-stores-keyword ()
   "Applying a WorkspaceState stores the mapped keyword under :pushed-render-state."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl-test--register-ws "ws1")
     ;; Act
     (agent-repl--frontend-apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_THINKING"))
@@ -100,6 +111,9 @@
   "Applying a WorkspaceState returns the mapped keyword."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should (eq (agent-repl--frontend-apply-workspace-state
                 '(:workspace "ws1" :state "RENDER_STATE_DONE"))
@@ -109,6 +123,9 @@
   "A later WorkspaceState overwrites the earlier pushed state (daemon is truth)."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (agent-repl--frontend-apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_THINKING"))
     ;; Act
@@ -121,6 +138,10 @@
   "The resolution inputs are stored under :pushed-render-state-meta."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl-test--register-ws "ws1")
     ;; Act
     (agent-repl--frontend-apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_IDLE_ASYNC"
@@ -137,6 +158,9 @@
   "A WorkspaceState with no workspace fails loudly (invariant violation)."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should-error (agent-repl--frontend-apply-workspace-state
                    '(:state "RENDER_STATE_IDLE")))))
@@ -145,6 +169,9 @@
   "A WorkspaceState with a blank workspace fails loudly."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should-error (agent-repl--frontend-apply-workspace-state
                    '(:workspace "" :state "RENDER_STATE_IDLE")))))
@@ -153,6 +180,9 @@
   "A WorkspaceState carrying an unmappable state fails loudly."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should-error (agent-repl--frontend-apply-workspace-state
                    '(:workspace "ws1" :state "RENDER_STATE_UNSPECIFIED")))))
@@ -163,6 +193,9 @@
   "A StateSnapshot applies the pushed state for every WorkspaceState in it."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act
     (agent-repl--frontend-apply-snapshot
      '(:workspaces ((:workspace "a" :state "RENDER_STATE_THINKING")
@@ -175,6 +208,9 @@
   "A StateSnapshot returns the count of workspace states applied."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should (= (agent-repl--frontend-apply-snapshot
                 '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE")
@@ -185,6 +221,9 @@
   "An empty StateSnapshot applies nothing and returns 0."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act / Assert
     (should (= (agent-repl--frontend-apply-snapshot '(:workspaces nil)) 0))))
 
@@ -193,6 +232,9 @@
 `:sessions'; the `:catalogs' array (no handler here) does not break it."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     ;; Act — sessions carry ids now; catalogs present but unhandled here.
     (agent-repl--frontend-apply-snapshot
@@ -208,6 +250,9 @@
 daemon no longer knows."
   ;; Arrange — a stale view lingers before the snapshot.
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     (agent-repl--frontend-store-session-view '(:sessionId "s_stale" :workspace "old"))
     ;; Act
@@ -221,6 +266,9 @@ daemon no longer knows."
   "A snapshot's `:daemon' member routes into the boot-id note (give-up reset)."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let ((noted nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id)
                  (lambda (boot-id) (setq noted boot-id))))
@@ -236,6 +284,9 @@ daemon no longer knows."
   "The sessionView handler upserts the view into the store, keyed by id."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     ;; Act
     (agent-repl--frontend-apply-session-view
@@ -252,6 +303,9 @@ daemon no longer knows."
   "The cwd correlation returns the non-terminal session bound to that cwd."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     (agent-repl--frontend-store-session-view '(:sessionId "s_dead" :workspace "/w" :terminal t))
     (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
@@ -262,6 +316,9 @@ daemon no longer knows."
   "The cwd correlation returns nil when no live session is bound to the cwd."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     ;; Act / Assert
     (should (null (agent-repl--frontend-live-session-id-for-cwd "/nope")))))
@@ -270,6 +327,9 @@ daemon no longer knows."
   "The daemonView handler routes its bootId into `--frontend-note-boot-id'."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let ((noted nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id)
                  (lambda (boot-id) (setq noted boot-id))))
@@ -282,6 +342,9 @@ daemon no longer knows."
   "The daemonView handler stores the view for the readiness/staleness reads."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let ((agent-repl--frontend-last-daemon-view nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore))
         ;; Act
@@ -301,6 +364,9 @@ daemon no longer knows."
   "A StateSnapshot's `:daemon' arm lands in the daemon-view store."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let ((agent-repl--frontend-last-daemon-view nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore))
         ;; Act
@@ -360,6 +426,9 @@ daemon no longer knows."
   "The sessionInit handler stores its SystemInit keyed by session id."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-inits)
     ;; Act
     (agent-repl--frontend-apply-session-init
@@ -376,12 +445,18 @@ daemon no longer knows."
 (ert-deftest agent-repl-test-session-init-nil-for-unknown ()
   "The session-init accessor returns nil for a session with no pushed init."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-inits)
     (should (null (agent-repl--frontend-session-init "s_nope")))))
 
 (ert-deftest agent-repl-test-apply-snapshot-rebuilds-session-inits ()
   "A StateSnapshot rebuilds the session-init roster from its :inits list."
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-inits)
     ;; Arrange — a stale init that the snapshot must drop.
     (agent-repl--frontend-store-session-init
@@ -471,6 +546,9 @@ daemon no longer knows."
   "A decoded workspaceState frame dispatched through the transport applies state."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; Act — decode + dispatch via the real registered handler
     (agent-repl--uds-dispatch-frame
      (agent-repl--uds-decode-frame
@@ -484,6 +562,9 @@ daemon no longer knows."
   "Applying a WorkspaceState runs the state-transition hook with (ws new prev)."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     ;; `let*': the hook-list init form closes over `captured', which must be
     ;; bound FIRST (a plain `let' evaluates all inits in the outer scope, so
     ;; the closure would capture an empty lexical env and never see `captured').
@@ -500,6 +581,9 @@ daemon no longer knows."
   "The hook receives the prior pushed keyword as PREVIOUS on a later push."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let* (captured
            (agent-repl-ws-state-transition-functions
             (list (lambda (ws new prev) (setq captured (list ws new prev))))))
@@ -515,6 +599,9 @@ daemon no longer knows."
   "A signaling subscriber is caught + logged; state application still succeeds."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let ((agent-repl-ws-state-transition-functions
            (list (lambda (&rest _) (error "boom")))))
       ;; Act
@@ -529,6 +616,9 @@ daemon no longer knows."
   "The FIRST pushed WorkspaceState arms the :agent-ready latch bit."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let (calls)
       (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
                  (lambda (ws key &optional _m) (push (list ws key) calls))))
@@ -542,6 +632,9 @@ daemon no longer knows."
   "A second pushed state for the same workspace does not re-arm the latch."
   ;; Arrange
   (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
     (let (calls)
       (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
                  (lambda (ws key &optional _m) (push (list ws key) calls))))
@@ -556,3 +649,54 @@ daemon no longer knows."
 (provide 'test-frontend-state)
 
 ;;; test-frontend-state.el ends here
+
+;;;; ---- The inbound workspace key ---------------------------------------
+;;
+;; Every daemon frame names its workspace by the session CWD; Emacs keys
+;; workspaces by persp NAME.  Feeding the path straight to `agent-repl--ws-put'
+;; does not fail — it STUB-CREATES an entry under the path, so the pushed state
+;; lands somewhere the tab-bar never reads and every workspace sits at its
+;; disconnected colour while the session works normally.
+
+(ert-deftest agent-repl-test-inbound-frame-resolves-cwd-to-workspace-name ()
+  "A frame naming the session CWD applies to the workspace that owns it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
+    ;; Act — the daemon always names the workspace by cwd.
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "/Users/x/.config/doom" :state "RENDER_STATE_THINKING"))
+    ;; Assert — the state reached the NAME the renderer reads.
+    (should (eq (agent-repl--ws-get "doom" :pushed-render-state) :thinking))))
+
+(ert-deftest agent-repl-test-inbound-frame-does-not-stub-create-under-the-path ()
+  "Resolving must not leave a path-keyed stub behind."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
+    ;; Act
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "/Users/x/.config/doom" :state "RENDER_STATE_DONE"))
+    ;; Assert — the path is not a workspace.
+    (should-not (agent-repl--ws-get "/Users/x/.config/doom" :pushed-render-state))))
+
+(ert-deftest agent-repl-test-inbound-frame-for-an-unowned-cwd-is-dropped ()
+  "A cwd no live workspace owns is dropped, never stub-created."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act — Emacs has nothing open for this path.
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "/Users/x/not-open" :state "RENDER_STATE_THINKING"))
+    ;; Assert — no entry invented to hold it.
+    (should-not (agent-repl--ws-known-p "/Users/x/not-open"))))
+
+(ert-deftest agent-repl-test-inbound-frame-accepts-a-workspace-name ()
+  "A frame already naming a known workspace still applies."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
+    ;; Act
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "doom" :state "RENDER_STATE_IDLE"))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "doom" :pushed-render-state) :idle))))

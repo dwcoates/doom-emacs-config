@@ -35,6 +35,8 @@
 ;; `agent-repl--latch-and-maybe-fire-loaded' lives in sentinel.el; both load
 ;; as part of the same module, so the symbol is resolved at call time.
 (declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
+(declare-function agent-repl--ws-dir-owner "workspace" (dir &optional except))
+(declare-function agent-repl--ws-known-p "workspace" (ws))
 ;; `agent-repl--frontend-note-boot-id' lives in frontend-client.el (it owns the
 ;; reattach give-up state the boot-id change resets); resolved at call time.
 (declare-function agent-repl--frontend-note-boot-id "frontend-client" (boot-id))
@@ -122,6 +124,35 @@ fallback keyword (AGENTS.md No-Silent-Fallbacks)."
 
 ;;;; ---- WorkspaceState application --------------------------------------
 
+;;;; ---- The inbound workspace key ---------------------------------------
+;;
+;; Every daemon frame names its workspace by the session CWD, because that is
+;; what the daemon keys workspaces by (SessionLocator, the SSM, sessiondrv).
+;; Emacs keys workspaces by their persp NAME ("doom").
+;;
+;; Feeding the daemon's path straight to `agent-repl--ws-put' does not fail —
+;; it STUB-CREATES a hash entry under the path.  The pushed render state then
+;; lands on that stub while the tab-bar keeps reading the real, name-keyed
+;; workspace, which never changes: every workspace sat at its disconnected
+;; colour while the GUI showed the session working normally.  The stubs are
+;; visible in the log as `sidebar-entries: skipping live ws=/Users/... with no
+;; :project-dir'.
+;;
+;; So every inbound handler resolves the path to the workspace NAME first, and
+;; a path that resolves to nothing is dropped LOUDLY rather than inventing a
+;; workspace to hold it.
+
+(defun agent-repl--frontend-ws-name (workspace)
+  "Return the Emacs workspace NAME the daemon's WORKSPACE string refers to.
+WORKSPACE is a session CWD (how the daemon names workspaces).  Resolves it
+against the live workspaces' `:project-dir'.  A WORKSPACE that is already a
+known workspace name is returned as-is, so a frame that carries a name
+still works.  Returns nil when nothing owns it — the caller must then drop
+the frame rather than key state under an unresolvable id."
+  (when (and workspace (not (string-empty-p workspace)))
+    (or (agent-repl--ws-dir-owner workspace)
+        (and (agent-repl--ws-known-p workspace) workspace))))
+
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
 Handler for the `workspaceState' oneof arm.  Maps the pushed RenderState
@@ -133,13 +164,17 @@ count, merge phase, cause kind/seq) are stored under
 transition.  Returns the applied keyword.
 
 Fails loudly on a missing/blank `workspace' (invariant violation)."
-  (let ((workspace (plist-get ws-state :workspace))
+  (let ((raw-workspace (plist-get ws-state :workspace))
         (state (plist-get ws-state :state)))
-    (when (or (null workspace) (string-empty-p workspace))
+    (when (or (null raw-workspace) (string-empty-p raw-workspace))
       (agent-repl--log nil
                        "frontend-apply-workspace-state: MISSING workspace in %S — no fallback"
                        ws-state)
       (error "agent-repl frontend: WorkspaceState missing workspace"))
+    ;; No live workspace owning this cwd means the daemon is reporting state
+    ;; for something Emacs does not have open. Dropping it is honest; keying
+    ;; it under the path would STUB-CREATE an entry the renderer never reads.
+    (if-let ((workspace (agent-repl--frontend-ws-name raw-workspace)))
     (let* ((keyword (agent-repl--frontend-state->keyword state))
            (previous (agent-repl--ws-get workspace :pushed-render-state))
            ;; live_task_count / cause_seq / at_ms are proto int64/uint64,
@@ -174,7 +209,11 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; Re-key point for the merge reactive consequences (design §4.6/§9.3):
       ;; run AFTER the pushed state is stored so subscribers observe it.
       (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
-      keyword)))
+      keyword)
+      (agent-repl--log nil
+                       "frontend-apply-workspace-state: no live workspace owns %s — dropping the frame (state=%s)"
+                       raw-workspace state)
+      nil)))
 
 (defun agent-repl--frontend-maybe-latch-agent-ready (workspace)
   "Set the `:agent-ready' latch bit for WORKSPACE on its FIRST pushed state.
