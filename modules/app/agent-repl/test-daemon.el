@@ -70,6 +70,13 @@ keys on the developer's own live sessions and fails whenever one of them
 happens to be mid-turn.  Tests wanting a busy probe re-stub it with their
 own `cl-letf', which shadows this one for the extent of that form.
 
+`agent-repl--frontend-run-listener-probe' is stubbed to report NO
+listener for the same hermeticity reason: the real probe runs `lsof'
+against whatever holds port 8787 on the developer's machine, and the
+first-boot pass would then judge the developer's own daemon.  No
+listener means \"nothing incompatible to replace\", which is the correct
+premise for every steady-state test here.
+
 The startup staleness one-shot is bound ALREADY-RUN
 \(`agent-repl--frontend-startup-staleness-checked' t), so this env models
 the STEADY-STATE ensure (the cheap live-process hot path).  Tests
@@ -83,6 +90,8 @@ exercising the one-shot itself re-bind it nil in their own `let'."
                 (lambda (_path) t))
                ((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
+               ((symbol-function 'agent-repl--frontend-run-listener-probe)
+                (lambda (&rest _) nil))
                ((symbol-function 'process-live-p)
                 (lambda (p) (and (agent-repl-test--fake-daemon-p p)
                                  (agent-repl-test--fake-daemon-live p))))
@@ -1056,3 +1065,326 @@ already been restarted."
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here
+
+;;;; ---- Incompatible-daemon replacement (E4 zero-user-action boot) --------
+
+(defmacro agent-repl-test--with-daemon-boot (&rest body)
+  "Run BODY with every first-boot external boundary stubbed inert.
+Each stub is overridden per test; the defaults make an unmocked path
+obvious (no listener, no build, no spawn) rather than reaching the host."
+  (declare (indent 0))
+  `(let ((agent-repl-frontend-daemon-addr "127.0.0.1:8787")
+         (agent-repl-frontend-incompatible-stop-grace-seconds 0.05)
+         (agent-repl--frontend-daemon-process nil)
+         (agent-repl--frontend-startup-staleness-checked nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--frontend-build-if-stale)
+                (lambda (&rest _) 0))
+               ((symbol-function 'agent-repl--frontend-start-daemon)
+                (lambda (&rest _) 'started))
+               ((symbol-function 'agent-repl--signal-process)
+                (lambda (&rest _) t))
+               ((symbol-function 'agent-repl--uds-socket-live-p)
+                (lambda (&rest _) nil)))
+       ,@body)))
+
+;; --- port parsing -------------------------------------------------------
+
+(ert-deftest agent-repl-test-daemon-port-parsed-from-addr ()
+  "The port is read off the configured listen address."
+  ;; Arrange
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:8787"))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-daemon-port) "8787"))))
+
+(ert-deftest agent-repl-test-daemon-port-nil-without-one ()
+  "An address with no port yields nil, making port detection a no-op."
+  ;; Arrange
+  (let ((agent-repl-frontend-daemon-addr "/var/run/sock"))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-daemon-port))))
+
+;; --- lsof parsing -------------------------------------------------------
+
+(ert-deftest agent-repl-test-parse-listener-reads-pid-and-command ()
+  "A `lsof -F' record yields its pid and command name."
+  ;; Arrange / Act
+  (let ((got (agent-repl--frontend-parse-listener "p4242\ncclaude-repld\n")))
+    ;; Assert
+    (should (equal got '(4242 . "claude-repld")))))
+
+(ert-deftest agent-repl-test-parse-listener-empty-output-is-nil ()
+  "No listener means nil, not a zero pid."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--frontend-parse-listener "")))
+
+(ert-deftest agent-repl-test-parse-listener-nil-output-is-nil ()
+  "A probe that could not run yields nil rather than erroring."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--frontend-parse-listener nil)))
+
+(ert-deftest agent-repl-test-parse-listener-takes-the-first-record ()
+  "Only the first listener is reported; the port has one owner."
+  ;; Arrange / Act
+  (let ((got (agent-repl--frontend-parse-listener
+              "p1\ncclaude-repld\np2\ncsomething-else\n")))
+    ;; Assert
+    (should (equal (car got) 1))))
+
+;; --- the surgical predicate ---------------------------------------------
+
+(ert-deftest agent-repl-test-our-daemon-command-matches-the-binary ()
+  "The daemon binary's own basename is recognized."
+  ;; Arrange / Act / Assert
+  (should (agent-repl--frontend-our-daemon-command-p
+           (file-name-nondirectory agent-repl--frontend-daemon-bin))))
+
+(ert-deftest agent-repl-test-our-daemon-command-rejects-a-stranger ()
+  "An unrelated program on the port is NOT ours."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--frontend-our-daemon-command-p "node")))
+
+(ert-deftest agent-repl-test-our-daemon-command-rejects-nil ()
+  "A missing command name is not a match (never signal on a guess)."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--frontend-our-daemon-command-p nil)))
+
+;; --- detection ----------------------------------------------------------
+
+(ert-deftest agent-repl-test-incompatible-daemon-detected ()
+  "A daemon holding the port while serving no UDS is incompatible."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+               (lambda (&rest _)
+                 (format "p999\nc%s\n"
+                         (file-name-nondirectory agent-repl--frontend-daemon-bin)))))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-incompatible-daemon) '(999 . "claude-repld"))))))
+
+(ert-deftest agent-repl-test-current-daemon-is-not-incompatible ()
+  "A daemon serving the frontend UDS is current and must never be killed."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&rest _) t))
+              ((symbol-function 'agent-repl--frontend-run-listener-probe)
+               (lambda (&rest _) "p999\ncclaude-repld\n")))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-incompatible-daemon)))))
+
+(ert-deftest agent-repl-test-free-port-is-not-incompatible ()
+  "Nothing listening means nothing to replace."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-incompatible-daemon))))
+
+(ert-deftest agent-repl-test-foreign-listener-is-not-incompatible ()
+  "A program that is not our daemon is left strictly alone."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+               (lambda (&rest _) "p999\ncsome-web-server\n")))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-incompatible-daemon)))))
+
+;; --- replacement --------------------------------------------------------
+
+(ert-deftest agent-repl-test-replace-incompatible-signals-term ()
+  "The incompatible daemon is asked to exit before it is killed."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let (signals (probes 0))
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _)
+                   (setq probes (1+ probes))
+                   ;; Present on the first look, gone once signalled.
+                   (when (= probes 1) "p999\ncclaude-repld\n")))
+                ((symbol-function 'agent-repl--signal-process)
+                 (lambda (pid sig) (push (cons pid sig) signals) t)))
+        ;; Act
+        (agent-repl--frontend-replace-incompatible-daemon)
+        ;; Assert
+        (should (equal signals '((999 . TERM))))))))
+
+(ert-deftest agent-repl-test-replace-incompatible-starts-the-new-daemon ()
+  "Once the port frees, a fresh daemon is started."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let ((probes 0) started)
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _)
+                   (setq probes (1+ probes))
+                   (when (= probes 1) "p999\ncclaude-repld\n")))
+                ((symbol-function 'agent-repl--frontend-start-daemon)
+                 (lambda (&rest _) (setq started t) 'started)))
+        ;; Act
+        (agent-repl--frontend-replace-incompatible-daemon)
+        ;; Assert
+        (should started)))))
+
+(ert-deftest agent-repl-test-replace-incompatible-builds-before-terminating ()
+  "Artifacts are built BEFORE the old daemon dies, so a build failure
+leaves the working daemon running rather than trading it for nothing."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let ((probes 0) order)
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _)
+                   (setq probes (1+ probes))
+                   (when (= probes 1) "p999\ncclaude-repld\n")))
+                ((symbol-function 'agent-repl--frontend-build-if-stale)
+                 (lambda (&rest _) (push 'build order) 0))
+                ((symbol-function 'agent-repl--signal-process)
+                 (lambda (&rest _) (push 'signal order) t)))
+        ;; Act
+        (agent-repl--frontend-replace-incompatible-daemon)
+        ;; Assert
+        (should (equal (nreverse order) '(build signal)))))))
+
+(ert-deftest agent-repl-test-replace-incompatible-kills-a-survivor ()
+  "A daemon that ignores SIGTERM is SIGKILLed."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let (signals)
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _) "p999\ncclaude-repld\n"))
+                ((symbol-function 'agent-repl--signal-process)
+                 (lambda (pid sig) (push (cons pid sig) signals) t)))
+        ;; Act
+        (agent-repl--frontend-replace-incompatible-daemon)
+        ;; Assert
+        (should (member '(999 . KILL) signals))))))
+
+(ert-deftest agent-repl-test-replace-incompatible-does-not-spawn-next-to-a-survivor ()
+  "A daemon that will not die is left in place: spawning beside it would
+only bind-fail, which is the failure this exists to prevent."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let (started)
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _) "p999\ncclaude-repld\n"))
+                ((symbol-function 'agent-repl--frontend-start-daemon)
+                 (lambda (&rest _) (setq started t))))
+        ;; Act
+        (agent-repl--frontend-replace-incompatible-daemon)
+        ;; Assert
+        (should-not started)))))
+
+(ert-deftest agent-repl-test-replace-incompatible-noop-without-one ()
+  "With no incompatible daemon, nothing is signalled and nothing spawns."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let (touched)
+      (cl-letf (((symbol-function 'agent-repl--signal-process)
+                 (lambda (&rest _) (setq touched t)))
+                ((symbol-function 'agent-repl--frontend-start-daemon)
+                 (lambda (&rest _) (setq touched t))))
+        ;; Act
+        (should-not (agent-repl--frontend-replace-incompatible-daemon))
+        ;; Assert
+        (should-not touched)))))
+
+;; --- artifact readiness -------------------------------------------------
+
+(ert-deftest agent-repl-test-missing-artifacts-lists-absent-ones ()
+  "Every absent launch artifact is reported."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+             (lambda (path) (not (string-suffix-p "dist" path)))))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-missing-artifacts)
+                   (list agent-repl--frontend-webapp-dir)))))
+
+(ert-deftest agent-repl-test-ensure-artifacts-builds-when-one-is-missing ()
+  "A missing artifact triggers a build."
+  ;; Arrange
+  (let (built)
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--frontend-build-if-stale)
+               (lambda (&rest _) (setq built t) 0)))
+      ;; Act
+      (agent-repl--frontend-ensure-artifacts)
+      ;; Assert
+      (should built))))
+
+(ert-deftest agent-repl-test-ensure-artifacts-skips-a-complete-build ()
+  "Present artifacts cost no bash at all."
+  ;; Arrange
+  (let (built)
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (&rest _) t))
+              ((symbol-function 'agent-repl--frontend-build-if-stale)
+               (lambda (&rest _) (setq built t) 0)))
+      ;; Act
+      (should-not (agent-repl--frontend-ensure-artifacts))
+      ;; Assert
+      (should-not built))))
+
+;; --- first-boot ordering + idempotency ----------------------------------
+
+(ert-deftest agent-repl-test-first-boot-replaces-before-anything-else ()
+  "An incompatible daemon is replaced first: it holds the port, so no
+later step could start a daemon anyway."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let ((probes 0) order)
+      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
+                 (lambda (&rest _)
+                   (setq probes (1+ probes))
+                   (when (= probes 1) "p999\ncclaude-repld\n")))
+                ((symbol-function 'agent-repl--frontend-start-daemon)
+                 (lambda (&rest _) (push 'start order) 'started))
+                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
+                 (lambda (&rest _) (push 'bounce order)))
+                ((symbol-function 'agent-repl--frontend-ensure-artifacts)
+                 (lambda (&rest _) (push 'artifacts order))))
+        ;; Act
+        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
+        ;; Assert — the replacement ran, and the staleness pass did not
+        ;; (the daemon it would judge was just built from current source).
+        (should (equal (nreverse order) '(start)))))))
+
+(ert-deftest agent-repl-test-first-boot-falls-through-without-an-incompatible-daemon ()
+  "With no incompatible daemon, the artifact sweep and staleness pass run."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let (order)
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
+                 (lambda (&rest _) (push 'artifacts order)))
+                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
+                 (lambda (&rest _) (push 'bounce order))))
+        ;; Act
+        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
+        ;; Assert
+        (should (equal (nreverse order) '(artifacts bounce)))))))
+
+(ert-deftest agent-repl-test-first-boot-runs-once-per-session ()
+  "A repeat boot pass is a no-op: the guard makes it a genuine one-shot,
+so opening a second panel never re-probes, re-builds or re-replaces."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (let ((runs 0))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
+                 (lambda (&rest _) (setq runs (1+ runs))))
+                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
+        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
+        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
+        ;; Assert
+        (should (= runs 1))))))
+
+(ert-deftest agent-repl-test-first-boot-guard-set-before-the-pass ()
+  "The guard is set BEFORE the pass, so an error still leaves it one-shot."
+  ;; Arrange
+  (agent-repl-test--with-daemon-boot
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
+               (lambda (&rest _) (error "build blew up"))))
+      ;; Act
+      (ignore-errors (agent-repl--frontend-maybe-bounce-stale-daemon-once))
+      ;; Assert
+      (should agent-repl--frontend-startup-staleness-checked))))
