@@ -78,14 +78,18 @@ func corpusRoot(t *testing.T) string {
 //   questions            → AskUserQuestionResult.questions (repeated Question)
 //   results              → WebSearchResult.results (ListValue)
 //   tasks                → TaskListResult.tasks (ListValue)
-//   updatedfields        → TaskUpdateResult.updated_fields (ListValue)
-//   statuschange         → TaskUpdateResult.status_change (Struct)
+//   updatedfields        → TaskUpdateResult.updated_fields (repeated string)
+//   statuschange         → TaskUpdateResult.status_change (TaskStatusChange)
 //   pin                  → SendMessageResult.pin (Struct)
 //   scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
 //   automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
 //   files                → DiagnosticsAttachment.files (ListValue)
 //   content              → FileAttachment.content (Struct) /
 //                          TaskReminderAttachment.content (ListValue)
+//
+// A LATER pass is replacing the remaining schemaless homes above with typed
+// messages, so those shapes become modeled field-by-field rather than absorbed
+// wholesale — see TestTypedToolResultShapes.
 //
 // The map is therefore EMPTY: the corpus is fully modeled and the contract is now
 // ZERO extras anywhere in it. The mechanism stays so a future corpus shape the
@@ -436,6 +440,56 @@ func TestClassifyToolResultArms(t *testing.T) {
 			if got != want {
 				t.Fatalf("%s: classified as %q, want %q", base, got, want)
 			}
+		})
+	}
+}
+
+// TestTypedToolResultShapes pins the tool-result fields that were tightened from
+// a schemaless Struct/ListValue to a typed shape: each must decode from its
+// GOLDEN FIXTURE as typed data with zero extras. A future corpus shape the typed
+// message cannot express would surface here as an undocumented extra (and in
+// TestGoldenTranscriptLines), which is the discipline the empty knownSchemaGaps
+// map exists to enforce.
+func TestTypedToolResultShapes(t *testing.T) {
+	root := corpusRoot(t)
+	tests := []struct {
+		name    string
+		fixture string
+		assert  func(t *testing.T, r *datav1.ToolUseResult)
+	}{
+		{
+			name:    "task_update status_change decodes as TaskStatusChange",
+			fixture: "task_update.jsonl",
+			assert: func(t *testing.T, r *datav1.ToolUseResult) {
+				sc := r.GetTaskUpdate().GetStatusChange()
+				if sc.GetFrom() != "pending" || sc.GetTo() != "in_progress" {
+					t.Fatalf("status_change = %+v, want {from:pending to:in_progress}", sc)
+				}
+			},
+		},
+		{
+			name:    "task_update updated_fields decodes as repeated string",
+			fixture: "task_update.jsonl",
+			assert: func(t *testing.T, r *datav1.ToolUseResult) {
+				got := r.GetTaskUpdate().GetUpdatedFields()
+				if len(got) != 1 || got[0] != "status" {
+					t.Fatalf("updated_fields = %v, want [status]", got)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			objs := readLines(t, filepath.Join(root, "tool-results", tc.fixture))
+			c := New(func(string, ...any) {})
+			// Act
+			res, extras := c.ToolUseResult(objs[0]["toolUseResult"])
+			// Assert
+			if extras != nil {
+				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			}
+			tc.assert(t, res)
 		})
 	}
 }
