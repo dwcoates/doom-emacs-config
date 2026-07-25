@@ -63,6 +63,46 @@ func TestScopeFramePassesMatchingHeartbeat(t *testing.T) {
 	}
 }
 
+func TestScopeFrameDropsNonMatchingQueue(t *testing.T) {
+	// Arrange — another session's queue must not leak into this connection:
+	// its entries are prompts the user typed somewhere else.
+	sc := Scope{SessionID: "s1"}
+	frame := QueueViewFrame(&frontendv1.QueueView{SessionId: "s2", Workspace: "/w2"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a queue for another session must be dropped")
+	}
+}
+
+func TestScopeFramePassesMatchingQueue(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1"}
+	frame := QueueViewFrame(&frontendv1.QueueView{SessionId: "s1", Workspace: "/w1"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a queue for this session must pass")
+	}
+}
+
+func TestFilterSnapshotKeepsOnlyThisScopesQueue(t *testing.T) {
+	// Arrange — the connect snapshot carries every session's queue.
+	sc := Scope{SessionID: "s1"}
+	snap := &frontendv1.StateSnapshot{Queues: []*frontendv1.QueueView{
+		{SessionId: "s1", Workspace: "/w1"},
+		{SessionId: "s2", Workspace: "/w2"},
+	}}
+	// Act
+	out := filterSnapshot(snap, sc)
+	// Assert
+	if len(out.GetQueues()) != 1 || out.GetQueues()[0].GetSessionId() != "s1" {
+		t.Fatalf("filtered queues = %+v", out.GetQueues())
+	}
+}
+
 func TestScopeFramePassesGlobalDegradedNotice(t *testing.T) {
 	// Arrange — a DegradedNotice carries no session/workspace identity.
 	sc := Scope{SessionID: "s1"}

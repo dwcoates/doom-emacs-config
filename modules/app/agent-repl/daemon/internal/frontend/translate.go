@@ -115,6 +115,11 @@ func HeartbeatViewFrame(h *frontendv1.HeartbeatView) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Heartbeat{Heartbeat: h}}
 }
 
+// QueueViewFrame wraps a QueueView (E4): the session's held-prompt queue.
+func QueueViewFrame(q *frontendv1.QueueView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Queue{Queue: q}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------

@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -35,6 +37,10 @@ import (
 // gone. Bound in main to a registry-writing adapter; nil disables the write.
 type SessionRegistrar interface {
 	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+	// QueuedPromptsChanged persists the prompts the daemon is currently
+	// HOLDING for a session (E4). A daemon that dies mid-queue would otherwise
+	// lose them with no trace; the record is the honest one.
+	QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt)
 }
 
 // Spawner makes a session's UDS shim reachable at its socket: it reattaches to
@@ -88,6 +94,18 @@ type Config struct {
 	Registrar SessionRegistrar
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
+	// Classifier judges prompts queued during a running turn (E4). Nil leaves
+	// the queue unclassified: entries are marked ERROR with that stated
+	// reason and still delivered by the ordinary turn-end drain, so the
+	// feature degrades to plain FIFO rather than silently pretending to have
+	// judged anything.
+	Classifier Classifier
+	// SessionConfigDir resolves a session's CLAUDE_CONFIG_DIR so the
+	// classifier runs under the same account as the session it is about. Nil
+	// leaves it empty, which inherits the daemon's own environment.
+	SessionConfigDir func(sessionID string) string
+	// now is the queue's clock, injected only by tests.
+	now func() int64
 
 	// socketPath and newClient are injected only by tests; production uses the
 	// package defaults (shimclient.DefaultSocketPath / a real shimclient).
@@ -104,6 +122,8 @@ type Manager struct {
 
 	socketPath func(sessionID string) string
 	newClient  func(cfg shimclient.Config) sessionClient
+	// now is the queue's clock (queued_at_ms), injected by tests.
+	now func() int64
 
 	mu       sync.Mutex
 	byWS     map[string]*driven // workspace -> live driver
@@ -127,6 +147,19 @@ type driven struct {
 	metaArmed bool
 	metaFired bool
 	metaCwd   string
+
+	// Prompt-queue state (E4), guarded by the manager mutex.
+	//
+	// turnActive tracks the OBSERVED turn boundary (TurnStarted/TurnEnded off
+	// the shim stream) rather than the SSM's derived turn_active: the queue
+	// must act on what the session really reported, at the moment it reported
+	// it, not on a resolved view of it.
+	turnActive bool
+	queue      promptQueue
+	// runningText is the prompt that started the turn now in flight, as far as
+	// this daemon saw it. It is the classifier's "what is already running"
+	// context, and is empty when the turn predates this daemon.
+	runningText string
 }
 
 // New builds a Manager. Required collaborators missing is a construction error
@@ -157,12 +190,17 @@ func New(cfg Config) (*Manager, error) {
 		newClient = func(c shimclient.Config) sessionClient { return shimclient.New(c) }
 	}
 	rootCtx, rootStop := context.WithCancel(context.Background())
+	now := cfg.now
+	if now == nil {
+		now = func() int64 { return time.Now().UnixMilli() }
+	}
 	return &Manager{
 		cfg:        cfg,
 		logf:       logf,
 		reg:        newPermRegistry(logf),
 		socketPath: socketPath,
 		newClient:  newClient,
+		now:        now,
 		byWS:       make(map[string]*driven),
 		lastCSID:   make(map[string]string),
 		rootCtx:    rootCtx,
@@ -244,13 +282,32 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // SubmitPrompt brings the workspace's session up (lazily, reattach-first) and
 // submits text to its shim. On the FIRST prompt after a RESUME/COMPACT_CONTINUE
 // session start, the metaprompt read-directive is prepended once (task step 4).
+// A prompt submitted while the session's turn is ALREADY RUNNING is not
+// forwarded at all: the daemon queues it (E4) and this returns nil, because
+// the command was accepted — it was accepted into the queue. The queue's own
+// pushed QueueView is what tells the frontend where the prompt went.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error {
 	d, err := m.ensure(workspace)
 	if err != nil {
 		return err
 	}
-	text = m.applyMetapromptLocked(d, text)
-	return d.client.SubmitPrompt(ctx, text, "frontend", permissionMode)
+
+	m.mu.Lock()
+	entry, queued := m.queueSubmitLocked(d, text, permissionMode)
+	if !queued {
+		m.mu.Unlock()
+		text = m.applyMetapromptLocked(d, text)
+		return d.client.SubmitPrompt(ctx, text, "frontend", permissionMode)
+	}
+	running := d.runningText
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+
+	m.logf("sessiondrv: queued prompt entry=%s session=%s ws=%q (turn in flight)",
+		entry.id, d.sessionID, workspace)
+	m.publish(d.sessionID, view, recs)
+	go m.classify(d, entry.id, running, text)
+	return nil
 }
 
 // applyMetapromptLocked folds the metaprompt directive into text once for an
@@ -371,6 +428,8 @@ func (m *Manager) ensure(workspace string) (*driven, error) {
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
+	}, func(active bool) {
+		m.onTurnBoundary(d, active)
 	})
 	d.consumer = cons
 	ph := permHandler{reg: m.reg, cons: cons, logf: m.logf}
@@ -411,7 +470,19 @@ func (m *Manager) ensure(workspace string) (*driven, error) {
 		if cur, ok := m.byWS[workspace]; ok && cur == d {
 			delete(m.byWS, workspace)
 		}
+		// The session is gone, so its held prompts can never be delivered.
+		// Empty the queue and PUSH the empty view: a frontend that keeps
+		// rendering chips for a dead session is offering the user controls
+		// that do nothing.
+		dropped := d.queue.drainAll()
+		view := d.queue.view(workspace, sessionID)
 		m.mu.Unlock()
+		if len(dropped) > 0 {
+			m.logf("sessiondrv: session %s ended with %d queued prompt(s) undelivered ws=%q",
+				sessionID, len(dropped), workspace)
+		}
+		m.cfg.Push.PushQueueView(view)
+		m.persistQueue(sessionID, nil)
 	}()
 	m.logf("sessiondrv: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
 	return d, nil
