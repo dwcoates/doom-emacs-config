@@ -909,6 +909,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--cee-agent-reinstall-and-bounce-exit-code
     agent-repl--notify-parent-of-child-merge
     agent-repl--frontend-run-build-script
+    agent-repl--frontend-run-listener-probe
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
     agent-repl--frontend-make-webview-buffer
