@@ -344,10 +344,110 @@ links) are inspected."
       (agent-repl--check-unmanaged-broken-links issues)
       (nreverse (car issues)))))
 
+;;;; ---- Legacy hook purge (first boot after the sentinel endgame) --------
+
+(defconst agent-repl--legacy-hook-scripts
+  '("permission-notify.sh"
+    "permission-request-notify.sh"
+    "prompt-submit-notify.sh"
+    "session-start-notify.sh"
+    "stop-failure-notify.sh"
+    "stop-notify.sh"
+    "subagent-start-notify.sh"
+    "subagent-stop-notify.sh")
+  "Basenames of this module's PRE-CUTOVER Claude Code hook scripts.
+Mirrors `LEGACY_HOOK_SCRIPTS' in `.claude/install.sh', which owns the
+removal itself.  This list exists only so the purge can be SKIPPED
+cheaply when there is nothing to purge — see
+`agent-repl--legacy-hooks-present-p'.
+
+Emacs registers no hooks any more (S8/S9 sentinel endgame): every one of
+these fed a sentinel plane the daemon replaced.  Left registered they
+still fire on every CLI event, writing sentinel files nothing reads.")
+
+(defun agent-repl--legacy-hook-settings-files ()
+  "Return every Claude Code settings.json on this host.
+The default `~/.claude' plus any sibling `~/.claude-*' account dir, since
+the pre-cutover installer provisioned hooks into each one.  No account
+name is hardcoded.  Mirrors `_legacy_hook_settings_files' in install.sh."
+  (let (out)
+    (dolist (dir (cons (expand-file-name "~/.claude")
+                       (file-expand-wildcards (expand-file-name "~/.claude-*"))))
+      (let ((settings (expand-file-name "settings.json" dir)))
+        (when (and (file-directory-p dir) (file-readable-p settings))
+          (push settings out))))
+    (nreverse out)))
+
+(defun agent-repl--legacy-hooks-present-p ()
+  "Return non-nil when any settings.json still registers a legacy hook.
+A cheap READ-ONLY substring scan, deliberately not a JSON parse: the
+question is only whether the purge has anything to do, and the script
+owns the actual structural edit.  Being wrong in the false-positive
+direction costs one no-op bash run; being wrong the other way would
+leave the hooks firing, so the scan is on the script BASENAMES, which
+appear in the registered command string however it is spelled."
+  (seq-some
+   (lambda (settings)
+     (let ((body (condition-case nil
+                     (with-temp-buffer
+                       (insert-file-contents settings)
+                       (buffer-string))
+                   ;; An unreadable settings.json is not evidence either
+                   ;; way; report it and treat this file as clean rather
+                   ;; than forcing a purge run on a guess.
+                   (error
+                    (agent-repl--log nil "purge-legacy-hooks: cannot read %s" settings)
+                    nil))))
+       (and body
+            (seq-some (lambda (name) (string-search name body))
+                      agent-repl--legacy-hook-scripts))))
+   (agent-repl--legacy-hook-settings-files)))
+
+(defvar agent-repl--legacy-hooks-purged nil
+  "Non-nil once the legacy-hook purge has run in this Emacs session.")
+
+(defun agent-repl--maybe-purge-legacy-hooks ()
+  "Remove this module's pre-cutover settings.json hook entries, once.
+Called inline from this file's load, so the FIRST Emacs to boot on the
+post-cutover code cleans up after the generation before it with no user
+action.
+
+Guarded three ways, in increasing cost:
+  - once per Emacs session, so a `SPC j R' reload does not re-run it;
+  - never in sandbox or batch, matching every other install action here
+    (the host is where hooks live, and the test suite must not touch the
+    developer's real config);
+  - only when a legacy entry is actually registered, so a healthy load is
+    a couple of small file reads and no bash at all.
+
+The script itself is idempotent, so a redundant run is harmless; these
+guards are about cost and blast radius, not correctness.  A failure is
+logged, never signalled: a leftover hook writes sentinel files nobody
+reads, which must not be allowed to break module load."
+  (unless (or agent-repl--legacy-hooks-purged
+              noninteractive
+              (agent-repl--in-sandbox-p)
+              (not agent-repl-auto-install-hooks))
+    (setq agent-repl--legacy-hooks-purged t)
+    (when (agent-repl--legacy-hooks-present-p)
+      (agent-repl--log nil "purge-legacy-hooks: legacy hook entries found; purging")
+      (condition-case err
+          (pcase-let ((`(,code ,output)
+                       (agent-repl--run-install-script "purge-legacy-hooks")))
+            (if (eq code 0)
+                (agent-repl--log nil "purge-legacy-hooks: done\n%s" output)
+              (agent-repl--log nil "purge-legacy-hooks: FAILED (exit %s)\n%s" code output)))
+        (error
+         (agent-repl--log nil "purge-legacy-hooks: FAILED (%s)"
+                          (error-message-string err)))))))
+
 ;; Run inline at load time so a missing managed skill symlink self-heals
 ;; on startup.  Guarded to no-op on healthy installs — see the function's
 ;; docstring for details.
 (agent-repl--maybe-install-hooks)
+
+;; Same shape, for the hook entries the previous generation left behind.
+(agent-repl--maybe-purge-legacy-hooks)
 
 (provide 'agent-repl-install)
 
