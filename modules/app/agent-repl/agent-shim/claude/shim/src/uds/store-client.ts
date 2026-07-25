@@ -147,6 +147,12 @@ export class StoreClient {
    * not subscribed yet, in which case adopting merely records the key.
    */
   private lastFromSeq: bigint | null = null;
+  /**
+   * Whether any merged event has been forwarded to the sink under the current
+   * store key. Once true the key is settled: the daemon has begun tracking
+   * that key's seq space, so switching would look like a seq regression.
+   */
+  private forwardedAny = false;
 
   constructor(private readonly opts: StoreClientOptions) {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
@@ -164,6 +170,23 @@ export class StoreClient {
    */
   adoptStoreKey(sessionId: string): void {
     if (!sessionId || sessionId === this.storeKey) return;
+    // Each session id is its own SEQ SPACE, and the daemon tracks last_seen_seq
+    // per shim connection, not per key. Switching after events have already
+    // been forwarded therefore hands the daemon a seq that goes BACKWARDS
+    // (the new key's stream starts at 1), which it treats as
+    // ErrSeqRegression — a TERMINAL protocol error it never reconnects from.
+    // That is exactly what a mid-session `conversation_reset` did on
+    // 2026-07-25: the shim adopted the CLI's new uuid, replayed it from seq=1
+    // against last_seen=5990, and the daemon dropped the shim for good.
+    //
+    // So the key is settled by the FIRST forwarded event and never moves
+    // again. A later change is surfaced loudly rather than acted on: the
+    // conversation continues under the key the daemon is already tracking.
+    if (this.forwardedAny) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, ignored: sessionId },
+        `REFUSING to switch store session key mid-stream — the daemon tracks one seq space per connection and would read the new key's seq as a regression; events for ${sessionId} will not be tailed until the shim respawns`);
+      return;
+    }
     const previous = this.storeKey;
     this.storeKey = sessionId;
     shimLog(COMPONENT, { session: this.opts.sessionId, store_key: sessionId },
@@ -360,6 +383,8 @@ export class StoreClient {
     const evt = unpackAs(msg, EventSchema);
     if (evt) {
       if (this.sink) {
+        // Settles the store key: see adoptStoreKey.
+        this.forwardedAny = true;
         this.sink(evt);
       } else {
         shimLog(COMPONENT, { session: this.opts.sessionId, seq: evt.seq }, `merged event dropped: no sink bound`);
