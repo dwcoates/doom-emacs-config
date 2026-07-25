@@ -3,6 +3,7 @@ package sessiondrv
 import (
 	"context"
 	"errors"
+	"net"
 	"reflect"
 	"runtime"
 	"strings"
@@ -30,7 +31,7 @@ type fakeSpawner struct {
 	err     error
 }
 
-func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID, _ string) error {
+func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
 	s.mu.Lock()
 	s.calls = append(s.calls, sessionID)
 	s.mu.Unlock()
@@ -42,6 +43,16 @@ func (s *fakeSpawner) StopShim(sessionID string) error {
 	s.stopped = append(s.stopped, sessionID)
 	s.mu.Unlock()
 	return nil
+}
+
+// stubSource satisfies the required ConnSource. The fake clients never use it
+// (they are handed to newClient directly), but the driver requires one because
+// production cannot drive a session without somewhere for shims to dial in.
+type stubSource struct{}
+
+func (stubSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
 }
 
 type fakeLocator struct{ m map[string]string }
@@ -124,7 +135,7 @@ func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Man
 		Locator:         locator,
 		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
 		ProtocolVersion: "1",
-		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
+		Source:          stubSource{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
 			mu.Lock()
@@ -154,7 +165,7 @@ func newTestManagerNotReady(t *testing.T, locator SessionLocator, spawner Spawne
 		Locator:         locator,
 		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
 		ProtocolVersion: "1",
-		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
+		Source:          stubSource{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg, notReady: notReady}
 			mu.Lock()

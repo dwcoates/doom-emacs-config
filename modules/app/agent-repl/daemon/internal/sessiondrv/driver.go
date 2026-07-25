@@ -55,11 +55,11 @@ type SessionRegistrar interface {
 	QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt)
 }
 
-// Spawner makes a session's UDS shim reachable at its socket: it reattaches to
-// a live shim (the reattach-first decision, §4.4) or spawns a fresh UDS-mode
-// shim (ShimUDSArgv), returning once the shim is listening or on failure. The
-// concrete impl lives in the server package (it owns ReattachDecision and the
-// spawn plumbing); injected here so the driver stays IO-narrow and testable.
+// Spawner makes sure a session has exactly one live shim: it leaves an existing
+// one alone (connected, or merely holding its session lock — the shim outlives
+// a dead daemon, §4.4) or spawns a fresh one via ShimUDSArgv. The
+// concrete impl lives in the server package (it owns the liveness checks and
+// the spawn plumbing); injected here so the driver stays IO-narrow and testable.
 type Spawner interface {
 	EnsureShim(ctx context.Context, sessionID string) error
 	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
@@ -136,7 +136,7 @@ type Manager struct {
 	logf func(string, ...any)
 	reg  *permRegistry
 
-	newClient  func(cfg shimclient.Config) sessionClient
+	newClient func(cfg shimclient.Config) sessionClient
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
 
@@ -191,6 +191,8 @@ func New(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("sessiondrv: New needs a SessionLocator")
 	case cfg.SeqStore == nil:
 		return nil, fmt.Errorf("sessiondrv: New needs a SeqStore")
+	case cfg.Source == nil:
+		return nil, fmt.Errorf("sessiondrv: New needs a ConnSource (shims dial the daemon; without it no session can be driven)")
 	}
 	logf := cfg.Logf
 	if logf == nil {
@@ -206,15 +208,15 @@ func New(cfg Config) (*Manager, error) {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
 	return &Manager{
-		cfg:        cfg,
-		logf:       logf,
-		reg:        newPermRegistry(logf),
-		newClient:  newClient,
-		now:        now,
-		byWS:       make(map[string]*driven),
-		lastCSID:   make(map[string]string),
-		rootCtx:    rootCtx,
-		rootStop:   rootStop,
+		cfg:       cfg,
+		logf:      logf,
+		reg:       newPermRegistry(logf),
+		newClient: newClient,
+		now:       now,
+		byWS:      make(map[string]*driven),
+		lastCSID:  make(map[string]string),
+		rootCtx:   rootCtx,
+		rootStop:  rootStop,
 	}, nil
 }
 
