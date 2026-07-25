@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,7 +49,7 @@ type fakeSpawner struct {
 	stopped []string
 }
 
-func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID, _ string) error {
+func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensured = append(f.ensured, sessionID)
@@ -77,6 +78,15 @@ func (f *fakeSpawner) stoppedIDs() []string {
 // stubMerge / stubLifecycle / stubState satisfy the frontend command handler's
 // required collaborators; the daemon's HTTP tests never drive a merge or a
 // lifecycle command, so they are inert.
+// stubConnSource stands in for the shim listener: the harness never runs a
+// real shim, so nothing ever dials in.
+type stubConnSource struct{}
+
+func (stubConnSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
+}
+
 type stubMerge struct{}
 
 func (stubMerge) Merge(context.Context, string) error  { return nil }
@@ -136,6 +146,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 		SSM:             mgr,
 		Spawner:         spawner,
 		Locator:         &SessionLocator{Reg: reg},
+		Source:          stubConnSource{},
 		SeqStore:        NewRegistrySeqStore(reg, logf),
 		DaemonVersion:   "test",
 		ProtocolVersion: "1",

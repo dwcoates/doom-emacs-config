@@ -33,7 +33,9 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 )
@@ -154,10 +156,10 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	storeSock := filepath.Join(sockDir, "store.sock")
-	// Session sockets resolve under $HOME (~/.cache/agent-repl/sock, see
-	// shimclient.DefaultSocketPath). Point HOME at the short dir so the fake
-	// shim binds an isolated, sun_path-sized socket instead of a socket in the
-	// LIVE daemon's shared socket dir.
+	// The daemon's shim socket and the session locks resolve under $HOME
+	// (~/.cache/agent-repl/{sock,run}). Point HOME at the short dir so this
+	// harness listens on an isolated, sun_path-sized socket rather than the
+	// LIVE daemon's, and locks its own sessions rather than the real ones.
 	t.Setenv("HOME", sockDir)
 	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
 	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
@@ -180,8 +182,18 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	t.Cleanup(func() { _ = ssmMgr.Close() })
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
-	udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) (func() error, error) {
-		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, opts, socketPath)
+	// Shims dial US: start the listener before anything is brought up.
+	shimSock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
+	shimListener := shimlisten.New(t.Logf)
+	if err := shimListener.Listen(shimSock); err != nil {
+		t.Fatalf("listen for shims: %v", err)
+	}
+	t.Cleanup(func() { _ = shimListener.Close() })
+	if err := sessionlock.EnsureDir(); err != nil {
+		t.Fatalf("make session lock dir: %v", err)
+	}
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, opts, shimSock)
 		argv = append(argv, "--store-socket", storeSock)
 		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD, Logf: t.Logf})
 		if spawnErr != nil {
@@ -200,8 +212,9 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:            forwarder,
 		SSM:             ssmMgr,
-		Spawner:         server.NewShimSpawner(reg, nil, udsSpawn, t.Logf),
+		Spawner:         server.NewShimSpawner(reg, shimListener.Connected, udsSpawn, t.Logf),
 		Locator:         &server.SessionLocator{Reg: reg},
+		Source:          &server.ShimConnSource{Listener: shimListener},
 		SeqStore:        server.NewRegistrySeqStore(reg, t.Logf),
 		Registrar:       server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
 		DaemonVersion:   "0.1.0-e2e",

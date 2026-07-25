@@ -1,15 +1,21 @@
 // Package shimclient is the daemon's client side of the agent-shim protocol:
-// one UDS connection per session to that session's shim (session-<id>.sock).
+// one connection per session to that session's shim.
+//
+// The shim DIALS the daemon (design-shim-transport-inversion.md); this package
+// is handed the resulting connection by the daemon's listener rather than
+// dialling one itself.
 //
 // Responsibilities:
-//   - Connection lifecycle: dial, receive the shim's ShimHello (the listener
-//     speaks first), reply DaemonHello, then Subscribe{session_id, from_seq}
-//     resuming from the daemon-tracked last_seen_seq.
+//   - Connection lifecycle: take the next connection for this session from the
+//     injected ConnSource (already identified by its ShimHello), reply
+//     DaemonHello, then Subscribe{session_id, from_seq} resuming from the
+//     daemon-tracked last_seen_seq.
 //   - Heartbeats both ways with a missed-heartbeat window that surfaces a
 //     degraded callback (and self-heals when traffic resumes).
-//   - Reconnect-with-backoff to a LIVE shim (reattach: the shim outlives the
-//     daemon, so a UDS disconnect never ends the turn — the daemon just
-//     re-attaches and replays from last_seen_seq). No --resume respawn here.
+//   - Reconnect: on a disconnect the client waits at the ConnSource for the
+//     shim to dial back in (the shim outlives the daemon, so a disconnect never
+//     ends the turn — the daemon re-attaches and replays from last_seen_seq).
+//     No --resume respawn here.
 //   - Control-plane sends with request_id correlation (control.go).
 //   - Inbound event demux to the injected sinks (events.go).
 //
@@ -32,8 +38,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,17 +172,6 @@ const (
 	DefaultBackoffMin        = 100 * time.Millisecond
 	DefaultBackoffMax        = 5 * time.Second
 )
-
-// DefaultSocketPath builds ~/.cache/agent-repl/sock/session-<id>.sock. On a
-// home-dir lookup failure it returns "" so the subsequent dial fails loudly
-// rather than silently pointing somewhere wrong.
-func DefaultSocketPath(sessionID string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".cache", "agent-repl", "sock", "session-"+sessionID+".sock")
-}
 
 // ConnSource yields a session's shim connection, already identified by the
 // ShimHello the shim opened with. Next BLOCKS until that session's shim dials

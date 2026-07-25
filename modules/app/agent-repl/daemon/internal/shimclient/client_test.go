@@ -3,6 +3,7 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -102,7 +103,7 @@ func (h *harness) config(t *testing.T, sessionID, path string) Config {
 	t.Helper()
 	return Config{
 		SessionID:         sessionID,
-		SocketPath:        func(string) string { return path },
+		Source:            dialSource{path: path},
 		DaemonVersion:     "test-daemon",
 		ProtocolVersion:   "1",
 		SeqStore:          h.seq,
@@ -117,6 +118,42 @@ func (h *harness) config(t *testing.T, sessionID, path string) Config {
 		BackoffMin:        5 * time.Millisecond,
 		BackoffMax:        20 * time.Millisecond,
 	}
+}
+
+// dialSource adapts the fake shim peer (which LISTENS) to the ConnSource the
+// client now takes. Production is the other way round — shims dial the daemon
+// and its listener reads the identifying ShimHello — so this does the same two
+// steps against the fake: connect, then consume the opening hello. Everything
+// downstream of the handshake is byte-for-byte what production sees.
+type dialSource struct{ path string }
+
+func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+	var dl net.Dialer
+	conn, err := dl.DialContext(ctx, "unix", d.path)
+	if err != nil {
+		return nil, nil, err
+	}
+	payload, err := wire.ReadFrame(conn)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	var env anypb.Any
+	if err := proto.Unmarshal(payload, &env); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	msg, err := env.UnmarshalNew()
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	hello, ok := msg.(*corev1.ShimHello)
+	if !ok {
+		conn.Close()
+		return nil, nil, fmt.Errorf("fake shim opened with %T, want ShimHello", msg)
+	}
+	return conn, hello, nil
 }
 
 // ---------------------------------------------------------------------------

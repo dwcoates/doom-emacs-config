@@ -108,6 +108,7 @@ func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {
 		Spawner:         &fakeSpawner{},
 		Locator:         fakeLocator{m: map[string]string{}},
 		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
+		Source:          stubSource{},
 		ProtocolVersion: "1",
 		Registrar:       reg,
 	})

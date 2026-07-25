@@ -100,7 +100,7 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		ProtocolVersion: "1",
 		Logf:            logf,
 		now:             func() int64 { return 1000 },
-		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
+		Source:          stubSource{},
 		newClient: func(c shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: c}
 			mu.Lock()

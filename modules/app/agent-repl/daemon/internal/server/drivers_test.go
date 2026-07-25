@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -56,29 +55,31 @@ func TestSessionLocatorMissForUnknownWorkspace(t *testing.T) {
 
 // --- ShimSpawner ----------------------------------------------------------
 
-func TestShimSpawnerReattachesWithoutSpawning(t *testing.T) {
-	// Arrange — the probe reports a live shim, so no spawn should happen.
+func TestShimSpawnerDoesNotSpawnWhenTheShimIsConnected(t *testing.T) {
+	// Arrange — the listener already has this session's shim, so there is
+	// nothing to bring up.
 	reg := openTestRegistry(t)
 	spawned := 0
 	sp := NewShimSpawner(reg,
-		func(context.Context, string) (bool, error) { return true, nil },
-		func(string, CreateOpts, string) (func() error, error) { spawned++; return nil, nil },
+		func(string) bool { return true },
+		func(string, CreateOpts) (func() error, error) { spawned++; return nil, nil },
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "s1", "/tmp/s1.sock")
+	err := sp.EnsureShim(context.Background(), "s1")
 
 	// Assert
 	if err != nil {
 		t.Fatalf("EnsureShim: %v", err)
 	}
 	if spawned != 0 {
-		t.Fatalf("reattach must not spawn (spawned=%d)", spawned)
+		t.Fatalf("a connected shim must not be re-spawned (spawned=%d)", spawned)
 	}
 }
 
-func TestShimSpawnerSpawnsFromRegistryRecordWhenNoListener(t *testing.T) {
-	// Arrange — no listener; the record supplies the spawn's CreateOpts.
+func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
+	// Arrange — nothing connected and no lock held; the record supplies the
+	// spawn's CreateOpts.
 	reg := openTestRegistry(t)
 	if err := reg.Put(registry.Record{
 		SessionID: "s1", CWD: "/w", Model: "haiku",
@@ -87,47 +88,24 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNoListener(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	var gotOpts CreateOpts
-	var gotSock string
 	sp := NewShimSpawner(reg,
-		func(context.Context, string) (bool, error) { return false, nil },
-		func(_ string, opts CreateOpts, sock string) (func() error, error) {
-			gotOpts, gotSock = opts, sock
+		func(string) bool { return false },
+		func(_ string, opts CreateOpts) (func() error, error) {
+			gotOpts = opts
 			return nil, nil
 		},
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "s1", "/tmp/s1.sock")
+	err := sp.EnsureShim(context.Background(), "s1")
 
 	// Assert — CreateOpts reconstructed from the record (resume = the CLI uuid).
 	if err != nil {
 		t.Fatalf("EnsureShim: %v", err)
 	}
-	if gotSock != "/tmp/s1.sock" || gotOpts.CWD != "/w" || gotOpts.Model != "haiku" ||
+	if gotOpts.CWD != "/w" || gotOpts.Model != "haiku" ||
 		gotOpts.ConfigDir != "/cfg" || gotOpts.Resume != "cli-uuid" {
-		t.Fatalf("spawn opts = %+v sock=%q", gotOpts, gotSock)
-	}
-}
-
-func TestShimSpawnerSurfacesProbeError(t *testing.T) {
-	// Arrange — a probe error (an anomalous socket) must surface, never be
-	// papered over into a silent respawn.
-	reg := openTestRegistry(t)
-	spawned := 0
-	sp := NewShimSpawner(reg,
-		func(context.Context, string) (bool, error) { return false, errors.New("bad hello") },
-		func(string, CreateOpts, string) (func() error, error) { spawned++; return nil, nil },
-		nil)
-
-	// Act
-	err := sp.EnsureShim(context.Background(), "s1", "/tmp/s1.sock")
-
-	// Assert
-	if err == nil {
-		t.Fatal("probe error must surface")
-	}
-	if spawned != 0 {
-		t.Fatalf("a probe error must not spawn (spawned=%d)", spawned)
+		t.Fatalf("spawn opts = %+v", gotOpts)
 	}
 }
 
@@ -136,12 +114,12 @@ func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 	// CreateOpts from, so it is a loud error.
 	reg := openTestRegistry(t)
 	sp := NewShimSpawner(reg,
-		func(context.Context, string) (bool, error) { return false, nil },
-		func(string, CreateOpts, string) (func() error, error) { return nil, nil },
+		func(string) bool { return false },
+		func(string, CreateOpts) (func() error, error) { return nil, nil },
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "ghost", "/tmp/ghost.sock")
+	err := sp.EnsureShim(context.Background(), "ghost")
 
 	// Assert
 	if err == nil {
