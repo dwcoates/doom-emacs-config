@@ -61,7 +61,7 @@ type SessionRegistrar interface {
 // concrete impl lives in the server package (it owns ReattachDecision and the
 // spawn plumbing); injected here so the driver stays IO-narrow and testable.
 type Spawner interface {
-	EnsureShim(ctx context.Context, sessionID, socketPath string) error
+	EnsureShim(ctx context.Context, sessionID string) error
 	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
 	// its child shim on hibernation, §4.4 redefined). A shim the daemon never
 	// spawned (a reattached one that outlived a prior daemon) is a no-op. A
@@ -120,10 +120,13 @@ type Config struct {
 	// now is the queue's clock, injected only by tests.
 	now func() int64
 
-	// socketPath and newClient are injected only by tests; production uses the
-	// package defaults (shimclient.DefaultSocketPath / a real shimclient).
-	socketPath func(sessionID string) string
-	newClient  func(cfg shimclient.Config) sessionClient
+	// Source yields each session's shim connection: shims dial the daemon's
+	// listening socket and the listener routes each connection to the client
+	// that owns that session. Required.
+	Source shimclient.ConnSource
+
+	// newClient is injected only by tests; production uses a real shimclient.
+	newClient func(cfg shimclient.Config) sessionClient
 }
 
 // Manager is the fleet of per-session drivers. It implements the frontend
@@ -133,7 +136,6 @@ type Manager struct {
 	logf func(string, ...any)
 	reg  *permRegistry
 
-	socketPath func(sessionID string) string
 	newClient  func(cfg shimclient.Config) sessionClient
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
@@ -194,10 +196,6 @@ func New(cfg Config) (*Manager, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	socketPath := cfg.socketPath
-	if socketPath == nil {
-		socketPath = shimclient.DefaultSocketPath
-	}
 	newClient := cfg.newClient
 	if newClient == nil {
 		newClient = func(c shimclient.Config) sessionClient { return shimclient.New(c) }
@@ -211,7 +209,6 @@ func New(cfg Config) (*Manager, error) {
 		cfg:        cfg,
 		logf:       logf,
 		reg:        newPermRegistry(logf),
-		socketPath: socketPath,
 		newClient:  newClient,
 		now:        now,
 		byWS:       make(map[string]*driven),
@@ -516,8 +513,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	if !ok {
 		return nil, fmt.Errorf("sessiondrv: workspace %q has no live session to drive", workspace)
 	}
-	socketPath := m.socketPath(sessionID)
-	if err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID, socketPath); err != nil {
+	if err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID); err != nil {
 		return nil, fmt.Errorf("sessiondrv: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
 	}
 
@@ -535,7 +531,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	d.cancel = cancel
 	client := m.newClient(shimclient.Config{
 		SessionID:       sessionID,
-		SocketPath:      m.socketPath,
+		Source:          m.cfg.Source,
 		DaemonVersion:   m.cfg.DaemonVersion,
 		ProtocolVersion: m.cfg.ProtocolVersion,
 		SeqStore:        m.cfg.SeqStore,

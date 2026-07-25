@@ -122,9 +122,15 @@ type Config struct {
 	// SessionID identifies the session this client attaches to.
 	SessionID string
 
-	// SocketPath resolves a session id to its shim UDS path. Nil uses
-	// DefaultSocketPath (~/.cache/agent-repl/sock/session-<id>.sock).
-	SocketPath func(sessionID string) string
+	// Source yields this session's connection. Required.
+	//
+	// The daemon no longer dials the shim: shims dial the daemon's one
+	// listening socket and announce themselves, and the listener hands each
+	// connection to the client that owns that session
+	// (design-shim-transport-inversion.md). Next blocks until the shim
+	// connects, so the reconnect loop needs no backoff of its own — a
+	// disconnected session simply waits here for its shim to dial back in.
+	Source ConnSource
 
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's or the handshake fails with ErrVersionMismatch.
@@ -172,6 +178,16 @@ func DefaultSocketPath(sessionID string) string {
 		return ""
 	}
 	return filepath.Join(home, ".cache", "agent-repl", "sock", "session-"+sessionID+".sock")
+}
+
+// ConnSource yields a session's shim connection, already identified by the
+// ShimHello the shim opened with. Next BLOCKS until that session's shim dials
+// in, so a client whose shim has gone simply waits here for it to come back.
+//
+// Implemented by the daemon's shim listener; an interface so the client stays
+// testable without a real socket.
+type ConnSource interface {
+	Next(ctx context.Context, sessionID string) (net.Conn, *corev1.ShimHello, error)
 }
 
 // Client is one session's shim connection. Construct with New; drive with Run.
@@ -230,9 +246,6 @@ type ackResult struct {
 
 // New constructs a Client, applying defaults for any zero-value Config field.
 func New(cfg Config) *Client {
-	if cfg.SocketPath == nil {
-		cfg.SocketPath = DefaultSocketPath
-	}
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
 	}
@@ -347,22 +360,20 @@ func (c *Client) Run(ctx context.Context) error {
 // The returned error describes why the connection ended (nil never happens
 // except on ctx cancel).
 func (c *Client) runOnce(ctx context.Context) (retErr error) {
-	path := c.cfg.SocketPath(c.cfg.SessionID)
-	if path == "" {
-		return errors.New("shimclient: empty socket path (home lookup failed?)")
+	if c.cfg.Source == nil {
+		return errors.New("shimclient: no ConnSource configured")
 	}
-	c.logf("dialing shim at %s", path)
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", path)
+	c.logf("awaiting shim connection")
+	conn, hello, err := c.cfg.Source.Next(ctx, c.cfg.SessionID)
 	if err != nil {
-		return fmt.Errorf("dial %s: %w", path, err)
+		return err
 	}
 
 	ac := &activeConn{conn: conn, pending: make(map[string]chan ackResult)}
 
-	// Handshake: the listener (shim) speaks first with ShimHello.
-	hello, err := c.handshake(ac)
-	if err != nil {
+	// The ShimHello was already read by the listener to route this connection
+	// here, so only the daemon's half of the handshake remains.
+	if err := c.completeHandshake(ac, hello); err != nil {
 		conn.Close()
 		return err
 	}
@@ -423,26 +434,28 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 
 // handshake receives the shim's ShimHello and replies with DaemonHello. A
 // protocol-version mismatch is terminal.
-func (c *Client) handshake(ac *activeConn) (*corev1.ShimHello, error) {
-	msg, err := readMsg(ac.conn)
-	if err != nil {
-		return nil, fmt.Errorf("reading ShimHello: %w", err)
-	}
-	hello, ok := msg.(*corev1.ShimHello)
-	if !ok {
-		return nil, fmt.Errorf("handshake: expected ShimHello, got %T", msg)
+// completeHandshake finishes the exchange for a connection the listener has
+// already identified. It checks the shim's protocol version and answers with
+// DaemonHello.
+//
+// The ShimHello is passed in rather than read here because the listener had to
+// read it to know which session the connection belonged to — reading it twice
+// would consume the first real frame instead.
+func (c *Client) completeHandshake(ac *activeConn, hello *corev1.ShimHello) error {
+	if hello == nil {
+		return fmt.Errorf("shimclient: handshake got no ShimHello")
 	}
 	if hello.GetProtocolVersion() != c.cfg.ProtocolVersion {
-		return nil, fmt.Errorf("%w: shim=%q daemon=%q", ErrVersionMismatch,
+		return fmt.Errorf("%w: shim=%q daemon=%q", ErrVersionMismatch,
 			hello.GetProtocolVersion(), c.cfg.ProtocolVersion)
 	}
 	if err := ac.writeMsg(&corev1.DaemonHello{
 		DaemonVersion:   c.cfg.DaemonVersion,
 		ProtocolVersion: c.cfg.ProtocolVersion,
 	}); err != nil {
-		return nil, fmt.Errorf("sending DaemonHello: %w", err)
+		return fmt.Errorf("sending DaemonHello: %w", err)
 	}
-	return hello, nil
+	return nil
 }
 
 // heartbeatSender emits a Heartbeat on every interval until the connection
