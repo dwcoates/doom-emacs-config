@@ -250,3 +250,96 @@ func TestRegistryResolverMissWorkspaceless(t *testing.T) {
 		t.Fatalf("Workspace = (%q,%v), want (\"\",false) for a workspace-less session", ws, ok)
 	}
 }
+
+// --- resolving the VENDOR session id ----------------------------------------
+//
+// The SSM resolves the id carried on the EVENT, and events are keyed by the
+// vendor uuid (the store files them under it, because the shim reads it off
+// the SDK message and the sidecar derives it from `<uuid>.jsonl`). The registry
+// is keyed by the daemon's s_ id, so resolving only that meant every lifecycle
+// event failed with "no workspace bound to session <uuid>" and no turn or task
+// state ever reached a workspace.
+
+func TestRegistryResolverResolvesTheVendorSessionID(t *testing.T) {
+	// Arrange: a record keyed by s_ id, carrying its vendor uuid.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{
+		SessionID:       "s_abc",
+		CWD:             "/w",
+		ClaudeSessionID: "96a0baaf-uuid",
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act: resolve by the id an EVENT would carry.
+	ws, ok := NewRegistryResolver(reg).Workspace("96a0baaf-uuid")
+
+	// Assert
+	if !ok || ws != "/w" {
+		t.Fatalf("Workspace(uuid) = (%q, %v), want (/w, true)", ws, ok)
+	}
+}
+
+func TestRegistryResolverStillResolvesTheDaemonSessionID(t *testing.T) {
+	// Arrange
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_abc", CWD: "/w", ClaudeSessionID: "96a0baaf-uuid"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act / Assert: the registry's own key must keep working.
+	ws, ok := NewRegistryResolver(reg).Workspace("s_abc")
+	if !ok || ws != "/w" {
+		t.Fatalf("Workspace(s_id) = (%q, %v), want (/w, true)", ws, ok)
+	}
+}
+
+func TestRegistryResolverPrefersTheNewestRecordForAVendorID(t *testing.T) {
+	// Arrange: one uuid carried by two records (a superseded resume), each
+	// bound to a different workspace.
+	reg := openTestRegistry(t)
+	older := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	newer := time.Now().UTC().Format(time.RFC3339)
+	if err := reg.Put(registry.Record{SessionID: "s_old", CWD: "/old", ClaudeSessionID: "shared-uuid", CreatedAt: older}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := reg.Put(registry.Record{SessionID: "s_new", CWD: "/new", ClaudeSessionID: "shared-uuid", CreatedAt: newer}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	ws, ok := NewRegistryResolver(reg).Workspace("shared-uuid")
+
+	// Assert
+	if !ok || ws != "/new" {
+		t.Fatalf("Workspace(shared uuid) = (%q, %v), want (/new, true)", ws, ok)
+	}
+}
+
+func TestRegistryResolverMissesAnUnknownVendorID(t *testing.T) {
+	// Arrange
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_abc", CWD: "/w", ClaudeSessionID: "96a0baaf-uuid"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act / Assert: an unknown id is an explicit miss the SSM surfaces loudly,
+	// never a bind to some arbitrary workspace.
+	if ws, ok := NewRegistryResolver(reg).Workspace("nobody-uuid"); ok {
+		t.Fatalf("Workspace(unknown) = (%q, true), want a miss", ws)
+	}
+}
+
+func TestRegistryResolverIgnoresAVendorMatchWithNoWorkspace(t *testing.T) {
+	// Arrange: a workspace-less session has no per-workspace state to bind.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_abc", ClaudeSessionID: "96a0baaf-uuid"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act / Assert
+	if ws, ok := NewRegistryResolver(reg).Workspace("96a0baaf-uuid"); ok {
+		t.Fatalf("Workspace(uuid with no cwd) = (%q, true), want a miss", ws)
+	}
+}
