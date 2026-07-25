@@ -501,10 +501,27 @@ message NestedMemoryAttachment {
   google.protobuf.Struct payload = 1;
 }
 
+// The file body a FileAttachment inlines: the same read payload shape the Read
+// tool returns (a window of the file, with the window's bounds and the file's
+// total length). Corpus: attachments/file.jsonl.
+message AttachedFileBody {
+  string file_path = 1;
+  string content = 2;
+  int64 num_lines = 3;   // lines actually present in `content`
+  int64 start_line = 4;  // 1-based first line of the window
+  int64 total_lines = 5; // lines in the whole file
+}
+
+// FileAttachment.content: the harness's read of the attached file, tagged with
+// the payload kind it read it as. Corpus: attachments/file.jsonl.
+message AttachedFileContent {
+  string type = 1;  // "text"
+  AttachedFileBody file = 2;
+}
+
 message FileAttachment {
-  // Object {type,file:{filePath,content,numLines,startLine,totalLines}};
-  // corpus: attachments/file.jsonl.
-  google.protobuf.Struct content = 1;
+  // The inlined read of the file; corpus: attachments/file.jsonl.
+  AttachedFileContent content = 1;
   string display_path = 2;
   string filename = 3;
 }

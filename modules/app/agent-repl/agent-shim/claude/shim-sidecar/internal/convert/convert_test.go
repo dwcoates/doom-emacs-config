@@ -84,12 +84,13 @@ func corpusRoot(t *testing.T) string {
 //   scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
 //   automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
 //   files                → DiagnosticsAttachment.files (ListValue)
-//   content              → FileAttachment.content (Struct) /
+//   content              → FileAttachment.content (AttachedFileContent) /
 //                          TaskReminderAttachment.content (ListValue)
 //
-// A LATER pass is replacing the remaining schemaless homes above with typed
-// messages, so those shapes become modeled field-by-field rather than absorbed
-// wholesale — see TestTypedToolResultShapes.
+// A LATER pass replaced four of the schemaless homes above with typed messages
+// (updated_fields, status_change, pin, FileAttachment.content), so those shapes
+// are now modeled field-by-field rather than absorbed wholesale — see
+// TestTypedToolResultShapes / TestFileAttachmentContentTyped.
 //
 // The map is therefore EMPTY: the corpus is fully modeled and the contract is now
 // ZERO extras anywhere in it. The mechanism stays so a future corpus shape the
@@ -503,5 +504,39 @@ func TestTypedToolResultShapes(t *testing.T) {
 			}
 			tc.assert(t, res)
 		})
+	}
+}
+
+// TestFileAttachmentContentTyped pins FileAttachment.content, tightened from a
+// Struct to AttachedFileContent{type, file:AttachedFileBody}: the golden
+// attachment fixture must decode every field as typed data with zero extras.
+func TestFileAttachmentContentTyped(t *testing.T) {
+	// Arrange
+	root := corpusRoot(t)
+	objs := readLines(t, filepath.Join(root, "attachments", "file.jsonl"))
+	c := New(func(string, ...any) {})
+	// Act
+	line, extras, err := c.TranscriptLine(objs[0])
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	content := line.GetAttachment().GetFile().GetContent()
+	if content.GetType() != "text" {
+		t.Fatalf("content.type = %q, want %q", content.GetType(), "text")
+	}
+	body := content.GetFile()
+	if !strings.HasSuffix(body.GetFilePath(), "approval-vs-verification-semantics.md") {
+		t.Fatalf("content.file.file_path = %q, want the fixture's memory path", body.GetFilePath())
+	}
+	if body.GetContent() == "" {
+		t.Fatal("content.file.content decoded empty")
+	}
+	if body.GetNumLines() != 16 || body.GetStartLine() != 1 || body.GetTotalLines() != 16 {
+		t.Fatalf("content.file line bounds = {num:%d start:%d total:%d}, want {16 1 16}",
+			body.GetNumLines(), body.GetStartLine(), body.GetTotalLines())
 	}
 }
