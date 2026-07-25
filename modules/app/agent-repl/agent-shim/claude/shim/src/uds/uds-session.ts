@@ -40,7 +40,7 @@ import type {
   SdkUserMessageLike,
 } from "../session.js";
 import { convert } from "../proto/convert.js";
-import { isEphemeral, toEphemeralEvent } from "../proto/delta.js";
+import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/delta.js";
 import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient } from "./store-client.js";
@@ -104,6 +104,13 @@ export class UdsSession {
    */
   private turnsInFlight = 0;
   private closed = false;
+  /**
+   * Which assistant message the SDK is currently streaming. Deltas carry no
+   * message identity of their own, so this supplies the one consumers
+   * reconcile on — without it every chunk looked like a new message and the
+   * frontend opened a bubble per chunk.
+   */
+  private readonly streamMessages = new StreamMessageTracker();
 
   constructor(private readonly deps: UdsSessionDeps) {
     const target: SdkControlTarget = {
@@ -256,7 +263,10 @@ export class UdsSession {
    */
   private routeSdkMessage(msg: SdkMessageLike): void {
     if (isEphemeral(msg)) {
-      const evt = toEphemeralEvent(msg, this.convertOpts());
+      // Observe BEFORE converting: a message_start must make its own id
+      // current for the deltas that follow it.
+      this.streamMessages.observe(msg);
+      const evt = toEphemeralEvent(msg, { ...this.convertOpts(), messageId: this.streamMessages.current() });
       if (evt) this.server.sendEvent(evt);
       return;
     }
