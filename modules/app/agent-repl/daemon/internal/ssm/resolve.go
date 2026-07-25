@@ -3,6 +3,9 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+
+	"claude-repld/internal/dlog"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -189,7 +192,50 @@ type resolved struct {
 // nothing at all) resolves found=false — matching the elisp `nil` for an
 // unborn/tombstoned workspace, and honoring "idle_async needs an idle base"
 // (background tasks alone never synthesize a state).
-func resolve(db *sql.DB, workspace string) (resolved, error) {
+// unmatchedTaskEndsQuery names the tasks whose `task_ended` row has no
+// `task_started` anywhere in the workspace's log — the only way the started
+// minus ended difference can come out negative. Used ONLY to make the
+// impossible-state log say WHICH task caused it.
+const unmatchedTaskEndsQuery = `
+SELECT DISTINCT COALESCE(e.task_id, 'row:' || e.at)
+FROM workspace_state e
+WHERE e.workspace = ? AND e.state = 'task_ended'
+  AND NOT EXISTS (
+    SELECT 1 FROM workspace_state s
+    WHERE s.workspace = e.workspace AND s.state = 'task_started'
+      AND COALESCE(s.task_id, 'row:' || s.at) = COALESCE(e.task_id, 'row:' || e.at)
+  )
+ORDER BY 1
+`
+
+// unmatchedTaskEnds lists the offending task ids for the negative-count log. A
+// failure here degrades the LOG LINE only (the clamp still happens and is still
+// logged), so it reports the lookup error in place of the ids rather than
+// swallowing it or aborting the resolution.
+func unmatchedTaskEnds(db *sql.DB, workspace string) string {
+	rows, err := db.Query(unmatchedTaskEndsQuery, workspace)
+	if err != nil {
+		return fmt.Sprintf("<task-id lookup failed: %v>", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Sprintf("<task-id scan failed: %v>", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Sprintf("<task-id iteration failed: %v>", err)
+	}
+	if len(ids) == 0 {
+		return "<none found>"
+	}
+	return strings.Join(ids, ",")
+}
+
+func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 	var (
 		token      sql.NullString
 		causeKind  sql.NullString
@@ -207,6 +253,21 @@ func resolve(db *sql.DB, workspace string) (resolved, error) {
 	}
 	if err != nil {
 		return resolved{}, fmt.Errorf("ssm: resolve workspace %q: %w", workspace, err)
+	}
+
+	// live_task_count is started-minus-ended over DISTINCT task ids, so it can
+	// only go negative when a `task_ended` arrives for a task whose
+	// `task_started` was never logged — a real observed possibility (a task
+	// begun before this daemon was watching, or a lost start row). A negative
+	// count is not a value: it is an IMPOSSIBLE STATE, and clamping it silently
+	// would hide the missing start forever. So it is clamped to 0 AND reported
+	// loudly, naming the workspace and the exact task ids responsible.
+	if taskCount < 0 {
+		if logf != nil {
+			logf("ssm: IMPOSSIBLE live_task_count=%d ws=%s — task_ended with no logged task_started for task_id(s) %s; clamping to 0",
+				taskCount, workspace, unmatchedTaskEnds(db, workspace))
+		}
+		taskCount = 0
 	}
 
 	winner := token.String
