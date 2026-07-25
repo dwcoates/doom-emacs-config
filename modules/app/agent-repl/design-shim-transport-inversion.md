@@ -124,19 +124,39 @@ Rejected alternatives:
 3. **PID liveness in the registry** — simple, but PID reuse is a real hazard
    and it leaves stale state to reap.
 
-## Open questions to settle before building
+## Decisions
 
-1. **Lock file location and naming** — alongside the sockets in
-   `~/.cache/agent-repl/sock/`, or a dedicated `run/` directory?
-2. **What the daemon does when the lock is held but no connection arrives**
-   within a bound. A shim is alive but not talking: reconnecting, wedged, or
-   starting up. Options: wait, or SIGTERM and respawn after a bound.
-3. **Whether the daemon's listening socket path stays per-daemon or becomes
-   well-known**, and how a surviving shim finds a daemon that has moved.
-4. **Migration.** Both sides must change together; a new shim cannot talk to an
-   old daemon. Given the shim is spawned by the daemon and both ship from this
-   repo, a flag day is acceptable — but the store and sidecar are launchd
-   services with independent lifetimes and must be checked for coupling.
+**Lock file location.** `~/.cache/agent-repl/run/session-<id>.lock`. A lock is
+not a socket, so it gets its own directory rather than living among them —
+matching the usual split between `/var/run` locks and socket paths. Created by
+the daemon's cache-root setup alongside `sock/` and `store/`.
+
+**Lock held but nothing dials in.** The daemon waits a bounded period for a
+connection claiming that session, and if none arrives it **fails the command
+loudly with a log naming the session and the lock holder**. It does NOT
+silently respawn: the lock says a shim is alive, so spawning a second one is
+the exact duplicate this mechanism exists to prevent, and killing the holder
+would destroy the in-flight turn §4.4 protects. A shim holding the lock without
+talking is a bug to surface, not a state to paper over.
+
+**The daemon's socket path is fixed and well-known**, exactly like
+`daemon-frontend.sock` today. There is one daemon (AGENTS.md forbids
+hand-spawning a second on the configured address), so a surviving shim
+reconnects to the same path it was given at spawn. Nothing moves.
+
+## One deployment note
+
+The shim and the daemon change together, so a shim built before this change is
+listening on its own socket and will never dial the daemon. Any shim still
+running across the upgrade is orphaned: the new daemon does not know it, and it
+is waiting for a dial that will not come.
+
+This is a one-time deploy concern with no design consequence. Those shims are
+hibernated by the idle sweep within minutes, and a session whose shim is gone
+respawns on its next prompt. Worth doing the deploy when nothing is mid-turn.
+
+The store and the sidecar are unaffected — they talk over `store.sock`, which
+this change does not touch.
 
 ## Relationship to the readiness gate
 
