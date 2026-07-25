@@ -458,3 +458,62 @@ describe("StoreClient store session key", () => {
     expect(client.storeSessionId()).toBe("96a0baaf-uuid");
   });
 });
+
+describe("StoreClient store key is settled by the first forwarded event", () => {
+  // Each session id is its own seq space, and the daemon tracks last_seen_seq
+  // per CONNECTION. Switching keys after events have flowed replays the new
+  // key from seq=1 against a much higher last_seen, which the daemon reads as
+  // ErrSeqRegression — terminal, never reconnected. A mid-session
+  // `conversation_reset` did exactly that on 2026-07-25.
+
+  it("refuses to switch the key once an event has been forwarded", async () => {
+    // Arrange: subscribe, then forward one merged event.
+    const store = await fakeStore();
+    stores.push(store);
+    const received: Event[] = [];
+    const client = new StoreClient({
+      socketPath: store.socketPath, sessionId: "sess-1",
+      producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
+      storeSessionId: "uuid-old",
+    });
+    clients.push(client);
+    client.onMerged((e) => received.push(e));
+    await client.connect();
+    await until(() => store.count() >= 1, "producer accepted");
+    client.subscribe(0n);
+    await until(() => store.count() === 2, "subscription accepted");
+    await store.latest().next(SubscribeSchema);
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 5990n }));
+    await until(() => received.length === 1, "event forwarded");
+
+    // Act: the CLI reports a NEW conversation uuid.
+    client.adoptStoreKey("uuid-new");
+
+    // Assert: key held, no reopen — the daemon keeps one seq space.
+    expect(client.storeSessionId()).toBe("uuid-old");
+    expect(store.count()).toBe(2);
+  });
+
+  it("still adopts the key before anything has been forwarded", async () => {
+    // Arrange: a fresh session learns its uuid before any merged event.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = new StoreClient({
+      socketPath: store.socketPath, sessionId: "sess-1",
+      producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
+    });
+    clients.push(client);
+    await client.connect();
+    await until(() => store.count() >= 1, "producer accepted");
+    client.subscribe(0n);
+    await until(() => store.count() === 2, "subscription accepted");
+    await store.latest().next(SubscribeSchema);
+
+    // Act
+    client.adoptStoreKey("uuid-new");
+    await until(() => store.count() === 3, "resubscribed");
+
+    // Assert
+    expect((await store.latest().next(SubscribeSchema)).sessionId).toBe("uuid-new");
+  });
+});
