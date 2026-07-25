@@ -14,8 +14,24 @@
  * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): if the
  * store is unreachable or rejects a batch, every event in that batch is
  * loud-logged as dropped and a `DegradedState` is reported to the injected
- * reporter. There is NO spill buffer, NO retry-forever, NO fallback — store
- * downtime is honest downtime and the display goes stale until it returns.
+ * reporter. There is NO spill buffer, NO retry of a rejected batch, NO
+ * fallback — store downtime is honest downtime and the display goes stale
+ * until it returns.
+ *
+ * "Until it returns" is load-bearing, and one thing is needed to make it
+ * true: the producer connection is REDIALED, once, by the next write that
+ * finds it down. The store is launchd-managed and restarts under a live shim,
+ * which kills that connection for good; without the redial every later write
+ * would drop against a corpse and downtime would be permanent, not honest.
+ * The redial is a connection lifecycle (the daemon<->shim link already works
+ * this way, §4.4), not a fallback absorbing a failure: one attempt, no timer,
+ * no background loop, and a redial that fails drops the batch exactly as a
+ * down connection always did. A deliberate close() is final and never
+ * redials.
+ *
+ * The SUBSCRIPTION connection has no such recovery: its `from_seq` belongs to
+ * the daemon (§4.4), which re-sends `Subscribe` on daemon<->shim reconnect,
+ * so the merged tail resumes there rather than here.
  */
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
@@ -66,6 +82,28 @@ export class StoreClient {
   private sink: StoreSink | null = null;
   private reporter: DegradedReporter | null = null;
   private readonly pendingWrites: PendingWrite[] = [];
+  /**
+   * The in-flight producer redial, shared by every write that finds the
+   * connection down. Writes are fire-and-forget from routeSdkMessage, so
+   * without this a burst arriving during an outage would open one socket per
+   * message instead of one per outage.
+   */
+  private redialing: Promise<void> | null = null;
+  /**
+   * Set by close(). A deliberate teardown must STAY torn down: without this a
+   * write racing shutdown would redial the store and resurrect a connection
+   * the shim is in the middle of closing.
+   */
+  private closed = false;
+  /**
+   * Tail of the send queue. `pendingWrites` is matched to acks POSITIONALLY
+   * (onAck shifts), so sends must be issued in call order. write() used to be
+   * synchronous up to conn.send(), which guaranteed that for free; awaiting a
+   * redial breaks it, so sends chain here instead. This resolves once a send
+   * is ISSUED, never once its ack lands — chaining on acks would serialize
+   * round-trips and throttle the stream.
+   */
+  private sendChain: Promise<unknown> = Promise.resolve();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly heartbeatIntervalMs: number;
 
@@ -153,14 +191,38 @@ export class StoreClient {
   }
 
   /**
-   * Write one PERSISTENT batch and resolve with its StoreWriteAck. On a down
-   * connection or a batch the store rejects, every event is loud-logged as
-   * dropped, a DegradedState is reported, and the promise rejects. No retry.
+   * Write one PERSISTENT batch and resolve with its StoreWriteAck. On a batch
+   * the store rejects, or a connection that cannot be re-established, every
+   * event is loud-logged as dropped, a DegradedState is reported, and the
+   * promise rejects.
+   *
+   * A DOWN connection is redialed ONCE first (see ensureProducerConn). The
+   * store is launchd-managed and restarts under us; the connection it kills is
+   * never re-established otherwise, so "the display goes stale until the store
+   * returns" (design §4.4) would never end — every later write would drop
+   * against a corpse. This does not soften the sad path: there is still no
+   * spill buffer, a rejected batch is still never retried, and a redial that
+   * fails drops the batch exactly as a down connection always did.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
-    if (!this.connected || !this.conn) {
-      this.dropBatch(events, `store connection is down`);
-      return Promise.reject(new Error("store-client: write on a down connection"));
+    // Chain the SEND so batches reach the wire in call order even when the
+    // first of them is waiting on a redial (see sendChain).
+    const sent = this.sendChain.then(
+      () => this.sendBatch(events),
+      () => this.sendBatch(events), // a prior send's failure never blocks this one
+    );
+    this.sendChain = sent.catch(() => {});
+    return sent;
+  }
+
+  /** Redial-if-needed, then enqueue and send one batch. */
+  private async sendBatch(events: Event[]): Promise<StoreWriteAck> {
+    try {
+      await this.ensureProducerConn();
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      this.dropBatch(events, `store connection is down (redial failed: ${why})`);
+      throw new Error("store-client: write on a down connection");
     }
     return new Promise<StoreWriteAck>((resolve, reject) => {
       this.pendingWrites.push({ resolve, reject, events });
@@ -171,8 +233,31 @@ export class StoreClient {
     });
   }
 
+  /**
+   * Resolve once the producer connection is live, redialing at most once per
+   * outage. Concurrent writers share the one in-flight dial rather than each
+   * opening a socket. NOT a retry loop: one attempt, and a failure propagates
+   * to the caller, which drops the batch loudly.
+   */
+  private ensureProducerConn(): Promise<void> {
+    if (this.connected && this.conn) return Promise.resolve();
+    // A deliberate teardown is final: never redial out from under shutdown.
+    // (An explicit connect() still works — only the IMPLICIT redial is gated.)
+    if (this.closed) {
+      return Promise.reject(new Error("store client is closed"));
+    }
+    if (!this.redialing) {
+      shimLog(COMPONENT, { session: this.opts.sessionId }, `producer connection down — redialing ${this.opts.socketPath}`);
+      this.redialing = this.connect().finally(() => {
+        this.redialing = null;
+      });
+    }
+    return this.redialing;
+  }
+
   /** Close both connections deliberately (not an error path). */
   close(): void {
+    this.closed = true;
     this.stopHeartbeat();
     this.connected = false;
     if (this.subConn) {

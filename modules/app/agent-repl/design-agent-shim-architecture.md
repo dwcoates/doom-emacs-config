@@ -151,6 +151,16 @@ reconciliation. This is a designed event classification, not a fallback.
   hard-fails event writes, loud-logs every dropped event, and reports a
   degraded state on the daemon connection; the display goes stale until the
   store returns. NO spill buffers, NO shadow paths.
+- The shim REDIALS the store's producer connection once per outage, on the
+  next write that finds it down. The store is launchd-managed and restarts
+  under live shims, killing a connection that is otherwise never rebuilt —
+  so without this "until the store returns" never arrives and every later
+  write drops against a corpse. This is connection lifecycle, the same shape
+  as daemon->shim reattach above, not a fallback: one attempt, no timer, no
+  background loop; a failed redial drops the batch loudly, a rejected batch
+  is still never retried, and a deliberate close() never redials. The
+  SUBSCRIPTION connection is not redialed — its `from_seq` belongs to the
+  daemon, which re-subscribes on reattach.
 
 ### 4.5 Turn/task lifecycle (the stream-only family)
 
@@ -865,7 +875,9 @@ corpus.
 - `agent-shim/claude/shim/src/uds/store-client.ts` — store connection: `StoreWrite`
   with `StoreWriteAck` accounting, `Subscribe{from_seq}` + continuous forward
   loop to an injected sink, honest sad path (drop + loud-log every event +
-  `DegradedState` to an injected reporter; NO spill, NO retry-forever).
+  `DegradedState` to an injected reporter; NO spill, NO retry of a rejected
+  batch); producer-connection redial, once per outage, driven by the next
+  write (§4.4).
 - `agent-shim/claude/shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch onto an
   injected `SdkControlTarget` (does NOT import src/session.ts); `canUseTool`→
   `PermissionRequest` round-trip blocking on a pending-request map keyed by
