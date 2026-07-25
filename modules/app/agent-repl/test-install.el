@@ -723,3 +723,200 @@ That case is already covered by `agent-repl--check-skill-links'."
 ;; (sentinel.el) drains and deletes the sentinel files they still write.
 
 ;;; test-install.el ends here
+
+;;;; ---- Legacy hook purge (E4 zero-user-action first boot) ---------------
+
+(defmacro agent-repl-test--with-fake-claude-home (var &rest body)
+  "Bind VAR to a temp HOME holding fake Claude config dirs, for BODY.
+`~' resolves inside it, so the purge's settings-file discovery is
+exercised for real without ever reading the developer's own config."
+  (declare (indent 1))
+  `(let* ((,var (make-temp-file "agent-repl-claude-home-" t))
+          (process-environment (cons (concat "HOME=" ,var) process-environment)))
+     (unwind-protect (progn ,@body)
+       (delete-directory ,var t))))
+
+(defun agent-repl-test--write-settings (home dir body)
+  "Create HOME/DIR/settings.json containing BODY."
+  (let ((d (expand-file-name dir home)))
+    (make-directory d t)
+    (with-temp-file (expand-file-name "settings.json" d) (insert body))))
+
+(ert-deftest agent-repl-test-legacy-settings-files-finds-the-default-dir ()
+  "The default ~/.claude settings file is discovered."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings home ".claude" "{}")
+    ;; Act / Assert
+    (should (equal (agent-repl--legacy-hook-settings-files)
+                   (list (expand-file-name ".claude/settings.json" home))))))
+
+(ert-deftest agent-repl-test-legacy-settings-files-finds-account-dirs ()
+  "Sibling ~/.claude-* account dirs are discovered too, unnamed."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings home ".claude" "{}")
+    (agent-repl-test--write-settings home ".claude-work" "{}")
+    ;; Act / Assert
+    (should (= 2 (length (agent-repl--legacy-hook-settings-files))))))
+
+(ert-deftest agent-repl-test-legacy-settings-files-skips-dirs-without-settings ()
+  "A config dir with no settings.json contributes nothing."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (make-directory (expand-file-name ".claude-empty" home) t)
+    ;; Act / Assert
+    (should-not (agent-repl--legacy-hook-settings-files))))
+
+(ert-deftest agent-repl-test-legacy-hooks-detected-when-registered ()
+  "A settings.json naming one of our hook scripts reports work to do."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"~/.claude/hooks/stop-notify.sh\"}]}]}}")
+    ;; Act / Assert
+    (should (agent-repl--legacy-hooks-present-p))))
+
+(ert-deftest agent-repl-test-legacy-hooks-absent-on-a-clean-config ()
+  "A settings.json with no hook of ours reports nothing to do."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings home ".claude" "{\"model\":\"opus\"}")
+    ;; Act / Assert
+    (should-not (agent-repl--legacy-hooks-present-p))))
+
+(ert-deftest agent-repl-test-legacy-hooks-ignores-a-foreign-hook ()
+  "Someone else's hook is not ours and must not trigger a purge."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"/opt/other/notify.sh\"}]}]}}")
+    ;; Act / Assert
+    (should-not (agent-repl--legacy-hooks-present-p))))
+
+(ert-deftest agent-repl-test-legacy-hooks-detected-in-an-account-dir ()
+  "A legacy hook registered only in an account dir is still found."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings home ".claude" "{}")
+    (agent-repl-test--write-settings
+     home ".claude-work"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"subagent-stop-notify.sh\"}]}]}}")
+    ;; Act / Assert
+    (should (agent-repl--legacy-hooks-present-p))))
+
+(ert-deftest agent-repl-test-purge-runs-the-script-when-hooks-are-present ()
+  "The purge shells out exactly when there is something to purge."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+    (let (actions
+          (agent-repl--legacy-hooks-purged nil)
+          (agent-repl-auto-install-hooks t))
+      (cl-letf (((symbol-function 'noninteractive) (lambda () nil))
+                ((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
+                ((symbol-function 'agent-repl--run-install-script)
+                 (lambda (action) (push action actions) (list 0 ""))))
+        (let ((noninteractive nil))
+          ;; Act
+          (agent-repl--maybe-purge-legacy-hooks))
+        ;; Assert
+        (should (equal actions '("purge-legacy-hooks")))))))
+
+(ert-deftest agent-repl-test-purge-skips-the-script-on-a-clean-config ()
+  "A healthy load is file reads only — no bash."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings home ".claude" "{}")
+    (let (actions
+          (agent-repl--legacy-hooks-purged nil)
+          (agent-repl-auto-install-hooks t))
+      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
+                ((symbol-function 'agent-repl--run-install-script)
+                 (lambda (action) (push action actions) (list 0 ""))))
+        (let ((noninteractive nil))
+          ;; Act
+          (agent-repl--maybe-purge-legacy-hooks))
+        ;; Assert
+        (should-not actions)))))
+
+(ert-deftest agent-repl-test-purge-runs-once-per-session ()
+  "Repeat boots do not re-run the purge: the guard is a genuine one-shot."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+    (let ((runs 0)
+          (agent-repl--legacy-hooks-purged nil)
+          (agent-repl-auto-install-hooks t))
+      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
+                ((symbol-function 'agent-repl--run-install-script)
+                 (lambda (_a) (setq runs (1+ runs)) (list 0 ""))))
+        (let ((noninteractive nil))
+          ;; Act
+          (agent-repl--maybe-purge-legacy-hooks)
+          (agent-repl--maybe-purge-legacy-hooks)
+          (agent-repl--maybe-purge-legacy-hooks))
+        ;; Assert
+        (should (= runs 1))))))
+
+(ert-deftest agent-repl-test-purge-no-ops-in-batch ()
+  "The test suite must never touch the developer's real config."
+  ;; Arrange
+  (let (actions (agent-repl--legacy-hooks-purged nil))
+    (cl-letf (((symbol-function 'agent-repl--run-install-script)
+               (lambda (action) (push action actions) (list 0 ""))))
+      ;; Act — `noninteractive' is t under batch, which is how this runs.
+      (agent-repl--maybe-purge-legacy-hooks)
+      ;; Assert
+      (should-not actions))))
+
+(ert-deftest agent-repl-test-purge-no-ops-in-sandbox ()
+  "Hooks live on the host; the container has none to purge."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+    (let (actions (agent-repl--legacy-hooks-purged nil))
+      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t))
+                ((symbol-function 'agent-repl--run-install-script)
+                 (lambda (action) (push action actions) (list 0 ""))))
+        (let ((noninteractive nil))
+          ;; Act
+          (agent-repl--maybe-purge-legacy-hooks))
+        ;; Assert
+        (should-not actions)))))
+
+(ert-deftest agent-repl-test-purge-failure-does-not-break-module-load ()
+  "A failing purge is logged, never signalled: a leftover hook writing
+sentinel files nobody reads must not be able to break startup."
+  ;; Arrange
+  (agent-repl-test--with-fake-claude-home home
+    (agent-repl-test--write-settings
+     home ".claude"
+     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+    (let ((agent-repl--legacy-hooks-purged nil)
+          (agent-repl-auto-install-hooks t))
+      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
+                ((symbol-function 'agent-repl--run-install-script)
+                 (lambda (_a) (error "script exploded"))))
+        (let ((noninteractive nil))
+          ;; Act / Assert
+          (should-not (agent-repl--maybe-purge-legacy-hooks)))))))
+
+(ert-deftest agent-repl-test-purge-scripts-mirror-the-installer-list ()
+  "The elisp skip-check list must cover every script install.sh purges,
+or a leftover hook would be skipped as \"nothing to do\"."
+  ;; Arrange — read the authoritative list out of the script itself.
+  (let ((body (with-temp-buffer
+                (insert-file-contents agent-repl--install-script)
+                (buffer-string))))
+    ;; Act / Assert
+    (dolist (name agent-repl--legacy-hook-scripts)
+      (should (string-search (concat "\"" name "\"") body)))))
