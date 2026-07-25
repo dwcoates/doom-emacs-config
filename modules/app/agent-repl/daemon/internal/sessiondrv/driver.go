@@ -80,6 +80,7 @@ type SessionLocator interface {
 // interface so the manager's routing is unit-testable with a fake.
 type sessionClient interface {
 	Run(ctx context.Context) error
+	AwaitReady(ctx context.Context) error
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
 	Interrupt(ctx context.Context, hard bool) error
 }
@@ -220,13 +221,19 @@ func New(cfg Config) (*Manager, error) {
 	}, nil
 }
 
-// Ensure brings the workspace's session up (lazily, reattach-first) without
+// Ensure STARTS the workspace's session (lazily, reattach-first) without
 // submitting a prompt — the eager bring-up the create path uses so a freshly
 // created session's shim is live (and its stream consumed onto the frontend +
 // SSM) before the first prompt. A workspace with no live session is a loud
 // error, same as SubmitPrompt.
+//
+// It deliberately does NOT wait for the shim connection to finish handshaking:
+// its callers only want the process running early, and every path that
+// actually SENDS to the shim waits for readiness itself (see ensure). Blocking
+// here would serialize a whole workspace restore behind N handshakes for no
+// benefit.
 func (m *Manager) Ensure(workspace string) error {
-	_, err := m.ensure(workspace)
+	_, err := m.bringUp(workspace)
 	return err
 }
 
@@ -299,7 +306,7 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // the command was accepted — it was accepted into the queue. The queue's own
 // pushed QueueView is what tells the frontend where the prompt went.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error {
-	d, err := m.ensure(workspace)
+	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return err
 	}
@@ -439,6 +446,40 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	return m.cfg.Spawner.StopShim(d.sessionID)
 }
 
+// bringUpTimeout bounds how long ensure waits for a spawned shim to connect
+// and handshake. It is a FAILURE bound, not a tuned delay: ensure returns the
+// instant the connection is ready, and this only decides how long we wait
+// before declaring the shim genuinely dead. Generous enough that a loaded
+// machine never trips it spuriously.
+const bringUpTimeout = 30 * time.Second
+
+// ensure returns a driver that is READY TO DRIVE: the shim is running and its
+// connection has completed the handshake, so a control send will not fail with
+// ErrNotConnected.
+//
+// This is the contract every caller already assumed and the code did not keep.
+// bringUp only starts the connect loop, so sending immediately after it raced
+// the shim's boot — and on a cold workspace (the idle sweep hibernates
+// everything not mid-turn) the send lost that race and the user's prompt was
+// rejected with "no live shim connection" about 500ms before the connection
+// came up.
+//
+// The wait is on the connection EVENT, never on a duration: AwaitReady returns
+// when the handshake lands. It also covers the RECONNECT window, because a
+// workspace already in byWS can still be mid-reconnect with no live connection.
+func (m *Manager) ensure(ctx context.Context, workspace string) (*driven, error) {
+	d, err := m.bringUp(workspace)
+	if err != nil {
+		return nil, err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, bringUpTimeout)
+	defer cancel()
+	if err := d.client.AwaitReady(waitCtx); err != nil {
+		return nil, fmt.Errorf("sessiondrv: session %s for workspace %q never became driveable: %w", d.sessionID, workspace, err)
+	}
+	return d, nil
+}
+
 // existing returns the live driver for workspace, or a loud error when there is
 // none (no lazy bring-up: interrupt/resync/answer for an unbrought-up workspace
 // is a caller error, distinct from a first prompt which brings it up).
@@ -453,7 +494,13 @@ func (m *Manager) existing(workspace string) (*driven, error) {
 
 // ensure returns the live driver for workspace, bringing it up (reattach-first
 // spawn + shimclient) on first use.
-func (m *Manager) ensure(workspace string) (*driven, error) {
+//
+// bringUp STARTS the session: it spawns the shim if needed and launches the
+// client's connect loop in a goroutine. It returns as soon as that is under
+// way, so the returned driver is NOT yet driveable — `d.client` has no
+// connection for the few hundred milliseconds the shim takes to boot, listen,
+// and handshake. Anything about to SEND must use ensure instead.
+func (m *Manager) bringUp(workspace string) (*driven, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()

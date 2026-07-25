@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -395,5 +396,100 @@ func persistentTurnEnd(session string, seq uint64) *corev1.Event {
 		Plane:     corev1.Plane_PLANE_STREAM,
 		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
 		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "end_turn"}},
+	}
+}
+
+// --- readiness latch ---------------------------------------------------------
+//
+// Bring-up is asynchronous: the daemon spawns the shim and starts connecting in
+// a goroutine, so for a few hundred milliseconds there is no connection and
+// every control send fails with ErrNotConnected. AwaitReady lets a caller wait
+// for the connection EVENT rather than guess a duration.
+
+func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
+	// Arrange: a client that has never connected.
+	c := New(Config{SessionID: "s1"})
+
+	// Act: waiting must not return while there is no connection.
+	done := make(chan error, 1)
+	go func() { done <- c.AwaitReady(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("AwaitReady returned %v before any connection existed", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	// Act: publish a connection exactly as the attach path does.
+	c.mu.Lock()
+	c.active = &activeConn{}
+	c.markReadyLocked()
+	c.mu.Unlock()
+
+	// Assert
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("AwaitReady: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AwaitReady did not return after the connection was published")
+	}
+}
+
+func TestAwaitReadyReturnsImmediatelyWhenAlreadyConnected(t *testing.T) {
+	// Arrange
+	c := New(Config{SessionID: "s1"})
+	c.mu.Lock()
+	c.active = &activeConn{}
+	c.markReadyLocked()
+	c.mu.Unlock()
+
+	// Act / Assert: an already-usable connection must not make callers wait.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := c.AwaitReady(ctx); err != nil {
+		t.Fatalf("AwaitReady: %v", err)
+	}
+}
+
+func TestAwaitReadyBlocksAgainAfterDisconnect(t *testing.T) {
+	// Arrange: connect, then drop — the reconnect window a workspace already
+	// in byWS can sit in, where a send would otherwise sail through on a latch
+	// left closed by the dead connection.
+	c := New(Config{SessionID: "s1"})
+	ac := &activeConn{}
+	c.mu.Lock()
+	c.active = ac
+	c.markReadyLocked()
+	c.mu.Unlock()
+
+	c.mu.Lock()
+	c.active = nil
+	c.markNotReadyLocked()
+	c.mu.Unlock()
+
+	// Act / Assert: waiting must block again, not return stale readiness.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := c.AwaitReady(ctx); err == nil {
+		t.Fatal("AwaitReady returned ready while disconnected")
+	}
+}
+
+func TestAwaitReadyFailsOnContextExpiry(t *testing.T) {
+	// Arrange: a shim that never comes up.
+	c := New(Config{SessionID: "s1"})
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := c.AwaitReady(ctx)
+
+	// Assert: the bound is a FAILURE bound, surfaced loudly and naming the session.
+	if err == nil {
+		t.Fatal("AwaitReady must fail when the shim never connects")
+	}
+	if !strings.Contains(err.Error(), "s1") {
+		t.Fatalf("err = %v, want it to name the session", err)
 	}
 }
