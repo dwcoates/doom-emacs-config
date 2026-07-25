@@ -55,6 +55,11 @@ type fakeClient struct {
 	origins    []string
 	modes      []string
 	interrupts int
+	// notReady, when non-nil, blocks AwaitReady until it is closed — the
+	// fake's stand-in for a shim that has not finished handshaking yet. Nil
+	// (the default) means the connection is already usable, so tests that do
+	// not care about bring-up timing are unaffected.
+	notReady chan struct{}
 }
 
 func (c *fakeClient) Run(ctx context.Context) error {
@@ -69,6 +74,21 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string) 
 	c.mu.Unlock()
 	return nil
 }
+func (c *fakeClient) AwaitReady(ctx context.Context) error {
+	c.mu.Lock()
+	ch := c.notReady
+	c.mu.Unlock()
+	if ch == nil {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *fakeClient) Interrupt(_ context.Context, _ bool) error {
 	c.mu.Lock()
 	c.interrupts++
@@ -107,6 +127,36 @@ func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Man
 		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
+			mu.Lock()
+			last = fc
+			mu.Unlock()
+			return fc
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(m.Close)
+	return m, func() *fakeClient { mu.Lock(); defer mu.Unlock(); return last }
+}
+
+// newTestManagerNotReady is newTestManager whose clients report NOT-yet-
+// connected until notReady is closed — a shim that has been spawned but has not
+// finished handshaking, which is the state every cold workspace passes through.
+func newTestManagerNotReady(t *testing.T, locator SessionLocator, spawner Spawner, notReady chan struct{}) (*Manager, func() *fakeClient) {
+	t.Helper()
+	var mu sync.Mutex
+	var last *fakeClient
+	m, err := New(Config{
+		Push:            &fakePusher{},
+		SSM:             &fakeApplier{},
+		Spawner:         spawner,
+		Locator:         locator,
+		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
+		ProtocolVersion: "1",
+		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
+		newClient: func(cfg shimclient.Config) sessionClient {
+			fc := &fakeClient{cfg: cfg, notReady: notReady}
 			mu.Lock()
 			last = fc
 			mu.Unlock()
@@ -456,5 +506,83 @@ func TestHibernateStillStopsWhicheverSessionIsLive(t *testing.T) {
 	// Assert
 	if len(spawner.stopped) != 1 || spawner.stopped[0] != "s1" {
 		t.Fatalf("stopped = %v, want [s1]", spawner.stopped)
+	}
+}
+
+// --- bring-up readiness ------------------------------------------------------
+//
+// The idle sweep hibernates every workspace that is not mid-turn, so a prompt
+// after any pause lands on a workspace whose shim must be spawned first. The
+// spawn is asynchronous: without a readiness gate the prompt was handed to a
+// connection that did not exist yet and came back "no live shim connection"
+// roughly 500ms before the shim finished connecting.
+
+func TestSubmitPromptWaitsForTheShimToBecomeDriveable(t *testing.T) {
+	// Arrange: a client that is NOT connected yet, as a freshly spawned shim.
+	spawner := &fakeSpawner{}
+	notReady := make(chan struct{})
+	m, lastClient := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner, notReady)
+
+	// Act: submit while the shim is still coming up.
+	done := make(chan error, 1)
+	go func() { done <- m.SubmitPrompt(context.Background(), "ws", "hello", "") }()
+
+	// Assert: it must not have been rejected — it is waiting, not failing.
+	select {
+	case err := <-done:
+		t.Fatalf("SubmitPrompt returned %v while the shim was still connecting", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	// Act: the shim finishes connecting.
+	close(notReady)
+
+	// Assert: the prompt is delivered, not dropped.
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SubmitPrompt: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SubmitPrompt never completed after the shim connected")
+	}
+	if fc := lastClient(); fc == nil || len(fc.promptTexts()) != 1 {
+		t.Fatalf("expected the prompt to reach the shim, got %+v", fc)
+	}
+}
+
+func TestSubmitPromptFailsWhenTheShimNeverConnects(t *testing.T) {
+	// Arrange: a shim that never becomes driveable.
+	m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+
+	// Act: the caller's context is the failure bound.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := m.SubmitPrompt(ctx, "ws", "hello", "")
+
+	// Assert: surfaced loudly, naming the workspace — never a silent drop.
+	if err == nil {
+		t.Fatal("SubmitPrompt must fail when the shim never connects")
+	}
+	if !strings.Contains(err.Error(), "ws") {
+		t.Fatalf("err = %v, want it to name the workspace", err)
+	}
+}
+
+func TestEnsureDoesNotWaitForReadiness(t *testing.T) {
+	// Arrange: Ensure is the eager create-path bring-up. It must NOT block on
+	// the handshake, or a workspace restore would serialize behind N of them.
+	m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+
+	// Act / Assert: returns promptly even though the shim never connects.
+	done := make(chan error, 1)
+	go func() { done <- m.Ensure("ws") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Ensure blocked on the shim handshake; it must only start the shim")
 	}
 }
