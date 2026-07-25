@@ -178,3 +178,78 @@ describe("module-level singleton", () => {
     expect(spy.consoleLines).toHaveLength(2);
   });
 });
+
+describe("structured context (E4 ClientLogCmd.context)", () => {
+  it("forwards a context object on the frame", () => {
+    // Arrange
+    const sent: ClientLogCmd[] = [];
+    const logger = new ForwardingLogger((cmd) => {
+      sent.push(cmd);
+      return true;
+    }, () => {});
+    // Act
+    logger.log("warn", "render stall", { pendingMs: 1200, visibility: "visible" });
+    // Assert
+    expect(sent).toHaveLength(1);
+    expect(sent[0].context).toEqual({ pendingMs: 1200, visibility: "visible" });
+  });
+
+  it("omits context entirely when the call site has none", () => {
+    // Arrange — an absent Struct must stay absent, not become {}.
+    const sent: ClientLogCmd[] = [];
+    const logger = new ForwardingLogger((cmd) => {
+      sent.push(cmd);
+      return true;
+    }, () => {});
+    // Act
+    logger.log("info", "plain line");
+    // Assert
+    expect(sent[0].context).toBeUndefined();
+    expect("context" in sent[0]).toBe(false);
+  });
+
+  it("still writes only the message to the console", () => {
+    // Arrange — a console line is read by a human; the struct is for the log.
+    const lines: string[] = [];
+    const logger = new ForwardingLogger(() => true, (_l, line) => lines.push(line));
+    // Act
+    logger.log("warn", "render stall", { pendingMs: 1200 });
+    // Assert
+    expect(lines).toEqual(["render stall"]);
+  });
+
+  it("carries context through the module-level log()", () => {
+    // Arrange
+    const sent: ClientLogCmd[] = [];
+    const logger = new ForwardingLogger((cmd) => {
+      sent.push(cmd);
+      return true;
+    }, () => {});
+    setLogger(logger);
+    // Act
+    log("error", "poll failed", { taskId: "bg1" });
+    // Assert
+    expect(sent[0].context).toEqual({ taskId: "bg1" });
+  });
+});
+
+describe("logLocalOnly (the rejected-forward path)", () => {
+  it("writes to the console without forwarding", () => {
+    // Arrange — forwarding a clientLog-rejection report would earn another
+    // rejection and loop, so this path must never send.
+    const sent: ClientLogCmd[] = [];
+    const lines: string[] = [];
+    const logger = new ForwardingLogger(
+      (cmd) => {
+        sent.push(cmd);
+        return true;
+      },
+      (_l, line) => lines.push(line),
+    );
+    // Act
+    logger.logLocalOnly("error", "clientLog rejected: no message");
+    // Assert
+    expect(lines).toEqual(["clientLog rejected: no message"]);
+    expect(sent).toEqual([]);
+  });
+});

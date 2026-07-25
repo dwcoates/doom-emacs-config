@@ -506,7 +506,8 @@ function MergeCard(): string {
  * own state so it can never read as a real verdict.
  */
 function queuedBadge(item: QueuedItem): { label: string; cls: string } {
-  switch (item.classification) {
+  const cls = item.classification;
+  switch (cls) {
     case "hold":
       return { label: "queued — will run after this turn", cls: "hold" };
     case "interject":
@@ -514,8 +515,16 @@ function queuedBadge(item: QueuedItem): { label: string; cls: string } {
     case "error":
       return { label: "queued — unclassified", cls: "error" };
     case "pending":
-    default:
       return { label: "queued — classifying…", cls: "pending" };
+    default: {
+      // EXHAUSTIVE by construction: a new QueueClassification arm fails to
+      // COMPILE here. The old `case "pending": default:` fallthrough would
+      // have rendered any future verdict as "classifying…", telling the user
+      // their prompt was still being judged when the daemon had already
+      // decided something this badge does not know how to say.
+      const unhandled: never = cls;
+      throw new Error(`render: unhandled queue classification ${String(unhandled)}`);
+    }
   }
 }
 

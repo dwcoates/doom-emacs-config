@@ -54,6 +54,7 @@ import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
 import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
 import { CommandDispatcher } from "./command-dispatch.js";
+import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
@@ -71,7 +72,12 @@ import {
 import { ConversationStore } from "./store.js";
 import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
-import { ForwardingLogger, setLogger, type ClientLogLevel } from "./wslog.js";
+import {
+  ForwardingLogger,
+  setLogger,
+  type ClientLogContext,
+  type ClientLogLevel,
+} from "./wslog.js";
 import { fetchTaskTail } from "./watcher-poll.js";
 import "./styles.css";
 
@@ -116,8 +122,12 @@ async function boot(): Promise<void> {
   // because the dispatcher it needs is built AFTER this logger (the dispatcher
   // logs through it). Until then a line is console-only — exactly the pre-boot
   // behavior `setLogger` already documents, not a fallback hiding a failure.
-  let clientLogSink: ((level: ClientLogLevel, message: string) => boolean) | null = null;
-  const wslog = new ForwardingLogger((cmd) => clientLogSink?.(cmd.level, cmd.message) ?? false);
+  let clientLogSink:
+    | ((level: ClientLogLevel, message: string, context?: ClientLogContext) => boolean)
+    | null = null;
+  const wslog = new ForwardingLogger(
+    (cmd) => clientLogSink?.(cmd.level, cmd.message, cmd.context) ?? false,
+  );
   const clog = wslog.log.bind(wslog);
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
@@ -140,6 +150,13 @@ async function boot(): Promise<void> {
   const dispatcher = new CommandDispatcher({
     send: (raw) => (ws as WsClient | undefined)?.send(raw) ?? false,
     log: (level, message) => clog(level, message),
+    // A REJECTED clientLog cannot be reported through `log`: that forwards
+    // another clientLog, earns another rejection, and loops. It still has to be
+    // SEEN, so it goes to the logger's local-only path — the same injected
+    // console sink every other line uses, at error level because a forward that
+    // the daemon refused is a real failure of the diagnostics channel, not a
+    // quiet fallback. The forward itself still happened and still failed loudly.
+    logLocal: (message) => wslog.logLocalOnly("error", message),
   });
   // The workspace a runtime command names — the live session's cwd, as the
   // pushed `SessionView` reports it. The daemon stamps the URL-scoped
@@ -150,7 +167,8 @@ async function boot(): Promise<void> {
 
   // Close the diagnostics loop declared above: from here every forwarded line
   // rides the protobuf command plane into the daemon's log.
-  clientLogSink = (level, message) => dispatcher.clientLog(cmdWorkspace(), level, message);
+  clientLogSink = (level, message, context) =>
+    dispatcher.clientLog(cmdWorkspace(), level, message, context as CommandStruct | undefined);
 
   // The permission mode the user picked that no prompt has carried yet:
   // frontend.v1 has no standalone set-permission-mode command, so the mode
@@ -520,8 +538,19 @@ async function boot(): Promise<void> {
         clog(
           "warn",
           `render stall: rAF pending ${Math.round(ms)}ms while frames keep arriving (visibility=${document.visibilityState} focus=${document.hasFocus()})`,
+          // The same facts as fields, so the daemon's log can be read back by
+          // something other than a human eye — this is the stall investigation's
+          // primary evidence, and grepping a sentence for a number is not a plan.
+          {
+            pendingMs: Math.round(ms),
+            visibility: document.visibilityState,
+            focus: document.hasFocus(),
+          },
         ),
-      onStallRecover: (ms) => clog("warn", `render stall recovered after ${Math.round(ms)}ms`),
+      onStallRecover: (ms) =>
+        clog("warn", `render stall recovered after ${Math.round(ms)}ms`, {
+          stalledMs: Math.round(ms),
+        }),
     },
   );
   // The wake anchors' countdowns tick on wall-clock time, not on frames,
@@ -536,7 +565,10 @@ async function boot(): Promise<void> {
   const swapTo = (next: string): void => {
     // Forwarded on the OLD socket in the instant before it closes; when
     // that loses the race the line still reaches the console.
-    clog("warn", `session rebind: ${activeSessionId} -> ${next}`);
+    clog("warn", `session rebind: ${activeSessionId} -> ${next}`, {
+      fromSessionId: activeSessionId,
+      toSessionId: next,
+    });
     ws.close();
     activeSessionId = next;
     // The successor is a fresh conversation view: its own claude session id,
