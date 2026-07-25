@@ -183,10 +183,51 @@ var _ ssm.Resolver = (*RegistryResolver)(nil)
 // reports (", false): a workspace-less session has no per-workspace state to
 // resolve, which the SSM surfaces as an explicit miss rather than binding
 // state to the empty-string workspace.
+//
+// sessionID may be EITHER identity a session has:
+//
+//   - the daemon-minted s_<hex> id, which is the registry's own key; or
+//   - the vendor session uuid (the CLI's, and its transcript filename).
+//
+// Both are needed because the SSM resolves the id carried on the EVENT, and
+// events are keyed by the vendor uuid — the store files them under it, since
+// the shim reads it off the SDK message and the sidecar derives it from
+// `<uuid>.jsonl`. Resolving only the s_ id meant every lifecycle event the
+// driver applied failed with "no workspace bound to session <uuid>", so no
+// turn or task state ever reached a workspace.
+//
+// The uuid lookup is a scan because the registry is keyed by the other id, and
+// several records can carry one uuid (a superseded resume, a rehydrated
+// record). The newest by CreatedAt wins, matching SessionLocator; an
+// unparseable timestamp sorts as the zero time so it never shadows a real one.
 func (r *RegistryResolver) Workspace(sessionID string) (string, bool) {
-	rec, ok := r.reg.Get(sessionID)
-	if !ok || rec.CWD == "" {
+	if sessionID == "" {
 		return "", false
 	}
-	return rec.CWD, true
+	// The registry's own key first: an exact hit needs no scan.
+	if rec, ok := r.reg.Get(sessionID); ok {
+		if rec.CWD == "" {
+			return "", false
+		}
+		return rec.CWD, true
+	}
+
+	var (
+		bestCWD string
+		bestAt  time.Time
+		found   bool
+	)
+	for _, rec := range r.reg.All() {
+		if rec.ClaudeSessionID != sessionID || rec.CWD == "" {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, rec.CreatedAt)
+		if err != nil {
+			at = time.Time{}
+		}
+		if !found || at.After(bestAt) {
+			bestCWD, bestAt, found = rec.CWD, at, true
+		}
+	}
+	return bestCWD, found
 }
