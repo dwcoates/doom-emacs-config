@@ -14,6 +14,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -159,7 +160,7 @@ type commandHandler struct {
 	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
 	// of them a loud failing ack rather than a silent no-op, same as shutdown.
 	queues QueueController
-	logf     func(string, ...any)
+	logf   func(string, ...any)
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
@@ -185,19 +186,47 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, logf: logf}, nil
 }
 
+// checkWorkspaceKey rejects a prompt-plane workspace key that is not an
+// absolute path.
+//
+// Every session-routed command is keyed by the session's CWD: SessionLocator
+// matches records on CWD == workspace and sessiondrv maps live drivers under
+// that same string. A frontend that sends a DISPLAY NAME instead ("doom" rather
+// than "/Users/…/.config/doom") therefore matches nothing — and without this
+// check the miss surfaces as `workspace "doom" has no live session to drive`,
+// indistinguishable from a genuinely dead session. That ambiguity is what let
+// the 2026-07-25 name-keyed regression read as a session-startup failure
+// instead of the wire-contract violation it was. Naming the real defect costs
+// one check.
+func checkWorkspaceKey(command, workspace string) error {
+	if !filepath.IsAbs(workspace) {
+		return fmt.Errorf("server: %s workspace key %q is not an absolute path — session-routed commands must be keyed by the session cwd, not a display name", command, workspace)
+	}
+	return nil
+}
+
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
 	h.logf("frontend cmd: submit_prompt ws=%s request_id=%s", workspace, requestID)
+	if err := checkWorkspaceKey("submit_prompt", workspace); err != nil {
+		return err
+	}
 	return h.prompts.SubmitPrompt(ctx, workspace, cmd.GetText(), cmd.GetPermissionMode())
 }
 
 func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error {
 	h.logf("frontend cmd: interrupt ws=%s request_id=%s hard=%v", workspace, requestID, cmd.GetHard())
+	if err := checkWorkspaceKey("interrupt", workspace); err != nil {
+		return err
+	}
 	return h.prompts.Interrupt(ctx, workspace, cmd.GetHard())
 }
 
 func (h *commandHandler) AnswerPermission(ctx context.Context, workspace, requestID string, cmd *frontendv1.PermissionAnswerCmd) error {
 	h.logf("frontend cmd: answer_permission ws=%s request_id=%s permission_request_id=%s allow=%v",
 		workspace, requestID, cmd.GetPermissionRequestId(), cmd.GetAllow())
+	if err := checkWorkspaceKey("answer_permission", workspace); err != nil {
+		return err
+	}
 	return h.prompts.AnswerPermission(ctx, workspace, cmd.GetPermissionRequestId(), cmd.GetAllow(), cmd.GetDenyMessage(), cmd.GetUpdatedInput())
 }
 

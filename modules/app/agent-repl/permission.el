@@ -56,6 +56,7 @@
 (declare-function agent-repl--uds-register-handler "frontend-uds" (field fn))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
 
 ;;;; ---- Resolution vocabulary -------------------------------------------
 
@@ -198,6 +199,9 @@ never an error.  Returns non-nil when a prompt was cleared."
 
 (defun agent-repl--send-permission-answer (ws request-id allow &optional updated-input deny-message)
   "Send a `PermissionAnswerCmd' for REQUEST-ID over the UDS, keyed by WS.
+The wire key is WS's cwd (`agent-repl--frontend-ws-command-key'), not the
+persp name: the daemon routes the answer to the live session whose CWD
+equals it, and a bare name matches nothing.
 ALLOW non-nil answers allow; nil answers deny.  UPDATED-INPUT, when
 non-nil, is an allow-with-edits Struct (a plist) sent as `updatedInput'.
 DENY-MESSAGE, when non-nil on a deny, travels as `denyMessage'.  A false
@@ -211,7 +215,9 @@ request id of the sent command."
                           (when (and (not allow) deny-message
                                      (not (string-empty-p deny-message)))
                             (list :denyMessage deny-message))))
-         (req (agent-repl--uds-send-command "permissionAnswer" payload ws)))
+         (req (agent-repl--uds-send-command
+               "permissionAnswer" payload
+               (agent-repl--frontend-ws-command-key ws))))
     (agent-repl--uds-track-command req "permissionAnswer" ws)
     (agent-repl--log ws "send-permission-answer: ws=%s request=%s allow=%s"
                      ws request-id (if allow "yes" "no"))

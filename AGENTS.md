@@ -431,6 +431,10 @@ Prefer adding a new entry under an existing relevant section over creating a new
 
 The agent-shim protobuf protocol shared by the agent-repl daemon and the shim ecosystem (the per-vendor agent-shim such as `claude/shim`, its `claude/shim-sidecar` JSONL reader, and the `shim-store`) may evolve freely in backward-compatible ways, but any BREAKING change to message shapes or semantics requires explicit user approval first — never break the contract silently, even though there are no external consumers.
 
+## The `workspace` wire field is a CWD, never a display name
+
+Every session-routed frontend command (`submitPrompt`, `interrupt`, `permissionAnswer`) is keyed by the session's **absolute cwd**: `SessionLocator.Locate` matches registry records on `rec.CWD == workspace`, and `sessiondrv` maps live drivers under that same string. Emacs keys everything by the **persp name** (`"doom"`), so a ws-keyed command must resolve its wire key through `agent-repl--frontend-ws-command-key` (`:project-dir`) — never pass the `ws` name straight to `agent-repl--uds-send-command`. The 2026-07-25 regression shipped the name and every prompt NACKed as `workspace "doom" has no live session to drive`, which reads as a dead session rather than a wire-contract violation; `checkWorkspaceKey` in `frontendcmd.go` now refuses a non-absolute key by name.
+
 ## The protocol schema is TREATED as vendor-agnostic
 
 The `agentshim.data.v1` shapes were derived from the Claude harness, so the schema is not factually vendor-agnostic — but it is BELIEVED and TREATED as vendor-agnostic everywhere: no consumer special-cases a vendor. When adding a new vendor (e.g. a `codex-shim`), RESOLVE any incongruity by revising the API (a breaking change is the expected remedy, gated on the approval rule above) — never by bolting vendor side-channels onto the protocol. See `modules/app/agent-repl/proto/AGENTS.md`.
