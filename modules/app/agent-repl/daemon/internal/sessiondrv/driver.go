@@ -27,6 +27,7 @@ package sessiondrv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -382,22 +383,57 @@ func (m *Manager) PendingPermissions(workspace string) []string {
 	return m.reg.idsForWorkspace(workspace)
 }
 
-// Hibernate suspends the workspace's live session: it stops consuming the
-// stream and SIGTERMs the child shim (the redefined hibernation, §4.4). The
-// registry record stays non-terminal (the caller owns that), so the next act
-// revives it via a fresh reattach-first Ensure. A workspace with no live driver
-// is a loud error (nothing to hibernate). NEVER call this while a turn is
-// active — the SSM is the caller's guard.
+// ErrNotLiveSession reports that the workspace IS driven, but by a DIFFERENT
+// session than the one the caller asked to stand down. Distinct from the "no
+// live session" error so a caller can tell "nothing to stop" (benign) from
+// "that shim belongs to someone else — do not touch it".
+var ErrNotLiveSession = errors.New("sessiondrv: not the live session for this workspace")
+
+// Hibernate suspends the workspace's live session, WHICHEVER session that is:
+// it stops consuming the stream and SIGTERMs the child shim (the redefined
+// hibernation, §4.4). The registry record stays non-terminal (the caller owns
+// that), so the next act revives it via a fresh reattach-first Ensure. A
+// workspace with no live driver is a loud error (nothing to hibernate). NEVER
+// call this while a turn is active — the SSM is the caller's guard.
+//
+// Use this ONLY when the intent really is workspace-scoped (the idle sweep,
+// daemon shutdown). A caller standing down one SPECIFIC record must use
+// HibernateSession — see the warning there.
 func (m *Manager) Hibernate(workspace string) error {
+	return m.hibernate(workspace, "")
+}
+
+// HibernateSession suspends workspace's live session ONLY when it is sessionID,
+// returning ErrNotLiveSession (having stopped nothing) when a different session
+// drives the workspace.
+//
+// Several registry records can share one cwd — a stale duplicate, a superseded
+// resume, an orphan awaiting reap — so "stop THIS record's shim" is not the same
+// question as "stop the workspace's shim". Answering it with the workspace-keyed
+// Hibernate SIGTERMs whichever shim happens to be live, which on 2026-07-25
+// meant reaping an orphan killed the healthy session created 175ms earlier for
+// the same workspace, leaving the user with nothing to drive.
+func (m *Manager) HibernateSession(workspace, sessionID string) error {
+	return m.hibernate(workspace, sessionID)
+}
+
+// hibernate is the shared teardown. An empty wantSession means "whichever
+// session is live"; a non-empty one gates the teardown on identity.
+func (m *Manager) hibernate(workspace, wantSession string) error {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
-	if ok {
-		delete(m.byWS, workspace)
-	}
-	m.mu.Unlock()
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("sessiondrv: no live session for workspace %q to hibernate", workspace)
 	}
+	if wantSession != "" && d.sessionID != wantSession {
+		live := d.sessionID
+		m.mu.Unlock()
+		return fmt.Errorf("%w: workspace %q is driven by session %s, not %s",
+			ErrNotLiveSession, workspace, live, wantSession)
+	}
+	delete(m.byWS, workspace)
+	m.mu.Unlock()
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
 	return m.cfg.Spawner.StopShim(d.sessionID)

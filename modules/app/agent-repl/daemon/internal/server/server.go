@@ -1176,11 +1176,16 @@ func (s *Server) DeleteSession(id string) error {
 			r.Terminal = true
 			r.DeathReason = "delete session"
 		})
-		// Best-effort stop of the live shim. A workspace with no live shim is
-		// an expected no-op, not a failure.
+		// Best-effort stop of THIS session's shim. Session-scoped, never
+		// workspace-scoped: several records can share a cwd (a stale
+		// duplicate, a superseded resume, an orphan awaiting reap), and the
+		// workspace-keyed teardown would SIGTERM whichever shim is live —
+		// deleting an orphan would kill the healthy session that replaced it.
+		// A workspace with no live shim, or one driven by a different
+		// session, is an expected no-op, not a failure.
 		if rec.CWD != "" {
-			if err := s.driver.Hibernate(rec.CWD); err != nil {
-				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
+			if err := s.driver.HibernateSession(rec.CWD, id); err != nil {
+				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim, or another session drives it)", id, rec.CWD, err)
 			}
 		}
 		// Push the terminal SessionView so frontends reap the workspace binding
