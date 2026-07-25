@@ -13,9 +13,10 @@
  * daemon's disk. The console side is never limited — locally attached
  * debuggers deserve the full stream.
  */
-import { ClientLogCmd } from "./protocol.js";
+import { ClientLogCmd, ClientLogContext } from "./protocol.js";
 
 export type ClientLogLevel = ClientLogCmd["level"];
+export type { ClientLogContext };
 
 /** Forwarding budget: at most MAX_FORWARDS_PER_WINDOW per window. */
 export const FORWARD_WINDOW_MS = 60_000;
@@ -38,7 +39,12 @@ export class ForwardingLogger {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  log(level: ClientLogLevel, message: string): void {
+  /**
+   * Log one line. CONTEXT, when given, is structured evidence (ids, counters,
+   * timings) forwarded on the frame's `context` Struct — the console side still
+   * gets the message text, since a console line is read by a human.
+   */
+  log(level: ClientLogLevel, message: string, context?: ClientLogContext): void {
     this.consoleFn(level, message);
     const t = this.now();
     if (t - this.windowStart >= FORWARD_WINDOW_MS) {
@@ -60,7 +66,20 @@ export class ForwardingLogger {
       return;
     }
     this.forwarded++;
-    this.send({ type: "client-log", level, message });
+    this.send({ type: "client-log", level, message, ...(context !== undefined ? { context } : {}) });
+  }
+
+  /**
+   * Write to the LOCAL console only, never forwarding.
+   *
+   * This exists for the one report that must not ride the forwarding path: a
+   * rejected `client_log` ack. Reporting that through `log` would forward
+   * another client log, earn another rejection, and loop. Routing it here
+   * still surfaces it loudly through the app's own injected console sink,
+   * rather than being swallowed or bypassing the sink with a bare console call.
+   */
+  logLocalOnly(level: ClientLogLevel, message: string): void {
+    this.consoleFn(level, message);
   }
 }
 
@@ -88,8 +107,8 @@ export function setLogger(logger: ForwardingLogger | null): void {
 }
 
 /** Log through the installed logger, or console-only before boot. */
-export function log(level: ClientLogLevel, message: string): void {
-  if (active !== null) active.log(level, message);
+export function log(level: ClientLogLevel, message: string, context?: ClientLogContext): void {
+  if (active !== null) active.log(level, message, context);
   else defaultConsole(level, message);
 }
 

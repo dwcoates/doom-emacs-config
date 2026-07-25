@@ -190,4 +190,18 @@ export interface ClientLogCmd {
   type: "client-log";
   level: "info" | "warn" | "error";
   message: string;
+  /**
+   * Optional structured payload (ids, counters, timings) accompanying the
+   * message, encoded onto `ClientLogCmd.context` (a `google.protobuf.Struct`).
+   *
+   * Schemaless on purpose, matching the proto: the shape is the reporting call
+   * site's business, so adding a diagnostic never becomes a proto change. Call
+   * sites that HAVE structured facts pass them here instead of only string-
+   * interpolating them into `message`, so the daemon's log carries the ids in a
+   * form something can read back.
+   */
+  context?: ClientLogContext;
 }
+
+/** A ClientLogCmd's structured payload: JSON values, as a Struct carries. */
+export type ClientLogContext = Record<string, unknown>;
