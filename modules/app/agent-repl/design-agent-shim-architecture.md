@@ -141,7 +141,14 @@ reconciliation. This is a designed event classification, not a fallback.
 
 - The daemon tracks `last_seen_seq` per session. On (re)connect to a shim it
   sends `Subscribe{session_id, from_seq}`; the shim re-serves from its store
-  subscription (the store replays from any seq).
+  subscription (the store replays from any seq). Only `from_seq` is relayed:
+  the shim substitutes the VENDOR session id (Claude's uuid) as the store's
+  subscription key, because that — not the daemon's `s_…` id — is what the
+  store files events under, and what the sidecar's file plane keys the same
+  conversation by. On `--resume` the uuid is known at spawn; a fresh session
+  adopts it from the first converted event and reopens the subscription at the
+  same `from_seq` (the store replays `seq > from_seq` from disk, so nothing is
+  lost by learning it late).
 - claude-shim listens on its own `session-<id>.sock` and OUTLIVES a dead
   daemon: a UDS disconnect does not end the SDK turn. The restarted daemon
   reconnects to the SAME live shim — no `--resume` respawn when the shim

@@ -71,6 +71,12 @@ export interface UdsSessionDeps {
    * twin reports the true origin (design §5.2 SessionSource).
    */
   sessionSource: SessionSource;
+  /**
+   * The vendor session id (Claude's uuid) the store keys events by, when
+   * already known — i.e. `--resume`. Omit for a fresh session; the uuid is
+   * then adopted from the first converted event.
+   */
+  storeSessionId?: string;
   /** Construct the SDK query over the streaming input iterable. */
   createQuery: (
     prompt: AsyncIterable<SdkUserMessageLike>,
@@ -143,6 +149,7 @@ export class UdsSession {
       sessionId: this.deps.sessionId,
       producer: `claude-shim:${this.deps.sessionId}`,
       ...(this.deps.heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs: this.deps.heartbeatIntervalMs } : {}),
+      ...(this.deps.storeSessionId !== undefined ? { storeSessionId: this.deps.storeSessionId } : {}),
     });
 
     const handlers: SessionServerHandlers = {
@@ -256,6 +263,12 @@ export class UdsSession {
     // A result closes the turn it belongs to.
     if (msg.type === "result" && this.turnsInFlight > 0) this.turnsInFlight--;
     const { vendor, lifecycle } = convert(msg, { sessionSource: this.deps.sessionSource, ...this.convertOpts() });
+    // The converted envelope carries the VENDOR session id (read off the SDK
+    // message), which is the id the store files these events under. Adopt it
+    // as the subscription key: a fresh session has no other way to learn it,
+    // and subscribing under this shim's `--session-id` listens on a channel
+    // nothing publishes to.
+    this.store.adoptStoreKey(vendor.sessionId);
     void this.store.write([vendor, ...lifecycle]).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
       // event + DegradedState to onDegraded). Nothing to add here; we only
