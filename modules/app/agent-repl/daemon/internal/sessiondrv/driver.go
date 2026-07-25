@@ -12,6 +12,17 @@
 // fresh UDS shim, then runs a shimclient whose sinks are this package's
 // per-session consumer. A UDS disconnect never ends the turn; the client
 // reattaches and replays from the daemon-tracked last_seen_seq.
+//
+// # The Locked naming convention
+//
+// A `…Locked` suffix on a Manager method means the CALLER ALREADY HOLDS m.mu
+// and the method must not touch it — the requires-held reading, which is the
+// only one used here. A method that takes m.mu itself carries NO suffix.
+//
+// The distinction matters because both kinds exist on the same receiver and
+// mixing the readings is a self-deadlock or an unguarded read, neither of which
+// the compiler catches. So the rule is one-directional and absolute: seeing
+// `Locked` means "I am inside the critical section", never "I will enter one".
 package sessiondrv
 
 import (
@@ -296,7 +307,7 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	entry, queued := m.queueSubmitLocked(d, text, permissionMode)
 	if !queued {
 		m.mu.Unlock()
-		text = m.applyMetapromptLocked(d, text)
+		text = m.applyMetaprompt(d, text)
 		return d.client.SubmitPrompt(ctx, text, "frontend", permissionMode)
 	}
 	running := d.runningText
@@ -310,9 +321,12 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	return nil
 }
 
-// applyMetapromptLocked folds the metaprompt directive into text once for an
-// armed session, loud-logging the fold. Takes/releases the manager mutex.
-func (m *Manager) applyMetapromptLocked(d *driven, text string) string {
+// applyMetaprompt folds the metaprompt directive into text once for an armed
+// session, loud-logging the fold.
+//
+// TAKES m.mu itself, which is why it carries no `Locked` suffix (see the
+// package doc): callers must NOT hold the mutex.
+func (m *Manager) applyMetaprompt(d *driven, text string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !d.metaArmed || d.metaFired {
