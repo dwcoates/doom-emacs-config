@@ -521,6 +521,180 @@ manual restart, so a wedged foreign daemon never costs a doomed spawn."
                         agent-repl-frontend-foreign-stop-grace-seconds)
     (agent-repl--frontend-start-daemon)))
 
+;;;; ---- Incompatible-daemon replacement (first boot after a cutover) ------
+
+(defcustom agent-repl-frontend-incompatible-stop-grace-seconds 8.0
+  "Seconds to wait for an INCOMPATIBLE daemon to exit after SIGTERM.
+An incompatible daemon predates this generation's protocol, so it cannot
+be asked to leave over the UDS (it serves none) and cannot be reached by
+`ShutdownCmd'.  It is signalled instead, and only SIGKILLed if it
+outlives this window."
+  :type 'number
+  :group 'agent-repl)
+
+(defconst agent-repl--frontend-listener-probe-program "lsof"
+  "Program used to find the process holding the daemon's TCP port.")
+
+(defun agent-repl--frontend-daemon-port ()
+  "Return the port component of `agent-repl-frontend-daemon-addr' as a string.
+Nil when the address carries no port, which makes every port-based
+detection below a no-op rather than a guess."
+  (when (string-match "\\`.*:\\([0-9]+\\)\\'" agent-repl-frontend-daemon-addr)
+    (match-string 1 agent-repl-frontend-daemon-addr)))
+
+(defun agent-repl--frontend-run-listener-probe (port)
+  "External-boundary wrapper: return `lsof' output naming PORT's listener.
+Returns the raw stdout string, or nil when the probe cannot run.  Body
+does nothing but invoke the external process so tests mock it via
+`cl-letf'; registered in `agent-repl--external-boundary-functions'."
+  (with-temp-buffer
+    (let ((code (call-process ;; ALLOW-EXTERNAL-BOUNDARY
+                 agent-repl--frontend-listener-probe-program nil t nil
+                 "-nP" "-a" "-iTCP:" "-sTCP:LISTEN" "-Fpc"
+                 (concat "-i" "TCP:" port))))
+      ;; lsof exits 1 when nothing matches, which is a legitimate "no
+      ;; listener" answer rather than a failure.
+      (when (memq code '(0 1))
+        (buffer-string)))))
+
+(defun agent-repl--frontend-parse-listener (output)
+  "Parse `lsof -F' OUTPUT into (PID . COMMAND), or nil when nothing listens.
+`-F' emits one field per line, each prefixed by its field character: `p'
+for the pid, `c' for the command name.  Only the FIRST listener is
+returned — the port has a single owner, and a second would mean something
+stranger than a stale daemon."
+  (when (stringp output)
+    (let (pid command)
+      (dolist (line (split-string output "\n" t))
+        (cond
+         ((and (null pid) (string-prefix-p "p" line))
+          (setq pid (string-to-number (substring line 1))))
+         ((and pid (null command) (string-prefix-p "c" line))
+          (setq command (substring line 1)))))
+      (when (and pid (> pid 0))
+        (cons pid (or command ""))))))
+
+(defun agent-repl--frontend-listener-owner ()
+  "Return (PID . COMMAND) for the process listening on the daemon's port.
+Nil when the port is free, unparseable, or has no resolvable port."
+  (when-let ((port (agent-repl--frontend-daemon-port)))
+    (agent-repl--frontend-parse-listener
+     (agent-repl--frontend-run-listener-probe port))))
+
+(defun agent-repl--frontend-our-daemon-command-p (command)
+  "Return non-nil when COMMAND names THIS module's daemon executable.
+The whole safety of the replacement below rests on this predicate: it is
+what keeps the terminate step from touching a process that merely happens
+to hold the port.  The match is on the daemon binary's own basename, so
+an unrelated program on the port is left strictly alone and reported."
+  (and (stringp command)
+       (equal command (file-name-nondirectory agent-repl--frontend-daemon-bin))))
+
+(defun agent-repl--frontend-incompatible-daemon ()
+  "Return (PID . COMMAND) of a running daemon this generation cannot talk to.
+This is the FIRST-BOOT-AFTER-CUTOVER condition: a `claude-repld' from a
+previous generation is still holding the daemon's port, but serves no
+frontend UDS socket, so nothing here can reach it — and a fresh daemon
+spawned next to it would only bind-fail and die.
+
+All three conditions must hold, and each rules out a different innocent
+case:
+  - something is listening on the daemon's port (else there is nothing
+    to replace);
+  - NO frontend UDS socket is being served (else the daemon is a current
+    one and is adopted normally, never killed);
+  - the listener is OUR daemon binary (else it is someone else's program
+    and is none of our business).
+
+Returns nil in every other case, including when the port is held by a
+foreign program — that is reported by the caller, not acted on."
+  (unless (agent-repl--frontend-daemon-responsive-p)
+    (when-let ((owner (agent-repl--frontend-listener-owner)))
+      (if (agent-repl--frontend-our-daemon-command-p (cdr owner))
+          owner
+        (agent-repl--log nil
+                         "startup: %s is held by pid %s (%s), which is NOT our daemon — leaving it alone"
+                         agent-repl-frontend-daemon-addr (car owner) (cdr owner))
+        nil))))
+
+(defun agent-repl--frontend-terminate-incompatible-daemon (pid)
+  "Terminate the incompatible daemon PID, gracefully first.
+SIGTERM so it runs its own shutdown path, then SIGKILL only if it
+outlives `agent-repl-frontend-incompatible-stop-grace-seconds'.  Returns
+non-nil when the port is free afterwards.
+
+There is no in-flight-turn guard here, unlike the ordinary stop: this
+daemon serves no UDS, so its turns are already unreachable from this
+Emacs — there is no live conversation to protect, only a process holding
+a port nothing can use."
+  (agent-repl--log nil "startup: terminating incompatible daemon pid=%s on %s"
+                   pid agent-repl-frontend-daemon-addr)
+  (agent-repl--signal-process pid 'TERM)
+  (when (agent-repl--frontend-poll-until
+         #'agent-repl--frontend-listener-owner
+         agent-repl-frontend-incompatible-stop-grace-seconds 0.1)
+    (agent-repl--log nil "startup: incompatible daemon pid=%s ignored SIGTERM for %ss; sending KILL"
+                     pid agent-repl-frontend-incompatible-stop-grace-seconds)
+    (agent-repl--signal-process pid 'KILL)
+    (agent-repl--frontend-poll-until
+     #'agent-repl--frontend-listener-owner
+     agent-repl-frontend-incompatible-stop-grace-seconds 0.1))
+  (not (agent-repl--frontend-listener-owner)))
+
+(defun agent-repl--frontend-replace-incompatible-daemon ()
+  "Replace an incompatible daemon with one built from the current source.
+Returns the new daemon process, or nil when there was nothing to replace.
+
+This is the zero-user-action half of the cutover: the generation that
+introduced the frontend UDS cannot be reached by the generation that
+predates it, so the FIRST Emacs to boot on the new code has to notice
+that, clear the port, and take it over. Artifacts are built BEFORE the
+old daemon is signalled, so a build failure leaves the working daemon
+running rather than trading it for nothing.
+
+A daemon that will not die is left in place with a loud note: spawning
+next to it would only bind-fail, which is the very failure this exists to
+prevent."
+  (when-let ((owner (agent-repl--frontend-incompatible-daemon)))
+    (agent-repl--log nil
+                     "startup: daemon on %s serves no frontend UDS — it predates this generation; replacing it"
+                     agent-repl-frontend-daemon-addr)
+    (agent-repl--frontend-build-if-stale nil)
+    (if (agent-repl--frontend-terminate-incompatible-daemon (car owner))
+        (agent-repl--frontend-start-daemon)
+      (agent-repl--log nil
+                       "startup: incompatible daemon pid=%s survived termination — NOT spawning next to it; run M-x agent-repl-frontend-daemon-restart"
+                       (car owner))
+      nil)))
+
+;;;; ---- First-boot artifact readiness ------------------------------------
+
+(defun agent-repl--frontend-missing-artifacts ()
+  "Return the list of launch artifacts that do not exist on disk.
+The daemon binary, the webapp bundle and the shim entrypoint are all
+required to serve a session; a missing one is what makes a first boot on
+a fresh checkout fail."
+  (seq-remove #'agent-repl--frontend-artifact-exists-p
+              (list agent-repl--frontend-daemon-bin
+                    agent-repl--frontend-webapp-dir
+                    agent-repl--frontend-shim-entry)))
+
+(defun agent-repl--frontend-ensure-artifacts ()
+  "Build any launch artifact that is missing, once per first boot.
+Returns non-nil when a build ran.
+
+The ordinary launch path already builds-if-stale before spawning, so this
+covers the case that path does not: a daemon is ALREADY running and would
+be adopted, while an artifact this Emacs needs is absent — most visibly
+`webapp/dist', without which every webview request 503s. Adopting in that
+state produces a daemon that runs and a panel that cannot render, which
+reads as a mysterious failure rather than a missing build."
+  (when-let ((missing (agent-repl--frontend-missing-artifacts)))
+    (agent-repl--log nil "startup: building missing launch artifact(s): %s"
+                     (mapconcat #'file-name-nondirectory missing ", "))
+    (agent-repl--frontend-build-if-stale nil)
+    t))
+
 (defun agent-repl--frontend-bounce-if-stale ()
   "Rebuild-if-stale, then bounce the running daemon when the binary is stale.
 Runs a build-if-stale pass FIRST so changed Go source is compiled onto
@@ -561,14 +735,35 @@ Once stale, the branch taken keeps the bounce safe:
         (agent-repl--frontend-bounce-foreign-daemon))))))
 
 (defun agent-repl--frontend-maybe-bounce-stale-daemon-once ()
-  "Run `agent-repl--frontend-bounce-if-stale' at most once per Emacs session.
-The guard is set BEFORE the bounce runs, so even a build error leaves the
+  "Run the first-boot health pass at most once per Emacs session.
+The guard is set BEFORE the pass runs, so even a build error leaves the
 check a genuine one-shot rather than re-firing (and re-building) on every
 subsequent panel open; the error itself still propagates to the caller,
-never swallowed."
+never swallowed.
+
+Three things happen here, in this order, and the order matters:
+
+  1. An INCOMPATIBLE daemon — one from a generation that predates the
+     frontend UDS — is replaced.  It has to go first: it holds the port,
+     so nothing after it could start a daemon anyway, and the staleness
+     comparison below cannot even read its binary mtime (that arrives on
+     a UDS it does not serve).
+  2. Missing launch artifacts are built, covering the adopt path that
+     would otherwise run a daemon with no webapp to serve.
+  3. The ordinary staleness bounce runs, for a CURRENT daemon launched
+     from an older binary than the one now on disk.
+
+Step 1 is what makes the first Emacs restart after a cutover
+self-healing: no user action, no manual kill, no manual build."
   (unless agent-repl--frontend-startup-staleness-checked
     (setq agent-repl--frontend-startup-staleness-checked t)
-    (agent-repl--frontend-bounce-if-stale)))
+    (if (agent-repl--frontend-replace-incompatible-daemon)
+        ;; The daemon was just built and launched from current source, so
+        ;; neither the artifact sweep nor the staleness comparison has
+        ;; anything left to say about it.
+        (agent-repl--log nil "startup: incompatible daemon replaced; skipping the staleness pass")
+      (agent-repl--frontend-ensure-artifacts)
+      (agent-repl--frontend-bounce-if-stale))))
 
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
