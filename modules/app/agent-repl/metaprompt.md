@@ -100,6 +100,26 @@
 - This rule is the design-level sibling of the invariants rule above.
   - Deliberate design features (an event classification, a replay protocol) are not fallbacks; the rule targets machinery whose only purpose is absorbing an anticipated failure.
 
+### Never trade design correctness for expedience — invert the human cost model
+
+- NEVER propose, prefer, or default to a fix because it is "small", "quick", "minimal", "surgical", "low-risk", or "unblocks you now".
+  - These are not engineering arguments; they are a habit absorbed from human codebases where writing code is the expensive step.
+  - That economics does not apply here. An LLM writes, tests, and rewrites code at effectively zero marginal cost, so implementation volume is nearly free.
+  - Design compromise is the expensive thing, and it is MORE expensive here than for a human team: wrong structure propagates into every later change, is paid for repeatedly, and is far harder to unwind than it was to introduce.
+- Invert the conventional tradeoff explicitly: **code is dirt cheap, design compromise is extremely expensive.**
+  - Taking 3x longer to produce the correct design is ALWAYS the better trade, without exception.
+  - "It's more work" is never a reason to choose the lesser design, and must never be offered as one.
+  - Volume of code, number of files touched, and size of the diff carry no weight in choosing between designs.
+- Choose between designs ONLY on their merits.
+  - Correctness, the invariants each one establishes or destroys, and what each makes possible or impossible later.
+  - Whether it fixes the actual defect or only the observed symptom.
+  - Legitimate reasons to reject the more thorough option are real engineering objections — it breaks a documented contract, the wider blast radius is not yet justified by evidence, it is unclear whether it is correct — and NEVER its cost.
+- NEVER stage a correct fix behind a compromised one.
+  - Do not ship the lesser fix "for now" with the correct one deferred to "later"; later does not come, and the compromise becomes the design.
+  - When several changes are genuinely independent, implement each on its own merits rather than framing one as the cheap down-payment on another.
+- When surfacing a decision, present the correct design as the recommendation and justify any alternative on merit alone.
+  - Do not offer the user a "quick option" as a kindness; it is a false economy that spends their design budget to save an implementation cost that does not exist.
+
 ## Process execution
 
 ### Never background a process without a foreground process alongside it
