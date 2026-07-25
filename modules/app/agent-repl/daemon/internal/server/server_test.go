@@ -68,6 +68,12 @@ func (f *fakeSpawner) ensuredIDs() []string {
 	return slices.Clone(f.ensured)
 }
 
+func (f *fakeSpawner) stoppedIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stopped)
+}
+
 // stubMerge / stubLifecycle / stubState satisfy the frontend command handler's
 // required collaborators; the daemon's HTTP tests never drive a merge or a
 // lifecycle command, so they are inert.
@@ -557,6 +563,50 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	rec, _ := h.reg.Get(id)
 	if !rec.Terminal || rec.DeathReason != "delete session" {
 		t.Errorf("record = %+v, want terminal with the delete death reason", rec)
+	}
+}
+
+// Several records can share one cwd — a stale duplicate, a superseded resume,
+// an orphan awaiting reap. Deleting one of them must stop ITS shim and only
+// its shim: the workspace-keyed teardown this used to do SIGTERMed whichever
+// shim was live, so on 2026-07-25 reaping an orphan killed the healthy session
+// created 175ms earlier and every prompt after it NACKed as "no live session".
+func TestDeleteSessionDoesNotStopADifferentLiveSession(t *testing.T) {
+	// Arrange: an orphan record, then the session that actually drives the cwd.
+	h := newHarness(t)
+	orphan := createSession(t, h, `{"cwd":"/w"}`)
+	// Stand the orphan's driver down (what a supersede or idle sweep does), so
+	// the NEXT create becomes the live driver for that cwd.
+	if err := h.driver.Hibernate("/w"); err != nil {
+		t.Fatalf("Hibernate: %v", err)
+	}
+	live := createSession(t, h, `{"cwd":"/w"}`)
+
+	// Act: reap the orphan.
+	if err := h.srv.DeleteSession(orphan); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert: the live session's shim was never stopped.
+	if slices.Contains(h.spawner.stoppedIDs(), live) {
+		t.Fatalf("deleting orphan %s stopped live session %s (stopped=%v)",
+			orphan, live, h.spawner.stoppedIDs())
+	}
+}
+
+func TestDeleteSessionStopsItsOwnLiveShim(t *testing.T) {
+	// Arrange: one session, live for its cwd.
+	h := newHarness(t)
+	id := createSession(t, h, `{"cwd":"/w"}`)
+
+	// Act
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert: session-scoping did not cost the delete its own teardown.
+	if !slices.Contains(h.spawner.stoppedIDs(), id) {
+		t.Fatalf("stopped = %v, want it to contain %s", h.spawner.stoppedIDs(), id)
 	}
 }
 

@@ -355,3 +355,106 @@ func TestHandlePermissionAbandonedOnTeardown(t *testing.T) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
 	}
 }
+
+// --- session-scoped hibernation ---------------------------------------------
+//
+// Several registry records can share one workspace cwd (a stale duplicate, a
+// superseded resume, an orphan awaiting reap), so "stand down THIS record's
+// shim" is a different question from "stand down the workspace's shim".
+// HibernateSession answers the first one; answering it with the
+// workspace-keyed Hibernate is what killed a healthy session on 2026-07-25.
+
+func TestHibernateSessionStopsTheMatchingSession(t *testing.T) {
+	// Arrange: bring up s1 for ws.
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act: stand down the session that IS live.
+	if err := m.HibernateSession("ws", "s1"); err != nil {
+		t.Fatalf("HibernateSession: %v", err)
+	}
+
+	// Assert.
+	if len(spawner.stopped) != 1 || spawner.stopped[0] != "s1" {
+		t.Fatalf("stopped = %v, want [s1]", spawner.stopped)
+	}
+}
+
+func TestHibernateSessionLeavesADifferentSessionRunning(t *testing.T) {
+	// Arrange: s1 is the live driver for ws.
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act: stand down a STALE record that shares the cwd (the orphan reap).
+	err := m.HibernateSession("ws", "s_orphan")
+
+	// Assert: nothing was stopped, and the refusal is distinguishable.
+	if !errors.Is(err, ErrNotLiveSession) {
+		t.Fatalf("err = %v, want ErrNotLiveSession", err)
+	}
+	if len(spawner.stopped) != 0 {
+		t.Fatalf("stopped = %v, want none (s1 must survive)", spawner.stopped)
+	}
+}
+
+func TestHibernateSessionKeepsTheDriverLiveOnAMismatch(t *testing.T) {
+	// Arrange: s1 live for ws.
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act: a mismatched stand-down must not evict the byWS entry either.
+	_ = m.HibernateSession("ws", "s_orphan")
+
+	// Assert: ws still resolves to its live driver.
+	d, err := m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing after mismatched HibernateSession: %v", err)
+	}
+	if d.sessionID != "s1" {
+		t.Fatalf("live session = %s, want s1", d.sessionID)
+	}
+}
+
+func TestHibernateSessionOnAnUnbroughtUpWorkspaceErrors(t *testing.T) {
+	// Arrange: nothing brought up.
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+
+	// Act
+	err := m.HibernateSession("ws", "s1")
+
+	// Assert: the "nothing to hibernate" error, NOT the identity refusal.
+	if err == nil {
+		t.Fatal("hibernating an unbrought-up workspace must error")
+	}
+	if errors.Is(err, ErrNotLiveSession) {
+		t.Fatalf("err = %v, want the no-live-session error", err)
+	}
+}
+
+func TestHibernateStillStopsWhicheverSessionIsLive(t *testing.T) {
+	// Arrange: the workspace-scoped variant keeps its identity-blind behavior
+	// (the idle sweep and daemon shutdown depend on it).
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act
+	if err := m.Hibernate("ws"); err != nil {
+		t.Fatalf("Hibernate: %v", err)
+	}
+
+	// Assert
+	if len(spawner.stopped) != 1 || spawner.stopped[0] != "s1" {
+		t.Fatalf("stopped = %v, want [s1]", spawner.stopped)
+	}
+}
