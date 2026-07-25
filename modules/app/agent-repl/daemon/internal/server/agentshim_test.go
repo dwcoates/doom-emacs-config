@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,31 +19,18 @@ import (
 	"claude-repld/internal/ssm"
 )
 
-// TestShimUDSArgvAppendsSocketContract covers the UDS spawn contract: the
-// existing stdio argv PLUS `--uds-socket <path>` (design §8, §4.4).
+// TestShimUDSArgvAppendsSocketContract covers the spawn contract: the existing
+// stdio argv PLUS `--daemon-socket <path>`, the socket the shim DIALS.
 func TestShimUDSArgvAppendsSocketContract(t *testing.T) {
 	// Arrange
 	opts := CreateOpts{Model: "haiku", CWD: "/w"}
 	// Act
-	got := ShimUDSArgv("node", "shim.js", "s1", false, opts, "/tmp/sock/session-s1.sock")
-	// Assert — base argv unchanged, socket flag appended last.
+	got := ShimUDSArgv("node", "shim.js", "s1", false, opts, "/tmp/sock/daemon-shim.sock")
+	// Assert — base argv unchanged, daemon socket appended last.
 	want := []string{"node", "shim.js", "--session-id", "s1", "--cwd", "/w", "--model", "haiku",
-		"--uds-socket", "/tmp/sock/session-s1.sock"}
+		"--daemon-socket", "/tmp/sock/daemon-shim.sock"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
-	}
-}
-
-// TestSessionSocketPathConvention covers the shared UDS path convention.
-func TestSessionSocketPathConvention(t *testing.T) {
-	// Act
-	got := SessionSocketPath("s1")
-	// Assert — non-empty and ends with the per-session socket name.
-	if got == "" {
-		t.Fatal("empty socket path")
-	}
-	if base := filepath.Base(got); base != "session-s1.sock" {
-		t.Fatalf("socket base = %q, want session-s1.sock", base)
 	}
 }
 
@@ -87,72 +73,6 @@ func listenUnix(t *testing.T) (net.Listener, string) {
 	}
 	t.Cleanup(func() { l.Close() })
 	return l, path
-}
-
-// TestReattachDecisionLiveShimReattaches: a live listener that opens with a
-// ShimHello (the listener speaks first) -> reattach.
-func TestReattachDecisionLiveShimReattaches(t *testing.T) {
-	// Arrange — a fake shim listener that greets with ShimHello.
-	l, path := listenUnix(t)
-	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		writeHelloFrame(t, conn, &corev1.ShimHello{ShimVersion: "test", TurnInFlight: true})
-		time.Sleep(50 * time.Millisecond)
-	}()
-	// Act
-	reattach, err := ReattachDecision(context.Background(), path)
-	// Assert
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !reattach {
-		t.Fatal("want reattach=true for a live greeting shim")
-	}
-}
-
-// TestReattachDecisionNoSocketSpawns: no listener at the path -> spawn (false),
-// no error (the expected fresh-session / dead-shim case).
-func TestReattachDecisionNoSocketSpawns(t *testing.T) {
-	// Arrange — a path with nothing listening.
-	path := shortSocketPath(t, "absent.sock")
-	// Act
-	reattach, err := ReattachDecision(context.Background(), path)
-	// Assert
-	if err != nil {
-		t.Fatalf("dial failure must not be an error: %v", err)
-	}
-	if reattach {
-		t.Fatal("want reattach=false when no shim is listening")
-	}
-}
-
-// TestReattachDecisionWrongFrameErrors: a listener answering with a non-Hello
-// frame is an anomaly surfaced as an error (never a silent respawn).
-func TestReattachDecisionWrongFrameErrors(t *testing.T) {
-	// Arrange — a listener that greets with the wrong message type.
-	l, path := listenUnix(t)
-	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		writeHelloFrame(t, conn, &corev1.Heartbeat{SentAtMs: 1})
-		time.Sleep(50 * time.Millisecond)
-	}()
-	// Act
-	reattach, err := ReattachDecision(context.Background(), path)
-	// Assert
-	if err == nil {
-		t.Fatal("want an error when the socket answers with a non-ShimHello frame")
-	}
-	if reattach {
-		t.Fatal("want reattach=false on a probe error")
-	}
 }
 
 // openTestRegistry opens a registry on a temp path.
