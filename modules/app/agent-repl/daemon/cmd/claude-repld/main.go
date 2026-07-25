@@ -290,6 +290,17 @@ func main() {
 		DaemonVersion:   daemonVersion,
 		ProtocolVersion: shimProtocolVersion,
 		Logf:            log.Printf,
+		// The prompt queue's classifier (E4). A queued prompt is judged by a
+		// cheap headless run under the SESSION's own account, so the
+		// classification cannot land on a different account's quota or config.
+		Classifier: sessiondrv.NewCLIClassifier("", log.Printf),
+		SessionConfigDir: func(sessionID string) string {
+			rec, ok := sessionRegistry.Get(sessionID)
+			if !ok {
+				return ""
+			}
+			return rec.ConfigDir
+		},
 	})
 	if err != nil {
 		log.Fatalf("claude-repld: build session driver: %v", err)
@@ -311,6 +322,7 @@ func main() {
 		Lifecycle:       pendingLifecycle{},
 		Sessions:        registrySessions{reg: sessionRegistry, driver: driver},
 		Inits:           driver,
+		Queues:          driver,
 		SessionCommands: sessionCommands,
 		Resyncer:        driver,
 		RequestShutdown: requestShutdown,
