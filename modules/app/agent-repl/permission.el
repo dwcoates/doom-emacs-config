@@ -51,6 +51,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--ws-put "workspace" (ws key val))
+(declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--notify "notifications" (ws title message))
 (declare-function agent-repl--uds-register-handler "frontend-uds" (field fn))
@@ -87,8 +88,13 @@ Emacs is state-centric: of the delta's typed items it consumes ONLY the
 type is the webapp's to render and is skipped here.  Each permission item
 is dispatched to `agent-repl--permission-handle-item' with the delta's
 workspace.  Returns the count of permission items handled."
-  (let ((workspace (plist-get delta :workspace))
-        (handled 0))
+  ;; The frame names its workspace by the session CWD; Emacs keys workspaces
+  ;; by persp NAME. Handing the path straight on would key the permission
+  ;; prompt to a stub the renderer never reads (see
+  ;; `agent-repl--frontend-ws-name').
+  (let* ((raw-workspace (plist-get delta :workspace))
+         (workspace (or (agent-repl--frontend-ws-name raw-workspace) raw-workspace))
+         (handled 0))
     (dolist (item (plist-get delta :items))
       (when (agent-repl--permission-item-p item)
         (agent-repl--permission-handle-item workspace item)
