@@ -129,6 +129,7 @@ import {
   SkillResultSchema,
   TaskCreateResultSchema,
   TaskListResultSchema,
+  TaskStatusChangeSchema,
   TaskStopResultSchema,
   TaskUpdateResultSchema,
   TextBlockSchema,
@@ -144,6 +145,7 @@ import {
   WriteResultSchema,
   type ContentBlock,
   type Question,
+  type TaskStatusChange,
   type ToolUseResult,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 
@@ -963,9 +965,9 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   if (any("statusChange", "status_change", "updatedFields", "updated_fields")) {
     return { case: "taskUpdate", value: create(TaskUpdateResultSchema, {
       taskId: strOf(pick(o, "task_id", "taskId")),
-      statusChange: asStructOpt(pick(o, "status_change", "statusChange")),
+      statusChange: statusChangeOf(pick(o, "status_change", "statusChange")),
       success: o["success"] === true,
-      updatedFields: asListValueOpt(pick(o, "updated_fields", "updatedFields")),
+      updatedFields: strListOf(pick(o, "updated_fields", "updatedFields")),
     }) };
   }
   if (has("pin")) {
@@ -1251,6 +1253,16 @@ function questionsOf(v: unknown): Question[] {
     }));
   }
   return out;
+}
+
+/**
+ * Map a raw `statusChange` onto the typed `TaskStatusChange` (corpus:
+ * tool-results/task_update). A non-object is not a transition and yields
+ * undefined (the field stays absent) rather than a fabricated {from:"",to:""}.
+ */
+function statusChangeOf(v: unknown): TaskStatusChange | undefined {
+  if (!isObject(v)) return undefined;
+  return create(TaskStatusChangeSchema, { from: strOf(v["from"]), to: strOf(v["to"]) });
 }
 
 function uuidOf(message: Record<string, unknown>): string {

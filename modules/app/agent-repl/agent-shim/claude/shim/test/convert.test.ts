@@ -496,17 +496,25 @@ describe("corrected tool-result shapes", () => {
     expect(typeof results[1]).toBe("string");
   });
 
-  it("task_update classifies its statusChange as an object", () => {
+  it("task_update reads its statusChange as a typed TaskStatusChange", () => {
     const r = convertToolUseResult(loadToolResult("task_update"));
     expect(r.result.case).toBe("taskUpdate");
     if (r.result.case !== "taskUpdate") throw new Error("arm");
-    expect(r.result.value.statusChange).toEqual({ from: "pending", to: "in_progress" });
+    expect(r.result.value.statusChange?.from).toBe("pending");
+    expect(r.result.value.statusChange?.to).toBe("in_progress");
   });
 
-  it("task_update keeps updatedFields as a list", () => {
+  it("task_update leaves statusChange absent when the raw value is not an object", () => {
+    const r = convertToolUseResult({ taskId: "1", statusChange: "pending->done" });
+    expect(r.result.case).toBe("taskUpdate");
+    if (r.result.case !== "taskUpdate") throw new Error("arm");
+    expect(r.result.value.statusChange).toBeUndefined();
+  });
+
+  it("task_update reads updatedFields as a repeated string", () => {
     const r = convertToolUseResult(loadToolResult("task_update"));
     if (r.result.case !== "taskUpdate") throw new Error("arm");
-    expect(listJson(r.result.value.updatedFields)).toEqual(["status"]);
+    expect(r.result.value.updatedFields).toEqual(["status"]);
   });
 
   it("send_message classifies its pin as an object", () => {
