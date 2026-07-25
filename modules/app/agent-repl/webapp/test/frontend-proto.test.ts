@@ -448,12 +448,43 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
     expect(frame.frame.value.entries).toEqual([]);
   });
 
-  it("defaults a missing classification to pending", () => {
-    // Arrange / Act — protojson omits an enum at its zero value.
-    const frame = decode({ queue: { sessionId: "s1", entries: [{ id: "q1", text: "x" }] } });
-    // Assert
-    if (frame.frame.case !== "queue") throw new Error("wrong variant");
-    expect(frame.frame.value.entries[0].classification).toBe("pending");
+  it("rejects a missing classification rather than defaulting it to pending", () => {
+    // Arrange / Act / Assert — protojson omits an enum at its zero value, and
+    // the zero is now UNSPECIFIED, which the daemon never sends. Reading it as
+    // `pending` would invent the very claim the wire declined to make.
+    expect(() =>
+      decode({ queue: { sessionId: "s1", entries: [{ id: "q1", text: "x" }] } }),
+    ).toThrow(/no classification/);
+  });
+
+  it("rejects an explicit UNSPECIFIED classification", () => {
+    // Arrange / Act / Assert — the spelled-out zero is the same wire fact as
+    // an absent field and gets the same loud rejection.
+    expect(() =>
+      decode({
+        queue: {
+          sessionId: "s1",
+          entries: [{ id: "q1", classification: "QUEUE_CLASSIFICATION_UNSPECIFIED" }],
+        },
+      }),
+    ).toThrow(/UNSPECIFIED/);
+  });
+
+  it("decodes each real classification the daemon sends", () => {
+    // Arrange
+    const cases: Array<[string, string]> = [
+      ["QUEUE_CLASSIFICATION_PENDING", "pending"],
+      ["QUEUE_CLASSIFICATION_INTERJECT", "interject"],
+      ["QUEUE_CLASSIFICATION_HOLD", "hold"],
+      ["QUEUE_CLASSIFICATION_ERROR", "error"],
+    ];
+    for (const [wire, want] of cases) {
+      // Act
+      const frame = decode({ queue: { sessionId: "s1", entries: [{ id: "q1", classification: wire }] } });
+      // Assert
+      if (frame.frame.case !== "queue") throw new Error("wrong variant");
+      expect(frame.frame.value.entries[0].classification).toBe(want);
+    }
   });
 
   it("rejects an unrecognized classification rather than defaulting it", () => {
@@ -467,10 +498,16 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
   });
 
   it("rejects an entry with no id, whose controls would all be dead", () => {
-    // Arrange / Act / Assert
-    expect(() => decode({ queue: { sessionId: "s1", entries: [{ text: "x" }] } })).toThrow(
-      /missing required `id`/,
-    );
+    // Arrange / Act / Assert — a real classification, so the missing id is
+    // what fails rather than the classification check upstream of it.
+    expect(() =>
+      decode({
+        queue: {
+          sessionId: "s1",
+          entries: [{ text: "x", classification: "QUEUE_CLASSIFICATION_PENDING" }],
+        },
+      }),
+    ).toThrow(/missing required `id`/);
   });
 
   it("rejects an unrecognized field on an entry", () => {

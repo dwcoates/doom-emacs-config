@@ -630,7 +630,13 @@ describe("queue -> queue effect (E4)", () => {
         sessions: [],
         catalogs: [],
         inits: [],
-        queues: [{ workspace: "ws", sessionId: "s1", entries: [{ id: "q1", text: "later" }] }],
+        queues: [
+          {
+            workspace: "ws",
+            sessionId: "s1",
+            entries: [{ id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_HOLD" }],
+          },
+        ],
       },
     });
     // Assert
