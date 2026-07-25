@@ -578,3 +578,71 @@ describe("heartbeat -> tool-progress (E4)", () => {
     expect(adapter.ignoredCounts().get("heartbeat")).toBeUndefined();
   });
 });
+
+describe("queue -> queue effect (E4)", () => {
+  it("maps a queue frame to a queue effect carrying its entries", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      queue: {
+        workspace: "ws",
+        sessionId: "s1",
+        entries: [{ id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_HOLD" }],
+      },
+    });
+
+    // Assert
+    expect(effects).toEqual([
+      {
+        kind: "queue",
+        value: {
+          workspace: "ws",
+          sessionId: "s1",
+          entries: [
+            {
+              id: "q1",
+              text: "later",
+              queuedAtMs: 0,
+              classification: "hold",
+              rationale: "",
+              accepted: false,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("passes an empty queue through as an empty entries list", () => {
+    // Arrange / Act — the store needs this to CLEAR its chips.
+    const effects = applyOne({ queue: { workspace: "ws", sessionId: "s1" } });
+    // Assert
+    expect(effects[0]).toEqual({
+      kind: "queue",
+      value: { workspace: "ws", sessionId: "s1", entries: [] },
+    });
+  });
+
+  it("fans a snapshot's queues out into queue effects", () => {
+    // Arrange / Act — a reconnect must restore the chips.
+    const effects = applyOne({
+      snapshot: {
+        workspaces: [],
+        sessions: [],
+        catalogs: [],
+        inits: [],
+        queues: [{ workspace: "ws", sessionId: "s1", entries: [{ id: "q1", text: "later" }] }],
+      },
+    });
+    // Assert
+    expect(effects.filter((e) => e.kind === "queue")).toHaveLength(1);
+  });
+
+  it("does not route the queue down the explicit-ignore path", () => {
+    // Arrange
+    const adapter = new StateAdapter();
+    // Act
+    adapter.apply(frame({ queue: { sessionId: "s1", entries: [] } }));
+    // Assert
+    expect(adapter.ignoredCounts().get("queue")).toBeUndefined();
+  });
+});

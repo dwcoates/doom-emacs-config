@@ -3359,6 +3359,7 @@ describe("FeedRenderer: the tail line pins to the bottom slot, not the feed", ()
     answerQuestions() {},
     cancelQueued() {},
     runQueuedNow() {},
+    acceptQueued() {},
   };
 
   function mount(): { container: HTMLElement; tailSlot: HTMLElement; feed: FeedRenderer } {
@@ -5909,6 +5910,7 @@ describe("FeedRenderer: reconcile honors feed order on a batched revisit", () =>
     answerQuestions() {},
     cancelQueued() {},
     runQueuedNow() {},
+    acceptQueued() {},
   };
 
   function mount(): { container: HTMLElement; feed: FeedRenderer } {
@@ -5966,6 +5968,7 @@ describe("FeedRenderer: the working-frontier breath is a class, not HTML", () =>
     answerQuestions() {},
     cancelQueued() {},
     runQueuedNow() {},
+    acceptQueued() {},
   };
 
   function mountFeed(): { container: HTMLElement; feed: FeedRenderer } {
@@ -6069,6 +6072,7 @@ describe("FeedRenderer.isMonitoring (topbar monitoring datapoint gate)", () => {
     answerQuestions() {},
     cancelQueued() {},
     runQueuedNow() {},
+    acceptQueued() {},
   };
 
   const mountFeed = (): FeedRenderer =>
@@ -6197,6 +6201,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     answerQuestions() {},
     cancelQueued() {},
     runQueuedNow() {},
+    acceptQueued() {},
   };
 
   function spyLines(): string[] {

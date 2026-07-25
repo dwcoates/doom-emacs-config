@@ -567,6 +567,30 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
         (should (seq-find (lambda (m) (string-match-p "no handler registered" m))
                           logged))))))
 
+(ert-deftest agent-repl-test-uds-queue-is-a-known-frame ()
+  "The E4 `queue' oneof arm is a recognized frame field (not malformed)."
+  ;; Act / Assert
+  (should (member "queue" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-queue-is-a-deliberately-ignored-frame ()
+  "`queue' is declared ignored: the webapp owns the chips and their controls."
+  ;; Act / Assert
+  (should (member "queue" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-queue-frame-returns-nil ()
+  "Dispatching a queue frame is a no-op, not a signal."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:queue (:workspace "ws1" :sessionId "s1" :entries nil))))))
+
+(ert-deftest agent-repl-test-uds-queue-commands-are-known ()
+  "The three E4 queue control arms are in the command mirror."
+  ;; Act / Assert
+  (dolist (field '("queueForce" "queueAccept" "queueCancel"))
+    (should (member field agent-repl--uds-known-command-fields))))
+
 (ert-deftest agent-repl-test-uds-client-log-is-a-known-command ()
   "The E4 `clientLog' arm is in the command mirror, though Emacs never sends it."
   ;; Act / Assert

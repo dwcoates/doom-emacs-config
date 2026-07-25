@@ -274,6 +274,45 @@ export interface StateSnapshot {
   daemon?: DaemonView;
   /** Retained per-session SystemInits (S9); absent on a pre-S9 daemon. */
   inits: SessionInitView[];
+  /** Each live session's held-prompt queue (E4); empty on a pre-E4 daemon. */
+  queues: QueueView[];
+}
+
+/**
+ * How the classifier judged a held prompt (E4). `pending` = still being
+ * judged; `error` = NOTHING decided it (the classifier failed, or answered
+ * unreadably) and is deliberately distinct from a real verdict.
+ */
+export const QUEUE_CLASSIFICATIONS = ["pending", "interject", "hold", "error"] as const;
+export type QueueClassification = (typeof QUEUE_CLASSIFICATIONS)[number];
+
+/** protojson enum name -> the webapp's keyword. */
+const QUEUE_CLASSIFICATION_BY_NAME: Readonly<Record<string, QueueClassification>> = {
+  QUEUE_CLASSIFICATION_PENDING: "pending",
+  QUEUE_CLASSIFICATION_INTERJECT: "interject",
+  QUEUE_CLASSIFICATION_HOLD: "hold",
+  QUEUE_CLASSIFICATION_ERROR: "error",
+};
+
+/** One prompt the daemon is holding (E4). */
+export interface QueueEntry {
+  id: string;
+  text: string;
+  queuedAtMs: number;
+  classification: QueueClassification;
+  rationale: string;
+  accepted: boolean;
+}
+
+/**
+ * The session's whole held-prompt queue (E4). It is a REPLACEMENT, not a
+ * delta: every push carries the complete queue, so an empty entries list means
+ * the queue is empty rather than "no news".
+ */
+export interface QueueView {
+  workspace: string;
+  sessionId: string;
+  entries: QueueEntry[];
 }
 
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
@@ -289,7 +328,8 @@ export type FrontendFrame = {
     | { case: "degradedNotice"; value: DegradedNotice }
     | { case: "daemonView"; value: DaemonView }
     | { case: "sessionInit"; value: SessionInitView }
-    | { case: "heartbeat"; value: HeartbeatView };
+    | { case: "heartbeat"; value: HeartbeatView }
+    | { case: "queue"; value: QueueView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -390,6 +430,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
   ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
   ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
+  ["queue", (v: unknown) => ({ case: "queue" as const, value: decodeQueueView(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -566,6 +607,70 @@ function decodeHeartbeatView(v: unknown): HeartbeatView {
   return hv;
 }
 
+const QUEUE_VIEW_KEYS = new Set(["workspace", "sessionId", "entries"]);
+const QUEUE_ENTRY_KEYS = new Set([
+  "id",
+  "text",
+  "queuedAtMs",
+  "classification",
+  "rationale",
+  "accepted",
+]);
+
+function decodeQueueView(v: unknown): QueueView {
+  const o = ensureObject(v, "QueueView");
+  rejectUnknown(o, QUEUE_VIEW_KEYS, "QueueView");
+  const qv: QueueView = {
+    workspace: str(o, "workspace", "QueueView"),
+    sessionId: str(o, "sessionId", "QueueView"),
+    entries: (o.entries === undefined || o.entries === null
+      ? []
+      : ensureArray(o.entries, "QueueView.entries")
+    ).map(decodeQueueEntry),
+  };
+  if (qv.sessionId === "") {
+    throw new Error("frontend-proto: QueueView missing required `session_id`");
+  }
+  return qv;
+}
+
+function decodeQueueEntry(v: unknown): QueueEntry {
+  const o = ensureObject(v, "QueueView.entries[]");
+  rejectUnknown(o, QUEUE_ENTRY_KEYS, "QueueView.entries[]");
+  const e: QueueEntry = {
+    id: str(o, "id", "QueueView.entries[]"),
+    text: str(o, "text", "QueueView.entries[]"),
+    queuedAtMs: num(o, "queuedAtMs", "QueueView.entries[]"),
+    classification: decodeQueueClassification(o.classification),
+    rationale: str(o, "rationale", "QueueView.entries[]"),
+    accepted: bool(o, "accepted", "QueueView.entries[]"),
+  };
+  // Without an id nothing can force, accept or cancel this entry, so the
+  // controls it renders would all be dead.
+  if (e.id === "") {
+    throw new Error("frontend-proto: QueueView entry missing required `id`");
+  }
+  return e;
+}
+
+/**
+ * Decode the classification enum. An UNRECOGNIZED name throws rather than
+ * falling back: silently rendering an unknown verdict as `pending` would tell
+ * the user their prompt is being judged when the daemon said something else
+ * entirely.
+ */
+function decodeQueueClassification(v: unknown): QueueClassification {
+  if (v === undefined || v === null) return "pending";
+  if (typeof v !== "string") {
+    throw new Error(`frontend-proto: QueueView entry classification must be a string (got ${typeof v})`);
+  }
+  const known = QUEUE_CLASSIFICATION_BY_NAME[v];
+  if (known === undefined) {
+    throw new Error(`frontend-proto: QueueView entry has unrecognized classification '${v}'`);
+  }
+  return known;
+}
+
 const TYPING_DELTA_KEYS = new Set(["workspace", "sessionId", "delta"]);
 const CONTENT_DELTA_KEYS = new Set([
   "uuid",
@@ -736,7 +841,7 @@ function decodeDaemonView(v: unknown): DaemonView {
   };
 }
 
-const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon", "inits"]);
+const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon", "inits", "queues"]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
   rejectUnknown(o, STATE_SNAPSHOT_KEYS, "StateSnapshot");
@@ -757,6 +862,10 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.inits, "StateSnapshot.inits")
     ).map(decodeSessionInitView),
+    queues: (o.queues === undefined || o.queues === null
+      ? []
+      : ensureArray(o.queues, "StateSnapshot.queues")
+    ).map(decodeQueueView),
   };
   // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
   // present rather than defaulting it away.

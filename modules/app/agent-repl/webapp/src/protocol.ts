@@ -18,6 +18,10 @@
  *   controls, model/mode pickers and diagnostics talk to the daemon.
  */
 
+import type { QueueClassification } from "./frontend-proto.js";
+
+export type { QueueClassification };
+
 export type PermissionMode =
   | "default"
   | "acceptEdits"
@@ -75,18 +79,22 @@ export type ContentBlock =
   | { type: string; [key: string]: unknown };
 
 /**
- * One parked message in the in-flight queue, mirrored in the store's
- * `queued` slice. A queued message is NOT a conversation item: it renders as
- * a subdued "queued — waiting" affordance and only becomes a real `user-turn`
- * once drained.
+ * One prompt the DAEMON is holding because a turn was already running when it
+ * was submitted (E4). Mirrored in the store's `queued` slice, and sourced
+ * wholesale from the pushed `QueueView`.
+ *
+ * A held prompt is NOT a conversation item: it renders as a subdued card, and
+ * only becomes a real user turn once the daemon delivers it.
  */
 export interface QueuedItem {
-  queue_id: string;
-  request_id: string;
-  content: ContentBlock[];
-  status: "classifying" | "waiting" | "interrupt";
-  verdict?: "wait" | "interrupt";
-  reason?: string;
+  id: string;
+  text: string;
+  queuedAtMs: number;
+  classification: QueueClassification;
+  /** The classifier's stated reason, or the failure detail on `error`. */
+  rationale: string;
+  /** The user has confirmed this entry's classification (view state only). */
+  accepted: boolean;
 }
 
 export type ResultSubtype =
@@ -167,12 +175,10 @@ export type PermissionPreview =
 //
 // The S8/S9 cutover deleted the legacy JSON `ClientCommand` command union: every
 // frontend→daemon command is now an `agentshim.frontend.v1.FrontendCommand`
-// protojson frame (see frontend-command.ts / command-dispatch.ts). The one
-// straggler with NO FrontendCommand arm is the webapp→daemon diagnostic
-// forward: `ClientLogCmd` survives ONLY as the shape `wslog.ts` formats its
-// console line from — its daemon delivery is disabled at the seam (main.ts)
-// until a `client_log` arm or a dedicated route exists (flagged for the
-// coordinator).
+// protojson frame (see frontend-command.ts / command-dispatch.ts), including
+// the webapp→daemon diagnostic forward, which rides the `client_log` arm (E4).
+// `ClientLogCmd` below is the in-memory shape `wslog.ts` passes around; its
+// wire encoding is `ClientLogBody` in frontend-command.ts.
 
 /**
  * A webapp-side diagnostic line: ALWAYS written to the local console, and
