@@ -765,7 +765,7 @@ the workspace's model.  Fails against that hardcoded nil, since
 
 (ert-deftest agent-repl-test-frontend-send-user-message-heals-via-ensure ()
   "Workspace sends ensure the session (healing staleness) then send `submitPrompt'
-keyed by the workspace (no session id on the wire)."
+keyed by the workspace CWD (no session id on the wire)."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
@@ -774,11 +774,11 @@ keyed by the workspace (no session id on the wire)."
       (agent-repl-test--with-uds
         ;; Act
         (agent-repl--frontend-send-user-message "ws1" "hi")
-        ;; Assert — submitPrompt carrying the text, keyed by the workspace.
+        ;; Assert — submitPrompt carrying the text, keyed by the workspace CWD.
         (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
           (should (equal field "submitPrompt"))
           (should (equal (plist-get payload :text) "hi"))
-          (should (equal ws "ws1")))))))
+          (should (equal ws "/w")))))))
 
 (ert-deftest agent-repl-test-frontend-send-user-message-syncs-webview ()
   "The send path remounts the webview onto the ensured (possibly healed) session."
@@ -1294,7 +1294,7 @@ the wire would deprive the agent of the directive it must read."
 (ert-deftest agent-repl-test-frontend-send-user-message-clears-next-send-origin ()
   "Send-user-message consumes and clears the one-shot `:next-send-origin'."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s1" :next-send-origin "merge")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1" :next-send-origin "merge")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
               ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
       (agent-repl-test--with-uds
@@ -1304,9 +1304,9 @@ the wire would deprive the agent of the directive it must read."
         (should (null (agent-repl--ws-get "ws1" :next-send-origin)))))))
 
 (ert-deftest agent-repl-test-frontend-send-user-message-submits-text ()
-  "Send-user-message sends `submitPrompt' with the text, keyed by the workspace."
+  "Send-user-message sends `submitPrompt' with the text, keyed by the workspace CWD."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
               ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
       (agent-repl-test--with-uds
@@ -1316,7 +1316,7 @@ the wire would deprive the agent of the directive it must read."
         (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
           (should (equal field "submitPrompt"))
           (should (equal (plist-get payload :text) "a normal prompt"))
-          (should (equal ws "ws1")))))))
+          (should (equal ws "/w")))))))
 
 (provide 'test-frontend-client)
 
@@ -1330,22 +1330,22 @@ the wire would deprive the agent of the directive it must read."
 ;; `interrupt' command keyed by the workspace and always returns t.
 
 (ert-deftest agent-repl-test-gui-interrupt-sends-command-keyed-by-workspace ()
-  "Interrupt dispatches the UDS `interrupt' command keyed by the workspace."
+  "Interrupt dispatches the UDS `interrupt' command keyed by the workspace CWD."
   ;; Arrange
   (agent-repl-test--with-ws "ws1"
-      '(:frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft"))
+      '(:project-dir "/w" :frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft"))
     (agent-repl-test--with-uds
       ;; Act
       (agent-repl--gui-interrupt "ws1" 'escape)
       ;; Assert
       (pcase-let ((`(,field ,_payload ,ws) (car uds-commands)))
         (should (equal field "interrupt"))
-        (should (equal ws "ws1"))))))
+        (should (equal ws "/w"))))))
 
 (ert-deftest agent-repl-test-gui-interrupt-returns-t ()
   "Both gestures return t (dispatched); the retract verdict is gone."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (agent-repl-test--with-uds
       ;; Act / Assert
       (should (eq (agent-repl--gui-interrupt "ws1" 'escape) t))
@@ -1366,3 +1366,26 @@ the wire would deprive the agent of the directive it must read."
       ;; Assert — RAW is recorded, since the decoration is not the user's to revise.
       (should (equal (agent-repl--ws-get "ws1" :sent-turn)
                      '(:request-id "r_9" :raw "write a test"))))))
+
+;;;; ---- the workspace wire key -------------------------------------------
+;;
+;; The daemon routes ws-keyed commands by matching the `workspace' field
+;; against the session's CWD.  Emacs keys everything by the persp NAME, so the
+;; resolver is what keeps the name off the wire — the UDS command cutover
+;; shipped without it and every prompt NACKed as "no live session to drive"
+;; (2026-07-25).
+
+(ert-deftest agent-repl-test-frontend-ws-command-key-is-the-project-dir ()
+  "The wire key is WS's `:project-dir', NEVER the persp name."
+  ;; Arrange
+  (agent-repl-test--with-ws "doom" '(:project-dir "/Users/x/.config/doom")
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-ws-command-key "doom")
+                   "/Users/x/.config/doom"))))
+
+(ert-deftest agent-repl-test-frontend-ws-command-key-signals-without-project-dir ()
+  "A workspace with no `:project-dir' fails loudly rather than sending its name."
+  ;; Arrange
+  (agent-repl-test--with-ws "doom" '(:frontend-session-id "s1")
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-ws-command-key "doom"))))

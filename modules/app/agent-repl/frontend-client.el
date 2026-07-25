@@ -60,9 +60,40 @@
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
 (declare-function agent-repl--frontend-daemon-view "frontend-state" ())
+(declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 
 (defvar agent-repl--uds-process)
 (defvar agent-repl-uds-socket-path)
+
+;;;; ---- The workspace wire key ------------------------------------------
+;;
+;; The daemon keys every workspace-routed command (`submitPrompt',
+;; `interrupt', `permissionAnswer') by the session's CWD: its
+;; `SessionLocator.Locate' scans the registry for a non-terminal record whose
+;; `CWD' EQUALS the `workspace' field, and `sessiondrv.Manager' maps live
+;; drivers under that same cwd string (daemon/internal/server/drivers.go,
+;; daemon/internal/sessiondrv/driver.go).
+;;
+;; Emacs, meanwhile, keys everything by the persp NAME ("doom").  Sending the
+;; name as the `workspace' field therefore matches NO record, and the daemon
+;; NACKs with `workspace "doom" has no live session to drive' — which is
+;; exactly what the UDS command cutover shipped, silently breaking every
+;; prompt/interrupt/permission answer (2026-07-25 incident).  `createSession'
+;; escaped it only because it already had the cwd in hand.
+;;
+;; So: every ws-keyed command resolves its wire key through here, and NOTHING
+;; puts a bare workspace name on the wire.
+
+(defun agent-repl--frontend-ws-command-key (ws)
+  "Return the `workspace' wire key the daemon routes WS's commands by.
+That key is WS's `:project-dir' — the same cwd string
+`agent-repl--frontend-create-session' registered the session under, so the
+daemon's cwd-keyed lookup resolves it.  NEVER the persp name WS itself.
+
+Signals (via `agent-repl--ws-dir') when WS has no `:project-dir': a
+command with no resolvable cwd cannot be routed, and a loud failure here
+beats a daemon NACK that reads as \"no live session\"."
+  (agent-repl--ws-dir ws))
 
 ;; Signalled when the daemon HARD-FAILS a --resume because the target
 ;; session has no transcript in its config dir (§2.10 resume viability
@@ -705,17 +736,19 @@ sender watches the bottom from the instant the prompt leaves."
 
 (defun agent-repl--gui-interrupt (ws kind)
   "The gui frontend's interrupt capability (registry `:interrupt-fn').
-Sends the UDS `interrupt' command keyed by WS (the daemon resolves WS ->
+Sends the UDS `interrupt' command keyed by WS's cwd
+\(`agent-repl--frontend-ws-command-key' — the daemon resolves that cwd ->
 session).  KIND (`escape' = `C-c C-k' STOP, `ctrl-c' = `C-c C-c' clear
 draft) no longer changes the wire request: frontend.v1's `InterruptCmd'
 carries only `hard' and NO retract id, so the retract half of the old
 `C-c C-k' undo is gone (it was already a daemon no-op post-cutover — the
 daemon's HTTP interrupt always reported retracted=false).  Always returns
 t: the interrupt is dispatched, never `retracted'."
-  (let ((id (agent-repl--ws-get ws :frontend-session-id)))
+  (let ((id (agent-repl--ws-get ws :frontend-session-id))
+        (key (agent-repl--frontend-ws-command-key ws)))
     ;; nil payload -> the daemon reads InterruptCmd{} (hard=false), the same
     ;; soft interrupt the retired HTTP route drove.
-    (let ((req (agent-repl--uds-send-command "interrupt" nil ws)))
+    (let ((req (agent-repl--uds-send-command "interrupt" nil key)))
       (agent-repl--uds-track-command req "interrupt" ws)
       (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"
                        ws id kind)
@@ -781,9 +814,9 @@ discarded one."
   "Send TEXT as WS's user turn over the UDS `submitPrompt' command.
 Ensures the session first (recreating a stale binding), so a send into a
 dead session heals instead of failing, then sends `submitPrompt' keyed by
-WS — the daemon resolves WS -> session, so no session id is on the wire.
-Returns the command request-id (retained by the caller as the sent-turn
-handle).
+WS's cwd (`agent-repl--frontend-ws-command-key') — the daemon resolves that
+cwd -> session, so no session id is on the wire.  Returns the command
+request-id (retained by the caller as the sent-turn handle).
 
 The one-shot `:next-send-origin' tag (set by the merge remediation) is
 consumed and cleared here but is NOT forwarded: frontend.v1's
@@ -799,7 +832,9 @@ is gone — matching the already-dead server behavior (the retired HTTP
     (when origin (agent-repl--ws-put ws :next-send-origin nil))
     (agent-repl--log ws "frontend send: session=%s len=%d origin=%s (uds submitPrompt)"
                      id (length text) origin)
-    (let ((req (agent-repl--uds-send-command "submitPrompt" (list :text text) ws)))
+    (let ((req (agent-repl--uds-send-command
+                "submitPrompt" (list :text text)
+                (agent-repl--frontend-ws-command-key ws))))
       (agent-repl--uds-track-command req "submitPrompt" ws)
       req)))
 
