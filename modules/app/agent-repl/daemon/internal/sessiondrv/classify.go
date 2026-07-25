@@ -117,19 +117,33 @@ func rationaleFor(cls frontendv1.QueueClassification) string {
 
 // ExtractVerdict reads the verdict off a classifier's raw stdout.
 //
-// The match is ANCHORED and EXACT, and requires exactly one token to be
-// present:
+// The match is LINE-ANCHORED and EXACT: a token counts only when it is the
+// ENTIRE content of some line, ignoring that line's surrounding whitespace.
+// The classifier is asked for one token and nothing else, so a token embedded
+// in prose ("I would answer <<QUEUE-JUMP>> here, because…") is the model
+// explaining itself rather than answering, and is deliberately NOT a verdict —
+// a substring match would read a hedged narration as a decision.
+//
+// Exactly one token must be present:
 //
 //   - Neither token: the model did not answer the question it was asked. That
-//     is a failure, not a HOLD.
+//     is a failure, not a HOLD. Prose that merely mentions a token is this
+//     case, not a verdict.
 //   - BOTH tokens: the model contradicted itself, or is quoting the prompt back.
 //     Believing either one would be picking a verdict at random.
 //
 // Both cases return an error, which the queue surfaces as the ERROR
 // classification. Nothing here guesses.
 func ExtractVerdict(out string) (frontendv1.QueueClassification, error) {
-	hasJump := strings.Contains(out, tokenJump)
-	hasHold := strings.Contains(out, tokenHold)
+	var hasJump, hasHold bool
+	for _, line := range strings.Split(out, "\n") {
+		switch strings.TrimSpace(line) {
+		case tokenJump:
+			hasJump = true
+		case tokenHold:
+			hasHold = true
+		}
+	}
 	switch {
 	case hasJump && hasHold:
 		return frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR,
