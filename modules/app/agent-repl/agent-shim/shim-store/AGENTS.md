@@ -12,6 +12,24 @@ The store is deliberately tiny and frozen: schema, seq, dedup, fan-out —
 nothing else. Payloads are opaque to it (no vendor knowledge, no parsing, no
 interpretation); only envelope columns are extracted for indexing.
 
+## `session_id` is the VENDOR session id, never a daemon/shim id
+
+Every `session_id` in this store — the seq scope, the `(session_id, dedup_key)`
+dedup index, the fan-out routing key, and `Subscribe{session_id, from_seq}` —
+is the **vendor** session id: Claude's uuid, which is also its transcript
+filename. It has to be, because two producers write the same conversation and
+must agree on its name: the shim (stream plane) reads `session_id` off the SDK
+message, and the shim-sidecar (file plane) derives it from `<uuid>.jsonl` — the
+sidecar never talks to the daemon and cannot know a daemon `s_…` id. Disagree
+and the dedup that merges the two planes cannot fire.
+
+Fan-out is an exact map lookup (`f.subs[ev.GetSessionId()]`), so subscribing
+under any other id registers a subscriber on a channel nothing publishes to:
+writes still succeed, and replay plus live-tail silently return nothing. That
+is precisely the 2026-07-25 bug — the shim subscribed under its `--session-id`,
+so only EPHEMERAL events (which bypass the store) ever reached the daemon, and
+prompts never rendered while responses arrived structureless.
+
 ## Any transaction that writes must BEGIN IMMEDIATE
 
 `Ingest` reads (`SELECT MAX(seq)`) before it inserts, so a DEFERRED

@@ -356,3 +356,105 @@ describe("StoreClient producer redial", () => {
     expect(store.count()).toBe(before);
   });
 });
+
+describe("StoreClient store session key", () => {
+  // The store keys events by the VENDOR session id carried on the Event
+  // envelope (the Claude uuid, which is the transcript filename the sidecar
+  // also keys by). Subscribing under the shim's own `--session-id` registered
+  // on a channel nothing publishes to: writes landed, replay and live-tail
+  // silently returned nothing, and only EPHEMERAL events reached the daemon.
+
+  async function clientWith(store: FakeStore, storeSessionId?: string): Promise<StoreClient> {
+    const client = new StoreClient({
+      socketPath: store.socketPath,
+      sessionId: "sess-1",
+      producer: "claude-shim:sess-1",
+      heartbeatIntervalMs: 0,
+      ...(storeSessionId !== undefined ? { storeSessionId } : {}),
+    });
+    clients.push(client);
+    await client.connect();
+    await until(() => store.count() >= 1, "producer connection accepted");
+    return client;
+  }
+
+  it("subscribes under the seeded vendor uuid, not the shim session id", async () => {
+    // Arrange: the --resume path, where the uuid is known at spawn.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store, "96a0baaf-uuid");
+
+    // Act
+    client.subscribe(0n);
+    await until(() => store.count() === 2, "subscription connection accepted");
+
+    // Assert
+    const sub = await store.latest().next(SubscribeSchema);
+    expect(sub.sessionId).toBe("96a0baaf-uuid");
+  });
+
+  it("adopts the vendor uuid and reopens the subscription at the same from_seq", async () => {
+    // Arrange: a FRESH session subscribes before the uuid is known.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store);
+    client.subscribe(7n);
+    await until(() => store.count() === 2, "first subscription accepted");
+    expect((await store.latest().next(SubscribeSchema)).sessionId).toBe("sess-1");
+
+    // Act: the first converted event reveals the real uuid.
+    client.adoptStoreKey("96a0baaf-uuid");
+    await until(() => store.count() === 3, "resubscribed under the uuid");
+
+    // Assert: same position, corrected key — the store replays seq > 7 from
+    // disk, so subscribing late loses nothing.
+    const resub = await store.latest().next(SubscribeSchema);
+    expect(resub.sessionId).toBe("96a0baaf-uuid");
+    expect(resub.fromSeq).toBe(7n);
+  });
+
+  it("does not reopen the subscription when the key is unchanged", async () => {
+    // Arrange: adoptStoreKey runs on EVERY converted event, so an unchanged
+    // key must not churn the connection.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store, "96a0baaf-uuid");
+    client.subscribe(0n);
+    await until(() => store.count() === 2, "subscription accepted");
+
+    // Act
+    client.adoptStoreKey("96a0baaf-uuid");
+    client.adoptStoreKey("96a0baaf-uuid");
+
+    // Assert
+    expect(store.count()).toBe(2);
+  });
+
+  it("records the key without subscribing when the daemon has not subscribed", async () => {
+    // Arrange: events can be converted before any daemon Subscribe arrives.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store);
+
+    // Act
+    client.adoptStoreKey("96a0baaf-uuid");
+
+    // Assert: key recorded, but no subscription invented on the shim's behalf.
+    expect(client.storeSessionId()).toBe("96a0baaf-uuid");
+    expect(store.count()).toBe(1);
+  });
+
+  it("ignores an empty vendor session id", async () => {
+    // Arrange: an unparsed/malformed SDK message can carry no session_id, and
+    // adopting "" would subscribe to nothing at all.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store, "96a0baaf-uuid");
+
+    // Act
+    client.adoptStoreKey("");
+
+    // Assert
+    expect(client.storeSessionId()).toBe("96a0baaf-uuid");
+  });
+});
