@@ -344,3 +344,27 @@ describe("UdsSession permission round-trip", () => {
     expect(result.behavior).toBe("deny");
   });
 });
+
+describe("UdsSession store subscription key", () => {
+  it("re-subscribes under the vendor session id the SDK reports", async () => {
+    // Arrange: the shim is `sess-1`, but the SDK reports the conversation's
+    // own uuid — which is the id the store files these events under (and the
+    // id the sidecar keys the same conversation by, from its transcript
+    // filename). Subscribing under `sess-1` listens to nothing.
+    const { query, store } = await rig({ subscribe: true });
+    const initialConnections = store.count();
+
+    // Act: a persistent message carrying the vendor uuid.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "96a0baaf-652a-4bb1-9450-e8292c595d33",
+      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+    } as unknown as SdkMessageLike);
+
+    // Assert: the subscription is reopened under the vendor uuid.
+    await until(() => store.count() > initialConnections, "resubscribed under the vendor uuid");
+    const resub = await store.latest().next(SubscribeSchema);
+    expect(resub.sessionId).toBe("96a0baaf-652a-4bb1-9450-e8292c595d33");
+  });
+});

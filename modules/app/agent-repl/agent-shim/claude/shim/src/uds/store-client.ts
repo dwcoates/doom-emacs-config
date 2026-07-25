@@ -32,6 +32,11 @@
  * The SUBSCRIPTION connection has no such recovery: its `from_seq` belongs to
  * the daemon (§4.4), which re-sends `Subscribe` on daemon<->shim reconnect,
  * so the merged tail resumes there rather than here.
+ *
+ * THE SUBSCRIPTION KEY is the VENDOR session id (Claude's uuid), not this
+ * shim's `--session-id` — see `storeKey`. Writes were always keyed that way
+ * (the envelope is read off the SDK message); the subscription was not, so it
+ * listened on a channel nothing published to.
  */
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
@@ -65,6 +70,13 @@ export interface StoreClientOptions {
   producer: string;
   /** Heartbeat cadence on the connection; 0 disables. Default 5000ms. */
   heartbeatIntervalMs?: number;
+  /**
+   * The VENDOR session id (the Claude CLI's uuid, which is its transcript
+   * filename) to subscribe under, when it is already known — i.e. on
+   * `--resume`. Omit for a fresh session, whose uuid only the SDK can reveal;
+   * `adoptStoreKey` sets it on the first converted event. See storeKey.
+   */
+  storeSessionId?: string;
 }
 
 const COMPONENT = "shim-store-client";
@@ -106,9 +118,64 @@ export class StoreClient {
   private sendChain: Promise<unknown> = Promise.resolve();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly heartbeatIntervalMs: number;
+  /**
+   * The session id events are actually STORED under, which is the vendor
+   * (Claude CLI) uuid — NOT this shim's `--session-id`.
+   *
+   * The store keys everything by the `session_id` on the Event envelope, and
+   * that envelope is filled from the SDK message (`readEnvelope`), so writes
+   * land under the vendor uuid. It has to be the uuid: the shim-sidecar
+   * writes the SAME conversation from the transcript file, and its only
+   * available identity is the filename (`<uuid>.jsonl`) — it never talks to
+   * the daemon and cannot know an `s_…` id. Both planes must agree or the
+   * `(session_id, dedup_key)` dedup that merges them cannot fire.
+   *
+   * Subscribing under the daemon's `s_…` id therefore registered a subscriber
+   * on a channel nothing is ever published to: writes worked, replay and
+   * live-tail silently returned nothing, and only EPHEMERAL events (which
+   * bypass the store) reached the daemon.
+   *
+   * Seeded from `--resume` when known, else from the shim's own session id —
+   * which is the pre-fix behavior, and harmless as a starting point because
+   * `adoptStoreKey` upgrades it (and reopens the subscription) the moment the
+   * first converted event reveals the real uuid.
+   */
+  private storeKey: string;
+  /**
+   * The daemon's last requested `from_seq`, retained so adopting the store key
+   * can REOPEN the subscription at the same position. Null when the daemon has
+   * not subscribed yet, in which case adopting merely records the key.
+   */
+  private lastFromSeq: bigint | null = null;
 
   constructor(private readonly opts: StoreClientOptions) {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
+    this.storeKey = opts.storeSessionId ?? opts.sessionId;
+  }
+
+  /**
+   * Adopt the vendor session id events are stored under, learned from a
+   * converted event's envelope. Idempotent, and a no-op when unchanged.
+   *
+   * When this CHANGES an existing subscription's key, the subscription is
+   * reopened at the daemon's last `from_seq`. Nothing is lost by subscribing
+   * late: the store replays everything with `seq > from_seq` from disk, so
+   * events written before the key was known arrive on that replay.
+   */
+  adoptStoreKey(sessionId: string): void {
+    if (!sessionId || sessionId === this.storeKey) return;
+    const previous = this.storeKey;
+    this.storeKey = sessionId;
+    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: sessionId },
+      `adopted store session key (was ${previous})`);
+    // Only reopen if the daemon has actually subscribed; otherwise recording
+    // the key is enough and the next subscribe() picks it up.
+    if (this.lastFromSeq !== null) this.subscribe(this.lastFromSeq);
+  }
+
+  /** The session id this client currently subscribes under. */
+  storeSessionId(): string {
+    return this.storeKey;
   }
 
   /** Route merged store events to `sink` (idempotent to set). */
@@ -159,6 +226,11 @@ export class StoreClient {
    * the producer connection.
    */
   subscribe(fromSeq: bigint): void {
+    // Retained so adoptStoreKey can reopen here once the vendor uuid is
+    // known: a fresh session only learns it from the SDK, which can be AFTER
+    // the daemon's first Subscribe. Nothing is lost by that late reopen — the
+    // store replays every event with seq > from_seq from disk.
+    this.lastFromSeq = fromSeq;
     if (this.subConn) {
       // Reopen: replace the old subscription deliberately. Nulling the field
       // first lets onSubClose tell replacement from a genuine drop.
@@ -182,11 +254,14 @@ export class StoreClient {
         COMPONENT,
       );
       this.subConn = conn;
+      // storeKey, NOT opts.sessionId: the store keys events by the vendor
+      // uuid on the Event envelope, so subscribing under this shim's
+      // `--session-id` registers on a channel nothing publishes to.
       conn.send(SubscribeSchema, create(SubscribeSchema, {
-        sessionId: this.opts.sessionId,
+        sessionId: this.storeKey,
         fromSeq,
       }));
-      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: fromSeq }, `subscribed to store`);
+      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: fromSeq }, `subscribed to store`);
     });
   }
 
