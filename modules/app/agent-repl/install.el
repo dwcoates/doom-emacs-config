@@ -141,7 +141,7 @@ script cannot be located."
     (error "agent-repl install script not found: %s"
            agent-repl--install-script))
   (with-temp-buffer
-    (let ((exit-code (call-process agent-repl-install-shell nil t nil
+    (let ((exit-code (call-process agent-repl-install-shell nil t nil ;; ALLOW-EXTERNAL-BOUNDARY
                                    agent-repl--install-script action)))
       (list exit-code (buffer-string)))))
 
