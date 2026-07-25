@@ -234,18 +234,25 @@ message FrontendCommand {
 
 // What the classifier decided about a queued prompt.
 enum QueueClassification {
+  // Never set by the daemon. Present because proto3 reserves 0 for "the field
+  // was not populated", and PENDING is a REAL verdict ("the classifier is
+  // running") that must not share an encoding with "nobody said anything".
+  // Every QueueEntry the daemon builds sets one of the four states below, so a
+  // receiver seeing UNSPECIFIED is looking at a malformed frame and must
+  // reject it loudly rather than guess which state was meant.
+  QUEUE_CLASSIFICATION_UNSPECIFIED = 0;
   // Not yet classified: the entry is queued and the classifier is running.
-  QUEUE_CLASSIFICATION_PENDING = 0;
+  QUEUE_CLASSIFICATION_PENDING = 1;
   // Deliver NOW: interrupt the running turn and submit once it has ended.
-  QUEUE_CLASSIFICATION_INTERJECT = 1;
+  QUEUE_CLASSIFICATION_INTERJECT = 2;
   // Deliver when the turn ends on its own; do not interrupt for it.
-  QUEUE_CLASSIFICATION_HOLD = 2;
+  QUEUE_CLASSIFICATION_HOLD = 3;
   // The classifier could not be believed (it answered with neither token, or
   // both). Surfaced as its own state rather than silently defaulted to one of
   // the real verdicts: a frontend must be able to see that nothing decided
   // this. Delivery falls back to the ordinary turn-end drain, so an
   // unclassifiable prompt is delayed, never dropped.
-  QUEUE_CLASSIFICATION_ERROR = 3;
+  QUEUE_CLASSIFICATION_ERROR = 4;
 }
 
 // One prompt the daemon is holding.

@@ -130,33 +130,42 @@ func (RenderState) EnumDescriptor() ([]byte, []int) {
 type QueueClassification int32
 
 const (
+	// Never set by the daemon. Present because proto3 reserves 0 for "the field
+	// was not populated", and PENDING is a REAL verdict ("the classifier is
+	// running") that must not share an encoding with "nobody said anything".
+	// Every QueueEntry the daemon builds sets one of the four states below, so a
+	// receiver seeing UNSPECIFIED is looking at a malformed frame and must
+	// reject it loudly rather than guess which state was meant.
+	QueueClassification_QUEUE_CLASSIFICATION_UNSPECIFIED QueueClassification = 0
 	// Not yet classified: the entry is queued and the classifier is running.
-	QueueClassification_QUEUE_CLASSIFICATION_PENDING QueueClassification = 0
+	QueueClassification_QUEUE_CLASSIFICATION_PENDING QueueClassification = 1
 	// Deliver NOW: interrupt the running turn and submit once it has ended.
-	QueueClassification_QUEUE_CLASSIFICATION_INTERJECT QueueClassification = 1
+	QueueClassification_QUEUE_CLASSIFICATION_INTERJECT QueueClassification = 2
 	// Deliver when the turn ends on its own; do not interrupt for it.
-	QueueClassification_QUEUE_CLASSIFICATION_HOLD QueueClassification = 2
+	QueueClassification_QUEUE_CLASSIFICATION_HOLD QueueClassification = 3
 	// The classifier could not be believed (it answered with neither token, or
 	// both). Surfaced as its own state rather than silently defaulted to one of
 	// the real verdicts: a frontend must be able to see that nothing decided
 	// this. Delivery falls back to the ordinary turn-end drain, so an
 	// unclassifiable prompt is delayed, never dropped.
-	QueueClassification_QUEUE_CLASSIFICATION_ERROR QueueClassification = 3
+	QueueClassification_QUEUE_CLASSIFICATION_ERROR QueueClassification = 4
 )
 
 // Enum value maps for QueueClassification.
 var (
 	QueueClassification_name = map[int32]string{
-		0: "QUEUE_CLASSIFICATION_PENDING",
-		1: "QUEUE_CLASSIFICATION_INTERJECT",
-		2: "QUEUE_CLASSIFICATION_HOLD",
-		3: "QUEUE_CLASSIFICATION_ERROR",
+		0: "QUEUE_CLASSIFICATION_UNSPECIFIED",
+		1: "QUEUE_CLASSIFICATION_PENDING",
+		2: "QUEUE_CLASSIFICATION_INTERJECT",
+		3: "QUEUE_CLASSIFICATION_HOLD",
+		4: "QUEUE_CLASSIFICATION_ERROR",
 	}
 	QueueClassification_value = map[string]int32{
-		"QUEUE_CLASSIFICATION_PENDING":   0,
-		"QUEUE_CLASSIFICATION_INTERJECT": 1,
-		"QUEUE_CLASSIFICATION_HOLD":      2,
-		"QUEUE_CLASSIFICATION_ERROR":     3,
+		"QUEUE_CLASSIFICATION_UNSPECIFIED": 0,
+		"QUEUE_CLASSIFICATION_PENDING":     1,
+		"QUEUE_CLASSIFICATION_INTERJECT":   2,
+		"QUEUE_CLASSIFICATION_HOLD":        3,
+		"QUEUE_CLASSIFICATION_ERROR":       4,
 	}
 )
 
@@ -1868,7 +1877,7 @@ func (x *QueueEntry) GetClassification() QueueClassification {
 	if x != nil {
 		return x.Classification
 	}
-	return QueueClassification_QUEUE_CLASSIFICATION_PENDING
+	return QueueClassification_QUEUE_CLASSIFICATION_UNSPECIFIED
 }
 
 func (x *QueueEntry) GetRationale() string {
@@ -3139,12 +3148,13 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x19RENDER_STATE_MERGE_FAILED\x10\v\x12\x17\n" +
 	"\x13RENDER_STATE_MERGED\x10\f\x12\x15\n" +
 	"\x11RENDER_STATE_DEAD\x10\r\x12\x19\n" +
-	"\x15RENDER_STATE_DEGRADED\x10\x0e*\x9a\x01\n" +
-	"\x13QueueClassification\x12 \n" +
-	"\x1cQUEUE_CLASSIFICATION_PENDING\x10\x00\x12\"\n" +
-	"\x1eQUEUE_CLASSIFICATION_INTERJECT\x10\x01\x12\x1d\n" +
-	"\x19QUEUE_CLASSIFICATION_HOLD\x10\x02\x12\x1e\n" +
-	"\x1aQUEUE_CLASSIFICATION_ERROR\x10\x03*\x84\x01\n" +
+	"\x15RENDER_STATE_DEGRADED\x10\x0e*\xc0\x01\n" +
+	"\x13QueueClassification\x12$\n" +
+	" QUEUE_CLASSIFICATION_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cQUEUE_CLASSIFICATION_PENDING\x10\x01\x12\"\n" +
+	"\x1eQUEUE_CLASSIFICATION_INTERJECT\x10\x02\x12\x1d\n" +
+	"\x19QUEUE_CLASSIFICATION_HOLD\x10\x03\x12\x1e\n" +
+	"\x1aQUEUE_CLASSIFICATION_ERROR\x10\x04*\x84\x01\n" +
 	"\x0eClientLogLevel\x12 \n" +
 	"\x1cCLIENT_LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_INFO\x10\x01\x12\x19\n" +

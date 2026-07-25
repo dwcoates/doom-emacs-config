@@ -425,3 +425,76 @@ func waitClientCount(t *testing.T, s *Server, want int) {
 	}
 	t.Fatalf("client count never reached %d (last=%d)", want, s.clientCount())
 }
+
+// --- QueueClassification wire encoding ---------------------------------------
+
+// TestQueueClassificationWireNames pins the protojson encoding of every
+// QueueClassification the daemon sends. PENDING is a REAL verdict ("the
+// classifier is running"), so it must appear on the wire; before
+// QUEUE_CLASSIFICATION_UNSPECIFIED took number 0, PENDING WAS 0 and protojson
+// omitted it, making "classifier running" indistinguishable from "field never
+// populated". The webapp decoder rejects an absent classification precisely
+// because that ambiguity is now gone.
+func TestQueueClassificationWireNames(t *testing.T) {
+	tests := []struct {
+		name string
+		cls  frontendv1.QueueClassification
+		want string
+	}{
+		{"pending", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING, "QUEUE_CLASSIFICATION_PENDING"},
+		{"interject", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT, "QUEUE_CLASSIFICATION_INTERJECT"},
+		{"hold", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD, "QUEUE_CLASSIFICATION_HOLD"},
+		{"error", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR, "QUEUE_CLASSIFICATION_ERROR"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			frame := QueueViewFrame(&frontendv1.QueueView{
+				Workspace: "w", SessionId: "s",
+				Entries: []*frontendv1.QueueEntry{{Id: "q1", Classification: tc.cls}},
+			})
+			// Act
+			data, err := marshalFrame(frame)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			// Assert
+			if !strings.Contains(string(data), tc.want) {
+				t.Fatalf("wire form %s does not carry %q", data, tc.want)
+			}
+			out := &frontendv1.FrontendFrame{}
+			if err := protojson.Unmarshal(data, out); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if !proto.Equal(frame, out) {
+				t.Errorf("round-trip mismatch\n in: %v\nout: %v", frame, out)
+			}
+		})
+	}
+}
+
+// TestQueueClassificationUnspecifiedIsOmittedOnTheWire pins the fact the
+// webapp's strict decoder rests on: UNSPECIFIED is the proto3 zero, so
+// protojson drops the field entirely. Absent and UNSPECIFIED are therefore the
+// SAME wire fact, and the decoder is right to reject both identically. The
+// daemon never produces this frame; the test exists so the equivalence cannot
+// silently stop holding.
+func TestQueueClassificationUnspecifiedIsOmittedOnTheWire(t *testing.T) {
+	// Arrange
+	frame := QueueViewFrame(&frontendv1.QueueView{
+		Workspace: "w", SessionId: "s",
+		Entries: []*frontendv1.QueueEntry{{
+			Id:             "q1",
+			Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_UNSPECIFIED,
+		}},
+	})
+	// Act
+	data, err := marshalFrame(frame)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Assert
+	if strings.Contains(string(data), "classification") {
+		t.Fatalf("UNSPECIFIED must be omitted by protojson, but the wire form carries it: %s", data)
+	}
+}
