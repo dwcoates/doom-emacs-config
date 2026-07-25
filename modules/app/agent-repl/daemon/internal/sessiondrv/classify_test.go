@@ -48,11 +48,65 @@ func TestExtractVerdictRejectsNeitherToken(t *testing.T) {
 }
 
 func TestExtractVerdictRejectsBothTokens(t *testing.T) {
-	// Arrange / Act — believing either would be picking at random.
-	_, err := ExtractVerdict(tokenJump + " or maybe " + tokenHold)
+	// Arrange / Act — one token per line, both answered; believing either
+	// would be picking at random.
+	got, err := ExtractVerdict(tokenJump + "\n" + tokenHold + "\n")
 	// Assert
 	if err == nil {
 		t.Fatal("both tokens must be an error")
+	}
+	if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+		t.Fatalf("classification = %v, want ERROR", got)
+	}
+}
+
+// TestExtractVerdictRejectsQuotedBackBothTokens covers the model echoing the
+// brief's own answer menu back instead of choosing: both tokens appear on their
+// own lines, so both match, and the contradiction must surface as ERROR rather
+// than letting the first-listed token win.
+func TestExtractVerdictRejectsQuotedBackBothTokens(t *testing.T) {
+	// Arrange
+	out := strings.Join([]string{
+		"You asked me to answer with one of:",
+		tokenJump,
+		tokenHold,
+		"Here is my answer.",
+	}, "\n")
+	// Act
+	got, err := ExtractVerdict(out)
+	// Assert
+	if err == nil {
+		t.Fatal("a quoted-back answer menu must be an error, not a verdict")
+	}
+	if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+		t.Fatalf("classification = %v, want ERROR", got)
+	}
+}
+
+// TestExtractVerdictIgnoresATokenEmbeddedInProse pins the LINE-ANCHORED
+// contract: a token that is only part of a sentence is the model narrating,
+// not answering, so it must not be read as a verdict.
+func TestExtractVerdictIgnoresATokenEmbeddedInProse(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+	}{
+		{"leading prose on the token's line", "I would answer " + tokenJump + " here."},
+		{"trailing prose on the token's line", tokenHold + " is what I would say, probably."},
+		{"token inside a longer word", "PREFIX" + tokenJump + "SUFFIX"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got, err := ExtractVerdict(tt.out)
+			// Assert
+			if err == nil {
+				t.Fatalf("a token embedded in prose must not be a verdict, got %v", got)
+			}
+			if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+				t.Fatalf("classification = %v, want ERROR", got)
+			}
+		})
 	}
 }
 
