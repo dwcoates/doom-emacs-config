@@ -200,9 +200,9 @@ func (m *Manager) queueSubmitLocked(d *driven, text, permissionMode string) (*qu
 	return e, true
 }
 
-// publishQueueLocked snapshots the queue for publication while the lock is
-// held. The caller pushes and persists AFTER unlocking, so neither the frontend
-// write nor the registry write happens under the manager mutex.
+// publishQueueLocked snapshots the queue for publication. Caller holds m.mu.
+// The caller pushes and persists AFTER unlocking, so neither the frontend write
+// nor the registry write happens under the manager mutex.
 func (m *Manager) publishQueueLocked(d *driven) (*frontendv1.QueueView, []registry.QueuedPrompt) {
 	view := d.queue.view(d.workspace, d.sessionID)
 	recs := make([]registry.QueuedPrompt, 0, len(d.queue.entries))
@@ -283,7 +283,7 @@ func (m *Manager) onTurnBoundary(d *driven, active bool) {
 // user typed; retrying in place would spin. Instead it is visible, keeps its
 // place, and gets another chance at the next turn end or on a user force.
 func (m *Manager) deliver(d *driven, e *queueEntry) {
-	text := m.applyMetapromptLocked(d, e.text)
+	text := m.applyMetaprompt(d, e.text)
 	err := d.client.SubmitPrompt(m.rootCtx, text, "frontend", e.permissionMode)
 	if err == nil {
 		m.mu.Lock()
