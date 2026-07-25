@@ -157,3 +157,35 @@ export function socketPair(): Promise<{ server: net.Server; a: net.Socket; b: ne
     });
   });
 }
+
+/**
+ * A fake DAEMON: listen on socketPath and hand back each shim that dials in.
+ *
+ * The shim dials the daemon now (design-shim-transport-inversion.md), so tests
+ * must be the listener. Start this BEFORE `server.connect()`, which is the
+ * ordering production has — the daemon listens long before it spawns a shim.
+ *
+ * `next()` resolves with successive connections, so a test can watch the shim
+ * RECONNECT after a drop rather than dialling back in itself.
+ */
+export function acceptShim(socketPath: string): { next: () => Promise<FramedPeer>; close: () => void } {
+  const server = net.createServer();
+  const queued: FramedPeer[] = [];
+  const waiting: Array<(p: FramedPeer) => void> = [];
+  server.on("connection", (socket) => {
+    const peer = new FramedPeer(socket);
+    const resolve = waiting.shift();
+    if (resolve) resolve(peer);
+    else queued.push(peer);
+  });
+  server.listen(socketPath);
+  return {
+    next: () =>
+      new Promise<FramedPeer>((resolve) => {
+        const ready = queued.shift();
+        if (ready) resolve(ready);
+        else waiting.push(resolve);
+      }),
+    close: () => server.close(),
+  };
+}

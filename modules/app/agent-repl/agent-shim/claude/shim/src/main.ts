@@ -14,7 +14,7 @@
  *   --resume <session>        resume an on-disk claude session
  *   --claude-bin <path>       claude CLI for the SDK to drive (system
  *                             binary for vterm parity; default: bundled)
- *   --uds-socket <path>       enable UDS mode: listen on <path> for the daemon
+ *   --daemon-socket <path>    enable UDS mode: dial <path> to reach the daemon
  *                             instead of speaking Layer-1 NDJSON over stdio
  *   --store-socket <path>     shim-store socket (UDS mode; default
  *                             ~/.cache/agent-repl/sock/store.sock)
@@ -27,6 +27,7 @@ import { pathToFileURL } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { UdsSession } from "./uds/uds-session.js";
+import { acquireSessionLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, FAKE_STATUS, createFakeQuery } from "./fake-query.js";
 import {
@@ -57,7 +58,7 @@ interface CliArgs {
    *  like `auto` that the SDK's bundled cli.js predates). */
   claudeBin?: string;
   /** UDS-mode listener path (session-<id>.sock). Present => UDS mode. */
-  udsSocket?: string;
+  daemonSocket?: string;
   /** shim-store socket path (UDS mode only). Defaults under ~/.cache. */
   storeSocket?: string;
   /** Print the version and exit (a node-runnable smoke of the bundle). */
@@ -110,8 +111,8 @@ export function parseArgs(argv: string[]): CliArgs {
       case "--claude-bin":
         args.claudeBin = next();
         break;
-      case "--uds-socket":
-        args.udsSocket = next();
+      case "--daemon-socket":
+        args.daemonSocket = next();
         break;
       case "--store-socket":
         args.storeSocket = next();
@@ -317,10 +318,10 @@ export async function main(): Promise<void> {
   const createQuery = makeCreateQuery(args);
 
   // ── UDS mode (design §8, §4.4) ────────────────────────────────────────────
-  // The daemon spawns the shim with `--uds-socket <path>` and CONNECTS to that
-  // listener; the shim OWNS lifetime and OUTLIVES the daemon (reattach). This
-  // is the path that supersedes stdio once the daemon flips to ShimUDSArgv.
-  if (args.udsSocket !== undefined) {
+  // The daemon spawns the shim with `--daemon-socket <path>` and the shim
+  // DIALS it; the shim OWNS lifetime and OUTLIVES the daemon, redialling until
+  // it returns (design-shim-transport-inversion.md). This supersedes stdio.
+  if (args.daemonSocket !== undefined) {
     await runUdsMode(args, createQuery);
     return;
   }
@@ -367,11 +368,21 @@ export async function main(): Promise<void> {
  * stop path is SIGTERM/SIGINT, which cleanly shuts the session down.
  */
 async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]): Promise<void> {
+  // Claim the session BEFORE anything else. Uniqueness used to come free from
+  // binding session-<id>.sock — a second shim could not exist. Dialling out
+  // removes that, and two shims on one conversation means two writers on one
+  // transcript, so the claim is now explicit. Holding it is what tells the
+  // daemon this session is alive even before we have dialled in.
+  //
+  // Failure to claim is a refusal to start: another shim owns this session.
+  const releaseLock = acquireSessionLock(args.sessionId);
+  process.on("exit", releaseLock);
+
   const session = new UdsSession({
     sessionId: args.sessionId,
     shimVersion: packageVersion("../package.json"),
     protocolVersion: "1",
-    udsSocketPath: args.udsSocket!,
+    udsSocketPath: args.daemonSocket!,
     storeSocketPath: args.storeSocket ?? defaultStoreSocket(),
     // SessionStarted.source: RESUME when respawned to resume an on-disk
     // session, FRESH for a brand-new one (design §5.2 SessionSource).

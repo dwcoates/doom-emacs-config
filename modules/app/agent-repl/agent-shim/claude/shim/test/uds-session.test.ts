@@ -41,7 +41,7 @@ import {
   SubmitPromptSchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
-import { FramedPeer, connectPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
 
 const tick = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
 
@@ -128,24 +128,14 @@ function fakeStore(): Promise<FakeStore> {
   });
 }
 
-/** Connect a daemon peer once the shim's listener is up (start() is async). */
-async function connectWhenReady(socketPath: string): Promise<FramedPeer> {
-  for (let i = 0; i < 2000; i++) {
-    try {
-      return await connectPeer(socketPath);
-    } catch {
-      await tick();
-    }
-  }
-  throw new Error(`connectWhenReady: ${socketPath} never became connectable`);
-}
-
 interface Rig {
   session: UdsSession;
   query: FakeQuery;
   store: FakeStore;
   daemon: FramedPeer;
   udsSocketPath: string;
+  /** Accepts the shim's RECONNECT after a daemon drop. */
+  daemonListener: { next: () => Promise<FramedPeer>; close: () => void };
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -164,7 +154,12 @@ async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } 
     canUseTool: CanUseToolLike,
   ): QueryLike => (query = new FakeQuery(prompt, canUseTool));
 
+  // Be the daemon: the shim dials us. Listening BEFORE start() mirrors
+  // production, where the daemon is up long before it spawns a shim.
   const udsSocketPath = tmpSocketPath();
+  const daemonListener = acceptShim(udsSocketPath);
+  cleanups.push(() => daemonListener.close());
+
   const session = new UdsSession({
     sessionId: "sess-1",
     shimVersion: "9.9",
@@ -187,7 +182,7 @@ async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } 
     await done.catch(() => {});
   });
 
-  const daemon = await connectWhenReady(udsSocketPath);
+  const daemon = await daemonListener.next();
   await daemon.next(ShimHelloSchema);
   daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
   await until(() => session.isConnected());
@@ -198,7 +193,7 @@ async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } 
     await until(() => store.count() >= 2);
     await store.latest().next(SubscribeSchema);
   }
-  return { session, query, store, daemon, udsSocketPath };
+  return { session, query, store, daemon, udsSocketPath, daemonListener };
 }
 
 describe("UdsSession control: prompt in → SDK", () => {
@@ -281,7 +276,7 @@ describe("UdsSession events: store round-trip and sad path", () => {
 describe("UdsSession lifetime: reattach", () => {
   it("a daemon disconnect ends neither the session nor the in-flight turn", async () => {
     // Arrange: a turn is in flight.
-    const { session, query, store, daemon, udsSocketPath } = await rig({ subscribe: true });
+    const { session, query, store, daemon, daemonListener } = await rig({ subscribe: true });
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     await until(() => query.prompts.length === 1);
@@ -291,8 +286,9 @@ describe("UdsSession lifetime: reattach", () => {
     // Assert: the turn survives and the store connection is untouched.
     expect(session.turnCount()).toBe(1);
     expect(store.peer().closed).toBe(false);
-    // A new daemon reattaches on the SAME live shim and resubscribes.
-    const daemon2 = await connectWhenReady(udsSocketPath);
+    // The shim redials on its own; the replacement daemon accepts and
+    // resubscribes on the SAME live session.
+    const daemon2 = await daemonListener.next();
     cleanups.push(() => daemon2.destroy());
     const hello = await daemon2.next(ShimHelloSchema);
     expect(hello.turnInFlight).toBe(true);

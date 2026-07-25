@@ -1,5 +1,5 @@
 /**
- * The per-session UDS listener the daemon connects to.
+ * The shim's connection to the daemon.
  *
  * The shim OWNS the `session-<id>.sock` and OUTLIVES the daemon: a dropped
  * daemon connection tears nothing down (the SDK turn keeps running, the store
@@ -16,7 +16,6 @@
  * the synchronous `Ack`/`Nack` receipt this server writes back.
  */
 import net from "node:net";
-import fs from "node:fs";
 import {
   MessageConn,
   envelopeType,
@@ -68,6 +67,7 @@ export interface SessionServerHandlers {
 }
 
 export interface SessionServerOptions {
+  /** The DAEMON socket this shim dials (every session shares one). */
   socketPath: string;
   sessionId: string;
   shimVersion: string;
@@ -77,37 +77,92 @@ export interface SessionServerOptions {
   turnInFlight?: () => boolean;
   /** Heartbeat cadence on the live connection; 0 disables. Default 5000ms. */
   heartbeatIntervalMs?: number;
+  /** First reconnect delay; doubles to reconnectMaxMs. Default 100ms. */
+  reconnectMinMs?: number;
+  /** Reconnect backoff ceiling. Default 5000ms. */
+  reconnectMaxMs?: number;
 }
 
 const COMPONENT = "shim-server";
 
 export class SessionServer {
-  private server: net.Server | null = null;
   private conn: MessageConn | null = null;
   private handshaked = false;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly heartbeatIntervalMs: number;
+  /** Set by close(); stops the reconnect loop from resurrecting the link. */
+  private closed = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private readonly reconnectMinMs: number;
+  private readonly reconnectMaxMs: number;
+  private reconnectDelayMs: number;
+  /** Resolves connect()'s promise on the first successful dial. */
+  private resolveFirstConnect: (() => void) | null = null;
 
   constructor(
     private readonly opts: SessionServerOptions,
     private readonly handlers: SessionServerHandlers,
   ) {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
+    this.reconnectMinMs = opts.reconnectMinMs ?? 100;
+    this.reconnectMaxMs = opts.reconnectMaxMs ?? 5000;
+    this.reconnectDelayMs = this.reconnectMinMs;
   }
 
-  /** Bind and listen on the session socket, replacing any stale file. */
-  listen(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.unlinkStaleSocket();
-      const server = net.createServer((socket) => this.onConnection(socket));
-      server.once("error", reject);
-      server.listen(this.opts.socketPath, () => {
-        server.removeListener("error", reject);
-        this.server = server;
-        shimLog(COMPONENT, { session: this.opts.sessionId }, `listening on ${this.opts.socketPath}`);
-        resolve();
-      });
+  /**
+   * Dial the daemon and keep the connection up until close().
+   *
+   * The shim DIALS; the daemon listens on one socket for every session
+   * (design-shim-transport-inversion.md). It used to be the other way round,
+   * which put the dialer ahead of the listener: the daemon dialled a
+   * session-<id>.sock that this process had not created yet, so the first
+   * dial always failed with ENOENT.
+   *
+   * Retrying belongs here, on the dialer, and it retries FOREVER: the daemon
+   * may be down for an arbitrary period, and the SDK turn keeps running while
+   * it is (§4.4 — a disconnect never ends the turn). Resolves on the first
+   * successful connection.
+   */
+  connect(): Promise<void> {
+    this.closed = false;
+    return new Promise((resolve) => {
+      this.resolveFirstConnect = resolve;
+      this.dial();
     });
+  }
+
+  /** One dial attempt; schedules a retry on failure. */
+  private dial(): void {
+    if (this.closed) return;
+    const socket = net.connect(this.opts.socketPath);
+    const onError = (err: Error) => {
+      socket.destroy();
+      if (this.closed) return;
+      shimLog(COMPONENT, { session: this.opts.sessionId },
+        `daemon not reachable at ${this.opts.socketPath} (${err.message}); retrying in ${this.reconnectDelayMs}ms`);
+      this.scheduleDial();
+    };
+    socket.once("error", onError);
+    socket.once("connect", () => {
+      socket.removeListener("error", onError);
+      this.reconnectDelayMs = this.reconnectMinMs;
+      this.onConnection(socket);
+      const resolveFirst = this.resolveFirstConnect;
+      this.resolveFirstConnect = null;
+      resolveFirst?.();
+    });
+  }
+
+  /** Arm the next dial with capped exponential backoff. */
+  private scheduleDial(): void {
+    if (this.closed || this.reconnectTimer) return;
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.reconnectMaxMs);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.dial();
+    }, delay);
+    this.reconnectTimer.unref?.();
   }
 
   /** True while a handshaked daemon connection is live. */
@@ -138,38 +193,26 @@ export class SessionServer {
     this.conn!.send(PermissionRequestSchema, req);
   }
 
-  /** Stop listening and drop any connection. Does not touch the SDK turn. */
+  /** Drop the connection and stop reconnecting. Does not touch the SDK turn. */
   close(): Promise<void> {
+    this.closed = true;
     this.stopHeartbeat();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.resolveFirstConnect = null;
     if (this.conn) {
       this.conn.close();
       this.conn = null;
     }
     this.handshaked = false;
-    return new Promise((resolve) => {
-      if (!this.server) {
-        resolve();
-        return;
-      }
-      const server = this.server;
-      this.server = null;
-      server.close(() => {
-        this.unlinkStaleSocket();
-        resolve();
-      });
-    });
+    return Promise.resolve();
   }
 
   private onConnection(socket: net.Socket): void {
-    // A daemon restart may connect anew while the old socket is still
-    // half-dead; the newest connection is the live daemon, so retire the old.
-    if (this.conn) {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `new daemon connection supersedes the previous one`);
-      this.conn.close();
-      this.conn = null;
-      this.handshaked = false;
-      this.stopHeartbeat();
-    }
+    // Only ever one outbound connection now: a redial happens strictly after
+    // the previous one closed, so there is no older peer to retire.
     const conn = new MessageConn(
       socket,
       {
@@ -180,7 +223,8 @@ export class SessionServer {
     );
     this.conn = conn;
     this.handshaked = false;
-    // The listener speaks first.
+    // The DIALER speaks first, and this frame is also what identifies the
+    // session to the daemon's listener, which routes the connection by it.
     conn.send(ShimHelloSchema, create(ShimHelloSchema, {
       sessionId: this.opts.sessionId,
       vendor: this.opts.vendor ?? "claude",
@@ -188,7 +232,7 @@ export class SessionServer {
       protocolVersion: this.opts.protocolVersion,
       turnInFlight: this.opts.turnInFlight ? this.opts.turnInFlight() : false,
     }));
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `daemon connected; ShimHello sent`);
+    shimLog(COMPONENT, { session: this.opts.sessionId }, `connected to daemon at ${this.opts.socketPath}; ShimHello sent`);
   }
 
   private onMessage(msg: Any): void {
@@ -256,6 +300,9 @@ export class SessionServer {
       shimLog(COMPONENT, { session: this.opts.sessionId }, `daemon disconnected cleanly (turn survives; awaiting reattach)`);
     }
     this.handlers.onDaemonDisconnected?.();
+    // Get back to the daemon: the turn is still running and its events are
+    // durable in the store, so reconnecting replays them from last_seen_seq.
+    this.scheduleDial();
   }
 
   private startHeartbeat(): void {
@@ -275,14 +322,4 @@ export class SessionServer {
     }
   }
 
-  private unlinkStaleSocket(): void {
-    try {
-      fs.unlinkSync(this.opts.socketPath);
-    } catch (err) {
-      // ENOENT is the normal case (no stale socket); anything else is loud.
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        shimLog(COMPONENT, { session: this.opts.sessionId }, `could not unlink stale socket ${this.opts.socketPath}: ${(err as Error).message}`);
-      }
-    }
-  }
 }

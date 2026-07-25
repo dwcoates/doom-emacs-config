@@ -19,7 +19,7 @@ import type {
   SubmitPrompt,
   Subscribe,
 } from "../src/uds/proto.js";
-import { FramedPeer, connectPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
 
 interface Calls {
   prompts: SubmitPrompt[];
@@ -59,6 +59,7 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
   return { server, socketPath, calls };
 }
 
+const listeners: Array<() => void> = [];
 const servers: SessionServer[] = [];
 function track(s: SessionServer): SessionServer {
   servers.push(s);
@@ -66,12 +67,18 @@ function track(s: SessionServer): SessionServer {
 }
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.close()));
+  listeners.splice(0).forEach((close) => close());
 });
 
-/** Connect a daemon peer and complete the ShimHello/DaemonHello handshake. */
+/**
+ * Stand up a fake daemon, let the shim dial in, and complete the
+ * ShimHello/DaemonHello handshake. The shim speaks first, as the dialer.
+ */
 async function handshake(server: SessionServer, socketPath: string): Promise<FramedPeer> {
-  await server.listen();
-  const peer = await connectPeer(socketPath);
+  const daemon = acceptShim(socketPath);
+  listeners.push(daemon.close);
+  await server.connect();
+  const peer = await daemon.next();
   const hello = await peer.next(ShimHelloSchema);
   expect(hello.sessionId).toBe("sess-1");
   peer.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
@@ -83,9 +90,11 @@ describe("SessionServer handshake", () => {
     // Arrange
     const { server, socketPath } = harness();
     track(server);
-    await server.listen();
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
     // Act
-    const peer = await connectPeer(socketPath);
+    await server.connect();
+    const peer = await daemon.next();
     const hello = await peer.next(ShimHelloSchema);
     // Assert
     expect(hello.sessionId).toBe("sess-1");
@@ -108,8 +117,10 @@ describe("SessionServer handshake", () => {
     // Arrange
     const { server, socketPath, calls } = harness();
     track(server);
-    await server.listen();
-    const peer = await connectPeer(socketPath);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer = await daemon.next();
     await peer.next(ShimHelloSchema);
     // Act: jump the gun with a prompt before saying hello
     peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "early" }));
@@ -203,7 +214,6 @@ describe("SessionServer outbound", () => {
     // Arrange
     const { server } = harness();
     track(server);
-    await server.listen();
     // Act / Assert: durable in the store, replays on resubscribe
     expect(() => server.sendEvent(create(EventSchema, { sessionId: "sess-1", seq: 1n }))).not.toThrow();
     expect(server.isConnected()).toBe(false);
@@ -224,41 +234,34 @@ describe("SessionServer outbound", () => {
 });
 
 describe("SessionServer disconnect tolerance", () => {
-  it("survives a daemon drop without tearing down, and re-handshakes on reconnect", async () => {
-    // Arrange
+  it("survives a daemon drop and redials, re-handshaking on the same session", async () => {
+    // Arrange: the shim is the DIALER now, so recovering the link is its job.
     const { server, socketPath, calls } = harness();
     track(server);
-    const peer1 = await handshake(server, socketPath);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer1 = await daemon.next();
+    await peer1.next(ShimHelloSchema);
+    peer1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
     await until(() => server.isConnected());
-    // Act: daemon vanishes
+
+    // Act: the daemon vanishes.
     peer1.destroy();
     await until(() => calls.disconnected === 1);
-    // Assert: nothing torn down, still listening
+
+    // Assert: nothing is torn down, and the shim comes back on its own.
     expect(server.isConnected()).toBe(false);
-    // A new daemon connection re-handshakes on the SAME live server
-    const peer2 = await connectPeer(socketPath);
+    const peer2 = await daemon.next();
     const hello = await peer2.next(ShimHelloSchema);
     expect(hello.sessionId).toBe("sess-1");
-    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
+    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1" }));
     await until(() => calls.connected === 2);
     expect(server.isConnected()).toBe(true);
   });
 
-  it("supersedes an older connection when a new one arrives", async () => {
-    // Arrange
-    const { server, socketPath, calls } = harness();
-    track(server);
-    const peer1 = await handshake(server, socketPath);
-    await until(() => calls.connected === 1);
-    // Act: a second daemon connects without the first dropping
-    const peer2 = await connectPeer(socketPath);
-    await peer2.next(ShimHelloSchema);
-    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
-    await until(() => calls.connected === 2);
-    // Assert: the newest connection is the live one
-    peer2.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "on-2" }));
-    const ack = await peer2.next(AckSchema);
-    expect(ack.requestId).toBe("on-2");
-    peer1.destroy();
-  });
+  // The "two daemons connect, newest wins" case is gone from this side: the
+  // shim owns ONE outbound connection, so it cannot be connected twice.
+  // Superseding a stale connection is now the daemon listener's job and is
+  // covered there (shimlisten: reconnect supersedes the parked connection).
 });
