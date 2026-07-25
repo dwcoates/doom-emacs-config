@@ -19,7 +19,7 @@ import {
   ShimHelloSchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
-import { FramedPeer, connectPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
 
 interface FakeStore {
   socketPath: string;
@@ -78,7 +78,10 @@ describe("daemon reattach with from_seq continuation", () => {
     cleanups.push(() => storeClient.close());
     await storeClient.connect();
 
+    // Be the daemon: the shim dials us, and redials itself after a drop.
     const socketPath = tmpSocketPath();
+    const daemonListener = acceptShim(socketPath);
+    cleanups.push(() => daemonListener.close());
     const server = new SessionServer(
       { socketPath, sessionId: "sess-1", shimVersion: "1", protocolVersion: "1", heartbeatIntervalMs: 0 },
       {
@@ -92,7 +95,7 @@ describe("daemon reattach with from_seq continuation", () => {
     cleanups.push(() => server.close());
     // The forward loop: every merged store event goes to the daemon.
     storeClient.onMerged((evt) => server.sendEvent(evt));
-    await server.listen();
+    await server.connect();
     await until(() => {
       try {
         store.peer();
@@ -103,7 +106,7 @@ describe("daemon reattach with from_seq continuation", () => {
     });
 
     // ---- Act 1: daemon connects, handshakes, subscribes from 0 ----
-    const daemon1 = await connectPeer(socketPath);
+    const daemon1 = await daemonListener.next();
     await daemon1.next(ShimHelloSchema);
     daemon1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1" }));
     await until(() => server.isConnected());
@@ -128,7 +131,7 @@ describe("daemon reattach with from_seq continuation", () => {
     expect(storeClient.isConnected()).toBe(true);
 
     // ---- Act 3: daemon reconnects and re-subscribes from the last seq ----
-    const daemon2 = await connectPeer(socketPath);
+    const daemon2 = await daemonListener.next();
     await daemon2.next(ShimHelloSchema);
     daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
     await until(() => server.isConnected());
