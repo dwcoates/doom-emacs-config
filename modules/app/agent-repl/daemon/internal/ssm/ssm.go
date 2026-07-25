@@ -118,7 +118,7 @@ func (m *Manager) warm() error {
 	}
 	restored := 0
 	for _, ws := range names {
-		r, err := resolve(m.db, ws)
+		r, err := resolve(m.db, ws, m.logf)
 		if err != nil {
 			return err
 		}
@@ -229,7 +229,7 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 // when it changed, and pushes the new WorkspaceState to subscribers. Caller
 // holds mu.
 func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) error {
-	r, err := resolve(m.db, workspace)
+	r, err := resolve(m.db, workspace, m.logf)
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ func (m *Manager) pushLocked(workspace string, r resolved) {
 func (m *Manager) Current(workspace string) (*frontendv1.WorkspaceState, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	r, err := resolve(m.db, workspace)
+	r, err := resolve(m.db, workspace, m.logf)
 	if err != nil {
 		return nil, false, err
 	}
@@ -298,7 +298,7 @@ func (m *Manager) Snapshot() ([]*frontendv1.WorkspaceState, error) {
 	}
 	out := make([]*frontendv1.WorkspaceState, 0, len(names))
 	for _, ws := range names {
-		r, err := resolve(m.db, ws)
+		r, err := resolve(m.db, ws, m.logf)
 		if err != nil {
 			return nil, err
 		}
