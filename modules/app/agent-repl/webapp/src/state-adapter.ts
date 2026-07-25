@@ -573,7 +573,15 @@ function assistantMessageItems(frame: ConversationItemFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
-  const uuid = frame.uuid;
+  // Key blocks on the ANTHROPIC message id, not the SDK envelope uuid: it is
+  // the only identity a message shares with its own live stream, so it is what
+  // lets a finished block replace the preview the deltas grew. The envelope
+  // uuid still identifies the ITEM (and is what both planes dedup on), but it
+  // does not exist yet while the message is still streaming.
+  //
+  // Falls back to the envelope uuid when a payload carries no id, so a block
+  // always has SOME stable key rather than colliding on "".
+  const uuid = pstr(frame.payload, "id") || frame.uuid;
   const ts = tsFromMs(frame.tsMs);
   const items: ConversationItem[] = [];
   const ignores: string[] = [];

@@ -274,6 +274,28 @@ describe("assistantMessage arm", () => {
     expect(items).toEqual([text, thinking]);
   });
 
+  it("keys blocks on the ANTHROPIC message id when the payload carries one", () => {
+    // The finished message must land on the SAME block the live deltas grew,
+    // and the only id it shares with its own stream is Anthropic's message id
+    // — the envelope uuid does not exist yet while the message is streaming.
+    const items = itemsFrom({
+      uuid: "envelope-uuid",
+      assistantMessage: { id: "msg_01ABC", content: [{ text: { text: "hello" } }] },
+    });
+    expect((items[0] as TextItem).blockId).toBe("msg_01ABC:0");
+    expect((items[0] as TextItem).blockId).not.toContain("envelope-uuid");
+  });
+
+  it("falls back to the envelope uuid when the payload carries no id", () => {
+    // A payload with no id must still get a stable key rather than colliding
+    // with every other id-less message on "".
+    const items = itemsFrom({
+      uuid: "envelope-uuid",
+      assistantMessage: { content: [{ text: { text: "hello" } }] },
+    });
+    expect((items[0] as TextItem).blockId).toBe("envelope-uuid:0");
+  });
+
   it("derives the block ts from the envelope tsMs", () => {
     const items = itemsFrom({ uuid: "m1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "x" } }] } });
     expect((items[0] as TextItem).ts).toBe(new Date(1700000000000).toISOString());

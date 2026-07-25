@@ -857,3 +857,73 @@ describe("ingest queue", () => {
     expect(store.state.items).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Streaming chunks grow ONE block.
+//
+// Deltas are keyed by the Anthropic message id, which every chunk of one
+// message shares. Keying them on the SDK envelope uuid — fresh per emitted
+// event — gave each chunk its own blockId, so the store pushed a new item per
+// chunk and the UI rendered a bubble per chunk instead of one growing bubble.
+// ---------------------------------------------------------------------------
+
+describe("streaming chunks reconcile into one block", () => {
+  it("grows a single item across consecutive chunks of one message", () => {
+    // Arrange
+    const store = new ConversationStore();
+
+    // Act: three chunks of the SAME message.
+    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "Hel" })]);
+    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "lo " })]);
+    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "there" })]);
+
+    // Assert: one bubble, fully assembled — not three.
+    const texts = store.state.items.filter((i) => i.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("Hello there");
+  });
+
+  it("opens a separate block for a different message", () => {
+    // Arrange: two assistant messages in one turn are genuinely two bubbles.
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([typingEffect({ uuid: "msg_FIRST", delta: "one" })]);
+    store.ingest([typingEffect({ uuid: "msg_SECOND", delta: "two" })]);
+
+    // Assert
+    expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
+  });
+
+  it("keeps separate blocks for separate block indexes of one message", () => {
+    // Arrange: one message can hold several content blocks.
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "a" })]);
+    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 1, delta: "b" })]);
+
+    // Assert
+    expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
+  });
+
+  it("replaces the streamed preview with the finished message", () => {
+    // Arrange: the preview the chunks grew.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "Hel" })]);
+    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "lo" })]);
+
+    // Act: the persistent item arrives, keyed on the SAME Anthropic id.
+    store.ingest([
+      itemsEffect([
+        { kind: "text", blockId: "msg_01ABC:0", messageId: "msg_01ABC", text: "Hello", done: true, ts: "t" },
+      ]),
+    ]);
+
+    // Assert: one item, now final — the preview was superseded, not duplicated.
+    const texts = store.state.items.filter((i) => i.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.kind === "text" && texts[0]!.done).toBe(true);
+    expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("Hello");
+  });
+});

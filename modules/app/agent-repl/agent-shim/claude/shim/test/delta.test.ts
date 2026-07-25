@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  StreamMessageTracker,
   isEphemeral,
   streamEventToContentDelta,
   toEphemeralEvent,
@@ -33,10 +34,17 @@ describe("streamEventToContentDelta arms", () => {
     expect(d.blockIndex).toBe(1);
   });
 
-  it("thinking arm carries the uuid consumers reconcile on", () => {
-    const d = delta("stream_event-content_block_delta-thinking");
-    expect(d.delta.case).toBe("thinking");
-    expect(d.uuid).toBe("aa3da566-9d60-4f94-9e99-b9c1f68fc9b4");
+  it("carries the streamed message id, NOT the event's own envelope uuid", () => {
+    // The fixture's envelope uuid is unique to this one stream_event; keying on
+    // it gave every chunk a different id, which is what made the frontend open
+    // a bubble per chunk.
+    const evt = streamEventToContentDelta(loadStream("stream_event-content_block_delta-thinking"), {
+      messageId: "msg_01ABC",
+    })!;
+    if (evt.payload.case !== "contentDelta") throw new Error("case");
+    expect(evt.payload.value.delta.case).toBe("thinking");
+    expect(evt.payload.value.uuid).toBe("msg_01ABC");
+    expect(evt.payload.value.uuid).not.toBe("aa3da566-9d60-4f94-9e99-b9c1f68fc9b4");
   });
 
   it("thinking arm with null estimated_tokens → 0", () => {
@@ -137,5 +145,102 @@ describe("toEphemeralEvent / isEphemeral", () => {
     expect(isEphemeral({ type: "stream_event" })).toBe(true);
     expect(isEphemeral({ type: "tool_progress" })).toBe(true);
     expect(isEphemeral({ type: "assistant" })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StreamMessageTracker — which message the deltas belong to.
+//
+// A content_block_delta says nothing about its message; the identity arrives
+// once, on the message_start that opened it. Keying deltas on the SDK envelope
+// uuid instead gave every chunk a different id, so the frontend opened a new
+// bubble per chunk rather than growing one.
+// ---------------------------------------------------------------------------
+
+describe("StreamMessageTracker", () => {
+  const start = (id: string) => ({
+    type: "stream_event",
+    session_id: "s",
+    uuid: "envelope-of-the-start-event",
+    event: { type: "message_start", message: { id, type: "message", role: "assistant" } },
+  });
+  const chunk = (text: string, envelopeUuid: string) => ({
+    type: "stream_event",
+    session_id: "s",
+    uuid: envelopeUuid,
+    event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+  });
+  const stop = () => ({
+    type: "stream_event",
+    session_id: "s",
+    uuid: "envelope-of-the-stop-event",
+    event: { type: "message_stop" },
+  });
+
+  it("adopts the message id from message_start", () => {
+    // Arrange
+    const t = new StreamMessageTracker();
+    // Act
+    t.observe(start("msg_01ABC"));
+    // Assert
+    expect(t.current()).toBe("msg_01ABC");
+  });
+
+  it("holds that id across every delta of the message", () => {
+    // Arrange: the whole point — consecutive chunks must reconcile together.
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_01ABC"));
+
+    // Act: three chunks, each with its OWN envelope uuid, as the SDK emits them.
+    const ids = ["e1", "e2", "e3"].map((e) => {
+      const msg = chunk("x", e);
+      t.observe(msg);
+      const evt = streamEventToContentDelta(msg, { messageId: t.current() })!;
+      if (evt.payload.case !== "contentDelta") throw new Error("case");
+      return evt.payload.value.uuid;
+    });
+
+    // Assert: one id, not three.
+    expect(ids).toEqual(["msg_01ABC", "msg_01ABC", "msg_01ABC"]);
+  });
+
+  it("clears the id at message_stop", () => {
+    // Arrange
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_01ABC"));
+    // Act
+    t.observe(stop());
+    // Assert: nothing is in flight between messages.
+    expect(t.current()).toBe("");
+  });
+
+  it("switches to the next message when a new one starts", () => {
+    // Arrange: two messages in one turn must not share a block.
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_FIRST"));
+    t.observe(stop());
+    // Act
+    t.observe(start("msg_SECOND"));
+    // Assert
+    expect(t.current()).toBe("msg_SECOND");
+  });
+
+  it("ignores non-stream messages", () => {
+    // Arrange: a persistent assistant message must not disturb the tracker.
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_01ABC"));
+    // Act
+    t.observe({ type: "assistant", uuid: "u", message: { id: "msg_OTHER" } });
+    // Assert
+    expect(t.current()).toBe("msg_01ABC");
+  });
+
+  it("reports no message when message_start carries no id", () => {
+    // Arrange / Act: a malformed start must not invent an id that would
+    // silently collide with another message's blocks.
+    const t = new StreamMessageTracker();
+    t.observe({ type: "stream_event", session_id: "s", event: { type: "message_start", message: {} } });
+    // Assert
+    expect(t.current()).toBe("");
   });
 });
