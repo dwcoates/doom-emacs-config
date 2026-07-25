@@ -126,3 +126,34 @@ describe("queuedCardKey", () => {
     expect(queuedCardKey(queued({ id: "q7" }))).toBe("queued:q7");
   });
 });
+
+describe("classification exhaustiveness (3e)", () => {
+  it("renders a distinct badge for every classification the decoder admits", () => {
+    // Arrange — the four the frontend-proto decoder can produce. Each must get
+    // its OWN label; a fallthrough would silently print "classifying…" for
+    // three of them.
+    const want: Array<[QueuedItem["classification"], string]> = [
+      ["pending", "classifying"],
+      ["hold", "will run after this turn"],
+      ["interject", "interrupting"],
+      ["error", "unclassified"],
+    ];
+    for (const [classification, label] of want) {
+      // Act
+      const html = QueuedCard(queued({ classification }));
+      // Assert
+      expect(html).toContain(label);
+    }
+  });
+
+  it("throws on a classification outside the union instead of rendering it as pending", () => {
+    // Arrange — the runtime half of the never-check. The COMPILE-time half is
+    // the `const unhandled: never = cls` in queuedBadge: adding a
+    // QueueClassification arm without a case here fails `npm run typecheck`,
+    // which is the guarantee that actually matters. This asserts the escape
+    // hatch is loud rather than silently reading as "still being judged".
+    const rogue = queued({ classification: "teleported" as QueuedItem["classification"] });
+    // Act / Assert
+    expect(() => QueuedCard(rogue)).toThrow(/unhandled queue classification/);
+  });
+});
