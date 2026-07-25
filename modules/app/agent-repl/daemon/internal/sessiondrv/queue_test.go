@@ -3,6 +3,8 @@ package sessiondrv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,7 +68,25 @@ type queueHarness struct {
 // harness. classifier may be nil (the unconfigured case).
 func newQueueHarness(t *testing.T, cls *fakeClassifier) *queueHarness {
 	t.Helper()
-	push := &fakePusher{}
+	return newQueueHarnessWithPusher(t, cls, nil, nil)
+}
+
+// newQueueHarnessWithPusher is newQueueHarness with two injection points:
+//
+//   - wrap decorates the recording fakePusher, so a test can act while the
+//     manager mutex is RELEASED across a push (that release is the window the
+//     interject race lives in, and a decorator is the only way to be inside it
+//     deterministically);
+//   - logf captures the daemon log, for tests asserting on a loud line.
+//
+// Both may be nil, which is the plain harness.
+func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any)) *queueHarness {
+	t.Helper()
+	rec := &fakePusher{}
+	var push Pusher = rec
+	if wrap != nil {
+		push = wrap(rec)
+	}
 	reg := &fakeRegistrar{}
 	var mu sync.Mutex
 	var last *fakeClient
@@ -78,6 +98,7 @@ func newQueueHarness(t *testing.T, cls *fakeClassifier) *queueHarness {
 		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
 		Registrar:       reg,
 		ProtocolVersion: "1",
+		Logf:            logf,
 		now:             func() int64 { return 1000 },
 		socketPath:      func(id string) string { return "/tmp/session-" + id + ".sock" },
 		newClient: func(c shimclient.Config) sessionClient {
@@ -102,7 +123,7 @@ func newQueueHarness(t *testing.T, cls *fakeClassifier) *queueHarness {
 	mu.Lock()
 	client := last
 	mu.Unlock()
-	return &queueHarness{t: t, m: m, push: push, client: client, cls: cls, reg: reg}
+	return &queueHarness{t: t, m: m, push: rec, client: client, cls: cls, reg: reg}
 }
 
 // driver returns the live driver for "ws".
@@ -945,3 +966,125 @@ func TestQueueEntryIDsAreUnique(t *testing.T) {
 
 // unusedCoreImport keeps corev1 referenced if a future test drops its last use.
 var _ = corev1.Event{}
+
+// --- the moot-path race ------------------------------------------------------
+
+// gatedPusher hands control to the test on ONE chosen PushQueueView call and
+// blocks there until released. beginInterject's moot path releases the manager
+// mutex across exactly that push, so a test holding the gate is standing inside
+// the race window with the lock free — which is what makes the race
+// reproducible without a single sleep.
+type gatedPusher struct {
+	*fakePusher
+	mu      sync.Mutex
+	armed   bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newGatedPusher(rec *fakePusher) *gatedPusher {
+	return &gatedPusher{
+		fakePusher: rec,
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+}
+
+// arm makes the NEXT PushQueueView the gated one.
+func (p *gatedPusher) arm() {
+	p.mu.Lock()
+	p.armed = true
+	p.mu.Unlock()
+}
+
+func (p *gatedPusher) PushQueueView(v *frontendv1.QueueView) {
+	p.fakePusher.PushQueueView(v)
+	p.mu.Lock()
+	hit := p.armed
+	p.armed = false // gate exactly one push
+	p.mu.Unlock()
+	if hit {
+		close(p.entered)
+		<-p.release
+	}
+}
+
+// TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile pins the
+// moot-path race. beginInterject's "no turn is running, so deliver directly"
+// branch drops the manager mutex to publish, then RE-takes it to take and
+// deliver the entry. A TurnStarted landing in that window makes the entry's
+// delivery a submit into a running turn — the exact thing the queue exists to
+// prevent.
+//
+// Driven deterministically: the pusher blocks inside the window, the test
+// drives the TurnStarted through the real onTurnBoundary callback while the
+// lock is free, and only then releases the push. No sleeps.
+func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.T) {
+	// Arrange — two prompts queued behind a running turn; the turn then ends,
+	// which drains the FIRST and leaves the second held with no turn running.
+	var gate *gatedPusher
+	var logMu sync.Mutex
+	var logged []string
+	h := newQueueHarnessWithPusher(t, nil,
+		func(rec *fakePusher) Pusher { gate = newGatedPusher(rec); return gate },
+		func(format string, args ...any) {
+			logMu.Lock()
+			logged = append(logged, fmt.Sprintf(format, args...))
+			logMu.Unlock()
+		})
+	h.turn(true)
+	if err := h.submit("first"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	if err := h.submit("second"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	h.turn(false)
+	waitFor(t, "the first entry to drain", func() bool { return len(h.entries()) == 1 })
+	held := h.entries()[0]
+	if held.text != "second" {
+		t.Fatalf("held entry = %q, want 'second'", held.text)
+	}
+	waitFor(t, "the first prompt to reach the shim", func() bool {
+		return len(h.client.promptTexts()) == 1
+	})
+
+	// Act — force the held entry. With no turn running this takes the moot
+	// path; the gate stops it mid-window and a TurnStarted lands there.
+	gate.arm()
+	forced := make(chan error, 1)
+	go func() { forced <- h.m.ForceQueueEntry("ws", held.id) }()
+	<-gate.entered
+	h.turn(true) // the racing TurnStarted, with the manager mutex free
+	close(gate.release)
+	if err := <-forced; err != nil {
+		t.Fatalf("ForceQueueEntry: %v", err)
+	}
+
+	// Assert — the entry was NOT submitted into the turn that just started, is
+	// back at the head of the queue with its classification, and the reversal
+	// was reported loudly.
+	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "first" {
+		t.Fatalf("prompts = %v, want only [first] — 'second' must not enter the running turn", got)
+	}
+	es := h.entries()
+	if len(es) != 1 || es[0].id != held.id {
+		t.Fatalf("entries = %+v, want the forced entry back at the head", es)
+	}
+	if !es[0].interjecting {
+		t.Fatal("the requeued entry must stay flagged interjecting so the next TurnEnded delivers it first")
+	}
+	logMu.Lock()
+	joined := strings.Join(logged, "\n")
+	logMu.Unlock()
+	if !strings.Contains(joined, "a turn STARTED while the moot path was publishing") {
+		t.Fatalf("the reversal must be logged loudly; log was:\n%s", joined)
+	}
+
+	// And it is delivered at the next real turn end, never stranded.
+	h.turn(false)
+	waitFor(t, "the requeued entry to deliver at the next turn end", func() bool {
+		got := h.client.promptTexts()
+		return len(got) == 2 && got[1] == "second"
+	})
+}

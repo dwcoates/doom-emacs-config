@@ -80,6 +80,13 @@ func (q *promptQueue) popFront() *queueEntry {
 	return e
 }
 
+// pushFront puts an entry back at the head of the queue: the position for one
+// that was taken for delivery and could not be delivered after all, so it keeps
+// its claim on the next delivery slot rather than going to the back.
+func (q *promptQueue) pushFront(e *queueEntry) {
+	q.entries = append([]*queueEntry{e}, q.entries...)
+}
+
 // takeInterjecting removes and returns the first entry flagged for interjection,
 // or nil when none is. Front-to-back so two forces in quick succession still
 // deliver in the order they were requested.
@@ -291,7 +298,7 @@ func (m *Manager) deliver(d *driven, e *queueEntry) {
 	e.interjecting = false
 	e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
 	e.rationale = fmt.Sprintf("delivery failed: %v", err)
-	d.queue.entries = append([]*queueEntry{e}, d.queue.entries...)
+	d.queue.pushFront(e)
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 	m.publish(d.sessionID, view, recs)
@@ -383,6 +390,26 @@ func (m *Manager) beginInterject(d *driven, entryID, source string) {
 		// Deliver directly rather than stranding the entry.
 		m.mu.Lock()
 		taken := d.queue.takeInterjecting()
+		// The lock was RELEASED across the publish above, so a TurnStarted can
+		// have landed in that window and d.turnActive can be true again. The
+		// "moot" reasoning that got us here — there is no turn, so delivering
+		// now is safe — no longer holds, and submitting would put the prompt
+		// into a turn that IS running, which is precisely what the queue
+		// exists to prevent. So the turn state is re-verified under the
+		// RE-TAKEN lock before the entry is committed to delivery.
+		if taken != nil && d.turnActive {
+			// Back to the head, keeping its classification and its interjecting
+			// flag: the entry still wants to go first, and the turn that just
+			// started will deliver it at its TurnEnded via the ordinary
+			// interject path. Loud, because a delivery decision was reversed.
+			d.queue.pushFront(taken)
+			view2, recs2 := m.publishQueueLocked(d)
+			m.mu.Unlock()
+			m.logf("sessiondrv: queue interject entry=%s (%s) session=%s — a turn STARTED while the moot path was publishing; requeued at the head instead of submitting into it",
+				taken.id, source, d.sessionID)
+			m.publish(d.sessionID, view2, recs2)
+			return
+		}
 		view2, recs2 := m.publishQueueLocked(d)
 		m.mu.Unlock()
 		if taken != nil {
