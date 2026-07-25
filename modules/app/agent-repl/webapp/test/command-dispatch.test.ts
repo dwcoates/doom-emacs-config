@@ -253,3 +253,46 @@ describe("clientLog (E4)", () => {
     expect(logs[0][1]).toContain("unknown request");
   });
 });
+
+describe("queue controls (E4)", () => {
+  it("sends a queueForce frame carrying the entry id", () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    void dispatcher.queueForce("/w", "q1");
+    // Assert
+    expect(JSON.parse(sent[0])).toEqual({
+      requestId: "r1",
+      workspace: "/w",
+      queueForce: { entryId: "q1" },
+    });
+  });
+
+  it("resolves a queueCancel on an ok ack", async () => {
+    // Arrange
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.queueCancel("/w", "q1");
+    // Act
+    dispatcher.observe(ackFrame("r1", true));
+    // Assert
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("rejects a queueForce whose entry is already gone", async () => {
+    // Arrange — unlike a clientLog, a queue control is an OPERATION the user
+    // asked for, so its rejection must reach the caller.
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.queueForce("/w", "q1");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "no queued prompt \"q1\""));
+    // Assert
+    await expect(p).rejects.toThrow(/no queued prompt/);
+  });
+
+  it("rejects a queueAccept when the socket is closed", async () => {
+    // Arrange
+    const { dispatcher } = newDispatcher(false);
+    // Act / Assert
+    await expect(dispatcher.queueAccept("/w", "q1")).rejects.toThrow(/socket not open/);
+  });
+});

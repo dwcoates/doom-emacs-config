@@ -59,6 +59,8 @@ import {
   type DegradedNotice,
   type FrontendFrame,
   type HeartbeatView,
+  type QueueEntry,
+  type QueueView,
   type SessionInitView,
   type SessionView,
   type TaskCatalog,
@@ -148,6 +150,16 @@ export interface ToolProgressInput {
   elapsedSeconds: number;
 }
 
+/**
+ * The session's held-prompt queue (E4). A REPLACEMENT, not a delta: the store
+ * adopts `entries` wholesale, so an empty list empties the queue.
+ */
+export interface QueueInput {
+  workspace: string;
+  sessionId: string;
+  entries: QueueEntry[];
+}
+
 /** TaskCatalog → the async/task roster input (topbar counter vocabulary). */
 export interface TaskCatalogInput {
   workspace: string;
@@ -184,6 +196,7 @@ export type AdapterEffect =
     }
   | { kind: "typing"; value: TypingReveal }
   | { kind: "tool-progress"; value: ToolProgressInput }
+  | { kind: "queue"; value: QueueInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
   | { kind: "session-init"; value: SessionInitInput }
   | { kind: "degraded"; value: DegradedBanner }
@@ -219,6 +232,7 @@ export class StateAdapter {
           ...s.sessions.map((sv) => this.sessionEffect(sv)),
           ...s.catalogs.map((tc) => this.catalogEffect(tc)),
           ...s.inits.map((si) => this.sessionInitEffect(si)),
+          ...s.queues.map((q) => this.queueEffect(q)),
         ];
       }
       case "workspaceState":
@@ -231,6 +245,8 @@ export class StateAdapter {
         return this.typingEffects(frame.frame.value);
       case "heartbeat":
         return [this.heartbeatEffect(frame.frame.value)];
+      case "queue":
+        return [this.queueEffect(frame.frame.value)];
       case "taskCatalog":
         return [this.catalogEffect(frame.frame.value)];
       case "sessionInit":
@@ -348,6 +364,18 @@ export class StateAdapter {
         parentToolUseId: hv.parentToolUseId,
         elapsedSeconds: hv.elapsedSeconds,
       },
+    };
+  }
+
+  /**
+   * The held-prompt queue (E4). Passed through structurally — the daemon owns
+   * both the ordering and the classification, and re-deriving either here is
+   * exactly the second source of truth the redesign exists to remove.
+   */
+  private queueEffect(qv: QueueView): AdapterEffect {
+    return {
+      kind: "queue",
+      value: { workspace: qv.workspace, sessionId: qv.sessionId, entries: qv.entries },
     };
   }
 

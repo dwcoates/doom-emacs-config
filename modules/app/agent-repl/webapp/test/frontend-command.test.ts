@@ -166,3 +166,20 @@ describe("encodeFrontendCommand — clientLog (E4)", () => {
     expect("context" in (w.clientLog as Record<string, unknown>)).toBe(false);
   });
 });
+
+describe("encodeFrontendCommand — queue controls (E4)", () => {
+  it("encodes a force by entry id", () => {
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "queueForce", entryId: "q1" } });
+    expect(w.queueForce).toEqual({ entryId: "q1" });
+  });
+
+  it("encodes an accept by entry id", () => {
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "queueAccept", entryId: "q1" } });
+    expect(w.queueAccept).toEqual({ entryId: "q1" });
+  });
+
+  it("encodes a cancel by entry id", () => {
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "queueCancel", entryId: "q1" } });
+    expect(w.queueCancel).toEqual({ entryId: "q1" });
+  });
+});

@@ -274,12 +274,23 @@ async function boot(): Promise<void> {
         })
         .catch((err: unknown) => clog("error", `question answer failed: ${String(err)}`));
     },
-    // §2.13 queued-card controls: the queue plane is dead server-side (S7) and
-    // has NO FrontendCommand arm; the store's queue is always empty so these
-    // cards never render. Kept as loud no-ops (flagged: queued affordance
-    // dropped in the cutover), never a silent crash.
-    cancelQueued: () => clog("warn", "queue-cancel: no FrontendCommand arm (queue plane dead)"),
-    runQueuedNow: () => clog("warn", "queue-run-now: no FrontendCommand arm (queue plane dead)"),
+    // Held-prompt queue controls (E4). These were loud no-ops between the
+    // cutover and the queue's return; they now drive the real command arms.
+    cancelQueued: (entryId) => {
+      void dispatcher
+        .queueCancel(cmdWorkspace(), entryId)
+        .catch((err: unknown) => clog("error", `queue cancel failed: ${String(err)}`));
+    },
+    runQueuedNow: (entryId) => {
+      void dispatcher
+        .queueForce(cmdWorkspace(), entryId)
+        .catch((err: unknown) => clog("error", `queue run-now failed: ${String(err)}`));
+    },
+    acceptQueued: (entryId) => {
+      void dispatcher
+        .queueAccept(cmdWorkspace(), entryId)
+        .catch((err: unknown) => clog("error", `queue accept failed: ${String(err)}`));
+    },
     sendPrompt: (text) => {
       // Card controls (stop task) are prompt-mediated: the button sends an
       // ordinary user message through the same command the composer uses.

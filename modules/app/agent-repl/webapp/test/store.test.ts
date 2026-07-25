@@ -14,6 +14,7 @@ import {
 } from "../src/store.js";
 import type {
   AdapterEffect,
+  QueueInput,
   SessionViewInput,
   ToolProgressInput,
   TypingReveal,
@@ -763,5 +764,96 @@ describe("ingest tool-progress", () => {
     store.ingest([progressEffect({ toolUseId: "tu1" })]);
     // Assert
     expect((store.state.items[1] as ToolItem).progressElapsedS).toBeUndefined();
+  });
+});
+
+// --- queue (E4 held prompts) -------------------------------------------------
+
+function queueEffect(entries: QueueInput["entries"]): AdapterEffect {
+  return { kind: "queue", value: { workspace: "ws", sessionId: "s1", entries } };
+}
+
+function queueEntry(over: Partial<QueueInput["entries"][number]> = {}) {
+  return {
+    id: "q1",
+    text: "later",
+    queuedAtMs: 1000,
+    classification: "pending" as const,
+    rationale: "",
+    accepted: false,
+    ...over,
+  };
+}
+
+describe("ingest queue", () => {
+  it("adopts the pushed entries", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.queued).toHaveLength(1);
+    expect(store.state.queued[0].text).toBe("later");
+  });
+
+  it("carries the classification and rationale through", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry({ classification: "hold", rationale: "unrelated" })])]);
+    // Assert
+    expect(store.state.queued[0].classification).toBe("hold");
+    expect(store.state.queued[0].rationale).toBe("unrelated");
+  });
+
+  it("REPLACES the queue rather than merging into it", () => {
+    // Arrange — the daemon owns the queue; merging here would make the webapp
+    // a second, divergent source of truth for it.
+    const store = new ConversationStore();
+    store.ingest([queueEffect([queueEntry({ id: "q1" }), queueEntry({ id: "q2" })])]);
+    // Act
+    store.ingest([queueEffect([queueEntry({ id: "q2" })])]);
+    // Assert
+    expect(store.state.queued.map((q) => q.id)).toEqual(["q2"]);
+  });
+
+  it("empties the queue on an empty push", () => {
+    // Arrange — this is how a drained queue and a dead session clear chips.
+    const store = new ConversationStore();
+    store.ingest([queueEffect([queueEntry()])]);
+    // Act
+    store.ingest([queueEffect([])]);
+    // Assert
+    expect(store.state.queued).toEqual([]);
+  });
+
+  it("preserves the daemon's entry order", () => {
+    // Arrange — delivery is FIFO, so the display order is load-bearing.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([
+      queueEffect([queueEntry({ id: "a" }), queueEntry({ id: "b" }), queueEntry({ id: "c" })]),
+    ]);
+    // Assert
+    expect(store.state.queued.map((q) => q.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("reports a change so the caller re-renders the chips", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    const res = store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(res.changed).toBe(true);
+  });
+
+  it("keeps a held prompt out of the conversation items", () => {
+    // Arrange — a held prompt has NOT reached the agent; rendering it as a
+    // conversation item would claim it had.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.items).toEqual([]);
   });
 });

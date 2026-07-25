@@ -16,6 +16,7 @@
 import type { CounterEntry } from "./counter-menu.js";
 import type {
   AdapterEffect,
+  QueueInput,
   SessionInitInput,
   SessionViewInput,
   ToolProgressInput,
@@ -307,9 +308,9 @@ export interface StoreState {
   systemInit: Record<string, unknown> | null;
   items: ConversationItem[];
   /**
-   * The in-flight message queue. GAP after the cutover: `frontend.v1` carries
-   * no queue frames, so this stays empty (the queued-message affordance and
-   * its cancel/run-now controls have no data to act on).
+   * The prompts the DAEMON is holding for this session (E4), sourced wholesale
+   * from the pushed `QueueView`. Empty whenever no turn is running, because
+   * the queue only forms behind a running turn.
    */
   queued: QueuedItem[];
   turnInFlight: boolean;
@@ -519,6 +520,9 @@ export class ConversationStore {
         case "tool-progress":
           changed = this.applyToolProgress(effect.value) || changed;
           break;
+        case "queue":
+          changed = this.applyQueue(effect.value) || changed;
+          break;
         case "task-catalog":
           this.taskRoster = effect.value.entries;
           changed = true;
@@ -645,6 +649,28 @@ export class ConversationStore {
     if (item.resultTs !== undefined) return false;
     if (item.progressElapsedS === p.elapsedSeconds) return false;
     item.progressElapsedS = p.elapsedSeconds;
+    return true;
+  }
+
+  /**
+   * Adopt the session's held-prompt queue (E4).
+   *
+   * WHOLESALE REPLACEMENT, not a merge: the daemon pushes the complete queue on
+   * every change and owns both the ordering and the classifications. Merging
+   * here would make the webapp a second, divergent source of truth for state
+   * the daemon already resolved — the exact thing the redesign removes. An
+   * empty entries list therefore empties the queue, which is how a drained
+   * queue and a dead session both clear their chips.
+   */
+  private applyQueue(q: QueueInput): boolean {
+    this.state.queued = q.entries.map((e) => ({
+      id: e.id,
+      text: e.text,
+      queuedAtMs: e.queuedAtMs,
+      classification: e.classification,
+      rationale: e.rationale,
+      accepted: e.accepted,
+    }));
     return true;
   }
 
