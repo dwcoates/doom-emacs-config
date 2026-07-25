@@ -184,6 +184,19 @@ type Client struct {
 	mu     sync.Mutex
 	active *activeConn
 
+	// ready is the readiness latch AwaitReady blocks on: CLOSED while active is
+	// non-nil, replaced with a fresh open channel when the connection drops.
+	// Guarded by the same mu as active, so the two can never disagree.
+	//
+	// This exists because bring-up is asynchronous: the daemon spawns the shim
+	// process and starts connecting in a goroutine, so for a few hundred
+	// milliseconds `active` is nil and every control send fails with
+	// ErrNotConnected. Callers need to wait for the connection to become
+	// usable, and they must wait on the EVENT rather than on a duration —
+	// a timeout tuned to "probably long enough" is a guess that is wrong on
+	// both sides (too short under load, needless latency otherwise).
+	ready chan struct{}
+
 	// lastSeen mirrors the SeqStore high-water mark for this session, tracked
 	// in memory so the demux can detect regressions cheaply.
 	lastSeen uint64
@@ -239,7 +252,56 @@ func New(cfg Config) *Client {
 		cfg.BackoffMax = DefaultBackoffMax
 	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
-	return &Client{cfg: cfg, logf: logf}
+	// An OPEN latch: a freshly built client has no connection yet.
+	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{})}
+}
+
+// markReadyLocked publishes "the connection is usable". Caller holds c.mu.
+func (c *Client) markReadyLocked() {
+	select {
+	case <-c.ready: // already closed; nothing to publish
+	default:
+		close(c.ready)
+	}
+}
+
+// markNotReadyLocked re-arms the latch after a disconnect. Caller holds c.mu.
+// A closed channel cannot be reopened, so a fresh one replaces it — which is
+// why AwaitReady re-reads the field on every pass instead of caching it.
+func (c *Client) markNotReadyLocked() {
+	select {
+	case <-c.ready:
+		c.ready = make(chan struct{})
+	default: // already open
+	}
+}
+
+// AwaitReady blocks until this client's shim connection is usable, or ctx ends.
+//
+// It returns as soon as the handshake completes — not after a fixed delay — so
+// callers get the connection at the earliest instant it exists. ctx supplies
+// the FAILURE bound: its expiry means the shim genuinely did not come up, and
+// the caller surfaces that loudly rather than sending into a dead connection.
+//
+// The loop re-checks under the lock because the connection can drop again
+// between the latch closing and this goroutine being scheduled.
+func (c *Client) AwaitReady(ctx context.Context) error {
+	for {
+		c.mu.Lock()
+		if c.active != nil {
+			c.mu.Unlock()
+			return nil
+		}
+		ch := c.ready
+		c.mu.Unlock()
+
+		select {
+		case <-ch:
+			// Latch closed; loop to confirm `active` under the lock.
+		case <-ctx.Done():
+			return fmt.Errorf("shimclient: awaiting shim connection for session %s: %w", c.cfg.SessionID, ctx.Err())
+		}
+	}
 }
 
 // Run attaches to the shim and keeps the connection alive until ctx is
@@ -315,9 +377,11 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	c.logf("attached: subscribed from_seq=%d turn_in_flight=%v shim_version=%s",
 		from, hello.GetTurnInFlight(), hello.GetShimVersion())
 
-	// Publish the live connection so control senders can write on it.
+	// Publish the live connection so control senders can write on it, and
+	// release anything blocked in AwaitReady.
 	c.mu.Lock()
 	c.active = ac
+	c.markReadyLocked()
 	c.mu.Unlock()
 
 	// Seed liveness and clear any prior degraded window (fresh connection).
@@ -348,6 +412,9 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	c.mu.Lock()
 	if c.active == ac {
 		c.active = nil
+		// Re-arm the latch: a later send must wait for the RECONNECT rather
+		// than sail through on a latch left closed by the dead connection.
+		c.markNotReadyLocked()
 	}
 	c.mu.Unlock()
 	ac.failPending(fmt.Errorf("shim connection closed: %w", retErr))
