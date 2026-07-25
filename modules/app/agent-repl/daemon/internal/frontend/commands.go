@@ -46,6 +46,14 @@ type CommandHandler interface {
 	// log. It is EVIDENCE, not a control signal: the handler records it and
 	// changes no daemon state.
 	ClientLog(ctx context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error
+	// ForceQueueEntry delivers a held prompt now, running the same interject
+	// sequence an INTERJECT verdict does (E4).
+	ForceQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueForceCmd) error
+	// AcceptQueueEntry confirms a held prompt's classification. View state
+	// only: it changes nothing about when the prompt is delivered.
+	AcceptQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueAcceptCmd) error
+	// CancelQueueEntry drops a held prompt; it is never delivered.
+	CancelQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueCancelCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -83,6 +91,12 @@ func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCom
 		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
 	case *frontendv1.FrontendCommand_ClientLog:
 		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
+	case *frontendv1.FrontendCommand_QueueForce:
+		err = h.ForceQueueEntry(ctx, ws, reqID, c.QueueForce)
+	case *frontendv1.FrontendCommand_QueueAccept:
+		err = h.AcceptQueueEntry(ctx, ws, reqID, c.QueueAccept)
+	case *frontendv1.FrontendCommand_QueueCancel:
+		err = h.CancelQueueEntry(ctx, ws, reqID, c.QueueCancel)
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
 		return failAck(reqID, fmt.Sprintf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))

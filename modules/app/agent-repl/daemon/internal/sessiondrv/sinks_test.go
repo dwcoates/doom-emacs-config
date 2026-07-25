@@ -13,14 +13,15 @@ import (
 
 // fakePusher records every frontend push for assertions.
 type fakePusher struct {
-	mu       sync.Mutex
-	convo    []*frontendv1.ConversationDelta
-	typing   []*frontendv1.TypingDelta
-	catalog  []*frontendv1.TaskCatalog
-	degraded []*frontendv1.DegradedNotice
+	mu         sync.Mutex
+	convo      []*frontendv1.ConversationDelta
+	typing     []*frontendv1.TypingDelta
+	catalog    []*frontendv1.TaskCatalog
+	degraded   []*frontendv1.DegradedNotice
 	state      []*frontendv1.WorkspaceState
 	inits      []*frontendv1.SessionInitView
 	heartbeats []*frontendv1.HeartbeatView
+	queues     []*frontendv1.QueueView
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
@@ -57,6 +58,28 @@ func (p *fakePusher) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 	p.mu.Lock()
 	p.heartbeats = append(p.heartbeats, h)
 	p.mu.Unlock()
+}
+func (p *fakePusher) PushQueueView(q *frontendv1.QueueView) {
+	p.mu.Lock()
+	p.queues = append(p.queues, q)
+	p.mu.Unlock()
+}
+
+// queueViews returns a copy of the recorded queue pushes.
+func (p *fakePusher) queueViews() []*frontendv1.QueueView {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]*frontendv1.QueueView(nil), p.queues...)
+}
+
+// lastQueue returns the most recent queue push, or nil when none landed.
+func (p *fakePusher) lastQueue() *frontendv1.QueueView {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.queues) == 0 {
+		return nil
+	}
+	return p.queues[len(p.queues)-1]
 }
 
 // permissionResolutions extracts, in push order, the resolution of every
@@ -107,7 +130,7 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -296,7 +319,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, func(ss *corev1.SessionStarted) { seen = ss })
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})

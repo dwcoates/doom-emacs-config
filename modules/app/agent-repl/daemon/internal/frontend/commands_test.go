@@ -62,6 +62,18 @@ func (m *mockHandler) ClientLog(_ context.Context, ws, rid string, _ *frontendv1
 	m.called, m.lastWorkspace, m.lastRequestID = "client_log", ws, rid
 	return m.err
 }
+func (m *mockHandler) ForceQueueEntry(_ context.Context, ws, rid string, _ *frontendv1.QueueForceCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "queue_force", ws, rid
+	return m.err
+}
+func (m *mockHandler) AcceptQueueEntry(_ context.Context, ws, rid string, _ *frontendv1.QueueAcceptCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "queue_accept", ws, rid
+	return m.err
+}
+func (m *mockHandler) CancelQueueEntry(_ context.Context, ws, rid string, _ *frontendv1.QueueCancelCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "queue_cancel", ws, rid
+	return m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -123,6 +135,21 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "client log",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r11", Workspace: "ws11", Command: &frontendv1.FrontendCommand_ClientLog{ClientLog: &frontendv1.ClientLogCmd{Message: "seq gap"}}},
 			wantHit: "client_log",
+		},
+		{
+			name:    "queue force",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r12", Workspace: "ws12", Command: &frontendv1.FrontendCommand_QueueForce{QueueForce: &frontendv1.QueueForceCmd{EntryId: "q_1"}}},
+			wantHit: "queue_force",
+		},
+		{
+			name:    "queue accept",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r13", Workspace: "ws13", Command: &frontendv1.FrontendCommand_QueueAccept{QueueAccept: &frontendv1.QueueAcceptCmd{EntryId: "q_1"}}},
+			wantHit: "queue_accept",
+		},
+		{
+			name:    "queue cancel",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r14", Workspace: "ws14", Command: &frontendv1.FrontendCommand_QueueCancel{QueueCancel: &frontendv1.QueueCancelCmd{EntryId: "q_1"}}},
+			wantHit: "queue_cancel",
 		},
 	}
 	for _, tc := range tests {

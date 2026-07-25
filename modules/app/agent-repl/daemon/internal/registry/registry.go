@@ -53,6 +53,25 @@ type Record struct {
 	// or losing events. Zero means "never subscribed"; a fresh subscribe
 	// from seq 0 then replays the whole session. See server.RegistrySeqStore.
 	LastSeq uint64 `json:"last_seq,omitempty"`
+	// QueuedPrompts are the prompts the daemon is currently HOLDING for
+	// this session because a turn was in flight when they were submitted
+	// (E4). Persisted for crash honesty: these are things the user typed
+	// that the agent has not seen yet, so a daemon that dies holding them
+	// must leave a record of what it was holding rather than lose them
+	// with no trace. Empty for a session with nothing queued, which is
+	// the overwhelmingly common case.
+	QueuedPrompts []QueuedPrompt `json:"queued_prompts,omitempty"`
+}
+
+// QueuedPrompt is one held prompt's durable form. Only the fields needed to
+// know WHAT was held and WHEN are persisted: a classification is a live
+// judgment about a turn that will not exist after a restart, so persisting one
+// would preserve an answer to a question that no longer applies.
+type QueuedPrompt struct {
+	ID             string `json:"id"`
+	Text           string `json:"text"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	QueuedAtMs     int64  `json:"queued_at_ms,omitempty"`
 }
 
 // fileShape is the on-disk JSON document.
