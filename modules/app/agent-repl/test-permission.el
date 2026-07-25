@@ -248,47 +248,77 @@
 
 ;;;; ---- answer round-trip -----------------------------------------------
 
+(defmacro agent-repl-test--with-answer-ws (&rest body)
+  "Register workspace \"ws1\" (cwd /w) for BODY, cleaning up after.
+The answer path resolves its WIRE KEY from `:project-dir\=', so a bare-name
+workspace cannot route an answer at all."
+  (declare (indent 0))
+  `(unwind-protect
+       (progn
+         (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
+         ,@body)
+     (remhash "ws1" agent-repl--workspaces)))
+
 (ert-deftest agent-repl-test-permission-answer-allow-shapes-payload ()
   "An allow answer sends allow:t with the permission request id."
   ;; Arrange
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &rest _) (setq captured (list field payload)) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
-      ;; Act
-      (agent-repl--send-permission-answer "ws1" "r1" t)
-      ;; Assert
-      (should (equal (nth 0 captured) "permissionAnswer"))
-      (should (equal (plist-get (nth 1 captured) :permissionRequestId) "r1"))
-      (should (eq (plist-get (nth 1 captured) :allow) t)))))
+  (agent-repl-test--with-answer-ws
+    (let (captured)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload &rest _) (setq captured (list field payload)) "req-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--send-permission-answer "ws1" "r1" t)
+        ;; Assert
+        (should (equal (nth 0 captured) "permissionAnswer"))
+        (should (equal (plist-get (nth 1 captured) :permissionRequestId) "r1"))
+        (should (eq (plist-get (nth 1 captured) :allow) t))))))
 
 (ert-deftest agent-repl-test-permission-answer-deny-omits-allow ()
   "A deny answer omits the allow field and carries the deny message."
   ;; Arrange
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &rest _) (setq captured (list field payload)) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
-      ;; Act
-      (agent-repl--send-permission-answer "ws1" "r1" nil nil "nope")
-      ;; Assert — allow omitted (protojson false-omission), denyMessage present
-      (should-not (plist-member (nth 1 captured) :allow))
-      (should (equal (plist-get (nth 1 captured) :denyMessage) "nope")))))
+  (agent-repl-test--with-answer-ws
+    (let (captured)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload &rest _) (setq captured (list field payload)) "req-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--send-permission-answer "ws1" "r1" nil nil "nope")
+        ;; Assert — allow omitted (protojson false-omission), denyMessage present
+        (should-not (plist-member (nth 1 captured) :allow))
+        (should (equal (plist-get (nth 1 captured) :denyMessage) "nope"))))))
 
 (ert-deftest agent-repl-test-permission-answer-tracks-command ()
   "The answer round-trip tracks its command for ack surfacing."
   ;; Arrange
-  (let (tracked)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) "req-9"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (rid field &rest _) (setq tracked (list rid field)))))
-      ;; Act
-      (agent-repl--send-permission-answer "ws1" "r1" t)
-      ;; Assert
-      (should (equal tracked '("req-9" "permissionAnswer"))))))
+  (agent-repl-test--with-answer-ws
+    (let (tracked)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "req-9"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (rid field &rest _) (setq tracked (list rid field)))))
+        ;; Act
+        (agent-repl--send-permission-answer "ws1" "r1" t)
+        ;; Assert
+        (should (equal tracked '("req-9" "permissionAnswer")))))))
+
+(ert-deftest agent-repl-test-permission-answer-is-keyed-by-the-workspace-cwd ()
+  "The answer goes on the wire keyed by WS\='s cwd, never the persp name.
+The daemon matches the `workspace\=' field against the session CWD; a bare
+name matches nothing and the answer is NACKed as \"no live session\"."
+  ;; Arrange
+  (agent-repl-test--with-answer-ws
+    (let (key)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field _payload &optional ws &rest _) (setq key ws) "req-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--send-permission-answer "ws1" "r1" t)
+        ;; Assert
+        (should (equal key "/w"))))))
 
 ;;;; ---- interactive answer command --------------------------------------
 

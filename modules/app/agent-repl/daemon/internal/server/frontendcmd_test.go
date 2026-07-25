@@ -118,12 +118,12 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	err := h.SubmitPrompt(context.Background(), "ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"})
+	err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"})
 	// Assert
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(p.prompted) != 1 || p.prompted[0] != "ws1:hi" {
+	if len(p.prompted) != 1 || p.prompted[0] != "/ws1:hi" {
 		t.Fatalf("prompted = %v", p.prompted)
 	}
 }
@@ -132,7 +132,7 @@ func TestCommandHandlerInterruptRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	_ = h.Interrupt(context.Background(), "ws1", "r1", &frontendv1.InterruptCmd{Hard: true})
+	_ = h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{Hard: true})
 	// Assert
 	if len(p.interrupts) != 1 || !p.interrupts[0] {
 		t.Fatalf("interrupts = %v", p.interrupts)
@@ -143,7 +143,7 @@ func TestCommandHandlerPermissionRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	_ = h.AnswerPermission(context.Background(), "ws1", "r1", &frontendv1.PermissionAnswerCmd{PermissionRequestId: "perm-9"})
+	_ = h.AnswerPermission(context.Background(), "/ws1", "r1", &frontendv1.PermissionAnswerCmd{PermissionRequestId: "perm-9"})
 	// Assert
 	if len(p.perms) != 1 || p.perms[0] != "perm-9" {
 		t.Fatalf("perms = %v", p.perms)
@@ -585,5 +585,78 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	// Assert.
 	if len(p.prompted) != 0 || len(p.interrupts) != 0 {
 		t.Fatal("a client log must not drive the prompt router")
+	}
+}
+
+// --- workspace-key validation ----------------------------------------------
+//
+// Session-routed commands are keyed by the session CWD. A display name matches
+// no record, so it must be refused AT THE BOUNDARY with a message that names
+// the wire-contract violation — not forwarded, where it degrades into an
+// indistinguishable "no live session to drive" (the 2026-07-25 regression).
+
+func TestSubmitPromptRejectsANonAbsoluteWorkspaceKey(t *testing.T) {
+	// Arrange
+	h, p, _, _ := newTestHandler(t)
+	// Act
+	err := h.SubmitPrompt(context.Background(), "doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"})
+	// Assert
+	if err == nil {
+		t.Fatal("a display-name workspace key must be refused")
+	}
+	if len(p.prompted) != 0 {
+		t.Fatalf("prompted = %v, want nothing forwarded", p.prompted)
+	}
+}
+
+func TestSubmitPromptRejectionNamesTheContractViolation(t *testing.T) {
+	// Arrange
+	h, _, _, _ := newTestHandler(t)
+	// Act
+	err := h.SubmitPrompt(context.Background(), "doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"})
+	// Assert: the message must not read as a dead session.
+	if err == nil || !strings.Contains(err.Error(), "not an absolute path") {
+		t.Fatalf("err = %v, want it to name the non-absolute key", err)
+	}
+}
+
+func TestInterruptRejectsANonAbsoluteWorkspaceKey(t *testing.T) {
+	// Arrange
+	h, p, _, _ := newTestHandler(t)
+	// Act
+	err := h.Interrupt(context.Background(), "doom", "r1", &frontendv1.InterruptCmd{})
+	// Assert
+	if err == nil {
+		t.Fatal("a display-name workspace key must be refused")
+	}
+	if len(p.interrupts) != 0 {
+		t.Fatalf("interrupts = %v, want nothing forwarded", p.interrupts)
+	}
+}
+
+func TestAnswerPermissionRejectsANonAbsoluteWorkspaceKey(t *testing.T) {
+	// Arrange
+	h, p, _, _ := newTestHandler(t)
+	// Act
+	err := h.AnswerPermission(context.Background(), "doom", "r1", &frontendv1.PermissionAnswerCmd{PermissionRequestId: "perm-9"})
+	// Assert
+	if err == nil {
+		t.Fatal("a display-name workspace key must be refused")
+	}
+	if len(p.perms) != 0 {
+		t.Fatalf("perms = %v, want nothing forwarded", p.perms)
+	}
+}
+
+func TestSubmitPromptAcceptsAnAbsoluteWorkspaceKey(t *testing.T) {
+	// Arrange
+	h, p, _, _ := newTestHandler(t)
+	// Act
+	if err := h.SubmitPrompt(context.Background(), "/Users/x/.config/doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Assert
+	if len(p.prompted) != 1 {
+		t.Fatalf("prompted = %v, want the cwd-keyed prompt forwarded", p.prompted)
 	}
 }
