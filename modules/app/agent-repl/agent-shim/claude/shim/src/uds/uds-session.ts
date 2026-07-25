@@ -198,7 +198,7 @@ export class UdsSession {
     // to the daemon (StoreClient has already loud-logged each dropped event).
     this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
     await this.store.connect();
-    await this.server.listen();
+    await this.server.connect();
     return this.pump();
   }
 
