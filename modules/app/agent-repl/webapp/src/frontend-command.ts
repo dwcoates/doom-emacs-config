@@ -19,12 +19,12 @@
  *   (`submitPrompt`, `interrupt`, …) whose value is the nested command message
  *   — exactly how the inbound `FrontendFrame.frame` oneof is shaped.
  *
- * SCOPE: only the seven commands the WEBAPP originates are modeled here —
+ * SCOPE: only the commands the WEBAPP originates are modeled here —
  * submit_prompt, interrupt, permission_answer, create_session, delete_session,
- * resync, client_log. The workspace-lifecycle commands (merge/close/open) are
- * the Emacs frontend's, and `shutdown` is a daemon-lifecycle command the
- * webapp never sends; none are encodable here so a stray call is a compile
- * error, not a silently malformed frame.
+ * resync, client_log, and the three queue controls. The workspace-lifecycle
+ * commands (merge/close/open) are the Emacs frontend's, and `shutdown` is a
+ * daemon-lifecycle command the webapp never sends; none are encodable here so
+ * a stray call is a compile error, not a silently malformed frame.
  */
 
 /** A protojson `google.protobuf.Struct` value (a free-form JSON object). */
@@ -104,6 +104,24 @@ export interface ClientLogBody {
   context?: CommandStruct;
 }
 
+/**
+ * The three held-prompt queue controls (E4). All carry only an entry id: the
+ * daemon owns what happens next, and the webapp names WHICH entry, never what
+ * to do with it beyond the verb the arm already is.
+ */
+export interface QueueForceBody {
+  case: "queueForce";
+  entryId: string;
+}
+export interface QueueAcceptBody {
+  case: "queueAccept";
+  entryId: string;
+}
+export interface QueueCancelBody {
+  case: "queueCancel";
+  entryId: string;
+}
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
@@ -111,7 +129,10 @@ export type FrontendCommandBody =
   | CreateSessionBody
   | DeleteSessionBody
   | ResyncBody
-  | ClientLogBody;
+  | ClientLogBody
+  | QueueForceBody
+  | QueueAcceptBody
+  | QueueCancelBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -131,6 +152,9 @@ const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   deleteSession: "deleteSession",
   resync: "resync",
   clientLog: "clientLog",
+  queueForce: "queueForce",
+  queueAccept: "queueAccept",
+  queueCancel: "queueCancel",
 };
 
 /** Build the nested protojson command message for one body arm. */
@@ -176,6 +200,10 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
       if (b.context !== undefined) arm.context = b.context;
       return arm;
     }
+    case "queueForce":
+    case "queueAccept":
+    case "queueCancel":
+      return { entryId: b.entryId };
   }
 }
 

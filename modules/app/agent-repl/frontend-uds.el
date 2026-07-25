@@ -91,7 +91,7 @@ when the ack reports failure — in addition to the loud log + echo).")
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView"
-    "sessionInit" "heartbeat")
+    "sessionInit" "heartbeat" "queue")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -101,12 +101,12 @@ malformed (unknown wire field) and signals loudly.
 commands, tools, skills, model list); it is the pushed-frame replacement
 for the deleted GET /commands HTTP slash-menu source.
 
-`heartbeat' (E4) is the ephemeral long-tool liveness relay; Emacs
-decodes it for wire parity and renders nothing — see
-`agent-repl--uds-ignored-frame-fields'.")
+`heartbeat' (E4) is the ephemeral long-tool liveness relay and `queue'
+(E4) is the daemon-held prompt queue; Emacs decodes both for wire parity
+and renders neither — see `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("heartbeat")
+  '("heartbeat" "queue")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -118,12 +118,17 @@ rendering it.  Logging those at the same volume would train the reader to
 ignore a message that is supposed to mean \"something is missing\".
 
 `heartbeat' (E4): a tool-liveness tick whose only consumer is the
-webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.")
+webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.
+
+`queue' (E4): the prompts the daemon is holding for a session.  The
+queue's controls (force/accept/cancel) live where the prompt was typed —
+the webapp composer — and Emacs does not offer them, so rendering the
+chips here would show state the user could not act on.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
-    "shutdown" "clientLog")
+    "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -136,7 +141,11 @@ log.  It is listed so this stays a faithful mirror of the proto oneof,
 but Emacs does not use it: Emacs already writes its own log file
 directly (`agent-repl--log'), so routing its diagnostics through the
 daemon would move them FURTHER from the reader, not closer.  The webapp
-needs it because its console is invisible and unpersisted.")
+needs it because its console is invisible and unpersisted.
+
+`queueForce' / `queueAccept' / `queueCancel' (E4) act on a held prompt.
+Listed for the same mirror reason; Emacs does not send them, because it
+does not render the queue they act on.")
 
 (defvar agent-repl--uds-frame-handlers nil
   "Alist mapping a `FrontendFrame' oneof field name (string) to a handler fn.

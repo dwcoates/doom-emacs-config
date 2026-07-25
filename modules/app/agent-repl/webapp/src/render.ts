@@ -87,9 +87,11 @@ export interface Actions {
    */
   answerQuestions(requestId: string, updatedInput: unknown): void;
   /** Remove a parked queued message without ever running it (§2.13). */
-  cancelQueued(queueId: string): void;
+  cancelQueued(entryId: string): void;
   /** Escalate a parked queued message to preempt the running turn (§2.13). */
-  runQueuedNow(queueId: string): void;
+  runQueuedNow(entryId: string): void;
+  /** Confirm a held prompt's classification (view state only, E4). */
+  acceptQueued(entryId: string): void;
   /**
    * Send TEXT as a user prompt — the channel behind the card controls
    * (stop task). Prompt-mediated on purpose: no daemon-native kill
@@ -498,54 +500,65 @@ function MergeCard(): string {
 }
 
 /**
- * §2.13 status/verdict badge for a queued item. `classifying` is the
- * pre-verdict state; `waiting` parks the message to drain in FIFO order;
- * `interrupt` escalates it to preempt the running turn.
+ * Classification badge for a held prompt (E4). `pending` is the pre-verdict
+ * state; `hold` will be delivered when the turn ends; `interject` is preempting
+ * the running turn right now; `error` means NOTHING decided it — shown as its
+ * own state so it can never read as a real verdict.
  */
 function queuedBadge(item: QueuedItem): { label: string; cls: string } {
-  switch (item.status) {
-    case "waiting":
-      return { label: "queued — waiting", cls: "waiting" };
-    case "interrupt":
-      return { label: "interrupting…", cls: "interrupt" };
-    case "classifying":
+  switch (item.classification) {
+    case "hold":
+      return { label: "queued — will run after this turn", cls: "hold" };
+    case "interject":
+      return { label: "interrupting…", cls: "interject" };
+    case "error":
+      return { label: "queued — unclassified", cls: "error" };
+    case "pending":
     default:
-      return { label: "queued — classifying…", cls: "classifying" };
+      return { label: "queued — classifying…", cls: "pending" };
   }
 }
 
 /**
- * A parked message in the in-flight queue (§2.13). It is deliberately NOT
- * a `bubble user`: a subdued card, so the reader SEES the message is queued
- * for later and is explicitly not interrupting the running turn unless
- * escalated. It carries the prompt text (injected spans stripped, exactly
- * as a user turn's are), a status/verdict badge, the classifier's one-line
- * reason once known, and a Cancel / Run-now pair. Each button carries the
- * `queue_id` in a data attribute for delegated click handling.
+ * A prompt the daemon is holding (E4). Deliberately NOT a `bubble user`: a
+ * subdued card, so the reader SEES that the message is waiting and has not
+ * reached the agent. It carries the prompt text, the classification badge, the
+ * classifier's reason once known, and the three controls the daemon actually
+ * honors. Each button carries the entry id for delegated click handling.
  */
 export function QueuedCard(item: QueuedItem): string {
   const badge = queuedBadge(item);
-  const qid = escapeHtml(item.queue_id);
-  const reason = item.reason
-    ? `<div class="queued-reason">${escapeHtml(item.reason)}</div>`
+  const qid = escapeHtml(item.id);
+  const reason = item.rationale
+    ? `<div class="queued-reason">${escapeHtml(item.rationale)}</div>`
     : "";
+  // Accept is offered only where it means something: confirming a verdict that
+  // has actually landed. There is nothing to confirm about a pending entry, and
+  // an already-accepted one says so instead of offering the button again.
+  const accept =
+    item.classification === "pending" || item.accepted
+      ? ""
+      : `<button data-queue-accept="${qid}">Accept</button>`;
+  const acceptedMark = item.accepted ? `<span class="queued-accepted">accepted</span>` : "";
   return `
     <div class="queued-card">
       <div class="queued-head">
         <span class="queued-badge ${badge.cls}">${escapeHtml(badge.label)}</span>
+        ${acceptedMark}
       </div>
-      <pre class="queued-content">${escapeHtml(blocksToText(item.content))}</pre>
+      <pre class="queued-content">${escapeHtml(item.text)}</pre>
       ${reason}
       <div class="queued-actions">
         <button data-queue-cancel="${qid}">Cancel</button>
+        ${accept}
         <button data-queue-run-now="${qid}">Run now</button>
       </div>
     </div>`;
 }
 
-/** Key identifying one queued card's DOM node across renders (§2.13). */
+/** Key identifying one queued card's DOM node across renders (E4). */
 export function queuedCardKey(item: QueuedItem): string {
-  return `queued:${item.queue_id}`;
+  return `queued:${item.id}`;
 }
 
 // Bubbles already warned about a metaprompt-tree postprocessing misfire. A
@@ -2760,6 +2773,8 @@ export class FeedRenderer {
       if (cancelQ !== null) this.actions.cancelQueued(cancelQ);
       const runNowQ = target.getAttribute("data-queue-run-now");
       if (runNowQ !== null) this.actions.runQueuedNow(runNowQ);
+      const acceptQ = target.getAttribute("data-queue-accept");
+      if (acceptQ !== null) this.actions.acceptQueued(acceptQ);
       const prompt = target.closest("[data-send-prompt]")?.getAttribute("data-send-prompt");
       if (prompt) this.actions.sendPrompt?.(prompt);
       const msgTo = target.closest("[data-msg-send]")?.getAttribute("data-msg-send");

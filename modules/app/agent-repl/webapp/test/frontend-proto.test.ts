@@ -51,6 +51,19 @@ const HEARTBEAT = {
   sessionId: "s1",
   progress: { toolUseId: "tu1", toolName: "Bash", elapsedSeconds: 12.5 },
 };
+const QUEUE = {
+  workspace: "ws",
+  sessionId: "s1",
+  entries: [
+    {
+      id: "q1",
+      text: "run this later",
+      queuedAtMs: "1700000000000",
+      classification: "QUEUE_CLASSIFICATION_HOLD",
+      rationale: "independent",
+    },
+  ],
+};
 const SNAPSHOT = { workspaces: [WS_STATE], sessions: [SESSION_VIEW], catalogs: [TASK_CATALOG] };
 
 describe("decodeFrontendFrame — every frame variant decodes", () => {
@@ -66,6 +79,7 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
     ["daemonView", { daemonView: DAEMON_VIEW }],
     ["sessionInit", { sessionInit: SESSION_INIT }],
     ["heartbeat", { heartbeat: HEARTBEAT }],
+    ["queue", { queue: QUEUE }],
   ];
   for (const [name, obj] of cases) {
     it(`decodes ${name}`, () => {
@@ -407,6 +421,84 @@ describe("decodeFrontendFrame — HeartbeatView (E4)", () => {
   it("reports heartbeat as visually supported (it feeds the running tool chip)", () => {
     // Arrange / Act / Assert
     expect(isVisuallySupportedFrame("heartbeat")).toBe(true);
+  });
+});
+
+describe("decodeFrontendFrame — QueueView (E4)", () => {
+  it("decodes an entry with its classification keyword", () => {
+    // Arrange / Act
+    const frame = decode({ queue: QUEUE });
+    // Assert
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    expect(frame.frame.value.entries[0]).toEqual({
+      id: "q1",
+      text: "run this later",
+      queuedAtMs: 1700000000000,
+      classification: "hold",
+      rationale: "independent",
+      accepted: false,
+    });
+  });
+
+  it("decodes an empty queue as an empty entries list", () => {
+    // Arrange / Act — "the queue is empty" is a value, not an absence.
+    const frame = decode({ queue: { workspace: "ws", sessionId: "s1" } });
+    // Assert
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    expect(frame.frame.value.entries).toEqual([]);
+  });
+
+  it("defaults a missing classification to pending", () => {
+    // Arrange / Act — protojson omits an enum at its zero value.
+    const frame = decode({ queue: { sessionId: "s1", entries: [{ id: "q1", text: "x" }] } });
+    // Assert
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    expect(frame.frame.value.entries[0].classification).toBe("pending");
+  });
+
+  it("rejects an unrecognized classification rather than defaulting it", () => {
+    // Arrange / Act / Assert — rendering an unknown verdict as `pending` would
+    // tell the user their prompt is being judged when it is not.
+    expect(() =>
+      decode({
+        queue: { sessionId: "s1", entries: [{ id: "q1", classification: "QUEUE_CLASSIFICATION_XX" }] },
+      }),
+    ).toThrow(/unrecognized classification/);
+  });
+
+  it("rejects an entry with no id, whose controls would all be dead", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ queue: { sessionId: "s1", entries: [{ text: "x" }] } })).toThrow(
+      /missing required `id`/,
+    );
+  });
+
+  it("rejects an unrecognized field on an entry", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({ queue: { sessionId: "s1", entries: [{ id: "q1", bogus: 1 }] } }),
+    ).toThrow(/unrecognized field/);
+  });
+
+  it("carries the queue through a StateSnapshot", () => {
+    // Arrange / Act — a reconnecting frontend gets the queue in its snapshot.
+    const frame = decode({ snapshot: { ...SNAPSHOT, queues: [QUEUE] } });
+    // Assert
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.queues).toHaveLength(1);
+  });
+
+  it("decodes a snapshot with no queues as an empty list", () => {
+    // Arrange / Act
+    const frame = decode({ snapshot: SNAPSHOT });
+    // Assert
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.queues).toEqual([]);
+  });
+
+  it("reports queue as visually supported", () => {
+    // Arrange / Act / Assert
+    expect(isVisuallySupportedFrame("queue")).toBe(true);
   });
 });
 

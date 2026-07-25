@@ -148,6 +148,22 @@ export class CommandDispatcher {
     return this.dispatch("", { case: "deleteSession", sessionId });
   }
 
+  // The held-prompt queue controls (E4). Ack-correlated, unlike clientLog:
+  // these are OPERATIONS the user asked for, so a rejection (an entry that has
+  // since been delivered or cancelled) must reach the caller instead of
+  // vanishing.
+  queueForce(workspace: string, entryId: string): Promise<void> {
+    return this.dispatch(workspace, { case: "queueForce", entryId });
+  }
+
+  queueAccept(workspace: string, entryId: string): Promise<void> {
+    return this.dispatch(workspace, { case: "queueAccept", entryId });
+  }
+
+  queueCancel(workspace: string, entryId: string): Promise<void> {
+    return this.dispatch(workspace, { case: "queueCancel", entryId });
+  }
+
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
     const requestId = this.newId();
     return new Promise<void>((resolve, reject) => {
