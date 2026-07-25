@@ -74,10 +74,13 @@ func (s *Server) supersedeResumeConflicts(opts CreateOpts) {
 			r.Terminal = true
 			r.DeathReason = supersedeReason
 		})
-		// Stop the old shim if the driver had brought one up. A workspace with
-		// no live driver is an expected no-op, not a failure.
-		if err := s.driver.Hibernate(rec.CWD); err != nil {
-			s.logf("session %s: supersede shim stop (ws %s): %v (expected when no live shim)", rec.SessionID, rec.CWD, err)
+		// Stop the OLD session's shim if the driver had brought one up —
+		// session-scoped, so superseding a stale record can never SIGTERM a
+		// newer session that already owns the same cwd. A workspace with no
+		// live driver, or one driven by a different session, is an expected
+		// no-op, not a failure.
+		if err := s.driver.HibernateSession(rec.CWD, rec.SessionID); err != nil {
+			s.logf("session %s: supersede shim stop (ws %s): %v (expected when no live shim, or another session drives it)", rec.SessionID, rec.CWD, err)
 		}
 	}
 }

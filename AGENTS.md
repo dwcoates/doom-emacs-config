@@ -435,6 +435,10 @@ The agent-shim protobuf protocol shared by the agent-repl daemon and the shim ec
 
 Every session-routed frontend command (`submitPrompt`, `interrupt`, `permissionAnswer`) is keyed by the session's **absolute cwd**: `SessionLocator.Locate` matches registry records on `rec.CWD == workspace`, and `sessiondrv` maps live drivers under that same string. Emacs keys everything by the **persp name** (`"doom"`), so a ws-keyed command must resolve its wire key through `agent-repl--frontend-ws-command-key` (`:project-dir`) — never pass the `ws` name straight to `agent-repl--uds-send-command`. The 2026-07-25 regression shipped the name and every prompt NACKed as `workspace "doom" has no live session to drive`, which reads as a dead session rather than a wire-contract violation; `checkWorkspaceKey` in `frontendcmd.go` now refuses a non-absolute key by name.
 
+## Stand down a SPECIFIC session with `HibernateSession`, not `Hibernate`
+
+Several registry records can share one workspace cwd (a stale duplicate, a superseded resume, an orphan awaiting reap). `sessiondrv.Manager.Hibernate(cwd)` SIGTERMs whichever shim is live for that cwd, so using it to stop one record's shim kills whatever session currently owns the workspace — on 2026-07-25 reaping an orphan killed the healthy session created 175ms earlier. Delete and supersede therefore call `HibernateSession(cwd, sessionID)`, which returns `ErrNotLiveSession` and stops nothing when a different session drives the workspace. `Hibernate` stays correct only for genuinely workspace-scoped teardown (idle sweep, daemon shutdown).
+
 ## The protocol schema is TREATED as vendor-agnostic
 
 The `agentshim.data.v1` shapes were derived from the Claude harness, so the schema is not factually vendor-agnostic — but it is BELIEVED and TREATED as vendor-agnostic everywhere: no consumer special-cases a vendor. When adding a new vendor (e.g. a `codex-shim`), RESOLVE any incongruity by revising the API (a breaking change is the expected remedy, gated on the approval rule above) — never by bolting vendor side-channels onto the protocol. See `modules/app/agent-repl/proto/AGENTS.md`.
