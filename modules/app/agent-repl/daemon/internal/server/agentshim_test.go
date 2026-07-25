@@ -263,3 +263,61 @@ func TestRegistryResolverIgnoresAVendorMatchWithNoWorkspace(t *testing.T) {
 		t.Fatalf("Workspace(uuid with no cwd) = (%q, true), want a miss", ws)
 	}
 }
+
+// --- the seq mark belongs to the CONVERSATION -------------------------------
+//
+// Every restart mints a fresh s_ id for the same conversation, but the store's
+// seq space is keyed by the vendor uuid. Reading only the new record's own mark
+// returned 0, so the shim re-subscribed from 0 and replayed the whole history —
+// and the first prompt's Ack queued behind those thousands of frames until it
+// timed out.
+
+func TestSeqStoreInheritsTheMarkFromTheSameConversation(t *testing.T) {
+	// Arrange: a superseded record with a high-water mark, and the fresh
+	// session that replaced it for the SAME conversation.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_old", CWD: "/w", ClaudeSessionID: "uuid-1", LastSeq: 6037}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := reg.Put(registry.Record{SessionID: "s_new", CWD: "/w", ClaudeSessionID: "uuid-1"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	got := NewRegistrySeqStore(reg, nil).LastSeq("s_new")
+
+	// Assert: continues where the conversation stopped, not from zero.
+	if got != 6037 {
+		t.Fatalf("last_seq = %d, want 6037 — a fresh session id must not replay the conversation", got)
+	}
+}
+
+func TestSeqStoreIgnoresOtherConversations(t *testing.T) {
+	// Arrange: a busy conversation must not lift another's mark, or the second
+	// would skip events it never saw.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_busy", CWD: "/a", ClaudeSessionID: "uuid-busy", LastSeq: 9000}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := reg.Put(registry.Record{SessionID: "s_quiet", CWD: "/b", ClaudeSessionID: "uuid-quiet", LastSeq: 12}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act / Assert
+	if got := NewRegistrySeqStore(reg, nil).LastSeq("s_quiet"); got != 12 {
+		t.Fatalf("last_seq = %d, want 12", got)
+	}
+}
+
+func TestSeqStoreUsesItsOwnMarkBeforeTheConversationIsKnown(t *testing.T) {
+	// Arrange: a brand-new session has no vendor uuid until system:init.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s_fresh", CWD: "/w", LastSeq: 5}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act / Assert
+	if got := NewRegistrySeqStore(reg, nil).LastSeq("s_fresh"); got != 5 {
+		t.Fatalf("last_seq = %d, want 5", got)
+	}
+}

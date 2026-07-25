@@ -58,12 +58,40 @@ func NewRegistrySeqStore(reg *registry.Registry, logf func(string, ...any)) *Reg
 var _ shimclient.SeqStore = (*RegistrySeqStore)(nil)
 
 // LastSeq returns the durable high-water mark for sessionID (0 if none).
+//
+// The mark belongs to the CONVERSATION, not to the daemon session id it is
+// filed under. The store's seq space is keyed by the vendor uuid, and every
+// restart mints a FRESH s_ id for the same conversation (the create path
+// supersedes the old record). Reading only this record's own mark therefore
+// returned 0 for a resumed conversation, and the shim re-subscribed from
+// from_seq=0 — replaying its ENTIRE history.
+//
+// That is not merely wasteful: those thousands of replayed frames arrive on
+// the same connection as control Acks, so the first prompt after a restart
+// queued behind ~6000 events and blew its 10s ack timeout. The user saw
+// "sending does nothing" while the daemon was busy re-reading the whole
+// conversation.
+//
+// So the mark is resolved across every record sharing this one's vendor uuid,
+// taking the highest. A resumed session continues where its predecessor
+// stopped instead of starting over.
 func (s *RegistrySeqStore) LastSeq(sessionID string) uint64 {
 	rec, ok := s.reg.Get(sessionID)
 	if !ok {
 		return 0
 	}
-	return rec.LastSeq
+	if rec.ClaudeSessionID == "" {
+		// No conversation identity yet (a fresh session before system:init):
+		// this record's own mark is the only thing that can apply.
+		return rec.LastSeq
+	}
+	best := rec.LastSeq
+	for _, other := range s.reg.All() {
+		if other.ClaudeSessionID == rec.ClaudeSessionID && other.LastSeq > best {
+			best = other.LastSeq
+		}
+	}
+	return best
 }
 
 // SetLastSeq records seq as the new high-water mark, write-through to disk.
