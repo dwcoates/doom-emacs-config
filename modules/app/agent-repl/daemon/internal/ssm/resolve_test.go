@@ -2,7 +2,9 @@ package ssm
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -135,7 +137,7 @@ func TestResolvePrecedence(t *testing.T) {
 				seedSignal(t, db, ws, "sess", s.state, s.cause, int64(i), s.at)
 			}
 			// Act.
-			got, err := resolve(db, ws)
+			got, err := resolve(db, ws, nil)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -173,7 +175,7 @@ func TestResolveIdleAsyncPromotion(t *testing.T) {
 				seedSignal(t, db, ws, "sess", ts, ts, int64(i+1), int64(i+2))
 			}
 			// Act.
-			got, err := resolve(db, ws)
+			got, err := resolve(db, ws, nil)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -205,7 +207,7 @@ func TestResolveTurnActive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newTestDB(t)
 			seedSignal(t, db, "ws", "sess", tt.state, tt.cause, 0, 1)
-			got, err := resolve(db, "ws")
+			got, err := resolve(db, "ws", nil)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
@@ -223,7 +225,7 @@ func TestResolveNoRenderBearingSignal(t *testing.T) {
 	db := newTestDB(t)
 	seedSignal(t, db, "ws", "sess", sigTaskStarted, causeTaskStarted, 0, 1)
 	// Act.
-	got, err := resolve(db, "ws")
+	got, err := resolve(db, "ws", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -237,7 +239,7 @@ func TestResolveNoRenderBearingSignal(t *testing.T) {
 // (explicit miss, no silent default).
 func TestResolveUnknownWorkspace(t *testing.T) {
 	db := newTestDB(t)
-	got, err := resolve(db, "never-seen")
+	got, err := resolve(db, "never-seen", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -254,7 +256,7 @@ func TestResolveMergePhaseSurfaced(t *testing.T) {
 	seedSignal(t, db, "ws", "sess", sigThinking, causeTurnStarted, 0, 2)
 	seedSignal(t, db, "ws", "", sigMergeQueued, causeMergeTransition, -1, 1)
 	// Act.
-	got, err := resolve(db, "ws")
+	got, err := resolve(db, "ws", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -264,5 +266,89 @@ func TestResolveMergePhaseSurfaced(t *testing.T) {
 	}
 	if got.mergePhase != sigMergeQueued {
 		t.Fatalf("mergePhase = %q, want %q", got.mergePhase, sigMergeQueued)
+	}
+}
+
+// TestResolveClampsANegativeLiveTaskCount covers the unmatched-end case: a
+// `task_ended` whose `task_started` was never logged drives started-minus-ended
+// below zero. The count is clamped to 0 (a negative live-task count is not a
+// value any consumer can act on) AND reported loudly, naming the workspace and
+// the offending task id — an impossible-state signal, not a silent default.
+func TestResolveClampsANegativeLiveTaskCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		ends      []string // task ids ended with no matching start
+		wantInLog []string
+	}{
+		{
+			name:      "one unmatched end",
+			ends:      []string{"ghost-1"},
+			wantInLog: []string{"IMPOSSIBLE", "ws=ws", "ghost-1", "clamping to 0"},
+		},
+		{
+			name:      "two unmatched ends name both tasks",
+			ends:      []string{"ghost-1", "ghost-2"},
+			wantInLog: []string{"IMPOSSIBLE", "ws=ws", "ghost-1", "ghost-2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange — an idle base plus ends whose starts were never logged.
+			db := newTestDB(t)
+			const ws = "ws"
+			seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
+			for i, id := range tt.ends {
+				seedTaskSignal(t, db, ws, "sess", sigTaskEnded, sigTaskEnded, int64(i+1), int64(i+2), id)
+			}
+			var logged []string
+			logf := func(format string, args ...any) {
+				logged = append(logged, fmt.Sprintf(format, args...))
+			}
+			// Act
+			got, err := resolve(db, ws, logf)
+			// Assert
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if got.liveTaskCount != 0 {
+				t.Fatalf("liveTaskCount = %d, want 0 (clamped)", got.liveTaskCount)
+			}
+			if len(logged) != 1 {
+				t.Fatalf("want exactly one impossible-state log line, got %d: %v", len(logged), logged)
+			}
+			for _, want := range tt.wantInLog {
+				if !strings.Contains(logged[0], want) {
+					t.Errorf("log line %q does not name %q", logged[0], want)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveDoesNotLogWhenTheTaskCountIsSane pins the clamp as an EXCEPTION
+// path: a well-formed start/end pair resolves to 0 without the impossible-state
+// log, so the signal keeps meaning something when it does fire.
+func TestResolveDoesNotLogWhenTheTaskCountIsSane(t *testing.T) {
+	// Arrange
+	db := newTestDB(t)
+	const ws = "ws"
+	seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
+	seedTaskSignal(t, db, ws, "sess", sigTaskStarted, sigTaskStarted, 1, 2, "t1")
+	seedTaskSignal(t, db, ws, "sess", sigTaskEnded, sigTaskEnded, 2, 3, "t1")
+	var logged []string
+	logf := func(format string, args ...any) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+	// Act
+	got, err := resolve(db, ws, logf)
+	// Assert
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.liveTaskCount != 0 {
+		t.Fatalf("liveTaskCount = %d, want 0", got.liveTaskCount)
+	}
+	if len(logged) != 0 {
+		t.Fatalf("a matched start/end must not log an impossible state, got: %v", logged)
 	}
 }
