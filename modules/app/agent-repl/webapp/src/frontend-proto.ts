@@ -658,11 +658,28 @@ function decodeQueueEntry(v: unknown): QueueEntry {
  * falling back: silently rendering an unknown verdict as `pending` would tell
  * the user their prompt is being judged when the daemon said something else
  * entirely.
+ *
+ * ABSENT / UNSPECIFIED also throws. `QUEUE_CLASSIFICATION_UNSPECIFIED` is the
+ * proto3 zero, so protojson OMITS the field when it holds that value — absent
+ * and UNSPECIFIED are the same wire fact, and both are handled here the same
+ * way. The daemon sets one of the four real states on every entry it builds
+ * (PENDING at enqueue, then the verdict), so neither can occur against a
+ * correct daemon; seeing one means the frame is malformed. Defaulting it to
+ * `pending` would invent the very claim the wire declined to make, which is
+ * the same failure the unrecognized-name branch exists to prevent.
  */
 function decodeQueueClassification(v: unknown): QueueClassification {
-  if (v === undefined || v === null) return "pending";
+  if (v === undefined || v === null) {
+    throw new Error(
+      "frontend-proto: QueueView entry has no classification " +
+        "(absent === QUEUE_CLASSIFICATION_UNSPECIFIED, which the daemon never sends)",
+    );
+  }
   if (typeof v !== "string") {
     throw new Error(`frontend-proto: QueueView entry classification must be a string (got ${typeof v})`);
+  }
+  if (v === "QUEUE_CLASSIFICATION_UNSPECIFIED") {
+    throw new Error("frontend-proto: QueueView entry classification is UNSPECIFIED, which the daemon never sends");
   }
   const known = QUEUE_CLASSIFICATION_BY_NAME[v];
   if (known === undefined) {
