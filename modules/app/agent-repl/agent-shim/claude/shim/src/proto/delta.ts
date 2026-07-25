@@ -4,9 +4,19 @@
  * `stream_event` partials (live typing) and `tool_progress` elapsed
  * heartbeats are the ONE class of event that MUST NOT take the store
  * round-trip: they are forwarded shim → daemon directly and never persisted
- * nor replayed. Consumers reconcile per claude `uuid`, REPLACING a streamed
- * preview with the store-delivered final message, so cross-path ordering is
- * irrelevant.
+ * nor replayed. Consumers reconcile per ANTHROPIC MESSAGE ID, REPLACING a
+ * streamed preview with the store-delivered final message, so cross-path
+ * ordering is irrelevant.
+ *
+ * That id — not the SDK envelope `uuid` — is the reconciliation key, because
+ * it is the only identity shared by a streaming message and its finished form.
+ * The SDK mints a FRESH envelope uuid for every message it emits, including
+ * every individual `stream_event`, so keying deltas on it gave each chunk a
+ * different id and the frontend rendered one bubble per chunk instead of
+ * growing one. The envelope uuid still identifies a finished conversation
+ * ITEM (it is what both planes dedup on, and the only id user turns,
+ * attachments and system lines have at all) — it simply cannot identify a
+ * message that has not finished being emitted.
  *
  * This module maps those two SDK stream messages into their core payloads:
  *   - `stream_event` → `core.ContentDelta` (live text/thinking/tool-input/
@@ -36,6 +46,54 @@ import {
 /** Wall-clock injection for deterministic tests. */
 export interface DeltaOptions {
   nowMs?: number;
+  /**
+   * The Anthropic id of the message currently being streamed, from the
+   * `message_start` that opened it (see {@link StreamMessageTracker}). Every
+   * delta of one message carries the same value, which is what lets consumers
+   * grow a single block instead of opening a new one per chunk.
+   */
+  messageId?: string;
+}
+
+/**
+ * Tracks which assistant message the stream is currently emitting.
+ *
+ * A `content_block_delta` says nothing about which message it belongs to — the
+ * identity arrives once, on the `message_start` that opened it. The SDK stream
+ * is continuous for the life of a shim, so the shim always sees that frame
+ * before the deltas that follow it; only the DAEMON can attach mid-message,
+ * and it recovers the finished message from the store instead.
+ */
+export class StreamMessageTracker {
+  private messageId = "";
+
+  /**
+   * Observe one SDK message, updating the in-flight id. Call BEFORE converting
+   * the message, so a `message_start`'s own id is already current for the
+   * deltas that follow.
+   */
+  observe(msg: unknown): void {
+    if (!isObject(msg) || msg["type"] !== "stream_event") return;
+    const event = msg["event"];
+    if (!isObject(event)) return;
+    switch (event["type"]) {
+      case "message_start": {
+        const message = event["message"];
+        this.messageId = isObject(message) && typeof message["id"] === "string" ? message["id"] : "";
+        break;
+      }
+      case "message_stop":
+        this.messageId = "";
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** The Anthropic id of the message being streamed, or "" between messages. */
+  current(): string {
+    return this.messageId;
+  }
 }
 
 function producedAt(opts: DeltaOptions | undefined): bigint {
@@ -80,7 +138,9 @@ export function streamEventToContentDelta(
   const arm = deltaArm(delta);
   if (!arm) return null;
 
-  const uuid = typeof msg["uuid"] === "string" ? msg["uuid"] : "";
+  // The message being streamed, NOT this event's own envelope uuid: the SDK
+  // mints that fresh per emission, so it differs on every chunk.
+  const uuid = opts?.messageId ?? "";
   const index = typeof event["index"] === "number" ? event["index"] : 0;
   const estimatedTokens =
     typeof delta["estimated_tokens"] === "number" && Number.isFinite(delta["estimated_tokens"])
