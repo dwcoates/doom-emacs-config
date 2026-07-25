@@ -3077,21 +3077,78 @@ func (x *TaskCreateResult) GetTask() *structpb.Struct {
 	return nil
 }
 
+// The status transition a TaskUpdate reports. Both ends are the harness's raw
+// task-status vocabulary as free strings (NOT RawTaskStatus): the corpus shows
+// "pending"/"in_progress", which are the TODO-list states, not the detached-task
+// lifecycle RawTaskStatus enumerates. Corpus: tool-results/task_update.jsonl.
+type TaskStatusChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStatusChange) Reset() {
+	*x = TaskStatusChange{}
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusChange) ProtoMessage() {}
+
+func (x *TaskStatusChange) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusChange.ProtoReflect.Descriptor instead.
+func (*TaskStatusChange) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *TaskStatusChange) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *TaskStatusChange) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
 type TaskUpdateResult struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	// Object {from,to}; corpus: tool-results/task_update.jsonl.
-	StatusChange *structpb.Struct `protobuf:"bytes,2,opt,name=status_change,json=statusChange,proto3" json:"status_change,omitempty"`
-	Success      bool             `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
-	// Array of changed field names; corpus: tool-results/task_update.jsonl.
-	UpdatedFields *structpb.ListValue `protobuf:"bytes,4,opt,name=updated_fields,json=updatedFields,proto3" json:"updated_fields,omitempty"`
+	// The {from,to} transition; corpus: tool-results/task_update.jsonl.
+	StatusChange *TaskStatusChange `protobuf:"bytes,2,opt,name=status_change,json=statusChange,proto3" json:"status_change,omitempty"`
+	Success      bool              `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	// Names of the task fields this update changed, e.g. ["status"]; corpus:
+	// tool-results/task_update.jsonl.
+	UpdatedFields []string `protobuf:"bytes,4,rep,name=updated_fields,json=updatedFields,proto3" json:"updated_fields,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskUpdateResult) Reset() {
 	*x = TaskUpdateResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[33]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3103,7 +3160,7 @@ func (x *TaskUpdateResult) String() string {
 func (*TaskUpdateResult) ProtoMessage() {}
 
 func (x *TaskUpdateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[33]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3116,7 +3173,7 @@ func (x *TaskUpdateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskUpdateResult.ProtoReflect.Descriptor instead.
 func (*TaskUpdateResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{33}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *TaskUpdateResult) GetTaskId() string {
@@ -3126,7 +3183,7 @@ func (x *TaskUpdateResult) GetTaskId() string {
 	return ""
 }
 
-func (x *TaskUpdateResult) GetStatusChange() *structpb.Struct {
+func (x *TaskUpdateResult) GetStatusChange() *TaskStatusChange {
 	if x != nil {
 		return x.StatusChange
 	}
@@ -3140,7 +3197,7 @@ func (x *TaskUpdateResult) GetSuccess() bool {
 	return false
 }
 
-func (x *TaskUpdateResult) GetUpdatedFields() *structpb.ListValue {
+func (x *TaskUpdateResult) GetUpdatedFields() []string {
 	if x != nil {
 		return x.UpdatedFields
 	}
@@ -3156,7 +3213,7 @@ type TaskListResult struct {
 
 func (x *TaskListResult) Reset() {
 	*x = TaskListResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[34]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3168,7 +3225,7 @@ func (x *TaskListResult) String() string {
 func (*TaskListResult) ProtoMessage() {}
 
 func (x *TaskListResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[34]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3181,7 +3238,7 @@ func (x *TaskListResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskListResult.ProtoReflect.Descriptor instead.
 func (*TaskListResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{34}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *TaskListResult) GetTasks() *structpb.ListValue {
@@ -3204,7 +3261,7 @@ type SendMessageResult struct {
 
 func (x *SendMessageResult) Reset() {
 	*x = SendMessageResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3216,7 +3273,7 @@ func (x *SendMessageResult) String() string {
 func (*SendMessageResult) ProtoMessage() {}
 
 func (x *SendMessageResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3229,7 +3286,7 @@ func (x *SendMessageResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageResult.ProtoReflect.Descriptor instead.
 func (*SendMessageResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{35}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SendMessageResult) GetMessage() string {
@@ -3274,7 +3331,7 @@ type WebFetchResult struct {
 
 func (x *WebFetchResult) Reset() {
 	*x = WebFetchResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3286,7 +3343,7 @@ func (x *WebFetchResult) String() string {
 func (*WebFetchResult) ProtoMessage() {}
 
 func (x *WebFetchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3299,7 +3356,7 @@ func (x *WebFetchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebFetchResult.ProtoReflect.Descriptor instead.
 func (*WebFetchResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{36}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *WebFetchResult) GetBytes() int64 {
@@ -3358,7 +3415,7 @@ type WebSearchResult struct {
 
 func (x *WebSearchResult) Reset() {
 	*x = WebSearchResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3370,7 +3427,7 @@ func (x *WebSearchResult) String() string {
 func (*WebSearchResult) ProtoMessage() {}
 
 func (x *WebSearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3383,7 +3440,7 @@ func (x *WebSearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebSearchResult.ProtoReflect.Descriptor instead.
 func (*WebSearchResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{37}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *WebSearchResult) GetDurationSeconds() float64 {
@@ -3427,7 +3484,7 @@ type AskUserQuestionResult struct {
 
 func (x *AskUserQuestionResult) Reset() {
 	*x = AskUserQuestionResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3439,7 +3496,7 @@ func (x *AskUserQuestionResult) String() string {
 func (*AskUserQuestionResult) ProtoMessage() {}
 
 func (x *AskUserQuestionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3452,7 +3509,7 @@ func (x *AskUserQuestionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskUserQuestionResult.ProtoReflect.Descriptor instead.
 func (*AskUserQuestionResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{38}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AskUserQuestionResult) GetQuestions() []*Question {
@@ -3487,7 +3544,7 @@ type ScheduleWakeupResult struct {
 
 func (x *ScheduleWakeupResult) Reset() {
 	*x = ScheduleWakeupResult{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3499,7 +3556,7 @@ func (x *ScheduleWakeupResult) String() string {
 func (*ScheduleWakeupResult) ProtoMessage() {}
 
 func (x *ScheduleWakeupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3512,7 +3569,7 @@ func (x *ScheduleWakeupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleWakeupResult.ProtoReflect.Descriptor instead.
 func (*ScheduleWakeupResult) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{39}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ScheduleWakeupResult) GetClampedDelaySeconds() int64 {
@@ -3567,7 +3624,7 @@ type ToolInput struct {
 
 func (x *ToolInput) Reset() {
 	*x = ToolInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3579,7 +3636,7 @@ func (x *ToolInput) String() string {
 func (*ToolInput) ProtoMessage() {}
 
 func (x *ToolInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3592,7 +3649,7 @@ func (x *ToolInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolInput.ProtoReflect.Descriptor instead.
 func (*ToolInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{40}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ToolInput) GetInput() isToolInput_Input {
@@ -3921,7 +3978,7 @@ type AgentInput struct {
 
 func (x *AgentInput) Reset() {
 	*x = AgentInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3933,7 +3990,7 @@ func (x *AgentInput) String() string {
 func (*AgentInput) ProtoMessage() {}
 
 func (x *AgentInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3946,7 +4003,7 @@ func (x *AgentInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentInput.ProtoReflect.Descriptor instead.
 func (*AgentInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{41}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *AgentInput) GetDescription() string {
@@ -4005,7 +4062,7 @@ type BashInput struct {
 
 func (x *BashInput) Reset() {
 	*x = BashInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4017,7 +4074,7 @@ func (x *BashInput) String() string {
 func (*BashInput) ProtoMessage() {}
 
 func (x *BashInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4030,7 +4087,7 @@ func (x *BashInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BashInput.ProtoReflect.Descriptor instead.
 func (*BashInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{42}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *BashInput) GetCommand() string {
@@ -4080,7 +4137,7 @@ type TaskOutputInput struct {
 
 func (x *TaskOutputInput) Reset() {
 	*x = TaskOutputInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4092,7 +4149,7 @@ func (x *TaskOutputInput) String() string {
 func (*TaskOutputInput) ProtoMessage() {}
 
 func (x *TaskOutputInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4105,7 +4162,7 @@ func (x *TaskOutputInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskOutputInput.ProtoReflect.Descriptor instead.
 func (*TaskOutputInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{43}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *TaskOutputInput) GetTaskId() string {
@@ -4139,7 +4196,7 @@ type KillShellInput struct {
 
 func (x *KillShellInput) Reset() {
 	*x = KillShellInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4151,7 +4208,7 @@ func (x *KillShellInput) String() string {
 func (*KillShellInput) ProtoMessage() {}
 
 func (x *KillShellInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4164,7 +4221,7 @@ func (x *KillShellInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillShellInput.ProtoReflect.Descriptor instead.
 func (*KillShellInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{44}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *KillShellInput) GetShellId() string {
@@ -4186,7 +4243,7 @@ type FileEditInput struct {
 
 func (x *FileEditInput) Reset() {
 	*x = FileEditInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4198,7 +4255,7 @@ func (x *FileEditInput) String() string {
 func (*FileEditInput) ProtoMessage() {}
 
 func (x *FileEditInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4211,7 +4268,7 @@ func (x *FileEditInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileEditInput.ProtoReflect.Descriptor instead.
 func (*FileEditInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{45}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *FileEditInput) GetFilePath() string {
@@ -4254,7 +4311,7 @@ type FileReadInput struct {
 
 func (x *FileReadInput) Reset() {
 	*x = FileReadInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4266,7 +4323,7 @@ func (x *FileReadInput) String() string {
 func (*FileReadInput) ProtoMessage() {}
 
 func (x *FileReadInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4279,7 +4336,7 @@ func (x *FileReadInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileReadInput.ProtoReflect.Descriptor instead.
 func (*FileReadInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{46}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *FileReadInput) GetFilePath() string {
@@ -4320,7 +4377,7 @@ type FileWriteInput struct {
 
 func (x *FileWriteInput) Reset() {
 	*x = FileWriteInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4332,7 +4389,7 @@ func (x *FileWriteInput) String() string {
 func (*FileWriteInput) ProtoMessage() {}
 
 func (x *FileWriteInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4345,7 +4402,7 @@ func (x *FileWriteInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileWriteInput.ProtoReflect.Descriptor instead.
 func (*FileWriteInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{47}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *FileWriteInput) GetFilePath() string {
@@ -4372,7 +4429,7 @@ type GlobInput struct {
 
 func (x *GlobInput) Reset() {
 	*x = GlobInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4384,7 +4441,7 @@ func (x *GlobInput) String() string {
 func (*GlobInput) ProtoMessage() {}
 
 func (x *GlobInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4397,7 +4454,7 @@ func (x *GlobInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GlobInput.ProtoReflect.Descriptor instead.
 func (*GlobInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{48}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GlobInput) GetPattern() string {
@@ -4435,7 +4492,7 @@ type GrepInput struct {
 
 func (x *GrepInput) Reset() {
 	*x = GrepInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4447,7 +4504,7 @@ func (x *GrepInput) String() string {
 func (*GrepInput) ProtoMessage() {}
 
 func (x *GrepInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4460,7 +4517,7 @@ func (x *GrepInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrepInput.ProtoReflect.Descriptor instead.
 func (*GrepInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{49}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *GrepInput) GetPattern() string {
@@ -4567,7 +4624,7 @@ type NotebookEditInput struct {
 
 func (x *NotebookEditInput) Reset() {
 	*x = NotebookEditInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4579,7 +4636,7 @@ func (x *NotebookEditInput) String() string {
 func (*NotebookEditInput) ProtoMessage() {}
 
 func (x *NotebookEditInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4592,7 +4649,7 @@ func (x *NotebookEditInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotebookEditInput.ProtoReflect.Descriptor instead.
 func (*NotebookEditInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{50}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *NotebookEditInput) GetNotebookPath() string {
@@ -4641,7 +4698,7 @@ type TodoItem struct {
 
 func (x *TodoItem) Reset() {
 	*x = TodoItem{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4653,7 +4710,7 @@ func (x *TodoItem) String() string {
 func (*TodoItem) ProtoMessage() {}
 
 func (x *TodoItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4666,7 +4723,7 @@ func (x *TodoItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TodoItem.ProtoReflect.Descriptor instead.
 func (*TodoItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{51}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *TodoItem) GetContent() string {
@@ -4699,7 +4756,7 @@ type TodoWriteInput struct {
 
 func (x *TodoWriteInput) Reset() {
 	*x = TodoWriteInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4711,7 +4768,7 @@ func (x *TodoWriteInput) String() string {
 func (*TodoWriteInput) ProtoMessage() {}
 
 func (x *TodoWriteInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4724,7 +4781,7 @@ func (x *TodoWriteInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TodoWriteInput.ProtoReflect.Descriptor instead.
 func (*TodoWriteInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{52}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *TodoWriteInput) GetTodos() []*TodoItem {
@@ -4744,7 +4801,7 @@ type WebFetchInput struct {
 
 func (x *WebFetchInput) Reset() {
 	*x = WebFetchInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4756,7 +4813,7 @@ func (x *WebFetchInput) String() string {
 func (*WebFetchInput) ProtoMessage() {}
 
 func (x *WebFetchInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4769,7 +4826,7 @@ func (x *WebFetchInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebFetchInput.ProtoReflect.Descriptor instead.
 func (*WebFetchInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{53}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *WebFetchInput) GetUrl() string {
@@ -4797,7 +4854,7 @@ type WebSearchInput struct {
 
 func (x *WebSearchInput) Reset() {
 	*x = WebSearchInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4809,7 +4866,7 @@ func (x *WebSearchInput) String() string {
 func (*WebSearchInput) ProtoMessage() {}
 
 func (x *WebSearchInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4822,7 +4879,7 @@ func (x *WebSearchInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebSearchInput.ProtoReflect.Descriptor instead.
 func (*WebSearchInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{54}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *WebSearchInput) GetQuery() string {
@@ -4857,7 +4914,7 @@ type QuestionOption struct {
 
 func (x *QuestionOption) Reset() {
 	*x = QuestionOption{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4869,7 +4926,7 @@ func (x *QuestionOption) String() string {
 func (*QuestionOption) ProtoMessage() {}
 
 func (x *QuestionOption) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4882,7 +4939,7 @@ func (x *QuestionOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuestionOption.ProtoReflect.Descriptor instead.
 func (*QuestionOption) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{55}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *QuestionOption) GetLabel() string {
@@ -4918,7 +4975,7 @@ type Question struct {
 
 func (x *Question) Reset() {
 	*x = Question{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4930,7 +4987,7 @@ func (x *Question) String() string {
 func (*Question) ProtoMessage() {}
 
 func (x *Question) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4943,7 +5000,7 @@ func (x *Question) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Question.ProtoReflect.Descriptor instead.
 func (*Question) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{56}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *Question) GetQuestion() string {
@@ -4986,7 +5043,7 @@ type AskUserQuestionInput struct {
 
 func (x *AskUserQuestionInput) Reset() {
 	*x = AskUserQuestionInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4998,7 +5055,7 @@ func (x *AskUserQuestionInput) String() string {
 func (*AskUserQuestionInput) ProtoMessage() {}
 
 func (x *AskUserQuestionInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5011,7 +5068,7 @@ func (x *AskUserQuestionInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskUserQuestionInput.ProtoReflect.Descriptor instead.
 func (*AskUserQuestionInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{57}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *AskUserQuestionInput) GetQuestions() []*Question {
@@ -5052,7 +5109,7 @@ type ConfigInput struct {
 
 func (x *ConfigInput) Reset() {
 	*x = ConfigInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5064,7 +5121,7 @@ func (x *ConfigInput) String() string {
 func (*ConfigInput) ProtoMessage() {}
 
 func (x *ConfigInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5077,7 +5134,7 @@ func (x *ConfigInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigInput.ProtoReflect.Descriptor instead.
 func (*ConfigInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{58}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *ConfigInput) GetSetting() string {
@@ -5104,7 +5161,7 @@ type ExitPlanModeInput struct {
 
 func (x *ExitPlanModeInput) Reset() {
 	*x = ExitPlanModeInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5116,7 +5173,7 @@ func (x *ExitPlanModeInput) String() string {
 func (*ExitPlanModeInput) ProtoMessage() {}
 
 func (x *ExitPlanModeInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5129,7 +5186,7 @@ func (x *ExitPlanModeInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExitPlanModeInput.ProtoReflect.Descriptor instead.
 func (*ExitPlanModeInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{59}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ExitPlanModeInput) GetPlan() string {
@@ -5155,7 +5212,7 @@ type McpInput struct {
 
 func (x *McpInput) Reset() {
 	*x = McpInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5167,7 +5224,7 @@ func (x *McpInput) String() string {
 func (*McpInput) ProtoMessage() {}
 
 func (x *McpInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5180,7 +5237,7 @@ func (x *McpInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpInput.ProtoReflect.Descriptor instead.
 func (*McpInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{60}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *McpInput) GetInput() *structpb.Struct {
@@ -5199,7 +5256,7 @@ type ListMcpResourcesInput struct {
 
 func (x *ListMcpResourcesInput) Reset() {
 	*x = ListMcpResourcesInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[61]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5211,7 +5268,7 @@ func (x *ListMcpResourcesInput) String() string {
 func (*ListMcpResourcesInput) ProtoMessage() {}
 
 func (x *ListMcpResourcesInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[61]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5224,7 +5281,7 @@ func (x *ListMcpResourcesInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMcpResourcesInput.ProtoReflect.Descriptor instead.
 func (*ListMcpResourcesInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{61}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ListMcpResourcesInput) GetServer() string {
@@ -5244,7 +5301,7 @@ type ReadMcpResourceInput struct {
 
 func (x *ReadMcpResourceInput) Reset() {
 	*x = ReadMcpResourceInput{}
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[62]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5256,7 +5313,7 @@ func (x *ReadMcpResourceInput) String() string {
 func (*ReadMcpResourceInput) ProtoMessage() {}
 
 func (x *ReadMcpResourceInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_tools_proto_msgTypes[62]
+	mi := &file_agentshim_data_v1_tools_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5269,7 +5326,7 @@ func (x *ReadMcpResourceInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadMcpResourceInput.ProtoReflect.Descriptor instead.
 func (*ReadMcpResourceInput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{62}
+	return file_agentshim_data_v1_tools_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ReadMcpResourceInput) GetServer() string {
@@ -5535,12 +5592,15 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x120\n" +
 	"\x14total_deferred_tools\x18\x03 \x01(\x03R\x12totalDeferredTools\"?\n" +
 	"\x10TaskCreateResult\x12+\n" +
-	"\x04task\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04task\"\xc6\x01\n" +
+	"\x04task\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04task\"6\n" +
+	"\x10TaskStatusChange\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\"\xb6\x01\n" +
 	"\x10TaskUpdateResult\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12<\n" +
-	"\rstatus_change\x18\x02 \x01(\v2\x17.google.protobuf.StructR\fstatusChange\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\x12A\n" +
-	"\x0eupdated_fields\x18\x04 \x01(\v2\x1a.google.protobuf.ListValueR\rupdatedFields\"B\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12H\n" +
+	"\rstatus_change\x18\x02 \x01(\v2#.agentshim.data.v1.TaskStatusChangeR\fstatusChange\x12\x18\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\x12%\n" +
+	"\x0eupdated_fields\x18\x04 \x03(\tR\rupdatedFields\"B\n" +
 	"\x0eTaskListResult\x120\n" +
 	"\x05tasks\x18\x01 \x01(\v2\x1a.google.protobuf.ListValueR\x05tasks\"\x9c\x01\n" +
 	"\x11SendMessageResult\x12\x18\n" +
@@ -5730,7 +5790,7 @@ func file_agentshim_data_v1_tools_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_data_v1_tools_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_agentshim_data_v1_tools_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
+var file_agentshim_data_v1_tools_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_agentshim_data_v1_tools_proto_goTypes = []any{
 	(RawTaskStatus)(0),            // 0: agentshim.data.v1.RawTaskStatus
 	(RetrievalStatus)(0),          // 1: agentshim.data.v1.RetrievalStatus
@@ -5767,38 +5827,39 @@ var file_agentshim_data_v1_tools_proto_goTypes = []any{
 	(*SkillResult)(nil),           // 32: agentshim.data.v1.SkillResult
 	(*ToolSearchResult)(nil),      // 33: agentshim.data.v1.ToolSearchResult
 	(*TaskCreateResult)(nil),      // 34: agentshim.data.v1.TaskCreateResult
-	(*TaskUpdateResult)(nil),      // 35: agentshim.data.v1.TaskUpdateResult
-	(*TaskListResult)(nil),        // 36: agentshim.data.v1.TaskListResult
-	(*SendMessageResult)(nil),     // 37: agentshim.data.v1.SendMessageResult
-	(*WebFetchResult)(nil),        // 38: agentshim.data.v1.WebFetchResult
-	(*WebSearchResult)(nil),       // 39: agentshim.data.v1.WebSearchResult
-	(*AskUserQuestionResult)(nil), // 40: agentshim.data.v1.AskUserQuestionResult
-	(*ScheduleWakeupResult)(nil),  // 41: agentshim.data.v1.ScheduleWakeupResult
-	(*ToolInput)(nil),             // 42: agentshim.data.v1.ToolInput
-	(*AgentInput)(nil),            // 43: agentshim.data.v1.AgentInput
-	(*BashInput)(nil),             // 44: agentshim.data.v1.BashInput
-	(*TaskOutputInput)(nil),       // 45: agentshim.data.v1.TaskOutputInput
-	(*KillShellInput)(nil),        // 46: agentshim.data.v1.KillShellInput
-	(*FileEditInput)(nil),         // 47: agentshim.data.v1.FileEditInput
-	(*FileReadInput)(nil),         // 48: agentshim.data.v1.FileReadInput
-	(*FileWriteInput)(nil),        // 49: agentshim.data.v1.FileWriteInput
-	(*GlobInput)(nil),             // 50: agentshim.data.v1.GlobInput
-	(*GrepInput)(nil),             // 51: agentshim.data.v1.GrepInput
-	(*NotebookEditInput)(nil),     // 52: agentshim.data.v1.NotebookEditInput
-	(*TodoItem)(nil),              // 53: agentshim.data.v1.TodoItem
-	(*TodoWriteInput)(nil),        // 54: agentshim.data.v1.TodoWriteInput
-	(*WebFetchInput)(nil),         // 55: agentshim.data.v1.WebFetchInput
-	(*WebSearchInput)(nil),        // 56: agentshim.data.v1.WebSearchInput
-	(*QuestionOption)(nil),        // 57: agentshim.data.v1.QuestionOption
-	(*Question)(nil),              // 58: agentshim.data.v1.Question
-	(*AskUserQuestionInput)(nil),  // 59: agentshim.data.v1.AskUserQuestionInput
-	(*ConfigInput)(nil),           // 60: agentshim.data.v1.ConfigInput
-	(*ExitPlanModeInput)(nil),     // 61: agentshim.data.v1.ExitPlanModeInput
-	(*McpInput)(nil),              // 62: agentshim.data.v1.McpInput
-	(*ListMcpResourcesInput)(nil), // 63: agentshim.data.v1.ListMcpResourcesInput
-	(*ReadMcpResourceInput)(nil),  // 64: agentshim.data.v1.ReadMcpResourceInput
-	(*structpb.Struct)(nil),       // 65: google.protobuf.Struct
-	(*structpb.ListValue)(nil),    // 66: google.protobuf.ListValue
+	(*TaskStatusChange)(nil),      // 35: agentshim.data.v1.TaskStatusChange
+	(*TaskUpdateResult)(nil),      // 36: agentshim.data.v1.TaskUpdateResult
+	(*TaskListResult)(nil),        // 37: agentshim.data.v1.TaskListResult
+	(*SendMessageResult)(nil),     // 38: agentshim.data.v1.SendMessageResult
+	(*WebFetchResult)(nil),        // 39: agentshim.data.v1.WebFetchResult
+	(*WebSearchResult)(nil),       // 40: agentshim.data.v1.WebSearchResult
+	(*AskUserQuestionResult)(nil), // 41: agentshim.data.v1.AskUserQuestionResult
+	(*ScheduleWakeupResult)(nil),  // 42: agentshim.data.v1.ScheduleWakeupResult
+	(*ToolInput)(nil),             // 43: agentshim.data.v1.ToolInput
+	(*AgentInput)(nil),            // 44: agentshim.data.v1.AgentInput
+	(*BashInput)(nil),             // 45: agentshim.data.v1.BashInput
+	(*TaskOutputInput)(nil),       // 46: agentshim.data.v1.TaskOutputInput
+	(*KillShellInput)(nil),        // 47: agentshim.data.v1.KillShellInput
+	(*FileEditInput)(nil),         // 48: agentshim.data.v1.FileEditInput
+	(*FileReadInput)(nil),         // 49: agentshim.data.v1.FileReadInput
+	(*FileWriteInput)(nil),        // 50: agentshim.data.v1.FileWriteInput
+	(*GlobInput)(nil),             // 51: agentshim.data.v1.GlobInput
+	(*GrepInput)(nil),             // 52: agentshim.data.v1.GrepInput
+	(*NotebookEditInput)(nil),     // 53: agentshim.data.v1.NotebookEditInput
+	(*TodoItem)(nil),              // 54: agentshim.data.v1.TodoItem
+	(*TodoWriteInput)(nil),        // 55: agentshim.data.v1.TodoWriteInput
+	(*WebFetchInput)(nil),         // 56: agentshim.data.v1.WebFetchInput
+	(*WebSearchInput)(nil),        // 57: agentshim.data.v1.WebSearchInput
+	(*QuestionOption)(nil),        // 58: agentshim.data.v1.QuestionOption
+	(*Question)(nil),              // 59: agentshim.data.v1.Question
+	(*AskUserQuestionInput)(nil),  // 60: agentshim.data.v1.AskUserQuestionInput
+	(*ConfigInput)(nil),           // 61: agentshim.data.v1.ConfigInput
+	(*ExitPlanModeInput)(nil),     // 62: agentshim.data.v1.ExitPlanModeInput
+	(*McpInput)(nil),              // 63: agentshim.data.v1.McpInput
+	(*ListMcpResourcesInput)(nil), // 64: agentshim.data.v1.ListMcpResourcesInput
+	(*ReadMcpResourceInput)(nil),  // 65: agentshim.data.v1.ReadMcpResourceInput
+	(*structpb.Struct)(nil),       // 66: google.protobuf.Struct
+	(*structpb.ListValue)(nil),    // 67: google.protobuf.ListValue
 }
 var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	5,  // 0: agentshim.data.v1.ContentBlock.text:type_name -> agentshim.data.v1.TextBlock
@@ -5810,23 +5871,23 @@ var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	4,  // 6: agentshim.data.v1.ContentBlock.fallback:type_name -> agentshim.data.v1.FallbackBlock
 	3,  // 7: agentshim.data.v1.FallbackBlock.from:type_name -> agentshim.data.v1.FallbackModelRef
 	3,  // 8: agentshim.data.v1.FallbackBlock.to:type_name -> agentshim.data.v1.FallbackModelRef
-	65, // 9: agentshim.data.v1.ToolUseBlock.input:type_name -> google.protobuf.Struct
+	66, // 9: agentshim.data.v1.ToolUseBlock.input:type_name -> google.protobuf.Struct
 	7,  // 10: agentshim.data.v1.ToolUseBlock.caller:type_name -> agentshim.data.v1.Caller
 	10, // 11: agentshim.data.v1.ToolResultBlock.content_blocks:type_name -> agentshim.data.v1.ToolResultBlockList
 	2,  // 12: agentshim.data.v1.ToolResultBlockList.blocks:type_name -> agentshim.data.v1.ContentBlock
 	11, // 13: agentshim.data.v1.ImageBlock.source:type_name -> agentshim.data.v1.ImageSource
-	65, // 14: agentshim.data.v1.ToolReferenceBlock.reference:type_name -> google.protobuf.Struct
+	66, // 14: agentshim.data.v1.ToolReferenceBlock.reference:type_name -> google.protobuf.Struct
 	15, // 15: agentshim.data.v1.ApiUserMessage.content_blocks:type_name -> agentshim.data.v1.ApiContentBlocks
 	2,  // 16: agentshim.data.v1.ApiContentBlocks.blocks:type_name -> agentshim.data.v1.ContentBlock
 	2,  // 17: agentshim.data.v1.ApiAssistantMessage.content:type_name -> agentshim.data.v1.ContentBlock
-	65, // 18: agentshim.data.v1.ApiAssistantMessage.stop_details:type_name -> google.protobuf.Struct
+	66, // 18: agentshim.data.v1.ApiAssistantMessage.stop_details:type_name -> google.protobuf.Struct
 	17, // 19: agentshim.data.v1.ApiAssistantMessage.usage:type_name -> agentshim.data.v1.ApiUsage
-	65, // 20: agentshim.data.v1.ApiAssistantMessage.diagnostics:type_name -> google.protobuf.Struct
-	65, // 21: agentshim.data.v1.ApiAssistantMessage.context_management:type_name -> google.protobuf.Struct
-	65, // 22: agentshim.data.v1.ApiAssistantMessage.container:type_name -> google.protobuf.Struct
-	65, // 23: agentshim.data.v1.ApiUsage.cache_creation:type_name -> google.protobuf.Struct
-	65, // 24: agentshim.data.v1.ApiUsage.server_tool_use:type_name -> google.protobuf.Struct
-	66, // 25: agentshim.data.v1.ApiUsage.iterations:type_name -> google.protobuf.ListValue
+	66, // 20: agentshim.data.v1.ApiAssistantMessage.diagnostics:type_name -> google.protobuf.Struct
+	66, // 21: agentshim.data.v1.ApiAssistantMessage.context_management:type_name -> google.protobuf.Struct
+	66, // 22: agentshim.data.v1.ApiAssistantMessage.container:type_name -> google.protobuf.Struct
+	66, // 23: agentshim.data.v1.ApiUsage.cache_creation:type_name -> google.protobuf.Struct
+	66, // 24: agentshim.data.v1.ApiUsage.server_tool_use:type_name -> google.protobuf.Struct
+	67, // 25: agentshim.data.v1.ApiUsage.iterations:type_name -> google.protobuf.ListValue
 	19, // 26: agentshim.data.v1.ToolUseResult.bash:type_name -> agentshim.data.v1.BashResult
 	21, // 27: agentshim.data.v1.ToolUseResult.agent:type_name -> agentshim.data.v1.AgentResult
 	22, // 28: agentshim.data.v1.ToolUseResult.agent_async_launch:type_name -> agentshim.data.v1.AgentAsyncLaunch
@@ -5840,14 +5901,14 @@ var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	32, // 36: agentshim.data.v1.ToolUseResult.skill:type_name -> agentshim.data.v1.SkillResult
 	33, // 37: agentshim.data.v1.ToolUseResult.tool_search:type_name -> agentshim.data.v1.ToolSearchResult
 	34, // 38: agentshim.data.v1.ToolUseResult.task_create:type_name -> agentshim.data.v1.TaskCreateResult
-	35, // 39: agentshim.data.v1.ToolUseResult.task_update:type_name -> agentshim.data.v1.TaskUpdateResult
-	36, // 40: agentshim.data.v1.ToolUseResult.task_list:type_name -> agentshim.data.v1.TaskListResult
-	37, // 41: agentshim.data.v1.ToolUseResult.send_message:type_name -> agentshim.data.v1.SendMessageResult
-	38, // 42: agentshim.data.v1.ToolUseResult.web_fetch:type_name -> agentshim.data.v1.WebFetchResult
-	39, // 43: agentshim.data.v1.ToolUseResult.web_search:type_name -> agentshim.data.v1.WebSearchResult
-	40, // 44: agentshim.data.v1.ToolUseResult.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionResult
-	41, // 45: agentshim.data.v1.ToolUseResult.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupResult
-	65, // 46: agentshim.data.v1.ToolUseResult.unclassified:type_name -> google.protobuf.Struct
+	36, // 39: agentshim.data.v1.ToolUseResult.task_update:type_name -> agentshim.data.v1.TaskUpdateResult
+	37, // 40: agentshim.data.v1.ToolUseResult.task_list:type_name -> agentshim.data.v1.TaskListResult
+	38, // 41: agentshim.data.v1.ToolUseResult.send_message:type_name -> agentshim.data.v1.SendMessageResult
+	39, // 42: agentshim.data.v1.ToolUseResult.web_fetch:type_name -> agentshim.data.v1.WebFetchResult
+	40, // 43: agentshim.data.v1.ToolUseResult.web_search:type_name -> agentshim.data.v1.WebSearchResult
+	41, // 44: agentshim.data.v1.ToolUseResult.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionResult
+	42, // 45: agentshim.data.v1.ToolUseResult.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupResult
+	66, // 46: agentshim.data.v1.ToolUseResult.unclassified:type_name -> google.protobuf.Struct
 	0,  // 47: agentshim.data.v1.AgentResult.status:type_name -> agentshim.data.v1.RawTaskStatus
 	2,  // 48: agentshim.data.v1.AgentResult.content:type_name -> agentshim.data.v1.ContentBlock
 	17, // 49: agentshim.data.v1.AgentResult.usage:type_name -> agentshim.data.v1.ApiUsage
@@ -5859,50 +5920,49 @@ var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	23, // 55: agentshim.data.v1.TaskOutputResult.local_bash:type_name -> agentshim.data.v1.LocalBashTask
 	24, // 56: agentshim.data.v1.TaskOutputResult.local_agent:type_name -> agentshim.data.v1.LocalAgentTask
 	0,  // 57: agentshim.data.v1.WorkflowLaunchResult.status:type_name -> agentshim.data.v1.RawTaskStatus
-	65, // 58: agentshim.data.v1.ReadResult.file:type_name -> google.protobuf.Struct
-	66, // 59: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.ListValue
-	66, // 60: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.ListValue
-	65, // 61: agentshim.data.v1.TaskCreateResult.task:type_name -> google.protobuf.Struct
-	65, // 62: agentshim.data.v1.TaskUpdateResult.status_change:type_name -> google.protobuf.Struct
-	66, // 63: agentshim.data.v1.TaskUpdateResult.updated_fields:type_name -> google.protobuf.ListValue
-	66, // 64: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.ListValue
-	65, // 65: agentshim.data.v1.SendMessageResult.pin:type_name -> google.protobuf.Struct
-	66, // 66: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.ListValue
-	58, // 67: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> agentshim.data.v1.Question
-	65, // 68: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
-	65, // 69: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
-	43, // 70: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
-	44, // 71: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
-	45, // 72: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
-	46, // 73: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
-	47, // 74: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
-	48, // 75: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
-	49, // 76: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
-	50, // 77: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
-	51, // 78: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
-	52, // 79: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
-	54, // 80: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
-	55, // 81: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
-	56, // 82: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
-	59, // 83: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
-	60, // 84: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
-	61, // 85: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
-	62, // 86: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
-	63, // 87: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
-	64, // 88: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
-	65, // 89: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
-	53, // 90: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
-	57, // 91: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
-	58, // 92: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
-	65, // 93: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
-	65, // 94: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
-	65, // 95: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
-	65, // 96: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
-	97, // [97:97] is the sub-list for method output_type
-	97, // [97:97] is the sub-list for method input_type
-	97, // [97:97] is the sub-list for extension type_name
-	97, // [97:97] is the sub-list for extension extendee
-	0,  // [0:97] is the sub-list for field type_name
+	66, // 58: agentshim.data.v1.ReadResult.file:type_name -> google.protobuf.Struct
+	67, // 59: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.ListValue
+	67, // 60: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.ListValue
+	66, // 61: agentshim.data.v1.TaskCreateResult.task:type_name -> google.protobuf.Struct
+	35, // 62: agentshim.data.v1.TaskUpdateResult.status_change:type_name -> agentshim.data.v1.TaskStatusChange
+	67, // 63: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.ListValue
+	66, // 64: agentshim.data.v1.SendMessageResult.pin:type_name -> google.protobuf.Struct
+	67, // 65: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.ListValue
+	59, // 66: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> agentshim.data.v1.Question
+	66, // 67: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
+	66, // 68: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
+	44, // 69: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
+	45, // 70: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
+	46, // 71: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
+	47, // 72: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
+	48, // 73: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
+	49, // 74: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
+	50, // 75: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
+	51, // 76: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
+	52, // 77: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
+	53, // 78: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
+	55, // 79: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
+	56, // 80: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
+	57, // 81: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
+	60, // 82: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
+	61, // 83: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
+	62, // 84: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
+	63, // 85: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
+	64, // 86: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
+	65, // 87: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
+	66, // 88: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
+	54, // 89: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
+	58, // 90: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
+	59, // 91: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
+	66, // 92: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
+	66, // 93: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
+	66, // 94: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
+	66, // 95: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
+	96, // [96:96] is the sub-list for method output_type
+	96, // [96:96] is the sub-list for method input_type
+	96, // [96:96] is the sub-list for extension type_name
+	96, // [96:96] is the sub-list for extension extendee
+	0,  // [0:96] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_tools_proto_init() }
@@ -5955,7 +6015,7 @@ func file_agentshim_data_v1_tools_proto_init() {
 		(*TaskOutputResult_LocalBash)(nil),
 		(*TaskOutputResult_LocalAgent)(nil),
 	}
-	file_agentshim_data_v1_tools_proto_msgTypes[40].OneofWrappers = []any{
+	file_agentshim_data_v1_tools_proto_msgTypes[41].OneofWrappers = []any{
 		(*ToolInput_Agent)(nil),
 		(*ToolInput_Bash)(nil),
 		(*ToolInput_TaskOutput)(nil),
@@ -5983,7 +6043,7 @@ func file_agentshim_data_v1_tools_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_data_v1_tools_proto_rawDesc), len(file_agentshim_data_v1_tools_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   63,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -355,13 +355,23 @@ message TaskCreateResult {
   google.protobuf.Struct task = 1;
 }
 
+// The status transition a TaskUpdate reports. Both ends are the harness's raw
+// task-status vocabulary as free strings (NOT RawTaskStatus): the corpus shows
+// "pending"/"in_progress", which are the TODO-list states, not the detached-task
+// lifecycle RawTaskStatus enumerates. Corpus: tool-results/task_update.jsonl.
+message TaskStatusChange {
+  string from = 1;
+  string to = 2;
+}
+
 message TaskUpdateResult {
   string task_id = 1;
-  // Object {from,to}; corpus: tool-results/task_update.jsonl.
-  google.protobuf.Struct status_change = 2;
+  // The {from,to} transition; corpus: tool-results/task_update.jsonl.
+  TaskStatusChange status_change = 2;
   bool success = 3;
-  // Array of changed field names; corpus: tool-results/task_update.jsonl.
-  google.protobuf.ListValue updated_fields = 4;
+  // Names of the task fields this update changed, e.g. ["status"]; corpus:
+  // tool-results/task_update.jsonl.
+  repeated string updated_fields = 4;
 }
 
 message TaskListResult {
