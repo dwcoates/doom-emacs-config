@@ -29,7 +29,9 @@ import (
 	"claude-repld/internal/replog"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/stateroot"
 )
@@ -238,6 +240,25 @@ func main() {
 	}
 	defer ssmMgr.Close()
 
+	// Shims dial US. One listening socket serves every session; each shim
+	// announces itself with its ShimHello and the listener routes the
+	// connection to the driver that owns that session. Started BEFORE any
+	// session is brought up so a shim surviving a previous daemon has
+	// somewhere to reconnect to the instant this one boots.
+	shimSocketPath, err := shimlisten.DefaultSocketPath()
+	if err != nil {
+		log.Fatalf("claude-repld: resolve shim socket path: %v", err)
+	}
+	shimListener := shimlisten.New(log.Printf)
+	if err := shimListener.Listen(shimSocketPath); err != nil {
+		log.Fatalf("claude-repld: listen for shims: %v", err)
+	}
+	defer shimListener.Close()
+	// The shim takes its session lock here; it must exist before any spawn.
+	if err := sessionlock.EnsureDir(); err != nil {
+		log.Fatalf("claude-repld: create session lock dir: %v", err)
+	}
+
 	// The per-session shim-driver consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
 	// frontend.Server) does not exist until WireAgentShim returns, so it pushes
@@ -247,14 +268,14 @@ func main() {
 	// exec stays here (main owns node/shim paths); production omits
 	// --store-socket so the shim defaults to the launchd singleton store. The
 	// returned stop func SIGTERMs the shim on hibernation.
-	udsSpawn := func(sessionID string, opts server.CreateOpts, socketPath string) (func() error, error) {
-		argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, socketPath)
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+		argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, shimSocketPath)
 		if *claudeBin != "" {
 			argv = append(argv, "--claude-bin", *claudeBin)
 		}
 		done := dlog.Call(log.Printf, "uds shim spawn",
 			"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
-			"config_dir", opts.ConfigDir, "socket", socketPath)
+			"config_dir", opts.ConfigDir, "daemon_socket", shimSocketPath)
 		proc, spawnErr := shim.Spawn(shim.Options{
 			Argv:     argv,
 			Dir:      opts.CWD,
@@ -283,7 +304,8 @@ func main() {
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:            forwarder,
 		SSM:             ssmMgr,
-		Spawner:         server.NewShimSpawner(sessionRegistry, nil, udsSpawn, log.Printf),
+		Spawner:         server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
+		Source:          &server.ShimConnSource{Listener: shimListener},
 		Locator:         &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
 		Registrar:       server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf},

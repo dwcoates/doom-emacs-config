@@ -12,14 +12,19 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimlisten"
 )
 
 // SessionLocator resolves a workspace to the newest non-terminal session bound
@@ -61,66 +66,102 @@ func (l *SessionLocator) Locate(workspace string) (string, bool) {
 	return bestID, found
 }
 
-// ReattachProbe answers the spawn-vs-reattach question for a session socket
-// (defaults to ReattachDecision). Injected so ShimSpawner is unit-testable
-// without a real UDS listener.
-type ReattachProbe func(ctx context.Context, socketPath string) (bool, error)
+// ShimConnSource adapts the shim listener to shimclient.ConnSource, splitting
+// the listener's (conn, hello) pair into the two values the client takes.
+type ShimConnSource struct {
+	// Listener is the daemon's shim listener (required).
+	Listener *shimlisten.Server
+}
 
-// ShimSpawnFunc execs a fresh UDS-mode shim for sessionID, told to listen on
-// socketPath and to write its events to the shim-store. The exec itself stays
-// in main (which owns node/shim paths and the store socket); ShimSpawner only
-// decides WHEN to call it. It returns a stop func that terminates the launched
-// shim cleanly (SIGTERM) — the daemon uses it to hibernate the child — or nil
-// when there is nothing to stop (a reattached, daemon-external shim).
-type ShimSpawnFunc func(sessionID string, opts CreateOpts, socketPath string) (stop func() error, err error)
+var _ shimclient.ConnSource = (*ShimConnSource)(nil)
 
-// ShimSpawner makes a session's UDS shim reachable at its socket: it reattaches
-// to a live shim (the shim outlives a dead daemon, §4.4) or spawns a fresh one,
-// resolving the spawn's CreateOpts from the session's registry record. It
-// tracks the stop func of every shim IT spawned so StopShim can SIGTERM it on
-// hibernation. It implements sessiondrv.Spawner.
+// Next blocks until sessionID's shim connects, then yields its connection and
+// the ShimHello that identified it.
+func (s *ShimConnSource) Next(ctx context.Context, sessionID string) (net.Conn, *corev1.ShimHello, error) {
+	if s.Listener == nil {
+		return nil, nil, fmt.Errorf("server: ShimConnSource has no listener")
+	}
+	c, err := s.Listener.Next(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.Net, c.Hello, nil
+}
+
+// ConnectedFunc reports whether a shim for sessionID has already dialled in.
+// Backed by the shim listener; injected so ShimSpawner is unit-testable
+// without a real socket.
+type ConnectedFunc func(sessionID string) bool
+
+// ShimSpawnFunc execs a fresh shim for sessionID, told which daemon socket to
+// dial and where to write its events. The exec itself stays in main (which
+// owns node/shim/store paths); ShimSpawner only decides WHEN to call it. It
+// returns a stop func that terminates the launched shim cleanly (SIGTERM) —
+// the daemon uses it to hibernate the child — or nil when there is nothing to
+// stop (a shim that outlived a prior daemon and dialled back in).
+type ShimSpawnFunc func(sessionID string, opts CreateOpts) (stop func() error, err error)
+
+// ShimSpawner keeps exactly one shim alive per session: it leaves an existing
+// one alone (whether it is connected or merely holding its session lock, §4.4)
+// or spawns a fresh one, resolving the spawn's CreateOpts from the session's
+// registry record. It tracks the stop func of every shim IT spawned so
+// StopShim can SIGTERM it on hibernation. It implements sessiondrv.Spawner.
 type ShimSpawner struct {
-	reg   *registry.Registry
-	probe ReattachProbe
-	spawn ShimSpawnFunc
-	logf  func(string, ...any)
+	reg       *registry.Registry
+	connected ConnectedFunc
+	spawn     ShimSpawnFunc
+	logf      func(string, ...any)
 
 	mu    sync.Mutex
 	stops map[string]func() error // session id -> stop the shim WE spawned
 }
 
-// NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil probe
-// defaults to ReattachDecision, a nil logf discards.
-func NewShimSpawner(reg *registry.Registry, probe ReattachProbe, spawn ShimSpawnFunc, logf func(string, ...any)) *ShimSpawner {
-	if probe == nil {
-		probe = ReattachDecision
-	}
+// NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
+// connected reports nothing connected, a nil logf discards.
+func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, spawn ShimSpawnFunc, logf func(string, ...any)) *ShimSpawner {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &ShimSpawner{reg: reg, probe: probe, spawn: spawn, logf: logf, stops: map[string]func() error{}}
+	return &ShimSpawner{reg: reg, connected: connected, spawn: spawn, logf: logf, stops: map[string]func() error{}}
 }
 
-// EnsureShim reattaches to a live shim at socketPath or spawns a fresh one.
-// The reattach probe distinguishes "a live shim is listening" (reattach, no
-// spawn) from "no listener" (spawn). A probe error (a socket answered by
-// something that is not a healthy shim) is surfaced, never papered over into a
-// silent respawn. A spawn with no registry record is a loud error: the driver
-// has no CreateOpts to reconstruct the session from.
-func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID, socketPath string) error {
+// EnsureShim makes sure exactly one shim is alive for sessionID, spawning one
+// only when none is.
+//
+// "Is a shim alive?" is answered by two things, because neither alone is
+// enough:
+//
+//   - the LISTENER, for a shim that has already dialled in; and
+//   - the session LOCK, for one that is alive but has not dialled in yet.
+//
+// The lock is what covers a daemon restart. A surviving shim reconnects on its
+// own schedule, so immediately after boot the listener legitimately answers
+// "not connected" for a session whose shim is alive and mid-turn. Spawning
+// then would put two shims on one conversation — two writers on one
+// transcript. The lock is held by the shim process itself and released by the
+// kernel when it dies, so it answers correctly during that window.
+//
+// A lock held with nothing dialled in is NOT a spawn: it is a shim that is
+// alive but not talking, which is a bug to surface rather than a state to
+// paper over. Spawning a second one is the exact duplicate this prevents, and
+// killing the holder would destroy the in-flight turn §4.4 protects.
+func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) error {
 	if s.reg == nil {
 		return fmt.Errorf("server: ShimSpawner has no registry; cannot resolve session %s", sessionID)
 	}
 	if s.spawn == nil {
 		return fmt.Errorf("server: ShimSpawner has no spawn func; cannot bring up session %s", sessionID)
 	}
-	reattach, err := s.probe(ctx, socketPath)
-	if err != nil {
-		return fmt.Errorf("server: reattach probe for session %s at %s: %w", sessionID, socketPath, err)
-	}
-	if reattach {
-		s.logf("server: session %s: reattaching to live shim at %s (no spawn)", sessionID, socketPath)
+	if s.connected != nil && s.connected(sessionID) {
+		s.logf("server: session %s: shim already connected (no spawn)", sessionID)
 		return nil
+	}
+	held, err := sessionlock.Held(sessionID)
+	if err != nil {
+		return fmt.Errorf("server: session %s: cannot determine whether a shim holds its lock: %w", sessionID, err)
+	}
+	if held {
+		return fmt.Errorf("server: session %s: a shim holds the session lock but has not connected — refusing to spawn a duplicate; the holder is alive and may be mid-turn", sessionID)
 	}
 	rec, ok := s.reg.Get(sessionID)
 	if !ok {
@@ -133,8 +174,8 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID, socketPath stri
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
 	}
-	s.logf("server: session %s: no live shim at %s — spawning fresh UDS shim (resume=%q)", sessionID, socketPath, rec.ClaudeSessionID)
-	stop, err := s.spawn(sessionID, opts, socketPath)
+	s.logf("server: session %s: no live shim — spawning fresh UDS shim (resume=%q)", sessionID, rec.ClaudeSessionID)
+	stop, err := s.spawn(sessionID, opts)
 	if err != nil {
 		return err
 	}
