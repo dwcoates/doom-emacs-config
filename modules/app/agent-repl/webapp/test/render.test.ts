@@ -6292,3 +6292,25 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(2);
   });
 });
+
+describe("a heartbeat alone puts elapsed on a plain running tool (MEDIUM)", () => {
+  it("renders the elapsed element for a running tool whose only signal is a heartbeat", () => {
+    // Arrange — a slow Bash still in flight: no result, no async source, no
+    // spawned tasks, no children, no tail. Only HeartbeatProgress's elapsed,
+    // which is exactly the case the heartbeat was added for.
+    const item = { ...tool(), progressElapsedS: 7 } as ConversationItem;
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain("face-elapsed");
+    expect(html).toContain("7s");
+  });
+
+  it("renders no elapsed element for the same tool without a heartbeat", () => {
+    // Arrange / Act — the contrast case, so the assertion above cannot pass
+    // for some unrelated reason.
+    const html = renderItem(tool());
+    // Assert
+    expect(html).not.toContain("face-elapsed");
+  });
+});

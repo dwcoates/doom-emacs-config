@@ -152,7 +152,14 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
   const tail =
     item.taskOutput !== undefined && item.taskOutput !== "" ? item.taskOutput : polled?.text ?? "";
 
-  if (!source && taskIds.length === 0 && children.length === 0 && tail === "") {
+  // A HEARTBEAT ALONE is enough to resolve a member. The other four signals all
+  // describe a DETACHED stream (a source, spawned tasks, children, a tail), and
+  // a plain long-running tool — a slow Bash, a big Read — has none of them. It
+  // does have an elapsed clock, fed by HeartbeatProgress, and returning null
+  // here dropped the only member the renderer's faceSide reads, so that clock
+  // never reached the DOM for exactly the calls it was added for.
+  const heartbeat = item.progressElapsedS !== undefined;
+  if (!source && taskIds.length === 0 && children.length === 0 && tail === "" && !heartbeat) {
     return null;
   }
 

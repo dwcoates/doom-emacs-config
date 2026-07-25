@@ -349,3 +349,40 @@ describe("livePollSourceIds", () => {
     expect(livePollSourceIds(watchers, ctx())).toEqual(new Set(["ag1"]));
   });
 });
+
+describe("a heartbeat alone (MEDIUM: the plain long-running tool)", () => {
+  it("resolves a member for a tool with nothing detached but a heartbeat", () => {
+    // Arrange — a slow Bash: no async source, no spawned task ids, no
+    // children, no tail. Only the elapsed clock HeartbeatProgress feeds.
+    const item = tool({ progressElapsedS: 7 });
+    // Act
+    const m = resolveMember(item, ctx());
+    // Assert
+    expect(m).not.toBeNull();
+    expect(m?.elapsedMs).toBe(7000);
+  });
+
+  it("still resolves nothing for a tool with no heartbeat and nothing detached", () => {
+    // Arrange / Act — the null case must stay null, or every plain tool call
+    // grows a member it has nothing to put in.
+    const m = resolveMember(tool(), ctx());
+    // Assert
+    expect(m).toBeNull();
+  });
+
+  it("keeps the polled elapsed ahead of the heartbeat's when both exist", () => {
+    // Arrange — the poll is live, the heartbeat is a frozen fallback.
+    const item = tool({
+      result: SPAWN_RESULT,
+      progressElapsedS: 2,
+      asyncSource: { source_id: "bg1", kind: "shell", status: "running" },
+    });
+    // Act
+    const m = resolveMember(
+      item,
+      ctx({ tails: { bg1: { text: "x", offset: 1, done: false, elapsedMs: 9000 } } }),
+    );
+    // Assert
+    expect(m?.elapsedMs).toBe(9000);
+  });
+});
