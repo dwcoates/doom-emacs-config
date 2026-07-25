@@ -191,6 +191,24 @@ func (r RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID str
 	}
 }
 
+// QueuedPromptsChanged persists the prompts the daemon is currently holding for
+// sessionID (E4). Same loud-on-failure contract as above: these are things the
+// user typed that the agent has not seen, so losing the record silently is the
+// one outcome that must not happen.
+func (r RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {
+	if r.Reg == nil {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) { rec.QueuedPrompts = queued })
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry queued_prompts write FAILED — held prompts will not survive a restart: %v", sessionID, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: queued_prompts write found no record (never registered)", sessionID)
+	}
+}
+
 // PushForwarder is the late-bound bridge from the driver's per-session sinks to
 // the frontend.Server. The driver is constructed BEFORE the Server (the Server
 // is what WireAgentShim returns, and the driver is one of its command
@@ -268,4 +286,12 @@ func (f *PushForwarder) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 		return
 	}
 	f.logMiss("heartbeat-view")
+}
+
+func (f *PushForwarder) PushQueueView(q *frontendv1.QueueView) {
+	if s := f.target.Load(); s != nil {
+		s.PushQueueView(q)
+		return
+	}
+	f.logMiss("queue-view")
 }

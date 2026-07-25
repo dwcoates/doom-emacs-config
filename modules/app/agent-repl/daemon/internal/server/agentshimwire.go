@@ -39,6 +39,10 @@ type AgentShimConfig struct {
 	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
 	// leaves snapshot.inits empty. Satisfied by *sessiondrv.Manager.
 	Inits SessionInitSource
+	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
+	// half and the snapshot half. Nil makes each queue command a loud failing
+	// ack and leaves snapshot.queues empty.
+	Queues QueueBackend
 	// SessionCommands is the late-bound daemon-core surface (session
 	// create/delete + DaemonView) the command handler and snapshot provider
 	// need. Required: main injects a *SessionCommandBinding and calls SetTarget
@@ -136,14 +140,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, cfg.Queues, logf)
 	if err != nil {
 		return nil, err
 	}
 
 	srv := frontend.New(frontend.Config{
 		Logf:    logf,
-		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, daemon: cfg.SessionCommands},
+		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, queues: cfg.Queues, daemon: cfg.SessionCommands},
 		Handler: handler,
 	})
 

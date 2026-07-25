@@ -1,10 +1,13 @@
 package sessiondrv
 
 import (
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+
+	"claude-repld/internal/registry"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -78,10 +81,23 @@ func TestSystemInitFromVendorIgnoresNonInitVendor(t *testing.T) {
 }
 
 // fakeRegistrar records the claude_session_id write-throughs.
-type fakeRegistrar struct{ writes []string }
+type fakeRegistrar struct {
+	mu     sync.Mutex
+	writes []string
+	queued map[string][]registry.QueuedPrompt
+}
 
 func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) {
 	f.writes = append(f.writes, sessionID+"="+csid)
+}
+
+func (f *fakeRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.queued == nil {
+		f.queued = map[string][]registry.QueuedPrompt{}
+	}
+	f.queued[sessionID] = queued
 }
 
 func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {

@@ -24,6 +24,7 @@ type Pusher interface {
 	PushWorkspaceState(*frontendv1.WorkspaceState)
 	PushSessionInitView(*frontendv1.SessionInitView)
 	PushHeartbeatView(*frontendv1.HeartbeatView)
+	PushQueueView(*frontendv1.QueueView)
 }
 
 // StateApplier is the slice of the SSM the driver feeds lifecycle events to.
@@ -54,6 +55,12 @@ type consumer struct {
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// driver arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
 	onSessionStarted func(*corev1.SessionStarted)
+	// onTurn reports an observed turn boundary (true = TurnStarted, false =
+	// TurnEnded). It drives the prompt queue's interception and drain (E4).
+	// Called on the shim read-loop goroutine, so the handler must not block on
+	// anything that needs that loop to make progress — notably an Ack-awaiting
+	// send back to the same shim.
+	onTurn func(active bool)
 
 	mu   sync.Mutex
 	ring []*corev1.Event
@@ -71,7 +78,7 @@ type consumer struct {
 	permOrder []string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted)) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool)) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -83,6 +90,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		logf:             logf,
 		now:              func() int64 { return time.Now().UnixMilli() },
 		onSessionStarted: onSessionStarted,
+		onTurn:           onTurn,
 	}
 }
 
@@ -145,6 +153,19 @@ func (c *consumer) Apply(ev *corev1.Event) {
 	c.retain(ev)
 	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
 		c.onSessionStarted(ss)
+	}
+	// The prompt queue keys entirely off the observed turn boundary (E4): a
+	// prompt is intercepted while a turn is running, and delivered when one
+	// actually ends. Reading it from the event stream — rather than from the
+	// SSM's derived turn_active, or from "we just sent an interrupt" — is what
+	// makes the interject sequence evented instead of a race against teardown.
+	if c.onTurn != nil {
+		switch ev.GetPayload().(type) {
+		case *corev1.Event_TurnStarted:
+			c.onTurn(true)
+		case *corev1.Event_TurnEnded:
+			c.onTurn(false)
+		}
 	}
 	if err := c.ssm.Apply(ev); err != nil {
 		c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",

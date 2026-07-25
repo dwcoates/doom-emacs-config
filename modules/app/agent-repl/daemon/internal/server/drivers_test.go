@@ -228,3 +228,12 @@ func (nopHandler) Shutdown(context.Context, string, string, *frontendv1.Shutdown
 func (nopHandler) ClientLog(context.Context, string, string, *frontendv1.ClientLogCmd) error {
 	return nil
 }
+func (nopHandler) ForceQueueEntry(context.Context, string, string, *frontendv1.QueueForceCmd) error {
+	return nil
+}
+func (nopHandler) AcceptQueueEntry(context.Context, string, string, *frontendv1.QueueAcceptCmd) error {
+	return nil
+}
+func (nopHandler) CancelQueueEntry(context.Context, string, string, *frontendv1.QueueCancelCmd) error {
+	return nil
+}

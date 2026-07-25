@@ -156,6 +156,9 @@ type commandHandler struct {
 	// /shutdown drives). Nil makes the shutdown command a loud failing ack (the
 	// capability is unconfigured), never a silent no-op.
 	shutdown func()
+	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
+	// of them a loud failing ack rather than a silent no-op, same as shutdown.
+	queues QueueController
 	logf     func(string, ...any)
 }
 
@@ -165,7 +168,7 @@ var _ frontend.CommandHandler = (*commandHandler)(nil)
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the
 // session-lifecycle binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), logf func(string, ...any)) (*commandHandler, error) {
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, logf func(string, ...any)) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -179,7 +182,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, logf: logf}, nil
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, logf: logf}, nil
 }
 
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
@@ -296,6 +299,43 @@ const clientLogContextCap = 2000
 // loudly rather than writing a blank line. An UNSPECIFIED level, by contrast,
 // is recorded AS unspecified: the level is metadata, and discarding real
 // evidence over missing metadata would defeat the purpose.
+// QueueController is the queue half of the frontend command surface (E4).
+// Satisfied by *sessiondrv.Manager. Every method reports an unknown entry id
+// as an error: the user asked for something specific, and pretending to have
+// done it would be worse than saying it is gone.
+type QueueController interface {
+	ForceQueueEntry(workspace, entryID string) error
+	AcceptQueueEntry(workspace, entryID string) error
+	CancelQueueEntry(workspace, entryID string) error
+}
+
+// ForceQueueEntry runs the interject sequence for a held prompt, user-initiated.
+func (h *commandHandler) ForceQueueEntry(_ context.Context, workspace, requestID string, cmd *frontendv1.QueueForceCmd) error {
+	h.logf("frontend cmd: queue_force ws=%s request_id=%s entry=%s", workspace, requestID, cmd.GetEntryId())
+	if h.queues == nil {
+		return fmt.Errorf("server: prompt queue not supported by this daemon")
+	}
+	return h.queues.ForceQueueEntry(workspace, cmd.GetEntryId())
+}
+
+// AcceptQueueEntry confirms a held prompt's classification (view state only).
+func (h *commandHandler) AcceptQueueEntry(_ context.Context, workspace, requestID string, cmd *frontendv1.QueueAcceptCmd) error {
+	h.logf("frontend cmd: queue_accept ws=%s request_id=%s entry=%s", workspace, requestID, cmd.GetEntryId())
+	if h.queues == nil {
+		return fmt.Errorf("server: prompt queue not supported by this daemon")
+	}
+	return h.queues.AcceptQueueEntry(workspace, cmd.GetEntryId())
+}
+
+// CancelQueueEntry drops a held prompt; it is never delivered.
+func (h *commandHandler) CancelQueueEntry(_ context.Context, workspace, requestID string, cmd *frontendv1.QueueCancelCmd) error {
+	h.logf("frontend cmd: queue_cancel ws=%s request_id=%s entry=%s", workspace, requestID, cmd.GetEntryId())
+	if h.queues == nil {
+		return fmt.Errorf("server: prompt queue not supported by this daemon")
+	}
+	return h.queues.CancelQueueEntry(workspace, cmd.GetEntryId())
+}
+
 func (h *commandHandler) ClientLog(_ context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
 	if cmd.GetMessage() == "" {
 		return fmt.Errorf("server: client log carries no message (ws=%q request_id=%q)", workspace, requestID)
@@ -348,6 +388,9 @@ type ssmSnapshotProvider struct {
 	// so a (re)connecting frontend sources its slash-command/tools/model menus
 	// from the snapshot. Nil-safe: a nil source leaves snapshot.inits empty.
 	inits SessionInitSource
+	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
+	// nil source leaves snapshot.queues empty.
+	queues QueueSource
 	// daemon supplies the DaemonView (boot id / protocol version / binary
 	// mtime / version) carried on every connect snapshot. Nil-safe: a nil
 	// source leaves snapshot.daemon unset rather than nil-derefing.
@@ -370,6 +413,21 @@ type SessionInitSource interface {
 	SessionInits() []*frontendv1.SessionInitView
 }
 
+// QueueSource supplies every live session's held-prompt queue (E4) for the
+// connect/resync snapshot. Satisfied by *sessiondrv.Manager. A session with an
+// empty queue still contributes its empty view, so a reconnecting frontend is
+// TOLD the queue is empty rather than left to assume it.
+type QueueSource interface {
+	QueueViews() []*frontendv1.QueueView
+}
+
+// QueueBackend is the daemon's whole prompt-queue surface: the command half
+// and the snapshot half. Satisfied by *sessiondrv.Manager, which owns both.
+type QueueBackend interface {
+	QueueController
+	QueueSource
+}
+
 // Snapshot assembles a StateSnapshot from the SSM's workspace states and the
 // session metadata source. A failed SSM read yields the sessions-only snapshot
 // with the failure loud-logged by the SSM; it never blocks the connect.
@@ -385,6 +443,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.inits != nil {
 		snap.Inits = p.inits.SessionInits()
+	}
+	if p.queues != nil {
+		snap.Queues = p.queues.QueueViews()
 	}
 	if p.daemon != nil {
 		snap.Daemon = p.daemon.DaemonView()

@@ -76,6 +76,21 @@ func (c *fakeClient) Interrupt(_ context.Context, _ bool) error {
 	return nil
 }
 
+// promptTexts returns a copy of the prompts the driver sent, safe to read while
+// the driver's own goroutines are still running.
+func (c *fakeClient) promptTexts() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.prompts...)
+}
+
+// interruptCount returns how many interrupts the driver sent.
+func (c *fakeClient) interruptCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.interrupts
+}
+
 // newTestManager builds a Manager whose clients are fakes, capturing the last
 // built fake so a test can inspect what the driver sent it.
 func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Manager, func() *fakeClient) {
@@ -241,7 +256,7 @@ var errBringUp = errors.New("bring-up failed")
 func newTestPermHandler() (permHandler, *permRegistry, *fakePusher) {
 	push := &fakePusher{}
 	reg := newPermRegistry(nil)
-	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil)
+	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil, nil)
 	return permHandler{reg: reg, cons: cons, logf: func(string, ...any) {}}, reg, push
 }
 
