@@ -35,6 +35,21 @@ func Open(path string, log Logf) (*DB, error) {
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during live-tail; NORMAL sync is durable under WAL;
 	// busy_timeout guards the brief window a checkpoint holds the writer.
+	//
+	// _txlock=immediate makes Begin() issue BEGIN IMMEDIATE, which is what
+	// actually makes busy_timeout apply to Ingest. Ingest reads (SELECT
+	// MAX(seq)) before it writes, so under the DEFERRED default the
+	// transaction takes a WAL READ snapshot and only later tries to upgrade to
+	// a writer — and SQLite refuses to run the busy handler for an upgrade:
+	//   - another connection committed since the snapshot -> SQLITE_BUSY_SNAPSHOT
+	//     (517), returned immediately because retrying can never succeed;
+	//   - a writer holds the lock at upgrade time -> SQLITE_BUSY (5), returned
+	//     immediately because waiting mid-upgrade would deadlock.
+	// One store process serves every live shim on its own goroutine and pooled
+	// connection, so those collisions are routine — and a rejected batch is
+	// PERMANENT loss (the shim's store-client drops it: no spill, no retry).
+	// Taking the write lock at BEGIN removes the upgrade entirely: contenders
+	// queue on busy_timeout instead of erroring.
 	dsn := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
@@ -42,6 +57,7 @@ func Open(path string, log Logf) (*DB, error) {
 			"synchronous(NORMAL)",
 			"foreign_keys(ON)",
 		},
+		"_txlock": {"immediate"},
 	}.Encode()
 
 	sqldb, err := sql.Open("sqlite", dsn)

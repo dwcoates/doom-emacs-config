@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -156,5 +158,83 @@ func TestIngestExtractsColumns(t *testing.T) {
 	}
 	if uuidCount != 1 {
 		t.Fatalf("uuid column rows = %d, want 1", uuidCount)
+	}
+}
+
+// --- concurrent writers -----------------------------------------------------
+
+// One shim-store process serves every live shim, and each connection's writes
+// run on their own goroutine over their own pooled SQL connection — so batches
+// from different sessions genuinely ingest concurrently. A rejected batch is
+// PERMANENT data loss (the shim's store-client drops it: no spill, no retry),
+// so a transient lock conflict must never surface as an ingest error.
+func TestConcurrentIngestNeverRejectsABatch(t *testing.T) {
+	// Arrange: 8 writers × 20 batches, the shape of a daemon restart where
+	// every reattached shim replays at once.
+	d := openTemp(t)
+	const writers, batches = 8, 20
+
+	// Act
+	errs := make(chan error, writers*batches)
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			session := fmt.Sprintf("s%d", w)
+			for b := 0; b < batches; b++ {
+				if _, err := d.Ingest("p", []*corev1.Event{persistentCore(session)}, nil); err != nil {
+					errs <- err
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+
+	// Assert: not one batch lost.
+	var got []error
+	for err := range errs {
+		got = append(got, err)
+	}
+	if len(got) > 0 {
+		t.Fatalf("%d/%d batches rejected under concurrency, first: %v", len(got), writers*batches, got[0])
+	}
+}
+
+// A writer must WAIT for a busy database rather than fail: busy_timeout only
+// applies when the write lock is taken at BEGIN, which is what the DSN's
+// immediate txlock buys. A deferred transaction that reads first and upgrades
+// later gets SQLITE_BUSY_SNAPSHOT with the busy handler never invoked.
+func TestConcurrentIngestKeepsSeqGapless(t *testing.T) {
+	// Arrange: many writers on ONE session, so every batch contends for the
+	// same MAX(seq) read and the same insert.
+	d := openTemp(t)
+	const writers, batches = 8, 20
+
+	// Act
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for b := 0; b < batches; b++ {
+				if _, err := d.Ingest("p", []*corev1.Event{persistentCore("shared")}, nil); err != nil {
+					t.Errorf("Ingest: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Assert: every event landed, with a gapless 1..N sequence.
+	var count, maxSeq uint64
+	row := d.sql.QueryRow(`SELECT COUNT(*), COALESCE(MAX(seq), 0) FROM event WHERE session_id = 'shared'`)
+	if err := row.Scan(&count, &maxSeq); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if want := uint64(writers * batches); count != want || maxSeq != want {
+		t.Fatalf("count=%d max_seq=%d, want both %d (gapless, nothing lost)", count, maxSeq, want)
 	}
 }
