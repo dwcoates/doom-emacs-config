@@ -424,6 +424,10 @@ type ssmSnapshotProvider struct {
 	// mtime / version) carried on every connect snapshot. Nil-safe: a nil
 	// source leaves snapshot.daemon unset rather than nil-derefing.
 	daemon DaemonViewSource
+	// progress supplies each workspace's resolved ProgressView (F1), so a
+	// (re)connecting frontend's footer is populated before the next change
+	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
+	progress ProgressSource
 }
 
 var _ frontend.StateProvider = (*ssmSnapshotProvider)(nil)
@@ -448,6 +452,13 @@ type SessionInitSource interface {
 // TOLD the queue is empty rather than left to assume it.
 type QueueSource interface {
 	QueueViews() []*frontendv1.QueueView
+}
+
+// ProgressSource supplies every workspace's resolved ProgressView (F1) for the
+// connect/resync snapshot, so a frontend's progress footer starts populated
+// rather than blank until the next change. Satisfied by *progress.Manager.
+type ProgressSource interface {
+	Snapshot() []*frontendv1.ProgressView
 }
 
 // QueueBackend is the daemon's whole prompt-queue surface: the command half
@@ -478,6 +489,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.daemon != nil {
 		snap.Daemon = p.daemon.DaemonView()
+	}
+	if p.progress != nil {
+		snap.Progress = p.progress.Snapshot()
 	}
 	return snap
 }

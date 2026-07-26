@@ -54,6 +54,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matches(f.Heartbeat.GetSessionId(), f.Heartbeat.GetWorkspace())
 	case *frontendv1.FrontendFrame_Queue:
 		return frame, sc.matches(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
+	case *frontendv1.FrontendFrame_Progress:
+		return frame, sc.matches(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
 	default:
 		// DegradedNotice / CommandAck / unknown: connection-global, pass through.
 		return frame, true
@@ -86,6 +88,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 	for _, q := range snap.GetQueues() {
 		if sc.matches(q.GetSessionId(), q.GetWorkspace()) {
 			out.Queues = append(out.Queues, q)
+		}
+	}
+	for _, p := range snap.GetProgress() {
+		if sc.matches(p.GetSessionId(), p.GetWorkspace()) {
+			out.Progress = append(out.Progress, p)
 		}
 	}
 	return out
