@@ -210,6 +210,12 @@ import {
   TaskUpdateResultSchema,
   TextBlockSchema,
   ThinkingBlockSchema,
+  ArtifactResultSchema,
+  GlobResultSchema,
+  GrepResultSchema,
+  StructuredOutputResultSchema,
+  TaskGetResultSchema,
+  TaskRecordSchema,
   ToolReferenceBlockSchema,
   ToolResultBlockListSchema,
   ToolResultBlockSchema,
@@ -1417,7 +1423,10 @@ function convertBlock(raw: Record<string, unknown>): ContentBlock | null {
     case "image":
       return create(ContentBlockSchema, { block: { case: "image", value: create(ImageBlockSchema, { source: convertImageSource(raw["source"]) }) } });
     case "tool_reference":
-      return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, { reference: asStruct(raw) }) } });
+      return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, {
+        reference: asStruct(raw),
+        toolName: strOf(pick(raw, "tool_name", "toolName")),
+      }) } });
     case "fallback":
       return create(ContentBlockSchema, { block: { case: "fallback", value: create(FallbackBlockSchema, { from: fallbackModel(raw["from"]), to: fallbackModel(raw["to"]) }) } });
     case "redacted_thinking":
@@ -1548,6 +1557,11 @@ export function convertToolUseResult(raw: unknown, sessionId = ""): ToolUseResul
   return create(ToolUseResultSchema, { result: { case: "unclassified", value: raw as JsonObject } });
 }
 
+/** True when `o` is an object carrying at least one of `keys`. */
+function anyIn(o: unknown, ...keys: string[]): boolean {
+  return isObject(o) && keys.some((k) => k in o);
+}
+
 function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"] | null {
   const has = (...k: string[]) => k.every((x) => x in o);
   const any = (...k: string[]) => k.some((x) => x in o);
@@ -1588,6 +1602,26 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       taskId: strOf(pick(o, "task_id", "taskId")),
       taskType: strOf(pick(o, "task_type", "taskType")),
       command: strOf(o["command"]),
+    }) };
+  }
+  // TaskGet before TaskCreate: BOTH key on `task`, and only TaskGet's carries
+  // the dependency lists. `task` is also NULLABLE here, and a null task is
+  // still a TaskGet result rather than something unidentifiable.
+  if (has("task") && o["task"] === null) {
+    return { case: "taskGet", value: create(TaskGetResultSchema, { taskSet: false }) };
+  }
+  if (has("task") && isObject(o["task"]) && anyIn(o["task"], "blocks", "blockedBy", "blocked_by")) {
+    const t = o["task"];
+    return { case: "taskGet", value: create(TaskGetResultSchema, {
+      taskSet: true,
+      task: create(TaskRecordSchema, {
+        id: strOf(pick(t, "id")),
+        subject: strOf(pick(t, "subject")),
+        description: strOf(pick(t, "description")),
+        status: strOf(pick(t, "status")),
+        blocks: strListOf(pick(t, "blocks")),
+        blockedBy: strListOf(pick(t, "blocked_by", "blockedBy")),
+      }),
     }) };
   }
   if (has("task") && isObject(o["task"])) {
@@ -1678,6 +1712,50 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   }
   if (o["type"] === "text" && isObject(o["file"])) {
     return { case: "read", value: create(ReadResultSchema, { type: strOf(o["type"]), file: o["file"] as JsonObject }) };
+  }
+  // Glob: filenames + a duration, and NO grep-only key. Checked before grep
+  // because both carry `filenames`.
+  if (has("filenames") && any("durationMs", "duration_ms") && !any("mode", "numMatches", "num_matches", "content")) {
+    return { case: "glob", value: create(GlobResultSchema, {
+      durationMs: bigOf(pick(o, "duration_ms", "durationMs")),
+      numFiles: bigOf(pick(o, "num_files", "numFiles")),
+      filenames: strListOf(o["filenames"]),
+      truncated: o["truncated"] === true,
+      totalMatches: bigOf(pick(o, "total_matches", "totalMatches")),
+      countIsComplete: pick(o, "count_is_complete", "countIsComplete") === true,
+    }) };
+  }
+  if (has("filenames") && any("mode", "numMatches", "num_matches", "numLines", "num_lines")) {
+    return { case: "grep", value: create(GrepResultSchema, {
+      mode: strOf(o["mode"]),
+      numFiles: bigOf(pick(o, "num_files", "numFiles")),
+      filenames: strListOf(o["filenames"]),
+      content: strOf(o["content"]),
+      numLines: bigOf(pick(o, "num_lines", "numLines")),
+      numMatches: bigOf(pick(o, "num_matches", "numMatches")),
+      totalFiles: bigOf(pick(o, "total_files", "totalFiles")),
+      totalLines: bigOf(pick(o, "total_lines", "totalLines")),
+      appliedLimit: bigOf(pick(o, "applied_limit", "appliedLimit")),
+      appliedOffset: bigOf(pick(o, "applied_offset", "appliedOffset")),
+    }) };
+  }
+  if (any("url", "artifactUrl", "artifact_url") && any("favicon", "label", "version") && !has("code")) {
+    return { case: "artifact", value: create(ArtifactResultSchema, {
+      url: strOf(pick(o, "url", "artifact_url", "artifactUrl")),
+      title: strOf(o["title"]),
+      description: strOf(o["description"]),
+      label: strOf(o["label"]),
+      version: strOf(o["version"]),
+    }) };
+  }
+  // StructuredOutput: the caller's OWN schema under a `structuredOutput` key.
+  // Schemaless by design, so captured whole rather than guessed at — but
+  // CLASSIFIED, so it no longer lands in `unclassified` alongside genuinely
+  // unidentifiable objects.
+  if (any("structuredOutput", "structured_output")) {
+    return { case: "structuredOutput", value: create(StructuredOutputResultSchema, {
+      data: asStructOpt(pick(o, "structured_output", "structuredOutput")),
+    }) };
   }
   return null;
 }
