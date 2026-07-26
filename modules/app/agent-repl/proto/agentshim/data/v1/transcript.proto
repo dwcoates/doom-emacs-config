@@ -647,7 +647,25 @@ message CommandPermissionsAttachment {
 
 message QueuedCommandAttachment {
   string command_mode = 1;
-  string prompt = 2;
+  // `prompt` is a string-or-blocks union on disk, NOT a plain string: the
+  // 731-record census splits 702 string / 29 `[{type:"text",text}]` array (every
+  // array is length 1 and every element a text block). Modeled as the repo's
+  // standard union idiom, with ONE deviation: the string arm keeps the name
+  // `prompt` and tag 2 rather than being renamed to the usual `prompt_string`.
+  //
+  // ADDITIVE, NOT a wire break — deliberately, so no user approval gate applies:
+  // wrapping an existing singular field in a new oneof leaves its tag, wire type
+  // and protojson name byte-identical, so every persisted event still decodes and
+  // Go's GetPrompt() is unchanged. Only `prompt_blocks` (tag 5) is new.
+  //
+  // Before this union existed the array form hit setField's type-mismatch arm:
+  // 29/731 records silently left `prompt` at "" and dumped the blocks into
+  // Event.extras, loud-logged as `unknown field "prompt"` — which read as an
+  // unmodeled field but was really a mismodeled type.
+  oneof prompt_value {
+    string prompt = 2;
+    ApiContentBlocks prompt_blocks = 5;
+  }
   string timestamp = 3;
   Origin origin = 4;
 }

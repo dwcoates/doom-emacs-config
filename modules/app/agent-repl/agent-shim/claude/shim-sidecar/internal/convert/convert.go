@@ -645,12 +645,23 @@ func (c *Converter) assistantContent(m protoreflect.Message, v any, cap *capture
 // contentUnion fills an ApiUserMessage / ToolResultBlock content oneof from a
 // string (content_string) or an array of blocks (content_blocks).
 func (c *Converter) contentUnion(m protoreflect.Message, v any, path string, cap *capture) {
+	c.blockUnion(m, v, path, cap, "content_string", "content_blocks")
+}
+
+// blockUnion routes ONE string-or-blocks disk value onto a two-arm proto oneof,
+// given the arm field names. The disk spells both arms with the SAME key, so the
+// runtime JSON type is the only discriminator; the reflective assign cannot do
+// this itself because fieldIndex deliberately excludes oneof members.
+//
+// blocksArm's message must carry a `repeated ContentBlock blocks` field
+// (ApiContentBlocks / ToolResultBlockList).
+func (c *Converter) blockUnion(m protoreflect.Message, v any, path string, cap *capture, stringArm, blocksArm string) {
 	fs := m.Descriptor().Fields()
 	switch t := v.(type) {
 	case string:
-		m.Set(fs.ByName("content_string"), protoreflect.ValueOfString(t))
+		m.Set(fs.ByName(protoreflect.Name(stringArm)), protoreflect.ValueOfString(t))
 	case []any:
-		blocksFd := fs.ByName("content_blocks")
+		blocksFd := fs.ByName(protoreflect.Name(blocksArm))
 		bl := m.NewField(blocksFd)
 		listFd := bl.Message().Descriptor().Fields().ByName("blocks")
 		lv := bl.Message().Mutable(listFd).List()
@@ -980,6 +991,10 @@ func (c *Converter) fillMessage(m protoreflect.Message, obj map[string]any, path
 		c.contentBlock(m, obj, path, cap)
 		return
 	}
+	if m.Descriptor().FullName() == "agentshim.data.v1.QueuedCommandAttachment" {
+		c.queuedCommandAttachment(m, obj, path, cap, ignore)
+		return
+	}
 	if fd := loneStructField(m.Descriptor()); fd != nil && !hasKeyIgnoring(obj, string(fd.Name()), ignore) {
 		if s, err := structpb.NewStruct(stripIgnore(obj, ignore)); err == nil {
 			m.Set(fd, protoreflect.ValueOfMessage(s.ProtoReflect()))
@@ -987,6 +1002,21 @@ func (c *Converter) fillMessage(m protoreflect.Message, obj map[string]any, path
 		}
 	}
 	c.assign(m, obj, path, cap, ignore)
+}
+
+// queuedCommandAttachment fills a QueuedCommandAttachment, routing its
+// string-or-blocks `prompt` union (census 702 string / 29 blocks) onto the
+// prompt_value oneof and leaving every other key to the reflective assign.
+func (c *Converter) queuedCommandAttachment(m protoreflect.Message, obj map[string]any, path string, cap *capture, ignore map[string]bool) {
+	rest := make(map[string]any, len(obj))
+	for k, v := range obj {
+		if canon(k) == "prompt" && !ignore[canon(k)] {
+			c.blockUnion(m, v, joinPath(path, k), cap, "prompt", "prompt_blocks")
+			continue
+		}
+		rest[k] = v
+	}
+	c.assign(m, rest, path, cap, ignore)
 }
 
 // loneStructField returns md's field when md has exactly one non-repeated

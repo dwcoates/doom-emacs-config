@@ -5058,11 +5058,31 @@ func (x *CommandPermissionsAttachment) GetAllowedTools() []string {
 }
 
 type QueuedCommandAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CommandMode   string                 `protobuf:"bytes,1,opt,name=command_mode,json=commandMode,proto3" json:"command_mode,omitempty"`
-	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	Timestamp     string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Origin        *Origin                `protobuf:"bytes,4,opt,name=origin,proto3" json:"origin,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	CommandMode string                 `protobuf:"bytes,1,opt,name=command_mode,json=commandMode,proto3" json:"command_mode,omitempty"`
+	// `prompt` is a string-or-blocks union on disk, NOT a plain string: the
+	// 731-record census splits 702 string / 29 `[{type:"text",text}]` array (every
+	// array is length 1 and every element a text block). Modeled as the repo's
+	// standard union idiom, with ONE deviation: the string arm keeps the name
+	// `prompt` and tag 2 rather than being renamed to the usual `prompt_string`.
+	//
+	// ADDITIVE, NOT a wire break — deliberately, so no user approval gate applies:
+	// wrapping an existing singular field in a new oneof leaves its tag, wire type
+	// and protojson name byte-identical, so every persisted event still decodes and
+	// Go's GetPrompt() is unchanged. Only `prompt_blocks` (tag 5) is new.
+	//
+	// Before this union existed the array form hit setField's type-mismatch arm:
+	// 29/731 records silently left `prompt` at "" and dumped the blocks into
+	// Event.extras, loud-logged as `unknown field "prompt"` — which read as an
+	// unmodeled field but was really a mismodeled type.
+	//
+	// Types that are valid to be assigned to PromptValue:
+	//
+	//	*QueuedCommandAttachment_Prompt
+	//	*QueuedCommandAttachment_PromptBlocks
+	PromptValue   isQueuedCommandAttachment_PromptValue `protobuf_oneof:"prompt_value"`
+	Timestamp     string                                `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Origin        *Origin                               `protobuf:"bytes,4,opt,name=origin,proto3" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5104,11 +5124,29 @@ func (x *QueuedCommandAttachment) GetCommandMode() string {
 	return ""
 }
 
+func (x *QueuedCommandAttachment) GetPromptValue() isQueuedCommandAttachment_PromptValue {
+	if x != nil {
+		return x.PromptValue
+	}
+	return nil
+}
+
 func (x *QueuedCommandAttachment) GetPrompt() string {
 	if x != nil {
-		return x.Prompt
+		if x, ok := x.PromptValue.(*QueuedCommandAttachment_Prompt); ok {
+			return x.Prompt
+		}
 	}
 	return ""
+}
+
+func (x *QueuedCommandAttachment) GetPromptBlocks() *ApiContentBlocks {
+	if x != nil {
+		if x, ok := x.PromptValue.(*QueuedCommandAttachment_PromptBlocks); ok {
+			return x.PromptBlocks
+		}
+	}
+	return nil
 }
 
 func (x *QueuedCommandAttachment) GetTimestamp() string {
@@ -5124,6 +5162,22 @@ func (x *QueuedCommandAttachment) GetOrigin() *Origin {
 	}
 	return nil
 }
+
+type isQueuedCommandAttachment_PromptValue interface {
+	isQueuedCommandAttachment_PromptValue()
+}
+
+type QueuedCommandAttachment_Prompt struct {
+	Prompt string `protobuf:"bytes,2,opt,name=prompt,proto3,oneof"`
+}
+
+type QueuedCommandAttachment_PromptBlocks struct {
+	PromptBlocks *ApiContentBlocks `protobuf:"bytes,5,opt,name=prompt_blocks,json=promptBlocks,proto3,oneof"`
+}
+
+func (*QueuedCommandAttachment_Prompt) isQueuedCommandAttachment_PromptValue() {}
+
+func (*QueuedCommandAttachment_PromptBlocks) isQueuedCommandAttachment_PromptValue() {}
 
 type ReadTruncationNoticeAttachment struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -7688,12 +7742,14 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x05files\x18\x01 \x01(\v2\x1a.google.protobuf.ListValueR\x05files\x12\x15\n" +
 	"\x06is_new\x18\x02 \x01(\bR\x05isNew\"C\n" +
 	"\x1cCommandPermissionsAttachment\x12#\n" +
-	"\rallowed_tools\x18\x01 \x03(\tR\fallowedTools\"\xa5\x01\n" +
+	"\rallowed_tools\x18\x01 \x03(\tR\fallowedTools\"\x83\x02\n" +
 	"\x17QueuedCommandAttachment\x12!\n" +
-	"\fcommand_mode\x18\x01 \x01(\tR\vcommandMode\x12\x16\n" +
-	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x1c\n" +
+	"\fcommand_mode\x18\x01 \x01(\tR\vcommandMode\x12\x18\n" +
+	"\x06prompt\x18\x02 \x01(\tH\x00R\x06prompt\x12J\n" +
+	"\rprompt_blocks\x18\x05 \x01(\v2#.agentshim.data.v1.ApiContentBlocksH\x00R\fpromptBlocks\x12\x1c\n" +
 	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\x121\n" +
-	"\x06origin\x18\x04 \x01(\v2\x19.agentshim.data.v1.OriginR\x06origin\"S\n" +
+	"\x06origin\x18\x04 \x01(\v2\x19.agentshim.data.v1.OriginR\x06originB\x0e\n" +
+	"\fprompt_value\"S\n" +
 	"\x1eReadTruncationNoticeAttachment\x121\n" +
 	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"i\n" +
 	"\x1aStructuredOutputAttachment\x12+\n" +
@@ -7980,6 +8036,7 @@ var file_agentshim_data_v1_transcript_proto_goTypes = []any{
 	(*ApiAssistantMessage)(nil),               // 93: agentshim.data.v1.ApiAssistantMessage
 	(*structpb.Struct)(nil),                   // 94: google.protobuf.Struct
 	(*structpb.ListValue)(nil),                // 95: google.protobuf.ListValue
+	(*ApiContentBlocks)(nil),                  // 96: agentshim.data.v1.ApiContentBlocks
 }
 var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	8,   // 0: agentshim.data.v1.TranscriptLine.user:type_name -> agentshim.data.v1.UserLine
@@ -8090,27 +8147,28 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	41,  // 105: agentshim.data.v1.HookBlockingErrorAttachment.blocking_error:type_name -> agentshim.data.v1.BlockingErrorDetail
 	95,  // 106: agentshim.data.v1.TaskReminderAttachment.content:type_name -> google.protobuf.ListValue
 	95,  // 107: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.ListValue
-	6,   // 108: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
-	94,  // 109: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 110: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
-	94,  // 111: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 112: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 113: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 114: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
-	58,  // 115: agentshim.data.v1.AttachedFileContent.file:type_name -> agentshim.data.v1.AttachedFileBody
-	59,  // 116: agentshim.data.v1.FileAttachment.content:type_name -> agentshim.data.v1.AttachedFileContent
-	94,  // 117: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 118: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 119: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 120: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
-	94,  // 121: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
-	67,  // 122: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
-	94,  // 123: agentshim.data.v1.MemoryAttachment.payload:type_name -> google.protobuf.Struct
-	124, // [124:124] is the sub-list for method output_type
-	124, // [124:124] is the sub-list for method input_type
-	124, // [124:124] is the sub-list for extension type_name
-	124, // [124:124] is the sub-list for extension extendee
-	0,   // [0:124] is the sub-list for field type_name
+	96,  // 108: agentshim.data.v1.QueuedCommandAttachment.prompt_blocks:type_name -> agentshim.data.v1.ApiContentBlocks
+	6,   // 109: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
+	94,  // 110: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 111: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
+	94,  // 112: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 113: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 114: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 115: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
+	58,  // 116: agentshim.data.v1.AttachedFileContent.file:type_name -> agentshim.data.v1.AttachedFileBody
+	59,  // 117: agentshim.data.v1.FileAttachment.content:type_name -> agentshim.data.v1.AttachedFileContent
+	94,  // 118: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 119: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 120: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 121: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 122: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
+	67,  // 123: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
+	94,  // 124: agentshim.data.v1.MemoryAttachment.payload:type_name -> google.protobuf.Struct
+	125, // [125:125] is the sub-list for method output_type
+	125, // [125:125] is the sub-list for method input_type
+	125, // [125:125] is the sub-list for extension type_name
+	125, // [125:125] is the sub-list for extension extendee
+	0,   // [0:125] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_transcript_proto_init() }
@@ -8205,6 +8263,10 @@ func file_agentshim_data_v1_transcript_proto_init() {
 		(*AttachmentLine_McpResource)(nil),
 		(*AttachmentLine_AlreadyReadFile)(nil),
 		(*AttachmentLine_TodoReminder)(nil),
+	}
+	file_agentshim_data_v1_transcript_proto_msgTypes[46].OneofWrappers = []any{
+		(*QueuedCommandAttachment_Prompt)(nil),
+		(*QueuedCommandAttachment_PromptBlocks)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
