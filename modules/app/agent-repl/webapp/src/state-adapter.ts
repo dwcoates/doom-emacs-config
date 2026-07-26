@@ -77,11 +77,12 @@ import {
 export type WebRenderState =
   | "init"
   | "idle"
+  | "ready"
   | "idle_async"
   | "thinking"
   | "permission"
   | "done"
-  | "stop_failed"
+  | "vendor_blocked"
   | "merging"
   | "merge_queued"
   | "merge_conflict"
@@ -541,7 +542,14 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.THINKING]: "thinking",
   [RenderState.PERMISSION]: "permission",
   [RenderState.DONE]: "done",
-  [RenderState.STOP_FAILED]: "stop_failed",
+  [RenderState.READY]: "ready",
+  [RenderState.VENDOR_BLOCKED]: "vendor_blocked",
+  // DEPRECATED upstream and no longer resolved by the SSM, but still mapped:
+  // an old daemon binary can push it, and erroring on a state we know how to
+  // render would be worse than rendering it. It resolves to the same purple
+  // VENDOR_BLOCKED means, because that is what it always was — a turn that
+  // ended on something only a human or the vendor can fix.
+  [RenderState.STOP_FAILED]: "vendor_blocked",
   [RenderState.MERGING]: "merging",
   [RenderState.MERGE_QUEUED]: "merge_queued",
   [RenderState.MERGE_CONFLICT]: "merge_conflict",

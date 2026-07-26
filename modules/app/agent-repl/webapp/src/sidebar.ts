@@ -14,14 +14,34 @@ import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
 import { log } from "./wslog.js";
 
-/** A workspace's lifecycle, as the Emacs side classifies it. */
+/**
+ * A workspace's lifecycle, as the Emacs side classifies it.
+ *
+ * The dots speak the SAME five-color vocabulary the tab-bar does, so a
+ * workspace can never read one way in the rail and another in the tabs:
+ *
+ * - blue   `init`, `dead`, `start-failed`, `degraded` — the route is
+ *   compromised on agent-repl's side.
+ * - purple `vendor-blocked` — blocked on the vendor or the account.
+ * - red    `thinking` — a turn is in flight.
+ * - yellow `idle-async` — no foreground turn, live detached work.
+ * - green  `ready`, `done`, `permission` — the route is proven usable and
+ *   the history painted. A pending permission is green: the agent is ready
+ *   for the user to look at the response.
+ *
+ * The merge statuses are untouched — the spinning recycle glyph already
+ * says what the merge pipeline needs to, without spending a color.
+ */
 export type WorkspaceStatus =
   | "thinking"
   | "permission"
   | "done"
-  | "done-viewed"
-  | "idle"
+  | "ready"
+  | "idle-async"
+  | "vendor-blocked"
   | "init"
+  | "start-failed"
+  | "degraded"
   | "dead"
   | "merging"
   | "merge-queued"
@@ -39,9 +59,12 @@ const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "thinking",
   "permission",
   "done",
-  "done-viewed",
-  "idle",
+  "ready",
+  "idle-async",
+  "vendor-blocked",
   "init",
+  "start-failed",
+  "degraded",
   "dead",
   "merging",
   "merge-queued",
@@ -74,9 +97,8 @@ const MERGE_GLYPH_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
  * its OWN current row exactly as the topbar datapoint it replaces did.
  */
 const MONITORABLE_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
-  "idle",
+  "ready",
   "done",
-  "done-viewed",
 ]);
 
 export interface WorkspaceRow {

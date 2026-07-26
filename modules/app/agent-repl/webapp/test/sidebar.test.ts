@@ -35,7 +35,7 @@ function row(over: Partial<WorkspaceRow> = {}): WorkspaceRow {
   return {
     name: "ws",
     dir: "/tmp/ws",
-    status: "idle",
+    status: "ready",
     closed: false,
     current: false,
     lastViewedAt: null,
@@ -244,14 +244,29 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("done")).toContain(`class="st st-done"`);
   });
 
-  it("keys a done-viewed dot to its solid-orange class", () => {
-    // Arrange + Act + Assert
-    expect(statusDotHtml("done-viewed")).toContain(`class="st st-done-viewed"`);
+  it("keys a ready dot to its green class", () => {
+    // Arrange + Act + Assert — a ready workspace is as available as a done one.
+    expect(statusDotHtml("ready")).toContain(`class="st st-ready"`);
   });
 
-  it("keys an idle dot to its hollow-ring class", () => {
+  it("keys an idle-async dot to its yellow class", () => {
+    // Arrange + Act + Assert — no foreground turn, live detached work.
+    expect(statusDotHtml("idle-async")).toContain(`class="st st-idle-async"`);
+  });
+
+  it("keys a vendor-blocked dot to its purple class", () => {
+    // Arrange + Act + Assert — blocked until a human or the vendor acts.
+    expect(statusDotHtml("vendor-blocked")).toContain(`class="st st-vendor-blocked"`);
+  });
+
+  it("keys a start-failed dot to the compromised-route class", () => {
     // Arrange + Act + Assert
-    expect(statusDotHtml("idle")).toContain(`class="st st-idle"`);
+    expect(statusDotHtml("start-failed")).toContain(`class="st st-start-failed"`);
+  });
+
+  it("keys a degraded dot to the compromised-route class", () => {
+    // Arrange + Act + Assert
+    expect(statusDotHtml("degraded")).toContain(`class="st st-degraded"`);
   });
 
   it("keys a dead dot to its grey class", () => {
@@ -311,7 +326,7 @@ describe("statusDotHtml", () => {
 
   it("overlays the breathing monitoring dot on a quiescent status", () => {
     // Arrange + Act + Assert — the session-local monitoring overlay.
-    expect(statusDotHtml("idle", true)).toContain(`class="st st-monitoring"`);
+    expect(statusDotHtml("ready", true)).toContain(`class="st st-monitoring"`);
   });
 
   it("never lets the monitoring overlay outrank an active status", () => {

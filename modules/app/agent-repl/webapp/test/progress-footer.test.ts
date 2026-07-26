@@ -130,10 +130,83 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
   });
 
   it("names idle_async as monitoring", () => {
-    // Arrange / Act — the amber idle-with-live-async signal.
+    // Arrange / Act — the yellow no-turn-but-live-async signal.
     const got = phaseLabel("idle_async");
     // Assert
     expect(got.word).toBe("monitoring");
+  });
+
+  // --- the five-color remap ---------------------------------------------
+
+  it("takes the yellow async tone while detached work runs", () => {
+    // Arrange / Act
+    const got = phaseLabel("idle_async");
+    // Assert — the same yellow the tab-bar and the sidebar dot wear.
+    expect(got.tone).toBe("async");
+  });
+
+  it("names a ready session ready", () => {
+    // Arrange / Act
+    const got = phaseLabel("ready");
+    // Assert
+    expect(got.word).toBe("ready");
+  });
+
+  it("takes the green tone for a ready session", () => {
+    // Arrange / Act — the route works and the agent is available.
+    const got = phaseLabel("ready");
+    // Assert
+    expect(got.tone).toBe("ok");
+  });
+
+  it("takes the green tone for an idle session too", () => {
+    // Arrange / Act — idle is the same claim as ready, not a lesser one.
+    const got = phaseLabel("idle");
+    // Assert
+    expect(got.tone).toBe("ok");
+  });
+
+  it("names a vendor-blocked session blocked", () => {
+    // Arrange / Act
+    const got = phaseLabel("vendor_blocked");
+    // Assert
+    expect(got.word).toBe("blocked");
+  });
+
+  it("takes the purple tone when the vendor has stopped the session", () => {
+    // Arrange / Act
+    const got = phaseLabel("vendor_blocked");
+    // Assert
+    expect(got.tone).toBe("blocked");
+  });
+
+  it("does NOT spin while blocked, since nothing is in progress", () => {
+    // Arrange / Act — every other spinning phase is work happening, so
+    // animating this one would say the opposite of what it means.
+    const got = phaseLabel("vendor_blocked");
+    // Assert
+    expect(got.spinning).toBe(false);
+  });
+
+  it("takes the compromised-route tone during bring-up", () => {
+    // Arrange / Act — init is blue, like every other broken-route state.
+    const got = phaseLabel("init");
+    // Assert
+    expect(got.tone).toBe("error");
+  });
+
+  it("still spins during bring-up, which really is in progress", () => {
+    // Arrange / Act
+    const got = phaseLabel("init");
+    // Assert
+    expect(got.spinning).toBe(true);
+  });
+
+  it("keeps a pending permission out of the alarm tones", () => {
+    // Arrange / Act — the agent is ready for the user to look, not broken.
+    const got = phaseLabel("permission");
+    // Assert
+    expect(got.tone).not.toBe("error");
   });
 });
 
