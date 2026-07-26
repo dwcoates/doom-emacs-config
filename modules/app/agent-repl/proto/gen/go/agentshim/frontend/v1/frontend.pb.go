@@ -8,9 +8,18 @@
 // - On (re)connect the daemon sends StateSnapshot first, then deltas.
 // - WorkspaceState is THE resolved render-state; frontends map .state to
 //   their display vocabulary and never re-derive from raw facts.
-// - TypingDelta is ephemeral (embeds core.ContentDelta); consumers reconcile
-//   per uuid, replacing previews when the ConversationDelta carrying the
-//   complete message arrives.
+// - TypingDelta is ephemeral (embeds core.ContentDelta); a preview is replaced
+//   when the ConversationDelta carrying the complete message arrives. The two
+//   sides share NO id and cannot: ContentDelta.uuid is the ANTHROPIC message
+//   id (stamped at the shim, the only identity a message shares with its own
+//   stream), while ConversationItem.uuid is the record ENVELOPE's id, which
+//   does not exist until the message has finished being emitted. Consumers
+//   therefore MATCH a finished block to its preview (same message, same kind)
+//   rather than looking it up, and dedup records on the envelope uuid.
+//   In particular ContentDelta.block_index is the TRUE API block ordinal,
+//   while an assistant record's own `content` array holds exactly one block
+//   (the SDK emits one record per block) — so that array index is always 0 and
+//   is NOT an identity. Deriving one from it renders a message's blocks twice.
 // - DegradedNotice is honest sad-path reporting (store/sidecar/shim outage);
 //   frontends display it, they do not work around it.
 

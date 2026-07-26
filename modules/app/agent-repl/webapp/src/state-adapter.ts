@@ -14,8 +14,12 @@
  * payload back into the store's bubble/card vocabulary. The mapping mirrors the
  * old translate.go decomposition semantics:
  * - assistantMessage (ApiAssistantMessage) → one item per content block:
- *   text → TextItem, thinking → ThinkingItem, tool_use → ToolItem; block id is
- *   `${uuid}:${blockIndex}`, message id is the envelope uuid.
+ *   text → TextItem, thinking → ThinkingItem, tool_use → ToolItem. A prose
+ *   block carries TWO ids: `messageId` is the Anthropic message id (the
+ *   identity it shares with its own live stream, so a finished block can be
+ *   paired with the preview the deltas grew), and `uuid` is the record's own
+ *   envelope-derived identity (what the store dedups a replayed record on).
+ *   The index within `content` is NOT an identity — see assistantMessageItems.
  * - userMessage (ApiUserMessage) → each tool_result block → a ToolItem
  *   (result-only, empty toolName — it reconciles onto the tool_use item by
  *   toolUseId in the store); the remaining blocks → one UserTurnItem (none = no
@@ -38,6 +42,7 @@
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
+import { recordBlockIdentity } from "./streaming.js";
 import type {
   CompactBoundaryItem,
   ConversationItem,
@@ -122,21 +127,31 @@ export interface SessionViewInput {
   configDir: string;
 }
 
-/** TypingDelta → the smooth.ts reveal feed's append. */
+/**
+ * TypingDelta → the store's live-typing feed, structurally a
+ * {@link StreamDelta} so `streaming.ts` can reconcile it directly.
+ *
+ * No block id is carried. The identity of a streamed block is derived in ONE
+ * place — `streaming.ts` — precisely so a second derivation here cannot drift
+ * from the one the finished record is matched against, which is the bug this
+ * shape used to have.
+ */
 export interface TypingReveal {
   workspace: string;
   sessionId: string;
-  uuid: string;
+  /**
+   * The ANTHROPIC message id every delta of one message shares, stamped at the
+   * source (the shim's `message_start` tracker) and carried opaquely since.
+   *
+   * The proto field it arrives in is spelled `uuid`, which is a misnomer it has
+   * outlived: it has never held an SDK envelope uuid, because the SDK mints a
+   * fresh one per emitted event and a message's chunks would then share nothing.
+   */
+  messageId: string;
+  /** The block's ordinal within that message, as the API numbered it. */
   blockIndex: number;
   kind: "text" | "thinking" | "input_json";
   delta: string;
-  /**
-   * The stable block id the store/smooth reveal keys the growing block on,
-   * synthesized from the ephemeral relay's `uuid` + `block_index`. Matches how
-   * the complete assistantMessage's blocks key (`${uuid}:${blockIndex}`), so a
-   * preview reconciles onto its finished block.
-   */
-  blockId: string;
 }
 
 /**
@@ -485,11 +500,10 @@ export class StateAdapter {
         value: {
           workspace: td.workspace,
           sessionId: td.sessionId,
-          uuid: td.uuid,
+          messageId: td.uuid,
           blockIndex: td.blockIndex,
           kind: td.kind,
           delta: td.delta,
-          blockId: `${td.uuid}:${td.blockIndex}`,
         },
       },
     ];
@@ -678,15 +692,14 @@ function assistantMessageItems(frame: ConversationItemFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
-  // Key blocks on the ANTHROPIC message id, not the SDK envelope uuid: it is
-  // the only identity a message shares with its own live stream, so it is what
-  // lets a finished block replace the preview the deltas grew. The envelope
-  // uuid still identifies the ITEM (and is what both planes dedup on), but it
-  // does not exist yet while the message is still streaming.
+  // The ANTHROPIC message id: the only identity a message shares with its own
+  // live stream, and so the only thing that can pair a finished block with the
+  // preview its deltas grew. Falls back to the envelope uuid when a payload
+  // carries no id of its own.
   //
-  // Falls back to the envelope uuid when a payload carries no id, so a block
-  // always has SOME stable key rather than colliding on "".
-  const uuid = pstr(frame.payload, "id") || frame.uuid;
+  // The block's own RECORD identity comes from `recordBlockIdentity` — the one
+  // authority — rather than being spelled out a second time here.
+  const messageId = pstr(frame.payload, "id") || frame.uuid;
   const ts = tsFromMs(frame.tsMs);
   const items: ConversationItem[] = [];
   const ignores: string[] = [];
@@ -696,8 +709,8 @@ function assistantMessageItems(frame: ConversationItemFrame): {
       case "text": {
         const item: TextItem = {
           kind: "text",
-          blockId: `${uuid}:${index}`,
-          messageId: uuid,
+          ...recordBlockIdentity(frame.uuid, messageId, index),
+          messageId,
           text: pstr(value, "text"),
           done: true,
           ts,
@@ -708,8 +721,8 @@ function assistantMessageItems(frame: ConversationItemFrame): {
       case "thinking": {
         const item: ThinkingItem = {
           kind: "thinking",
-          blockId: `${uuid}:${index}`,
-          messageId: uuid,
+          ...recordBlockIdentity(frame.uuid, messageId, index),
+          messageId,
           text: pstr(value, "thinking"),
           done: true,
         };
@@ -719,10 +732,10 @@ function assistantMessageItems(frame: ConversationItemFrame): {
         break;
       }
       case "toolUse":
-        items.push(toolItemFromUse(value, uuid, ts));
+        items.push(toolItemFromUse(value, messageId, ts));
         break;
       case "toolResult":
-        items.push(toolItemFromResult(value, uuid, ts));
+        items.push(toolItemFromResult(value, messageId, ts));
         break;
       default:
         // image | toolReference | fallback | unknown — no per-block visual.
