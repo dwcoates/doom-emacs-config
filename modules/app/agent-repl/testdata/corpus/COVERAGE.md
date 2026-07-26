@@ -160,6 +160,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 | `TaskUpdateResult` | FOUND | tool-results/task_update.jsonl |
 | `TaskListResult` | FOUND | tool-results/task_list.jsonl |
 | `SendMessageResult` | FOUND | tool-results/send_message.jsonl |
+| `ArtifactRead` | NOT-FOUND-ON-MACHINE | WebFetchOutput.artifactRead is typings-only; no fetch on the machine resolved to an Artifact |
 | `WebFetchResult` | FOUND | tool-results/web_fetch.jsonl |
 | `WebSearchResult` | FOUND | tool-results/web_search.jsonl |
 | `AskUserQuestionResult` | FOUND | tool-results/ask_user_question.jsonl |
@@ -200,8 +201,8 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 
 - FOUND: 149
 - PARTIAL: 3
-- NOT-FOUND-ON-MACHINE: 22
-- Total shapes: 174
+- NOT-FOUND-ON-MACHINE: 23
+- Total shapes: 175
 
 ### NOT-FOUND / PARTIAL detail (nothing fabricated)
 
@@ -220,6 +221,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 - `stream:KeepAlive` (NOT-FOUND-ON-MACHINE) — control channel not in probes
 - `transcript:AgentMetaJson` (PARTIAL) — sidechain/agent-*.meta.json (model field absent in sample; other fields present)
 - `tools:ToolReferenceBlock` (NOT-FOUND-ON-MACHINE) — tool_reference content block not observed on the machine
+- `tools:ArtifactRead` (NOT-FOUND-ON-MACHINE) — WebFetchOutput.artifactRead is typings-only; no fetch on the machine resolved to an Artifact
 - `tools:KillShellInput` (NOT-FOUND-ON-MACHINE) — no KillShell tool use on the machine (proto already notes zero disk occurrences)
 - `tools:GrepInput` (NOT-FOUND-ON-MACHINE) — no Grep tool on the machine (grep is run via Bash)
 - `tools:NotebookEditInput` (NOT-FOUND-ON-MACHINE) — no NotebookEdit tool use on the machine
