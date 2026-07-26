@@ -58,18 +58,28 @@ const (
 	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST       AssistantMessageError = 4
 	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_SERVER_ERROR          AssistantMessageError = 5
 	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_UNKNOWN               AssistantMessageError = 6
+	// [sdk 0.3.220] the rest of the 10-member vocabulary. Without these the
+	// converter collapsed four distinct failures into UNSPECIFIED.
+	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_OAUTH_ORG_NOT_ALLOWED AssistantMessageError = 7
+	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_OVERLOADED            AssistantMessageError = 8
+	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND       AssistantMessageError = 9
+	AssistantMessageError_ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS     AssistantMessageError = 10
 )
 
 // Enum value maps for AssistantMessageError.
 var (
 	AssistantMessageError_name = map[int32]string{
-		0: "ASSISTANT_MESSAGE_ERROR_UNSPECIFIED",
-		1: "ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED",
-		2: "ASSISTANT_MESSAGE_ERROR_BILLING_ERROR",
-		3: "ASSISTANT_MESSAGE_ERROR_RATE_LIMIT",
-		4: "ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST",
-		5: "ASSISTANT_MESSAGE_ERROR_SERVER_ERROR",
-		6: "ASSISTANT_MESSAGE_ERROR_UNKNOWN",
+		0:  "ASSISTANT_MESSAGE_ERROR_UNSPECIFIED",
+		1:  "ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED",
+		2:  "ASSISTANT_MESSAGE_ERROR_BILLING_ERROR",
+		3:  "ASSISTANT_MESSAGE_ERROR_RATE_LIMIT",
+		4:  "ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST",
+		5:  "ASSISTANT_MESSAGE_ERROR_SERVER_ERROR",
+		6:  "ASSISTANT_MESSAGE_ERROR_UNKNOWN",
+		7:  "ASSISTANT_MESSAGE_ERROR_OAUTH_ORG_NOT_ALLOWED",
+		8:  "ASSISTANT_MESSAGE_ERROR_OVERLOADED",
+		9:  "ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND",
+		10: "ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS",
 	}
 	AssistantMessageError_value = map[string]int32{
 		"ASSISTANT_MESSAGE_ERROR_UNSPECIFIED":           0,
@@ -79,6 +89,10 @@ var (
 		"ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST":       4,
 		"ASSISTANT_MESSAGE_ERROR_SERVER_ERROR":          5,
 		"ASSISTANT_MESSAGE_ERROR_UNKNOWN":               6,
+		"ASSISTANT_MESSAGE_ERROR_OAUTH_ORG_NOT_ALLOWED": 7,
+		"ASSISTANT_MESSAGE_ERROR_OVERLOADED":            8,
+		"ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND":       9,
+		"ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS":     10,
 	}
 )
 
@@ -176,8 +190,9 @@ const (
 	McpServerState_MCP_SERVER_STATE_UNSPECIFIED McpServerState = 0
 	McpServerState_MCP_SERVER_STATE_CONNECTED   McpServerState = 1
 	McpServerState_MCP_SERVER_STATE_FAILED      McpServerState = 2
-	McpServerState_MCP_SERVER_STATE_NEEDS_AUTH  McpServerState = 3
+	McpServerState_MCP_SERVER_STATE_NEEDS_AUTH  McpServerState = 3 // wire spelling is "needs-auth"
 	McpServerState_MCP_SERVER_STATE_PENDING     McpServerState = 4
+	McpServerState_MCP_SERVER_STATE_DISABLED    McpServerState = 5
 )
 
 // Enum value maps for McpServerState.
@@ -188,6 +203,7 @@ var (
 		2: "MCP_SERVER_STATE_FAILED",
 		3: "MCP_SERVER_STATE_NEEDS_AUTH",
 		4: "MCP_SERVER_STATE_PENDING",
+		5: "MCP_SERVER_STATE_DISABLED",
 	}
 	McpServerState_value = map[string]int32{
 		"MCP_SERVER_STATE_UNSPECIFIED": 0,
@@ -195,6 +211,7 @@ var (
 		"MCP_SERVER_STATE_FAILED":      2,
 		"MCP_SERVER_STATE_NEEDS_AUTH":  3,
 		"MCP_SERVER_STATE_PENDING":     4,
+		"MCP_SERVER_STATE_DISABLED":    5,
 	}
 )
 
@@ -1114,6 +1131,17 @@ type UserMessage struct {
 	// [observed] present on subagent-context user messages:
 	SubagentType    string `protobuf:"bytes,8,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"`
 	TaskDescription string `protobuf:"bytes,9,opt,name=task_description,json=taskDescription,proto3" json:"task_description,omitempty"`
+	// [sdk 0.3.220] fields beyond the folded 0.1.77 core:
+	Timestamp string `protobuf:"bytes,10,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// "now" | "next" | "later" — the queue-priority signal.
+	Priority string `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"`
+	// Provenance. UNSET is UNATTRIBUTED, never "human": strict trust gates fail
+	// closed on it (see Origin in transcript.proto).
+	Origin      *Origin `protobuf:"bytes,12,opt,name=origin,proto3" json:"origin,omitempty"`
+	ShouldQuery bool    `protobuf:"varint,13,opt,name=should_query,json=shouldQuery,proto3" json:"should_query,omitempty"`
+	// REPLAY-ONLY (SDKUserMessageReplay). Typed `unknown[]` by the SDK, so
+	// captured verbatim rather than guessed at.
+	FileAttachments *structpb.ListValue `protobuf:"bytes,14,opt,name=file_attachments,json=fileAttachments,proto3" json:"file_attachments,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1211,6 +1239,41 @@ func (x *UserMessage) GetTaskDescription() string {
 	return ""
 }
 
+func (x *UserMessage) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *UserMessage) GetPriority() string {
+	if x != nil {
+		return x.Priority
+	}
+	return ""
+}
+
+func (x *UserMessage) GetOrigin() *Origin {
+	if x != nil {
+		return x.Origin
+	}
+	return nil
+}
+
+func (x *UserMessage) GetShouldQuery() bool {
+	if x != nil {
+		return x.ShouldQuery
+	}
+	return false
+}
+
+func (x *UserMessage) GetFileAttachments() *structpb.ListValue {
+	if x != nil {
+		return x.FileAttachments
+	}
+	return nil
+}
+
 // [sdk coreTypes.d.ts:428-435] SDKAssistantMessage.
 type AssistantMessage struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -1220,6 +1283,17 @@ type AssistantMessage struct {
 	HasError        bool                   `protobuf:"varint,4,opt,name=has_error,json=hasError,proto3" json:"has_error,omitempty"`                        // disambiguates unset vs UNKNOWN
 	Uuid            string                 `protobuf:"bytes,5,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId       string                 `protobuf:"bytes,6,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// [sdk 0.3.220]:
+	RequestId                     string `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Timestamp                     string `protobuf:"bytes,8,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ResumedFromIncompleteThinking bool   `protobuf:"varint,9,opt,name=resumed_from_incomplete_thinking,json=resumedFromIncompleteThinking,proto3" json:"resumed_from_incomplete_thinking,omitempty"`
+	// The uuids this message REPLACES (a re-issued assistant turn). Consumers
+	// reconciling per uuid must retract these, not render both.
+	Supersedes []string `protobuf:"bytes,10,rep,name=supersedes,proto3" json:"supersedes,omitempty"`
+	Aborted    bool     `protobuf:"varint,11,opt,name=aborted,proto3" json:"aborted,omitempty"`
+	// Subagent context, matching UserMessage's pair.
+	SubagentType    string `protobuf:"bytes,12,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"`
+	TaskDescription string `protobuf:"bytes,13,opt,name=task_description,json=taskDescription,proto3" json:"task_description,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1296,6 +1370,55 @@ func (x *AssistantMessage) GetSessionId() string {
 	return ""
 }
 
+func (x *AssistantMessage) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AssistantMessage) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *AssistantMessage) GetResumedFromIncompleteThinking() bool {
+	if x != nil {
+		return x.ResumedFromIncompleteThinking
+	}
+	return false
+}
+
+func (x *AssistantMessage) GetSupersedes() []string {
+	if x != nil {
+		return x.Supersedes
+	}
+	return nil
+}
+
+func (x *AssistantMessage) GetAborted() bool {
+	if x != nil {
+		return x.Aborted
+	}
+	return false
+}
+
+func (x *AssistantMessage) GetSubagentType() string {
+	if x != nil {
+		return x.SubagentType
+	}
+	return ""
+}
+
+func (x *AssistantMessage) GetTaskDescription() string {
+	if x != nil {
+		return x.TaskDescription
+	}
+	return ""
+}
+
 type ResultMessage struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Subtype           ResultSubtype          `protobuf:"varint,1,opt,name=subtype,proto3,enum=agentshim.data.v1.ResultSubtype" json:"subtype,omitempty"`
@@ -1312,17 +1435,34 @@ type ResultMessage struct {
 	Errors            []string               `protobuf:"bytes,12,rep,name=errors,proto3" json:"errors,omitempty"`                                             // error variants only
 	Uuid              string                 `protobuf:"bytes,13,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId         string                 `protobuf:"bytes,14,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// [observed] stream-only extras beyond the typings:
+	// Fields 15-22 were reverse-engineered as [observed] against SDK 0.1.77 and
+	// are TYPED as of 0.3.220 — the guesses were right. stop_reason is required
+	// on both variants there; the rest ride the success variant only, except
+	// terminal_reason / fast_mode_state, which ride both.
 	ApiErrorStatus    int64  `protobuf:"varint,15,opt,name=api_error_status,json=apiErrorStatus,proto3" json:"api_error_status,omitempty"` // number|null; 0 = null
 	ApiErrorStatusSet bool   `protobuf:"varint,16,opt,name=api_error_status_set,json=apiErrorStatusSet,proto3" json:"api_error_status_set,omitempty"`
 	TtftMs            int64  `protobuf:"varint,17,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"`
 	TtftStreamMs      int64  `protobuf:"varint,18,opt,name=ttft_stream_ms,json=ttftStreamMs,proto3" json:"ttft_stream_ms,omitempty"`
 	TimeToRequestMs   int64  `protobuf:"varint,19,opt,name=time_to_request_ms,json=timeToRequestMs,proto3" json:"time_to_request_ms,omitempty"`
-	StopReason        string `protobuf:"bytes,20,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`             // e.g. "end_turn"
-	TerminalReason    string `protobuf:"bytes,21,opt,name=terminal_reason,json=terminalReason,proto3" json:"terminal_reason,omitempty"` // e.g. "completed"
-	FastModeState     string `protobuf:"bytes,22,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"`  // e.g. "off"
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	StopReason        string `protobuf:"bytes,20,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"` // e.g. "end_turn"
+	// 19-value TerminalReason vocabulary, e.g. "completed", "max_turns",
+	// "budget_exhausted", "hook_stopped".
+	TerminalReason string `protobuf:"bytes,21,opt,name=terminal_reason,json=terminalReason,proto3" json:"terminal_reason,omitempty"`
+	FastModeState  string `protobuf:"bytes,22,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"` // "off" | "cooldown" | "on"
+	// [sdk 0.3.220] spawn-to-first-request latency and turn attribution:
+	UserMessageUuid          string `protobuf:"bytes,23,opt,name=user_message_uuid,json=userMessageUuid,proto3" json:"user_message_uuid,omitempty"`
+	RequestSentWallMs        int64  `protobuf:"varint,24,opt,name=request_sent_wall_ms,json=requestSentWallMs,proto3" json:"request_sent_wall_ms,omitempty"`
+	TimeToRequestFromSpawnMs int64  `protobuf:"varint,25,opt,name=time_to_request_from_spawn_ms,json=timeToRequestFromSpawnMs,proto3" json:"time_to_request_from_spawn_ms,omitempty"`
+	WarmSpareClaimed         bool   `protobuf:"varint,26,opt,name=warm_spare_claimed,json=warmSpareClaimed,proto3" json:"warm_spare_claimed,omitempty"`
+	TimeOriginMs             int64  `protobuf:"varint,27,opt,name=time_origin_ms,json=timeOriginMs,proto3" json:"time_origin_ms,omitempty"`
+	// A tool the turn ended WITHOUT running (terminal_reason "tool_deferred").
+	DeferredToolUse *DeferredToolUse `protobuf:"bytes,28,opt,name=deferred_tool_use,json=deferredToolUse,proto3" json:"deferred_tool_use,omitempty"`
+	// 10-value FastModeDisabledReason vocabulary, e.g. "free", "preference",
+	// "network_error", "model_not_allowed".
+	FastModeDisabledReason string  `protobuf:"bytes,29,opt,name=fast_mode_disabled_reason,json=fastModeDisabledReason,proto3" json:"fast_mode_disabled_reason,omitempty"`
+	Origin                 *Origin `protobuf:"bytes,30,opt,name=origin,proto3" json:"origin,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ResultMessage) Reset() {
@@ -1509,6 +1649,123 @@ func (x *ResultMessage) GetFastModeState() string {
 	return ""
 }
 
+func (x *ResultMessage) GetUserMessageUuid() string {
+	if x != nil {
+		return x.UserMessageUuid
+	}
+	return ""
+}
+
+func (x *ResultMessage) GetRequestSentWallMs() int64 {
+	if x != nil {
+		return x.RequestSentWallMs
+	}
+	return 0
+}
+
+func (x *ResultMessage) GetTimeToRequestFromSpawnMs() int64 {
+	if x != nil {
+		return x.TimeToRequestFromSpawnMs
+	}
+	return 0
+}
+
+func (x *ResultMessage) GetWarmSpareClaimed() bool {
+	if x != nil {
+		return x.WarmSpareClaimed
+	}
+	return false
+}
+
+func (x *ResultMessage) GetTimeOriginMs() int64 {
+	if x != nil {
+		return x.TimeOriginMs
+	}
+	return 0
+}
+
+func (x *ResultMessage) GetDeferredToolUse() *DeferredToolUse {
+	if x != nil {
+		return x.DeferredToolUse
+	}
+	return nil
+}
+
+func (x *ResultMessage) GetFastModeDisabledReason() string {
+	if x != nil {
+		return x.FastModeDisabledReason
+	}
+	return ""
+}
+
+func (x *ResultMessage) GetOrigin() *Origin {
+	if x != nil {
+		return x.Origin
+	}
+	return nil
+}
+
+// [sdk 0.3.220 SDKDeferredToolUse] the tool a deferred turn never ran.
+type DeferredToolUse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Input         *structpb.Struct       `protobuf:"bytes,3,opt,name=input,proto3" json:"input,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeferredToolUse) Reset() {
+	*x = DeferredToolUse{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeferredToolUse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeferredToolUse) ProtoMessage() {}
+
+func (x *DeferredToolUse) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeferredToolUse.ProtoReflect.Descriptor instead.
+func (*DeferredToolUse) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeferredToolUse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DeferredToolUse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeferredToolUse) GetInput() *structpb.Struct {
+	if x != nil {
+		return x.Input
+	}
+	return nil
+}
+
 // Anthropic API usage block (NonNullableUsage).
 type Usage struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
@@ -1525,7 +1782,7 @@ type Usage struct {
 
 func (x *Usage) Reset() {
 	*x = Usage{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[4]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1537,7 +1794,7 @@ func (x *Usage) String() string {
 func (*Usage) ProtoMessage() {}
 
 func (x *Usage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[4]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1550,7 +1807,7 @@ func (x *Usage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Usage.ProtoReflect.Descriptor instead.
 func (*Usage) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Usage) GetInputTokens() int64 {
@@ -1612,14 +1869,18 @@ type ModelUsage struct {
 	WebSearchRequests        int64                  `protobuf:"varint,5,opt,name=web_search_requests,json=webSearchRequests,proto3" json:"web_search_requests,omitempty"`
 	CostUsd                  float64                `protobuf:"fixed64,6,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
 	ContextWindow            int64                  `protobuf:"varint,7,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
-	MaxOutputTokens          int64                  `protobuf:"varint,8,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"` // [observed]
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	MaxOutputTokens          int64                  `protobuf:"varint,8,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"` // [observed] in 0.1.77; TYPED in 0.3.220
+	// [sdk 0.3.220] which model actually served the request, and through whom —
+	// an alias resolves to a canonical id, and the provider may not be Anthropic.
+	CanonicalModel string `protobuf:"bytes,9,opt,name=canonical_model,json=canonicalModel,proto3" json:"canonical_model,omitempty"`
+	Provider       string `protobuf:"bytes,10,opt,name=provider,proto3" json:"provider,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ModelUsage) Reset() {
 	*x = ModelUsage{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[5]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1631,7 +1892,7 @@ func (x *ModelUsage) String() string {
 func (*ModelUsage) ProtoMessage() {}
 
 func (x *ModelUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[5]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1644,7 +1905,7 @@ func (x *ModelUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelUsage.ProtoReflect.Descriptor instead.
 func (*ModelUsage) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ModelUsage) GetInputTokens() int64 {
@@ -1703,6 +1964,20 @@ func (x *ModelUsage) GetMaxOutputTokens() int64 {
 	return 0
 }
 
+func (x *ModelUsage) GetCanonicalModel() string {
+	if x != nil {
+		return x.CanonicalModel
+	}
+	return ""
+}
+
+func (x *ModelUsage) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
 // [sdk coreTypes.d.ts:436-440].
 type PermissionDenial struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1715,7 +1990,7 @@ type PermissionDenial struct {
 
 func (x *PermissionDenial) Reset() {
 	*x = PermissionDenial{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[6]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1727,7 +2002,7 @@ func (x *PermissionDenial) String() string {
 func (*PermissionDenial) ProtoMessage() {}
 
 func (x *PermissionDenial) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[6]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1740,7 +2015,7 @@ func (x *PermissionDenial) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionDenial.ProtoReflect.Descriptor instead.
 func (*PermissionDenial) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PermissionDenial) GetToolName() string {
@@ -1764,17 +2039,28 @@ func (x *PermissionDenial) GetToolInput() *structpb.Struct {
 	return nil
 }
 
+// [sdk 0.3.220 McpServerStatus]. NOTE the asymmetry: `system:init` carries
+// only the narrow {name, status} pair, while the RICH form below arrives on
+// the control channel's mcp_server_status response. One message models both,
+// so the extra fields are simply unset on the init path.
 type McpServerStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Status        McpServerState         `protobuf:"varint,2,opt,name=status,proto3,enum=agentshim.data.v1.McpServerState" json:"status,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Name       string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Status     McpServerState         `protobuf:"varint,2,opt,name=status,proto3,enum=agentshim.data.v1.McpServerState" json:"status,omitempty"`
+	ServerInfo *McpServerInfo         `protobuf:"bytes,3,opt,name=server_info,json=serverInfo,proto3" json:"server_info,omitempty"`
+	Error      string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	// McpServerStatusConfig is a union of transport configs, so it stays a
+	// Struct: there is no single shape to type it as.
+	Config        *structpb.Struct `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
+	Scope         string           `protobuf:"bytes,6,opt,name=scope,proto3" json:"scope,omitempty"`
+	Tools         []*McpToolRef    `protobuf:"bytes,7,rep,name=tools,proto3" json:"tools,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *McpServerStatus) Reset() {
 	*x = McpServerStatus{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[7]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1786,7 +2072,7 @@ func (x *McpServerStatus) String() string {
 func (*McpServerStatus) ProtoMessage() {}
 
 func (x *McpServerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[7]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1799,7 +2085,7 @@ func (x *McpServerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerStatus.ProtoReflect.Descriptor instead.
 func (*McpServerStatus) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *McpServerStatus) GetName() string {
@@ -1816,6 +2102,215 @@ func (x *McpServerStatus) GetStatus() McpServerState {
 	return McpServerState_MCP_SERVER_STATE_UNSPECIFIED
 }
 
+func (x *McpServerStatus) GetServerInfo() *McpServerInfo {
+	if x != nil {
+		return x.ServerInfo
+	}
+	return nil
+}
+
+func (x *McpServerStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *McpServerStatus) GetConfig() *structpb.Struct {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+func (x *McpServerStatus) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *McpServerStatus) GetTools() []*McpToolRef {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+type McpServerInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *McpServerInfo) Reset() {
+	*x = McpServerInfo{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *McpServerInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*McpServerInfo) ProtoMessage() {}
+
+func (x *McpServerInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use McpServerInfo.ProtoReflect.Descriptor instead.
+func (*McpServerInfo) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *McpServerInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *McpServerInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+// One tool an MCP server advertises, with the hints a permission surface needs
+// to decide how loudly to ask.
+type McpToolRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	Annotations   *McpToolAnnotations    `protobuf:"bytes,3,opt,name=annotations,proto3" json:"annotations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *McpToolRef) Reset() {
+	*x = McpToolRef{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *McpToolRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*McpToolRef) ProtoMessage() {}
+
+func (x *McpToolRef) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use McpToolRef.ProtoReflect.Descriptor instead.
+func (*McpToolRef) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *McpToolRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *McpToolRef) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *McpToolRef) GetAnnotations() *McpToolAnnotations {
+	if x != nil {
+		return x.Annotations
+	}
+	return nil
+}
+
+type McpToolAnnotations struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReadOnly      bool                   `protobuf:"varint,1,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	Destructive   bool                   `protobuf:"varint,2,opt,name=destructive,proto3" json:"destructive,omitempty"`
+	OpenWorld     bool                   `protobuf:"varint,3,opt,name=open_world,json=openWorld,proto3" json:"open_world,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *McpToolAnnotations) Reset() {
+	*x = McpToolAnnotations{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *McpToolAnnotations) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*McpToolAnnotations) ProtoMessage() {}
+
+func (x *McpToolAnnotations) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use McpToolAnnotations.ProtoReflect.Descriptor instead.
+func (*McpToolAnnotations) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *McpToolAnnotations) GetReadOnly() bool {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return false
+}
+
+func (x *McpToolAnnotations) GetDestructive() bool {
+	if x != nil {
+		return x.Destructive
+	}
+	return false
+}
+
+func (x *McpToolAnnotations) GetOpenWorld() bool {
+	if x != nil {
+		return x.OpenWorld
+	}
+	return false
+}
+
 type PluginRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1828,7 +2323,7 @@ type PluginRef struct {
 
 func (x *PluginRef) Reset() {
 	*x = PluginRef{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[8]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1840,7 +2335,7 @@ func (x *PluginRef) String() string {
 func (*PluginRef) ProtoMessage() {}
 
 func (x *PluginRef) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[8]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1853,7 +2348,7 @@ func (x *PluginRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginRef.ProtoReflect.Descriptor instead.
 func (*PluginRef) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *PluginRef) GetName() string {
@@ -1903,19 +2398,22 @@ type SystemInit struct {
 	Plugins           []*PluginRef           `protobuf:"bytes,13,rep,name=plugins,proto3" json:"plugins,omitempty"`
 	Uuid              string                 `protobuf:"bytes,14,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId         string                 `protobuf:"bytes,15,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	FastModeState     string                 `protobuf:"bytes,16,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"` // [observed]
+	FastModeState     string                 `protobuf:"bytes,16,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"` // [observed] in 0.1.77; TYPED in 0.3.220
 	// [corpus] further observed init fields:
 	Capabilities            []string          `protobuf:"bytes,17,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // e.g. "interrupt_receipt_v1"
 	AnalyticsDisabled       bool              `protobuf:"varint,18,opt,name=analytics_disabled,json=analyticsDisabled,proto3" json:"analytics_disabled,omitempty"`
 	ProductFeedbackDisabled bool              `protobuf:"varint,19,opt,name=product_feedback_disabled,json=productFeedbackDisabled,proto3" json:"product_feedback_disabled,omitempty"`
 	MemoryPaths             map[string]string `protobuf:"bytes,20,rep,name=memory_paths,json=memoryPaths,proto3" json:"memory_paths,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // e.g. {"auto": <memory dir>}
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// [sdk 0.3.220] WHY fast mode is off, so the state is explicable and not
+	// just a flag. Same 10-value vocabulary as ResultMessage's.
+	FastModeDisabledReason string `protobuf:"bytes,21,opt,name=fast_mode_disabled_reason,json=fastModeDisabledReason,proto3" json:"fast_mode_disabled_reason,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *SystemInit) Reset() {
 	*x = SystemInit{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[9]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1927,7 +2425,7 @@ func (x *SystemInit) String() string {
 func (*SystemInit) ProtoMessage() {}
 
 func (x *SystemInit) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[9]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1940,7 +2438,7 @@ func (x *SystemInit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemInit.ProtoReflect.Descriptor instead.
 func (*SystemInit) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SystemInit) GetAgents() []string {
@@ -2083,6 +2581,13 @@ func (x *SystemInit) GetMemoryPaths() map[string]string {
 	return nil
 }
 
+func (x *SystemInit) GetFastModeDisabledReason() string {
+	if x != nil {
+		return x.FastModeDisabledReason
+	}
+	return ""
+}
+
 // [sdk coreTypes.d.ts:500-506] SDKPartialAssistantMessage wrapping the raw
 // Anthropic API RawMessageStreamEvent. NOTE: in live operation these become
 // EPHEMERAL core.ContentDelta via the delta bypass; the full typed model
@@ -2100,7 +2605,7 @@ type StreamEvent struct {
 
 func (x *StreamEvent) Reset() {
 	*x = StreamEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[10]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2112,7 +2617,7 @@ func (x *StreamEvent) String() string {
 func (*StreamEvent) ProtoMessage() {}
 
 func (x *StreamEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[10]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2125,7 +2630,7 @@ func (x *StreamEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEvent.ProtoReflect.Descriptor instead.
 func (*StreamEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StreamEvent) GetEvent() *RawMessageStreamEvent {
@@ -2180,7 +2685,7 @@ type RawMessageStreamEvent struct {
 
 func (x *RawMessageStreamEvent) Reset() {
 	*x = RawMessageStreamEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[11]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2192,7 +2697,7 @@ func (x *RawMessageStreamEvent) String() string {
 func (*RawMessageStreamEvent) ProtoMessage() {}
 
 func (x *RawMessageStreamEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[11]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2205,7 +2710,7 @@ func (x *RawMessageStreamEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RawMessageStreamEvent.ProtoReflect.Descriptor instead.
 func (*RawMessageStreamEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RawMessageStreamEvent) GetEvent() isRawMessageStreamEvent_Event {
@@ -2318,7 +2823,7 @@ type MessageStartEvent struct {
 
 func (x *MessageStartEvent) Reset() {
 	*x = MessageStartEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[12]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2330,7 +2835,7 @@ func (x *MessageStartEvent) String() string {
 func (*MessageStartEvent) ProtoMessage() {}
 
 func (x *MessageStartEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[12]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2343,7 +2848,7 @@ func (x *MessageStartEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageStartEvent.ProtoReflect.Descriptor instead.
 func (*MessageStartEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MessageStartEvent) GetMessage() *structpb.Struct {
@@ -2363,7 +2868,7 @@ type ContentBlockStartEvent struct {
 
 func (x *ContentBlockStartEvent) Reset() {
 	*x = ContentBlockStartEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[13]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2375,7 +2880,7 @@ func (x *ContentBlockStartEvent) String() string {
 func (*ContentBlockStartEvent) ProtoMessage() {}
 
 func (x *ContentBlockStartEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[13]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2388,7 +2893,7 @@ func (x *ContentBlockStartEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentBlockStartEvent.ProtoReflect.Descriptor instead.
 func (*ContentBlockStartEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ContentBlockStartEvent) GetIndex() uint32 {
@@ -2421,7 +2926,7 @@ type ContentBlockDeltaEvent struct {
 
 func (x *ContentBlockDeltaEvent) Reset() {
 	*x = ContentBlockDeltaEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[14]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2433,7 +2938,7 @@ func (x *ContentBlockDeltaEvent) String() string {
 func (*ContentBlockDeltaEvent) ProtoMessage() {}
 
 func (x *ContentBlockDeltaEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[14]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2446,7 +2951,7 @@ func (x *ContentBlockDeltaEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentBlockDeltaEvent.ProtoReflect.Descriptor instead.
 func (*ContentBlockDeltaEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{14}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ContentBlockDeltaEvent) GetIndex() uint32 {
@@ -2536,7 +3041,7 @@ type TextDelta struct {
 
 func (x *TextDelta) Reset() {
 	*x = TextDelta{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[15]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2548,7 +3053,7 @@ func (x *TextDelta) String() string {
 func (*TextDelta) ProtoMessage() {}
 
 func (x *TextDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[15]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2561,7 +3066,7 @@ func (x *TextDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TextDelta.ProtoReflect.Descriptor instead.
 func (*TextDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{15}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TextDelta) GetText() string {
@@ -2583,7 +3088,7 @@ type ThinkingDelta struct {
 
 func (x *ThinkingDelta) Reset() {
 	*x = ThinkingDelta{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[16]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2595,7 +3100,7 @@ func (x *ThinkingDelta) String() string {
 func (*ThinkingDelta) ProtoMessage() {}
 
 func (x *ThinkingDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[16]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2608,7 +3113,7 @@ func (x *ThinkingDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThinkingDelta.ProtoReflect.Descriptor instead.
 func (*ThinkingDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{16}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ThinkingDelta) GetThinking() string {
@@ -2641,7 +3146,7 @@ type InputJsonDelta struct {
 
 func (x *InputJsonDelta) Reset() {
 	*x = InputJsonDelta{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[17]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2653,7 +3158,7 @@ func (x *InputJsonDelta) String() string {
 func (*InputJsonDelta) ProtoMessage() {}
 
 func (x *InputJsonDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[17]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2666,7 +3171,7 @@ func (x *InputJsonDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputJsonDelta.ProtoReflect.Descriptor instead.
 func (*InputJsonDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{17}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *InputJsonDelta) GetPartialJson() string {
@@ -2685,7 +3190,7 @@ type SignatureDelta struct {
 
 func (x *SignatureDelta) Reset() {
 	*x = SignatureDelta{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[18]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2697,7 +3202,7 @@ func (x *SignatureDelta) String() string {
 func (*SignatureDelta) ProtoMessage() {}
 
 func (x *SignatureDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[18]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2710,7 +3215,7 @@ func (x *SignatureDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignatureDelta.ProtoReflect.Descriptor instead.
 func (*SignatureDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{18}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SignatureDelta) GetSignature() string {
@@ -2729,7 +3234,7 @@ type ContentBlockStopEvent struct {
 
 func (x *ContentBlockStopEvent) Reset() {
 	*x = ContentBlockStopEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[19]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2741,7 +3246,7 @@ func (x *ContentBlockStopEvent) String() string {
 func (*ContentBlockStopEvent) ProtoMessage() {}
 
 func (x *ContentBlockStopEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[19]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2754,7 +3259,7 @@ func (x *ContentBlockStopEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentBlockStopEvent.ProtoReflect.Descriptor instead.
 func (*ContentBlockStopEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{19}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ContentBlockStopEvent) GetIndex() uint32 {
@@ -2774,7 +3279,7 @@ type MessageDeltaEvent struct {
 
 func (x *MessageDeltaEvent) Reset() {
 	*x = MessageDeltaEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[20]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2786,7 +3291,7 @@ func (x *MessageDeltaEvent) String() string {
 func (*MessageDeltaEvent) ProtoMessage() {}
 
 func (x *MessageDeltaEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[20]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2799,7 +3304,7 @@ func (x *MessageDeltaEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageDeltaEvent.ProtoReflect.Descriptor instead.
 func (*MessageDeltaEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{20}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *MessageDeltaEvent) GetDelta() *structpb.Struct {
@@ -2824,7 +3329,7 @@ type MessageStopEvent struct {
 
 func (x *MessageStopEvent) Reset() {
 	*x = MessageStopEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[21]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2836,7 +3341,7 @@ func (x *MessageStopEvent) String() string {
 func (*MessageStopEvent) ProtoMessage() {}
 
 func (x *MessageStopEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[21]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2849,23 +3354,32 @@ func (x *MessageStopEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageStopEvent.ProtoReflect.Descriptor instead.
 func (*MessageStopEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{21}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{25}
 }
 
 // [sdk coreTypes.d.ts:507-516] compact_boundary (stream variant, snake_case).
+// [sdk 0.3.220] the stream type CAUGHT UP to the disk twin: post_tokens,
+// duration_ms, preserved_segment and preserved_messages are all typed now, so
+// compaction is a measurable operation here and not just a marker. The
+// preserved_* messages are DiskCompactMetadata's (transcript.proto) — one
+// model, since both planes describe the same compaction.
 type CompactBoundary struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Trigger       CompactTrigger         `protobuf:"varint,1,opt,name=trigger,proto3,enum=agentshim.data.v1.CompactTrigger" json:"trigger,omitempty"`
-	PreTokens     int64                  `protobuf:"varint,2,opt,name=pre_tokens,json=preTokens,proto3" json:"pre_tokens,omitempty"`
-	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Trigger           CompactTrigger         `protobuf:"varint,1,opt,name=trigger,proto3,enum=agentshim.data.v1.CompactTrigger" json:"trigger,omitempty"`
+	PreTokens         int64                  `protobuf:"varint,2,opt,name=pre_tokens,json=preTokens,proto3" json:"pre_tokens,omitempty"`
+	Uuid              string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId         string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	PostTokens        int64                  `protobuf:"varint,5,opt,name=post_tokens,json=postTokens,proto3" json:"post_tokens,omitempty"`
+	DurationMs        int64                  `protobuf:"varint,6,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	PreservedSegment  *PreservedSegment      `protobuf:"bytes,7,opt,name=preserved_segment,json=preservedSegment,proto3" json:"preserved_segment,omitempty"`
+	PreservedMessages *PreservedMessages     `protobuf:"bytes,8,opt,name=preserved_messages,json=preservedMessages,proto3" json:"preserved_messages,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CompactBoundary) Reset() {
 	*x = CompactBoundary{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[22]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2877,7 +3391,7 @@ func (x *CompactBoundary) String() string {
 func (*CompactBoundary) ProtoMessage() {}
 
 func (x *CompactBoundary) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[22]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2890,7 +3404,7 @@ func (x *CompactBoundary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactBoundary.ProtoReflect.Descriptor instead.
 func (*CompactBoundary) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{22}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CompactBoundary) GetTrigger() CompactTrigger {
@@ -2921,19 +3435,55 @@ func (x *CompactBoundary) GetSessionId() string {
 	return ""
 }
 
-// [sdk coreTypes.d.ts:517-524] subtype "status"; status: 'compacting'|null.
+func (x *CompactBoundary) GetPostTokens() int64 {
+	if x != nil {
+		return x.PostTokens
+	}
+	return 0
+}
+
+func (x *CompactBoundary) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *CompactBoundary) GetPreservedSegment() *PreservedSegment {
+	if x != nil {
+		return x.PreservedSegment
+	}
+	return nil
+}
+
+func (x *CompactBoundary) GetPreservedMessages() *PreservedMessages {
+	if x != nil {
+		return x.PreservedMessages
+	}
+	return nil
+}
+
+// [sdk 0.3.220 SDKStatusMessage] subtype "status".
 type StatusMessage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"` // "" = null
-	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SDKStatus: "compacting" | "requesting" | null. "" = null. ("requesting"
+	// was corpus-observed before the typings named it.)
+	Status    string `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Uuid      string `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId string `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// "default"|"acceptEdits"|"bypassPermissions"|"plan"|"dontAsk"|"auto".
+	PermissionMode string `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	// Turns compaction from an in-progress marker into an outcome:
+	// "success" | "failed", with the reason when it failed.
+	CompactResult string `protobuf:"bytes,5,opt,name=compact_result,json=compactResult,proto3" json:"compact_result,omitempty"`
+	CompactError  string `protobuf:"bytes,6,opt,name=compact_error,json=compactError,proto3" json:"compact_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StatusMessage) Reset() {
 	*x = StatusMessage{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[23]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2945,7 +3495,7 @@ func (x *StatusMessage) String() string {
 func (*StatusMessage) ProtoMessage() {}
 
 func (x *StatusMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[23]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2958,7 +3508,7 @@ func (x *StatusMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusMessage.ProtoReflect.Descriptor instead.
 func (*StatusMessage) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{23}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StatusMessage) GetStatus() string {
@@ -2982,27 +3532,51 @@ func (x *StatusMessage) GetSessionId() string {
 	return ""
 }
 
+func (x *StatusMessage) GetPermissionMode() string {
+	if x != nil {
+		return x.PermissionMode
+	}
+	return ""
+}
+
+func (x *StatusMessage) GetCompactResult() string {
+	if x != nil {
+		return x.CompactResult
+	}
+	return ""
+}
+
+func (x *StatusMessage) GetCompactError() string {
+	if x != nil {
+		return x.CompactError
+	}
+	return ""
+}
+
 // [sdk coreTypes.d.ts:525-535] subtype "hook_response" + [observed] extras.
 type HookResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HookName      string                 `protobuf:"bytes,1,opt,name=hook_name,json=hookName,proto3" json:"hook_name,omitempty"`
-	HookEvent     string                 `protobuf:"bytes,2,opt,name=hook_event,json=hookEvent,proto3" json:"hook_event,omitempty"`
-	Stdout        string                 `protobuf:"bytes,3,opt,name=stdout,proto3" json:"stdout,omitempty"`
-	Stderr        string                 `protobuf:"bytes,4,opt,name=stderr,proto3" json:"stderr,omitempty"`
-	ExitCode      int32                  `protobuf:"varint,5,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	ExitCodeSet   bool                   `protobuf:"varint,6,opt,name=exit_code_set,json=exitCodeSet,proto3" json:"exit_code_set,omitempty"`
-	HookId        string                 `protobuf:"bytes,7,opt,name=hook_id,json=hookId,proto3" json:"hook_id,omitempty"` // [observed]
-	Output        string                 `protobuf:"bytes,8,opt,name=output,proto3" json:"output,omitempty"`               // [observed]
-	Outcome       string                 `protobuf:"bytes,9,opt,name=outcome,proto3" json:"outcome,omitempty"`             // [observed] e.g. "error"
-	Uuid          string                 `protobuf:"bytes,10,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SessionId     string                 `protobuf:"bytes,11,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	HookName    string                 `protobuf:"bytes,1,opt,name=hook_name,json=hookName,proto3" json:"hook_name,omitempty"`
+	HookEvent   string                 `protobuf:"bytes,2,opt,name=hook_event,json=hookEvent,proto3" json:"hook_event,omitempty"`
+	Stdout      string                 `protobuf:"bytes,3,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr      string                 `protobuf:"bytes,4,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	ExitCode    int32                  `protobuf:"varint,5,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	ExitCodeSet bool                   `protobuf:"varint,6,opt,name=exit_code_set,json=exitCodeSet,proto3" json:"exit_code_set,omitempty"`
+	// Fields 7-9 were [observed] against 0.1.77 and are REQUIRED in 0.3.220.
+	HookId string `protobuf:"bytes,7,opt,name=hook_id,json=hookId,proto3" json:"hook_id,omitempty"`
+	Output string `protobuf:"bytes,8,opt,name=output,proto3" json:"output,omitempty"`
+	// Closed vocabulary: "success" | "error" | "cancelled". "cancelled" is
+	// NEVER an error — the hook was called off, it did not fail.
+	Outcome       string `protobuf:"bytes,9,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Uuid          string `protobuf:"bytes,10,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string `protobuf:"bytes,11,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HookResponse) Reset() {
 	*x = HookResponse{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[24]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3014,7 +3588,7 @@ func (x *HookResponse) String() string {
 func (*HookResponse) ProtoMessage() {}
 
 func (x *HookResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[24]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3027,7 +3601,7 @@ func (x *HookResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookResponse.ProtoReflect.Descriptor instead.
 func (*HookResponse) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{24}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *HookResponse) GetHookName() string {
@@ -3107,7 +3681,7 @@ func (x *HookResponse) GetSessionId() string {
 	return ""
 }
 
-// [sdk coreTypes.d.ts:536-544].
+// [sdk 0.3.220 SDKToolProgressMessage].
 type ToolProgress struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	ToolUseId          string                 `protobuf:"bytes,1,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
@@ -3116,13 +3690,18 @@ type ToolProgress struct {
 	ElapsedTimeSeconds float64                `protobuf:"fixed64,4,opt,name=elapsed_time_seconds,json=elapsedTimeSeconds,proto3" json:"elapsed_time_seconds,omitempty"`
 	Uuid               string                 `protobuf:"bytes,5,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	SessionId          string                 `protobuf:"bytes,6,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	TaskId             string                 `protobuf:"bytes,7,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// TRUE = a liveness ping, not progress. A spinner must not advance on it.
+	Heartbeat     bool           `protobuf:"varint,8,opt,name=heartbeat,proto3" json:"heartbeat,omitempty"`
+	SubagentType  string         `protobuf:"bytes,9,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"`
+	SubagentRetry *SubagentRetry `protobuf:"bytes,10,opt,name=subagent_retry,json=subagentRetry,proto3" json:"subagent_retry,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ToolProgress) Reset() {
 	*x = ToolProgress{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[25]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3134,7 +3713,7 @@ func (x *ToolProgress) String() string {
 func (*ToolProgress) ProtoMessage() {}
 
 func (x *ToolProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[25]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3147,7 +3726,7 @@ func (x *ToolProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolProgress.ProtoReflect.Descriptor instead.
 func (*ToolProgress) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{25}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ToolProgress) GetToolUseId() string {
@@ -3192,6 +3771,128 @@ func (x *ToolProgress) GetSessionId() string {
 	return ""
 }
 
+func (x *ToolProgress) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ToolProgress) GetHeartbeat() bool {
+	if x != nil {
+		return x.Heartbeat
+	}
+	return false
+}
+
+func (x *ToolProgress) GetSubagentType() string {
+	if x != nil {
+		return x.SubagentType
+	}
+	return ""
+}
+
+func (x *ToolProgress) GetSubagentRetry() *SubagentRetry {
+	if x != nil {
+		return x.SubagentRetry
+	}
+	return nil
+}
+
+// [sdk 0.3.220] a subagent's retry/backoff state, so a stalled task reads as
+// "retrying" rather than "hung".
+type SubagentRetry struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AgentId        string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Attempt        int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	MaxRetries     int32                  `protobuf:"varint,3,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	RetryDelayMs   int64                  `protobuf:"varint,4,opt,name=retry_delay_ms,json=retryDelayMs,proto3" json:"retry_delay_ms,omitempty"`
+	ErrorStatus    int64                  `protobuf:"varint,5,opt,name=error_status,json=errorStatus,proto3" json:"error_status,omitempty"` // number|null; 0 = null
+	ErrorStatusSet bool                   `protobuf:"varint,6,opt,name=error_status_set,json=errorStatusSet,proto3" json:"error_status_set,omitempty"`
+	ErrorCategory  string                 `protobuf:"bytes,7,opt,name=error_category,json=errorCategory,proto3" json:"error_category,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SubagentRetry) Reset() {
+	*x = SubagentRetry{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubagentRetry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubagentRetry) ProtoMessage() {}
+
+func (x *SubagentRetry) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubagentRetry.ProtoReflect.Descriptor instead.
+func (*SubagentRetry) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *SubagentRetry) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SubagentRetry) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *SubagentRetry) GetMaxRetries() int32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *SubagentRetry) GetRetryDelayMs() int64 {
+	if x != nil {
+		return x.RetryDelayMs
+	}
+	return 0
+}
+
+func (x *SubagentRetry) GetErrorStatus() int64 {
+	if x != nil {
+		return x.ErrorStatus
+	}
+	return 0
+}
+
+func (x *SubagentRetry) GetErrorStatusSet() bool {
+	if x != nil {
+		return x.ErrorStatusSet
+	}
+	return false
+}
+
+func (x *SubagentRetry) GetErrorCategory() string {
+	if x != nil {
+		return x.ErrorCategory
+	}
+	return ""
+}
+
 // [sdk coreTypes.d.ts:545-552].
 type AuthStatus struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
@@ -3206,7 +3907,7 @@ type AuthStatus struct {
 
 func (x *AuthStatus) Reset() {
 	*x = AuthStatus{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[26]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3218,7 +3919,7 @@ func (x *AuthStatus) String() string {
 func (*AuthStatus) ProtoMessage() {}
 
 func (x *AuthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[26]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3231,7 +3932,7 @@ func (x *AuthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthStatus.ProtoReflect.Descriptor instead.
 func (*AuthStatus) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{26}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AuthStatus) GetIsAuthenticating() bool {
@@ -3269,23 +3970,38 @@ func (x *AuthStatus) GetSessionId() string {
 	return ""
 }
 
-// [observed] type:"rate_limit_event".
+// [sdk 0.3.220 SDKRateLimitInfo] type:"rate_limit_event". The base seven
+// fields were [observed] against 0.1.77 and are typed now; the overage/credit
+// half was entirely unmodeled, which is exactly the half that tells a user
+// they are blocked and what they could do about it.
 type RateLimitInfo struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Status             string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`                                      // e.g. "allowed_warning"
-	ResetsAt           int64                  `protobuf:"varint,2,opt,name=resets_at,json=resetsAt,proto3" json:"resets_at,omitempty"`                 // epoch seconds
-	RateLimitType      string                 `protobuf:"bytes,3,opt,name=rate_limit_type,json=rateLimitType,proto3" json:"rate_limit_type,omitempty"` // e.g. "overage"
-	Utilization        float64                `protobuf:"fixed64,4,opt,name=utilization,proto3" json:"utilization,omitempty"`
-	IsUsingOverage     bool                   `protobuf:"varint,5,opt,name=is_using_overage,json=isUsingOverage,proto3" json:"is_using_overage,omitempty"`
-	OverageInUse       bool                   `protobuf:"varint,6,opt,name=overage_in_use,json=overageInUse,proto3" json:"overage_in_use,omitempty"`
-	SurpassedThreshold float64                `protobuf:"fixed64,7,opt,name=surpassed_threshold,json=surpassedThreshold,proto3" json:"surpassed_threshold,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "allowed" | "allowed_warning" | "rejected".
+	Status   string `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ResetsAt int64  `protobuf:"varint,2,opt,name=resets_at,json=resetsAt,proto3" json:"resets_at,omitempty"` // epoch seconds
+	// "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet" |
+	// "seven_day_overage_included" | "overage".
+	RateLimitType      string  `protobuf:"bytes,3,opt,name=rate_limit_type,json=rateLimitType,proto3" json:"rate_limit_type,omitempty"`
+	Utilization        float64 `protobuf:"fixed64,4,opt,name=utilization,proto3" json:"utilization,omitempty"`
+	IsUsingOverage     bool    `protobuf:"varint,5,opt,name=is_using_overage,json=isUsingOverage,proto3" json:"is_using_overage,omitempty"`
+	OverageInUse       bool    `protobuf:"varint,6,opt,name=overage_in_use,json=overageInUse,proto3" json:"overage_in_use,omitempty"`
+	SurpassedThreshold float64 `protobuf:"fixed64,7,opt,name=surpassed_threshold,json=surpassedThreshold,proto3" json:"surpassed_threshold,omitempty"`
+	// Same vocabulary as `status`, for the overage allowance specifically.
+	OverageStatus   string `protobuf:"bytes,8,opt,name=overage_status,json=overageStatus,proto3" json:"overage_status,omitempty"`
+	OverageResetsAt int64  `protobuf:"varint,9,opt,name=overage_resets_at,json=overageResetsAt,proto3" json:"overage_resets_at,omitempty"`
+	// 13-value vocabulary, e.g. "out_of_credits", "org_level_disabled",
+	// "member_zero_credit_limit", "fetch_error".
+	OverageDisabledReason           string `protobuf:"bytes,10,opt,name=overage_disabled_reason,json=overageDisabledReason,proto3" json:"overage_disabled_reason,omitempty"`
+	ErrorCode                       string `protobuf:"bytes,11,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"` // "credits_required"
+	CanUserPurchaseCredits          bool   `protobuf:"varint,12,opt,name=can_user_purchase_credits,json=canUserPurchaseCredits,proto3" json:"can_user_purchase_credits,omitempty"`
+	HasChargeableSavedPaymentMethod bool   `protobuf:"varint,13,opt,name=has_chargeable_saved_payment_method,json=hasChargeableSavedPaymentMethod,proto3" json:"has_chargeable_saved_payment_method,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *RateLimitInfo) Reset() {
 	*x = RateLimitInfo{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[27]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3297,7 +4013,7 @@ func (x *RateLimitInfo) String() string {
 func (*RateLimitInfo) ProtoMessage() {}
 
 func (x *RateLimitInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[27]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3310,7 +4026,7 @@ func (x *RateLimitInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RateLimitInfo.ProtoReflect.Descriptor instead.
 func (*RateLimitInfo) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{27}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RateLimitInfo) GetStatus() string {
@@ -3362,6 +4078,48 @@ func (x *RateLimitInfo) GetSurpassedThreshold() float64 {
 	return 0
 }
 
+func (x *RateLimitInfo) GetOverageStatus() string {
+	if x != nil {
+		return x.OverageStatus
+	}
+	return ""
+}
+
+func (x *RateLimitInfo) GetOverageResetsAt() int64 {
+	if x != nil {
+		return x.OverageResetsAt
+	}
+	return 0
+}
+
+func (x *RateLimitInfo) GetOverageDisabledReason() string {
+	if x != nil {
+		return x.OverageDisabledReason
+	}
+	return ""
+}
+
+func (x *RateLimitInfo) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *RateLimitInfo) GetCanUserPurchaseCredits() bool {
+	if x != nil {
+		return x.CanUserPurchaseCredits
+	}
+	return false
+}
+
+func (x *RateLimitInfo) GetHasChargeableSavedPaymentMethod() bool {
+	if x != nil {
+		return x.HasChargeableSavedPaymentMethod
+	}
+	return false
+}
+
 type RateLimitEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RateLimitInfo *RateLimitInfo         `protobuf:"bytes,1,opt,name=rate_limit_info,json=rateLimitInfo,proto3" json:"rate_limit_info,omitempty"`
@@ -3373,7 +4131,7 @@ type RateLimitEvent struct {
 
 func (x *RateLimitEvent) Reset() {
 	*x = RateLimitEvent{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[28]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3385,7 +4143,7 @@ func (x *RateLimitEvent) String() string {
 func (*RateLimitEvent) ProtoMessage() {}
 
 func (x *RateLimitEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[28]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3398,7 +4156,7 @@ func (x *RateLimitEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RateLimitEvent.ProtoReflect.Descriptor instead.
 func (*RateLimitEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{28}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RateLimitEvent) GetRateLimitInfo() *RateLimitInfo {
@@ -3436,7 +4194,7 @@ type HookStarted struct {
 
 func (x *HookStarted) Reset() {
 	*x = HookStarted{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[29]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3448,7 +4206,7 @@ func (x *HookStarted) String() string {
 func (*HookStarted) ProtoMessage() {}
 
 func (x *HookStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[29]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3461,7 +4219,7 @@ func (x *HookStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookStarted.ProtoReflect.Descriptor instead.
 func (*HookStarted) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{29}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *HookStarted) GetHookId() string {
@@ -3512,7 +4270,7 @@ type ThinkingTokens struct {
 
 func (x *ThinkingTokens) Reset() {
 	*x = ThinkingTokens{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[30]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3524,7 +4282,7 @@ func (x *ThinkingTokens) String() string {
 func (*ThinkingTokens) ProtoMessage() {}
 
 func (x *ThinkingTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[30]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3537,7 +4295,7 @@ func (x *ThinkingTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThinkingTokens.ProtoReflect.Descriptor instead.
 func (*ThinkingTokens) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{30}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ThinkingTokens) GetEstimatedTokens() int64 {
@@ -3582,7 +4340,7 @@ type SystemNotification struct {
 
 func (x *SystemNotification) Reset() {
 	*x = SystemNotification{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[31]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3594,7 +4352,7 @@ func (x *SystemNotification) String() string {
 func (*SystemNotification) ProtoMessage() {}
 
 func (x *SystemNotification) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[31]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3607,7 +4365,7 @@ func (x *SystemNotification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemNotification.ProtoReflect.Descriptor instead.
 func (*SystemNotification) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{31}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SystemNotification) GetKey() string {
@@ -3645,25 +4403,31 @@ func (x *SystemNotification) GetSessionId() string {
 	return ""
 }
 
-// [observed] system/task_started. task_type: "local_bash" | "local_agent"
-// (workflows announce via tool results instead).
+// [sdk 0.3.220 SDKTaskStartedMessage] system/task_started. task_type is
+// "local_bash" | "local_agent" | "local_workflow" — 0.3.220 announces
+// workflows HERE, not only via tool results as 0.1.77 did.
 type TaskStartedMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	ToolUseId     string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	TaskType      string                 `protobuf:"bytes,4,opt,name=task_type,json=taskType,proto3" json:"task_type,omitempty"`
-	SubagentType  string                 `protobuf:"bytes,5,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"` // agent tasks only
-	Prompt        string                 `protobuf:"bytes,6,opt,name=prompt,proto3" json:"prompt,omitempty"`                                 // agent tasks only
-	Uuid          string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SessionId     string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	TaskId       string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ToolUseId    string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Description  string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	TaskType     string                 `protobuf:"bytes,4,opt,name=task_type,json=taskType,proto3" json:"task_type,omitempty"`
+	SubagentType string                 `protobuf:"bytes,5,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"` // agent tasks only
+	Prompt       string                 `protobuf:"bytes,6,opt,name=prompt,proto3" json:"prompt,omitempty"`                                 // agent tasks only
+	Uuid         string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId    string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// meta.name of the workflow script (e.g. "spec"); local_workflow only.
+	WorkflowName string `protobuf:"bytes,9,opt,name=workflow_name,json=workflowName,proto3" json:"workflow_name,omitempty"`
+	// Ambient/housekeeping work. A consumer should HIDE it from the inline
+	// transcript rather than render it as a task the user started.
+	SkipTranscript bool `protobuf:"varint,10,opt,name=skip_transcript,json=skipTranscript,proto3" json:"skip_transcript,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskStartedMsg) Reset() {
 	*x = TaskStartedMsg{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[32]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3675,7 +4439,7 @@ func (x *TaskStartedMsg) String() string {
 func (*TaskStartedMsg) ProtoMessage() {}
 
 func (x *TaskStartedMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[32]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3688,7 +4452,7 @@ func (x *TaskStartedMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStartedMsg.ProtoReflect.Descriptor instead.
 func (*TaskStartedMsg) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{32}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *TaskStartedMsg) GetTaskId() string {
@@ -3747,18 +4511,39 @@ func (x *TaskStartedMsg) GetSessionId() string {
 	return ""
 }
 
-// [observed] system/task_updated.
+func (x *TaskStartedMsg) GetWorkflowName() string {
+	if x != nil {
+		return x.WorkflowName
+	}
+	return ""
+}
+
+func (x *TaskStartedMsg) GetSkipTranscript() bool {
+	if x != nil {
+		return x.SkipTranscript
+	}
+	return false
+}
+
+// [sdk 0.3.220 SDKTaskUpdatedMessage.patch] system/task_updated.
 type TaskPatch struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`                   // "completed" | "failed" | "killed"
-	EndTime       int64                  `protobuf:"varint,2,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"` // epoch millis
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "pending" | "running" | "completed" | "failed" | "killed" | "paused".
+	// NOTE the first two and the last are NON-terminal: a patch is not
+	// automatically a task ending.
+	Status         string `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	EndTime        int64  `protobuf:"varint,2,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"` // epoch millis
+	Description    string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	TotalPausedMs  int64  `protobuf:"varint,4,opt,name=total_paused_ms,json=totalPausedMs,proto3" json:"total_paused_ms,omitempty"`
+	Error          string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	IsBackgrounded bool   `protobuf:"varint,6,opt,name=is_backgrounded,json=isBackgrounded,proto3" json:"is_backgrounded,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskPatch) Reset() {
 	*x = TaskPatch{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[33]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3770,7 +4555,7 @@ func (x *TaskPatch) String() string {
 func (*TaskPatch) ProtoMessage() {}
 
 func (x *TaskPatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[33]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3783,7 +4568,7 @@ func (x *TaskPatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPatch.ProtoReflect.Descriptor instead.
 func (*TaskPatch) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{33}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TaskPatch) GetStatus() string {
@@ -3800,6 +4585,34 @@ func (x *TaskPatch) GetEndTime() int64 {
 	return 0
 }
 
+func (x *TaskPatch) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *TaskPatch) GetTotalPausedMs() int64 {
+	if x != nil {
+		return x.TotalPausedMs
+	}
+	return 0
+}
+
+func (x *TaskPatch) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TaskPatch) GetIsBackgrounded() bool {
+	if x != nil {
+		return x.IsBackgrounded
+	}
+	return false
+}
+
 type TaskUpdatedMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -3812,7 +4625,7 @@ type TaskUpdatedMsg struct {
 
 func (x *TaskUpdatedMsg) Reset() {
 	*x = TaskUpdatedMsg{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[34]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3824,7 +4637,7 @@ func (x *TaskUpdatedMsg) String() string {
 func (*TaskUpdatedMsg) ProtoMessage() {}
 
 func (x *TaskUpdatedMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[34]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3837,7 +4650,7 @@ func (x *TaskUpdatedMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskUpdatedMsg.ProtoReflect.Descriptor instead.
 func (*TaskUpdatedMsg) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{34}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *TaskUpdatedMsg) GetTaskId() string {
@@ -3882,7 +4695,7 @@ type TaskUsage struct {
 
 func (x *TaskUsage) Reset() {
 	*x = TaskUsage{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3894,7 +4707,7 @@ func (x *TaskUsage) String() string {
 func (*TaskUsage) ProtoMessage() {}
 
 func (x *TaskUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[35]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3907,7 +4720,7 @@ func (x *TaskUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskUsage.ProtoReflect.Descriptor instead.
 func (*TaskUsage) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{35}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *TaskUsage) GetTotalTokens() int64 {
@@ -3932,22 +4745,24 @@ func (x *TaskUsage) GetDurationMs() int64 {
 }
 
 type TaskNotificationMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	ToolUseId     string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
-	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // "completed" | "failed" | "stopped"
-	OutputFile    string                 `protobuf:"bytes,4,opt,name=output_file,json=outputFile,proto3" json:"output_file,omitempty"`
-	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
-	Usage         *TaskUsage             `protobuf:"bytes,6,opt,name=usage,proto3" json:"usage,omitempty"` // agent tasks only
-	Uuid          string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
-	SessionId     string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	TaskId     string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ToolUseId  string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Status     string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // "completed" | "failed" | "stopped"
+	OutputFile string                 `protobuf:"bytes,4,opt,name=output_file,json=outputFile,proto3" json:"output_file,omitempty"`
+	Summary    string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
+	Usage      *TaskUsage             `protobuf:"bytes,6,opt,name=usage,proto3" json:"usage,omitempty"` // agent tasks only
+	Uuid       string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId  string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// Ambient/housekeeping work; hide from the inline transcript.
+	SkipTranscript bool `protobuf:"varint,9,opt,name=skip_transcript,json=skipTranscript,proto3" json:"skip_transcript,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskNotificationMsg) Reset() {
 	*x = TaskNotificationMsg{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3959,7 +4774,7 @@ func (x *TaskNotificationMsg) String() string {
 func (*TaskNotificationMsg) ProtoMessage() {}
 
 func (x *TaskNotificationMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[36]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3972,7 +4787,7 @@ func (x *TaskNotificationMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskNotificationMsg.ProtoReflect.Descriptor instead.
 func (*TaskNotificationMsg) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{36}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *TaskNotificationMsg) GetTaskId() string {
@@ -4031,6 +4846,13 @@ func (x *TaskNotificationMsg) GetSessionId() string {
 	return ""
 }
 
+func (x *TaskNotificationMsg) GetSkipTranscript() bool {
+	if x != nil {
+		return x.SkipTranscript
+	}
+	return false
+}
+
 // [observed] system/background_tasks_changed — full current list each time.
 type BackgroundTaskRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -4043,7 +4865,7 @@ type BackgroundTaskRef struct {
 
 func (x *BackgroundTaskRef) Reset() {
 	*x = BackgroundTaskRef{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4055,7 +4877,7 @@ func (x *BackgroundTaskRef) String() string {
 func (*BackgroundTaskRef) ProtoMessage() {}
 
 func (x *BackgroundTaskRef) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[37]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4068,7 +4890,7 @@ func (x *BackgroundTaskRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackgroundTaskRef.ProtoReflect.Descriptor instead.
 func (*BackgroundTaskRef) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{37}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *BackgroundTaskRef) GetTaskId() string {
@@ -4103,7 +4925,7 @@ type BackgroundTasksChanged struct {
 
 func (x *BackgroundTasksChanged) Reset() {
 	*x = BackgroundTasksChanged{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4115,7 +4937,7 @@ func (x *BackgroundTasksChanged) String() string {
 func (*BackgroundTasksChanged) ProtoMessage() {}
 
 func (x *BackgroundTasksChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[38]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4128,7 +4950,7 @@ func (x *BackgroundTasksChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackgroundTasksChanged.ProtoReflect.Descriptor instead.
 func (*BackgroundTasksChanged) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{38}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *BackgroundTasksChanged) GetTasks() []*BackgroundTaskRef {
@@ -4164,7 +4986,7 @@ type ControlRequest struct {
 
 func (x *ControlRequest) Reset() {
 	*x = ControlRequest{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4176,7 +4998,7 @@ func (x *ControlRequest) String() string {
 func (*ControlRequest) ProtoMessage() {}
 
 func (x *ControlRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[39]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4189,7 +5011,7 @@ func (x *ControlRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlRequest.ProtoReflect.Descriptor instead.
 func (*ControlRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{39}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ControlRequest) GetRequestId() string {
@@ -4206,17 +5028,34 @@ func (x *ControlRequest) GetRequest() *structpb.Struct {
 	return nil
 }
 
+// [sdk 0.3.220 SDKControlResponse] STRUCTURAL NOTE — the wire is
+//
+//	{type:"control_response", response:{subtype, request_id, ...}}
+//
+// There is NO top-level `request_id` sibling. The id lives INSIDE `response`,
+// beside the subtype that says whether the request succeeded. Verified against
+// the shipped sdk.mjs, which constructs exactly two shapes (success/error).
+// A converter reading a top-level `request_id` therefore always got "" and
+// correlation was impossible.
+//
+// Field 1 is KEPT and now filled by LIFTING response.request_id, so every
+// existing reader that correlates on it starts working rather than breaking.
+// Field 2 is kept as the verbatim capture; `body` is the same object TYPED.
 type ControlResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Response      *structpb.Struct       `protobuf:"bytes,2,opt,name=response,proto3" json:"response,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Lifted from response.request_id (there is no top-level key to read).
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The nested response object, verbatim.
+	Response *structpb.Struct `protobuf:"bytes,2,opt,name=response,proto3" json:"response,omitempty"`
+	// The nested response object, typed.
+	Body          *ControlResponseBody `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ControlResponse) Reset() {
 	*x = ControlResponse{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4228,7 +5067,7 @@ func (x *ControlResponse) String() string {
 func (*ControlResponse) ProtoMessage() {}
 
 func (x *ControlResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[40]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4241,7 +5080,7 @@ func (x *ControlResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlResponse.ProtoReflect.Descriptor instead.
 func (*ControlResponse) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{40}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ControlResponse) GetRequestId() string {
@@ -4258,6 +5097,101 @@ func (x *ControlResponse) GetResponse() *structpb.Struct {
 	return nil
 }
 
+func (x *ControlResponse) GetBody() *ControlResponseBody {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+// The nested body of a control_response, both arms folded (`subtype`
+// discriminates; `response` is success-only and `error` is error-only).
+type ControlResponseBody struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Subtype   string                 `protobuf:"bytes,1,opt,name=subtype,proto3" json:"subtype,omitempty"` // "success" | "error"
+	RequestId string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Response  *structpb.Struct       `protobuf:"bytes,3,opt,name=response,proto3" json:"response,omitempty"` // success only
+	Error     string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`       // error only
+	// Requests still awaiting an answer, echoed on BOTH arms so a reconnecting
+	// client learns what it is still blocking.
+	PendingPermissionRequests []*structpb.Struct `protobuf:"bytes,5,rep,name=pending_permission_requests,json=pendingPermissionRequests,proto3" json:"pending_permission_requests,omitempty"`
+	PendingUserDialogRequests []*structpb.Struct `protobuf:"bytes,6,rep,name=pending_user_dialog_requests,json=pendingUserDialogRequests,proto3" json:"pending_user_dialog_requests,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *ControlResponseBody) Reset() {
+	*x = ControlResponseBody{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlResponseBody) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlResponseBody) ProtoMessage() {}
+
+func (x *ControlResponseBody) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlResponseBody.ProtoReflect.Descriptor instead.
+func (*ControlResponseBody) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ControlResponseBody) GetSubtype() string {
+	if x != nil {
+		return x.Subtype
+	}
+	return ""
+}
+
+func (x *ControlResponseBody) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ControlResponseBody) GetResponse() *structpb.Struct {
+	if x != nil {
+		return x.Response
+	}
+	return nil
+}
+
+func (x *ControlResponseBody) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ControlResponseBody) GetPendingPermissionRequests() []*structpb.Struct {
+	if x != nil {
+		return x.PendingPermissionRequests
+	}
+	return nil
+}
+
+func (x *ControlResponseBody) GetPendingUserDialogRequests() []*structpb.Struct {
+	if x != nil {
+		return x.PendingUserDialogRequests
+	}
+	return nil
+}
+
 type ControlCancelRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -4267,7 +5201,7 @@ type ControlCancelRequest struct {
 
 func (x *ControlCancelRequest) Reset() {
 	*x = ControlCancelRequest{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4279,7 +5213,7 @@ func (x *ControlCancelRequest) String() string {
 func (*ControlCancelRequest) ProtoMessage() {}
 
 func (x *ControlCancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[41]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4292,7 +5226,7 @@ func (x *ControlCancelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlCancelRequest.ProtoReflect.Descriptor instead.
 func (*ControlCancelRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{41}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ControlCancelRequest) GetRequestId() string {
@@ -4310,7 +5244,7 @@ type KeepAlive struct {
 
 func (x *KeepAlive) Reset() {
 	*x = KeepAlive{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4322,7 +5256,7 @@ func (x *KeepAlive) String() string {
 func (*KeepAlive) ProtoMessage() {}
 
 func (x *KeepAlive) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[42]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4335,7 +5269,7 @@ func (x *KeepAlive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeepAlive.ProtoReflect.Descriptor instead.
 func (*KeepAlive) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{42}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{48}
 }
 
 // [sdk 0.3.220] system/api_retry — a retryable API failure about to be
@@ -4356,7 +5290,7 @@ type ApiRetry struct {
 
 func (x *ApiRetry) Reset() {
 	*x = ApiRetry{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4368,7 +5302,7 @@ func (x *ApiRetry) String() string {
 func (*ApiRetry) ProtoMessage() {}
 
 func (x *ApiRetry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4381,7 +5315,7 @@ func (x *ApiRetry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiRetry.ProtoReflect.Descriptor instead.
 func (*ApiRetry) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{43}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ApiRetry) GetAttempt() int32 {
@@ -4463,7 +5397,7 @@ type ControlRequestProgress struct {
 
 func (x *ControlRequestProgress) Reset() {
 	*x = ControlRequestProgress{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4475,7 +5409,7 @@ func (x *ControlRequestProgress) String() string {
 func (*ControlRequestProgress) ProtoMessage() {}
 
 func (x *ControlRequestProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4488,7 +5422,7 @@ func (x *ControlRequestProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlRequestProgress.ProtoReflect.Descriptor instead.
 func (*ControlRequestProgress) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{44}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ControlRequestProgress) GetRequestId() string {
@@ -4598,7 +5532,7 @@ type ModelRefusalFallback struct {
 
 func (x *ModelRefusalFallback) Reset() {
 	*x = ModelRefusalFallback{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4610,7 +5544,7 @@ func (x *ModelRefusalFallback) String() string {
 func (*ModelRefusalFallback) ProtoMessage() {}
 
 func (x *ModelRefusalFallback) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4623,7 +5557,7 @@ func (x *ModelRefusalFallback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelRefusalFallback.ProtoReflect.Descriptor instead.
 func (*ModelRefusalFallback) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{45}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ModelRefusalFallback) GetTrigger() string {
@@ -4728,7 +5662,7 @@ type ModelRefusalNoFallback struct {
 
 func (x *ModelRefusalNoFallback) Reset() {
 	*x = ModelRefusalNoFallback{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4740,7 +5674,7 @@ func (x *ModelRefusalNoFallback) String() string {
 func (*ModelRefusalNoFallback) ProtoMessage() {}
 
 func (x *ModelRefusalNoFallback) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4753,7 +5687,7 @@ func (x *ModelRefusalNoFallback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelRefusalNoFallback.ProtoReflect.Descriptor instead.
 func (*ModelRefusalNoFallback) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{46}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ModelRefusalNoFallback) GetOriginalModel() string {
@@ -4825,7 +5759,7 @@ type LocalCommandOutput struct {
 
 func (x *LocalCommandOutput) Reset() {
 	*x = LocalCommandOutput{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4837,7 +5771,7 @@ func (x *LocalCommandOutput) String() string {
 func (*LocalCommandOutput) ProtoMessage() {}
 
 func (x *LocalCommandOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4850,7 +5784,7 @@ func (x *LocalCommandOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalCommandOutput.ProtoReflect.Descriptor instead.
 func (*LocalCommandOutput) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{47}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *LocalCommandOutput) GetContent() string {
@@ -4893,7 +5827,7 @@ type HookProgress struct {
 
 func (x *HookProgress) Reset() {
 	*x = HookProgress{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4905,7 +5839,7 @@ func (x *HookProgress) String() string {
 func (*HookProgress) ProtoMessage() {}
 
 func (x *HookProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4918,7 +5852,7 @@ func (x *HookProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookProgress.ProtoReflect.Descriptor instead.
 func (*HookProgress) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{48}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *HookProgress) GetHookId() string {
@@ -4991,7 +5925,7 @@ type PluginInstall struct {
 
 func (x *PluginInstall) Reset() {
 	*x = PluginInstall{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5003,7 +5937,7 @@ func (x *PluginInstall) String() string {
 func (*PluginInstall) ProtoMessage() {}
 
 func (x *PluginInstall) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5016,7 +5950,7 @@ func (x *PluginInstall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginInstall.ProtoReflect.Descriptor instead.
 func (*PluginInstall) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{49}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *PluginInstall) GetStatus() string {
@@ -5069,7 +6003,7 @@ type TaskProgressUsage struct {
 
 func (x *TaskProgressUsage) Reset() {
 	*x = TaskProgressUsage{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5081,7 +6015,7 @@ func (x *TaskProgressUsage) String() string {
 func (*TaskProgressUsage) ProtoMessage() {}
 
 func (x *TaskProgressUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5094,7 +6028,7 @@ func (x *TaskProgressUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskProgressUsage.ProtoReflect.Descriptor instead.
 func (*TaskProgressUsage) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{50}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *TaskProgressUsage) GetTotalTokens() int64 {
@@ -5135,7 +6069,7 @@ type TaskProgressMsg struct {
 
 func (x *TaskProgressMsg) Reset() {
 	*x = TaskProgressMsg{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5147,7 +6081,7 @@ func (x *TaskProgressMsg) String() string {
 func (*TaskProgressMsg) ProtoMessage() {}
 
 func (x *TaskProgressMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5160,7 +6094,7 @@ func (x *TaskProgressMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskProgressMsg.ProtoReflect.Descriptor instead.
 func (*TaskProgressMsg) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{51}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *TaskProgressMsg) GetTaskId() string {
@@ -5239,7 +6173,7 @@ type SessionStateChanged struct {
 
 func (x *SessionStateChanged) Reset() {
 	*x = SessionStateChanged{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5251,7 +6185,7 @@ func (x *SessionStateChanged) String() string {
 func (*SessionStateChanged) ProtoMessage() {}
 
 func (x *SessionStateChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5264,7 +6198,7 @@ func (x *SessionStateChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionStateChanged.ProtoReflect.Descriptor instead.
 func (*SessionStateChanged) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{52}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *SessionStateChanged) GetState() string {
@@ -5304,7 +6238,7 @@ type WorkerShuttingDown struct {
 
 func (x *WorkerShuttingDown) Reset() {
 	*x = WorkerShuttingDown{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5316,7 +6250,7 @@ func (x *WorkerShuttingDown) String() string {
 func (*WorkerShuttingDown) ProtoMessage() {}
 
 func (x *WorkerShuttingDown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5329,7 +6263,7 @@ func (x *WorkerShuttingDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerShuttingDown.ProtoReflect.Descriptor instead.
 func (*WorkerShuttingDown) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{53}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *WorkerShuttingDown) GetReason() string {
@@ -5368,7 +6302,7 @@ type SlashCommandRef struct {
 
 func (x *SlashCommandRef) Reset() {
 	*x = SlashCommandRef{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5380,7 +6314,7 @@ func (x *SlashCommandRef) String() string {
 func (*SlashCommandRef) ProtoMessage() {}
 
 func (x *SlashCommandRef) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5393,7 +6327,7 @@ func (x *SlashCommandRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlashCommandRef.ProtoReflect.Descriptor instead.
 func (*SlashCommandRef) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{54}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *SlashCommandRef) GetName() string {
@@ -5435,7 +6369,7 @@ type CommandsChanged struct {
 
 func (x *CommandsChanged) Reset() {
 	*x = CommandsChanged{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5447,7 +6381,7 @@ func (x *CommandsChanged) String() string {
 func (*CommandsChanged) ProtoMessage() {}
 
 func (x *CommandsChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5460,7 +6394,7 @@ func (x *CommandsChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandsChanged.ProtoReflect.Descriptor instead.
 func (*CommandsChanged) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{55}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *CommandsChanged) GetCommands() []*SlashCommandRef {
@@ -5496,7 +6430,7 @@ type PersistedFile struct {
 
 func (x *PersistedFile) Reset() {
 	*x = PersistedFile{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5508,7 +6442,7 @@ func (x *PersistedFile) String() string {
 func (*PersistedFile) ProtoMessage() {}
 
 func (x *PersistedFile) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5521,7 +6455,7 @@ func (x *PersistedFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistedFile.ProtoReflect.Descriptor instead.
 func (*PersistedFile) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{56}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *PersistedFile) GetFilename() string {
@@ -5548,7 +6482,7 @@ type FailedFile struct {
 
 func (x *FailedFile) Reset() {
 	*x = FailedFile{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5560,7 +6494,7 @@ func (x *FailedFile) String() string {
 func (*FailedFile) ProtoMessage() {}
 
 func (x *FailedFile) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5573,7 +6507,7 @@ func (x *FailedFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailedFile.ProtoReflect.Descriptor instead.
 func (*FailedFile) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{57}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *FailedFile) GetFilename() string {
@@ -5603,7 +6537,7 @@ type FilesPersisted struct {
 
 func (x *FilesPersisted) Reset() {
 	*x = FilesPersisted{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5615,7 +6549,7 @@ func (x *FilesPersisted) String() string {
 func (*FilesPersisted) ProtoMessage() {}
 
 func (x *FilesPersisted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5628,7 +6562,7 @@ func (x *FilesPersisted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilesPersisted.ProtoReflect.Descriptor instead.
 func (*FilesPersisted) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{58}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *FilesPersisted) GetFiles() []*PersistedFile {
@@ -5682,7 +6616,7 @@ type RecalledMemory struct {
 
 func (x *RecalledMemory) Reset() {
 	*x = RecalledMemory{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5694,7 +6628,7 @@ func (x *RecalledMemory) String() string {
 func (*RecalledMemory) ProtoMessage() {}
 
 func (x *RecalledMemory) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5707,7 +6641,7 @@ func (x *RecalledMemory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecalledMemory.ProtoReflect.Descriptor instead.
 func (*RecalledMemory) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{59}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *RecalledMemory) GetPath() string {
@@ -5750,7 +6684,7 @@ type MemoryRecall struct {
 
 func (x *MemoryRecall) Reset() {
 	*x = MemoryRecall{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5762,7 +6696,7 @@ func (x *MemoryRecall) String() string {
 func (*MemoryRecall) ProtoMessage() {}
 
 func (x *MemoryRecall) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5775,7 +6709,7 @@ func (x *MemoryRecall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryRecall.ProtoReflect.Descriptor instead.
 func (*MemoryRecall) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{60}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *MemoryRecall) GetMode() string {
@@ -5819,7 +6753,7 @@ type ElicitationComplete struct {
 
 func (x *ElicitationComplete) Reset() {
 	*x = ElicitationComplete{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5831,7 +6765,7 @@ func (x *ElicitationComplete) String() string {
 func (*ElicitationComplete) ProtoMessage() {}
 
 func (x *ElicitationComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5844,7 +6778,7 @@ func (x *ElicitationComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ElicitationComplete.ProtoReflect.Descriptor instead.
 func (*ElicitationComplete) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{61}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *ElicitationComplete) GetMcpServerName() string {
@@ -5894,7 +6828,7 @@ type PermissionDenied struct {
 
 func (x *PermissionDenied) Reset() {
 	*x = PermissionDenied{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5906,7 +6840,7 @@ func (x *PermissionDenied) String() string {
 func (*PermissionDenied) ProtoMessage() {}
 
 func (x *PermissionDenied) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5919,7 +6853,7 @@ func (x *PermissionDenied) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionDenied.ProtoReflect.Descriptor instead.
 func (*PermissionDenied) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{62}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *PermissionDenied) GetToolName() string {
@@ -5991,7 +6925,7 @@ type MirrorKey struct {
 
 func (x *MirrorKey) Reset() {
 	*x = MirrorKey{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6003,7 +6937,7 @@ func (x *MirrorKey) String() string {
 func (*MirrorKey) ProtoMessage() {}
 
 func (x *MirrorKey) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6016,7 +6950,7 @@ func (x *MirrorKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MirrorKey.ProtoReflect.Descriptor instead.
 func (*MirrorKey) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{63}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *MirrorKey) GetProjectKey() string {
@@ -6052,7 +6986,7 @@ type MirrorError struct {
 
 func (x *MirrorError) Reset() {
 	*x = MirrorError{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6064,7 +6998,7 @@ func (x *MirrorError) String() string {
 func (*MirrorError) ProtoMessage() {}
 
 func (x *MirrorError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6077,7 +7011,7 @@ func (x *MirrorError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MirrorError.ProtoReflect.Descriptor instead.
 func (*MirrorError) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{64}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *MirrorError) GetError() string {
@@ -6125,7 +7059,7 @@ type Informational struct {
 
 func (x *Informational) Reset() {
 	*x = Informational{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6137,7 +7071,7 @@ func (x *Informational) String() string {
 func (*Informational) ProtoMessage() {}
 
 func (x *Informational) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6150,7 +7084,7 @@ func (x *Informational) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Informational.ProtoReflect.Descriptor instead.
 func (*Informational) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{65}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *Informational) GetContent() string {
@@ -6209,7 +7143,7 @@ type ToolUseSummary struct {
 
 func (x *ToolUseSummary) Reset() {
 	*x = ToolUseSummary{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6221,7 +7155,7 @@ func (x *ToolUseSummary) String() string {
 func (*ToolUseSummary) ProtoMessage() {}
 
 func (x *ToolUseSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6234,7 +7168,7 @@ func (x *ToolUseSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolUseSummary.ProtoReflect.Descriptor instead.
 func (*ToolUseSummary) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{66}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ToolUseSummary) GetSummary() string {
@@ -6277,7 +7211,7 @@ type PromptSuggestion struct {
 
 func (x *PromptSuggestion) Reset() {
 	*x = PromptSuggestion{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6289,7 +7223,7 @@ func (x *PromptSuggestion) String() string {
 func (*PromptSuggestion) ProtoMessage() {}
 
 func (x *PromptSuggestion) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6302,7 +7236,7 @@ func (x *PromptSuggestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PromptSuggestion.ProtoReflect.Descriptor instead.
 func (*PromptSuggestion) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{67}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *PromptSuggestion) GetSuggestion() string {
@@ -6339,7 +7273,7 @@ type ConversationReset struct {
 
 func (x *ConversationReset) Reset() {
 	*x = ConversationReset{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6351,7 +7285,7 @@ func (x *ConversationReset) String() string {
 func (*ConversationReset) ProtoMessage() {}
 
 func (x *ConversationReset) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6364,7 +7298,7 @@ func (x *ConversationReset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationReset.ProtoReflect.Descriptor instead.
 func (*ConversationReset) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{68}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ConversationReset) GetNewConversationId() string {
@@ -6409,7 +7343,7 @@ type ActiveGoalValue struct {
 
 func (x *ActiveGoalValue) Reset() {
 	*x = ActiveGoalValue{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6421,7 +7355,7 @@ func (x *ActiveGoalValue) String() string {
 func (*ActiveGoalValue) ProtoMessage() {}
 
 func (x *ActiveGoalValue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6434,7 +7368,7 @@ func (x *ActiveGoalValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActiveGoalValue.ProtoReflect.Descriptor instead.
 func (*ActiveGoalValue) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{69}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ActiveGoalValue) GetCondition() string {
@@ -6484,7 +7418,7 @@ type ActiveGoal struct {
 
 func (x *ActiveGoal) Reset() {
 	*x = ActiveGoal{}
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6496,7 +7430,7 @@ func (x *ActiveGoal) String() string {
 func (*ActiveGoal) ProtoMessage() {}
 
 func (x *ActiveGoal) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6509,7 +7443,7 @@ func (x *ActiveGoal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActiveGoal.ProtoReflect.Descriptor instead.
 func (*ActiveGoal) Descriptor() ([]byte, []int) {
-	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{70}
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ActiveGoal) GetValue() *ActiveGoalValue {
@@ -6544,7 +7478,7 @@ var File_agentshim_data_v1_stream_proto protoreflect.FileDescriptor
 
 const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\n" +
-	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\x1fagentshim/data/v1/unknown.proto\"\xf4\x1a\n" +
+	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\"agentshim/data/v1/transcript.proto\x1a\x1fagentshim/data/v1/unknown.proto\"\xf4\x1a\n" +
 	"\x13ClaudeStreamMessage\x124\n" +
 	"\x04user\x18\x01 \x01(\v2\x1e.agentshim.data.v1.UserMessageH\x00R\x04user\x12C\n" +
 	"\tassistant\x18\x02 \x01(\v2#.agentshim.data.v1.AssistantMessageH\x00R\tassistant\x12:\n" +
@@ -6595,7 +7529,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x12conversation_reset\x18+ \x01(\v2$.agentshim.data.v1.ConversationResetH\x00R\x11conversationReset\x12@\n" +
 	"\vactive_goal\x18, \x01(\v2\x1d.agentshim.data.v1.ActiveGoalH\x00R\n" +
 	"activeGoalB\x05\n" +
-	"\x03msg\"\x84\x03\n" +
+	"\x03msg\"\xdb\x04\n" +
 	"\vUserMessage\x12;\n" +
 	"\amessage\x18\x01 \x01(\v2!.agentshim.data.v1.ApiUserMessageR\amessage\x12+\n" +
 	"\x12parent_tool_use_id\x18\x02 \x01(\tR\x0fparentToolUseId\x12!\n" +
@@ -6606,7 +7540,13 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"session_id\x18\x06 \x01(\tR\tsessionId\x12\x1b\n" +
 	"\tis_replay\x18\a \x01(\bR\bisReplay\x12#\n" +
 	"\rsubagent_type\x18\b \x01(\tR\fsubagentType\x12)\n" +
-	"\x10task_description\x18\t \x01(\tR\x0ftaskDescription\"\x91\x02\n" +
+	"\x10task_description\x18\t \x01(\tR\x0ftaskDescription\x12\x1c\n" +
+	"\ttimestamp\x18\n" +
+	" \x01(\tR\ttimestamp\x12\x1a\n" +
+	"\bpriority\x18\v \x01(\tR\bpriority\x121\n" +
+	"\x06origin\x18\f \x01(\v2\x19.agentshim.data.v1.OriginR\x06origin\x12!\n" +
+	"\fshould_query\x18\r \x01(\bR\vshouldQuery\x12E\n" +
+	"\x10file_attachments\x18\x0e \x01(\v2\x1a.google.protobuf.ListValueR\x0ffileAttachments\"\xa1\x04\n" +
 	"\x10AssistantMessage\x12@\n" +
 	"\amessage\x18\x01 \x01(\v2&.agentshim.data.v1.ApiAssistantMessageR\amessage\x12+\n" +
 	"\x12parent_tool_use_id\x18\x02 \x01(\tR\x0fparentToolUseId\x12>\n" +
@@ -6614,7 +7554,18 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\thas_error\x18\x04 \x01(\bR\bhasError\x12\x12\n" +
 	"\x04uuid\x18\x05 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x06 \x01(\tR\tsessionId\"\x89\b\n" +
+	"session_id\x18\x06 \x01(\tR\tsessionId\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\a \x01(\tR\trequestId\x12\x1c\n" +
+	"\ttimestamp\x18\b \x01(\tR\ttimestamp\x12G\n" +
+	" resumed_from_incomplete_thinking\x18\t \x01(\bR\x1dresumedFromIncompleteThinking\x12\x1e\n" +
+	"\n" +
+	"supersedes\x18\n" +
+	" \x03(\tR\n" +
+	"supersedes\x12\x18\n" +
+	"\aaborted\x18\v \x01(\bR\aaborted\x12#\n" +
+	"\rsubagent_type\x18\f \x01(\tR\fsubagentType\x12)\n" +
+	"\x10task_description\x18\r \x01(\tR\x0ftaskDescription\"\xb9\v\n" +
 	"\rResultMessage\x12:\n" +
 	"\asubtype\x18\x01 \x01(\x0e2 .agentshim.data.v1.ResultSubtypeR\asubtype\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
@@ -6642,10 +7593,22 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\vstop_reason\x18\x14 \x01(\tR\n" +
 	"stopReason\x12'\n" +
 	"\x0fterminal_reason\x18\x15 \x01(\tR\x0eterminalReason\x12&\n" +
-	"\x0ffast_mode_state\x18\x16 \x01(\tR\rfastModeState\x1a\\\n" +
+	"\x0ffast_mode_state\x18\x16 \x01(\tR\rfastModeState\x12*\n" +
+	"\x11user_message_uuid\x18\x17 \x01(\tR\x0fuserMessageUuid\x12/\n" +
+	"\x14request_sent_wall_ms\x18\x18 \x01(\x03R\x11requestSentWallMs\x12?\n" +
+	"\x1dtime_to_request_from_spawn_ms\x18\x19 \x01(\x03R\x18timeToRequestFromSpawnMs\x12,\n" +
+	"\x12warm_spare_claimed\x18\x1a \x01(\bR\x10warmSpareClaimed\x12$\n" +
+	"\x0etime_origin_ms\x18\x1b \x01(\x03R\ftimeOriginMs\x12N\n" +
+	"\x11deferred_tool_use\x18\x1c \x01(\v2\".agentshim.data.v1.DeferredToolUseR\x0fdeferredToolUse\x129\n" +
+	"\x19fast_mode_disabled_reason\x18\x1d \x01(\tR\x16fastModeDisabledReason\x121\n" +
+	"\x06origin\x18\x1e \x01(\v2\x19.agentshim.data.v1.OriginR\x06origin\x1a\\\n" +
 	"\x0fModelUsageEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.agentshim.data.v1.ModelUsageR\x05value:\x028\x01\"\xe9\x02\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.agentshim.data.v1.ModelUsageR\x05value:\x028\x01\"d\n" +
+	"\x0fDeferredToolUse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12-\n" +
+	"\x05input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x05input\"\xe9\x02\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x125\n" +
@@ -6653,7 +7616,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x1bcache_creation_input_tokens\x18\x04 \x01(\x03R\x18cacheCreationInputTokens\x12>\n" +
 	"\x0ecache_creation\x18\x05 \x01(\v2\x17.google.protobuf.StructR\rcacheCreation\x12?\n" +
 	"\x0fserver_tool_use\x18\x06 \x01(\v2\x17.google.protobuf.StructR\rserverToolUse\x12!\n" +
-	"\fservice_tier\x18\a \x01(\tR\vserviceTier\"\xe8\x02\n" +
+	"\fservice_tier\x18\a \x01(\tR\vserviceTier\"\xad\x03\n" +
 	"\n" +
 	"ModelUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
@@ -6663,20 +7626,42 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x13web_search_requests\x18\x05 \x01(\x03R\x11webSearchRequests\x12\x19\n" +
 	"\bcost_usd\x18\x06 \x01(\x01R\acostUsd\x12%\n" +
 	"\x0econtext_window\x18\a \x01(\x03R\rcontextWindow\x12*\n" +
-	"\x11max_output_tokens\x18\b \x01(\x03R\x0fmaxOutputTokens\"\x87\x01\n" +
+	"\x11max_output_tokens\x18\b \x01(\x03R\x0fmaxOutputTokens\x12'\n" +
+	"\x0fcanonical_model\x18\t \x01(\tR\x0ecanonicalModel\x12\x1a\n" +
+	"\bprovider\x18\n" +
+	" \x01(\tR\bprovider\"\x87\x01\n" +
 	"\x10PermissionDenial\x12\x1b\n" +
 	"\ttool_name\x18\x01 \x01(\tR\btoolName\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x126\n" +
 	"\n" +
-	"tool_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\ttoolInput\"`\n" +
+	"tool_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\ttoolInput\"\xb5\x02\n" +
 	"\x0fMcpServerStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x129\n" +
-	"\x06status\x18\x02 \x01(\x0e2!.agentshim.data.v1.McpServerStateR\x06status\"e\n" +
+	"\x06status\x18\x02 \x01(\x0e2!.agentshim.data.v1.McpServerStateR\x06status\x12A\n" +
+	"\vserver_info\x18\x03 \x01(\v2 .agentshim.data.v1.McpServerInfoR\n" +
+	"serverInfo\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12/\n" +
+	"\x06config\x18\x05 \x01(\v2\x17.google.protobuf.StructR\x06config\x12\x14\n" +
+	"\x05scope\x18\x06 \x01(\tR\x05scope\x123\n" +
+	"\x05tools\x18\a \x03(\v2\x1d.agentshim.data.v1.McpToolRefR\x05tools\"=\n" +
+	"\rMcpServerInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\x8b\x01\n" +
+	"\n" +
+	"McpToolRef\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12G\n" +
+	"\vannotations\x18\x03 \x01(\v2%.agentshim.data.v1.McpToolAnnotationsR\vannotations\"r\n" +
+	"\x12McpToolAnnotations\x12\x1b\n" +
+	"\tread_only\x18\x01 \x01(\bR\breadOnly\x12 \n" +
+	"\vdestructive\x18\x02 \x01(\bR\vdestructive\x12\x1d\n" +
+	"\n" +
+	"open_world\x18\x03 \x01(\bR\topenWorld\"e\n" +
 	"\tPluginRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
 	"\x06source\x18\x03 \x01(\tR\x06source\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion\"\xf4\x06\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\"\xaf\a\n" +
 	"\n" +
 	"SystemInit\x12\x16\n" +
 	"\x06agents\x18\x01 \x03(\tR\x06agents\x12E\n" +
@@ -6701,7 +7686,8 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\fcapabilities\x18\x11 \x03(\tR\fcapabilities\x12-\n" +
 	"\x12analytics_disabled\x18\x12 \x01(\bR\x11analyticsDisabled\x12:\n" +
 	"\x19product_feedback_disabled\x18\x13 \x01(\bR\x17productFeedbackDisabled\x12Q\n" +
-	"\fmemory_paths\x18\x14 \x03(\v2..agentshim.data.v1.SystemInit.MemoryPathsEntryR\vmemoryPaths\x1a>\n" +
+	"\fmemory_paths\x18\x14 \x03(\v2..agentshim.data.v1.SystemInit.MemoryPathsEntryR\vmemoryPaths\x129\n" +
+	"\x19fast_mode_disabled_reason\x18\x15 \x01(\tR\x16fastModeDisabledReason\x1a>\n" +
 	"\x10MemoryPathsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc6\x01\n" +
@@ -6748,19 +7734,28 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x11MessageDeltaEvent\x12-\n" +
 	"\x05delta\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x05delta\x12.\n" +
 	"\x05usage\x18\x02 \x01(\v2\x18.agentshim.data.v1.UsageR\x05usage\"\x12\n" +
-	"\x10MessageStopEvent\"\xa0\x01\n" +
+	"\x10MessageStopEvent\"\x89\x03\n" +
 	"\x0fCompactBoundary\x12;\n" +
 	"\atrigger\x18\x01 \x01(\x0e2!.agentshim.data.v1.CompactTriggerR\atrigger\x12\x1d\n" +
 	"\n" +
 	"pre_tokens\x18\x02 \x01(\x03R\tpreTokens\x12\x12\n" +
 	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\"Z\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vpost_tokens\x18\x05 \x01(\x03R\n" +
+	"postTokens\x12\x1f\n" +
+	"\vduration_ms\x18\x06 \x01(\x03R\n" +
+	"durationMs\x12P\n" +
+	"\x11preserved_segment\x18\a \x01(\v2#.agentshim.data.v1.PreservedSegmentR\x10preservedSegment\x12S\n" +
+	"\x12preserved_messages\x18\b \x01(\v2$.agentshim.data.v1.PreservedMessagesR\x11preservedMessages\"\xcf\x01\n" +
 	"\rStatusMessage\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\"\xb9\x02\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12'\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12%\n" +
+	"\x0ecompact_result\x18\x05 \x01(\tR\rcompactResult\x12#\n" +
+	"\rcompact_error\x18\x06 \x01(\tR\fcompactError\"\xb9\x02\n" +
 	"\fHookResponse\x12\x1b\n" +
 	"\thook_name\x18\x01 \x01(\tR\bhookName\x12\x1d\n" +
 	"\n" +
@@ -6775,7 +7770,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x04uuid\x18\n" +
 	" \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\v \x01(\tR\tsessionId\"\xdd\x01\n" +
+	"session_id\x18\v \x01(\tR\tsessionId\"\x82\x03\n" +
 	"\fToolProgress\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12+\n" +
@@ -6783,7 +7778,21 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x14elapsed_time_seconds\x18\x04 \x01(\x01R\x12elapsedTimeSeconds\x12\x12\n" +
 	"\x04uuid\x18\x05 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x06 \x01(\tR\tsessionId\"\x9a\x01\n" +
+	"session_id\x18\x06 \x01(\tR\tsessionId\x12\x17\n" +
+	"\atask_id\x18\a \x01(\tR\x06taskId\x12\x1c\n" +
+	"\theartbeat\x18\b \x01(\bR\theartbeat\x12#\n" +
+	"\rsubagent_type\x18\t \x01(\tR\fsubagentType\x12G\n" +
+	"\x0esubagent_retry\x18\n" +
+	" \x01(\v2 .agentshim.data.v1.SubagentRetryR\rsubagentRetry\"\xff\x01\n" +
+	"\rSubagentRetry\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x18\n" +
+	"\aattempt\x18\x02 \x01(\x05R\aattempt\x12\x1f\n" +
+	"\vmax_retries\x18\x03 \x01(\x05R\n" +
+	"maxRetries\x12$\n" +
+	"\x0eretry_delay_ms\x18\x04 \x01(\x03R\fretryDelayMs\x12!\n" +
+	"\ferror_status\x18\x05 \x01(\x03R\verrorStatus\x12(\n" +
+	"\x10error_status_set\x18\x06 \x01(\bR\x0eerrorStatusSet\x12%\n" +
+	"\x0eerror_category\x18\a \x01(\tR\rerrorCategory\"\x9a\x01\n" +
 	"\n" +
 	"AuthStatus\x12+\n" +
 	"\x11is_authenticating\x18\x01 \x01(\bR\x10isAuthenticating\x12\x16\n" +
@@ -6791,7 +7800,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x12\n" +
 	"\x04uuid\x18\x04 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x05 \x01(\tR\tsessionId\"\x8f\x02\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"\xc2\x04\n" +
 	"\rRateLimitInfo\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1b\n" +
 	"\tresets_at\x18\x02 \x01(\x03R\bresetsAt\x12&\n" +
@@ -6799,7 +7808,15 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\vutilization\x18\x04 \x01(\x01R\vutilization\x12(\n" +
 	"\x10is_using_overage\x18\x05 \x01(\bR\x0eisUsingOverage\x12$\n" +
 	"\x0eoverage_in_use\x18\x06 \x01(\bR\foverageInUse\x12/\n" +
-	"\x13surpassed_threshold\x18\a \x01(\x01R\x12surpassedThreshold\"\x8d\x01\n" +
+	"\x13surpassed_threshold\x18\a \x01(\x01R\x12surpassedThreshold\x12%\n" +
+	"\x0eoverage_status\x18\b \x01(\tR\roverageStatus\x12*\n" +
+	"\x11overage_resets_at\x18\t \x01(\x03R\x0foverageResetsAt\x126\n" +
+	"\x17overage_disabled_reason\x18\n" +
+	" \x01(\tR\x15overageDisabledReason\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\v \x01(\tR\terrorCode\x129\n" +
+	"\x19can_user_purchase_credits\x18\f \x01(\bR\x16canUserPurchaseCredits\x12L\n" +
+	"#has_chargeable_saved_payment_method\x18\r \x01(\bR\x1fhasChargeableSavedPaymentMethod\"\x8d\x01\n" +
 	"\x0eRateLimitEvent\x12H\n" +
 	"\x0frate_limit_info\x18\x01 \x01(\v2 .agentshim.data.v1.RateLimitInfoR\rrateLimitInfo\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
@@ -6825,7 +7842,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\bpriority\x18\x03 \x01(\tR\bpriority\x12\x12\n" +
 	"\x04uuid\x18\x04 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x05 \x01(\tR\tsessionId\"\xf8\x01\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"\xc6\x02\n" +
 	"\x0eTaskStartedMsg\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12 \n" +
@@ -6835,10 +7852,17 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x06prompt\x18\x06 \x01(\tR\x06prompt\x12\x12\n" +
 	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\b \x01(\tR\tsessionId\">\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\x12#\n" +
+	"\rworkflow_name\x18\t \x01(\tR\fworkflowName\x12'\n" +
+	"\x0fskip_transcript\x18\n" +
+	" \x01(\bR\x0eskipTranscript\"\xc7\x01\n" +
 	"\tTaskPatch\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x19\n" +
-	"\bend_time\x18\x02 \x01(\x03R\aendTime\"\x90\x01\n" +
+	"\bend_time\x18\x02 \x01(\x03R\aendTime\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12&\n" +
+	"\x0ftotal_paused_ms\x18\x04 \x01(\x03R\rtotalPausedMs\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12'\n" +
+	"\x0fis_backgrounded\x18\x06 \x01(\bR\x0eisBackgrounded\"\x90\x01\n" +
 	"\x0eTaskUpdatedMsg\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x122\n" +
 	"\x05patch\x18\x02 \x01(\v2\x1c.agentshim.data.v1.TaskPatchR\x05patch\x12\x12\n" +
@@ -6849,7 +7873,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\ftotal_tokens\x18\x01 \x01(\x03R\vtotalTokens\x12\x1b\n" +
 	"\ttool_uses\x18\x02 \x01(\x03R\btoolUses\x12\x1f\n" +
 	"\vduration_ms\x18\x03 \x01(\x03R\n" +
-	"durationMs\"\x88\x02\n" +
+	"durationMs\"\xb1\x02\n" +
 	"\x13TaskNotificationMsg\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12\x16\n" +
@@ -6860,7 +7884,8 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x05usage\x18\x06 \x01(\v2\x1c.agentshim.data.v1.TaskUsageR\x05usage\x12\x12\n" +
 	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\b \x01(\tR\tsessionId\"k\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\x12'\n" +
+	"\x0fskip_transcript\x18\t \x01(\bR\x0eskipTranscript\"k\n" +
 	"\x11BackgroundTaskRef\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1b\n" +
 	"\ttask_type\x18\x02 \x01(\tR\btaskType\x12 \n" +
@@ -6873,11 +7898,20 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x0eControlRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x121\n" +
-	"\arequest\x18\x02 \x01(\v2\x17.google.protobuf.StructR\arequest\"e\n" +
+	"\arequest\x18\x02 \x01(\v2\x17.google.protobuf.StructR\arequest\"\xa1\x01\n" +
 	"\x0fControlResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x123\n" +
-	"\bresponse\x18\x02 \x01(\v2\x17.google.protobuf.StructR\bresponse\"5\n" +
+	"\bresponse\x18\x02 \x01(\v2\x17.google.protobuf.StructR\bresponse\x12:\n" +
+	"\x04body\x18\x03 \x01(\v2&.agentshim.data.v1.ControlResponseBodyR\x04body\"\xcc\x02\n" +
+	"\x13ControlResponseBody\x12\x18\n" +
+	"\asubtype\x18\x01 \x01(\tR\asubtype\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x123\n" +
+	"\bresponse\x18\x03 \x01(\v2\x17.google.protobuf.StructR\bresponse\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12W\n" +
+	"\x1bpending_permission_requests\x18\x05 \x03(\v2\x17.google.protobuf.StructR\x19pendingPermissionRequests\x12X\n" +
+	"\x1cpending_user_dialog_requests\x18\x06 \x03(\v2\x17.google.protobuf.StructR\x19pendingUserDialogRequests\"5\n" +
 	"\x14ControlCancelRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"\v\n" +
@@ -7092,7 +8126,7 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\tvalue_set\x18\x02 \x01(\bR\bvalueSet\x12\x12\n" +
 	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId*\xc2\x02\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId*\xf9\x03\n" +
 	"\x15AssistantMessageError\x12'\n" +
 	"#ASSISTANT_MESSAGE_ERROR_UNSPECIFIED\x10\x00\x121\n" +
 	"-ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED\x10\x01\x12)\n" +
@@ -7100,20 +8134,26 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\"ASSISTANT_MESSAGE_ERROR_RATE_LIMIT\x10\x03\x12+\n" +
 	"'ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST\x10\x04\x12(\n" +
 	"$ASSISTANT_MESSAGE_ERROR_SERVER_ERROR\x10\x05\x12#\n" +
-	"\x1fASSISTANT_MESSAGE_ERROR_UNKNOWN\x10\x06*\xfb\x01\n" +
+	"\x1fASSISTANT_MESSAGE_ERROR_UNKNOWN\x10\x06\x121\n" +
+	"-ASSISTANT_MESSAGE_ERROR_OAUTH_ORG_NOT_ALLOWED\x10\a\x12&\n" +
+	"\"ASSISTANT_MESSAGE_ERROR_OVERLOADED\x10\b\x12+\n" +
+	"'ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND\x10\t\x12-\n" +
+	")ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS\x10\n" +
+	"*\xfb\x01\n" +
 	"\rResultSubtype\x12\x1e\n" +
 	"\x1aRESULT_SUBTYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RESULT_SUBTYPE_SUCCESS\x10\x01\x12)\n" +
 	"%RESULT_SUBTYPE_ERROR_DURING_EXECUTION\x10\x02\x12\"\n" +
 	"\x1eRESULT_SUBTYPE_ERROR_MAX_TURNS\x10\x03\x12'\n" +
 	"#RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD\x10\x04\x126\n" +
-	"2RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES\x10\x05*\xae\x01\n" +
+	"2RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES\x10\x05*\xcd\x01\n" +
 	"\x0eMcpServerState\x12 \n" +
 	"\x1cMCP_SERVER_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aMCP_SERVER_STATE_CONNECTED\x10\x01\x12\x1b\n" +
 	"\x17MCP_SERVER_STATE_FAILED\x10\x02\x12\x1f\n" +
 	"\x1bMCP_SERVER_STATE_NEEDS_AUTH\x10\x03\x12\x1c\n" +
-	"\x18MCP_SERVER_STATE_PENDING\x10\x04*\xb2\x01\n" +
+	"\x18MCP_SERVER_STATE_PENDING\x10\x04\x12\x1d\n" +
+	"\x19MCP_SERVER_STATE_DISABLED\x10\x05*\xb2\x01\n" +
 	"\fApiKeySource\x12\x1e\n" +
 	"\x1aAPI_KEY_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13API_KEY_SOURCE_USER\x10\x01\x12\x1a\n" +
@@ -7139,7 +8179,7 @@ func file_agentshim_data_v1_stream_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_data_v1_stream_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 73)
+var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
 var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(AssistantMessageError)(0),     // 0: agentshim.data.v1.AssistantMessageError
 	(ResultSubtype)(0),             // 1: agentshim.data.v1.ResultSubtype
@@ -7150,179 +8190,205 @@ var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(*UserMessage)(nil),            // 6: agentshim.data.v1.UserMessage
 	(*AssistantMessage)(nil),       // 7: agentshim.data.v1.AssistantMessage
 	(*ResultMessage)(nil),          // 8: agentshim.data.v1.ResultMessage
-	(*Usage)(nil),                  // 9: agentshim.data.v1.Usage
-	(*ModelUsage)(nil),             // 10: agentshim.data.v1.ModelUsage
-	(*PermissionDenial)(nil),       // 11: agentshim.data.v1.PermissionDenial
-	(*McpServerStatus)(nil),        // 12: agentshim.data.v1.McpServerStatus
-	(*PluginRef)(nil),              // 13: agentshim.data.v1.PluginRef
-	(*SystemInit)(nil),             // 14: agentshim.data.v1.SystemInit
-	(*StreamEvent)(nil),            // 15: agentshim.data.v1.StreamEvent
-	(*RawMessageStreamEvent)(nil),  // 16: agentshim.data.v1.RawMessageStreamEvent
-	(*MessageStartEvent)(nil),      // 17: agentshim.data.v1.MessageStartEvent
-	(*ContentBlockStartEvent)(nil), // 18: agentshim.data.v1.ContentBlockStartEvent
-	(*ContentBlockDeltaEvent)(nil), // 19: agentshim.data.v1.ContentBlockDeltaEvent
-	(*TextDelta)(nil),              // 20: agentshim.data.v1.TextDelta
-	(*ThinkingDelta)(nil),          // 21: agentshim.data.v1.ThinkingDelta
-	(*InputJsonDelta)(nil),         // 22: agentshim.data.v1.InputJsonDelta
-	(*SignatureDelta)(nil),         // 23: agentshim.data.v1.SignatureDelta
-	(*ContentBlockStopEvent)(nil),  // 24: agentshim.data.v1.ContentBlockStopEvent
-	(*MessageDeltaEvent)(nil),      // 25: agentshim.data.v1.MessageDeltaEvent
-	(*MessageStopEvent)(nil),       // 26: agentshim.data.v1.MessageStopEvent
-	(*CompactBoundary)(nil),        // 27: agentshim.data.v1.CompactBoundary
-	(*StatusMessage)(nil),          // 28: agentshim.data.v1.StatusMessage
-	(*HookResponse)(nil),           // 29: agentshim.data.v1.HookResponse
-	(*ToolProgress)(nil),           // 30: agentshim.data.v1.ToolProgress
-	(*AuthStatus)(nil),             // 31: agentshim.data.v1.AuthStatus
-	(*RateLimitInfo)(nil),          // 32: agentshim.data.v1.RateLimitInfo
-	(*RateLimitEvent)(nil),         // 33: agentshim.data.v1.RateLimitEvent
-	(*HookStarted)(nil),            // 34: agentshim.data.v1.HookStarted
-	(*ThinkingTokens)(nil),         // 35: agentshim.data.v1.ThinkingTokens
-	(*SystemNotification)(nil),     // 36: agentshim.data.v1.SystemNotification
-	(*TaskStartedMsg)(nil),         // 37: agentshim.data.v1.TaskStartedMsg
-	(*TaskPatch)(nil),              // 38: agentshim.data.v1.TaskPatch
-	(*TaskUpdatedMsg)(nil),         // 39: agentshim.data.v1.TaskUpdatedMsg
-	(*TaskUsage)(nil),              // 40: agentshim.data.v1.TaskUsage
-	(*TaskNotificationMsg)(nil),    // 41: agentshim.data.v1.TaskNotificationMsg
-	(*BackgroundTaskRef)(nil),      // 42: agentshim.data.v1.BackgroundTaskRef
-	(*BackgroundTasksChanged)(nil), // 43: agentshim.data.v1.BackgroundTasksChanged
-	(*ControlRequest)(nil),         // 44: agentshim.data.v1.ControlRequest
-	(*ControlResponse)(nil),        // 45: agentshim.data.v1.ControlResponse
-	(*ControlCancelRequest)(nil),   // 46: agentshim.data.v1.ControlCancelRequest
-	(*KeepAlive)(nil),              // 47: agentshim.data.v1.KeepAlive
-	(*ApiRetry)(nil),               // 48: agentshim.data.v1.ApiRetry
-	(*ControlRequestProgress)(nil), // 49: agentshim.data.v1.ControlRequestProgress
-	(*ModelRefusalFallback)(nil),   // 50: agentshim.data.v1.ModelRefusalFallback
-	(*ModelRefusalNoFallback)(nil), // 51: agentshim.data.v1.ModelRefusalNoFallback
-	(*LocalCommandOutput)(nil),     // 52: agentshim.data.v1.LocalCommandOutput
-	(*HookProgress)(nil),           // 53: agentshim.data.v1.HookProgress
-	(*PluginInstall)(nil),          // 54: agentshim.data.v1.PluginInstall
-	(*TaskProgressUsage)(nil),      // 55: agentshim.data.v1.TaskProgressUsage
-	(*TaskProgressMsg)(nil),        // 56: agentshim.data.v1.TaskProgressMsg
-	(*SessionStateChanged)(nil),    // 57: agentshim.data.v1.SessionStateChanged
-	(*WorkerShuttingDown)(nil),     // 58: agentshim.data.v1.WorkerShuttingDown
-	(*SlashCommandRef)(nil),        // 59: agentshim.data.v1.SlashCommandRef
-	(*CommandsChanged)(nil),        // 60: agentshim.data.v1.CommandsChanged
-	(*PersistedFile)(nil),          // 61: agentshim.data.v1.PersistedFile
-	(*FailedFile)(nil),             // 62: agentshim.data.v1.FailedFile
-	(*FilesPersisted)(nil),         // 63: agentshim.data.v1.FilesPersisted
-	(*RecalledMemory)(nil),         // 64: agentshim.data.v1.RecalledMemory
-	(*MemoryRecall)(nil),           // 65: agentshim.data.v1.MemoryRecall
-	(*ElicitationComplete)(nil),    // 66: agentshim.data.v1.ElicitationComplete
-	(*PermissionDenied)(nil),       // 67: agentshim.data.v1.PermissionDenied
-	(*MirrorKey)(nil),              // 68: agentshim.data.v1.MirrorKey
-	(*MirrorError)(nil),            // 69: agentshim.data.v1.MirrorError
-	(*Informational)(nil),          // 70: agentshim.data.v1.Informational
-	(*ToolUseSummary)(nil),         // 71: agentshim.data.v1.ToolUseSummary
-	(*PromptSuggestion)(nil),       // 72: agentshim.data.v1.PromptSuggestion
-	(*ConversationReset)(nil),      // 73: agentshim.data.v1.ConversationReset
-	(*ActiveGoalValue)(nil),        // 74: agentshim.data.v1.ActiveGoalValue
-	(*ActiveGoal)(nil),             // 75: agentshim.data.v1.ActiveGoal
-	nil,                            // 76: agentshim.data.v1.ResultMessage.ModelUsageEntry
-	nil,                            // 77: agentshim.data.v1.SystemInit.MemoryPathsEntry
-	(*UnknownRecord)(nil),          // 78: agentshim.data.v1.UnknownRecord
-	(*ApiUserMessage)(nil),         // 79: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),          // 80: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),    // 81: agentshim.data.v1.ApiAssistantMessage
-	(*structpb.Struct)(nil),        // 82: google.protobuf.Struct
+	(*DeferredToolUse)(nil),        // 9: agentshim.data.v1.DeferredToolUse
+	(*Usage)(nil),                  // 10: agentshim.data.v1.Usage
+	(*ModelUsage)(nil),             // 11: agentshim.data.v1.ModelUsage
+	(*PermissionDenial)(nil),       // 12: agentshim.data.v1.PermissionDenial
+	(*McpServerStatus)(nil),        // 13: agentshim.data.v1.McpServerStatus
+	(*McpServerInfo)(nil),          // 14: agentshim.data.v1.McpServerInfo
+	(*McpToolRef)(nil),             // 15: agentshim.data.v1.McpToolRef
+	(*McpToolAnnotations)(nil),     // 16: agentshim.data.v1.McpToolAnnotations
+	(*PluginRef)(nil),              // 17: agentshim.data.v1.PluginRef
+	(*SystemInit)(nil),             // 18: agentshim.data.v1.SystemInit
+	(*StreamEvent)(nil),            // 19: agentshim.data.v1.StreamEvent
+	(*RawMessageStreamEvent)(nil),  // 20: agentshim.data.v1.RawMessageStreamEvent
+	(*MessageStartEvent)(nil),      // 21: agentshim.data.v1.MessageStartEvent
+	(*ContentBlockStartEvent)(nil), // 22: agentshim.data.v1.ContentBlockStartEvent
+	(*ContentBlockDeltaEvent)(nil), // 23: agentshim.data.v1.ContentBlockDeltaEvent
+	(*TextDelta)(nil),              // 24: agentshim.data.v1.TextDelta
+	(*ThinkingDelta)(nil),          // 25: agentshim.data.v1.ThinkingDelta
+	(*InputJsonDelta)(nil),         // 26: agentshim.data.v1.InputJsonDelta
+	(*SignatureDelta)(nil),         // 27: agentshim.data.v1.SignatureDelta
+	(*ContentBlockStopEvent)(nil),  // 28: agentshim.data.v1.ContentBlockStopEvent
+	(*MessageDeltaEvent)(nil),      // 29: agentshim.data.v1.MessageDeltaEvent
+	(*MessageStopEvent)(nil),       // 30: agentshim.data.v1.MessageStopEvent
+	(*CompactBoundary)(nil),        // 31: agentshim.data.v1.CompactBoundary
+	(*StatusMessage)(nil),          // 32: agentshim.data.v1.StatusMessage
+	(*HookResponse)(nil),           // 33: agentshim.data.v1.HookResponse
+	(*ToolProgress)(nil),           // 34: agentshim.data.v1.ToolProgress
+	(*SubagentRetry)(nil),          // 35: agentshim.data.v1.SubagentRetry
+	(*AuthStatus)(nil),             // 36: agentshim.data.v1.AuthStatus
+	(*RateLimitInfo)(nil),          // 37: agentshim.data.v1.RateLimitInfo
+	(*RateLimitEvent)(nil),         // 38: agentshim.data.v1.RateLimitEvent
+	(*HookStarted)(nil),            // 39: agentshim.data.v1.HookStarted
+	(*ThinkingTokens)(nil),         // 40: agentshim.data.v1.ThinkingTokens
+	(*SystemNotification)(nil),     // 41: agentshim.data.v1.SystemNotification
+	(*TaskStartedMsg)(nil),         // 42: agentshim.data.v1.TaskStartedMsg
+	(*TaskPatch)(nil),              // 43: agentshim.data.v1.TaskPatch
+	(*TaskUpdatedMsg)(nil),         // 44: agentshim.data.v1.TaskUpdatedMsg
+	(*TaskUsage)(nil),              // 45: agentshim.data.v1.TaskUsage
+	(*TaskNotificationMsg)(nil),    // 46: agentshim.data.v1.TaskNotificationMsg
+	(*BackgroundTaskRef)(nil),      // 47: agentshim.data.v1.BackgroundTaskRef
+	(*BackgroundTasksChanged)(nil), // 48: agentshim.data.v1.BackgroundTasksChanged
+	(*ControlRequest)(nil),         // 49: agentshim.data.v1.ControlRequest
+	(*ControlResponse)(nil),        // 50: agentshim.data.v1.ControlResponse
+	(*ControlResponseBody)(nil),    // 51: agentshim.data.v1.ControlResponseBody
+	(*ControlCancelRequest)(nil),   // 52: agentshim.data.v1.ControlCancelRequest
+	(*KeepAlive)(nil),              // 53: agentshim.data.v1.KeepAlive
+	(*ApiRetry)(nil),               // 54: agentshim.data.v1.ApiRetry
+	(*ControlRequestProgress)(nil), // 55: agentshim.data.v1.ControlRequestProgress
+	(*ModelRefusalFallback)(nil),   // 56: agentshim.data.v1.ModelRefusalFallback
+	(*ModelRefusalNoFallback)(nil), // 57: agentshim.data.v1.ModelRefusalNoFallback
+	(*LocalCommandOutput)(nil),     // 58: agentshim.data.v1.LocalCommandOutput
+	(*HookProgress)(nil),           // 59: agentshim.data.v1.HookProgress
+	(*PluginInstall)(nil),          // 60: agentshim.data.v1.PluginInstall
+	(*TaskProgressUsage)(nil),      // 61: agentshim.data.v1.TaskProgressUsage
+	(*TaskProgressMsg)(nil),        // 62: agentshim.data.v1.TaskProgressMsg
+	(*SessionStateChanged)(nil),    // 63: agentshim.data.v1.SessionStateChanged
+	(*WorkerShuttingDown)(nil),     // 64: agentshim.data.v1.WorkerShuttingDown
+	(*SlashCommandRef)(nil),        // 65: agentshim.data.v1.SlashCommandRef
+	(*CommandsChanged)(nil),        // 66: agentshim.data.v1.CommandsChanged
+	(*PersistedFile)(nil),          // 67: agentshim.data.v1.PersistedFile
+	(*FailedFile)(nil),             // 68: agentshim.data.v1.FailedFile
+	(*FilesPersisted)(nil),         // 69: agentshim.data.v1.FilesPersisted
+	(*RecalledMemory)(nil),         // 70: agentshim.data.v1.RecalledMemory
+	(*MemoryRecall)(nil),           // 71: agentshim.data.v1.MemoryRecall
+	(*ElicitationComplete)(nil),    // 72: agentshim.data.v1.ElicitationComplete
+	(*PermissionDenied)(nil),       // 73: agentshim.data.v1.PermissionDenied
+	(*MirrorKey)(nil),              // 74: agentshim.data.v1.MirrorKey
+	(*MirrorError)(nil),            // 75: agentshim.data.v1.MirrorError
+	(*Informational)(nil),          // 76: agentshim.data.v1.Informational
+	(*ToolUseSummary)(nil),         // 77: agentshim.data.v1.ToolUseSummary
+	(*PromptSuggestion)(nil),       // 78: agentshim.data.v1.PromptSuggestion
+	(*ConversationReset)(nil),      // 79: agentshim.data.v1.ConversationReset
+	(*ActiveGoalValue)(nil),        // 80: agentshim.data.v1.ActiveGoalValue
+	(*ActiveGoal)(nil),             // 81: agentshim.data.v1.ActiveGoal
+	nil,                            // 82: agentshim.data.v1.ResultMessage.ModelUsageEntry
+	nil,                            // 83: agentshim.data.v1.SystemInit.MemoryPathsEntry
+	(*UnknownRecord)(nil),          // 84: agentshim.data.v1.UnknownRecord
+	(*ApiUserMessage)(nil),         // 85: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),          // 86: agentshim.data.v1.ToolUseResult
+	(*Origin)(nil),                 // 87: agentshim.data.v1.Origin
+	(*structpb.ListValue)(nil),     // 88: google.protobuf.ListValue
+	(*ApiAssistantMessage)(nil),    // 89: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.Struct)(nil),        // 90: google.protobuf.Struct
+	(*PreservedSegment)(nil),       // 91: agentshim.data.v1.PreservedSegment
+	(*PreservedMessages)(nil),      // 92: agentshim.data.v1.PreservedMessages
 }
 var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
-	6,  // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
-	7,  // 1: agentshim.data.v1.ClaudeStreamMessage.assistant:type_name -> agentshim.data.v1.AssistantMessage
-	8,  // 2: agentshim.data.v1.ClaudeStreamMessage.result:type_name -> agentshim.data.v1.ResultMessage
-	14, // 3: agentshim.data.v1.ClaudeStreamMessage.system_init:type_name -> agentshim.data.v1.SystemInit
-	15, // 4: agentshim.data.v1.ClaudeStreamMessage.stream_event:type_name -> agentshim.data.v1.StreamEvent
-	27, // 5: agentshim.data.v1.ClaudeStreamMessage.compact_boundary:type_name -> agentshim.data.v1.CompactBoundary
-	28, // 6: agentshim.data.v1.ClaudeStreamMessage.status:type_name -> agentshim.data.v1.StatusMessage
-	29, // 7: agentshim.data.v1.ClaudeStreamMessage.hook_response:type_name -> agentshim.data.v1.HookResponse
-	30, // 8: agentshim.data.v1.ClaudeStreamMessage.tool_progress:type_name -> agentshim.data.v1.ToolProgress
-	31, // 9: agentshim.data.v1.ClaudeStreamMessage.auth_status:type_name -> agentshim.data.v1.AuthStatus
-	33, // 10: agentshim.data.v1.ClaudeStreamMessage.rate_limit_event:type_name -> agentshim.data.v1.RateLimitEvent
-	34, // 11: agentshim.data.v1.ClaudeStreamMessage.hook_started:type_name -> agentshim.data.v1.HookStarted
-	35, // 12: agentshim.data.v1.ClaudeStreamMessage.thinking_tokens:type_name -> agentshim.data.v1.ThinkingTokens
-	36, // 13: agentshim.data.v1.ClaudeStreamMessage.notification:type_name -> agentshim.data.v1.SystemNotification
-	37, // 14: agentshim.data.v1.ClaudeStreamMessage.task_started:type_name -> agentshim.data.v1.TaskStartedMsg
-	39, // 15: agentshim.data.v1.ClaudeStreamMessage.task_updated:type_name -> agentshim.data.v1.TaskUpdatedMsg
-	41, // 16: agentshim.data.v1.ClaudeStreamMessage.task_notification:type_name -> agentshim.data.v1.TaskNotificationMsg
-	43, // 17: agentshim.data.v1.ClaudeStreamMessage.background_tasks_changed:type_name -> agentshim.data.v1.BackgroundTasksChanged
-	44, // 18: agentshim.data.v1.ClaudeStreamMessage.control_request:type_name -> agentshim.data.v1.ControlRequest
-	45, // 19: agentshim.data.v1.ClaudeStreamMessage.control_response:type_name -> agentshim.data.v1.ControlResponse
-	46, // 20: agentshim.data.v1.ClaudeStreamMessage.control_cancel_request:type_name -> agentshim.data.v1.ControlCancelRequest
-	47, // 21: agentshim.data.v1.ClaudeStreamMessage.keep_alive:type_name -> agentshim.data.v1.KeepAlive
-	78, // 22: agentshim.data.v1.ClaudeStreamMessage.unknown:type_name -> agentshim.data.v1.UnknownRecord
-	48, // 23: agentshim.data.v1.ClaudeStreamMessage.api_retry:type_name -> agentshim.data.v1.ApiRetry
-	49, // 24: agentshim.data.v1.ClaudeStreamMessage.control_request_progress:type_name -> agentshim.data.v1.ControlRequestProgress
-	50, // 25: agentshim.data.v1.ClaudeStreamMessage.model_refusal_fallback:type_name -> agentshim.data.v1.ModelRefusalFallback
-	51, // 26: agentshim.data.v1.ClaudeStreamMessage.model_refusal_no_fallback:type_name -> agentshim.data.v1.ModelRefusalNoFallback
-	52, // 27: agentshim.data.v1.ClaudeStreamMessage.local_command_output:type_name -> agentshim.data.v1.LocalCommandOutput
-	53, // 28: agentshim.data.v1.ClaudeStreamMessage.hook_progress:type_name -> agentshim.data.v1.HookProgress
-	54, // 29: agentshim.data.v1.ClaudeStreamMessage.plugin_install:type_name -> agentshim.data.v1.PluginInstall
-	56, // 30: agentshim.data.v1.ClaudeStreamMessage.task_progress:type_name -> agentshim.data.v1.TaskProgressMsg
-	57, // 31: agentshim.data.v1.ClaudeStreamMessage.session_state_changed:type_name -> agentshim.data.v1.SessionStateChanged
-	58, // 32: agentshim.data.v1.ClaudeStreamMessage.worker_shutting_down:type_name -> agentshim.data.v1.WorkerShuttingDown
-	60, // 33: agentshim.data.v1.ClaudeStreamMessage.commands_changed:type_name -> agentshim.data.v1.CommandsChanged
-	63, // 34: agentshim.data.v1.ClaudeStreamMessage.files_persisted:type_name -> agentshim.data.v1.FilesPersisted
-	65, // 35: agentshim.data.v1.ClaudeStreamMessage.memory_recall:type_name -> agentshim.data.v1.MemoryRecall
-	66, // 36: agentshim.data.v1.ClaudeStreamMessage.elicitation_complete:type_name -> agentshim.data.v1.ElicitationComplete
-	67, // 37: agentshim.data.v1.ClaudeStreamMessage.permission_denied:type_name -> agentshim.data.v1.PermissionDenied
-	69, // 38: agentshim.data.v1.ClaudeStreamMessage.mirror_error:type_name -> agentshim.data.v1.MirrorError
-	70, // 39: agentshim.data.v1.ClaudeStreamMessage.informational:type_name -> agentshim.data.v1.Informational
-	71, // 40: agentshim.data.v1.ClaudeStreamMessage.tool_use_summary:type_name -> agentshim.data.v1.ToolUseSummary
-	72, // 41: agentshim.data.v1.ClaudeStreamMessage.prompt_suggestion:type_name -> agentshim.data.v1.PromptSuggestion
-	73, // 42: agentshim.data.v1.ClaudeStreamMessage.conversation_reset:type_name -> agentshim.data.v1.ConversationReset
-	75, // 43: agentshim.data.v1.ClaudeStreamMessage.active_goal:type_name -> agentshim.data.v1.ActiveGoal
-	79, // 44: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
-	80, // 45: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	81, // 46: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	0,  // 47: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
-	1,  // 48: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
-	9,  // 49: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
-	76, // 50: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
-	11, // 51: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
-	82, // 52: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
-	82, // 53: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
-	82, // 54: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
-	82, // 55: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
-	2,  // 56: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
-	3,  // 57: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
-	12, // 58: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
-	13, // 59: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
-	77, // 60: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
-	16, // 61: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
-	17, // 62: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
-	18, // 63: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
-	19, // 64: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
-	24, // 65: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
-	25, // 66: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
-	26, // 67: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
-	82, // 68: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
-	82, // 69: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
-	20, // 70: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
-	21, // 71: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
-	22, // 72: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
-	23, // 73: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
-	82, // 74: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
-	9,  // 75: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
-	4,  // 76: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
-	32, // 77: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
-	38, // 78: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
-	40, // 79: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
-	42, // 80: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
-	82, // 81: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
-	82, // 82: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
-	0,  // 83: agentshim.data.v1.ApiRetry.error:type_name -> agentshim.data.v1.AssistantMessageError
-	55, // 84: agentshim.data.v1.TaskProgressMsg.usage:type_name -> agentshim.data.v1.TaskProgressUsage
-	59, // 85: agentshim.data.v1.CommandsChanged.commands:type_name -> agentshim.data.v1.SlashCommandRef
-	61, // 86: agentshim.data.v1.FilesPersisted.files:type_name -> agentshim.data.v1.PersistedFile
-	62, // 87: agentshim.data.v1.FilesPersisted.failed:type_name -> agentshim.data.v1.FailedFile
-	64, // 88: agentshim.data.v1.MemoryRecall.memories:type_name -> agentshim.data.v1.RecalledMemory
-	68, // 89: agentshim.data.v1.MirrorError.key:type_name -> agentshim.data.v1.MirrorKey
-	74, // 90: agentshim.data.v1.ActiveGoal.value:type_name -> agentshim.data.v1.ActiveGoalValue
-	10, // 91: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
-	92, // [92:92] is the sub-list for method output_type
-	92, // [92:92] is the sub-list for method input_type
-	92, // [92:92] is the sub-list for extension type_name
-	92, // [92:92] is the sub-list for extension extendee
-	0,  // [0:92] is the sub-list for field type_name
+	6,   // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
+	7,   // 1: agentshim.data.v1.ClaudeStreamMessage.assistant:type_name -> agentshim.data.v1.AssistantMessage
+	8,   // 2: agentshim.data.v1.ClaudeStreamMessage.result:type_name -> agentshim.data.v1.ResultMessage
+	18,  // 3: agentshim.data.v1.ClaudeStreamMessage.system_init:type_name -> agentshim.data.v1.SystemInit
+	19,  // 4: agentshim.data.v1.ClaudeStreamMessage.stream_event:type_name -> agentshim.data.v1.StreamEvent
+	31,  // 5: agentshim.data.v1.ClaudeStreamMessage.compact_boundary:type_name -> agentshim.data.v1.CompactBoundary
+	32,  // 6: agentshim.data.v1.ClaudeStreamMessage.status:type_name -> agentshim.data.v1.StatusMessage
+	33,  // 7: agentshim.data.v1.ClaudeStreamMessage.hook_response:type_name -> agentshim.data.v1.HookResponse
+	34,  // 8: agentshim.data.v1.ClaudeStreamMessage.tool_progress:type_name -> agentshim.data.v1.ToolProgress
+	36,  // 9: agentshim.data.v1.ClaudeStreamMessage.auth_status:type_name -> agentshim.data.v1.AuthStatus
+	38,  // 10: agentshim.data.v1.ClaudeStreamMessage.rate_limit_event:type_name -> agentshim.data.v1.RateLimitEvent
+	39,  // 11: agentshim.data.v1.ClaudeStreamMessage.hook_started:type_name -> agentshim.data.v1.HookStarted
+	40,  // 12: agentshim.data.v1.ClaudeStreamMessage.thinking_tokens:type_name -> agentshim.data.v1.ThinkingTokens
+	41,  // 13: agentshim.data.v1.ClaudeStreamMessage.notification:type_name -> agentshim.data.v1.SystemNotification
+	42,  // 14: agentshim.data.v1.ClaudeStreamMessage.task_started:type_name -> agentshim.data.v1.TaskStartedMsg
+	44,  // 15: agentshim.data.v1.ClaudeStreamMessage.task_updated:type_name -> agentshim.data.v1.TaskUpdatedMsg
+	46,  // 16: agentshim.data.v1.ClaudeStreamMessage.task_notification:type_name -> agentshim.data.v1.TaskNotificationMsg
+	48,  // 17: agentshim.data.v1.ClaudeStreamMessage.background_tasks_changed:type_name -> agentshim.data.v1.BackgroundTasksChanged
+	49,  // 18: agentshim.data.v1.ClaudeStreamMessage.control_request:type_name -> agentshim.data.v1.ControlRequest
+	50,  // 19: agentshim.data.v1.ClaudeStreamMessage.control_response:type_name -> agentshim.data.v1.ControlResponse
+	52,  // 20: agentshim.data.v1.ClaudeStreamMessage.control_cancel_request:type_name -> agentshim.data.v1.ControlCancelRequest
+	53,  // 21: agentshim.data.v1.ClaudeStreamMessage.keep_alive:type_name -> agentshim.data.v1.KeepAlive
+	84,  // 22: agentshim.data.v1.ClaudeStreamMessage.unknown:type_name -> agentshim.data.v1.UnknownRecord
+	54,  // 23: agentshim.data.v1.ClaudeStreamMessage.api_retry:type_name -> agentshim.data.v1.ApiRetry
+	55,  // 24: agentshim.data.v1.ClaudeStreamMessage.control_request_progress:type_name -> agentshim.data.v1.ControlRequestProgress
+	56,  // 25: agentshim.data.v1.ClaudeStreamMessage.model_refusal_fallback:type_name -> agentshim.data.v1.ModelRefusalFallback
+	57,  // 26: agentshim.data.v1.ClaudeStreamMessage.model_refusal_no_fallback:type_name -> agentshim.data.v1.ModelRefusalNoFallback
+	58,  // 27: agentshim.data.v1.ClaudeStreamMessage.local_command_output:type_name -> agentshim.data.v1.LocalCommandOutput
+	59,  // 28: agentshim.data.v1.ClaudeStreamMessage.hook_progress:type_name -> agentshim.data.v1.HookProgress
+	60,  // 29: agentshim.data.v1.ClaudeStreamMessage.plugin_install:type_name -> agentshim.data.v1.PluginInstall
+	62,  // 30: agentshim.data.v1.ClaudeStreamMessage.task_progress:type_name -> agentshim.data.v1.TaskProgressMsg
+	63,  // 31: agentshim.data.v1.ClaudeStreamMessage.session_state_changed:type_name -> agentshim.data.v1.SessionStateChanged
+	64,  // 32: agentshim.data.v1.ClaudeStreamMessage.worker_shutting_down:type_name -> agentshim.data.v1.WorkerShuttingDown
+	66,  // 33: agentshim.data.v1.ClaudeStreamMessage.commands_changed:type_name -> agentshim.data.v1.CommandsChanged
+	69,  // 34: agentshim.data.v1.ClaudeStreamMessage.files_persisted:type_name -> agentshim.data.v1.FilesPersisted
+	71,  // 35: agentshim.data.v1.ClaudeStreamMessage.memory_recall:type_name -> agentshim.data.v1.MemoryRecall
+	72,  // 36: agentshim.data.v1.ClaudeStreamMessage.elicitation_complete:type_name -> agentshim.data.v1.ElicitationComplete
+	73,  // 37: agentshim.data.v1.ClaudeStreamMessage.permission_denied:type_name -> agentshim.data.v1.PermissionDenied
+	75,  // 38: agentshim.data.v1.ClaudeStreamMessage.mirror_error:type_name -> agentshim.data.v1.MirrorError
+	76,  // 39: agentshim.data.v1.ClaudeStreamMessage.informational:type_name -> agentshim.data.v1.Informational
+	77,  // 40: agentshim.data.v1.ClaudeStreamMessage.tool_use_summary:type_name -> agentshim.data.v1.ToolUseSummary
+	78,  // 41: agentshim.data.v1.ClaudeStreamMessage.prompt_suggestion:type_name -> agentshim.data.v1.PromptSuggestion
+	79,  // 42: agentshim.data.v1.ClaudeStreamMessage.conversation_reset:type_name -> agentshim.data.v1.ConversationReset
+	81,  // 43: agentshim.data.v1.ClaudeStreamMessage.active_goal:type_name -> agentshim.data.v1.ActiveGoal
+	85,  // 44: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
+	86,  // 45: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	87,  // 46: agentshim.data.v1.UserMessage.origin:type_name -> agentshim.data.v1.Origin
+	88,  // 47: agentshim.data.v1.UserMessage.file_attachments:type_name -> google.protobuf.ListValue
+	89,  // 48: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	0,   // 49: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
+	1,   // 50: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
+	10,  // 51: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
+	82,  // 52: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
+	12,  // 53: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
+	90,  // 54: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
+	9,   // 55: agentshim.data.v1.ResultMessage.deferred_tool_use:type_name -> agentshim.data.v1.DeferredToolUse
+	87,  // 56: agentshim.data.v1.ResultMessage.origin:type_name -> agentshim.data.v1.Origin
+	90,  // 57: agentshim.data.v1.DeferredToolUse.input:type_name -> google.protobuf.Struct
+	90,  // 58: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
+	90,  // 59: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
+	90,  // 60: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
+	2,   // 61: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
+	14,  // 62: agentshim.data.v1.McpServerStatus.server_info:type_name -> agentshim.data.v1.McpServerInfo
+	90,  // 63: agentshim.data.v1.McpServerStatus.config:type_name -> google.protobuf.Struct
+	15,  // 64: agentshim.data.v1.McpServerStatus.tools:type_name -> agentshim.data.v1.McpToolRef
+	16,  // 65: agentshim.data.v1.McpToolRef.annotations:type_name -> agentshim.data.v1.McpToolAnnotations
+	3,   // 66: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
+	13,  // 67: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
+	17,  // 68: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
+	83,  // 69: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
+	20,  // 70: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
+	21,  // 71: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
+	22,  // 72: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
+	23,  // 73: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
+	28,  // 74: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
+	29,  // 75: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
+	30,  // 76: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
+	90,  // 77: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
+	90,  // 78: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
+	24,  // 79: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
+	25,  // 80: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
+	26,  // 81: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
+	27,  // 82: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
+	90,  // 83: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
+	10,  // 84: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
+	4,   // 85: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
+	91,  // 86: agentshim.data.v1.CompactBoundary.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
+	92,  // 87: agentshim.data.v1.CompactBoundary.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
+	35,  // 88: agentshim.data.v1.ToolProgress.subagent_retry:type_name -> agentshim.data.v1.SubagentRetry
+	37,  // 89: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
+	43,  // 90: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
+	45,  // 91: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
+	47,  // 92: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
+	90,  // 93: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
+	90,  // 94: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
+	51,  // 95: agentshim.data.v1.ControlResponse.body:type_name -> agentshim.data.v1.ControlResponseBody
+	90,  // 96: agentshim.data.v1.ControlResponseBody.response:type_name -> google.protobuf.Struct
+	90,  // 97: agentshim.data.v1.ControlResponseBody.pending_permission_requests:type_name -> google.protobuf.Struct
+	90,  // 98: agentshim.data.v1.ControlResponseBody.pending_user_dialog_requests:type_name -> google.protobuf.Struct
+	0,   // 99: agentshim.data.v1.ApiRetry.error:type_name -> agentshim.data.v1.AssistantMessageError
+	61,  // 100: agentshim.data.v1.TaskProgressMsg.usage:type_name -> agentshim.data.v1.TaskProgressUsage
+	65,  // 101: agentshim.data.v1.CommandsChanged.commands:type_name -> agentshim.data.v1.SlashCommandRef
+	67,  // 102: agentshim.data.v1.FilesPersisted.files:type_name -> agentshim.data.v1.PersistedFile
+	68,  // 103: agentshim.data.v1.FilesPersisted.failed:type_name -> agentshim.data.v1.FailedFile
+	70,  // 104: agentshim.data.v1.MemoryRecall.memories:type_name -> agentshim.data.v1.RecalledMemory
+	74,  // 105: agentshim.data.v1.MirrorError.key:type_name -> agentshim.data.v1.MirrorKey
+	80,  // 106: agentshim.data.v1.ActiveGoal.value:type_name -> agentshim.data.v1.ActiveGoalValue
+	11,  // 107: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
+	108, // [108:108] is the sub-list for method output_type
+	108, // [108:108] is the sub-list for method input_type
+	108, // [108:108] is the sub-list for extension type_name
+	108, // [108:108] is the sub-list for extension extendee
+	0,   // [0:108] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_stream_proto_init() }
@@ -7331,6 +8397,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		return
 	}
 	file_agentshim_data_v1_tools_proto_init()
+	file_agentshim_data_v1_transcript_proto_init()
 	file_agentshim_data_v1_unknown_proto_init()
 	file_agentshim_data_v1_stream_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClaudeStreamMessage_User)(nil),
@@ -7378,7 +8445,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		(*ClaudeStreamMessage_ConversationReset)(nil),
 		(*ClaudeStreamMessage_ActiveGoal)(nil),
 	}
-	file_agentshim_data_v1_stream_proto_msgTypes[11].OneofWrappers = []any{
+	file_agentshim_data_v1_stream_proto_msgTypes[15].OneofWrappers = []any{
 		(*RawMessageStreamEvent_MessageStart)(nil),
 		(*RawMessageStreamEvent_ContentBlockStart)(nil),
 		(*RawMessageStreamEvent_ContentBlockDelta)(nil),
@@ -7386,7 +8453,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		(*RawMessageStreamEvent_MessageDelta)(nil),
 		(*RawMessageStreamEvent_MessageStop)(nil),
 	}
-	file_agentshim_data_v1_stream_proto_msgTypes[14].OneofWrappers = []any{
+	file_agentshim_data_v1_stream_proto_msgTypes[18].OneofWrappers = []any{
 		(*ContentBlockDeltaEvent_TextDelta)(nil),
 		(*ContentBlockDeltaEvent_ThinkingDelta)(nil),
 		(*ContentBlockDeltaEvent_InputJsonDelta)(nil),
@@ -7398,7 +8465,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_data_v1_stream_proto_rawDesc), len(file_agentshim_data_v1_stream_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   73,
+			NumMessages:   79,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
