@@ -107,6 +107,27 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * Unwrap a `stream_event` envelope to its inner frame, when that frame is of
+ * `type`; `null` for any other frame, or a shape this cannot read.
+ *
+ * Every stream mapper below is keyed to exactly ONE frame type — that is what
+ * makes them mutually exclusive and lets the dispatcher try them in turn — so
+ * this unwrap-and-discriminate is the whole of what they have in common. One
+ * site owns how the envelope is read, so a third mapper (or a change in the
+ * envelope's shape) lands in one place rather than being copied a third time.
+ */
+function frameOfType(msg: Record<string, unknown>, type: string): Record<string, unknown> | null {
+  const event = msg["event"];
+  if (!isObject(event) || event["type"] !== type) return null;
+  return event;
+}
+
+/** The session id off a stream message's envelope, or "" when it has none. */
+function sessionOf(msg: Record<string, unknown>): string {
+  return strOf(msg["session_id"]);
+}
+
 function ephemeralEvent(
   sessionId: string,
   producedAtMs: bigint,
@@ -133,9 +154,9 @@ export function streamEventToContentDelta(
   msg: Record<string, unknown>,
   opts?: DeltaOptions,
 ): Event | null {
-  const event = msg["event"];
-  if (!isObject(event) || event["type"] !== "content_block_delta") return null;
-  const delta = event["delta"];
+  const frame = frameOfType(msg, "content_block_delta");
+  if (!frame) return null;
+  const delta = frame["delta"];
   if (!isObject(delta)) return null;
 
   const arm = deltaArm(delta);
@@ -144,14 +165,13 @@ export function streamEventToContentDelta(
   // The message being streamed, NOT this event's own envelope uuid: the SDK
   // mints that fresh per emission, so it differs on every chunk.
   const uuid = opts?.messageId ?? "";
-  const index = typeof event["index"] === "number" ? event["index"] : 0;
+  const index = typeof frame["index"] === "number" ? frame["index"] : 0;
   const estimatedTokens =
     typeof delta["estimated_tokens"] === "number" && Number.isFinite(delta["estimated_tokens"])
       ? BigInt(Math.trunc(delta["estimated_tokens"] as number))
       : 0n;
 
-  const sessionId = typeof msg["session_id"] === "string" ? msg["session_id"] : "";
-  return ephemeralEvent(sessionId, producedAt(opts), {
+  return ephemeralEvent(sessionOf(msg), producedAt(opts), {
     case: "contentDelta",
     value: create(ContentDeltaSchema, {
       uuid,
@@ -187,13 +207,11 @@ export function streamEventToMessageLatency(
   msg: Record<string, unknown>,
   opts?: DeltaOptions,
 ): Event | null {
-  const event = msg["event"];
-  if (!isObject(event) || event["type"] !== "message_start") return null;
+  if (!frameOfType(msg, "message_start")) return null;
   const ttft = msg["ttft_ms"];
   if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft <= 0) return null;
 
-  const sessionId = typeof msg["session_id"] === "string" ? msg["session_id"] : "";
-  return ephemeralEvent(sessionId, producedAt(opts), {
+  return ephemeralEvent(sessionOf(msg), producedAt(opts), {
     case: "messageLatency",
     value: create(MessageLatencySchema, {
       // The message this stamp measures, keyed exactly as ContentDelta keys
