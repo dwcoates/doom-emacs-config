@@ -1,6 +1,7 @@
 package errclass
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -33,6 +34,7 @@ func TestSentinelClassifiesEachSentinel(t *testing.T) {
 		{"not live session", ErrNotLiveSession, TypeSessionNotLive},
 		{"repull in flight", ErrRepullInFlight, TypeHistoryRepullInFlight},
 		{"repull truncated", ErrRepullTruncated, TypeHistoryReplayTruncated},
+		{"interrupt undelivered", ErrInterruptUndelivered, TypeInterruptUndelivered},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,34 +219,56 @@ func TestCommandIsAlwaysInternalClass(t *testing.T) {
 	}
 }
 
-func TestInterruptFailedClassifiesAsUndelivered(t *testing.T) {
+func TestInterruptErrorFailedIsAFailure(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := Interrupt(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 	// Assert.
-	if got == nil || got.GetErrorType() != string(TypeInterruptUndelivered) {
-		t.Fatalf("Interrupt(FAILED) = %v, want %q", got, TypeInterruptUndelivered)
+	if !errors.Is(got, ErrInterruptUndelivered) {
+		t.Fatalf("InterruptError(FAILED) = %v, want ErrInterruptUndelivered", got)
 	}
 }
 
-func TestInterruptAlreadyCompleteIsQuietSuccess(t *testing.T) {
+func TestInterruptErrorFailedClassifiesAsUndelivered(t *testing.T) {
+	// Arrange: the outcome routed through the ONE command door.
+	logf, _ := capture()
+	// Act.
+	got := Command(logf, InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED))
+	// Assert.
+	if got.GetErrorType() != string(TypeInterruptUndelivered) {
+		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeInterruptUndelivered)
+	}
+}
+
+func TestInterruptErrorAlreadyCompleteIsQuietSuccess(t *testing.T) {
 	// Arrange: the outcome that exists precisely so a stop landing on a
 	// finished turn stops being painted as a failed stop.
 	// Act.
-	got := Interrupt(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	// Assert.
 	if got != nil {
-		t.Fatalf("Interrupt(ALREADY_COMPLETE) = %v, want nil; the user asked for the turn to be over and it already is", got)
+		t.Fatalf("InterruptError(ALREADY_COMPLETE) = %v, want nil; the user asked for the turn to be over and it already is", got)
 	}
 }
 
-func TestInterruptInterruptedIsQuietSuccess(t *testing.T) {
+func TestInterruptErrorInterruptedIsQuietSuccess(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := Interrupt(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	// Assert.
 	if got != nil {
-		t.Fatalf("Interrupt(INTERRUPTED) = %v, want nil", got)
+		t.Fatalf("InterruptError(INTERRUPTED) = %v, want nil", got)
+	}
+}
+
+func TestInterruptErrorUnspecifiedIsQuietSuccess(t *testing.T) {
+	// Arrange: every non-interrupt command acks with UNSPECIFIED, so treating
+	// it as a failure would fail every command in the tree.
+	// Act.
+	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED)
+	// Assert.
+	if got != nil {
+		t.Fatalf("InterruptError(UNSPECIFIED) = %v, want nil", got)
 	}
 }
 

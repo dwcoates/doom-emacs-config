@@ -14,6 +14,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
 )
 
@@ -66,6 +67,10 @@ type fakeClient struct {
 	origins    []string
 	modes      []string
 	interrupts int
+	// interruptOutcome is the shim verdict the fake acks with. Zero means
+	// INTERRUPTED, so a test that does not care about the outcome gets the
+	// ordinary successful stop.
+	interruptOutcome corev1.InterruptOutcome
 	// notReady, when non-nil, blocks AwaitReady until it is closed — the
 	// fake's stand-in for a shim that has not finished handshaking yet. Nil
 	// (the default) means the connection is already usable, so tests that do
@@ -100,11 +105,15 @@ func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	}
 }
 
-func (c *fakeClient) Interrupt(_ context.Context, _ bool) error {
+func (c *fakeClient) Interrupt(_ context.Context, _ bool) (corev1.InterruptOutcome, error) {
 	c.mu.Lock()
 	c.interrupts++
+	outcome := c.interruptOutcome
 	c.mu.Unlock()
-	return nil
+	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
+		outcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
+	}
+	return outcome, nil
 }
 
 // Replay is the shim-mediated bounded history replay. The default fake serves
@@ -282,6 +291,64 @@ func TestInterruptRequiresLiveSession(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
 	if err := m.Interrupt(context.Background(), "ws", true); err == nil {
 		t.Fatal("interrupt with no live session must error")
+	}
+}
+
+// --- Interrupt outcome (F4) -------------------------------------------------
+//
+// The shim's own verdict decides whether a stop failed. From outside, a stop
+// that could not be delivered and a turn that had already ended arrive as the
+// same silence, and the second used to be reported as the first.
+
+func TestInterruptReportsNoErrorWhenTheTurnWasStopped(t *testing.T) {
+	// Arrange.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
+
+	// Act.
+	err := m.Interrupt(context.Background(), "ws", true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt(INTERRUPTED) = %v, want nil", err)
+	}
+}
+
+func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
+	// Arrange: the outcome that exists precisely so this stops being painted
+	// as a failed stop. The user asked for the turn to be over and it is.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
+
+	// Act.
+	err := m.Interrupt(context.Background(), "ws", true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt(ALREADY_COMPLETE) = %v, want nil; a no-op stop is success", err)
+	}
+}
+
+func TestInterruptReportsAnUndeliverableStopAsAFailure(t *testing.T) {
+	// Arrange: the ONLY outcome that reads as a failure.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
+
+	// Act.
+	err := m.Interrupt(context.Background(), "ws", true)
+
+	// Assert.
+	if !errors.Is(err, errclass.ErrInterruptUndelivered) {
+		t.Fatalf("Interrupt(FAILED) = %v, want ErrInterruptUndelivered", err)
 	}
 }
 

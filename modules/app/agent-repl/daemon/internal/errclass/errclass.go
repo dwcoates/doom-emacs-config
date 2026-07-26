@@ -254,6 +254,12 @@ var (
 	ErrNotLiveSession      = errors.New("sessiondrv: not the live session for this workspace")
 	ErrRepullInFlight      = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
 	ErrRepullTruncated     = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
+	// ErrInterruptUndelivered is the one interrupt outcome that is a failure.
+	// It is a sentinel rather than a special case at the ack site so that an
+	// undeliverable stop reaches a human through the SAME door as every other
+	// command failure — outcome to error to Command to card — instead of
+	// getting a second classification path of its own.
+	ErrInterruptUndelivered = errors.New("sessiondrv: the interrupt could not be delivered")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -271,6 +277,7 @@ var sentinelTypes = []struct {
 	{ErrNotLiveSession, TypeSessionNotLive},
 	{ErrRepullInFlight, TypeHistoryRepullInFlight},
 	{ErrRepullTruncated, TypeHistoryReplayTruncated},
+	{ErrInterruptUndelivered, TypeInterruptUndelivered},
 }
 
 // Sentinel is the errors.Is ladder over the daemon's sentinel errors. It
@@ -322,23 +329,22 @@ func Command(logf dlog.Logf, err error) *frontendv1.SystemFailureItem {
 	}
 }
 
-// Interrupt classifies an interrupt's ACK outcome.
+// InterruptError converts an interrupt's ACK outcome into the daemon's error
+// channel: nil when the stop succeeded, ErrInterruptUndelivered when it did
+// not.
 //
 // Only FAILED is a failure. ALREADY_COMPLETE is quiet SUCCESS — the user
-// asked for the turn to be over and it already is — and returning a card for
-// it is exactly the mislabeling the outcome enum was added to stop: a daemon
-// watching for an `aborted` result could not tell a stop that failed from a
-// turn that had already ended, and painted the second as the first.
-func Interrupt(outcome corev1.InterruptOutcome) *frontendv1.SystemFailureItem {
+// asked for the turn to be over and it already is — and reporting it as an
+// error is exactly the mislabeling the outcome enum was added to stop: a
+// daemon watching for an `aborted` result could not tell a stop that FAILED
+// from a turn that had ALREADY ENDED, and painted the second as the first.
+// Deriving it downstream is what made it ambiguous; this reads the shim's own
+// verdict instead.
+func InterruptError(outcome corev1.InterruptOutcome) error {
 	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED {
 		return nil
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeInterruptUndelivered),
-		Message:      prose[TypeInterruptUndelivered],
-		SourceDetail: outcome.String(),
-	}
+	return ErrInterruptUndelivered
 }
 
 // statusTypes maps an HTTP status to its failure type. ApiErrorLine carries
