@@ -434,3 +434,97 @@ func TestThinkingIsNotPromotedToIdleAsync(t *testing.T) {
 		t.Fatalf("state = %s, want THINKING", renderName(got.state))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Backfill composes into green
+// ---------------------------------------------------------------------------
+
+// THE REOPEN WEDGE, end to end at the SSM: a session whose transcript was
+// already ingested reaches GREEN with no prompt ever submitted. If the
+// backfill axis could not settle for such a session, this would sit blue
+// forever on the most ordinary action there is — reopening a workspace.
+func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
+	// Arrange — the reopen sequence, with NO transcript line arriving:
+	// the daemon settles the backfill from the store high-water, the shim
+	// asserts readiness, and the frontend attests it painted the replay.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyBackfillState("ws1", "done"); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	// Act — the frontend painted the replayed history.
+	if err := m.ApplyPaintAck("ws1", 4200); err != nil {
+		t.Fatalf("paint ack: %v", err)
+	}
+	// Assert
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state = %s, want READY for a reopened, fully-backfilled session", renderName(got))
+	}
+}
+
+// A FAILED backfill is blue: the history is incomplete, so anything painted
+// from it is a partial account of the conversation.
+func TestFailedBackfillResolvesBlue(t *testing.T) {
+	// Arrange — everything else healthy and attested.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyPaintAck("ws1", 10); err != nil {
+		t.Fatalf("paint ack: %v", err)
+	}
+	// Act.
+	if err := m.ApplyBackfillState("ws1", "failed"); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
+		t.Fatalf("state = %s, want INIT (blue) for a failed backfill", renderName(got))
+	}
+}
+
+// "Nothing to backfill" is a real, correct answer — a genuinely fresh
+// workspace — not an unknown, so it must not hold the workspace blue.
+func TestEmptyWorkspaceBackfillDoesNotHoldBlue(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyBackfillState("ws1", "pending"); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	// Act — an empty history is attested at seq 0.
+	if err := m.ApplyPaintAck("ws1", 0); err != nil {
+		t.Fatalf("paint ack: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state = %s, want READY for a fresh empty workspace", renderName(got))
+	}
+}
+
+// A failed backfill that later recovers releases the axis.
+func TestBackfillRecoveryReleasesBlue(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyPaintAck("ws1", 3); err != nil {
+		t.Fatalf("paint ack: %v", err)
+	}
+	if err := m.ApplyBackfillState("ws1", "failed"); err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	// Act.
+	if err := m.ApplyBackfillState("ws1", "done"); err != nil {
+		t.Fatalf("backfill done: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state = %s, want READY once the backfill settled", renderName(got))
+	}
+}

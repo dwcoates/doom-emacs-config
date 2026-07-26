@@ -26,17 +26,21 @@ const (
 	sigVendorClear   = "vendor_clear" // vendor axis cleared (released).
 	sigUnpainted     = "unpainted"    // no frontend has attested painting.
 	sigPainted       = "painted"      // paint axis cleared (attested).
-	sigDead          = "dead"
-	sigMerging       = "merging"
-	sigMergeQueued   = "merge_queued"
-	sigMergeConflict = "merge_conflict"
-	sigMergeFailed   = "merge_failed"
-	sigMerged        = "merged"
-	sigMergeNone     = "merge_none" // merge axis cleared (no merge in flight).
-	sigDegraded      = "degraded"
-	sigDegradedClear = "degraded_clear" // degraded axis cleared (recovered).
-	sigTaskStarted   = "task_started"
-	sigTaskEnded     = "task_ended"
+	// A transcript the sidecar could not fully read: the history is
+	// incomplete, so anything painted from it is a partial account.
+	sigBackfillFailed = "backfill_failed"
+	sigBackfillOK     = "backfill_ok" // backfill axis cleared (done, or nothing to do).
+	sigDead           = "dead"
+	sigMerging        = "merging"
+	sigMergeQueued    = "merge_queued"
+	sigMergeConflict  = "merge_conflict"
+	sigMergeFailed    = "merge_failed"
+	sigMerged         = "merged"
+	sigMergeNone      = "merge_none" // merge axis cleared (no merge in flight).
+	sigDegraded       = "degraded"
+	sigDegradedClear  = "degraded_clear" // degraded axis cleared (recovered).
+	sigTaskStarted    = "task_started"
+	sigTaskEnded      = "task_ended"
 )
 
 // Cause-kind strings recorded per row and surfaced on WorkspaceState.
@@ -150,6 +154,10 @@ func renderStateOf(token string) frontendv1.RenderState {
 		return frontendv1.RenderState_RENDER_STATE_READY
 	case sigVendorBlocked:
 		return frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED
+	case sigBackfillFailed:
+		// Blue, like every other compromised route: an incomplete history
+		// cannot be the basis of a "ready" claim.
+		return frontendv1.RenderState_RENDER_STATE_INIT
 	case sigUnpainted:
 		// An unattested route is BLUE, and INIT is blue's token. A frontend
 		// that never reported painting is indistinguishable from one that
@@ -207,7 +215,8 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	10 dead             the shim is gone
 //	11 degraded         a store/transport outage
 //	12 unpainted        no frontend has attested painting the history
-//	13 init             bring-up
+//	13 backfill_failed  the transcript could not be fully read
+//	14 init             bring-up
 //	--- purple -------------------------------------------------------------
 //	20 vendor_blocked
 //	--- red ----------------------------------------------------------------
@@ -239,7 +248,8 @@ WITH
     ('dead','agent',10),
     ('degraded','degraded',11),
     ('unpainted','paint',12),
-    ('init','agent',13),
+    ('backfill_failed','backfill',13),
+    ('init','agent',14),
     ('vendor_blocked','vendor',20),
     ('thinking','agent',30),
     ('permission','agent',40),
@@ -275,6 +285,11 @@ WITH
     WHERE r.state IN ('unpainted','painted')
     ORDER BY r.at DESC LIMIT 1
   ),
+  latest_backfill AS (
+    SELECT r.* FROM rows r
+    WHERE r.state IN ('backfill_failed','backfill_ok')
+    ORDER BY r.at DESC LIMIT 1
+  ),
   candidates AS (
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_agent
     UNION ALL
@@ -285,6 +300,8 @@ WITH
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_vendor WHERE state <> 'vendor_clear'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_paint WHERE state <> 'painted'
+    UNION ALL
+    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
   ),
   ranked AS (
     SELECT c.state, c.cause_kind, c.cause_seq, c.at, c.session_id, p.rank
