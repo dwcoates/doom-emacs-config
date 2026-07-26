@@ -102,10 +102,155 @@ func TestStartUsesTheHeadlessOpusArgv(t *testing.T) {
 	}
 }
 
+func TestNewRefusesAnUngatedModeWithoutConsent(t *testing.T) {
+	// Arrange — an ungated analyst approves its own tool calls against a real
+	// checkout, unattended, so it takes an operator who said so.
+	cfg := Config{
+		Dir:            "/repo",
+		PermissionMode: "bypassPermissions",
+		Start:          func([]string, string) error { return nil },
+		Logf:           func(string, ...any) {},
+	}
+	// Act
+	_, err := New(cfg, time.Now())
+	// Assert — refused at boot, never downgraded to a gated mode.
+	if err == nil {
+		t.Fatal("New(bypassPermissions, no consent) = nil error, want a refusal")
+	}
+}
+
+func TestNewRefusalNamesTheCheckoutAtRisk(t *testing.T) {
+	// Arrange
+	cfg := Config{
+		Dir:            "/home/u/config",
+		PermissionMode: "bypassPermissions",
+		Start:          func([]string, string) error { return nil },
+		Logf:           func(string, ...any) {},
+	}
+	// Act
+	_, err := New(cfg, time.Now())
+	// Assert — the operator must be able to see WHAT would have been exposed.
+	if err == nil || !strings.Contains(err.Error(), "/home/u/config") {
+		t.Fatalf("err = %v, want it to name the remediation dir", err)
+	}
+}
+
+func TestNewAcceptsAnUngatedModeWithConsent(t *testing.T) {
+	// Arrange — the analyst cannot function gated (headless auto-deny), so
+	// this is the configuration in which the feature actually works.
+	rec := &recorder{}
+	// Act
+	r := newRunner(t, rec, Config{PermissionMode: "bypassPermissions", AllowUngated: true})
+	// Assert
+	if r == nil {
+		t.Fatal("New with consent returned no runner")
+	}
+}
+
+func TestNewNeedsNoConsentForAGatedMode(t *testing.T) {
+	// Arrange
+	rec := &recorder{}
+	// Act
+	r := newRunner(t, rec, Config{PermissionMode: "acceptEdits"})
+	// Assert
+	if r == nil {
+		t.Fatal("New(acceptEdits) returned no runner")
+	}
+}
+
+func TestNewRecordsTheUngatedAnalystAtBoot(t *testing.T) {
+	// Arrange — the operator learns of an ungated analyst when the daemon
+	// adopts the config, not when a session is finally lost.
+	var lines []string
+	cfg := Config{
+		Dir:            "/repo",
+		PermissionMode: "bypassPermissions",
+		AllowUngated:   true,
+		Start:          func([]string, string) error { return nil },
+		Logf:           func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}
+	// Act
+	if _, err := New(cfg, time.Now()); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Assert
+	if len(lines) != 1 || !strings.Contains(lines[0], "UNGATED") {
+		t.Fatalf("boot log = %v, want one UNGATED record", lines)
+	}
+}
+
+func TestNewLogsNothingAtBootForAGatedAnalyst(t *testing.T) {
+	// Arrange
+	var lines []string
+	cfg := Config{
+		Dir:            "/repo",
+		PermissionMode: "acceptEdits",
+		Start:          func([]string, string) error { return nil },
+		Logf:           func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}
+	// Act
+	if _, err := New(cfg, time.Now()); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Assert
+	if len(lines) != 0 {
+		t.Fatalf("boot log = %v, want nothing for a gated analyst", lines)
+	}
+}
+
+func TestStartRecordsTheUngatedDispatch(t *testing.T) {
+	// Arrange — the spawn itself is named, with the consent that admitted it,
+	// exactly as an ungated session create is.
+	rec := &recorder{}
+	var lines []string
+	r, err := New(Config{
+		Dir:            "/repo",
+		PermissionMode: "bypassPermissions",
+		AllowUngated:   true,
+		Start:          rec.start,
+		Logf:           func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Act
+	if _, err := r.Start("s_abc"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Assert — the last line is the dispatch, and it carries the note.
+	dispatch := lines[len(lines)-1]
+	if !strings.Contains(dispatch, "UNGATED") || !strings.Contains(dispatch, "consent=true") {
+		t.Fatalf("dispatch log = %q, want the ungated record with its consent", dispatch)
+	}
+}
+
+func TestStartDispatchRecordIsPlainForAGatedAnalyst(t *testing.T) {
+	// Arrange
+	rec := &recorder{}
+	var lines []string
+	r, err := New(Config{
+		Dir:            "/repo",
+		PermissionMode: "acceptEdits",
+		Start:          rec.start,
+		Logf:           func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) },
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Act
+	if _, err := r.Start("s_abc"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Assert
+	if strings.Contains(lines[len(lines)-1], "UNGATED") {
+		t.Fatalf("dispatch log = %q, want no ungated claim for a gated analyst", lines[len(lines)-1])
+	}
+}
+
 func TestStartCarriesTheConfiguredPermissionMode(t *testing.T) {
 	// Arrange — the operator opted the headless analyst out of gating.
 	rec := &recorder{}
-	r := newRunner(t, rec, Config{PermissionMode: "bypassPermissions"})
+	r := newRunner(t, rec, Config{PermissionMode: "bypassPermissions", AllowUngated: true})
 	// Act
 	if _, err := r.Start("s_abc"); err != nil {
 		t.Fatalf("Start: %v", err)

@@ -143,11 +143,39 @@ permission prompt: under the CLI default every tool call it makes is
 auto-denied, and it can then only narrate a diagnosis into the daemon
 log.  Reading the logs, running git, and driving the workspace-creation
 skill all require it to be ungated, which is what the default here buys.
-Set to nil to hand the analyst no --permission-mode at all."
+Set to nil to hand the analyst no --permission-mode at all.
+
+An ungated value here is inert on its own: the daemon REFUSES TO BOOT
+under one unless `agent-repl-frontend-remediation-allow-ungated' also
+consents.  See that variable for the tradeoff being consented to."
   :type '(choice (const :tag "Ungated (can actually remediate)" "bypassPermissions")
                  (const :tag "Edits only" "acceptEdits")
                  (const :tag "CLI default (report-only)" nil)
                  string)
+  :group 'agent-repl)
+
+(defcustom agent-repl-frontend-remediation-allow-ungated t
+  "Consent to running the lost-session analyst with NO permission gate.
+Becomes the daemon's `-allow-ungated-remediation', which it REQUIRES
+whenever `agent-repl-frontend-remediation-permission-mode' is ungated
+\(`bypassPermissions').  Without it such a configuration makes
+`claude-repld' refuse to boot rather than run ungated by default.
+
+THE TRADEOFF THIS ACKNOWLEDGES.  The analyst is a headless `claude -p'
+with nobody at the keyboard, so under any GATED mode every tool call it
+makes is auto-denied and it can only narrate a diagnosis: the feature
+does nothing.  Ungated is therefore the only mode in which it works, and
+what that costs is a `claude' running unattended against
+`agent-repl--frontend-repo-root' -- your real doom checkout -- approving
+its own tool calls, triggered by a lost session rather than by you.
+
+Defaulting to t is that tradeoff accepted deliberately, not by omission.
+Set to nil to withdraw the consent, and then also set
+`agent-repl-frontend-remediation-permission-mode' to a gated mode (or
+nil), or the daemon will refuse to start.  Every ungated analyst -- both
+its configuration at daemon boot and each dispatch -- is recorded in the
+daemon log, which is where an analyst with no session UI is visible."
+  :type 'boolean
   :group 'agent-repl)
 
 (defcustom agent-repl-frontend-widget-assets-dir
@@ -342,7 +370,15 @@ endpoint to exactly these roots."
       (list "-remediation-dir" agent-repl--frontend-repo-root)
       (when agent-repl-frontend-remediation-permission-mode
         (list "-remediation-permission-mode"
-              agent-repl-frontend-remediation-permission-mode))))
+              agent-repl-frontend-remediation-permission-mode))
+      ;; The standing consent, sent whenever it is held rather than only
+      ;; when the configured mode happens to need it.  The daemon owns the
+      ;; question of WHICH modes are ungated (`protocol.UngatedPermissionMode'),
+      ;; so re-deciding it here would only add a second copy of that list to
+      ;; drift out of sync -- and a drifted copy would withhold the consent
+      ;; and stop the daemon booting.
+      (when agent-repl-frontend-remediation-allow-ungated
+        (list "-allow-ungated-remediation"))))
    (when-let ((widget (agent-repl--frontend-discover-widget-assets-dir)))
      (list "-widget-assets" widget))
    (when-let ((claude (executable-find "claude")))
