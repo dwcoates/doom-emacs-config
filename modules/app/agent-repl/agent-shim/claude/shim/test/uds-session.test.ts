@@ -79,7 +79,12 @@ class FakeQuery implements QueryLike {
     this.interruptCalls++;
     return Promise.resolve(this.interruptReceipt);
   }
-  setPermissionMode(): Promise<void> {
+  /** Modes the session actually applied, and an optional forced rejection. */
+  readonly permissionModes: string[] = [];
+  setPermissionModeError: Error | undefined = undefined;
+  setPermissionMode(mode: string): Promise<void> {
+    if (this.setPermissionModeError) return Promise.reject(this.setPermissionModeError);
+    this.permissionModes.push(mode);
     return Promise.resolve();
   }
   setModel(): Promise<void> {
@@ -368,6 +373,57 @@ describe("UdsSession permission round-trip", () => {
     await until(() => query.interruptCalls >= 1);
     // Assert: the FIRST Event to arrive is the store outage deliberately
     // provoked afterwards, proving the quiet interrupt emitted none of its own.
+    store.close();
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+});
+
+describe("UdsSession permission-mode overrides", () => {
+  it("a launch-only mode is refused loudly instead of silently doing nothing", async () => {
+    // Arrange: bypassPermissions is valid at launch but the CLI refuses to
+    // switch INTO it, so the shim must not pretend it applied.
+    const { daemon } = await rig();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "go", permissionMode: "bypassPermissions",
+    }));
+    await daemon.next(AckSchema);
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-permission-mode");
+    expect(evt.payload.value.reason).toContain("bypassPermissions");
+  });
+
+  it("a mode the CLI rejects reaches the user as DegradedState", async () => {
+    // Arrange: the SDK rejects the switch (e.g. an unknown mode reaching a
+    // newer CLI). The user picked it, so they must be told it did not take.
+    const { query, daemon } = await rig();
+    query.setPermissionModeError = new Error("Cannot set permission mode");
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "go", permissionMode: "plan",
+    }));
+    await daemon.next(AckSchema);
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.reason).toContain("still in the previous mode");
+  });
+
+  it("an accepted mode reports no degradation", async () => {
+    // Arrange
+    const { query, store, daemon } = await rig();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "go", permissionMode: "plan",
+    }));
+    await daemon.next(AckSchema);
+    await until(() => query.permissionModes.length === 1);
+    // Assert: the first Event is the store outage provoked afterwards, so the
+    // accepted switch emitted none of its own.
     store.close();
     const evt = await daemon.next(EventSchema);
     if (evt.payload.case !== "degradedState") throw new Error("case");
