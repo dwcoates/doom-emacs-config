@@ -43,6 +43,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     retrying: null,
     authenticating: null,
     hook: null,
+    blocked: null,
     rateLimited: null,
     errorSummary: "",
     errorItemUuid: "",
@@ -210,6 +211,44 @@ describe("activityDetail: exactly one account of the dead air", () => {
       progress: progress({
         authenticating: { sinceMs: NOW, detail: "paste your code" },
         rateLimited: { resetsAt: 0, utilization: 0, status: "limited" },
+      }),
+    });
+    // Act
+    const got = activityDetail(i, NOW) as Activity;
+    // Assert
+    expect(got.text).toBe("auth · paste your code");
+  });
+
+  it("says the session is parked on the reader", () => {
+    // Arrange
+    const i = input({ progress: progress({ blocked: { sinceMs: NOW, detail: "waiting on you" } }) });
+    // Act
+    const got = activityDetail(i, NOW) as Activity;
+    // Assert
+    expect(got.text).toBe("waiting on you");
+  });
+
+  it("lets a parked session supersede a retry", () => {
+    // Arrange — nothing will happen until the reader acts, whatever the agent
+    // was doing before it stopped.
+    const i = input({
+      progress: progress({
+        blocked: { sinceMs: NOW, detail: "waiting on you" },
+        retrying: { sinceMs: NOW, detail: "attempt 3/10" },
+      }),
+    });
+    // Act
+    const got = activityDetail(i, NOW) as Activity;
+    // Assert
+    expect(got.text).toBe("waiting on you");
+  });
+
+  it("lets an auth prompt supersede a parked session", () => {
+    // Arrange — auth is the same statement with a specific remedy attached.
+    const i = input({
+      progress: progress({
+        authenticating: { sinceMs: NOW, detail: "paste your code" },
+        blocked: { sinceMs: NOW, detail: "waiting on you" },
       }),
     });
     // Act
@@ -461,6 +500,17 @@ describe("sheetHtml: the detail the thin strip drops", () => {
     const got = sheetHtml(i, NOW);
     // Assert
     expect(got).toContain("hook (5s) — PreToolUse");
+  });
+
+  it("gives the blocked window its own sheet row", () => {
+    // Arrange
+    const i = input({
+      progress: progress({ blocked: { sinceMs: NOW - 9_000, detail: "waiting on you" } }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain("blocked (9s) — waiting on you");
   });
 
   it("reports the live task count", () => {
