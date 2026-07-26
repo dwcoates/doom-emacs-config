@@ -115,7 +115,7 @@ export class StoreClient {
    * is ISSUED, never once its ack lands — chaining on acks would serialize
    * round-trips and throttle the stream.
    */
-  private sendChain: Promise<unknown> = Promise.resolve();
+  private sendChain: Promise<void> = Promise.resolve();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly heartbeatIntervalMs: number;
   /**
@@ -303,32 +303,58 @@ export class StoreClient {
    * fails drops the batch exactly as a down connection always did.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
-    // Chain the SEND so batches reach the wire in call order even when the
-    // first of them is waiting on a redial (see sendChain).
-    const sent = this.sendChain.then(
-      () => this.sendBatch(events),
-      () => this.sendBatch(events), // a prior send's failure never blocks this one
-    );
-    this.sendChain = sent.catch(() => {});
-    return sent;
+    // The ack promise is built HERE and handed to the send, because the two
+    // settle on different clocks: the send chains (so batches reach the wire in
+    // call order even when the first is waiting on a redial), while the ack
+    // lands whenever the store gets to it. Returning the send's own promise
+    // would chain the next batch behind this batch's round-trip.
+    let resolve!: (ack: StoreWriteAck) => void;
+    let reject!: (err: Error) => void;
+    const acked = new Promise<StoreWriteAck>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    const issued = this.sendChain.then(() => this.issueBatch({ resolve, reject, events }));
+    // A batch that cannot be sent reports itself (loud per-event drop log,
+    // DegradedState, and a rejected `acked`), so the chain carries ORDER only.
+    // Recovering it here keeps one failed send from wedging every later write.
+    this.sendChain = issued.catch(() => {});
+    return acked;
   }
 
-  /** Redial-if-needed, then enqueue and send one batch. */
-  private async sendBatch(events: Event[]): Promise<StoreWriteAck> {
+  /**
+   * Redial-if-needed, then send one batch and enqueue it for its ack.
+   *
+   * Settles once the batch is ISSUED, never on its ack — this is what the send
+   * chain waits on, so awaiting the ack here would serialize the stream on
+   * store round-trips. Every failure is routed to `pending.reject` rather than
+   * thrown, so a caller always learns about its own batch.
+   */
+  private async issueBatch(pending: PendingWrite): Promise<void> {
     try {
       await this.ensureProducerConn();
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
-      this.dropBatch(events, `store connection is down (redial failed: ${why})`);
-      throw new Error("store-client: write on a down connection");
+      this.dropBatch(pending.events, `store connection is down (redial failed: ${why})`);
+      pending.reject(new Error("store-client: write on a down connection"));
+      return;
     }
-    return new Promise<StoreWriteAck>((resolve, reject) => {
-      this.pendingWrites.push({ resolve, reject, events });
+    // Send BEFORE enqueueing: a send that throws never reached the wire, so no
+    // ack will ever match it, and an entry queued first would silently steal
+    // the NEXT batch's ack. Nothing can interleave, since an ack is only ever
+    // read on a later turn of the event loop.
+    try {
       this.conn!.send(StoreWriteSchema, create(StoreWriteSchema, {
         producer: this.opts.producer,
-        batch: create(EventBatchSchema, { events }),
+        batch: create(EventBatchSchema, { events: pending.events }),
       }));
-    });
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      this.dropBatch(pending.events, `store write failed to send: ${why}`);
+      pending.reject(new Error(`store-client: write failed to send: ${why}`));
+      return;
+    }
+    this.pendingWrites.push(pending);
   }
 
   /**
