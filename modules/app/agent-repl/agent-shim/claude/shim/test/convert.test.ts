@@ -1387,6 +1387,20 @@ describe("web_fetch arm", () => {
     expect(r.result.case).not.toBe("artifact");
   });
 
+  it("types the artifactRead of a fetch that resolved to a published Artifact", () => {
+    const r = convertToolUseResult({ bytes: 12, code: 200, codeText: "OK", durationMs: 5, result: "x", url: "https://x/y", artifactRead: { slug: "coach-plan", ver: "3" } }, "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.artifactRead).toEqual(expect.objectContaining({ slug: "coach-plan", ver: "3" }));
+  });
+
+  it("leaves artifactRead ABSENT on an ordinary fetch", () => {
+    // The corpus fetch is an ordinary page, so an all-empty ArtifactRead would
+    // read downstream as "this fetch WAS an Artifact".
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.artifactRead).toBeUndefined();
+  });
+
   it("leaves a bare {url,bytes} object unclassified (no HTTP status text)", () => {
     const r = convertToolUseResult({ url: "https://x/y", bytes: 626 }, "s");
     expect(r.result.case).toBe("unclassified");

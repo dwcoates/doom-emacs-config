@@ -776,7 +776,53 @@ func (c *Converter) toolUseResult(m protoreflect.Message, v any, cap *capture) {
 	}
 	fd := fs.ByName(protoreflect.Name(arm))
 	payload := m.NewField(fd)
-	c.assign(payload.Message(), obj, "toolUseResult."+arm, cap, nil)
+	path := "toolUseResult." + arm
+	if arm == "task_output" {
+		c.taskOutputResult(payload.Message(), obj, path, cap)
+	} else {
+		c.assign(payload.Message(), obj, path, cap, nil)
+	}
+	m.Set(fd, payload)
+}
+
+// taskOutputResult fills a TaskOutputResult. `retrieval_status` assigns
+// generically, but `task` is a ONEOF whose arm is named by the NESTED object's
+// `task_type` tag — a discriminator the generic assign cannot see, so it
+// captured the entire task object into extras instead. Same dispatch shape as
+// contentBlock, one level down.
+func (c *Converter) taskOutputResult(m protoreflect.Message, obj map[string]any, path string, cap *capture) {
+	idx := fieldIndex(m.Descriptor())
+	for k, v := range obj {
+		ck := canon(k)
+		if ck == "task" {
+			c.taskOutputTask(m, v, joinPath(path, k), cap)
+			continue
+		}
+		if fd, ok := idx[ck]; ok {
+			c.setField(m, fd, v, joinPath(path, k), cap)
+			continue
+		}
+		cap.add(joinPath(path, k), v)
+	}
+}
+
+// taskOutputTask sets the `task` oneof from the task object's task_type.
+// A non-object, or a type naming no oneof member, is captured verbatim rather
+// than folded into whichever arm happens to be nearest.
+func (c *Converter) taskOutputTask(m protoreflect.Message, v any, path string, cap *capture) {
+	task, ok := v.(map[string]any)
+	if !ok {
+		cap.add(path, v)
+		return
+	}
+	typ, _ := task["task_type"].(string)
+	fd := oneofMemberByCanon(m.Descriptor(), "task", canon(typ))
+	if fd == nil {
+		cap.add(joinPath(path, typ), task)
+		return
+	}
+	payload := m.NewField(fd)
+	c.fillMessage(payload.Message(), task, path, cap, nil)
 	m.Set(fd, payload)
 }
 
