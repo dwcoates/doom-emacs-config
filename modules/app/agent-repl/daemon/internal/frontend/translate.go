@@ -341,13 +341,55 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		if sub.ApiError == nil {
 			return nil
 		}
-		return []*frontendv1.ConversationItem{{
+		items := []*frontendv1.ConversationItem{{
 			Uuid: uuid, TsMs: tsMs, RequestId: requestID,
 			Item: &frontendv1.ConversationItem_ApiError{ApiError: sub.ApiError},
 		}}
+		// A TERMINAL failure additionally gets the classified card (F4).
+		//
+		// The webapp used to classify this same line by its OWN rule — and a
+		// third rule for "fatal" on top — while the daemon classified it by a
+		// different one, so the two processes disagreed about what the same
+		// bytes meant. Both hold the fact; only the daemon holds the cause, so
+		// the daemon decides and the frontend renders.
+		//
+		// It is a SEPARATE item rather than a different arm of the same one
+		// because the arms are a oneof and the legacy api_error must keep
+		// flowing until both frontends have shipped their card readers. Its
+		// uuid is derived from this line's so the two cannot collide, and so
+		// the card is stable across a resync.
+		if failure := ApiFailureFromLine(sub.ApiError, uuid); failure != nil {
+			items = append(items, &frontendv1.ConversationItem{
+				Uuid: failure.GetItemUuid(), TsMs: tsMs, RequestId: requestID,
+				Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+			})
+		}
+		return items
 	default:
 		return nil
 	}
+}
+
+// FailureUUID is the card uuid derived from the conversation item a failure
+// came from. Deriving it — rather than minting a fresh one — is what keeps the
+// card stable across a resync and distinct from the legacy item it accompanies.
+func FailureUUID(itemUUID string) string {
+	return "failure:" + itemUUID
+}
+
+// ApiFailureFromLine classifies a TERMINAL ApiErrorLine as a failure card, and
+// returns nil for one that is still mid-backoff.
+//
+// The retrying/terminal split is the daemon's single rule (see
+// internal/progress, which drives the retrying window off the same test): a
+// line the SDK will try again is not a failure to report, because the turn is
+// still in flight. Reporting it as one is how a working session came to look
+// broken between attempts.
+func ApiFailureFromLine(ae *datav1.ApiErrorLine, itemUUID string) *frontendv1.SystemFailureItem {
+	if ae == nil || errclass.Retrying(ae) {
+		return nil
+	}
+	return errclass.APIError(ae, FailureUUID(itemUUID))
 }
 
 // --- assistant / user / result / compaction items --------------------------
