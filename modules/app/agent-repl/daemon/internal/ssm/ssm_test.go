@@ -332,26 +332,67 @@ func TestSubscribePushesTransitions(t *testing.T) {
 	}
 }
 
-// TestApplyNoTransitionNoPush: an event that does not change the resolved
-// state produces no transition log and no push.
-func TestApplyNoTransitionNoPush(t *testing.T) {
-	// Arrange: an already-thinking session with a subscriber.
+// TestApplyLogsNoSelfTransition: an event that leaves the resolved state where
+// it was writes no transition line (§12: log deltas only).
+func TestApplyLogsNoSelfTransition(t *testing.T) {
+	// Arrange: an already-thinking session.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply turn: %v", err)
 	}
-	ch, _ := m.Subscribe()
-	// Act: a task starts (count changes) but the winning state stays thinking.
+	// Act: a task starts; the winning state stays thinking.
 	if err := m.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
 		t.Fatalf("Apply task: %v", err)
 	}
-	// Assert: no thinking→thinking transition line, and no push.
-	if cl.count("transition ws=ws1") != 1 { // only the original turn-start
+	// Assert: only the original turn-start transition line.
+	if cl.count("transition ws=ws1") != 1 {
 		t.Fatalf("transition count = %d, want 1 (no self-transition)", cl.count("transition ws=ws1"))
 	}
+}
+
+// TestApplyPushesWhenOnlyTheLiveTaskCountMoves: live_task_count is RENDERED
+// (the footer's live-task figure, via progress.ApplyWorkspaceState), so a
+// count-only change must reach subscribers. Keying the push on the render state
+// alone left a stale number on screen with nothing that could correct it.
+func TestApplyPushesWhenOnlyTheLiveTaskCountMoves(t *testing.T) {
+	// Arrange: an already-thinking session with a subscriber.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("Apply turn: %v", err)
+	}
+	ch, _ := m.Subscribe()
+	// Act: a task starts; the state stays thinking but the count goes 0→1.
+	if err := m.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
+		t.Fatalf("Apply task: %v", err)
+	}
+	// Assert.
 	select {
 	case msg := <-ch:
-		t.Fatalf("unexpected push for a non-transition: %s", renderName(msg.State))
+		if msg.GetLiveTaskCount() != 1 {
+			t.Fatalf("pushed live_task_count = %d, want 1", msg.GetLiveTaskCount())
+		}
+	default:
+		t.Fatal("a live-task-count change must be pushed")
+	}
+}
+
+// TestApplyNoVisibleChangeNoPush: an event that moves neither the state nor the
+// live-task count stays quiet.
+func TestApplyNoVisibleChangeNoPush(t *testing.T) {
+	// Arrange: an already-thinking session with a subscriber.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("Apply turn: %v", err)
+	}
+	ch, _ := m.Subscribe()
+	// Act: another turn start — same state, same (zero) task count.
+	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+		t.Fatalf("Apply turn: %v", err)
+	}
+	// Assert.
+	select {
+	case msg := <-ch:
+		t.Fatalf("unexpected push for a non-change: %s", renderName(msg.State))
 	default:
 	}
 }

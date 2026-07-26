@@ -585,6 +585,41 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
     (should-not (agent-repl--uds-dispatch-frame
                  '(:queue (:workspace "ws1" :sessionId "s1" :entries nil))))))
 
+(ert-deftest agent-repl-test-uds-progress-is-a-known-frame ()
+  "The F1 `progress' oneof arm is a recognized frame field (not malformed).
+The daemon pushes a `ProgressView' per workspace; this vocabulary
+predated the frame, so every push signalled
+`agent-repl-uds-malformed-frame' and surfaced as a user-visible error on
+workspace open."
+  ;; Act / Assert
+  (should (member "progress" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-progress-is-a-deliberately-ignored-frame ()
+  "`progress' is declared ignored: the footer is webapp-only by design."
+  ;; Act / Assert
+  (should (member "progress" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-progress-frame-returns-nil ()
+  "Dispatching a progress frame is a no-op, not a signal."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:progress (:workspace "ws1" :sessionId "s1" :liveTaskCount 0))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-progress-frame-skips-unwired-warning ()
+  "A progress frame must NOT log the unfinished-wiring message a real gap logs."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame '(:progress (:workspace "ws1")))
+        ;; Assert
+        (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
+                              logged))))))
+
 (ert-deftest agent-repl-test-uds-queue-commands-are-known ()
   "The three E4 queue control arms are in the command mirror."
   ;; Act / Assert
