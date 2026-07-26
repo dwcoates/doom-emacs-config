@@ -114,8 +114,15 @@ type L1Event struct {
 	// commands
 	Commands []SlashCommand `json:"commands,omitempty"`
 
-	// status — the SDK's system:init re-read off a throwaway probe handshake,
-	// forwarded opaque exactly like Data below.
+	// status — VESTIGIAL. It carried a `/status` snapshot re-read off a
+	// throwaway probe handshake, but the shim no longer has that path: the
+	// CLI never emits system:init on a query whose prompt iterable does not
+	// yield, so the probe waited forever, and nothing ever sent the
+	// `refresh-status` that drove it. The producer is gone.
+	//
+	// The field and its entry in l1EventKnownTypes are KEPT so an older shim
+	// binary still parses cleanly rather than tripping the unknown-event log.
+	// Nothing reads it.
 	Status json.RawMessage `json:"status,omitempty"`
 
 	// stream-event / assistant-message / tool-result
