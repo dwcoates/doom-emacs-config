@@ -1156,5 +1156,93 @@ describe("control_response structural nesting", () => {
   });
 });
 
+describe("tool results that used to fall through to unclassified", () => {
+  it("classifies a Glob result", () => {
+    const r = convertToolUseResult({ durationMs: 12, numFiles: 3, filenames: ["a", "b", "c"], truncated: false }, "s");
+    expect(r?.result.case).toBe("glob");
+  });
+
+  it("keeps a Glob result's filenames", () => {
+    const r = convertToolUseResult({ durationMs: 12, numFiles: 3, filenames: ["a", "b", "c"], truncated: false }, "s");
+    if (r?.result.case !== "glob") throw new Error("case");
+    expect(r.result.value.filenames).toEqual(["a", "b", "c"]);
+  });
+
+  it("classifies a Grep result rather than mistaking it for a Glob", () => {
+    // Both carry `filenames`; only grep carries a mode/match count.
+    const r = convertToolUseResult({ mode: "content", numFiles: 1, filenames: ["a"], numMatches: 7, content: "hit" }, "s");
+    expect(r?.result.case).toBe("grep");
+  });
+
+  it("keeps a Grep result's match count", () => {
+    const r = convertToolUseResult({ mode: "content", numFiles: 1, filenames: ["a"], numMatches: 7 }, "s");
+    if (r?.result.case !== "grep") throw new Error("case");
+    expect(r.result.value.numMatches).toBe(7n);
+  });
+
+  it("classifies a TaskGet result with a task", () => {
+    const r = convertToolUseResult({ task: { id: "t1", subject: "s", description: "d", status: "pending", blocks: [], blockedBy: ["t0"] } }, "s");
+    if (r?.result.case !== "taskGet") throw new Error("case");
+    expect(r.result.value.task?.blockedBy).toEqual(["t0"]);
+  });
+
+  it("classifies a TaskGet result whose task is null", () => {
+    // Nullable, so the null form is still a TaskGet and must not fall through.
+    const r = convertToolUseResult({ task: null }, "s");
+    if (r?.result.case !== "taskGet") throw new Error("case");
+    expect(r.result.value.taskSet).toBe(false);
+  });
+
+  it("classifies an Artifact result", () => {
+    const r = convertToolUseResult({ url: "https://x/y", title: "T", favicon: "📊", label: "v1" }, "s");
+    expect(r?.result.case).toBe("artifact");
+  });
+
+  it("keeps an Artifact result's url", () => {
+    const r = convertToolUseResult({ url: "https://x/y", title: "T", favicon: "📊" }, "s");
+    if (r?.result.case !== "artifact") throw new Error("case");
+    expect(r.result.value.url).toBe("https://x/y");
+  });
+
+  it("classifies a StructuredOutput result instead of leaving it unclassified", () => {
+    const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
+    expect(r?.result.case).toBe("structuredOutput");
+  });
+
+  it("preserves a StructuredOutput result's caller-defined payload whole", () => {
+    const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
+    if (r?.result.case !== "structuredOutput") throw new Error("case");
+    expect(r.result.value.data).toEqual({ verdict: "ok", score: 3 });
+  });
+});
+
+describe("ToolReferenceBlock typing", () => {
+  /** Walk user -> content_blocks -> tool_result -> content_blocks -> [0]. */
+  function toolReferenceOf(toolName: string) {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "tool_reference", tool_name: toolName }] }] },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    const content = csm.msg.value.message!.content;
+    if (content.case !== "contentBlocks") throw new Error("user content case");
+    const outer = content.value.blocks[0];
+    if (outer?.block.case !== "toolResult") throw new Error("outer block");
+    const nested = outer.block.value.content;
+    if (nested.case !== "contentBlocks") throw new Error("tool_result content case");
+    const inner = nested.value.blocks[0];
+    if (inner?.block.case !== "toolReference") throw new Error("inner block");
+    return inner.block.value;
+  }
+
+  it("types the tool name out of a tool_reference block", () => {
+    expect(toolReferenceOf("Bash").toolName).toBe("Bash");
+  });
+
+  it("still preserves the tool_reference block verbatim alongside the typed name", () => {
+    expect(toolReferenceOf("Bash").reference).toEqual({ type: "tool_reference", tool_name: "Bash" });
+  });
+});
+
 // Silence unused-import lint for the dir constants documenting fixture roots.
 void toolResultsDir;
