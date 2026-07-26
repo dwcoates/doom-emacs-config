@@ -279,6 +279,8 @@ func (m *Manager) Apply(workspace string, ev *corev1.Event) error {
 	case *corev1.Event_TurnEnded:
 		m.closeTurnLocked(wp, p.TurnEnded)
 		m.pushLocked(workspace, wp)
+	case *corev1.Event_MessageLatency:
+		m.applyLatencyLocked(workspace, wp, p.MessageLatency)
 	case *corev1.Event_Vendor:
 		if err := m.applyVendorLocked(workspace, wp, p.Vendor, at); err != nil {
 			return err
@@ -290,6 +292,37 @@ func (m *Manager) Apply(workspace string, ev *corev1.Event) error {
 		// relay's. Nothing to fold, and nothing lost.
 	}
 	return nil
+}
+
+// applyLatencyLocked adopts a streamed message's first-token latency.
+//
+// This is the LIVE ttft source. The same number reaches the daemon a second
+// time on the turn's terminal result, but only once the turn is over — useless
+// to a footer whose whole job is to report the turn in flight. The shim's delta
+// bypass relays the vendor's mid-stream stamp as an EPHEMERAL MessageLatency,
+// and this is its one consumer.
+//
+// LATEST-WINS per message, matching the field's meaning ("first-token latency
+// of the current message"): a turn streams one message per API request, each
+// stamped with its own latency, and the footer reports the newest. Structural
+// rather than coalesced, because it moves at most once per message.
+//
+// A missing or unusable stamp never reaches here (the relay declines to emit
+// one), so a zero arriving anyway is a producer bug rather than absence — but
+// it is still refused rather than allowed to blank a figure already standing,
+// which is the EPHEMERAL contract's absence-tolerance.
+func (m *Manager) applyLatencyLocked(workspace string, wp *workspaceProgress, ml *corev1.MessageLatency) {
+	next := ml.GetTtftMs()
+	if next <= 0 {
+		m.logf("progress: MessageLatency with no usable ttft ws=%s uuid=%s ttft=%d; ignored",
+			workspace, ml.GetUuid(), next)
+		return
+	}
+	if wp.view.GetTtftMs() == next {
+		return
+	}
+	wp.view.TtftMs = next
+	m.pushLocked(workspace, wp)
 }
 
 // ---------------------------------------------------------------------------

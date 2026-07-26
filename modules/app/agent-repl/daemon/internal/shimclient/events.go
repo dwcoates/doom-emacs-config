@@ -54,7 +54,7 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 // dispatchEvent routes one Event and maintains last_seen_seq. Lifecycle
 // payloads go to the StateSink (SSM), DegradedState to the DegradedReporter,
 // and everything else (data.v1 vendor Any, ContentDelta, HeartbeatProgress,
-// UnparsedEvent) to the FrameSink. PERSISTENT events (seq > 0) advance the
+// MessageLatency, UnparsedEvent) to the FrameSink. PERSISTENT events (seq > 0) advance the
 // monotonic high-water mark; a regression is a fatal protocol violation.
 func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	if seq := ev.GetSeq(); seq > 0 {
@@ -87,6 +87,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		c.cfg.FrameSink.Consume(ev)
 	case *corev1.Event_ContentDelta,
 		*corev1.Event_HeartbeatProgress,
+		*corev1.Event_MessageLatency,
 		*corev1.Event_Vendor:
 		c.cfg.FrameSink.Consume(ev)
 	case nil:

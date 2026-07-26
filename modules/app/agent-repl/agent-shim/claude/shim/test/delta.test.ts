@@ -4,6 +4,7 @@ import {
   StreamMessageTracker,
   isEphemeral,
   streamEventToContentDelta,
+  streamEventToMessageLatency,
   toEphemeralEvent,
   toolProgressToHeartbeat,
 } from "../src/proto/delta.js";
@@ -96,6 +97,92 @@ describe("streamEventToContentDelta ignores structural frames", () => {
 });
 
 // ---------------------------------------------------------------------------
+// stream_event → MessageLatency (the ttft relay).
+//
+// `ttft_ms` is a top-level field of the stream_event envelope that the SDK
+// stamps on message_start — the one structural frame carrying a progress fact,
+// and one the ContentDelta mapper drops. Relaying it is what makes first-token
+// latency reachable mid-turn instead of only at the turn's result.
+// ---------------------------------------------------------------------------
+
+describe("streamEventToMessageLatency", () => {
+  /** A message_start frame with an arbitrary top-level ttft stamp. */
+  const start = (ttft: unknown) => ({
+    type: "stream_event",
+    session_id: "s1",
+    uuid: "envelope-of-the-start-event",
+    ttft_ms: ttft,
+    event: { type: "message_start", message: { id: "msg_01ABC", type: "message", role: "assistant" } },
+  });
+
+  function latency(msg: Record<string, unknown>, opts?: { nowMs?: number; messageId?: string }) {
+    const evt = streamEventToMessageLatency(msg, opts);
+    expect(evt).not.toBeNull();
+    if (evt!.payload.case !== "messageLatency") throw new Error("not a message latency");
+    return evt!.payload.value;
+  }
+
+  it("carries the corpus message_start's ttft stamp", () => {
+    // Arrange / Act
+    const l = latency(loadStream("stream_event-message_start"));
+    // Assert: the observed stamp, verbatim.
+    expect(l.ttftMs).toBe(865n);
+  });
+
+  it("keys the stamp to the streaming message id, not the envelope uuid", () => {
+    // Arrange / Act
+    const l = latency(start(700), { messageId: "msg_01ABC" });
+    // Assert: same key ContentDelta uses, so both describe one message.
+    expect(l.uuid).toBe("msg_01ABC");
+  });
+
+  it("carries the session id off the envelope", () => {
+    expect(streamEventToMessageLatency(start(700))!.sessionId).toBe("s1");
+  });
+
+  it("is classified EPHEMERAL, plane STREAM, seq 0", () => {
+    // Arrange / Act
+    const evt = streamEventToMessageLatency(start(700), { nowMs: 42 })!;
+    // Assert: the bypass contract — never persisted, never sequenced.
+    expect([evt.class, evt.plane, evt.seq, evt.producedAtMs]).toEqual([
+      EventClass.EPHEMERAL,
+      Plane.STREAM,
+      0n,
+      42n,
+    ]);
+  });
+
+  it("truncates a fractional stamp rather than rejecting it", () => {
+    expect(latency(start(864.7)).ttftMs).toBe(864n);
+  });
+
+  it("returns null when message_start carries no stamp", () => {
+    // Arrange: absence is the common case, not an anomaly.
+    const msg = start(undefined);
+    delete (msg as Record<string, unknown>)["ttft_ms"];
+    // Act / Assert
+    expect(streamEventToMessageLatency(msg)).toBeNull();
+  });
+
+  it("returns null for a zero stamp (absence, not a measured zero)", () => {
+    expect(streamEventToMessageLatency(start(0))).toBeNull();
+  });
+
+  it("returns null for a non-numeric stamp", () => {
+    expect(streamEventToMessageLatency(start("865"))).toBeNull();
+  });
+
+  it("returns null for a content_block_delta frame", () => {
+    // Arrange / Act / Assert: the two mappers are mutually exclusive.
+    expect(streamEventToMessageLatency(loadStream("stream_event-content_block_delta-text"))).toBeNull();
+  });
+
+  it("returns null for a message_stop frame", () => {
+    expect(streamEventToMessageLatency(loadStream("stream_event-message_stop"))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // tool_progress → HeartbeatProgress.
 // ---------------------------------------------------------------------------
 
@@ -130,6 +217,20 @@ describe("toEphemeralEvent / isEphemeral", () => {
   it("routes stream_event to a ContentDelta", () => {
     const evt = toEphemeralEvent(loadStream("stream_event-content_block_delta-text"));
     expect(evt?.payload.case).toBe("contentDelta");
+  });
+
+  it("routes a stamped message_start to a MessageLatency", () => {
+    // Arrange / Act: the frame the ContentDelta mapper drops.
+    const evt = toEphemeralEvent(loadStream("stream_event-message_start"));
+    // Assert
+    expect(evt?.payload.case).toBe("messageLatency");
+  });
+
+  it("returns null for a message_start with no ttft stamp", () => {
+    // Arrange: a structural frame with nothing relayable stays dropped.
+    const msg = { type: "stream_event", session_id: "s", event: { type: "message_start", message: { id: "m" } } };
+    // Act / Assert
+    expect(toEphemeralEvent(msg)).toBeNull();
   });
 
   it("routes tool_progress to a HeartbeatProgress", () => {
