@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
+	"claude-repld/internal/session"
 	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/workspace/merge"
 )
@@ -22,9 +22,12 @@ import (
 //   - merge needs the workspace -> (source/target worktree, branch) resolution
 //     that lives in the Emacs worktree layout; the daemon has no daemon-side
 //     source for it yet (§9.3 open question).
-//   - close/open have no entry in the workspacecmd channel (create/switch/fold
-//     /task-* only); the Emacs lifecycle verbs are not yet exposed to the
-//     daemon.
+//
+// open IS live: server.WorkspaceOpener discovers the workspace's on-disk
+// transcript, binds it as the resume target, and ensures the session eagerly so
+// the workspace never renders blue with an empty feed. close remains unexposed
+// (the workspacecmd channel carries no close entry) and fails loudly from
+// WorkspaceOpener.Close.
 //
 // registrySessions (the SessionView metadata source) IS real: it reads the
 // persistent registry, so snapshots carry live per-session model/workspace.
@@ -68,13 +71,16 @@ func (pendingMergeDirs) Resolve(workspace string) (merge.Request, error) {
 	return merge.Request{}, fmt.Errorf("merge dir resolution not wired for workspace %q: the workspace->worktree/branch mapping is not yet exposed daemon-side (§9.3)", workspace)
 }
 
-// pendingLifecycle is the not-yet-exposed WorkspaceLifecycle: the workspacecmd
-// channel has no close/open entry type.
-type pendingLifecycle struct{}
-
-func (pendingLifecycle) Close(_ context.Context, workspace string) error {
-	return fmt.Errorf("close-workspace not exposed daemon-side for %q (no workspacecmd entry)", workspace)
-}
-func (pendingLifecycle) Open(_ context.Context, workspace string) error {
-	return fmt.Errorf("open-workspace not exposed daemon-side for %q (no workspacecmd entry)", workspace)
+// knownConfigDirs is every Claude config root the daemon knows: the account
+// roster's dirs plus the daemon-wide default. Transcript discovery probes all
+// of them so a conversation living under another account is REPORTED as a
+// migration candidate rather than silently missed.
+func knownConfigDirs(accounts []server.Account) func() []string {
+	return func() []string {
+		dirs := []string{session.DefaultClaudeConfigDir()}
+		for _, a := range accounts {
+			dirs = append(dirs, session.ClaudeConfigDir(a.ConfigDir))
+		}
+		return dirs
+	}
 }

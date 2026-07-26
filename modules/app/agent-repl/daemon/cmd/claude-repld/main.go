@@ -336,11 +336,21 @@ func main() {
 	// provider need. Its *Server target does not exist until server.New below,
 	// so bind it after — the same late-bind shape as forwarder.
 	sessionCommands := &server.SessionCommandBinding{Logf: log.Printf}
+	// NEVER-BLUE (workspaceopen.go): bind each registered workspace to its
+	// on-disk transcript at boot, so a restart already knows every resume
+	// target before a frontend can connect, and ensure eagerly on open.
+	opener := &server.WorkspaceOpener{
+		Reg:        sessionRegistry,
+		Ensurer:    driver,
+		ConfigDirs: knownConfigDirs(accounts),
+		Logf:       log.Printf,
+	}
+	opener.BindAll()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:             ssmMgr,
 		Prompts:         driver,
 		MergeDirs:       pendingMergeDirs{},
-		Lifecycle:       pendingLifecycle{},
+		Lifecycle:       opener,
 		Sessions:        registrySessions{reg: sessionRegistry, driver: driver},
 		Inits:           driver,
 		Queues:          driver,
