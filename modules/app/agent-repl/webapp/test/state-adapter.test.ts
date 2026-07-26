@@ -794,6 +794,19 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     expect(got.compacting).toBeNull();
   });
 
+  it("carries the blocked window, which is a window and NOT a phase", () => {
+    // Arrange / Act — `state` stays the SSM's verdict; this is separate signal.
+    const got = progressOf(
+      progressFrame({
+        state: "RENDER_STATE_THINKING",
+        blocked: { active: true, sinceMs: "5", detail: "waiting on you" },
+      }),
+    );
+    // Assert
+    expect(got.blocked).toEqual({ sinceMs: 5, detail: "waiting on you" });
+    expect(got.state).toBe("thinking");
+  });
+
   it("carries the rate-limit window's structured detail", () => {
     // Arrange / Act
     const got = progressOf(
