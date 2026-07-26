@@ -82,13 +82,28 @@ func TestSystemInitFromVendorIgnoresNonInitVendor(t *testing.T) {
 
 // fakeRegistrar records the claude_session_id write-throughs.
 type fakeRegistrar struct {
-	mu     sync.Mutex
-	writes []string
-	queued map[string][]registry.QueuedPrompt
+	mu        sync.Mutex
+	writes    []string
+	queued    map[string][]registry.QueuedPrompt
+	backfills []string
 }
 
 func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) {
 	f.writes = append(f.writes, sessionID+"="+csid)
+}
+
+// BackfillStateChanged records the never-blue backfill transitions (F2).
+func (f *fakeRegistrar) BackfillStateChanged(sessionID, state string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.backfills = append(f.backfills, sessionID+"="+state)
+}
+
+// backfillWrites returns the recorded transitions, taken under the lock.
+func (f *fakeRegistrar) backfillWrites() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.backfills...)
 }
 
 func (f *fakeRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {

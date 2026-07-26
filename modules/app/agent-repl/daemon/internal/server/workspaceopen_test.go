@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
+	"claude-repld/internal/sessiondrv"
 )
 
 // fakeEnsurer records the workspaces it was asked to bring up.
@@ -219,6 +220,67 @@ func TestRepeatedOpensNeverRebindADiscoveredTranscript(t *testing.T) {
 	rec, _ := reg.Get("s_1")
 	if rec.ClaudeSessionID != "uuid-first" {
 		t.Fatalf("ClaudeSessionID = %q; want the original binding kept", rec.ClaudeSessionID)
+	}
+}
+
+func TestDiscoveryMarksAWorkspaceWithHistoryBackfillPending(t *testing.T) {
+	// Arrange — a transcript on disk means this session HAS history owed.
+	cfg := t.TempDir()
+	o, reg, _, _ := openerRig(t, cfg)
+	writeProjectTranscript(t, cfg, "/w", "uuid-disk")
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	o.BindWorkspace("/w")
+
+	// Assert — without this the record reads UNSPECIFIED ("nothing to
+	// backfill") until the first line lands, which is the blue window itself.
+	rec, _ := reg.Get("s_1")
+	if rec.BackfillState != sessiondrv.BackfillPending {
+		t.Fatalf("BackfillState = %q; want pending", rec.BackfillState)
+	}
+}
+
+func TestDiscoveryLeavesAWorkspaceWithNoTranscriptUnmarked(t *testing.T) {
+	// Arrange — a genuinely fresh workspace owes no backfill.
+	cfg := t.TempDir()
+	o, reg, _, _ := openerRig(t, cfg)
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	o.BindWorkspace("/w")
+
+	// Assert — empty is a real, correct answer here, not "unknown".
+	rec, _ := reg.Get("s_1")
+	if rec.BackfillState != "" {
+		t.Fatalf("BackfillState = %q; want empty for a workspace with no history", rec.BackfillState)
+	}
+}
+
+func TestDiscoveryNeverDowngradesASettledBackfillState(t *testing.T) {
+	// Arrange — a session whose backfill already completed. A later switch
+	// re-runs discovery, which must not walk it back to pending.
+	cfg := t.TempDir()
+	o, reg, _, _ := openerRig(t, cfg)
+	writeProjectTranscript(t, cfg, "/w", "uuid-disk")
+	if err := reg.Put(registry.Record{
+		SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z",
+		BackfillState: sessiondrv.BackfillDone,
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	o.BindWorkspace("/w")
+
+	// Assert
+	rec, _ := reg.Get("s_1")
+	if rec.BackfillState != sessiondrv.BackfillDone {
+		t.Fatalf("BackfillState = %q; want done to survive re-discovery", rec.BackfillState)
 	}
 }
 
