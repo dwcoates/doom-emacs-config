@@ -447,8 +447,12 @@ async function boot(): Promise<void> {
     // a permanent banner plus a document-wide marker the chrome paints against
     // (styles.css `.ungated`). Both are pure functions of the live mode — there
     // is nothing to dismiss while the mode is in force.
+    //
+    // Read off `s.permissionMode`, NOT the settled `wantMode`: a pending pick
+    // is a UI intent, and a warning that a click can clear before the daemon
+    // has honored anything is a warning that can be clicked away.
     const ungatedMode = ungatedModeOf({
-      requestedMode: wantMode,
+      requestedMode: s.permissionMode,
       systemInit: s.systemInit,
     });
     ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
