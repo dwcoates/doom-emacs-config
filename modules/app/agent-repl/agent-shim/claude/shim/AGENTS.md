@@ -3,7 +3,8 @@
 The per-session Claude shim (TypeScript/Node, one process per session).
 Responsibility: drive the Claude Agent SDK (`query()`), convert the SDK stream
 into agent-shim protocol events (loud validation: hard-error on missing
-expected fields, capture-and-log unknown new fields), write PERSISTENT events
+expected fields of a KNOWN family, capture an UNKNOWN discriminator onto the
+`unknown` passthrough arm, capture-and-log unknown new fields), write PERSISTENT events
 to the shim-store, forward the store-merged session stream plus EPHEMERAL
 deltas to its daemon connection, and execute control messages (prompts,
 interrupts, `canUseTool` permission round-trips).
