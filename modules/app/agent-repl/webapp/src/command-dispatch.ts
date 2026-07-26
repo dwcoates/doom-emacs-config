@@ -22,7 +22,7 @@
  * That makes the whole plane testable against a mocked WS.
  */
 
-import type { CommandAck, FrontendFrame, SessionView } from "./frontend-proto.js";
+import type { CommandAck, FrontendFrame, SessionView, SystemFailure } from "./frontend-proto.js";
 import {
   encodeFrontendCommand,
   type ClientLogBody,
@@ -72,6 +72,14 @@ export interface DispatchOptions {
    * another rejection, and loop. Defaults to the console.
    */
   logLocal?: (message: string) => void;
+  /**
+   * The classified refusal sink (F4). A rejected command used to reach a
+   * human through NOTHING on this side: `error` went to a local log and the
+   * promise it rejected was swallowed by every caller. This hands the
+   * daemon's classified failure to whoever can show it, so "invisible" stops
+   * being an acceptable disposition for a rejected prompt.
+   */
+  onFailure?: (failure: SystemFailure) => void;
 }
 
 interface PendingAck {
@@ -244,8 +252,14 @@ export class CommandDispatcher {
       return;
     }
     this.pending.delete(ack.requestId);
-    if (ack.ok) p.resolve();
-    else p.reject(new Error(`${p.command} rejected: ${ack.error}`));
+    if (ack.ok) {
+      p.resolve();
+      return;
+    }
+    // Surface BEFORE rejecting: every caller of these promises swallows the
+    // rejection into a log line, so the reject alone reaches no one.
+    if (ack.failure !== undefined) this.opts.onFailure?.(ack.failure);
+    p.reject(new Error(`${p.command} rejected: ${ack.error}`));
   }
 
   // --- createSession (SessionView-correlated) -------------------------------

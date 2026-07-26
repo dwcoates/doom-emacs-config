@@ -7,6 +7,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -86,6 +87,7 @@ type fakeRegistrar struct {
 	writes    []string
 	queued    map[string][]registry.QueuedPrompt
 	backfills []string
+	deaths    []string
 }
 
 func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) {
@@ -104,6 +106,20 @@ func (f *fakeRegistrar) backfillWrites() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.backfills...)
+}
+
+// SessionDied records the terminal write a shim death produces (F4).
+func (f *fakeRegistrar) SessionDied(sessionID, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deaths = append(f.deaths, sessionID+"="+reason)
+}
+
+// deathWrites returns the recorded deaths, taken under the lock.
+func (f *fakeRegistrar) deathWrites() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deaths...)
 }
 
 func (f *fakeRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {
@@ -132,6 +148,30 @@ func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {
 	}
 	t.Cleanup(m.Close)
 	return m
+}
+
+func TestPersistSessionDeathWritesTheShimDiedReason(t *testing.T) {
+	// Arrange: the reason the registry documented while no code path wrote it.
+	reg := &fakeRegistrar{}
+	m := newRegistrarManager(t, reg)
+
+	// Act.
+	m.persistSessionDeath("s1", errclass.DeathReasonShimDied)
+
+	// Assert.
+	want := "s1=" + errclass.DeathReasonShimDied
+	if got := reg.deathWrites(); len(got) != 1 || got[0] != want {
+		t.Fatalf("death writes = %v, want [%s]", got, want)
+	}
+}
+
+func TestPersistSessionDeathIsANoOpWithoutARegistrar(t *testing.T) {
+	// Arrange: a driver built without a registrar (a unit harness).
+	m := newRegistrarManager(t, nil)
+
+	// Act + Assert: the absence of a registrar must not panic the read loop
+	// the death is reported from.
+	m.persistSessionDeath("s1", errclass.DeathReasonShimDied)
 }
 
 func TestPersistVendorSessionIDWritesThroughOncePerValue(t *testing.T) {

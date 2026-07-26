@@ -46,22 +46,24 @@ import { recordBlockIdentity } from "./streaming.js";
 import type {
   CompactBoundaryItem,
   ConversationItem,
-  ErrorItem,
   PermissionItem,
   ResultItem,
-  RetryItem,
+  SystemFailureCard,
   TextItem,
   ThinkingItem,
   ToolItem,
   UserTurnItem,
 } from "./store.js";
 import {
+  ERROR_CLASSES,
   RenderState,
   UNSUPPORTED_SHAPES,
   type ConversationDelta,
   type ConversationItemArm,
   type ConversationItemFrame,
   type DegradedNotice,
+  type ErrorClass,
+  type SystemFailure,
   type FrontendFrame,
   type HeartbeatView,
   type ProgressView,
@@ -226,6 +228,13 @@ export interface ProgressInput {
   errorSummary: string;
   /** The feed item the error row scrolls to; "" = not addressable. */
   errorItemUuid: string;
+  /**
+   * The CLASSIFIED error state (F4), superseding the two fields above. The
+   * footer takes its color from the failure's class rather than from a
+   * hardcoded red no other surface consulted, and addresses the card through
+   * the failure's own uuid. `null` = no error standing.
+   */
+  failure: SystemFailureCard | null;
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
@@ -485,6 +494,7 @@ export class StateAdapter {
             : null,
         errorSummary: pv.errorSummary,
         errorItemUuid: pv.errorItemUuid,
+        failure: pv.failure === undefined ? null : systemFailureFrom(pv.failure),
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
         liveTaskCount: pv.liveTaskCount,
@@ -656,9 +666,15 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
     case "compactBoundaryLine":
       return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
     case "apiError":
-      return { items: [apiErrorItem(frame.payload, frame.uuid)], ignores: [] };
+      // SUPERSEDED (F4) by the systemFailure arm. The daemon still emits this
+      // for the transition, and this end deliberately renders nothing from
+      // it: reading it meant re-deciding retrying-vs-terminal by a rule the
+      // daemon did not share, which is the divergence the card closed.
+      return { items: [], ignores: ["conversation-item:apiError"] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
+    case "systemFailure":
+      return { items: [systemFailureCard(frame.payload, frame.uuid)], ignores: [] };
     default: {
       const never: never = arm;
       throw new Error(`state-adapter: unhandled conversation item arm ${JSON.stringify(never)}`);
@@ -935,25 +951,65 @@ function compactBoundaryLineItem(line: Obj): CompactBoundaryItem {
   };
 }
 
-// UUID is the item envelope's uuid, carried onto the store item so the
-// progress footer's error row can scroll the feed to the exact line the
-// daemon's error summary came from.
-function apiErrorItem(e: Obj, uuid: string): ErrorItem | RetryItem {
-  const detail = pobj(e, "error") ?? {};
-  const message = pstr(detail, "message");
-  const retryAttempt = pnum(e, "retryAttempt");
-  const retryInMs = pnum(e, "retryInMs");
-  const maxRetries = pnum(e, "maxRetries");
-  if (retryAttempt > 0 || retryInMs > 0) {
-    return {
-      kind: "retry",
-      attempt: retryAttempt,
-      reason: message,
-      fatal: pbool(detail, "isNetworkDown") || (maxRetries > 0 && retryAttempt >= maxRetries),
-      uuid,
-    };
+/**
+ * Adopt a daemon-classified failure as a conversation card.
+ *
+ * It is an ADOPTION, not a derivation. What it replaces re-decided, on this
+ * side of the wire, whether an ApiErrorLine was retrying (by a different test
+ * than the daemon's), whether it was fatal (by a third test nothing rendered),
+ * and what to call it (a hardcoded "api_error" code and a hardcoded
+ * `recoverable: false`, neither fed by anything). Every field below is the
+ * daemon's, unexamined.
+ *
+ * UUID is the item envelope's, carried onto the card so the progress footer's
+ * error row can scroll the feed to it.
+ */
+function systemFailureCard(e: Obj, uuid: string): SystemFailureCard {
+  return {
+    kind: "failure",
+    errorClass: errorClassOf(pstr(e, "errorClass")),
+    errorType: pstr(e, "errorType"),
+    message: pstr(e, "message"),
+    sourceDetail: pstr(e, "sourceDetail"),
+    resolvedAtMs: pnum(e, "resolvedAtMs"),
+    uuid,
+  };
+}
+
+/**
+ * Adopt an already-DECODED `SystemFailure` (from a `ProgressView` or a
+ * `CommandAck`) as the store's card shape.
+ *
+ * The decoder validated the class, so unlike `systemFailureCard` — which
+ * adopts a raw conversation-item payload — this one has nothing left to
+ * check. Both exist because a failure reaches this end through two different
+ * doors, and neither may re-interpret what the daemon decided.
+ */
+export function systemFailureFrom(f: SystemFailure): SystemFailureCard {
+  return {
+    kind: "failure",
+    errorClass: f.errorClass,
+    errorType: f.errorType,
+    message: f.message,
+    sourceDetail: f.sourceDetail,
+    resolvedAtMs: f.resolvedAtMs,
+    uuid: f.itemUuid,
+  };
+}
+
+/**
+ * `frontend.v1.ErrorClass` name → the store's class.
+ *
+ * An unrecognized class THROWS rather than defaulting. The class decides the
+ * card's color, so guessing one would paint a failure the wrong color —
+ * quietly, and in a way that contradicts the workspace colored beside it.
+ */
+function errorClassOf(name: string): ErrorClass {
+  const known = ERROR_CLASSES.find((c) => name === c || name === `ERROR_CLASS_${c}`);
+  if (known === undefined) {
+    throw new Error(`state-adapter: SystemFailureItem has unrecognized error_class '${name}'`);
   }
-  return { kind: "error", code: "api_error", message, recoverable: false, uuid };
+  return known;
 }
 
 /** core.v1.PermissionItem.Resolution (proto enum name) → the store shape. */

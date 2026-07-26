@@ -48,6 +48,8 @@
   (load (expand-file-name "test-dir-watcher.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
   (load (expand-file-name "test-explain-config.el" dir) nil t)
+  (load (expand-file-name "test-failure.el" dir) nil t)
+  (load (expand-file-name "test-render-colors.el" dir) nil t)
   (load (expand-file-name "test-frontend-client.el" dir) nil t)
   (load (expand-file-name "test-frontend-state.el" dir) nil t)
   (load (expand-file-name "test-frontend-uds.el" dir) nil t)

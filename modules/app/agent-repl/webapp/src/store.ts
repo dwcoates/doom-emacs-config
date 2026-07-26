@@ -14,6 +14,7 @@
  * whether anything visible changed; the caller schedules the render.
  */
 import type { CounterEntry } from "./counter-menu.js";
+import type { ErrorClass } from "./frontend-proto.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -26,7 +27,6 @@ import type {
 } from "./state-adapter.js";
 import { applyStreamDelta, blockKey, settleStreamedBlock } from "./streaming.js";
 import {
-  AssistantMessageError,
   AsyncSource,
   ContentBlock,
   ModelInfo,
@@ -77,13 +77,6 @@ export interface TextItem {
   parentToolUseId?: string;
   text: string;
   done: boolean;
-  /**
-   * Set when the owning assistant message was an API-level failure (a
-   * session/usage limit, a billing or auth error): the bubble is a failure
-   * notice, not an answer, so it renders red instead of the green
-   * final-response border. Undefined on a normal block.
-   */
-  error?: AssistantMessageError;
   /**
    * When the agent OPENED the block, rendered on the bubble. Taken at the
    * start rather than the end so the stamp holds still while the block streams.
@@ -209,25 +202,34 @@ export interface CompactBoundaryItem {
   preTokens: number;
   postTokens: number;
 }
-export interface ErrorItem {
-  kind: "error";
-  code: string;
+/**
+ * A daemon-classified failure, as a conversation card.
+ *
+ * It replaces the ErrorItem/RetryItem pair, which this end derived from a raw
+ * ApiErrorLine by rules the DAEMON did not share: a different retry test, a
+ * third rule for "fatal" that nothing rendered, a hardcoded `code` of
+ * "api_error" and a hardcoded `recoverable` of false — neither fed by
+ * anything. Every field here is the daemon's verdict, adopted unchanged.
+ */
+export interface SystemFailureCard {
+  kind: "failure";
+  /** SEMANTIC, never chromatic: the color comes from the shared table. */
+  errorClass: ErrorClass;
+  errorType: string;
   message: string;
-  recoverable: boolean;
+  /** The raw account, shown beside the prose rather than replacing it. */
+  sourceDetail: string;
   /**
-   * The daemon's uuid for the line this came from. It is the ADDRESS the
-   * progress footer's error row scrolls to (`ProgressView.error_item_uuid`),
-   * which is the only way to find an error that has already scrolled off.
-   * Empty for an error the daemon reported without an addressable line.
+   * Wall-clock ms a WINDOW-shaped failure closed; 0 while open. A resolved
+   * card renders as settled rather than as a standing alarm, which is the
+   * whole reason the two edges reconcile onto one uuid.
    */
-  uuid: string;
-}
-export interface RetryItem {
-  kind: "retry";
-  attempt: number;
-  reason: string;
-  fatal: boolean;
-  /** The daemon's uuid for the line this came from (see `ErrorItem.uuid`). */
+  resolvedAtMs: number;
+  /**
+   * The daemon's uuid for this card. It is the ADDRESS the progress footer's
+   * error row scrolls to, which is the only way to find a failure that has
+   * already scrolled off.
+   */
   uuid: string;
 }
 export interface SystemItem {
@@ -310,8 +312,7 @@ export type ConversationItem =
   | PermissionItem
   | ResultItem
   | CompactBoundaryItem
-  | ErrorItem
-  | RetryItem
+  | SystemFailureCard
   | SystemItem;
 
 // --- store state -----------------------------------------------------------------
@@ -500,6 +501,11 @@ function itemKey(item: ConversationItem): string | null {
       return `tool:${item.toolUseId}`;
     case "permission":
       return `permission:${item.requestId}`;
+    // A WINDOW-shaped failure is re-sent under its OPENING uuid with a
+    // resolution stamp, so it must reconcile in place. Appending instead
+    // would leave the alarm standing beside its own all-clear.
+    case "failure":
+      return `failure:${item.uuid}`;
     // Terminal / one-shot items carry no reconcilable id: they are appended.
     default:
       return null;
@@ -653,6 +659,21 @@ export class ConversationStore {
    */
   private applySessionInit(si: SessionInitInput): boolean {
     this.state.systemInit = si.init;
+    return true;
+  }
+
+  /**
+   * File a failure card that arrived OUTSIDE the conversation stream — a
+   * refused command's `CommandAck.failure` (F4).
+   *
+   * It goes into the feed rather than into a toast, for the same reason the
+   * degraded card does: the feed is where a user looks to find out what
+   * happened, and a refusal that renders anywhere else is a refusal they will
+   * miss. Keyed by uuid like every other item, so a re-delivery replaces
+   * rather than duplicates.
+   */
+  addFailure(failure: SystemFailureCard): boolean {
+    this.mergeItem(failure);
     return true;
   }
 

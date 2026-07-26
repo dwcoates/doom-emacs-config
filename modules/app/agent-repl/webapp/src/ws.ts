@@ -24,6 +24,19 @@ export interface WsClientOptions {
   /** Fired once when sessionExists reports the session is gone. */
   onGone?: () => void;
   /**
+   * The daemon became unreachable (F4): the socket closed for a reason the
+   * user did not ask for. Carries the close CODE and REASON, which are the
+   * only evidence separating a daemon restart from a network drop — this
+   * handler used to read neither.
+   */
+  onUnreachable?: (code: number, reason: string) => void;
+  /**
+   * The daemon became reachable again, closing the window `onUnreachable`
+   * opened. Fired only after an actual reconnect, so a first connection never
+   * reports a recovery from nothing.
+   */
+  onReachable?: () => void;
+  /**
    * Diagnostic sink. The one caller today is the dropped-reply branch:
    * a store-generated command (typically a gap's replay-request) that
    * could not be sent because the socket was not OPEN previously
@@ -64,19 +77,32 @@ export class WsClient {
     this.ws = ws;
 
     ws.onopen = () => {
+      // A reconnect CLOSES the unreachable window rather than leaving its
+      // card standing: the route works again, and a permanent alarm about a
+      // fault that ended is the thing the resolution stamp exists to stop.
+      if (this.attempts > 0) this.opts.onReachable?.();
       this.attempts = 0;
       this.opts.onStatusChange?.(true);
     };
     ws.onmessage = (event: MessageEvent) => {
       this.opts.onMessage(String(event.data));
     };
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       this.opts.onStatusChange?.(false);
       this.ws = null;
-      if (!this.closedByUser) this.scheduleReconnect();
+      if (this.closedByUser) return;
+      // The close CODE and REASON are the only evidence separating a daemon
+      // that restarted from a network drop, and this handler used to read
+      // neither — which is how "reconnecting…" became the webapp's single
+      // answer to every transport fault. A user-initiated close is not a
+      // failure and is deliberately above this line.
+      this.opts.onUnreachable?.(event.code, event.reason);
+      this.scheduleReconnect();
     };
     ws.onerror = () => {
-      // onclose always follows onerror; reconnect is handled there.
+      // onclose always follows onerror; the classification happens there,
+      // where the code and reason are available. An error handler that
+      // classified on its own would double-report every drop.
     };
   }
 

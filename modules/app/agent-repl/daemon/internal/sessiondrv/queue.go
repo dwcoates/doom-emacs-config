@@ -9,6 +9,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
@@ -436,8 +437,16 @@ func (m *Manager) beginInterject(d *driven, entryID, source string) {
 	m.logf("sessiondrv: queue interjecting entry=%s (%s) session=%s — interrupting, will submit on TurnEnded",
 		entryID, source, d.sessionID)
 	go func() {
-		if err := d.client.Interrupt(m.rootCtx, true); err != nil {
-			m.logf("sessiondrv: queue interject interrupt FAILED entry=%s session=%s: %v", entryID, d.sessionID, err)
+		// An interject's stop is only a failure if the shim says it could not
+		// deliver it. ALREADY_COMPLETE means the turn we were racing had
+		// already ended, which is the outcome the interject wanted.
+		outcome, err := d.client.Interrupt(m.rootCtx, true)
+		if err == nil {
+			err = errclass.InterruptError(outcome)
+		}
+		if err != nil {
+			m.logf("sessiondrv: queue interject interrupt FAILED entry=%s session=%s outcome=%s: %v",
+				entryID, d.sessionID, outcome, err)
 			m.mu.Lock()
 			if cur := d.queue.get(entryID); cur != nil {
 				cur.interjecting = false

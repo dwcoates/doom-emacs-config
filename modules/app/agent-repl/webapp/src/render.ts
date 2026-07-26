@@ -64,10 +64,9 @@ import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   CompactBoundaryItem,
   ConversationItem,
-  ErrorItem,
   PermissionItem,
   ResultItem,
-  RetryItem,
+  SystemFailureCard,
   StoreState,
   SystemItem,
   TextItem,
@@ -549,17 +548,7 @@ function TextStream(
   // member settles (amber → green quiescence). A bubble the projection does
   // not host carries no members, so it never goes amber.
   const liveAsync = hasLiveAsync(item.blockId, panels);
-  // An API-level error (a session/usage limit, a billing or auth failure)
-  // outranks every other state: the bubble is a failure notice, not an
-  // answer, so it wears the red border whether or not the turn otherwise
-  // landed a green final-response or is still breathing amber async.
-  const stateCls = item.error
-    ? " error-response"
-    : liveAsync
-      ? " async-live"
-      : chip
-        ? " final-response"
-        : "";
+  const stateCls = liveAsync ? " async-live" : chip ? " final-response" : "";
   const cls = `bubble assistant md${stateCls}`;
   // The catalog rides EVERY host bubble, not just a final one: an interrupted
   // or tools-only turn hosts its survivors too (asyncByBubble), so a bubble
@@ -1880,14 +1869,47 @@ function CompactDivider(item: CompactBoundaryItem): string {
   );
 }
 
-function ErrorBanner(item: ErrorItem): string {
-  return `<div class="error-banner">[${escapeHtml(item.code)}] ${escapeHtml(item.message)}${
-    item.recoverable ? "" : " (fatal)"
-  }</div>`;
+/**
+ * A daemon-classified failure, as a bordered card in the feed.
+ *
+ * It is where a user whose workspace changed color finds out WHY. Before it
+ * there was nowhere for that account to live: the degraded banner was chrome
+ * that scrolled away, a refused command rendered nothing at all, and an API
+ * failure rendered a one-line grey badge built from a code no one set.
+ *
+ * The border color comes from the failure's CLASS, from the same table the
+ * workspace takes its color from — so a purple workspace can never be
+ * explained by a card of some other color.
+ *
+ * A RESOLVED card renders as settled: a check, the closing time, and the
+ * alarm styling dropped. The window ended, and a card that went on shouting
+ * about it would be lying about the present to be accurate about the past.
+ */
+function SystemFailureBubble(item: SystemFailureCard): string {
+  const resolved = item.resolvedAtMs > 0;
+  const cls = `failure-card failure-${item.errorClass.toLowerCase()}${resolved ? " resolved" : ""}`;
+  const mark = resolved ? "✓" : "✕";
+  const detail = item.sourceDetail
+    ? `<div class="failure-detail">${escapeHtml(item.sourceDetail)}</div>`
+    : "";
+  const stamp = resolved
+    ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(item.resolvedAtMs))}</div>`
+    : "";
+  return (
+    `<div class="${cls}" data-error-type="${escapeHtml(item.errorType)}">` +
+    `<div class="failure-head"><span class="failure-mark">${mark}</span>` +
+    `<span class="failure-message">${escapeHtml(item.message)}</span></div>` +
+    detail +
+    stamp +
+    `</div>`
+  );
 }
 
-function RetryBadge(item: RetryItem): string {
-  return `<div class="retry-badge">retrying (attempt ${item.attempt}): ${escapeHtml(item.reason)}</div>`;
+/** Wall-clock HH:MM:SS for a resolution stamp. */
+function formatClockTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function SystemNote(item: SystemItem): string {
@@ -1948,10 +1970,8 @@ export function renderItem(
     }
     case "compact-boundary":
       return CompactDivider(item);
-    case "error":
-      return ErrorBanner(item);
-    case "retry":
-      return RetryBadge(item);
+    case "failure":
+      return SystemFailureBubble(item);
     case "system":
       return SystemNote(item);
   }
@@ -1967,6 +1987,10 @@ export function itemKey(item: ConversationItem, index: number): string {
       return `tool:${item.toolUseId}`;
     case "permission":
       return `perm:${item.requestId}`;
+    // Keyed by uuid, not index: a resolved failure replaces its own opening
+    // card, and an index key would strand the two on separate DOM nodes.
+    case "failure":
+      return `failure:${item.uuid}`;
     default:
       return `${item.kind}:${index}`;
   }
@@ -2518,18 +2542,18 @@ export class FeedRenderer {
   }
 
   /**
-   * Reveal the error/retry item carrying UUID — the progress footer's error
-   * row clicking through to the line its summary came from, which is the only
-   * way to find an error that has already scrolled off the feed.
+   * Reveal the failure card carrying UUID — the progress footer's error row
+   * clicking through to the failure its summary came from, which is the only
+   * way to find one that has already scrolled off the feed.
    *
-   * Answers whether the line was found: false when the uuid names nothing in
-   * the current feed (a `/clear` discarded it, or the error predates this
+   * Answers whether the card was found: false when the uuid names nothing in
+   * the current feed (a `/clear` discarded it, or the failure predates this
    * view), which the caller reports rather than silently doing nothing.
    */
   revealError(uuid: string): boolean {
     if (!this.lastState) return false;
     const index = this.lastState.items.findIndex(
-      (i) => (i.kind === "error" || i.kind === "retry") && i.uuid === uuid,
+      (i) => i.kind === "failure" && i.uuid === uuid,
     );
     if (index === -1) return false;
     const node = this.nodes.get(itemKey(this.lastState.items[index], index))?.el;
