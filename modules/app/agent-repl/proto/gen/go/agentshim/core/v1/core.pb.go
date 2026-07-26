@@ -379,6 +379,78 @@ func (PermissionDecision) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
+// The three-valued outcome of an Interrupt, decided by the SHIM.
+//
+// The shim owns turn lifecycle (it counts prompts in and results out) and
+// its event loop is single-threaded, so the liveness check inside its
+// interrupt handler is naturally atomic against turn end: whichever the
+// counter says at that instant IS the answer, and no later event can
+// retroactively change it. The ambiguous fourth case — "the turn ended at
+// about the moment the stop landed, so was that a stop or a no-op?" — is
+// therefore unrepresentable rather than merely unlikely.
+//
+// Deriving this downstream is what made it ambiguous before: a daemon or a
+// frontend watching for an `aborted` result sees the turn end and the
+// interrupt arrive as two unordered events, and could not tell a stop that
+// FAILED from a turn that had ALREADY ENDED. It painted the second as the
+// first.
+type InterruptOutcome int32
+
+const (
+	InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED InterruptOutcome = 0
+	// A turn was live and the stop was delivered.
+	InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED InterruptOutcome = 1
+	// No turn was live. SUCCESS, not an error: the user asked for the turn to
+	// be over and it already is.
+	InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE InterruptOutcome = 2
+	// The stop could not be delivered at all. A route/control failure, and
+	// the only outcome that reads as a failure anywhere downstream.
+	InterruptOutcome_INTERRUPT_OUTCOME_FAILED InterruptOutcome = 3
+)
+
+// Enum value maps for InterruptOutcome.
+var (
+	InterruptOutcome_name = map[int32]string{
+		0: "INTERRUPT_OUTCOME_UNSPECIFIED",
+		1: "INTERRUPT_OUTCOME_INTERRUPTED",
+		2: "INTERRUPT_OUTCOME_ALREADY_COMPLETE",
+		3: "INTERRUPT_OUTCOME_FAILED",
+	}
+	InterruptOutcome_value = map[string]int32{
+		"INTERRUPT_OUTCOME_UNSPECIFIED":      0,
+		"INTERRUPT_OUTCOME_INTERRUPTED":      1,
+		"INTERRUPT_OUTCOME_ALREADY_COMPLETE": 2,
+		"INTERRUPT_OUTCOME_FAILED":           3,
+	}
+)
+
+func (x InterruptOutcome) Enum() *InterruptOutcome {
+	p := new(InterruptOutcome)
+	*p = x
+	return p
+}
+
+func (x InterruptOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InterruptOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentshim_core_v1_core_proto_enumTypes[6].Descriptor()
+}
+
+func (InterruptOutcome) Type() protoreflect.EnumType {
+	return &file_agentshim_core_v1_core_proto_enumTypes[6]
+}
+
+func (x InterruptOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InterruptOutcome.Descriptor instead.
+func (InterruptOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{6}
+}
+
 type PermissionItem_Resolution int32
 
 const (
@@ -418,11 +490,11 @@ func (x PermissionItem_Resolution) String() string {
 }
 
 func (PermissionItem_Resolution) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[6].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[7].Descriptor()
 }
 
 func (PermissionItem_Resolution) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[6]
+	return &file_agentshim_core_v1_core_proto_enumTypes[7]
 }
 
 func (x PermissionItem_Resolution) Number() protoreflect.EnumNumber {
@@ -1943,10 +2015,13 @@ func (x *Interrupt) GetHard() bool {
 }
 
 type Ack struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Set only on an Interrupt's ack; UNSPECIFIED on every other command,
+	// whose success is unqualified.
+	InterruptOutcome InterruptOutcome `protobuf:"varint,2,opt,name=interrupt_outcome,json=interruptOutcome,proto3,enum=agentshim.core.v1.InterruptOutcome" json:"interrupt_outcome,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Ack) Reset() {
@@ -1984,6 +2059,13 @@ func (x *Ack) GetRequestId() string {
 		return x.RequestId
 	}
 	return ""
+}
+
+func (x *Ack) GetInterruptOutcome() InterruptOutcome {
+	if x != nil {
+		return x.InterruptOutcome
+	}
+	return InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED
 }
 
 type Nack struct {
@@ -2972,10 +3054,11 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\tInterrupt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
-	"\x04hard\x18\x02 \x01(\bR\x04hard\"$\n" +
+	"\x04hard\x18\x02 \x01(\bR\x04hard\"v\n" +
 	"\x03Ack\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"=\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12P\n" +
+	"\x11interrupt_outcome\x18\x02 \x01(\x0e2#.agentshim.core.v1.InterruptOutcomeR\x10interruptOutcome\"=\n" +
 	"\x04Nack\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
@@ -3079,7 +3162,12 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x12PermissionDecision\x12#\n" +
 	"\x1fPERMISSION_DECISION_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19PERMISSION_DECISION_ALLOW\x10\x01\x12\x1c\n" +
-	"\x18PERMISSION_DECISION_DENY\x10\x02B*Z(agentrepl/proto/agentshim/core/v1;corev1b\x06proto3"
+	"\x18PERMISSION_DECISION_DENY\x10\x02*\x9e\x01\n" +
+	"\x10InterruptOutcome\x12!\n" +
+	"\x1dINTERRUPT_OUTCOME_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dINTERRUPT_OUTCOME_INTERRUPTED\x10\x01\x12&\n" +
+	"\"INTERRUPT_OUTCOME_ALREADY_COMPLETE\x10\x02\x12\x1c\n" +
+	"\x18INTERRUPT_OUTCOME_FAILED\x10\x03B*Z(agentrepl/proto/agentshim/core/v1;corev1b\x06proto3"
 
 var (
 	file_agentshim_core_v1_core_proto_rawDescOnce sync.Once
@@ -3093,7 +3181,7 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 	return file_agentshim_core_v1_core_proto_rawDescData
 }
 
-var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
 var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                     // 0: agentshim.core.v1.Plane
@@ -3102,80 +3190,82 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(TerminalStatus)(0),            // 3: agentshim.core.v1.TerminalStatus
 	(SessionSource)(0),             // 4: agentshim.core.v1.SessionSource
 	(PermissionDecision)(0),        // 5: agentshim.core.v1.PermissionDecision
-	(PermissionItem_Resolution)(0), // 6: agentshim.core.v1.PermissionItem.Resolution
-	(*Event)(nil),                  // 7: agentshim.core.v1.Event
-	(*EventBatch)(nil),             // 8: agentshim.core.v1.EventBatch
-	(*UnparsedEvent)(nil),          // 9: agentshim.core.v1.UnparsedEvent
-	(*SessionStarted)(nil),         // 10: agentshim.core.v1.SessionStarted
-	(*SessionEnded)(nil),           // 11: agentshim.core.v1.SessionEnded
-	(*TurnStarted)(nil),            // 12: agentshim.core.v1.TurnStarted
-	(*TurnEnded)(nil),              // 13: agentshim.core.v1.TurnEnded
-	(*TaskStarted)(nil),            // 14: agentshim.core.v1.TaskStarted
-	(*TaskProgress)(nil),           // 15: agentshim.core.v1.TaskProgress
-	(*TaskEnded)(nil),              // 16: agentshim.core.v1.TaskEnded
-	(*ContentDelta)(nil),           // 17: agentshim.core.v1.ContentDelta
-	(*HeartbeatProgress)(nil),      // 18: agentshim.core.v1.HeartbeatProgress
-	(*MessageLatency)(nil),         // 19: agentshim.core.v1.MessageLatency
-	(*DegradedState)(nil),          // 20: agentshim.core.v1.DegradedState
-	(*ShimHello)(nil),              // 21: agentshim.core.v1.ShimHello
-	(*DaemonHello)(nil),            // 22: agentshim.core.v1.DaemonHello
-	(*SubmitPrompt)(nil),           // 23: agentshim.core.v1.SubmitPrompt
-	(*Interrupt)(nil),              // 24: agentshim.core.v1.Interrupt
-	(*Ack)(nil),                    // 25: agentshim.core.v1.Ack
-	(*Nack)(nil),                   // 26: agentshim.core.v1.Nack
-	(*Subscribe)(nil),              // 27: agentshim.core.v1.Subscribe
-	(*ReplayRequest)(nil),          // 28: agentshim.core.v1.ReplayRequest
-	(*ReplayEvent)(nil),            // 29: agentshim.core.v1.ReplayEvent
-	(*ReplayDone)(nil),             // 30: agentshim.core.v1.ReplayDone
-	(*PermissionRequest)(nil),      // 31: agentshim.core.v1.PermissionRequest
-	(*PermissionResponse)(nil),     // 32: agentshim.core.v1.PermissionResponse
-	(*PermissionItem)(nil),         // 33: agentshim.core.v1.PermissionItem
-	(*Heartbeat)(nil),              // 34: agentshim.core.v1.Heartbeat
-	(*StoreWrite)(nil),             // 35: agentshim.core.v1.StoreWrite
-	(*StoreWriteAck)(nil),          // 36: agentshim.core.v1.StoreWriteAck
-	(*CursorState)(nil),            // 37: agentshim.core.v1.CursorState
-	(*CursorQuery)(nil),            // 38: agentshim.core.v1.CursorQuery
-	(*CursorList)(nil),             // 39: agentshim.core.v1.CursorList
-	(*anypb.Any)(nil),              // 40: google.protobuf.Any
-	(*structpb.Struct)(nil),        // 41: google.protobuf.Struct
+	(InterruptOutcome)(0),          // 6: agentshim.core.v1.InterruptOutcome
+	(PermissionItem_Resolution)(0), // 7: agentshim.core.v1.PermissionItem.Resolution
+	(*Event)(nil),                  // 8: agentshim.core.v1.Event
+	(*EventBatch)(nil),             // 9: agentshim.core.v1.EventBatch
+	(*UnparsedEvent)(nil),          // 10: agentshim.core.v1.UnparsedEvent
+	(*SessionStarted)(nil),         // 11: agentshim.core.v1.SessionStarted
+	(*SessionEnded)(nil),           // 12: agentshim.core.v1.SessionEnded
+	(*TurnStarted)(nil),            // 13: agentshim.core.v1.TurnStarted
+	(*TurnEnded)(nil),              // 14: agentshim.core.v1.TurnEnded
+	(*TaskStarted)(nil),            // 15: agentshim.core.v1.TaskStarted
+	(*TaskProgress)(nil),           // 16: agentshim.core.v1.TaskProgress
+	(*TaskEnded)(nil),              // 17: agentshim.core.v1.TaskEnded
+	(*ContentDelta)(nil),           // 18: agentshim.core.v1.ContentDelta
+	(*HeartbeatProgress)(nil),      // 19: agentshim.core.v1.HeartbeatProgress
+	(*MessageLatency)(nil),         // 20: agentshim.core.v1.MessageLatency
+	(*DegradedState)(nil),          // 21: agentshim.core.v1.DegradedState
+	(*ShimHello)(nil),              // 22: agentshim.core.v1.ShimHello
+	(*DaemonHello)(nil),            // 23: agentshim.core.v1.DaemonHello
+	(*SubmitPrompt)(nil),           // 24: agentshim.core.v1.SubmitPrompt
+	(*Interrupt)(nil),              // 25: agentshim.core.v1.Interrupt
+	(*Ack)(nil),                    // 26: agentshim.core.v1.Ack
+	(*Nack)(nil),                   // 27: agentshim.core.v1.Nack
+	(*Subscribe)(nil),              // 28: agentshim.core.v1.Subscribe
+	(*ReplayRequest)(nil),          // 29: agentshim.core.v1.ReplayRequest
+	(*ReplayEvent)(nil),            // 30: agentshim.core.v1.ReplayEvent
+	(*ReplayDone)(nil),             // 31: agentshim.core.v1.ReplayDone
+	(*PermissionRequest)(nil),      // 32: agentshim.core.v1.PermissionRequest
+	(*PermissionResponse)(nil),     // 33: agentshim.core.v1.PermissionResponse
+	(*PermissionItem)(nil),         // 34: agentshim.core.v1.PermissionItem
+	(*Heartbeat)(nil),              // 35: agentshim.core.v1.Heartbeat
+	(*StoreWrite)(nil),             // 36: agentshim.core.v1.StoreWrite
+	(*StoreWriteAck)(nil),          // 37: agentshim.core.v1.StoreWriteAck
+	(*CursorState)(nil),            // 38: agentshim.core.v1.CursorState
+	(*CursorQuery)(nil),            // 39: agentshim.core.v1.CursorQuery
+	(*CursorList)(nil),             // 40: agentshim.core.v1.CursorList
+	(*anypb.Any)(nil),              // 41: google.protobuf.Any
+	(*structpb.Struct)(nil),        // 42: google.protobuf.Struct
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
 	1,  // 1: agentshim.core.v1.Event.class:type_name -> agentshim.core.v1.EventClass
-	10, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
-	11, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
-	12, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
-	13, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
-	14, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
-	15, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
-	16, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
-	17, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
-	18, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	20, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
-	9,  // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
-	19, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
-	40, // 14: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	41, // 15: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
-	7,  // 16: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
-	37, // 17: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
+	11, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
+	12, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
+	13, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
+	14, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
+	15, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
+	16, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
+	17, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
+	18, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
+	19, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	21, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
+	10, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
+	20, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
+	41, // 14: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	42, // 15: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	8,  // 16: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
+	38, // 17: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 18: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
 	2,  // 19: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 20: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 21: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
 	3,  // 22: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
-	7,  // 23: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	41, // 24: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	5,  // 25: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	41, // 26: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	31, // 27: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
-	6,  // 28: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
-	8,  // 29: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	37, // 30: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	6,  // 23: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	8,  // 24: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
+	42, // 25: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	5,  // 26: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
+	42, // 27: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	32, // 28: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	7,  // 29: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
+	9,  // 30: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
+	38, // 31: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_core_v1_core_proto_init() }
@@ -3209,7 +3299,7 @@ func file_agentshim_core_v1_core_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
-			NumEnums:      7,
+			NumEnums:      8,
 			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
