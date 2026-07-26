@@ -263,10 +263,16 @@ message ApiAssistantMessage {
   repeated ContentBlock content = 3;
   string stop_reason = 4;   // nullable: "" = null
   string stop_sequence = 5; // nullable: "" = null
+  // SHAPE (census, 2 lines): {type, category, explanation}. Two observations
+  // is too thin to close the shape, so it stays genuinely schemaless.
   google.protobuf.Struct stop_details = 6;
   ApiUsage usage = 7;
+  // SHAPE (census, 1,813 lines): {cache_miss_reason} — a direct explanation for
+  // a slow turn.
   google.protobuf.Struct diagnostics = 8;
+  // SHAPE (census, 23 lines): {applied_edits}. Thinly observed; schemaless.
   google.protobuf.Struct context_management = 9;
+  // Shape never observed in the census; genuinely schemaless.
   google.protobuf.Struct container = 10;
 }
 
@@ -277,10 +283,19 @@ message ApiUsage {
   int64 output_tokens = 2;
   int64 cache_read_input_tokens = 3;
   int64 cache_creation_input_tokens = 4;
+  // SHAPE (census, 129,415 lines): {ephemeral_5m_input_tokens,
+  // ephemeral_1h_input_tokens}. Left as a Struct deliberately: retyping a live
+  // field is wire-breaking for every event already in the store, and no data is
+  // lost as a Struct. Documented so a consumer knows exactly what to read.
   google.protobuf.Struct cache_creation = 5;
+  // SHAPE (census, 103,749 lines): {web_search_requests, web_fetch_requests}.
+  // Same reasoning as cache_creation.
   google.protobuf.Struct server_tool_use = 6;
   string service_tier = 7;
   // [corpus] observed on newer CC versions:
+  // SHAPE (census, 103,504 lines): per element {input_tokens, output_tokens,
+  // cache_read_input_tokens, cache_creation_input_tokens, cache_creation,
+  // type, model?}.
   google.protobuf.ListValue iterations = 8;  // per-model iteration breakdown
   string speed = 9;                          // e.g. "standard"
   string inference_geo = 10;                 // e.g. "global"

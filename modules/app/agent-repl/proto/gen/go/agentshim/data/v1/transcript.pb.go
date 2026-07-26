@@ -2991,10 +2991,14 @@ func (x *PrLinkLine) GetTimestamp() string {
 }
 
 type FileHistorySnapshotLine struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	MessageId        string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	Snapshot         *structpb.Struct       `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"` // {messageId, timestamp, trackedFileBackups}
-	IsSnapshotUpdate bool                   `protobuf:"varint,3,opt,name=is_snapshot_update,json=isSnapshotUpdate,proto3" json:"is_snapshot_update,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	// SHAPE (census, 2,815 lines): {messageId, timestamp, trackedFileBackups},
+	// where trackedFileBackups maps a path to a FileBackup. Left as a Struct for
+	// the same reason as ApiUsage.cache_creation (retyping a live field breaks
+	// every persisted event).
+	Snapshot         *structpb.Struct `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	IsSnapshotUpdate bool             `protobuf:"varint,3,opt,name=is_snapshot_update,json=isSnapshotUpdate,proto3" json:"is_snapshot_update,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -5097,8 +5101,10 @@ func (x *QueuedCommandAttachment) GetOrigin() *Origin {
 }
 
 type ReadTruncationNoticeAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"` // shape sparse/variable in census
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {banner, toolUseID}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"` // shape sparse/variable in census
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5193,8 +5199,10 @@ func (x *StructuredOutputAttachment) GetToolUseId() string {
 }
 
 type CompactFileReferenceAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {filename, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5237,8 +5245,10 @@ func (x *CompactFileReferenceAttachment) GetPayload() *structpb.Struct {
 }
 
 type ContextTipAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {tip}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5281,8 +5291,10 @@ func (x *ContextTipAttachment) GetPayload() *structpb.Struct {
 }
 
 type DateChangeAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {newDate}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5325,8 +5337,10 @@ func (x *DateChangeAttachment) GetPayload() *structpb.Struct {
 }
 
 type NestedMemoryAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {path, content, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5563,8 +5577,10 @@ func (x *FileAttachment) GetFilename() string {
 }
 
 type UltrathinkEffortAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5607,8 +5623,10 @@ func (x *UltrathinkEffortAttachment) GetPayload() *structpb.Struct {
 }
 
 type DynamicSkillAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {skillDir, skillNames, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5651,8 +5669,10 @@ func (x *DynamicSkillAttachment) GetPayload() *structpb.Struct {
 }
 
 type UltraEffortEnterAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {reminderType}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5695,8 +5715,10 @@ func (x *UltraEffortEnterAttachment) GetPayload() *structpb.Struct {
 }
 
 type UltraEffortExitAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5739,8 +5761,10 @@ func (x *UltraEffortExitAttachment) GetPayload() *structpb.Struct {
 }
 
 type PlanModeExitAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {planFilePath, planExists}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
