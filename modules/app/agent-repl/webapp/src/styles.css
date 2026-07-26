@@ -1544,16 +1544,15 @@ pre {
    is deliberately NOT here — like the clear-context boundary rule it spans the
    column as a separator rather than reading as a badge. */
 .result,
-.retry-badge,
-.system-note,
-.error-banner {
+.failure-card,
+.system-note {
   width: fit-content;
   max-width: var(--agent-bubble-cap);
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
 
-.compact-divider, .system-note, .retry-badge {
+.compact-divider, .system-note {
   color: var(--muted);
   font-size: 0.75rem;
 }
@@ -1642,26 +1641,77 @@ pre {
   margin-right: auto;
 }
 
-.error-banner {
+/* --- the system-failure card (F4) -----------------------------------------
+   Where a user whose workspace changed color finds out WHY. It replaces both
+   the grey one-line retry badge and the red error banner, and absorbs the
+   amber #degraded-banner that used to sit above the feed as chrome.
+
+   The border color is the failure's CLASS, taken from the SAME five-color
+   assignment the workspace dot takes (proto/vocab/render-colors.json), so a
+   card can never explain a workspace in a color the workspace is not. There
+   is deliberately no third hue here: a failure is either our machinery
+   (--init blue) or the vendor's (--blocked purple), and inventing a red for
+   "error in general" is what put three answers about one API line in the
+   tree to begin with. */
+.failure-card {
   border: 1px solid var(--err);
-  color: var(--err);
+  border-left-width: 3px;
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
 }
 
-/* The agent-shim degraded-state banner (#degraded-banner): store/sidecar/shim
-   downtime surfaced honestly at the top of the feed (design §11). A warning,
-   not a fatal error — so it wears the remediation amber, kin to the other
-   "needs attention" chrome, rather than the red .error-banner. `[hidden]`
-   collapses it whenever no component is degraded. */
-#degraded-banner {
-  border: 1px solid var(--remediation);
-  color: var(--remediation);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  margin: 0.25rem 0.75rem;
-  font-size: 0.85rem;
+/* INTERNAL — agent-repl's own machinery: shim down, store outage, a refused
+   command. The same blue the workspace resolves to, because nothing about the
+   account is implicated. */
+.failure-card.failure-internal {
+  border-color: var(--init);
+  color: var(--init);
+}
+
+/* API — the vendor or the account stopped the work. The same purple
+   vendor-blocked resolves to: releasing it needs a human, never a retry. */
+.failure-card.failure-api {
+  border-color: var(--blocked);
+  color: var(--blocked);
+}
+
+.failure-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.failure-mark {
+  flex: none;
+  font-weight: 700;
+}
+
+/* The raw account the source gave, beside the prose rather than replacing it.
+   Muted and monospaced: it is evidence for whoever debugs this, not the
+   sentence the reader is meant to take away. */
+.failure-detail {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* A RESOLVED window: the failure ended, so the card settles. The border drops
+   to the ordinary card rule and the text to the ordinary foreground — a card
+   that went on shouting would be lying about the present to be accurate about
+   the past. The check and the closing time say it happened and it is over. */
+.failure-card.resolved {
+  border-color: var(--border);
+  border-left-color: var(--border);
+  color: var(--muted);
+}
+
+.failure-resolved {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
 }
 
 /* --- §2.13 in-flight message queue ----------------------------------------
@@ -2318,8 +2368,14 @@ pre {
   color: #ffffff;
 }
 
-/* The error row: a persistent red line under the strip, standing until the
-   next turn starts. When it names a feed item it is clickable, and says so. */
+/* The error row: a persistent line under the strip, standing until the next
+   turn starts. When it names a feed item it is clickable, and says so.
+
+   Its color comes from the failure's CLASS (`.failure-internal` /
+   `.failure-api` below), not from a hue of its own — a footer that painted
+   its own red could contradict the very card it points at. The base rule
+   keeps --err only for the case where a class somehow did not apply, so the
+   row is never invisible. */
 .pfooter-error {
   color: var(--err);
   font-size: 0.74rem;
@@ -2329,6 +2385,8 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pfooter-error.failure-internal { color: var(--init); }
+.pfooter-error.failure-api { color: var(--blocked); }
 .pfooter-error.addressable { cursor: pointer; }
 .pfooter-error.addressable:hover { text-decoration: underline; }
 
@@ -2367,7 +2425,7 @@ pre {
    Two cues, both permanent while the mode is in force and neither
    dismissible:
      1. #ungated-banner, a FILLED high-contrast bar under the topbar. Filled,
-        not outlined like #degraded-banner and .error-banner — those are
+        not outlined like .failure-card — those are
         "something went wrong" notices sharing the feed's ground, and an open
         door must not read as one more of them.
      2. body.ungated, an inset frame around the whole viewport, so the warning
