@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/frontend"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -144,6 +145,58 @@ func systemInitFromVendor(a *anypb.Any) *datav1.SystemInit {
 	return csm.GetSystemInit()
 }
 
+// commandsChangedFromVendor decodes a vendor event's Any into its
+// CommandsChanged arm, or nil when it is anything else.
+func commandsChangedFromVendor(a *anypb.Any) *datav1.CommandsChanged {
+	if a == nil {
+		return nil
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil
+	}
+	csm, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return nil
+	}
+	return csm.GetCommandsChanged()
+}
+
+// applyCommandsChanged folds a system/commands_changed push into the retained
+// SystemInit and returns the refreshed snapshot to re-publish, or nil when
+// there is nothing to fold it into yet.
+//
+// The SDK's contract for this message is REPLACE, not merge: the payload is
+// the complete current command list after a mid-session change (a skill
+// discovered as the agent moves into a subdirectory, a plugin installed). So
+// the retained slash-command list is overwritten wholesale.
+//
+// The retained SystemInit is CLONED rather than mutated: the very same pointer
+// was already handed to frontends in an earlier SessionInitView, and editing
+// it in place would retroactively rewrite a snapshot they are still holding.
+//
+// A push arriving before any init has nothing to update. That is not an error
+// worth failing on — the init that follows carries the current list anyway —
+// but it IS worth saying out loud rather than silently discarding a command
+// list the user's menu is waiting for.
+func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.SystemInit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.systemInit == nil {
+		c.logf("sessiondrv: commands_changed before system:init session=%s commands=%d; dropped (the next init carries the current list)",
+			c.sessionID, len(cc.GetCommands()))
+		return nil
+	}
+	names := make([]string, 0, len(cc.GetCommands()))
+	for _, cmd := range cc.GetCommands() {
+		names = append(names, cmd.GetName())
+	}
+	refreshed, _ := proto.Clone(c.systemInit).(*datav1.SystemInit)
+	refreshed.SlashCommands = names
+	c.systemInit = refreshed
+	return refreshed
+}
+
 // Apply feeds a lifecycle event to the SSM and refreshes the TaskCatalog on
 // task-lifecycle transitions (design step 1). It also fires onSessionStarted so
 // the driver can arm the metaprompt re-fire. An SSM apply error is loud-logged,
@@ -211,6 +264,21 @@ func (c *consumer) Consume(ev *corev1.Event) {
 				SessionId: c.sessionID,
 				Init:      si,
 			})
+		}
+		// system/commands_changed is the SDK's mid-session command-list push
+		// (a skill discovered as the agent moves, a plugin installed). Before
+		// this arm existed the menu froze at whatever the session's one init
+		// reported, and only an explicit refresh could unstick it. Folding it
+		// into the retained SystemInit and re-publishing means the frontend's
+		// menu simply follows, through the SessionInitView it already consumes.
+		if cc := commandsChangedFromVendor(p.Vendor); cc != nil {
+			if refreshed := c.applyCommandsChanged(cc); refreshed != nil {
+				c.push.PushSessionInitView(&frontendv1.SessionInitView{
+					Workspace: c.workspace,
+					SessionId: c.sessionID,
+					Init:      refreshed,
+				})
+			}
 		}
 		c.pushConversation(ev)
 	default:
