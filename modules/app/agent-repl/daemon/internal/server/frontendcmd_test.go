@@ -419,9 +419,13 @@ func TestSnapshotProviderCarriesTheProgressViews(t *testing.T) {
 	}
 }
 
-func TestWireAgentShimMirrorsSSMStateIntoProgress(t *testing.T) {
-	// Arrange — the seam between the two resolvers: the footer's phase must be
-	// the SSM's verdict, not a second opinion.
+// The seam between the two resolvers still fires — an SSM transition reaches
+// the progress resolver through the same loop that pushes the WorkspaceState
+// frame — but it no longer carries a PHASE. The footer reads the phase off the
+// WorkspaceState, so a copy here would be a second, staler answer to a question
+// the SSM has already answered.
+func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *testing.T) {
+	// Arrange.
 	reg := openTestRegistry(t)
 	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
 	shim, err := WireAgentShim(AgentShimConfig{
@@ -446,8 +450,11 @@ func TestWireAgentShimMirrorsSSMStateIntoProgress(t *testing.T) {
 	// Assert
 	select {
 	case v := <-views:
-		if v.GetState() != frontendv1.RenderState_RENDER_STATE_MERGING {
-			t.Fatalf("progress state = %v, want MERGING mirrored from the SSM", v.GetState())
+		if v.GetWorkspace() != "/w" {
+			t.Fatalf("progress view = %v, want the transition's workspace", v)
+		}
+		if v.GetState() != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+			t.Fatalf("progress state = %v, want UNSPECIFIED (the phase is not mirrored)", v.GetState())
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the SSM transition to reach the progress resolver")
