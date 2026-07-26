@@ -466,7 +466,7 @@ describe("UdsSession permission round-trip", () => {
     expect(evt.payload.case).toBe("degradedState");
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.component).toBe("claude-shim-interrupt");
-    expect(evt.payload.value.reason).toContain("u-1,u-2");
+    expect(evt.payload.value.reason).toContain("still_queued=[u-1 u-2]");
   });
 
   it("an interrupt receipt with no survivors emits no DegradedState", async () => {

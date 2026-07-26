@@ -7,6 +7,7 @@
  * scripted fake query.
  */
 import { AsyncQueue } from "./input-queue.js";
+import { shimLog } from "./uds/log.js";
 import {
   AssistantMessageError,
   ContentBlock,
@@ -26,6 +27,9 @@ import {
   decodeCommandLine,
 } from "./protocol.js";
 
+/** Log component for this session's loud anomaly lines. */
+const LOG_COMPONENT = "claude-shim-session";
+
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
 // ---------------------------------------------------------------------------
@@ -35,16 +39,43 @@ import {
  * advertising `interrupt_receipt_v1` in system:init `capabilities`).
  *
  * `still_queued` names async user messages that SURVIVE the interrupt and
- * will still run. Our daemon holds its own prompt queue rather than
- * enqueuing into the CLI, so this is expected to be empty — a non-empty
- * list means work outlived an interrupt the daemon believes it cancelled,
- * which is exactly the kind of thing that must be loud, never swallowed.
- * Older CLIs resolve `undefined`.
+ * will still run. Older CLIs resolve `undefined`.
  */
 export interface InterruptReceipt {
   still_queued: string[];
   /** Present only when the request set `cancel_queued`. */
   cancelled?: string[];
+}
+
+/**
+ * Describe an interrupt receipt that reports surviving work, or return null
+ * when the receipt is the expected empty one.
+ *
+ * WHY A NON-EMPTY RECEIPT IS AN ANOMALY FOR US. Our daemon holds its own
+ * prompt queue and interjects by Interrupt-then-SubmitPrompt; it never
+ * enqueues async messages into the CLI. So `still_queued` should ALWAYS be
+ * empty here. A non-empty one means prompts are sitting in a CLI-side queue
+ * the daemon cannot see, will still run, and cannot cancel — the daemon's
+ * whole model of "I hold the queue" is wrong at that moment. That is a broken
+ * assumption, not a status update, so the entries are reported VERBATIM
+ * rather than counted: the uuids are the only handle anyone has on the work
+ * that is about to run unbidden.
+ *
+ * Shared by both transports so the stdio and UDS paths cannot drift into
+ * describing the same anomaly two different ways.
+ */
+export function describeInterruptSurvivors(
+  receipt: InterruptReceipt | undefined,
+): string | null {
+  const survivors = receipt?.still_queued ?? [];
+  if (survivors.length === 0) return null;
+  const cancelled = receipt?.cancelled ?? [];
+  const cancelledNote =
+    cancelled.length > 0 ? `; cancelled=[${cancelled.join(" ")}]` : "";
+  return (
+    `interrupt receipt reports ${survivors.length} message(s) STILL QUEUED CLI-side, ` +
+    `which the daemon cannot see or cancel: still_queued=[${survivors.join(" ")}]${cancelledNote}`
+  );
 }
 
 /** Structural subset of the SDK `Query` interface the shim uses. */
@@ -417,22 +448,21 @@ export class ShimSession {
   /**
    * Surface an interrupt receipt that reports surviving work.
    *
-   * An empty (or absent) receipt is the expected case and stays silent. A
-   * NON-empty `still_queued` contradicts the interrupt's whole contract, so
-   * it is reported as a command-scoped error rather than logged and dropped
-   * — the daemon must not believe it cancelled work that is still running.
+   * An empty (or absent) receipt is the expected case and stays SILENT — it
+   * is the normal outcome on every interrupt and logging it would bury the
+   * one case that matters. A non-empty one gets BOTH channels: a loud stderr
+   * log carrying the queued entries verbatim (the only durable record, and
+   * the only place the uuids survive for a human), and a command-scoped
+   * error event so the daemon learns its cancellation did not fully take.
    */
   private reportInterruptSurvivors(
     receipt: InterruptReceipt | undefined,
     requestId: RequestId,
   ): void {
-    const survivors = receipt?.still_queued ?? [];
-    if (survivors.length === 0) return;
-    this.emitError(
-      "sdk_throw",
-      `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
-      requestId,
-    );
+    const anomaly = describeInterruptSurvivors(receipt);
+    if (anomaly === null) return;
+    shimLog(LOG_COMPONENT, { session: this.deps.sessionId }, anomaly);
+    this.emitError("sdk_throw", anomaly, requestId);
   }
 
   /** Unblock any pending SDK permission waits (interrupt/shutdown). */
