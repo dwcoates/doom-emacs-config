@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 )
 
 // runConnectedClient starts c.Run and returns a channel that fires on each
@@ -45,7 +46,7 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		m, err := readMsg(conn)
+		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read SubmitPrompt: %v", err)
 			return
@@ -59,7 +60,7 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 			t.Errorf("prompt text: got %q", sp.GetText())
 		}
 		mustWriteMsg(t, conn, &corev1.Ack{RequestId: sp.GetRequestId()})
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
 	defer stop()
@@ -79,14 +80,14 @@ func TestSubmitPromptNackIsLoudError(t *testing.T) {
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		m, err := readMsg(conn)
+		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read SubmitPrompt: %v", err)
 			return
 		}
 		sp := m.(*corev1.SubmitPrompt)
 		mustWriteMsg(t, conn, &corev1.Nack{RequestId: sp.GetRequestId(), Reason: "busy"})
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
 	defer stop()
@@ -106,8 +107,8 @@ func TestControlAckTimeout(t *testing.T) {
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		_, _ = readMsg(conn) // read the SubmitPrompt, then stay silent
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn) // read the SubmitPrompt, then stay silent
+		_, _ = wire.ReadAny(conn)
 	})
 	cfg := h.config(t, "sess-1", path)
 	cfg.AckTimeout = 60 * time.Millisecond
@@ -130,7 +131,7 @@ func TestInterruptAckSuccess(t *testing.T) {
 	gotHard := make(chan bool, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		m, err := readMsg(conn)
+		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read Interrupt: %v", err)
 			return
@@ -142,7 +143,7 @@ func TestInterruptAckSuccess(t *testing.T) {
 		}
 		gotHard <- iv.GetHard()
 		mustWriteMsg(t, conn, &corev1.Ack{RequestId: iv.GetRequestId()})
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
 	defer stop()
@@ -188,7 +189,7 @@ func TestPermissionRequestRoundTrip(t *testing.T) {
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
 		mustWriteMsg(t, conn, &corev1.PermissionRequest{RequestId: "perm-7", ToolName: "Bash"})
-		m, err := readMsg(conn)
+		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read PermissionResponse: %v", err)
 			return
@@ -199,7 +200,7 @@ func TestPermissionRequestRoundTrip(t *testing.T) {
 			return
 		}
 		gotResp <- pr
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	_, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
 	defer stop()

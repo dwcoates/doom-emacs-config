@@ -7,6 +7,7 @@ import (
 	"io"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 )
 
 // readLoop is the single-goroutine demux: it reads frames in arrival order and
@@ -16,7 +17,7 @@ import (
 // the connection closes, ctx is cancelled, or a protocol violation is hit.
 func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 	for {
-		msg, err := readMsg(ac.conn)
+		msg, err := wire.ReadAny(ac.conn)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

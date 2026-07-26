@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 )
 
 // fakeStore is a one-connection stand-in for shim-store's subscriber side: it
@@ -61,7 +62,7 @@ func startFakeStore(t *testing.T, fs *fakeStore) string {
 			return
 		}
 		defer conn.Close()
-		msg, rerr := readMsg(conn)
+		msg, rerr := wire.ReadAny(conn)
 		if rerr != nil {
 			return
 		}
@@ -77,7 +78,7 @@ func startFakeStore(t *testing.T, fs *fakeStore) string {
 			return
 		}
 		for _, ev := range fs.events {
-			if werr := writeMsg(conn, ev); werr != nil {
+			if werr := wire.WriteAny(conn, ev); werr != nil {
 				return
 			}
 		}
@@ -225,7 +226,7 @@ func TestReplayRejectsAnEmptyVendorSessionID(t *testing.T) {
 func TestReplayRejectsANonEventFrame(t *testing.T) {
 	// Arrange — the store sends nothing but Events on a subscriber connection.
 	fs := &fakeStore{extra: func(conn net.Conn) {
-		_ = writeMsg(conn, &corev1.Heartbeat{SentAtMs: 1})
+		_ = wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: 1})
 	}}
 	c := newTestClient(t, startFakeStore(t, fs), nil)
 	// Act

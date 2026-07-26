@@ -56,9 +56,6 @@ import (
 	"agentrepl/wire"
 
 	"claude-repld/internal/dlog"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Defaults for the Config bounds.
@@ -185,7 +182,7 @@ func (c *Client) Replay(ctx context.Context, vendorSessionID string, fromSeq, st
 		}
 	}()
 
-	if err := writeMsg(conn, &corev1.Subscribe{SessionId: vendorSessionID, FromSeq: fromSeq}); err != nil {
+	if err := wire.WriteAny(conn, &corev1.Subscribe{SessionId: vendorSessionID, FromSeq: fromSeq}); err != nil {
 		return 0, fmt.Errorf("storesub: sending Subscribe (session=%s from_seq=%d): %w", vendorSessionID, fromSeq, err)
 	}
 	c.logf("re-pull subscribed session=%s from_seq=%d stop_at_seq=%d socket=%s",
@@ -196,7 +193,7 @@ func (c *Client) Replay(ctx context.Context, vendorSessionID string, fromSeq, st
 		if err := conn.SetReadDeadline(time.Now().Add(c.cfg.IdleTimeout)); err != nil {
 			return delivered, fmt.Errorf("storesub: setting read deadline: %w", err)
 		}
-		msg, err := readMsg(conn)
+		msg, err := wire.ReadAny(conn)
 		switch {
 		case err == nil:
 		case errors.Is(err, os.ErrDeadlineExceeded):
@@ -240,34 +237,4 @@ func (c *Client) Replay(ctx context.Context, vendorSessionID string, fromSeq, st
 				ErrTruncated, c.cfg.MaxEvents, fromSeq, stopAtSeq)
 		}
 	}
-}
-
-// --- Any framing (the convention every agent-shim UDS hop uses) -------------
-
-func writeMsg(conn net.Conn, m proto.Message) error {
-	a, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("storesub: wrapping %T in Any: %w", m, err)
-	}
-	b, err := proto.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("storesub: marshaling Any(%T): %w", m, err)
-	}
-	return wire.WriteFrame(conn, b)
-}
-
-func readMsg(conn net.Conn) (proto.Message, error) {
-	frame, err := wire.ReadFrame(conn)
-	if err != nil {
-		return nil, err
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		return nil, fmt.Errorf("storesub: decoding Any frame: %w", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("storesub: resolving Any type %q: %w", a.GetTypeUrl(), err)
-	}
-	return m, nil
 }

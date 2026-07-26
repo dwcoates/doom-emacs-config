@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -23,7 +24,7 @@ func TestReplayContinuationFromLastSeq(t *testing.T) {
 		for seq := uint64(5); seq <= 9; seq++ {
 			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
 		}
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	_, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
 	defer stop()

@@ -7,9 +7,10 @@
 // prefix followed by exactly one serialized google.protobuf.Any. The Any wraps
 // the actual message (StoreWrite, StoreWriteAck, Subscribe, Heartbeat,
 // core.v1.Event for subscription delivery, ...) and its type_url is THE message
-// discriminator, resolved against the proto registry (anypb.New /
-// Any.UnmarshalNew). The daemon's shimclient and the TS shim speak the same
-// convention.
+// discriminator, resolved against the proto registry. Both halves of that
+// envelope live in `agentrepl/wire` (WriteAny / ReadAny), so this server, the
+// sidecar's store client, and the daemon cannot drift; the TS shim speaks the
+// same convention.
 //
 // Connection roles follow from the first frame's wrapped message:
 //
@@ -32,8 +33,6 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/wire"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Logf is the loud-logging sink (§12), injected for test capture.
@@ -149,7 +148,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
 	defer s.untrackConn(conn)
 
-	msg, err := readMsg(conn)
+	msg, err := wire.ReadAny(conn)
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
 			s.log("connection dropped before first frame: %v", err)
@@ -191,7 +190,7 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 		}
 		cursors = all
 	}
-	if err := writeMsg(conn, &corev1.CursorList{Cursors: cursors}); err != nil {
+	if err := wire.WriteAny(conn, &corev1.CursorList{Cursors: cursors}); err != nil {
 		s.log("cursor query reply failed: %v", err)
 	}
 }
@@ -204,7 +203,7 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 		return
 	}
 	for {
-		msg, err := readMsg(conn)
+		msg, err := wire.ReadAny(conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				s.log("producer connection dropped (producer=%s): %v", first.GetProducer(), err)
@@ -218,7 +217,7 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 				return
 			}
 		case *corev1.Heartbeat:
-			if err := writeMsg(conn, &corev1.Heartbeat{SentAtMs: m.GetSentAtMs()}); err != nil {
+			if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: m.GetSentAtMs()}); err != nil {
 				return
 			}
 		default:
@@ -233,7 +232,7 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 // dropped.
 func (s *Server) processWrite(conn net.Conn, sw *corev1.StoreWrite) error {
 	ack := s.ingestAndFan(sw)
-	return writeMsg(conn, ack)
+	return wire.WriteAny(conn, ack)
 }
 
 func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
@@ -304,7 +303,7 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	}
 	var lastReplaySeq uint64
 	for _, ev := range replayed {
-		if err := writeMsg(conn, ev); err != nil {
+		if err := wire.WriteAny(conn, ev); err != nil {
 			s.log("subscribe replay write failed: session=%s: %v", sessionID, err)
 			return
 		}
@@ -327,7 +326,7 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 				ev.GetSeq() > 0 && ev.GetSeq() <= lastReplaySeq {
 				continue
 			}
-			if err := writeMsg(conn, ev); err != nil {
+			if err := wire.WriteAny(conn, ev); err != nil {
 				s.log("subscriber write failed: session=%s: %v", sessionID, err)
 				return
 			}
@@ -339,7 +338,7 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 // subscriber connection so a client close unblocks the tail loop.
 func (s *Server) subReadLoop(conn net.Conn, subr *subscriber) {
 	for {
-		if _, err := readMsg(conn); err != nil {
+		if _, err := wire.ReadAny(conn); err != nil {
 			subr.close()
 			return
 		}
@@ -347,35 +346,9 @@ func (s *Server) subReadLoop(conn net.Conn, subr *subscriber) {
 }
 
 // ---- Any framing ----------------------------------------------------------
-
-// writeMsg wraps m in a google.protobuf.Any and writes it as one wire frame.
-func writeMsg(conn net.Conn, m proto.Message) error {
-	a, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("shim-store server: wrapping %T in Any: %w", m, err)
-	}
-	b, err := proto.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("shim-store server: marshaling Any(%T): %w", m, err)
-	}
-	return wire.WriteFrame(conn, b)
-}
-
-// readMsg reads one wire frame and unwraps the google.protobuf.Any into its
-// concrete message via the proto registry. io.EOF at a frame boundary is
-// returned verbatim so callers can distinguish a clean close.
-func readMsg(conn net.Conn) (proto.Message, error) {
-	frame, err := wire.ReadFrame(conn)
-	if err != nil {
-		return nil, err
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		return nil, fmt.Errorf("shim-store server: decoding Any frame: %w", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("shim-store server: resolving Any type %q: %w", a.GetTypeUrl(), err)
-	}
-	return m, nil
-}
+//
+// The encode/decode pair lives in agentrepl/wire (WriteAny / ReadAny). It used
+// to be copy-pasted here and in three other packages; one wire contract with
+// four hand-maintained copies is the drift that package exists to prevent.
+// ReadAny still returns ReadFrame's error VERBATIM, which is what lets the
+// handlers below tell a clean io.EOF close from a fault.
