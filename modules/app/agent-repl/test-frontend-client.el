@@ -165,6 +165,47 @@ id the daemon delivers on the pushed SessionView."
       ;; Assert
       (should-not (plist-member (agent-repl-test--created-payload) :permissionMode)))))
 
+(ert-deftest agent-repl-test-frontend-create-omits-ungated-consent-by-default ()
+  "An ordinary create never carries the ungated-session consent."
+  ;; Arrange
+  (agent-repl-test--with-uds-create '(:id "s_1")
+    (let ((agent-repl-frontend-allow-ungated nil))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should-not (plist-member (agent-repl-test--created-payload) :allowUngated)))))
+
+(ert-deftest agent-repl-test-frontend-create-sends-bound-ungated-consent ()
+  "A caller that binds the consent gets it on the wire as `allowUngated'."
+  ;; Arrange
+  (agent-repl-test--with-uds-create '(:id "s_1")
+    (let ((agent-repl-frontend-allow-ungated t)
+          (agent-repl-frontend-permission-mode "bypassPermissions"))
+      ;; Act
+      (agent-repl--frontend-create-session "/w")
+      ;; Assert
+      (should (eq (plist-get (agent-repl-test--created-payload) :allowUngated) t)))))
+
+(ert-deftest agent-repl-test-frontend-ungated-mode-p-flags-bypass-permissions ()
+  "`bypassPermissions' is the mode under which no permission gate exists."
+  ;; Arrange + Act + Assert
+  (should (agent-repl-frontend-ungated-permission-mode-p "bypassPermissions")))
+
+(ert-deftest agent-repl-test-frontend-ungated-mode-p-clears-dont-ask ()
+  "`dontAsk' bypasses canUseTool fail-CLOSED, so it is not ungated."
+  ;; Arrange + Act + Assert
+  (should-not (agent-repl-frontend-ungated-permission-mode-p "dontAsk")))
+
+(ert-deftest agent-repl-test-frontend-ungated-mode-p-clears-auto ()
+  "`auto' still reaches canUseTool for the ask path."
+  ;; Arrange + Act + Assert
+  (should-not (agent-repl-frontend-ungated-permission-mode-p "auto")))
+
+(ert-deftest agent-repl-test-frontend-ungated-mode-p-clears-nil ()
+  "A nil mode is not a claim of ungatedness."
+  ;; Arrange + Act + Assert
+  (should-not (agent-repl-frontend-ungated-permission-mode-p nil)))
+
 (ert-deftest agent-repl-test-frontend-create-sends-multi-repo-config-dir ()
   "A cwd under the multi-repo root carries that account's CLAUDE_CONFIG_DIR."
   ;; Arrange

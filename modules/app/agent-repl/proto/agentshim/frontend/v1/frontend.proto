@@ -340,6 +340,20 @@ message CreateSessionCmd {
   string config_dir = 4;
   string resume_claude_session_id = 5;  // "" = fresh
   bool fake = 6;                        // test harness sessions
+  // The caller's DELIBERATE consent to create a session with NO permission
+  // gate. Required whenever permission_mode names a mode that shadows the
+  // shim's canUseTool callback in the fail-OPEN direction
+  // (bypassPermissions): under such a mode the SDK auto-approves every tool
+  // before canUseTool is consulted, so the daemon's whole permission
+  // round-trip never engages and no permission card can ever appear.
+  //
+  // The daemon REFUSES such a create without this flag. The mode is otherwise
+  // one string away from every ordinary create, and "reachable by a typo" is
+  // not an acceptable property for the switch that turns the gate off. It is
+  // a create-time consent only: a session already registered in that mode
+  // still rehydrates after a daemon restart, since refusing there would
+  // silently change a live session's posture.
+  bool allow_ungated = 7;
 }
 
 // Additive (S7): session teardown over UDS (replaces DELETE /sessions/{id}).
