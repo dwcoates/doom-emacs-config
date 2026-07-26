@@ -12,6 +12,7 @@ import {
   ClaudeStreamMessageSchema,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
 const streamDir = fileURLToPath(new URL("../../../../testdata/corpus/stream/", import.meta.url));
 const toolResultsDir = fileURLToPath(new URL("../../../../testdata/corpus/tool-results/", import.meta.url));
@@ -550,22 +551,91 @@ describe("corrected tool-result shapes", () => {
 // Missing / unknown discriminators → UnparsedEvent (never a zero value).
 // ---------------------------------------------------------------------------
 
-describe("UnparsedEvent hard-error path", () => {
+/**
+ * The two halves of the §5.1 contract, which are NOT alternatives:
+ * UnparsedEvent is for a KNOWN shape that failed conversion; the
+ * UnknownRecord passthrough is for an unrecognized DISCRIMINATOR.
+ */
+describe("UnparsedEvent hard-error path (known shape, failed conversion)", () => {
   it("a message with no type is unparsed", () => {
     const result = convert({ foo: "bar" });
     expect(result.vendor.payload.case).toBe("unparsed");
   });
 
-  it("an unknown type is unparsed with the producer stamped", () => {
-    const result = convert({ type: "totally_new_message", session_id: "s" });
+  it("a user message missing `message` is unparsed with the producer stamped", () => {
+    // `user` IS a modeled type, so its shape is an expectation the record
+    // violated — a hard error, never the passthrough arm.
+    const result = convert({ type: "user", session_id: "s" });
     expect(result.vendor.payload.case).toBe("unparsed");
     if (result.vendor.payload.case !== "unparsed") throw new Error("case");
     expect(result.vendor.payload.value.producer).toBe("claude-shim");
   });
 
-  it("an unknown system subtype is unparsed", () => {
-    const result = convert({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+  it("a stream_event with an unusable delta arm is unparsed", () => {
+    const result = convert({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_delta", index: 0, delta: { type: "no_such_delta" } },
+    });
     expect(result.vendor.payload.case).toBe("unparsed");
+  });
+});
+
+describe("UnknownRecord passthrough (unrecognized discriminator)", () => {
+  const unknownOf = (msg: unknown) => {
+    const csm = vendor(convert(msg));
+    if (csm.msg.case !== "unknown") throw new Error(`expected unknown arm, got ${csm.msg.case}`);
+    return csm.msg.value;
+  };
+
+  it("an unknown top-level type lands on the passthrough arm", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s" });
+    expect(rec.discriminator).toBe("totally_new_message");
+  });
+
+  it("an unknown top-level type is tagged as a TYPE discriminator", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s" });
+    expect(rec.discriminatorField).toBe(DiscriminatorField.TYPE);
+  });
+
+  it("an unknown top-level type preserves the whole record verbatim", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s", payload: { a: 1 } });
+    expect(rec.raw).toEqual({ type: "totally_new_message", session_id: "s", payload: { a: 1 } });
+  });
+
+  it("an unknown system subtype lands on the passthrough arm", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.discriminator).toBe("brand_new_subtype");
+  });
+
+  it("an unknown system subtype is tagged as a SUBTYPE discriminator", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.discriminatorField).toBe(DiscriminatorField.SUBTYPE);
+  });
+
+  it("an unknown system subtype records `system` as its parent type", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.parentType).toBe("system");
+  });
+
+  it("a passthrough record does not also populate Event.extras", () => {
+    // UnknownRecord.raw already holds every field; duplicating them into
+    // extras would make the unknown-FIELD log lie about what is new.
+    const result = convert({ type: "totally_new_message", session_id: "s", novel: 1 });
+    expect(result.vendor.extras).toBeUndefined();
+    expect(result.loggedExtras).toEqual([]);
+  });
+
+  it("an unknown content block is preserved instead of dropped", () => {
+    const csm = vendor(convert({
+      type: "assistant",
+      session_id: "s",
+      message: { id: "m", model: "x", content: [{ type: "no_such_block", data: "keep me" }] },
+    }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    const [block] = csm.msg.value.message!.content;
+    if (block?.block.case !== "unknown") throw new Error(`expected unknown block, got ${block?.block.case}`);
+    expect(block.block.value.raw).toEqual({ type: "no_such_block", data: "keep me" });
   });
 });
 

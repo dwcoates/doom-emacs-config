@@ -51,9 +51,42 @@ const COMPONENT = "claude-shim-convert";
  */
 const seenFieldPaths = new Set<string>();
 
+/**
+ * Distinct unknown DISCRIMINATORS already loud-logged, so the passthrough
+ * path logs once per new family rather than once per message — a family that
+ * arrives on every turn would otherwise drown the log.
+ */
+const seenDiscriminators = new Set<string>();
+
 /** Test-only: clear the once-per-path log dedup so cases stay independent. */
 export function __resetExtrasSeen(): void {
   seenFieldPaths.clear();
+  seenDiscriminators.clear();
+}
+
+/**
+ * Loud-log an unrecognized union discriminator ONCE per distinct value, and
+ * report whether this call was the one that logged it.
+ *
+ * This is the passthrough arm's single log line. It is deliberately NOT a
+ * warning about broken data: an unmodeled discriminator means the vendor
+ * shipped something new, which is expected on a format documented as
+ * version-unstable. What matters is that it is visible and that the record
+ * survives in `UnknownRecord.raw`.
+ */
+export function logUnknownDiscriminator(
+  discriminator: string,
+  parentType: string,
+): boolean {
+  const key = parentType === "" ? discriminator : `${parentType}:${discriminator}`;
+  if (seenDiscriminators.has(key)) return false;
+  seenDiscriminators.add(key);
+  shimLog(
+    COMPONENT,
+    { discriminator: key },
+    `unmodeled discriminator captured verbatim into UnknownRecord: ${key}`,
+  );
+  return true;
 }
 
 /**
@@ -156,6 +189,21 @@ export class Reader {
    */
   ignore(...keys: string[]): void {
     for (const k of keys) this.consumed.add(k);
+  }
+
+  /**
+   * Mark EVERY remaining key consumed, for the passthrough (UnknownRecord)
+   * path only.
+   *
+   * The passthrough arm already stores the record whole in `UnknownRecord.raw`,
+   * so letting {@link finish} also copy each field into `Event.extras` would
+   * duplicate the payload AND — worse — log every field of an unknown family
+   * as a "new field", which is noise that hides the genuine unknown-field
+   * signal on families we DO model. The one honest log for this record is the
+   * unknown-discriminator log, emitted by {@link logUnknownDiscriminator}.
+   */
+  consumeAll(): void {
+    for (const k of Object.keys(this.raw)) this.consumed.add(k);
   }
 
   /**

@@ -344,6 +344,7 @@ type ClaudeStreamMessage struct {
 	//	*ClaudeStreamMessage_ControlResponse
 	//	*ClaudeStreamMessage_ControlCancelRequest
 	//	*ClaudeStreamMessage_KeepAlive
+	//	*ClaudeStreamMessage_Unknown
 	Msg           isClaudeStreamMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -584,6 +585,15 @@ func (x *ClaudeStreamMessage) GetKeepAlive() *KeepAlive {
 	return nil
 }
 
+func (x *ClaudeStreamMessage) GetUnknown() *UnknownRecord {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_Unknown); ok {
+			return x.Unknown
+		}
+	}
+	return nil
+}
+
 type isClaudeStreamMessage_Msg interface {
 	isClaudeStreamMessage_Msg()
 }
@@ -678,6 +688,15 @@ type ClaudeStreamMessage_KeepAlive struct {
 	KeepAlive *KeepAlive `protobuf:"bytes,22,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
 }
 
+type ClaudeStreamMessage_Unknown struct {
+	// PASSTHROUGH (unknown.proto): a `type`/`subtype` no arm above models.
+	// The SDK union grew 11 -> 38 members between 0.1.77 and 0.3.220, so an
+	// unmodeled family is the NORMAL consequence of the vendor shipping,
+	// not a defect. Captured whole; a message of a KNOWN family that fails
+	// conversion is still a core.UnparsedEvent.
+	Unknown *UnknownRecord `protobuf:"bytes,23,opt,name=unknown,proto3,oneof"`
+}
+
 func (*ClaudeStreamMessage_User) isClaudeStreamMessage_Msg() {}
 
 func (*ClaudeStreamMessage_Assistant) isClaudeStreamMessage_Msg() {}
@@ -721,6 +740,8 @@ func (*ClaudeStreamMessage_ControlResponse) isClaudeStreamMessage_Msg() {}
 func (*ClaudeStreamMessage_ControlCancelRequest) isClaudeStreamMessage_Msg() {}
 
 func (*ClaudeStreamMessage_KeepAlive) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_Unknown) isClaudeStreamMessage_Msg() {}
 
 // [sdk coreTypes.d.ts:396-426] SDKUserMessage + SDKUserMessageReplay folded
 // (is_replay=true for the replay variant, whose uuid is required).
@@ -3967,7 +3988,7 @@ var File_agentshim_data_v1_stream_proto protoreflect.FileDescriptor
 
 const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\n" +
-	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\"\xf5\f\n" +
+	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\x1fagentshim/data/v1/unknown.proto\"\xb3\r\n" +
 	"\x13ClaudeStreamMessage\x124\n" +
 	"\x04user\x18\x01 \x01(\v2\x1e.agentshim.data.v1.UserMessageH\x00R\x04user\x12C\n" +
 	"\tassistant\x18\x02 \x01(\v2#.agentshim.data.v1.AssistantMessageH\x00R\tassistant\x12:\n" +
@@ -3994,7 +4015,8 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x10control_response\x18\x14 \x01(\v2\".agentshim.data.v1.ControlResponseH\x00R\x0fcontrolResponse\x12_\n" +
 	"\x16control_cancel_request\x18\x15 \x01(\v2'.agentshim.data.v1.ControlCancelRequestH\x00R\x14controlCancelRequest\x12=\n" +
 	"\n" +
-	"keep_alive\x18\x16 \x01(\v2\x1c.agentshim.data.v1.KeepAliveH\x00R\tkeepAliveB\x05\n" +
+	"keep_alive\x18\x16 \x01(\v2\x1c.agentshim.data.v1.KeepAliveH\x00R\tkeepAlive\x12<\n" +
+	"\aunknown\x18\x17 \x01(\v2 .agentshim.data.v1.UnknownRecordH\x00R\aunknownB\x05\n" +
 	"\x03msg\"\x84\x03\n" +
 	"\vUserMessage\x12;\n" +
 	"\amessage\x18\x01 \x01(\v2!.agentshim.data.v1.ApiUserMessageR\amessage\x12+\n" +
@@ -4380,10 +4402,11 @@ var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(*KeepAlive)(nil),              // 47: agentshim.data.v1.KeepAlive
 	nil,                            // 48: agentshim.data.v1.ResultMessage.ModelUsageEntry
 	nil,                            // 49: agentshim.data.v1.SystemInit.MemoryPathsEntry
-	(*ApiUserMessage)(nil),         // 50: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),          // 51: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),    // 52: agentshim.data.v1.ApiAssistantMessage
-	(*structpb.Struct)(nil),        // 53: google.protobuf.Struct
+	(*UnknownRecord)(nil),          // 50: agentshim.data.v1.UnknownRecord
+	(*ApiUserMessage)(nil),         // 51: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),          // 52: agentshim.data.v1.ToolUseResult
+	(*ApiAssistantMessage)(nil),    // 53: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.Struct)(nil),        // 54: google.protobuf.Struct
 }
 var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	6,  // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
@@ -4408,51 +4431,52 @@ var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	45, // 19: agentshim.data.v1.ClaudeStreamMessage.control_response:type_name -> agentshim.data.v1.ControlResponse
 	46, // 20: agentshim.data.v1.ClaudeStreamMessage.control_cancel_request:type_name -> agentshim.data.v1.ControlCancelRequest
 	47, // 21: agentshim.data.v1.ClaudeStreamMessage.keep_alive:type_name -> agentshim.data.v1.KeepAlive
-	50, // 22: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
-	51, // 23: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	52, // 24: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	0,  // 25: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
-	1,  // 26: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
-	9,  // 27: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
-	48, // 28: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
-	11, // 29: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
-	53, // 30: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
-	53, // 31: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
-	53, // 32: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
-	53, // 33: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
-	2,  // 34: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
-	3,  // 35: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
-	12, // 36: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
-	13, // 37: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
-	49, // 38: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
-	16, // 39: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
-	17, // 40: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
-	18, // 41: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
-	19, // 42: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
-	24, // 43: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
-	25, // 44: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
-	26, // 45: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
-	53, // 46: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
-	53, // 47: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
-	20, // 48: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
-	21, // 49: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
-	22, // 50: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
-	23, // 51: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
-	53, // 52: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
-	9,  // 53: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
-	4,  // 54: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
-	32, // 55: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
-	38, // 56: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
-	40, // 57: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
-	42, // 58: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
-	53, // 59: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
-	53, // 60: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
-	10, // 61: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	50, // 22: agentshim.data.v1.ClaudeStreamMessage.unknown:type_name -> agentshim.data.v1.UnknownRecord
+	51, // 23: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
+	52, // 24: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	53, // 25: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	0,  // 26: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
+	1,  // 27: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
+	9,  // 28: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
+	48, // 29: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
+	11, // 30: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
+	54, // 31: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
+	54, // 32: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
+	54, // 33: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
+	54, // 34: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
+	2,  // 35: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
+	3,  // 36: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
+	12, // 37: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
+	13, // 38: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
+	49, // 39: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
+	16, // 40: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
+	17, // 41: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
+	18, // 42: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
+	19, // 43: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
+	24, // 44: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
+	25, // 45: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
+	26, // 46: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
+	54, // 47: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
+	54, // 48: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
+	20, // 49: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
+	21, // 50: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
+	22, // 51: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
+	23, // 52: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
+	54, // 53: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
+	9,  // 54: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
+	4,  // 55: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
+	32, // 56: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
+	38, // 57: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
+	40, // 58: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
+	42, // 59: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
+	54, // 60: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
+	54, // 61: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
+	10, // 62: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
+	63, // [63:63] is the sub-list for method output_type
+	63, // [63:63] is the sub-list for method input_type
+	63, // [63:63] is the sub-list for extension type_name
+	63, // [63:63] is the sub-list for extension extendee
+	0,  // [0:63] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_stream_proto_init() }
@@ -4461,6 +4485,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		return
 	}
 	file_agentshim_data_v1_tools_proto_init()
+	file_agentshim_data_v1_unknown_proto_init()
 	file_agentshim_data_v1_stream_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClaudeStreamMessage_User)(nil),
 		(*ClaudeStreamMessage_Assistant)(nil),
@@ -4484,6 +4509,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		(*ClaudeStreamMessage_ControlResponse)(nil),
 		(*ClaudeStreamMessage_ControlCancelRequest)(nil),
 		(*ClaudeStreamMessage_KeepAlive)(nil),
+		(*ClaudeStreamMessage_Unknown)(nil),
 	}
 	file_agentshim_data_v1_stream_proto_msgTypes[11].OneofWrappers = []any{
 		(*RawMessageStreamEvent_MessageStart)(nil),

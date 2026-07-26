@@ -13,6 +13,7 @@ syntax = "proto3";
 package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
+import "agentshim/data/v1/unknown.proto";
 
 option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
@@ -52,6 +53,11 @@ message ContentBlock {
     ImageBlock image = 5;
     ToolReferenceBlock tool_reference = 6;
     FallbackBlock fallback = 7;  // [corpus] model-fallback marker block
+    // PASSTHROUGH (unknown.proto): a block `type` no arm above models.
+    // Before this arm existed the converter's only option was to SKIP such a
+    // block, which dropped it from the message body outright — the one place
+    // the never-drop contract was actually being violated.
+    UnknownRecord unknown = 17;
   }
 }
 
