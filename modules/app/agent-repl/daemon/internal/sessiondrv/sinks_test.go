@@ -633,6 +633,52 @@ func TestResyncRespectsFromSeq(t *testing.T) {
 	}
 }
 
+func TestResyncReportsTheRingFloor(t *testing.T) {
+	// Arrange — the oldest retained seq is what the ring replay could cover.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.retain(&corev1.Event{SessionId: "s1", Seq: 6108})
+	c.retain(&corev1.Event{SessionId: "s1", Seq: 7117})
+
+	// Act.
+	floor, haveFloor := c.resync(0)
+
+	// Assert.
+	if !haveFloor || floor != 6108 {
+		t.Fatalf("resync floor = (%d, %v), want (6108, true)", floor, haveFloor)
+	}
+}
+
+func TestResyncReportsNoFloorForAnEmptyRing(t *testing.T) {
+	// Arrange — a freshly restarted daemon has retained nothing yet, so the
+	// ring cannot say where the live window begins.
+	c := newTestConsumer(&fakePusher{}, &fakeApplier{})
+
+	// Act.
+	_, haveFloor := c.resync(0)
+
+	// Assert.
+	if haveFloor {
+		t.Fatal("an empty ring must report no floor, not a floor of 0")
+	}
+}
+
+func TestResyncIgnoresSeqlessItemsWhenReportingTheFloor(t *testing.T) {
+	// Arrange — a daemon-composed permission item carries no store seq, so it
+	// says nothing about how far back the ring reaches.
+	c := newTestConsumer(&fakePusher{}, &fakeApplier{})
+	c.retain(&corev1.Event{SessionId: "s1", Seq: 0})
+	c.retain(&corev1.Event{SessionId: "s1", Seq: 42})
+
+	// Act.
+	floor, haveFloor := c.resync(0)
+
+	// Assert.
+	if !haveFloor || floor != 42 {
+		t.Fatalf("resync floor = (%d, %v), want (42, true)", floor, haveFloor)
+	}
+}
+
 // vendorEvent wraps a ClaudeStreamMessage as a vendor core Event.
 func vendorEvent(t *testing.T, csm *datav1.ClaudeStreamMessage, seq uint64) *corev1.Event {
 	t.Helper()

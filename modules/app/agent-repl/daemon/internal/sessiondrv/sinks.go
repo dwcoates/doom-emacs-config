@@ -458,11 +458,16 @@ func (c *consumer) ConnectionRecovered(_ string) {
 // resync replays the retained conversation deltas from fromSeq (0 = from the
 // start of the retained window) via the normal PushConversationDelta path. It
 // is idempotent by construction: the frontends reconcile by through_seq/uuid,
-// so re-pushing already-seen items REPLACES rather than duplicates them. This
-// is the simplest honest mechanism (task step 5): the daemon replays its
-// bounded retained ring; history older than the window is recovered by the
-// store-backed Subscribe replay on reconnect.
-func (c *consumer) resync(fromSeq uint64) {
+// so re-pushing already-seen items REPLACES rather than duplicates them.
+//
+// It returns the ring's FLOOR: the oldest seq this replay could possibly have
+// covered. A caller asking below the floor was answered incompletely, and the
+// floor is what tells it so — the bounded store re-pull (repull.go) closes the
+// remainder. Before the floor was reported, "older than the retained window"
+// was answered with silence, which is what left a freshly-mounted GUI blank
+// after a daemon restart (the ring is empty then, so EVERY request is
+// below-floor).
+func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	for _, ev := range c.snapshotRing() {
 		if ev.GetSeq() < fromSeq {
 			continue
@@ -478,6 +483,28 @@ func (c *consumer) resync(fromSeq uint64) {
 	for _, item := range c.snapshotPermItems() {
 		c.pushPermissionDelta(item)
 	}
+	return c.ringFloor()
+}
+
+// ringFloor reports the oldest store seq the retained ring still holds — the
+// first seq a resync replay can cover — and whether the ring holds one at all.
+//
+// ok=false means the ring carries no seq-bearing event: it was emptied by the
+// cap, or (the case that matters) this is a freshly restarted daemon whose ring
+// has not filled yet. A caller cannot derive the floor from the ring then, and
+// must fall back to the DURABLE last_seen_seq — see Manager.Resync.
+//
+// Reporting 0 in that case would claim the ring covers all of history, which is
+// the silent answer this whole mechanism exists to replace.
+func (c *consumer) ringFloor() (uint64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ev := range c.ring {
+		if seq := ev.GetSeq(); seq > 0 {
+			return seq, true
+		}
+	}
+	return 0, false
 }
 
 // pushPermission retains and pushes a permission ConversationItem, keyed by its
