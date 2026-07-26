@@ -161,7 +161,131 @@ gain the telemetry below.)
 - A per-task progress pulse on the relocated rosters (fed by the items
   above) would be the eventual render, were this ever revisited.
 
-## Nuked (filled in at execution)
+## Nuked (recorded at execution)
 
-The precise inventory of removed code lands here with the removal commit, so
-the doc records what the footer replaced.
+The precise inventory of removed code, with line ranges as they stood at
+removal time (i.e. against the commit the nuke was applied to).
+
+### `webapp/src/render.ts` (3601 → 3120 lines)
+
+| symbol | kind | lines at removal |
+|---|---|---|
+| `interruptingIndicatorHtml` | exported fn | 263–280 |
+| `thinkingRowHtml` | exported fn | 282–301 |
+| `workingRowHtml` | exported fn | 303–323 |
+| `retryingRowHtml` | exported fn | 325–344 |
+| `PulseTarget` | exported type | 1865–1886 |
+| `pulseTarget` | exported fn | 1888–1974 |
+| `isPulsed` | exported fn | 1976–1980 |
+| `tailStatusRow` | exported fn | 1982–2013 |
+| `turnStatsRowHtml` | exported fn | 2020–2047 |
+| `tailLineHtml` | exported fn | 2049–2075 |
+| `FeedRenderer.tailSlot` | private field | 2656–2663 |
+| `FeedRenderer.tailHtml` | private field | 2664–2670 |
+| `FeedRenderer.turnTimerLabel` | private field | 2689–2695 |
+| `FeedRenderer.applyPulse` | private method | 3160–3178 |
+| `FeedRenderer.renderTailLine` | private method | 3389–3403 |
+| `FeedRenderer.paintTurnTimer` | public method | 3405–3417 |
+
+Plus the call sites: the `tailSlot` constructor parameter, the two
+`const pulse = pulseTarget(...)` bindings (`renderRestored` and `render`), the
+two `this.renderTailLine(tailLineHtml(...))` calls, and the two
+`this.applyPulse(...)` calls.
+
+`formatTokenDelta` (2015–2018) was deleted with the block and RESTORED: the
+settled response's corner (`resultMeta`) and the result chip still use it. Its
+neighbours in that contiguous run were all footer-replaced; it was not.
+
+KEPT deliberately: `showsMonitoringRow` and `FeedRenderer.isMonitoring` /
+`monitoring`. They take booleans, never the pulse, and feed the SIDEBAR's amber
+dot — a different surface the footer does not replace.
+
+### `webapp/src/styles.css`
+
+Removed rules: `.interrupting-pending`, `.interrupting-spinner`,
+`.working-pending`, `.retrying-pending`, `.retrying-spinner`,
+`.turn-stats-live` (+ its two `.info-*` children), `.tail-line`, `#tail-slot`,
+`#tail-slot:empty`, `.bubble.pulsing`, `@keyframes bubble-breathe`, and the
+reduced-motion overrides naming `.interrupting-spinner`, `.retrying-spinner`
+and `.bubble.pulsing`.
+
+Removed palette tokens (both themes): `--user-pulse`, `--assistant-pulse`, and
+the `--pulse-to` bindings on `.bubble.user` / `.bubble.assistant`.
+
+Narrowed rather than removed: the two grouped `.thinking-pending` rules (the
+ellipsis-gap cancel and the left-rail flush) lost their `working` / `retrying`
+/ `interrupting` siblings. `.thinking-pending` and `.thinking-spinner` SURVIVE
+— `chess-game.ts` renders its own `processing…` row with them.
+
+### `webapp/index.html`
+
+`#tail-slot` replaced by `#progress-footer`, the footer's own slot in the same
+position (flex sibling between `#feed` and the composer).
+
+### `webapp/src/main.ts`
+
+The `tailSlotEl` lookup and its constructor argument; the `TaskTimer` paint
+callback repointed from `feed.paintTurnTimer` to `footer.paintTurnTimer`.
+
+### Tests removed with their subjects
+
+`webapp/test/render.test.ts` (5711 → 5369 lines): the `interruptingIndicatorHtml`,
+`workingRowHtml`, `thinkingRowHtml`, `retryingRowHtml`, `turnStatsRowHtml`,
+`isPulsed`, `tailStatusRow`, `tailLineHtml` describes; the three `pulseTarget`
+describes; `FeedRenderer: the tail line pins to the bottom slot, not the feed`;
+and `FeedRenderer: the working-frontier breath is a class, not HTML`.
+
+`webapp/test/styles.test.ts`: `the bubble pulse`, `live turn-stats row`,
+`bottom-pinned tail slot (#tail-slot)`, `combined tail line`,
+`tail status rows flush the response column's left rail`,
+`interrupting indicator`, `working indicator`, and the two
+`describe.each` palette suites (`$role pulse palette`,
+`$role breath is perceptible`). The `retrying indicator` describe was reduced
+to its two surviving `--retry` palette assertions, which the footer's own
+retry accent still depends on.
+
+## Unfed seams (schema present, no live source)
+
+Recorded so the gap is a known one rather than a silent zero.
+
+- **`ttft_ms`** — genuinely unfed. `ResultMessage.ttft_ms` exists but arrives
+  only at TURN END, which is useless to a live footer, and the mid-turn
+  `StreamEvent.ttft_ms` is unreachable: `stream_event` is ephemeral, so
+  `convert()` never runs on it, and the delta bypass returns null for every
+  non-`content_block_delta` frame. Feeding it needs a minimal shim relay —
+  OUT OF SCOPE here (the shim was a hard boundary for this work). The footer's
+  sheet omits the row entirely rather than printing a zero.
+- **`authenticating`** — WIRED but unwitnessed. `data.AuthStatus` is converted
+  and would forward, but no corpus fixture exists and the CLI has not been
+  observed emitting it. The resolver's arm is real, not a placeholder.
+
+Everything else the doc's sketch named IS fed: `thinking_tokens`, the
+`compacting` window, the `retrying` / `error_summary` split out of the
+`ApiErrorLine` family, the `hook` window (`HookStarted` / `HookResponse`), and
+the `rate_limited` window (`RateLimitEvent`) all reach the daemon today as
+vendor events that previously died in `conversationItemsFromVendor`.
+
+### Proto deltas from the sketch above
+
+- `Window` and `RateLimitWindow` are TOP-LEVEL messages (`ProgressWindow`,
+  `RateLimitWindow`) rather than nested, for cleaner generated names in both
+  Go and TS. Field numbers and semantics are exactly as sketched.
+- `error_item_uuid = 17` was added: the design's error row scrolls the feed to
+  the corresponding item, which needs the item's address. `ErrorItem` /
+  `RetryItem` grew a matching `uuid` in the webapp store.
+
+### Turn-start reset signal
+
+`input_tokens` / `thinking_tokens` / `ttft_ms` reset, and `error_summary`
+clears, on the FIRST of either signal to arrive:
+
+- `NoteTurnAccepted`, fired when the daemon accepts a prompt for immediate
+  submission (`sessiondrv.Manager.SubmitPrompt`, non-queued path). This is the
+  earliest turn start the daemon actually observes today, since live
+  `TurnStarted` events do not currently reach it (a separate known defect).
+- a `TurnStarted` store event, once those flow again.
+
+The open is idempotent (guarded by the resolver's own `turnOpen`), so whichever
+arrives second is a no-op and the accumulated figures survive it. A QUEUED
+prompt deliberately does not fire it: the turn it would report is the one
+already running.

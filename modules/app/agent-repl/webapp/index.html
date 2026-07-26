@@ -49,13 +49,15 @@
            collapsed) otherwise. -->
       <div id="degraded-banner" hidden></div>
       <main id="feed"></main>
-      <!-- The live tail line's bottom-pinned slot: the progress indicator
-           (thinking/working/retrying/interrupting) and the running turn-stats
-           (elapsed clock + grown context) render HERE, a flex sibling wedged
-           between the scrolling feed and the composer, so they stay stuck to
-           the window's bottom rather than floating just under the last bubble
-           as the feed grew. Empty (and so collapsed via :empty) off-turn. -->
-      <div id="tail-slot"></div>
+      <!-- The consolidated progress footer's slot (progress-footer.ts): THE
+           in-flight indicator, a flex sibling wedged between the scrolling
+           feed and the composer so the dock stays stuck to the window's
+           bottom rather than floating just under the last bubble as the feed
+           grew. It replaced the scattered tail rows (thinking / working /
+           retrying) and the live turn-stats row that used to render here.
+           Empty (and so collapsed via :empty) before the daemon resolves its
+           first ProgressView. -->
+      <div id="progress-footer"></div>
       <!-- The feed search's echo area: `C-s` in the composer starts an
            incremental search over the feed, and the query, the position among
            the matches, and any folds the search could not reach are reported
