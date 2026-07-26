@@ -537,6 +537,15 @@ message SendMessageResult {
   string resumed_agent_id = 4;
 }
 
+// [sdk 0.3.220 WebFetchOutput.artifactRead] — the published Artifact a fetch
+// resolved to, when the fetched URL named one rather than an ordinary page.
+// NOT-FOUND-ON-MACHINE: typings-only, so the wire spelling is the typings'
+// (`{slug, ver}`); no fetch in the census carries it.
+message ArtifactRead {
+  string slug = 1;
+  string ver = 2;  // optional
+}
+
 message WebFetchResult {
   int64 bytes = 1;
   int64 code = 2;
@@ -544,6 +553,10 @@ message WebFetchResult {
   int64 duration_ms = 4;
   string result = 5;
   string url = 6;
+  // Absent on an ordinary fetch, hence a submessage rather than inlined
+  // fields: an unset ArtifactRead is "this was not an Artifact", which an
+  // inlined empty slug could not say.
+  ArtifactRead artifact_read = 7;
 }
 
 message WebSearchResult {
