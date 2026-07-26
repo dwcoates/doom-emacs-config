@@ -573,13 +573,15 @@ daemon no longer knows."
   (should (eq (cdr (assoc "snapshot" agent-repl--uds-frame-handlers))
               #'agent-repl--frontend-apply-snapshot)))
 
-(ert-deftest agent-repl-test-state-registers-no-degraded-handler ()
-  "The degradedNotice arm has NO handler: the banner is retired (F4).
-It stays in the KNOWN frame fields (the arm is still on the wire) and is
-listed as deliberately ignored, so a push from an older daemon is a
-settled no-op rather than an unfinished-wiring warning."
+(ert-deftest agent-repl-test-state-degraded-notice-arm-stays-retired ()
+  "The degradedNotice arm is RETIRED (step 11): no handler, and no longer a
+known or ignored frame field at all (the wire arm itself is gone —
+reserved 8/\"degraded_notice\" in frontend.proto), so a push from a daemon
+old enough to still send it is now the loud unknown-field signal rather
+than a settled no-op."
   (should-not (assoc "degradedNotice" agent-repl--uds-frame-handlers))
-  (should (member "degradedNotice" agent-repl--uds-ignored-frame-fields)))
+  (should-not (member "degradedNotice" agent-repl--uds-known-frame-fields))
+  (should-not (member "degradedNotice" agent-repl--uds-ignored-frame-fields)))
 
 (ert-deftest agent-repl-test-state-dispatch-end-to-end ()
   "A decoded workspaceState frame dispatched through the transport applies state."
