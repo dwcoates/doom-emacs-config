@@ -218,6 +218,7 @@ import {
   TaskUpdateResultSchema,
   TextBlockSchema,
   ThinkingBlockSchema,
+  ArtifactReadSchema,
   ArtifactResultSchema,
   GlobResultSchema,
   GrepResultSchema,
@@ -233,6 +234,7 @@ import {
   WebSearchResultSchema,
   WorkflowLaunchResultSchema,
   WriteResultSchema,
+  type ArtifactRead,
   type ContentBlock,
   type MessagePin,
   type Question,
@@ -1765,11 +1767,6 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   // arms it shares a key with: WebSearch keys on `duration_seconds` (a fetch
   // reports `duration_ms`), and Artifact's `!has("code")` guard already excludes
   // anything carrying an HTTP code.
-  //
-  // WebFetchResult does not model `artifact_read` ({slug, ver}), the one
-  // optional sibling 0.3.220 adds and which no observed result carries, so it
-  // drops here exactly as the unmodeled siblings of the other arms do; typing
-  // it needs a proto change.
   if (any("code_text", "codeText") && has("bytes")) {
     return { case: "webFetch", value: create(WebFetchResultSchema, {
       bytes: bigOf(pick(o, "bytes")),
@@ -1778,6 +1775,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       durationMs: bigOf(pick(o, "duration_ms", "durationMs")),
       result: strOf(pick(o, "result")),
       url: strOf(pick(o, "url")),
+      artifactRead: artifactReadOf(pick(o, "artifact_read", "artifactRead")),
     }) };
   }
   if (any("statusChange", "status_change", "updatedFields", "updated_fields")) {
@@ -2244,6 +2242,17 @@ function pinOf(v: unknown): MessagePin | undefined {
     name: strOf(v["name"]),
     ref: strOf(v["ref"]),
   });
+}
+
+/**
+ * Map a WebFetch result's `artifactRead` onto the typed `ArtifactRead` (sdk
+ * 0.3.220 WebFetchOutput). An ordinary fetch omits the key entirely, so a
+ * non-object yields undefined and the field stays absent — an all-empty
+ * ArtifactRead would read downstream as "this fetch WAS an Artifact".
+ */
+function artifactReadOf(v: unknown): ArtifactRead | undefined {
+  if (!isObject(v)) return undefined;
+  return create(ArtifactReadSchema, { slug: strOf(v["slug"]), ver: strOf(v["ver"]) });
 }
 
 function uuidOf(message: Record<string, unknown>): string {
