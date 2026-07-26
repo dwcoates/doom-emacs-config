@@ -597,3 +597,46 @@ func TestEnsureDoesNotWaitForReadiness(t *testing.T) {
 		t.Fatal("Ensure blocked on the shim handshake; it must only start the shim")
 	}
 }
+
+// TestResyncRoundTripReplaysTheRetainedHistory is the integration proof of the
+// backfill-to-GUI path: a freshly-mounted frontend asks from seq 0 and receives
+// the daemon's whole retained conversation history back as ConversationDeltas.
+//
+// It runs the REAL chain — Manager.Resync, the per-session consumer's retained
+// ring, and internal/frontend's conversation translation — against a recording
+// Pusher. That is exactly the hop that used to answer with silence, because
+// nothing ever sent a ResyncCmd.
+func TestResyncRoundTripReplaysTheRetainedHistory(t *testing.T) {
+	// Arrange: a live driver whose ring holds three streamed assistant messages.
+	h := newRepullHarness(t, &fakeHistory{}, "vendor-uuid")
+	d := h.driver(t)
+	for i, uuid := range []string{"u1", "u2", "u3"} {
+		d.consumer.Consume(assistantEvent(t, uint64(6108+i), uuid))
+	}
+	h.push.mu.Lock()
+	h.push.convo = nil // drop the LIVE pushes; only the replay should remain
+	h.push.mu.Unlock()
+
+	// Act: the fresh frontend knows nothing, so it asks from the very start.
+	if err := h.m.Resync("ws", 0); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+
+	// Assert: every retained item comes back, in order, stamped with its seq.
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	var gotUUIDs []string
+	var gotSeqs []uint64
+	for _, cd := range h.push.convo {
+		gotSeqs = append(gotSeqs, cd.GetThroughSeq())
+		for _, it := range cd.GetItems() {
+			gotUUIDs = append(gotUUIDs, it.GetUuid())
+		}
+	}
+	if !reflect.DeepEqual(gotUUIDs, []string{"u1", "u2", "u3"}) {
+		t.Fatalf("replayed item uuids = %v, want [u1 u2 u3]", gotUUIDs)
+	}
+	if !reflect.DeepEqual(gotSeqs, []uint64{6108, 6109, 6110}) {
+		t.Fatalf("replayed through_seqs = %v, want [6108 6109 6110]", gotSeqs)
+	}
+}
