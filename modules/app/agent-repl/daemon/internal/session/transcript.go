@@ -11,9 +11,13 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
+	"time"
 )
 
 // DefaultClaudeConfigDir returns the Claude CLI config root: the
@@ -48,10 +52,116 @@ func ClaudeConfigDir(dir string) string {
 
 var transcriptSlugRe = regexp.MustCompile(`[^A-Za-z0-9]`)
 
+// EncodeCWD returns the CLI's `projects/<dir>` encoding of an absolute cwd:
+// every non-alphanumeric byte becomes "-".
+func EncodeCWD(cwd string) string {
+	return transcriptSlugRe.ReplaceAllString(cwd, "-")
+}
+
+// ProjectDir returns the directory the CLI files cwd's transcripts under.
+func ProjectDir(configDir, cwd string) string {
+	return filepath.Join(configDir, "projects", EncodeCWD(cwd))
+}
+
 // TranscriptPath returns the transcript JSONL path for claudeSessionID rooted
 // at cwd, mirroring the CLI's project-dir encoding (every non-alphanumeric byte
 // of the absolute cwd becomes "-").
 func TranscriptPath(configDir, cwd, claudeSessionID string) string {
-	slug := transcriptSlugRe.ReplaceAllString(cwd, "-")
-	return filepath.Join(configDir, "projects", slug, claudeSessionID+".jsonl")
+	return filepath.Join(ProjectDir(configDir, cwd), claudeSessionID+".jsonl")
+}
+
+// Transcript is one session transcript found on disk.
+type Transcript struct {
+	// ConfigDir is the `~/.claude*` root the transcript was found under.
+	ConfigDir string
+	// SessionID is the vendor (Claude CLI) session uuid — the filename stem,
+	// which is exactly the id `--resume` takes.
+	SessionID string
+	Path      string
+	ModTime   time.Time
+}
+
+// NewestTranscript returns the most recently modified `<uuid>.jsonl` the CLI
+// has written for cwd under configDir, and whether one exists.
+//
+// A missing project dir is a MISS, not an error: a workspace that has never
+// been talked to simply has no transcript. Anything else (an unreadable dir, a
+// broken stat) is surfaced.
+func NewestTranscript(configDir, cwd string) (Transcript, bool, error) {
+	dir := ProjectDir(configDir, cwd)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Transcript{}, false, nil
+		}
+		return Transcript{}, false, fmt.Errorf("session: read project dir %s: %w", dir, err)
+	}
+	var newest Transcript
+	found := false
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return Transcript{}, false, fmt.Errorf("session: stat transcript %s: %w", filepath.Join(dir, e.Name()), err)
+		}
+		if found && !info.ModTime().After(newest.ModTime) {
+			continue
+		}
+		newest = Transcript{
+			ConfigDir: configDir,
+			SessionID: strings.TrimSuffix(e.Name(), ".jsonl"),
+			Path:      filepath.Join(dir, e.Name()),
+			ModTime:   info.ModTime(),
+		}
+		found = true
+	}
+	return newest, found, nil
+}
+
+// Discovery is the result of probing every known config dir for a workspace's
+// transcripts.
+type Discovery struct {
+	// Adopted is the newest transcript under the session's OWN config dir. Only
+	// this one may be bound to the session: it is the root the CLI would resume
+	// from.
+	Adopted Transcript
+	// Found reports whether Adopted is set.
+	Found bool
+	// Migrations are transcripts found under OTHER config dirs. They are
+	// REPORTED, never adopted: adopting one would silently resume a
+	// conversation the session's own CLI root cannot see, so the honest move is
+	// to name it loudly and leave the decision to a human.
+	Migrations []Transcript
+}
+
+// Discover probes ownDir first, then every other dir in configDirs, for cwd's
+// newest transcript. Duplicate and empty dirs are skipped.
+func Discover(ownDir string, configDirs []string, cwd string) (Discovery, error) {
+	var out Discovery
+	if ownDir != "" {
+		t, ok, err := NewestTranscript(ownDir, cwd)
+		if err != nil {
+			return Discovery{}, err
+		}
+		out.Adopted, out.Found = t, ok
+	}
+	seen := map[string]bool{ownDir: true, "": true}
+	others := append([]string(nil), configDirs...)
+	sort.Strings(others)
+	for _, dir := range others {
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		t, ok, err := NewestTranscript(dir, cwd)
+		if err != nil {
+			return Discovery{}, err
+		}
+		if ok {
+			out.Migrations = append(out.Migrations, t)
+		}
+	}
+	return out, nil
 }

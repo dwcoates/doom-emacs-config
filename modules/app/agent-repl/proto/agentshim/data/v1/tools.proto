@@ -230,8 +230,13 @@ message ImageBlock {
   ImageSource source = 1;
 }
 
+// [corpus] a tool_result nesting a reference to another tool, 270
+// occurrences on disk. The shape is trivially typeable, so it is typed;
+// `reference` stays as the verbatim capture so nothing an untyped key carries
+// is lost.
 message ToolReferenceBlock {
-  google.protobuf.Struct reference = 1;  // shape varies; captured verbatim
+  google.protobuf.Struct reference = 1;  // the block verbatim, incl. `type`
+  string tool_name = 2;                  // disk key `tool_name`
 }
 
 // ---------------------------------------------------------------------------
@@ -258,10 +263,16 @@ message ApiAssistantMessage {
   repeated ContentBlock content = 3;
   string stop_reason = 4;   // nullable: "" = null
   string stop_sequence = 5; // nullable: "" = null
+  // SHAPE (census, 2 lines): {type, category, explanation}. Two observations
+  // is too thin to close the shape, so it stays genuinely schemaless.
   google.protobuf.Struct stop_details = 6;
   ApiUsage usage = 7;
+  // SHAPE (census, 1,813 lines): {cache_miss_reason} — a direct explanation for
+  // a slow turn.
   google.protobuf.Struct diagnostics = 8;
+  // SHAPE (census, 23 lines): {applied_edits}. Thinly observed; schemaless.
   google.protobuf.Struct context_management = 9;
+  // Shape never observed in the census; genuinely schemaless.
   google.protobuf.Struct container = 10;
 }
 
@@ -272,10 +283,19 @@ message ApiUsage {
   int64 output_tokens = 2;
   int64 cache_read_input_tokens = 3;
   int64 cache_creation_input_tokens = 4;
+  // SHAPE (census, 129,415 lines): {ephemeral_5m_input_tokens,
+  // ephemeral_1h_input_tokens}. Left as a Struct deliberately: retyping a live
+  // field is wire-breaking for every event already in the store, and no data is
+  // lost as a Struct. Documented so a consumer knows exactly what to read.
   google.protobuf.Struct cache_creation = 5;
+  // SHAPE (census, 103,749 lines): {web_search_requests, web_fetch_requests}.
+  // Same reasoning as cache_creation.
   google.protobuf.Struct server_tool_use = 6;
   string service_tier = 7;
   // [corpus] observed on newer CC versions:
+  // SHAPE (census, 103,504 lines): per element {input_tokens, output_tokens,
+  // cache_read_input_tokens, cache_creation_input_tokens, cache_creation,
+  // type, model?}.
   google.protobuf.ListValue iterations = 8;  // per-model iteration breakdown
   string speed = 9;                          // e.g. "standard"
   string inference_geo = 10;                 // e.g. "global"
@@ -309,6 +329,12 @@ message ToolUseResult {
     WebSearchResult web_search = 19;
     AskUserQuestionResult ask_user_question = 20;
     ScheduleWakeupResult schedule_wakeup = 21;
+    // Previously unclassified despite being routinely used on disk.
+    StructuredOutputResult structured_output = 22;
+    GlobResult glob = 23;
+    GrepResult grep = 24;
+    ArtifactResult artifact = 25;
+    TaskGetResult task_get = 26;
     // A result object whose tool could not be identified: preserved verbatim
     // and loud-logged (this is capture, not classification — an unknown
     // object NEVER silently becomes a known type).
@@ -543,6 +569,60 @@ message ScheduleWakeupResult {
   bool was_clamped = 3;
 }
 
+// [corpus] StructuredOutput — the payload is the caller's OWN schema, so it
+// is genuinely schemaless and stays a Struct (same reasoning as McpInput).
+message StructuredOutputResult {
+  google.protobuf.Struct data = 1;
+}
+
+// [sdk GlobOutput].
+message GlobResult {
+  int64 duration_ms = 1;
+  int64 num_files = 2;
+  repeated string filenames = 3;
+  bool truncated = 4;
+  int64 total_matches = 5;
+  bool count_is_complete = 6;
+}
+
+// [sdk GrepOutput].
+message GrepResult {
+  string mode = 1;  // "content" | "files_with_matches" | "count"
+  int64 num_files = 2;
+  repeated string filenames = 3;
+  string content = 4;
+  int64 num_lines = 5;
+  int64 num_matches = 6;
+  int64 total_files = 7;
+  int64 total_lines = 8;
+  int64 applied_limit = 9;
+  int64 applied_offset = 10;
+}
+
+// [corpus] Artifact — the published page's identity.
+message ArtifactResult {
+  string url = 1;
+  string title = 2;
+  string description = 3;
+  string label = 4;
+  string version = 5;
+}
+
+// [sdk TaskGetOutput] — `task` is nullable, hence the _set companion.
+message TaskGetResult {
+  TaskRecord task = 1;
+  bool task_set = 2;
+}
+
+message TaskRecord {
+  string id = 1;
+  string subject = 2;
+  string description = 3;
+  string status = 4;  // "pending" | "in_progress" | "completed"
+  repeated string blocks = 5;
+  repeated string blocked_by = 6;
+}
+
 // ---------------------------------------------------------------------------
 // Tool inputs (sdk-tools.d.ts census C1) — typed twins of tool_use.input
 // ---------------------------------------------------------------------------
@@ -568,18 +648,155 @@ message ToolInput {
     McpInput mcp = 17;
     ListMcpResourcesInput list_mcp_resources = 18;
     ReadMcpResourceInput read_mcp_resource = 19;
+    // The 13 families used on disk with no typed input arm, while
+    // ToolUseResult already typed most of their RESULTS. Nine come from
+    // sdk-tools.d.ts; Skill / StructuredOutput / ToolSearch / SendMessage have
+    // no interface there and are corpus-grounded, exactly as their result
+    // twins already are.
+    SkillInput skill = 20;
+    TaskUpdateInput task_update = 21;
+    StructuredOutputInput structured_output = 22;
+    TaskCreateInput task_create = 23;
+    ToolSearchInput tool_search = 24;
+    SendMessageInput send_message = 25;
+    MonitorInput monitor = 26;
+    TaskStopInput task_stop = 27;
+    ScheduleWakeupInput schedule_wakeup = 28;
+    WorkflowInput workflow = 29;
+    TaskListInput task_list = 31;
+    TaskGetInput task_get = 32;
+    ArtifactInput artifact = 33;
     google.protobuf.Struct unclassified = 30;
   }
 }
 
-// [sdk sdk-tools.d.ts:32-57].
+// [sdk 0.3.220 AgentInput].
 message AgentInput {
   string description = 1;
   string prompt = 2;
   string subagent_type = 3;
-  string model = 4;   // 'sonnet'|'opus'|'haiku', optional
+  string model = 4;   // "sonnet"|"opus"|"haiku"|"fable", optional
+  // [corpus] proto-only: no 0.3.220 AgentInput field backs this.
   string resume = 5;
   bool run_in_background = 6;
+  // "worktree" gives the agent its own git worktree; "remote" launches it in a
+  // remote cloud environment. 35 uses on disk and previously unmodeled, which
+  // hid the single most consequential thing about a spawned agent: whether it
+  // shares this checkout.
+  string isolation = 7;
+  // Makes the agent addressable via SendMessage({to: name}) while running.
+  string name = 8;
+}
+
+// [corpus] Skill — no sdk-tools.d.ts interface; grounded in disk usage.
+message SkillInput {
+  string skill = 1;
+  string args = 2;
+}
+
+// [sdk TaskUpdateInput].
+message TaskUpdateInput {
+  string task_id = 1;  // wire key `taskId`
+  string subject = 2;
+  string description = 3;
+  string active_form = 4;
+  // "pending" | "in_progress" | "completed" | "deleted".
+  string status = 5;
+  repeated string add_blocks = 6;
+  repeated string add_blocked_by = 7;
+  string owner = 8;
+  google.protobuf.Struct metadata = 9;
+}
+
+// [corpus] StructuredOutput — the caller's OWN schema, so schemaless by
+// design and captured whole (same reasoning as McpInput).
+message StructuredOutputInput {
+  google.protobuf.Struct data = 1;
+}
+
+// [sdk TaskCreateInput].
+message TaskCreateInput {
+  string subject = 1;
+  string description = 2;
+  string active_form = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+// [corpus] ToolSearch — no sdk-tools.d.ts interface.
+message ToolSearchInput {
+  string query = 1;
+  int64 max_results = 2;
+}
+
+// [corpus] SendMessage — no sdk-tools.d.ts interface.
+message SendMessageInput {
+  string to = 1;
+  string summary = 2;
+  string message = 3;
+  string type = 4;
+  string recipient = 5;
+  string content = 6;
+}
+
+// [sdk MonitorInput].
+message MonitorInput {
+  string description = 1;
+  int64 timeout_ms = 2;
+  bool persistent = 3;
+  string command = 4;
+  MonitorWebsocket ws = 5;
+}
+
+message MonitorWebsocket {
+  string url = 1;
+  repeated string protocols = 2;
+}
+
+// [sdk TaskStopInput] — one of the two ids identifies the target.
+message TaskStopInput {
+  string task_id = 1;
+  string shell_id = 2;
+}
+
+// [sdk ScheduleWakeupInput].
+message ScheduleWakeupInput {
+  int64 delay_seconds = 1;
+  string reason = 2;
+  string prompt = 3;
+  bool stop = 4;
+}
+
+// [sdk WorkflowInput].
+message WorkflowInput {
+  string script = 1;
+  string name = 2;
+  string description = 3;
+  string title = 4;
+  google.protobuf.Struct args = 5;
+  string script_path = 6;
+  string resume_from_run_id = 7;
+}
+
+// [sdk TaskListInput] — empty by design; the arm's PRESENCE is the signal.
+message TaskListInput {}
+
+// [sdk TaskGetInput].
+message TaskGetInput {
+  string task_id = 1;  // wire key `taskId`
+}
+
+// [sdk ArtifactInput].
+message ArtifactInput {
+  string action = 1;     // "publish" | "list"
+  string file_path = 2;
+  string favicon = 3;
+  int64 limit = 4;
+  string scope = 5;      // "mine" | "shared" | "all"
+  string title = 6;
+  string description = 7;
+  string label = 8;
+  string url = 9;
+  bool force = 10;
 }
 
 // [sdk sdk-tools.d.ts:58-90].
