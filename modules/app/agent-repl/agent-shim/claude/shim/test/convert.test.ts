@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { toJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyUnpack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
-import { convert, convertToolUseResult } from "../src/proto/convert.js";
+import { SessionStartGate, convert, convertToolUseResult, promptPreview } from "../src/proto/convert.js";
 import { __resetExtrasSeen } from "../src/proto/extras.js";
 import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
 import {
@@ -249,6 +249,20 @@ describe("user", () => {
 // Lifecycle twins.
 // ---------------------------------------------------------------------------
 
+describe("promptPreview", () => {
+  it("keeps only the first line", () => {
+    expect(promptPreview("first line\nsecond line")).toBe("first line");
+  });
+
+  it("caps the preview at 200 characters", () => {
+    expect(promptPreview("x".repeat(500))).toHaveLength(200);
+  });
+
+  it("passes a short single-line prompt through unchanged", () => {
+    expect(promptPreview("hello there")).toBe("hello there");
+  });
+});
+
 describe("lifecycle twins", () => {
   it("system:init emits SessionStarted", () => {
     const { lifecycle } = convert(loadStream("system_init"));
@@ -275,6 +289,46 @@ describe("lifecycle twins", () => {
     expect(lifecycle[0]!.payload.value.source).toBe(SessionSource.RESUME);
   });
 
+  it("a second system:init under one gate emits NO SessionStarted twin", () => {
+    // Arrange: the SDK re-inits per submit, which used to knock the SSM back
+    // to IDLE at exactly the moment a submit put it into THINKING.
+    const sessionGate = new SessionStartGate();
+    convert(loadStream("system_init"), { sessionGate });
+    // Act
+    const { lifecycle } = convert(loadStream("system_init"), { sessionGate });
+    // Assert
+    expect(lifecycle).toHaveLength(0);
+  });
+
+  it("the FIRST system:init under a gate still emits SessionStarted", () => {
+    // Arrange
+    const sessionGate = new SessionStartGate();
+    // Act
+    const { lifecycle } = convert(loadStream("system_init"), { sessionGate });
+    // Assert
+    expect(lifecycle[0]!.payload.case).toBe("sessionStarted");
+  });
+
+  it("a system:init announcing a NEW vendor session id re-emits SessionStarted", () => {
+    // Arrange: a conversation_reset / compact-continue genuinely starts a new
+    // session, so the gate must re-admit it.
+    const sessionGate = new SessionStartGate();
+    convert(loadStream("system_init"), { sessionGate });
+    const reinit = { ...(loadStream("system_init") as Record<string, unknown>), session_id: "a-different-uuid" };
+    // Act
+    const { lifecycle } = convert(reinit, { sessionGate });
+    // Assert
+    expect(lifecycle[0]!.payload.case).toBe("sessionStarted");
+  });
+
+  it("system:init emits SessionStarted when no gate is injected", () => {
+    // Arrange / Act: the single-message decode path (probes, unit tests) has
+    // no shim lifetime to be the second init of.
+    const { lifecycle } = convert(loadStream("system_init"));
+    // Assert
+    expect(lifecycle).toHaveLength(1);
+  });
+
   it("SessionStarted.source honors an explicit FRESH option", () => {
     // Arrange / Act
     const { lifecycle } = convert(loadStream("system_init"), { sessionSource: SessionSource.FRESH });
@@ -292,11 +346,10 @@ describe("lifecycle twins", () => {
     expect(lifecycle[0]!.payload.value.isError).toBe(false);
   });
 
-  it("non-tool-result user emits TurnStarted with a bounded preview", () => {
-    const { lifecycle } = convert(loadStream("user"));
-    expect(lifecycle).toHaveLength(1);
-    if (lifecycle[0]!.payload.case !== "turnStarted") throw new Error("case");
-    expect(lifecycle[0]!.payload.value.promptPreview).toBe("Reply with the single word ok and stop.");
+  it("a plain user message emits NO TurnStarted (turn start is shim-authoritative)", () => {
+    // A `user` message is a replayed echo, not a turn start: deriving one from
+    // it never fired for a live submit and double-counted turns on replay.
+    expect(convert(loadStream("user")).lifecycle).toHaveLength(0);
   });
 
   it("a tool-result user message emits NO TurnStarted", () => {
@@ -307,6 +360,16 @@ describe("lifecycle twins", () => {
       uuid: "u1",
     };
     expect(convert(toolResultUser).lifecycle).toHaveLength(0);
+  });
+
+  it("a REPLAYED user message emits NO TurnStarted", () => {
+    // Arrange: the resume/rehydration echo, the one shape that DID reach the
+    // old derivation and so double-counted the turn it was replaying.
+    const replayed = { ...(loadStream("user") as Record<string, unknown>), is_replay: true };
+    // Act
+    const { lifecycle } = convert(replayed);
+    // Assert
+    expect(lifecycle).toHaveLength(0);
   });
 
   it("task_started emits TaskStarted with SHELL kind for local_bash", () => {

@@ -21,14 +21,28 @@
  * emitted ALONGSIDE the vendor event (as separate Events the store also
  * persists), so consumers get a clean turn/task/session spine without
  * decoding the vendor payload:
- *   - system:init                 → SessionStarted
+ *   - system:init                 → SessionStarted (FIRST init only, gated by
+ *                                   {@link SessionStartGate})
  *   - result                      → TurnEnded
- *   - user (NOT a tool-result)    → TurnStarted (bounded prompt preview)
  *   - system:task_started         → TaskStarted
  *   - system:task_notification    → TaskEnded  (RawTaskStatus → TerminalStatus)
  *   - system:task_updated         → TaskEnded  (patch.status → TerminalStatus)
  *   - system:background_tasks_changed → vendor-only (no twin)
  * Dedup keys are NEVER set here: the store derives `uuid:`/`tur:` itself.
+ *
+ * TURN START IS NOT A TWIN. A `user` message is NOT a turn-start signal and
+ * this converter no longer derives one from it. Two reasons, both observed
+ * live:
+ *   1. The SDK echoes a `user` message only on REPLAY (resume / transcript
+ *      rehydration), never for a prompt the daemon just submitted — so the
+ *      derived TurnStarted never fired at the one moment it mattered and the
+ *      SSM never resolved THINKING for a live submit.
+ *   2. When an echo DOES arrive it is history, not a new turn, so counting it
+ *      as one double-counts turns against the TurnEnded from `result`.
+ * Turn start is therefore SHIM-AUTHORITATIVE: the session emits TurnStarted
+ * itself the moment it accepts a SubmitPrompt (see UdsSession.emitTurnStarted).
+ * The vendor stream has no message for "a turn began"; the shim is the only
+ * component that knows.
  *
  * CLASS: PERSISTENT for everything, EXCEPT `stream_event` / `tool_progress`,
  * which are EPHEMERAL (their live-typing/heartbeat relay is {@link
@@ -51,7 +65,6 @@ import {
   TaskStartedSchema,
   TerminalStatus,
   TurnEndedSchema,
-  TurnStartedSchema,
   type Event,
 } from "../uds/proto.js";
 import {
@@ -206,6 +219,42 @@ const COMPONENT = "claude-shim-convert";
 /** How far a TurnStarted prompt preview is bounded (first line, then chars). */
 const PROMPT_PREVIEW_CAP = 200;
 
+/**
+ * Bound a prompt to its TurnStarted preview: first line, then capped.
+ *
+ * Exported because the TurnStarted emitter now lives in the session (turn
+ * start is shim-authoritative, see the file header) while the bounding
+ * contract belongs here beside the rest of the proto shaping.
+ */
+export function promptPreview(text: string): string {
+  const firstLine = text.split("\n", 1)[0] ?? "";
+  return firstLine.slice(0, PROMPT_PREVIEW_CAP);
+}
+
+/**
+ * Admits the FIRST `system:init` of a shim lifetime (and any later init that
+ * announces a DIFFERENT vendor session id) to emit a SessionStarted twin.
+ *
+ * The SDK re-inits on every submit, so an ungated converter emitted a
+ * SessionStarted twin per prompt. Downstream that is not a harmless repeat:
+ * the SSM maps SessionStarted → IDLE, so a re-init landing at submit time
+ * knocked the workspace out of THINKING at exactly the moment it entered it.
+ * A session starts once; a re-init of the SAME session is not a new session.
+ *
+ * A CHANGED vendor session id is a genuinely new session (a
+ * conversation_reset, a compact-continue), so it re-admits.
+ */
+export class SessionStartGate {
+  private seen: string | null = null;
+
+  /** True when this init's SessionStarted twin should be emitted. */
+  admit(vendorSessionId: string): boolean {
+    if (this.seen === vendorSessionId) return false;
+    this.seen = vendorSessionId;
+    return true;
+  }
+}
+
 /** Wall-clock injection for deterministic tests. */
 export interface ConvertOptions {
   nowMs?: number;
@@ -216,6 +265,14 @@ export interface ConvertOptions {
    * pre-seam behavior, so every G4 test that omits it is unaffected.
    */
   sessionSource?: SessionSource;
+  /**
+   * The shim-lifetime gate deciding whether a `system:init` emits its
+   * SessionStarted twin. UdsSession always supplies one (it owns the shim
+   * lifetime the gate is scoped to). Absent — the single-message decode path
+   * used by probes and unit tests — every init emits its twin, because a
+   * lone convert() call has no lifetime to be the second init of.
+   */
+  sessionGate?: SessionStartGate;
 }
 
 /** The full result of converting one SDK message. */
@@ -581,15 +638,10 @@ function buildUser(message: Record<string, unknown>, r: Reader): Built {
     taskDescription: r.str("task_description", "taskDescription"),
   });
 
-  // A user message that is NOT a tool-result carrier is a genuine prompt turn.
-  const lifecyclePayloads: Event["payload"][] = [];
-  if (!carriesToolResult(rawMessage)) {
-    lifecyclePayloads.push({
-      case: "turnStarted",
-      value: create(TurnStartedSchema, { promptPreview: promptPreview(rawMessage) }),
-    });
-  }
-  return { csm: csm({ case: "user", value: userMsg }), lifecyclePayloads, typeLabel: "user", ephemeral: false };
+  // NO TurnStarted twin: a `user` message is a replayed echo, not a turn
+  // start (see the file header). The session emits TurnStarted at
+  // SubmitPrompt accept instead.
+  return { csm: csm({ case: "user", value: userMsg }), lifecyclePayloads: [], typeLabel: "user", ephemeral: false };
 }
 
 function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
@@ -761,15 +813,28 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
     productFeedbackDisabled: r.bool("product_feedback_disabled", "productFeedbackDisabled"),
     memoryPaths: strMap(r.obj("memory_paths", "memoryPaths")),
   });
-  const sessionStarted = create(SessionStartedSchema, {
-    source: opts?.sessionSource ?? SessionSource.FRESH,
-    model: init.model,
-    cwd: init.cwd,
-    vendorSessionId: init.sessionId,
-  });
+  // The SDK re-inits per submit; only the FIRST init of a shim lifetime (or
+  // one announcing a different vendor session id) is a session STARTING. See
+  // SessionStartGate: an ungated twin knocked the SSM back to IDLE at exactly
+  // the moment a submit put it into THINKING.
+  const admitted = opts?.sessionGate === undefined || opts.sessionGate.admit(init.sessionId);
+  const lifecyclePayloads: Event["payload"][] = [];
+  if (admitted) {
+    lifecyclePayloads.push({
+      case: "sessionStarted",
+      value: create(SessionStartedSchema, {
+        source: opts?.sessionSource ?? SessionSource.FRESH,
+        model: init.model,
+        cwd: init.cwd,
+        vendorSessionId: init.sessionId,
+      }),
+    });
+  } else {
+    shimLog(COMPONENT, { session: init.sessionId }, `system:init re-announced an already-started session; SessionStarted twin suppressed`);
+  }
   return {
     csm: csm({ case: "systemInit", value: init }),
-    lifecyclePayloads: [{ case: "sessionStarted", value: sessionStarted }],
+    lifecyclePayloads,
     typeLabel: label,
     ephemeral: false,
   };
@@ -1703,20 +1768,3 @@ function safeStringify(v: unknown): string {
   }
 }
 
-function carriesToolResult(rawMessage: Record<string, unknown>): boolean {
-  const content = rawMessage["content"];
-  return Array.isArray(content) && content.some((b) => isObject(b) && b["type"] === "tool_result");
-}
-
-function promptPreview(rawMessage: Record<string, unknown>): string {
-  const content = rawMessage["content"];
-  let text = "";
-  if (typeof content === "string") {
-    text = content;
-  } else if (Array.isArray(content)) {
-    const firstText = content.find((b) => isObject(b) && b["type"] === "text");
-    if (isObject(firstText)) text = strOf(firstText["text"]);
-  }
-  const firstLine = text.split("\n", 1)[0] ?? "";
-  return firstLine.slice(0, PROMPT_PREVIEW_CAP);
-}
