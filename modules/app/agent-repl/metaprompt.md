@@ -100,6 +100,18 @@
 - This rule is the design-level sibling of the invariants rule above.
   - Deliberate design features (an event classification, a replay protocol) are not fallbacks; the rule targets machinery whose only purpose is absorbing an anticipated failure.
 
+### "Structurally impossible" ALWAYS beats "very improbable"
+
+- When a failure mode can be made STRUCTURALLY IMPOSSIBLE by organizing the architecture or communication differently, that design is ALWAYS preferred over one where the failure is merely improbable.
+  - A "very improbable" failure is still a failure, and it arrives on the schedule of load, timing, restarts, and scale rather than never.
+  - Probabilistic mitigation (retries, sleeps, grace windows, "should be fast enough") is a tax paid forever; a structural guarantee is designed once and holds.
+- NEVER introduce (or tolerate) a race condition when a couple of minutes of architectural thought can eliminate it structurally.
+  - The moment I notice myself reaching for a retry, a delay, or an ordering convention, I stop and ask what reorganization would make the race unrepresentable.
+  - Typical structural tools: single ownership of the contended resource; a rendezvous owned by something that outlives both parties (e.g. an init-system-owned socket, where connects queue until the service accepts); scoping an operation to the connection or session that makes it valid, so ordering stops mattering; kernel-enforced exclusivity that dies with its holder (flock); readiness expressed as a latch the caller awaits rather than a duration the caller hopes covers it.
+  - Worked examples in this codebase: the session flock (uniqueness enforced by the kernel, not by "we probably won't spawn twice"); connection-scoped cursor recovery (boot ordering becomes irrelevant) versus a boot-time dial retry; the shim-readiness latch versus "wait probably long enough".
+- When surfacing design candidates, name explicitly whether each makes the failure impossible or merely unlikely.
+  - The distinction is a first-class engineering argument and often the deciding one.
+
 ### Never trade design correctness for expedience — invert the human cost model
 
 - NEVER propose, prefer, or default to a fix because it is "small", "quick", "minimal", "surgical", "low-risk", or "unblocks you now".
