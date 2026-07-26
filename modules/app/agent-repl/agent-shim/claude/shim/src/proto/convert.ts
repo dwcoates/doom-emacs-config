@@ -21,14 +21,28 @@
  * emitted ALONGSIDE the vendor event (as separate Events the store also
  * persists), so consumers get a clean turn/task/session spine without
  * decoding the vendor payload:
- *   - system:init                 → SessionStarted
+ *   - system:init                 → SessionStarted (FIRST init only, gated by
+ *                                   {@link SessionStartGate})
  *   - result                      → TurnEnded
- *   - user (NOT a tool-result)    → TurnStarted (bounded prompt preview)
  *   - system:task_started         → TaskStarted
  *   - system:task_notification    → TaskEnded  (RawTaskStatus → TerminalStatus)
  *   - system:task_updated         → TaskEnded  (patch.status → TerminalStatus)
  *   - system:background_tasks_changed → vendor-only (no twin)
  * Dedup keys are NEVER set here: the store derives `uuid:`/`tur:` itself.
+ *
+ * TURN START IS NOT A TWIN. A `user` message is NOT a turn-start signal and
+ * this converter no longer derives one from it. Two reasons, both observed
+ * live:
+ *   1. The SDK echoes a `user` message only on REPLAY (resume / transcript
+ *      rehydration), never for a prompt the daemon just submitted — so the
+ *      derived TurnStarted never fired at the one moment it mattered and the
+ *      SSM never resolved THINKING for a live submit.
+ *   2. When an echo DOES arrive it is history, not a new turn, so counting it
+ *      as one double-counts turns against the TurnEnded from `result`.
+ * Turn start is therefore SHIM-AUTHORITATIVE: the session emits TurnStarted
+ * itself the moment it accepts a SubmitPrompt (see UdsSession.emitTurnStarted).
+ * The vendor stream has no message for "a turn began"; the shim is the only
+ * component that knows.
  *
  * CLASS: PERSISTENT for everything, EXCEPT `stream_event` / `tool_progress`,
  * which are EPHEMERAL (their live-typing/heartbeat relay is {@link
@@ -51,7 +65,6 @@ import {
   TaskStartedSchema,
   TerminalStatus,
   TurnEndedSchema,
-  TurnStartedSchema,
   type Event,
 } from "../uds/proto.js";
 import {
@@ -80,13 +93,18 @@ import {
   ContentBlockStopEventSchema,
   ControlCancelRequestSchema,
   ControlRequestSchema,
+  ControlResponseBodySchema,
   ControlResponseSchema,
+  DeferredToolUseSchema,
   HookResponseSchema,
   HookStartedSchema,
   InputJsonDeltaSchema,
   KeepAliveSchema,
+  McpServerInfoSchema,
   McpServerState,
   McpServerStatusSchema,
+  McpToolAnnotationsSchema,
+  McpToolRefSchema,
   MessageDeltaEventSchema,
   MessageStartEventSchema,
   MessageStopEventSchema,
@@ -101,6 +119,7 @@ import {
   SignatureDeltaSchema,
   StatusMessageSchema,
   StreamEventSchema,
+  SubagentRetrySchema,
   SystemInitSchema,
   SystemNotificationSchema,
   TaskNotificationMsgSchema,
@@ -147,6 +166,12 @@ import {
   type ModelUsage,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import {
+  OriginKind,
+  OriginSchema,
+  PreservedMessagesSchema,
+  PreservedSegmentSchema,
+} from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
+import {
   ApiAssistantMessageSchema,
   ApiContentBlocksSchema,
   ApiUsageSchema,
@@ -185,6 +210,12 @@ import {
   TaskUpdateResultSchema,
   TextBlockSchema,
   ThinkingBlockSchema,
+  ArtifactResultSchema,
+  GlobResultSchema,
+  GrepResultSchema,
+  StructuredOutputResultSchema,
+  TaskGetResultSchema,
+  TaskRecordSchema,
   ToolReferenceBlockSchema,
   ToolResultBlockListSchema,
   ToolResultBlockSchema,
@@ -206,6 +237,42 @@ const COMPONENT = "claude-shim-convert";
 /** How far a TurnStarted prompt preview is bounded (first line, then chars). */
 const PROMPT_PREVIEW_CAP = 200;
 
+/**
+ * Bound a prompt to its TurnStarted preview: first line, then capped.
+ *
+ * Exported because the TurnStarted emitter now lives in the session (turn
+ * start is shim-authoritative, see the file header) while the bounding
+ * contract belongs here beside the rest of the proto shaping.
+ */
+export function promptPreview(text: string): string {
+  const firstLine = text.split("\n", 1)[0] ?? "";
+  return firstLine.slice(0, PROMPT_PREVIEW_CAP);
+}
+
+/**
+ * Admits the FIRST `system:init` of a shim lifetime (and any later init that
+ * announces a DIFFERENT vendor session id) to emit a SessionStarted twin.
+ *
+ * The SDK re-inits on every submit, so an ungated converter emitted a
+ * SessionStarted twin per prompt. Downstream that is not a harmless repeat:
+ * the SSM maps SessionStarted → IDLE, so a re-init landing at submit time
+ * knocked the workspace out of THINKING at exactly the moment it entered it.
+ * A session starts once; a re-init of the SAME session is not a new session.
+ *
+ * A CHANGED vendor session id is a genuinely new session (a
+ * conversation_reset, a compact-continue), so it re-admits.
+ */
+export class SessionStartGate {
+  private seen: string | null = null;
+
+  /** True when this init's SessionStarted twin should be emitted. */
+  admit(vendorSessionId: string): boolean {
+    if (this.seen === vendorSessionId) return false;
+    this.seen = vendorSessionId;
+    return true;
+  }
+}
+
 /** Wall-clock injection for deterministic tests. */
 export interface ConvertOptions {
   nowMs?: number;
@@ -216,6 +283,14 @@ export interface ConvertOptions {
    * pre-seam behavior, so every G4 test that omits it is unaffected.
    */
   sessionSource?: SessionSource;
+  /**
+   * The shim-lifetime gate deciding whether a `system:init` emits its
+   * SessionStarted twin. UdsSession always supplies one (it owns the shim
+   * lifetime the gate is scoped to). Absent — the single-message decode path
+   * used by probes and unit tests — every init emits its twin, because a
+   * lone convert() call has no lifetime to be the second init of.
+   */
+  sessionGate?: SessionStartGate;
 }
 
 /** The full result of converting one SDK message. */
@@ -380,7 +455,7 @@ function build(type: string, message: Record<string, unknown>, r: Reader, opts?:
     case "control_request":
       return vendorOnly({ case: "controlRequest", value: create(ControlRequestSchema, { requestId: r.str("request_id", "requestId"), request: r.struct("request") }) }, type);
     case "control_response":
-      return vendorOnly({ case: "controlResponse", value: create(ControlResponseSchema, { requestId: r.str("request_id", "requestId"), response: r.struct("response") }) }, type);
+      return buildControlResponse(message, r);
     case "control_cancel_request":
       return vendorOnly({ case: "controlCancelRequest", value: create(ControlCancelRequestSchema, { requestId: r.str("request_id", "requestId") }) }, type);
     case "keep_alive":
@@ -444,7 +519,14 @@ function buildSystem(message: Record<string, unknown>, r: Reader, opts?: Convert
     case "init":
       return buildSystemInit(message, r, label, opts);
     case "status":
-      return vendorOnly({ case: "status", value: create(StatusMessageSchema, { status: r.str("status"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+      return vendorOnly({ case: "status", value: create(StatusMessageSchema, {
+        status: r.str("status"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+        permissionMode: r.str("permissionMode", "permission_mode"),
+        compactResult: r.str("compact_result", "compactResult"),
+        compactError: r.str("compact_error", "compactError"),
+      }) }, label);
     case "hook_response":
       return buildHookResponse(message, r, label);
     case "hook_started":
@@ -579,17 +661,18 @@ function buildUser(message: Record<string, unknown>, r: Reader): Built {
     // itself lives on `parent_tool_use_id`).
     subagentType: r.str("subagent_type", "subagentType"),
     taskDescription: r.str("task_description", "taskDescription"),
+    // [sdk 0.3.220]:
+    timestamp: r.str("timestamp"),
+    priority: r.str("priority"),
+    origin: convertOrigin(r.obj("origin")),
+    shouldQuery: r.bool("should_query", "shouldQuery"),
+    fileAttachments: asListValueOpt(r.val("file_attachments", "fileAttachments")),
   });
 
-  // A user message that is NOT a tool-result carrier is a genuine prompt turn.
-  const lifecyclePayloads: Event["payload"][] = [];
-  if (!carriesToolResult(rawMessage)) {
-    lifecyclePayloads.push({
-      case: "turnStarted",
-      value: create(TurnStartedSchema, { promptPreview: promptPreview(rawMessage) }),
-    });
-  }
-  return { csm: csm({ case: "user", value: userMsg }), lifecyclePayloads, typeLabel: "user", ephemeral: false };
+  // NO TurnStarted twin: a `user` message is a replayed echo, not a turn
+  // start (see the file header). The session emits TurnStarted at
+  // SubmitPrompt accept instead.
+  return { csm: csm({ case: "user", value: userMsg }), lifecyclePayloads: [], typeLabel: "user", ephemeral: false };
 }
 
 function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
@@ -606,6 +689,14 @@ function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
     hasError,
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    // [sdk 0.3.220]:
+    requestId: r.str("request_id", "requestId"),
+    timestamp: r.str("timestamp"),
+    resumedFromIncompleteThinking: r.bool("resumed_from_incomplete_thinking", "resumedFromIncompleteThinking"),
+    supersedes: r.strList("supersedes"),
+    aborted: r.bool("aborted"),
+    subagentType: r.str("subagent_type", "subagentType"),
+    taskDescription: r.str("task_description", "taskDescription"),
   });
   return { csm: csm({ case: "assistant", value: assistantMsg }), lifecyclePayloads: [], typeLabel: "assistant", ephemeral: false };
 }
@@ -635,6 +726,15 @@ function buildResult(message: Record<string, unknown>, r: Reader): Built {
     stopReason: r.str("stop_reason", "stopReason"),
     terminalReason: r.str("terminal_reason", "terminalReason"),
     fastModeState: r.str("fast_mode_state", "fastModeState"),
+    // [sdk 0.3.220]:
+    userMessageUuid: r.str("user_message_uuid", "userMessageUuid"),
+    requestSentWallMs: r.big("request_sent_wall_ms", "requestSentWallMs"),
+    timeToRequestFromSpawnMs: r.big("time_to_request_from_spawn_ms", "timeToRequestFromSpawnMs"),
+    warmSpareClaimed: r.bool("warm_spare_claimed", "warmSpareClaimed"),
+    timeOriginMs: r.big("time_origin_ms", "timeOriginMs"),
+    deferredToolUse: convertDeferredToolUse(r.obj("deferred_tool_use", "deferredToolUse")),
+    fastModeDisabledReason: r.str("fast_mode_disabled_reason", "fastModeDisabledReason"),
+    origin: convertOrigin(r.obj("origin")),
   });
   const turnEnded = create(TurnEndedSchema, {
     stopReason: result.stopReason,
@@ -718,8 +818,146 @@ function buildToolProgress(message: Record<string, unknown>, r: Reader): Built {
     elapsedTimeSeconds: r.num("elapsed_time_seconds", "elapsedTimeSeconds"),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    // [sdk 0.3.220]:
+    taskId: r.str("task_id", "taskId"),
+    heartbeat: r.bool("heartbeat"),
+    subagentType: r.str("subagent_type", "subagentType"),
+    subagentRetry: convertSubagentRetry(r.obj("subagent_retry", "subagentRetry")),
   });
   return { csm: csm({ case: "toolProgress", value: tp }), lifecyclePayloads: [], typeLabel: "tool_progress", ephemeral: true };
+}
+
+/**
+ * control_response — the STRUCTURAL arm (see stream.proto's ControlResponse).
+ *
+ * The wire nests everything under `response`; there is NO top-level
+ * `request_id` sibling, so reading one always produced "" and correlating a
+ * response back to its request was impossible. The id is LIFTED out of the
+ * nested body onto field 1, and the body is also captured typed.
+ */
+function buildControlResponse(message: Record<string, unknown>, r: Reader): Built {
+  const raw = r.obj("response");
+  const body = raw === undefined ? undefined : create(ControlResponseBodySchema, {
+    subtype: strOf(pick(raw, "subtype")),
+    requestId: strOf(pick(raw, "request_id", "requestId")),
+    response: asStructOpt(pick(raw, "response")),
+    error: strOf(pick(raw, "error")),
+    pendingPermissionRequests: structList(pick(raw, "pending_permission_requests", "pendingPermissionRequests")),
+    pendingUserDialogRequests: structList(pick(raw, "pending_user_dialog_requests", "pendingUserDialogRequests")),
+  });
+  return vendorOnly({ case: "controlResponse", value: create(ControlResponseSchema, {
+    requestId: body?.requestId ?? "",
+    response: asStructOpt(raw),
+    body,
+  }) }, "control_response");
+}
+
+/** Every JSON object in a list, as Structs (non-objects are skipped). */
+function structList(raw: unknown): JsonObject[] {
+  return Array.isArray(raw) ? raw.filter(isObject).map(asStruct) : [];
+}
+
+/**
+ * A message's provenance. ONE model for both planes (Origin lives in
+ * transcript.proto); the `kind` discriminates which of the payload fields are
+ * meaningful.
+ *
+ * An absent origin stays UNSET — never defaulted to HUMAN, which is exactly
+ * the attribution a strict trust gate must refuse to invent.
+ */
+function convertOrigin(raw: Record<string, unknown> | undefined) {
+  if (raw === undefined) return undefined;
+  const pid = pick(raw, "verifiedPeerPid", "verified_peer_pid");
+  return create(OriginSchema, {
+    kind: originKindEnum(strOf(pick(raw, "kind"))),
+    server: strOf(pick(raw, "server")),
+    from: strOf(pick(raw, "from")),
+    name: strOf(pick(raw, "name")),
+    fromSession: strOf(pick(raw, "fromSession", "from_session")),
+    senderTaskId: strOf(pick(raw, "senderTaskId", "sender_task_id")),
+    body: strOf(pick(raw, "body")),
+    verifiedPeerPid: bigOf(pid),
+    verifiedPeerPidSet: pid !== undefined && pid !== null,
+    subkind: strOf(pick(raw, "subkind")),
+  });
+}
+
+function originKindEnum(s: string): OriginKind {
+  switch (s) {
+    case "human": return OriginKind.HUMAN;
+    case "task-notification":
+    case "task_notification": return OriginKind.TASK_NOTIFICATION;
+    case "coordinator": return OriginKind.COORDINATOR;
+    case "channel": return OriginKind.CHANNEL;
+    case "peer": return OriginKind.PEER;
+    case "observer": return OriginKind.OBSERVER;
+    case "auto-continuation":
+    case "auto_continuation": return OriginKind.AUTO_CONTINUATION;
+    case "observer-activity":
+    case "observer_activity": return OriginKind.OBSERVER_ACTIVITY;
+    default: return OriginKind.UNSPECIFIED;
+  }
+}
+
+/** The tool a deferred turn ended without running. */
+function convertDeferredToolUse(raw: Record<string, unknown> | undefined) {
+  if (raw === undefined) return undefined;
+  return create(DeferredToolUseSchema, {
+    id: strOf(pick(raw, "id")),
+    name: strOf(pick(raw, "name")),
+    input: asStructOpt(pick(raw, "input")),
+  });
+}
+
+/** A subagent's retry/backoff state, so a stall reads as "retrying". */
+function convertSubagentRetry(raw: Record<string, unknown> | undefined) {
+  if (raw === undefined) return undefined;
+  const status = pick(raw, "error_status", "errorStatus");
+  return create(SubagentRetrySchema, {
+    agentId: strOf(pick(raw, "agent_id", "agentId")),
+    attempt: numOf(pick(raw, "attempt")),
+    maxRetries: numOf(pick(raw, "max_retries", "maxRetries")),
+    retryDelayMs: bigOf(pick(raw, "retry_delay_ms", "retryDelayMs")),
+    errorStatus: bigOf(status),
+    errorStatusSet: status !== undefined && status !== null,
+    errorCategory: strOf(pick(raw, "error_category", "errorCategory")),
+  });
+}
+
+/** compact_metadata.preserved_segment (shared with the disk twin). */
+function convertPreservedSegment(raw: Record<string, unknown> | undefined) {
+  if (raw === undefined) return undefined;
+  return create(PreservedSegmentSchema, {
+    headUuid: strOf(pick(raw, "head_uuid", "headUuid")),
+    anchorUuid: strOf(pick(raw, "anchor_uuid", "anchorUuid")),
+    tailUuid: strOf(pick(raw, "tail_uuid", "tailUuid")),
+  });
+}
+
+/** compact_metadata.preserved_messages (shared with the disk twin). */
+function convertPreservedMessages(raw: Record<string, unknown> | undefined) {
+  if (raw === undefined) return undefined;
+  return create(PreservedMessagesSchema, {
+    anchorUuid: strOf(pick(raw, "anchor_uuid", "anchorUuid")),
+    uuids: strListOf(pick(raw, "uuids")),
+    allUuids: strListOf(pick(raw, "all_uuids", "allUuids")),
+  });
+}
+
+/**
+ * Whether a task-patch status actually ENDS the task. 0.3.220's vocabulary
+ * includes "pending", "running" and "paused", none of which is terminal.
+ */
+function isTerminalTaskStatus(status: string): boolean {
+  switch (status) {
+    case "completed":
+    case "failed":
+    case "killed":
+    case "stopped":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function buildAuthStatus(message: Record<string, unknown>, r: Reader): Built {
@@ -760,16 +998,30 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
     analyticsDisabled: r.bool("analytics_disabled", "analyticsDisabled"),
     productFeedbackDisabled: r.bool("product_feedback_disabled", "productFeedbackDisabled"),
     memoryPaths: strMap(r.obj("memory_paths", "memoryPaths")),
+    fastModeDisabledReason: r.str("fast_mode_disabled_reason", "fastModeDisabledReason"),
   });
-  const sessionStarted = create(SessionStartedSchema, {
-    source: opts?.sessionSource ?? SessionSource.FRESH,
-    model: init.model,
-    cwd: init.cwd,
-    vendorSessionId: init.sessionId,
-  });
+  // The SDK re-inits per submit; only the FIRST init of a shim lifetime (or
+  // one announcing a different vendor session id) is a session STARTING. See
+  // SessionStartGate: an ungated twin knocked the SSM back to IDLE at exactly
+  // the moment a submit put it into THINKING.
+  const admitted = opts?.sessionGate === undefined || opts.sessionGate.admit(init.sessionId);
+  const lifecyclePayloads: Event["payload"][] = [];
+  if (admitted) {
+    lifecyclePayloads.push({
+      case: "sessionStarted",
+      value: create(SessionStartedSchema, {
+        source: opts?.sessionSource ?? SessionSource.FRESH,
+        model: init.model,
+        cwd: init.cwd,
+        vendorSessionId: init.sessionId,
+      }),
+    });
+  } else {
+    shimLog(COMPONENT, { session: init.sessionId }, `system:init re-announced an already-started session; SessionStarted twin suppressed`);
+  }
   return {
     csm: csm({ case: "systemInit", value: init }),
-    lifecyclePayloads: [{ case: "sessionStarted", value: sessionStarted }],
+    lifecyclePayloads,
     typeLabel: label,
     ephemeral: false,
   };
@@ -799,6 +1051,12 @@ function buildCompactBoundary(message: Record<string, unknown>, r: Reader, label
     preTokens: r.big("pre_tokens", "preTokens"),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    // [sdk 0.3.220] the stream type caught up to the disk twin, so compaction
+    // is measurable here and not just marked.
+    postTokens: r.big("post_tokens", "postTokens"),
+    durationMs: r.big("duration_ms", "durationMs"),
+    preservedSegment: convertPreservedSegment(r.obj("preserved_segment", "preservedSegment")),
+    preservedMessages: convertPreservedMessages(r.obj("preserved_messages", "preservedMessages")),
   });
   return vendorOnly({ case: "compactBoundary", value: cb }, label);
 }
@@ -814,6 +1072,14 @@ function buildRateLimitEvent(message: Record<string, unknown>, r: Reader): Built
       isUsingOverage: pick(info, "is_using_overage", "isUsingOverage") === true,
       overageInUse: pick(info, "overage_in_use", "overageInUse") === true,
       surpassedThreshold: numOf(pick(info, "surpassed_threshold", "surpassedThreshold")),
+      // [sdk 0.3.220] the overage/credit half — the part that says whether the
+      // user is blocked and what they could do about it.
+      overageStatus: strOf(pick(info, "overage_status", "overageStatus")),
+      overageResetsAt: bigOf(pick(info, "overage_resets_at", "overageResetsAt")),
+      overageDisabledReason: strOf(pick(info, "overage_disabled_reason", "overageDisabledReason")),
+      errorCode: strOf(pick(info, "error_code", "errorCode")),
+      canUserPurchaseCredits: pick(info, "can_user_purchase_credits", "canUserPurchaseCredits") === true,
+      hasChargeableSavedPaymentMethod: pick(info, "has_chargeable_saved_payment_method", "hasChargeableSavedPaymentMethod") === true,
     }),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
@@ -837,6 +1103,8 @@ function buildTaskStarted(message: Record<string, unknown>, r: Reader, label: st
     prompt: r.str("prompt"),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    workflowName: r.str("workflow_name", "workflowName"),
+    skipTranscript: r.bool("skip_transcript", "skipTranscript"),
   });
   const taskStarted = create(TaskStartedSchema, {
     taskId,
@@ -862,21 +1130,35 @@ function buildTaskUpdated(message: Record<string, unknown>, r: Reader, label: st
     patch: patchObj === undefined ? undefined : create(TaskPatchSchema, {
       status,
       endTime: bigOf(pick(patchObj, "end_time", "endTime")),
+      // [sdk 0.3.220]:
+      description: strOf(pick(patchObj, "description")),
+      totalPausedMs: bigOf(pick(patchObj, "total_paused_ms", "totalPausedMs")),
+      error: strOf(pick(patchObj, "error")),
+      isBackgrounded: pick(patchObj, "is_backgrounded", "isBackgrounded") === true,
     }),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
   });
-  const taskEnded = create(TaskEndedSchema, {
-    taskId,
-    kind: TaskKind.UNSPECIFIED,
-    status: terminalStatusEnum(status),
-    summary: "",
-    outputPath: "",
-    inference: "",
-  });
+  // A patch is NOT automatically a task ending: 0.3.220's vocabulary includes
+  // "pending", "running" and "paused". Emitting a TaskEnded for those decremented
+  // the live-task counter for a task that was still running.
+  const lifecyclePayloads: Event["payload"][] = [];
+  if (isTerminalTaskStatus(status)) {
+    lifecyclePayloads.push({
+      case: "taskEnded",
+      value: create(TaskEndedSchema, {
+        taskId,
+        kind: TaskKind.UNSPECIFIED,
+        status: terminalStatusEnum(status),
+        summary: "",
+        outputPath: "",
+        inference: "",
+      }),
+    });
+  }
   return {
     csm: csm({ case: "taskUpdated", value: msg }),
-    lifecyclePayloads: [{ case: "taskEnded", value: taskEnded }],
+    lifecyclePayloads,
     typeLabel: label,
     ephemeral: false,
   };
@@ -901,6 +1183,7 @@ function buildTaskNotification(message: Record<string, unknown>, r: Reader, labe
     }),
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
+    skipTranscript: r.bool("skip_transcript", "skipTranscript"),
   });
   const taskEnded = create(TaskEndedSchema, {
     taskId,
@@ -1140,7 +1423,10 @@ function convertBlock(raw: Record<string, unknown>): ContentBlock | null {
     case "image":
       return create(ContentBlockSchema, { block: { case: "image", value: create(ImageBlockSchema, { source: convertImageSource(raw["source"]) }) } });
     case "tool_reference":
-      return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, { reference: asStruct(raw) }) } });
+      return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, {
+        reference: asStruct(raw),
+        toolName: strOf(pick(raw, "tool_name", "toolName")),
+      }) } });
     case "fallback":
       return create(ContentBlockSchema, { block: { case: "fallback", value: create(FallbackBlockSchema, { from: fallbackModel(raw["from"]), to: fallbackModel(raw["to"]) }) } });
     case "redacted_thinking":
@@ -1271,6 +1557,11 @@ export function convertToolUseResult(raw: unknown, sessionId = ""): ToolUseResul
   return create(ToolUseResultSchema, { result: { case: "unclassified", value: raw as JsonObject } });
 }
 
+/** True when `o` is an object carrying at least one of `keys`. */
+function anyIn(o: unknown, ...keys: string[]): boolean {
+  return isObject(o) && keys.some((k) => k in o);
+}
+
 function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"] | null {
   const has = (...k: string[]) => k.every((x) => x in o);
   const any = (...k: string[]) => k.some((x) => x in o);
@@ -1311,6 +1602,26 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       taskId: strOf(pick(o, "task_id", "taskId")),
       taskType: strOf(pick(o, "task_type", "taskType")),
       command: strOf(o["command"]),
+    }) };
+  }
+  // TaskGet before TaskCreate: BOTH key on `task`, and only TaskGet's carries
+  // the dependency lists. `task` is also NULLABLE here, and a null task is
+  // still a TaskGet result rather than something unidentifiable.
+  if (has("task") && o["task"] === null) {
+    return { case: "taskGet", value: create(TaskGetResultSchema, { taskSet: false }) };
+  }
+  if (has("task") && isObject(o["task"]) && anyIn(o["task"], "blocks", "blockedBy", "blocked_by")) {
+    const t = o["task"];
+    return { case: "taskGet", value: create(TaskGetResultSchema, {
+      taskSet: true,
+      task: create(TaskRecordSchema, {
+        id: strOf(pick(t, "id")),
+        subject: strOf(pick(t, "subject")),
+        description: strOf(pick(t, "description")),
+        status: strOf(pick(t, "status")),
+        blocks: strListOf(pick(t, "blocks")),
+        blockedBy: strListOf(pick(t, "blocked_by", "blockedBy")),
+      }),
     }) };
   }
   if (has("task") && isObject(o["task"])) {
@@ -1402,6 +1713,50 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   if (o["type"] === "text" && isObject(o["file"])) {
     return { case: "read", value: create(ReadResultSchema, { type: strOf(o["type"]), file: o["file"] as JsonObject }) };
   }
+  // Glob: filenames + a duration, and NO grep-only key. Checked before grep
+  // because both carry `filenames`.
+  if (has("filenames") && any("durationMs", "duration_ms") && !any("mode", "numMatches", "num_matches", "content")) {
+    return { case: "glob", value: create(GlobResultSchema, {
+      durationMs: bigOf(pick(o, "duration_ms", "durationMs")),
+      numFiles: bigOf(pick(o, "num_files", "numFiles")),
+      filenames: strListOf(o["filenames"]),
+      truncated: o["truncated"] === true,
+      totalMatches: bigOf(pick(o, "total_matches", "totalMatches")),
+      countIsComplete: pick(o, "count_is_complete", "countIsComplete") === true,
+    }) };
+  }
+  if (has("filenames") && any("mode", "numMatches", "num_matches", "numLines", "num_lines")) {
+    return { case: "grep", value: create(GrepResultSchema, {
+      mode: strOf(o["mode"]),
+      numFiles: bigOf(pick(o, "num_files", "numFiles")),
+      filenames: strListOf(o["filenames"]),
+      content: strOf(o["content"]),
+      numLines: bigOf(pick(o, "num_lines", "numLines")),
+      numMatches: bigOf(pick(o, "num_matches", "numMatches")),
+      totalFiles: bigOf(pick(o, "total_files", "totalFiles")),
+      totalLines: bigOf(pick(o, "total_lines", "totalLines")),
+      appliedLimit: bigOf(pick(o, "applied_limit", "appliedLimit")),
+      appliedOffset: bigOf(pick(o, "applied_offset", "appliedOffset")),
+    }) };
+  }
+  if (any("url", "artifactUrl", "artifact_url") && any("favicon", "label", "version") && !has("code")) {
+    return { case: "artifact", value: create(ArtifactResultSchema, {
+      url: strOf(pick(o, "url", "artifact_url", "artifactUrl")),
+      title: strOf(o["title"]),
+      description: strOf(o["description"]),
+      label: strOf(o["label"]),
+      version: strOf(o["version"]),
+    }) };
+  }
+  // StructuredOutput: the caller's OWN schema under a `structuredOutput` key.
+  // Schemaless by design, so captured whole rather than guessed at — but
+  // CLASSIFIED, so it no longer lands in `unclassified` alongside genuinely
+  // unidentifiable objects.
+  if (any("structuredOutput", "structured_output")) {
+    return { case: "structuredOutput", value: create(StructuredOutputResultSchema, {
+      data: asStructOpt(pick(o, "structured_output", "structuredOutput")),
+    }) };
+  }
   return null;
 }
 
@@ -1448,6 +1803,8 @@ function convertModelUsage(raw: Record<string, unknown> | undefined): Record<str
       costUsd: numOf(pick(v, "cost_usd", "costUSD", "costUsd")),
       contextWindow: bigOf(pick(v, "context_window", "contextWindow")),
       maxOutputTokens: bigOf(pick(v, "max_output_tokens", "maxOutputTokens")),
+      canonicalModel: strOf(pick(v, "canonical_model", "canonicalModel")),
+      provider: strOf(pick(v, "provider")),
     });
   }
   return out;
@@ -1464,10 +1821,41 @@ function convertPermissionDenials(raw: unknown[] | undefined) {
 
 function convertMcpServers(raw: unknown[] | undefined) {
   if (raw === undefined) return [];
-  return raw.filter(isObject).map((s) => create(McpServerStatusSchema, {
-    name: strOf(pick(s, "name")),
-    status: mcpStateEnum(strOf(pick(s, "status"))),
-  }));
+  return raw.filter(isObject).map((s) => {
+    const info = pick(s, "server_info", "serverInfo");
+    return create(McpServerStatusSchema, {
+      name: strOf(pick(s, "name")),
+      status: mcpStateEnum(strOf(pick(s, "status"))),
+      // The rich fields ride the control channel's mcp_server_status response,
+      // not `system:init` (which carries only {name,status}); one message
+      // models both, so these are simply unset on the init path.
+      serverInfo: isObject(info)
+        ? create(McpServerInfoSchema, { name: strOf(pick(info, "name")), version: strOf(pick(info, "version")) })
+        : undefined,
+      error: strOf(pick(s, "error")),
+      config: asStructOpt(pick(s, "config")),
+      scope: strOf(pick(s, "scope")),
+      tools: convertMcpTools(pick(s, "tools")),
+    });
+  });
+}
+
+function convertMcpTools(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isObject).map((t) => {
+    const ann = pick(t, "annotations");
+    return create(McpToolRefSchema, {
+      name: strOf(pick(t, "name")),
+      description: strOf(pick(t, "description")),
+      annotations: isObject(ann)
+        ? create(McpToolAnnotationsSchema, {
+            readOnly: pick(ann, "readOnly", "read_only") === true,
+            destructive: pick(ann, "destructive") === true,
+            openWorld: pick(ann, "openWorld", "open_world") === true,
+          })
+        : undefined,
+    });
+  });
 }
 
 /** Coerce a JSON object into a proto map<string,string>; non-string values drop. */
@@ -1512,6 +1900,12 @@ function assistantErrorEnum(s: string): AssistantMessageError {
     case "rate_limit": return AssistantMessageError.RATE_LIMIT;
     case "invalid_request": return AssistantMessageError.INVALID_REQUEST;
     case "server_error": return AssistantMessageError.SERVER_ERROR;
+    // The rest of the 10-member 0.3.220 vocabulary. Without these four, four
+    // distinct failures were reported to the user as "unknown".
+    case "oauth_org_not_allowed": return AssistantMessageError.OAUTH_ORG_NOT_ALLOWED;
+    case "overloaded": return AssistantMessageError.OVERLOADED;
+    case "model_not_found": return AssistantMessageError.MODEL_NOT_FOUND;
+    case "max_output_tokens": return AssistantMessageError.MAX_OUTPUT_TOKENS;
     default: return AssistantMessageError.UNKNOWN;
   }
 }
@@ -1531,8 +1925,13 @@ function mcpStateEnum(s: string): McpServerState {
   switch (s) {
     case "connected": return McpServerState.CONNECTED;
     case "failed": return McpServerState.FAILED;
+    // The wire spelling is HYPHENATED. Matching only "needs_auth" meant a
+    // server actually waiting on the user converted to UNSPECIFIED, so the one
+    // status a human has to act on was the one that got lost.
+    case "needs-auth":
     case "needs_auth": return McpServerState.NEEDS_AUTH;
     case "pending": return McpServerState.PENDING;
+    case "disabled": return McpServerState.DISABLED;
     default: return McpServerState.UNSPECIFIED;
   }
 }
@@ -1703,20 +2102,3 @@ function safeStringify(v: unknown): string {
   }
 }
 
-function carriesToolResult(rawMessage: Record<string, unknown>): boolean {
-  const content = rawMessage["content"];
-  return Array.isArray(content) && content.some((b) => isObject(b) && b["type"] === "tool_result");
-}
-
-function promptPreview(rawMessage: Record<string, unknown>): string {
-  const content = rawMessage["content"];
-  let text = "";
-  if (typeof content === "string") {
-    text = content;
-  } else if (Array.isArray(content)) {
-    const firstText = content.find((b) => isObject(b) && b["type"] === "text");
-    if (isObject(firstText)) text = strOf(firstText["text"]);
-  }
-  const firstLine = text.split("\n", 1)[0] ?? "";
-  return firstLine.slice(0, PROMPT_PREVIEW_CAP);
-}

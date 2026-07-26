@@ -4,14 +4,17 @@ import { fileURLToPath } from "node:url";
 import { toJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyUnpack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
-import { convert, convertToolUseResult } from "../src/proto/convert.js";
+import { SessionStartGate, convert, convertToolUseResult, promptPreview } from "../src/proto/convert.js";
 import { __resetExtrasSeen } from "../src/proto/extras.js";
 import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
 import {
   ApiKeySource,
+  AssistantMessageError,
   ClaudeStreamMessageSchema,
+  McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
 const streamDir = fileURLToPath(new URL("../../../../testdata/corpus/stream/", import.meta.url));
@@ -249,6 +252,20 @@ describe("user", () => {
 // Lifecycle twins.
 // ---------------------------------------------------------------------------
 
+describe("promptPreview", () => {
+  it("keeps only the first line", () => {
+    expect(promptPreview("first line\nsecond line")).toBe("first line");
+  });
+
+  it("caps the preview at 200 characters", () => {
+    expect(promptPreview("x".repeat(500))).toHaveLength(200);
+  });
+
+  it("passes a short single-line prompt through unchanged", () => {
+    expect(promptPreview("hello there")).toBe("hello there");
+  });
+});
+
 describe("lifecycle twins", () => {
   it("system:init emits SessionStarted", () => {
     const { lifecycle } = convert(loadStream("system_init"));
@@ -275,6 +292,46 @@ describe("lifecycle twins", () => {
     expect(lifecycle[0]!.payload.value.source).toBe(SessionSource.RESUME);
   });
 
+  it("a second system:init under one gate emits NO SessionStarted twin", () => {
+    // Arrange: the SDK re-inits per submit, which used to knock the SSM back
+    // to IDLE at exactly the moment a submit put it into THINKING.
+    const sessionGate = new SessionStartGate();
+    convert(loadStream("system_init"), { sessionGate });
+    // Act
+    const { lifecycle } = convert(loadStream("system_init"), { sessionGate });
+    // Assert
+    expect(lifecycle).toHaveLength(0);
+  });
+
+  it("the FIRST system:init under a gate still emits SessionStarted", () => {
+    // Arrange
+    const sessionGate = new SessionStartGate();
+    // Act
+    const { lifecycle } = convert(loadStream("system_init"), { sessionGate });
+    // Assert
+    expect(lifecycle[0]!.payload.case).toBe("sessionStarted");
+  });
+
+  it("a system:init announcing a NEW vendor session id re-emits SessionStarted", () => {
+    // Arrange: a conversation_reset / compact-continue genuinely starts a new
+    // session, so the gate must re-admit it.
+    const sessionGate = new SessionStartGate();
+    convert(loadStream("system_init"), { sessionGate });
+    const reinit = { ...(loadStream("system_init") as Record<string, unknown>), session_id: "a-different-uuid" };
+    // Act
+    const { lifecycle } = convert(reinit, { sessionGate });
+    // Assert
+    expect(lifecycle[0]!.payload.case).toBe("sessionStarted");
+  });
+
+  it("system:init emits SessionStarted when no gate is injected", () => {
+    // Arrange / Act: the single-message decode path (probes, unit tests) has
+    // no shim lifetime to be the second init of.
+    const { lifecycle } = convert(loadStream("system_init"));
+    // Assert
+    expect(lifecycle).toHaveLength(1);
+  });
+
   it("SessionStarted.source honors an explicit FRESH option", () => {
     // Arrange / Act
     const { lifecycle } = convert(loadStream("system_init"), { sessionSource: SessionSource.FRESH });
@@ -292,11 +349,10 @@ describe("lifecycle twins", () => {
     expect(lifecycle[0]!.payload.value.isError).toBe(false);
   });
 
-  it("non-tool-result user emits TurnStarted with a bounded preview", () => {
-    const { lifecycle } = convert(loadStream("user"));
-    expect(lifecycle).toHaveLength(1);
-    if (lifecycle[0]!.payload.case !== "turnStarted") throw new Error("case");
-    expect(lifecycle[0]!.payload.value.promptPreview).toBe("Reply with the single word ok and stop.");
+  it("a plain user message emits NO TurnStarted (turn start is shim-authoritative)", () => {
+    // A `user` message is a replayed echo, not a turn start: deriving one from
+    // it never fired for a live submit and double-counted turns on replay.
+    expect(convert(loadStream("user")).lifecycle).toHaveLength(0);
   });
 
   it("a tool-result user message emits NO TurnStarted", () => {
@@ -307,6 +363,16 @@ describe("lifecycle twins", () => {
       uuid: "u1",
     };
     expect(convert(toolResultUser).lifecycle).toHaveLength(0);
+  });
+
+  it("a REPLAYED user message emits NO TurnStarted", () => {
+    // Arrange: the resume/rehydration echo, the one shape that DID reach the
+    // old derivation and so double-counted the turn it was replaying.
+    const replayed = { ...(loadStream("user") as Record<string, unknown>), is_replay: true };
+    // Act
+    const { lifecycle } = convert(replayed);
+    // Assert
+    expect(lifecycle).toHaveLength(0);
   });
 
   it("task_started emits TaskStarted with SHELL kind for local_bash", () => {
@@ -875,6 +941,306 @@ describe("UnknownRecord passthrough (unrecognized discriminator)", () => {
     const [block] = csm.msg.value.message!.content;
     if (block?.block.case !== "unknown") throw new Error(`expected unknown block, got ${block?.block.case}`);
     expect(block.block.value.raw).toEqual({ type: "no_such_block", data: "keep me" });
+  });
+});
+
+describe("SDK 0.3.220 stream field gaps", () => {
+  it("UserMessage carries the SDK timestamp", () => {
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", timestamp: "2026-07-25T12:00:00Z", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.timestamp).toBe("2026-07-25T12:00:00Z");
+  });
+
+  it("UserMessage carries the queue priority", () => {
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", priority: "next", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.priority).toBe("next");
+  });
+
+  it("UserMessage carries a peer origin's kernel-verified pid", () => {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      origin: { kind: "peer", from: "sess-2", name: "mate", verifiedPeerPid: 4242 },
+      message: { role: "user", content: "hi" },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin?.verifiedPeerPid).toBe(4242n);
+  });
+
+  it("an absent origin stays UNSET rather than defaulting to human", () => {
+    // A strict is-human trust gate must never be handed an invented attribution.
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin).toBeUndefined();
+  });
+
+  it("a hyphenated origin kind maps onto its enum member", () => {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      origin: { kind: "observer-activity" },
+      message: { role: "user", content: "hi" },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin?.kind).toBe(OriginKind.OBSERVER_ACTIVITY);
+  });
+
+  it("AssistantMessage carries the request id", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", request_id: "req_9", message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.requestId).toBe("req_9");
+  });
+
+  it("AssistantMessage carries the uuids it supersedes", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", supersedes: ["a", "b"], message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.supersedes).toEqual(["a", "b"]);
+  });
+
+  it("an overloaded assistant error is no longer collapsed into UNKNOWN", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", error: "overloaded", message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.error).toBe(AssistantMessageError.OVERLOADED);
+  });
+
+  it("ResultMessage carries the spawn-to-request latency", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", time_to_request_from_spawn_ms: 1234 }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.timeToRequestFromSpawnMs).toBe(1234n);
+  });
+
+  it("ResultMessage carries the deferred tool use", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", deferred_tool_use: { id: "toolu_1", name: "Bash", input: { command: "ls" } } }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.deferredToolUse?.name).toBe("Bash");
+  });
+
+  it("ModelUsage carries the canonical model", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", modelUsage: { alias: { canonicalModel: "claude-opus-5-20260101" } } }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.modelUsage["alias"]?.canonicalModel).toBe("claude-opus-5-20260101");
+  });
+
+  it("a needs-auth MCP server converts to NEEDS_AUTH", () => {
+    // The wire spelling is hyphenated; matching only needs_auth lost exactly
+    // the status a human has to act on.
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", mcp_servers: [{ name: "srv", status: "needs-auth" }] }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.status).toBe(McpServerState.NEEDS_AUTH);
+  });
+
+  it("a disabled MCP server converts to DISABLED", () => {
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", mcp_servers: [{ name: "srv", status: "disabled" }] }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.status).toBe(McpServerState.DISABLED);
+  });
+
+  it("an MCP server's advertised tool annotations survive", () => {
+    const csm = vendor(convert({
+      type: "system", subtype: "init", session_id: "s", uuid: "u",
+      mcp_servers: [{ name: "srv", status: "connected", tools: [{ name: "t", annotations: { readOnly: true, destructive: false } }] }],
+    }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.tools[0]?.annotations?.readOnly).toBe(true);
+  });
+
+  it("SystemInit carries the fast-mode disabled reason", () => {
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", fast_mode_disabled_reason: "network_error" }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.fastModeDisabledReason).toBe("network_error");
+  });
+
+  it("StatusMessage carries the compact result", () => {
+    const csm = vendor(convert({ type: "system", subtype: "status", session_id: "s", uuid: "u", status: "compacting", compact_result: "failed" }));
+    if (csm.msg.case !== "status") throw new Error("case");
+    expect(csm.msg.value.compactResult).toBe("failed");
+  });
+
+  it("ToolProgress distinguishes a heartbeat from real progress", () => {
+    const csm = vendor(convert({ type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Bash", heartbeat: true }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.heartbeat).toBe(true);
+  });
+
+  it("ToolProgress carries the subagent retry attempt", () => {
+    const csm = vendor(convert({
+      type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Agent",
+      subagent_retry: { agent_id: "a1", attempt: 2, max_retries: 5, error_status: 529, error_category: "overloaded" },
+    }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.subagentRetry?.attempt).toBe(2);
+  });
+
+  it("a null subagent-retry error status is distinguishable from zero", () => {
+    const csm = vendor(convert({
+      type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Agent",
+      subagent_retry: { agent_id: "a1", attempt: 1, error_status: null },
+    }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.subagentRetry?.errorStatusSet).toBe(false);
+  });
+
+  it("TaskStartedMsg carries the workflow name", () => {
+    const csm = vendor(convert({ type: "system", subtype: "task_started", session_id: "s", uuid: "u", task_id: "w1", task_type: "local_workflow", workflow_name: "spec" }));
+    if (csm.msg.case !== "taskStarted") throw new Error("case");
+    expect(csm.msg.value.workflowName).toBe("spec");
+  });
+
+  it("a running task patch emits NO TaskEnded", () => {
+    // 0.3.220 patches carry pending/running/paused; ending the task on those
+    // decremented the live-task counter for work still in flight.
+    const { lifecycle } = convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "running" } });
+    expect(lifecycle).toHaveLength(0);
+  });
+
+  it("a completed task patch still emits TaskEnded", () => {
+    const { lifecycle } = convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "completed" } });
+    expect(lifecycle[0]!.payload.case).toBe("taskEnded");
+  });
+
+  it("TaskPatch carries the pause accounting", () => {
+    const csm = vendor(convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "paused", total_paused_ms: 900 } }));
+    if (csm.msg.case !== "taskUpdated") throw new Error("case");
+    expect(csm.msg.value.patch?.totalPausedMs).toBe(900n);
+  });
+
+  it("RateLimitInfo carries the overage disabled reason", () => {
+    const csm = vendor(convert({ type: "rate_limit_event", session_id: "s", uuid: "u", rate_limit_info: { status: "rejected", overage_disabled_reason: "out_of_credits" } }));
+    if (csm.msg.case !== "rateLimitEvent") throw new Error("case");
+    expect(csm.msg.value.rateLimitInfo?.overageDisabledReason).toBe("out_of_credits");
+  });
+
+  it("RateLimitInfo carries whether credits can be purchased", () => {
+    const csm = vendor(convert({ type: "rate_limit_event", session_id: "s", uuid: "u", rate_limit_info: { status: "rejected", can_user_purchase_credits: true } }));
+    if (csm.msg.case !== "rateLimitEvent") throw new Error("case");
+    expect(csm.msg.value.rateLimitInfo?.canUserPurchaseCredits).toBe(true);
+  });
+
+  it("CompactBoundary carries the post-compaction token count", () => {
+    const csm = vendor(convert({ type: "compact_boundary", session_id: "s", uuid: "u", trigger: "auto", pre_tokens: 100, post_tokens: 40 }));
+    if (csm.msg.case !== "compactBoundary") throw new Error("case");
+    expect(csm.msg.value.postTokens).toBe(40n);
+  });
+
+  it("CompactBoundary carries the preserved segment anchors", () => {
+    const csm = vendor(convert({ type: "compact_boundary", session_id: "s", uuid: "u", trigger: "manual", preserved_segment: { head_uuid: "h", anchor_uuid: "a", tail_uuid: "t" } }));
+    if (csm.msg.case !== "compactBoundary") throw new Error("case");
+    expect(csm.msg.value.preservedSegment?.anchorUuid).toBe("a");
+  });
+});
+
+describe("control_response structural nesting", () => {
+  it("lifts the nested request id onto the top-level field", () => {
+    // The wire has no top-level request_id sibling, so reading one always
+    // produced "" and correlation was impossible.
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "req_7", response: { ok: true } } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.requestId).toBe("req_7");
+  });
+
+  it("types the success body's subtype", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "req_7" } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.subtype).toBe("success");
+  });
+
+  it("types the error body's message", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "error", request_id: "req_8", error: "nope" } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.error).toBe("nope");
+  });
+
+  it("carries the pending permission requests echoed on the body", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "r", pending_permission_requests: [{ request_id: "p1" }] } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.pendingPermissionRequests).toHaveLength(1);
+  });
+});
+
+describe("tool results that used to fall through to unclassified", () => {
+  it("classifies a Glob result", () => {
+    const r = convertToolUseResult({ durationMs: 12, numFiles: 3, filenames: ["a", "b", "c"], truncated: false }, "s");
+    expect(r?.result.case).toBe("glob");
+  });
+
+  it("keeps a Glob result's filenames", () => {
+    const r = convertToolUseResult({ durationMs: 12, numFiles: 3, filenames: ["a", "b", "c"], truncated: false }, "s");
+    if (r?.result.case !== "glob") throw new Error("case");
+    expect(r.result.value.filenames).toEqual(["a", "b", "c"]);
+  });
+
+  it("classifies a Grep result rather than mistaking it for a Glob", () => {
+    // Both carry `filenames`; only grep carries a mode/match count.
+    const r = convertToolUseResult({ mode: "content", numFiles: 1, filenames: ["a"], numMatches: 7, content: "hit" }, "s");
+    expect(r?.result.case).toBe("grep");
+  });
+
+  it("keeps a Grep result's match count", () => {
+    const r = convertToolUseResult({ mode: "content", numFiles: 1, filenames: ["a"], numMatches: 7 }, "s");
+    if (r?.result.case !== "grep") throw new Error("case");
+    expect(r.result.value.numMatches).toBe(7n);
+  });
+
+  it("classifies a TaskGet result with a task", () => {
+    const r = convertToolUseResult({ task: { id: "t1", subject: "s", description: "d", status: "pending", blocks: [], blockedBy: ["t0"] } }, "s");
+    if (r?.result.case !== "taskGet") throw new Error("case");
+    expect(r.result.value.task?.blockedBy).toEqual(["t0"]);
+  });
+
+  it("classifies a TaskGet result whose task is null", () => {
+    // Nullable, so the null form is still a TaskGet and must not fall through.
+    const r = convertToolUseResult({ task: null }, "s");
+    if (r?.result.case !== "taskGet") throw new Error("case");
+    expect(r.result.value.taskSet).toBe(false);
+  });
+
+  it("classifies an Artifact result", () => {
+    const r = convertToolUseResult({ url: "https://x/y", title: "T", favicon: "📊", label: "v1" }, "s");
+    expect(r?.result.case).toBe("artifact");
+  });
+
+  it("keeps an Artifact result's url", () => {
+    const r = convertToolUseResult({ url: "https://x/y", title: "T", favicon: "📊" }, "s");
+    if (r?.result.case !== "artifact") throw new Error("case");
+    expect(r.result.value.url).toBe("https://x/y");
+  });
+
+  it("classifies a StructuredOutput result instead of leaving it unclassified", () => {
+    const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
+    expect(r?.result.case).toBe("structuredOutput");
+  });
+
+  it("preserves a StructuredOutput result's caller-defined payload whole", () => {
+    const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
+    if (r?.result.case !== "structuredOutput") throw new Error("case");
+    expect(r.result.value.data).toEqual({ verdict: "ok", score: 3 });
+  });
+});
+
+describe("ToolReferenceBlock typing", () => {
+  /** Walk user -> content_blocks -> tool_result -> content_blocks -> [0]. */
+  function toolReferenceOf(toolName: string) {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "tool_reference", tool_name: toolName }] }] },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    const content = csm.msg.value.message!.content;
+    if (content.case !== "contentBlocks") throw new Error("user content case");
+    const outer = content.value.blocks[0];
+    if (outer?.block.case !== "toolResult") throw new Error("outer block");
+    const nested = outer.block.value.content;
+    if (nested.case !== "contentBlocks") throw new Error("tool_result content case");
+    const inner = nested.value.blocks[0];
+    if (inner?.block.case !== "toolReference") throw new Error("inner block");
+    return inner.block.value;
+  }
+
+  it("types the tool name out of a tool_reference block", () => {
+    expect(toolReferenceOf("Bash").toolName).toBe("Bash");
+  });
+
+  it("still preserves the tool_reference block verbatim alongside the typed name", () => {
+    expect(toolReferenceOf("Bash").reference).toEqual({ type: "tool_reference", tool_name: "Bash" });
   });
 });
 

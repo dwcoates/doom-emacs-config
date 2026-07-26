@@ -38,6 +38,7 @@ import {
   PermissionResponseSchema,
   SessionSource,
   ShimHelloSchema,
+  StoreWriteAckSchema,
   StoreWriteSchema,
   SubmitPromptSchema,
   SubscribeSchema,
@@ -152,7 +153,9 @@ afterEach(async () => {
 });
 
 /** Stand up store + session, connect a daemon, and (optionally) subscribe. */
-async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } = {}): Promise<Rig> {
+async function rig(
+  opts: { subscribe?: boolean; sessionSource?: SessionSource; storeSessionId?: string } = {},
+): Promise<Rig> {
   const store = await fakeStore();
   cleanups.push(() => store.close());
 
@@ -175,6 +178,7 @@ async function rig(opts: { subscribe?: boolean; sessionSource?: SessionSource } 
     udsSocketPath,
     storeSocketPath: store.socketPath,
     sessionSource: opts.sessionSource ?? SessionSource.FRESH,
+    ...(opts.storeSessionId !== undefined ? { storeSessionId: opts.storeSessionId } : {}),
     createQuery,
     heartbeatIntervalMs: 0,
     newRequestId: (() => {
@@ -217,6 +221,106 @@ describe("UdsSession control: prompt in → SDK", () => {
     const content = query.prompts[0]!.message.content;
     expect(content).toEqual([{ type: "text", text: "hello there" }]);
     expect(session.turnCount()).toBe(1);
+  });
+});
+
+describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
+  it("writes a TurnStarted to the store when it accepts a SubmitPrompt", async () => {
+    // Arrange: a resumed session already knows the vendor session id.
+    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    const sw = await store.peer().next(StoreWriteSchema);
+    // Assert
+    expect(sw.batch!.events[0]!.payload.case).toBe("turnStarted");
+  });
+
+  it("bounds the TurnStarted preview to the prompt's first line", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "line one\nline two" }));
+    const sw = await store.peer().next(StoreWriteSchema);
+    // Assert
+    const payload = sw.batch!.events[0]!.payload;
+    if (payload.case !== "turnStarted") throw new Error("case");
+    expect(payload.value.promptPreview).toBe("line one");
+  });
+
+  it("correlates the TurnStarted to the SubmitPrompt's request id", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    const sw = await store.peer().next(StoreWriteSchema);
+    // Assert
+    expect(sw.batch!.events[0]!.requestId).toBe("p1");
+  });
+
+  it("files the TurnStarted under the vendor session id, not the shim's own id", async () => {
+    // Arrange: the store's seq space is keyed by the vendor uuid; writing
+    // under `sess-1` would land in a space nothing subscribes to.
+    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    const sw = await store.peer().next(StoreWriteSchema);
+    // Assert
+    expect(sw.batch!.events[0]!.sessionId).toBe("vendor-uuid");
+  });
+
+  it("holds a TurnStarted accepted before the vendor session id is known", async () => {
+    // Arrange: a FRESH session has no --resume id, so the store key is still
+    // the placeholder when the first prompt arrives.
+    const { store, daemon } = await rig({ subscribe: true });
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    await daemon.next(AckSchema);
+    await tick();
+    // Assert: nothing written yet — it is held, not filed under `sess-1`.
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+  });
+
+  it("flushes a held TurnStarted under the adopted key once the SDK reveals it", async () => {
+    // Arrange: a held turn from a fresh session.
+    const { query, store, daemon } = await rig({ subscribe: true });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    await daemon.next(AckSchema);
+    // Act: the SDK reveals the vendor session id.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "vendor-uuid",
+      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+    } as unknown as SdkMessageLike);
+    const first = await store.peer().next(StoreWriteSchema);
+    // Assert: the held turn is flushed, restamped with the adopted key.
+    expect(first.batch!.events[0]!.payload.case).toBe("turnStarted");
+    expect(first.batch!.events[0]!.sessionId).toBe("vendor-uuid");
+  });
+
+  it("emits SessionStarted for the first system:init only, across re-inits", async () => {
+    // Arrange: the SDK re-inits per submit; a second twin would knock the SSM
+    // back to IDLE at submit time.
+    const { query, store } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const init = {
+      type: "system",
+      subtype: "init",
+      session_id: "vendor-uuid",
+      uuid: "i1",
+      model: "claude",
+      cwd: "/tmp",
+    } as unknown as SdkMessageLike;
+    // Act
+    query.emit(init);
+    const firstWrite = await store.peer().next(StoreWriteSchema);
+    // StoreClient chains sends on acks, so the second batch only leaves once
+    // the first is acked (production's store always does).
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 2n }));
+    query.emit(init);
+    const secondWrite = await store.peer().next(StoreWriteSchema);
+    // Assert
+    expect(firstWrite.batch!.events.map((e) => e.payload.case)).toContain("sessionStarted");
+    expect(secondWrite.batch!.events.map((e) => e.payload.case)).not.toContain("sessionStarted");
   });
 });
 
