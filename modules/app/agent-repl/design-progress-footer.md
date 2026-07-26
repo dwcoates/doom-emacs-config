@@ -274,6 +274,26 @@ vendor events that previously died in `conversationItemsFromVendor`.
   the corresponding item, which needs the item's address. `ErrorItem` /
   `RetryItem` grew a matching `uuid` in the webapp store.
 
+### Counter relocation (executed)
+
+The topbar's `sessionTopbarDatapoints` now returns empty `agents` / `tasks`,
+so the header strip renders no roster chips at all; it keeps the tokens chip,
+the model picker, and the remaining session datapoints. The rosters render in
+the footer's counters cluster through the SAME `counter-menu` facade
+(`agentsMenuHtml` / `tasksMenuHtml`) — the chips, rows, dots, and reveal
+behavior are unchanged, and the only adaptation is CSS: `.pfooter-counters`
+flips each overlay UPWARD (`bottom: calc(100% + 6px)`), since a dock at the
+window's bottom has nowhere to drop.
+
+The AGENT-scoped strip (`agentTopbarDatapoints`, rendered inside subagent
+bubbles) keeps its own rosters: a bubble's direct children are about that
+bubble, not about the session, so they never belonged in the relocation.
+
+Disclosure ownership split accordingly: `main.ts` keeps a `tokensMenuOpen`
+boolean for the header, the `ProgressFooter` owns its own roster + sheet
+disclosure, and `FeedRenderer` still owns each bubble's. All three dismiss
+together through one `closeAllMenus`.
+
 ### Turn-start reset signal
 
 `input_tokens` / `thinking_tokens` / `ttft_ms` reset, and `error_summary`
