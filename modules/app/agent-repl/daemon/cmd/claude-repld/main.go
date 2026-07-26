@@ -307,6 +307,9 @@ func main() {
 		}()
 		return func() error { return proc.Terminate() }, nil
 	}
+	// Held by pointer so its SessionView re-push can be late-bound below: the
+	// Server it pushes through does not exist yet (same shape as forwarder).
+	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf}
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:            forwarder,
 		SSM:             ssmMgr,
@@ -315,7 +318,7 @@ func main() {
 		Source:          &server.ShimConnSource{Listener: shimListener},
 		Locator:         &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
-		Registrar:       server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf},
+		Registrar:       registrar,
 		DaemonVersion:   daemonVersion,
 		ProtocolVersion: shimProtocolVersion,
 		Logf:            log.Printf,
@@ -397,6 +400,10 @@ func main() {
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).
 	sessionCommands.SetTarget(srv)
+	// Same late bind for the registrar's SessionView re-push, so a backfill
+	// transition reaches a CONNECTED frontend rather than waiting for the next
+	// unrelated push (F2).
+	registrar.PushView = srv.RepushSessionView
 
 	mux := http.NewServeMux()
 	// Mount the API at every prefix its routes live under. Driven off

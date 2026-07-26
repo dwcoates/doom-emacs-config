@@ -931,6 +931,29 @@ sweep uses, so a workspace the daemon simply cannot open never retry-loops."
   :type 'integer
   :group 'agent-repl)
 
+(defun agent-repl--frontend-backfill-settled-p (session-id)
+  "Return non-nil when SESSION-ID's history has finished arriving (F2).
+Reads the daemon-resolved `SessionView.backfill' off the pushed-frame store
+\(frontend-state.el); the webapp and Emacs share one verdict and neither
+derives it.
+
+Settled means there is nothing more to wait for:
+  `BACKFILL_STATE_DONE'          the transcript is in the store;
+  `BACKFILL_STATE_UNSPECIFIED'   there is no transcript to backfill at all
+                                 (a genuinely fresh workspace — an empty feed
+                                 is the CORRECT render, not a blue bug).
+
+`BACKFILL_STATE_PENDING' and `BACKFILL_STATE_FAILED' are both UNSETTLED, so
+the switch re-ensures: pending may simply not have landed yet, and failed is
+the sidecar telling us it could not read the transcript — the one case that
+must never be mistaken for \"nothing to backfill\".
+
+A daemon too old to send the field reports nil, which reads as settled: it
+cannot backfill on switch either, so retrying would loop for nothing."
+  (let ((state (plist-get (agent-repl--frontend-session-view session-id) :backfill)))
+    (or (null state)
+        (member state '("BACKFILL_STATE_DONE" "BACKFILL_STATE_UNSPECIFIED")))))
+
 (defun agent-repl--frontend-switch-ensure-skip-reason (ws)
   "Return a string naming why WS's switch must not send, or nil to send.
 Ordered cheapest-first.  Every arm is a genuine no-op rather than a
@@ -943,11 +966,21 @@ that would have retried it is the retry."
    ((not (agent-repl--uds-connected-p)) "uds link down")
    ;; No cwd means no routable wire key, and the daemon routes purely by cwd.
    ((null (agent-repl--ws-get ws :project-dir)) "no project-dir")
-   ;; THE common case: a workspace already driving a live session has
-   ;; nothing to ensure, so the send would be pure daemon-side rescan.
+   ;; THE common case: a workspace already driving a live session WHOSE
+   ;; HISTORY ARRIVED has nothing to ensure, so the send would be pure
+   ;; daemon-side rescan.
+   ;;
+   ;; Liveness alone is NOT enough (F2). A session the daemon bound and brought
+   ;; up, but whose transcript the sidecar never delivered, is live and blue at
+   ;; the same time — and that is precisely the workspace the never-blue
+   ;; contract is about. So the skip additionally requires the daemon's
+   ;; backfill verdict to be settled; `pending' and `failed' both fall through
+   ;; to a send, bounded by the cooldown and give-up below.
    ((let ((id (agent-repl--ws-get ws :frontend-session-id)))
-      (and id (agent-repl--frontend-session-live-p id)))
-    "session already live")
+      (and id
+           (agent-repl--frontend-session-live-p id)
+           (agent-repl--frontend-backfill-settled-p id)))
+    "session already live and backfilled")
    ((agent-repl--ws-get ws :switch-ensure-failed) "gave up after repeated failures")
    ((let ((at (agent-repl--ws-get ws :switch-ensure-at)))
       (and at (< (- (float-time) at) agent-repl-frontend-switch-ensure-cooldown)))

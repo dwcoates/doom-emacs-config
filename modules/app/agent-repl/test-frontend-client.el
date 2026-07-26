@@ -1287,6 +1287,101 @@ guarantees each webview reloads the freshly built bundle."
         ;; Assert — this is THE common case; a send here is pure daemon rescan.
         (should (null uds-commands))))))
 
+;;;; ---- never-blue: the backfill-completion gate (F2) --------------------
+;;
+;; A LIVE session whose history never arrived is live and blue at once. These
+;; pin that liveness alone no longer earns the skip.
+
+(defmacro agent-repl-test--with-backfill (state &rest body)
+  "Run BODY with ws1's bound session live and its `backfill' reading STATE.
+STATE nil stands for a pre-F2 daemon that sends no field at all."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+             ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+             ((symbol-function 'agent-repl--frontend-session-view)
+              (lambda (_id) (and ,state (list :sessionId "s_1" :backfill ,state)))))
+     (agent-repl-test--with-uds ,@body)))
+
+(ert-deftest agent-repl-test-frontend-backfill-settled-when-done ()
+  "A delivered transcript is settled."
+  (agent-repl-test--with-backfill "BACKFILL_STATE_DONE"
+    (should (agent-repl--frontend-backfill-settled-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-backfill-settled-when-nothing-to-backfill ()
+  "A workspace with no transcript is settled: an empty feed is CORRECT there."
+  (agent-repl-test--with-backfill "BACKFILL_STATE_UNSPECIFIED"
+    (should (agent-repl--frontend-backfill-settled-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-backfill-unsettled-while-pending ()
+  "History that has not landed yet is NOT settled."
+  (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
+    (should-not (agent-repl--frontend-backfill-settled-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-backfill-unsettled-when-failed ()
+  "A failed sidecar read is NOT settled, and must never read as merely not-yet."
+  (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
+    (should-not (agent-repl--frontend-backfill-settled-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-backfill-settled-on-a-pre-f2-daemon ()
+  "A daemon that sends no field reads as settled.
+It cannot backfill on switch either, so retrying would loop for nothing."
+  (agent-repl-test--with-backfill nil
+    (should (agent-repl--frontend-backfill-settled-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-skips-a-live-backfilled-session ()
+  "The steady state: live AND backfilled earns the skip."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-backfill "BACKFILL_STATE_DONE"
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (null uds-commands)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-sends-for-a-live-but-unbackfilled-session ()
+  "THE residual this closes: live but blue must re-ensure, not skip."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (equal (car (car uds-commands)) "openWorkspace")))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-sends-for-a-failed-backfill ()
+  "A failed sidecar read re-ensures rather than being mistaken for done."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (equal (car (car uds-commands)) "openWorkspace")))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-failed-backfill-still-gives-up ()
+  "A permanently failing sidecar cannot retry-loop.
+The give-up latch is what bounds it: the unsettled backfill would otherwise
+re-send on every single switch forever."
+  ;; Arrange — unsettled AND already given up.
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1"
+                                    :switch-ensure-failed t)
+    (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (null uds-commands)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-failed-backfill-respects-cooldown ()
+  "An unsettled backfill still debounces within the cooldown."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Act — a rapid re-switch.
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (= 1 (length uds-commands))))))
+
 (ert-deftest agent-repl-test-frontend-switch-ensure-sends-when-bound-session-dead ()
   "A bound-but-dead session still needs the ensure (that is the blue case)."
   ;; Arrange

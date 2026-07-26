@@ -139,7 +139,29 @@ export interface SessionView {
    * account identity for a daemon-executed, webapp-initiated switch.
    */
   configDir: string;
+  /**
+   * Whether this session's on-disk transcript has been read into the store
+   * (F2, the never-blue completion signal). Daemon-resolved; the webapp
+   * decodes it for wire parity and renders no visual for it — the consumer is
+   * the Emacs workspace-switch ensure.
+   */
+  backfill: BackfillState;
 }
+
+/**
+ * The never-blue backfill vocabulary (F2). `unspecified` is a REAL answer —
+ * "no transcript on disk, nothing to backfill" — not an unknown.
+ */
+export const BACKFILL_STATES = ["unspecified", "pending", "done", "failed"] as const;
+export type BackfillState = (typeof BACKFILL_STATES)[number];
+
+/** protojson enum name -> the webapp's keyword. */
+const BACKFILL_STATE_BY_NAME: Readonly<Record<string, BackfillState>> = {
+  BACKFILL_STATE_UNSPECIFIED: "unspecified",
+  BACKFILL_STATE_PENDING: "pending",
+  BACKFILL_STATE_DONE: "done",
+  BACKFILL_STATE_FAILED: "failed",
+};
 
 /**
  * Daemon-level identity/liveness (S7). Emacs keys boot detection and
@@ -556,6 +578,7 @@ const SESSION_VIEW_KEYS = new Set([
   "hibernated",
   "pendingPermissions",
   "configDir",
+  "backfill",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -584,6 +607,9 @@ function decodeSessionView(v: unknown): SessionView {
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
     // S8 account identity: "" when the daemon has not resolved a config dir.
     configDir: str(o, "configDir", "SessionView"),
+    // F2 never-blue signal; absent on a pre-F2 daemon, which reads as
+    // `unspecified` — the same "nothing to backfill" a fresh workspace has.
+    backfill: decodeBackfillState(o.backfill),
   };
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
@@ -921,6 +947,23 @@ function decodeDaemonView(v: unknown): DaemonView {
     daemonBinaryMtimeMs: num(o, "daemonBinaryMtimeMs", "DaemonView"),
     daemonVersion: str(o, "daemonVersion", "DaemonView"),
   };
+}
+
+/**
+ * Decode the backfill enum. An UNRECOGNIZED name throws rather than falling
+ * back: reading an unknown state as `done` would leave a workspace blue with
+ * nothing retrying it, which is the exact failure this signal exists to catch.
+ */
+function decodeBackfillState(v: unknown): BackfillState {
+  if (v === undefined || v === null) return "unspecified";
+  if (typeof v !== "string") {
+    throw new Error(`frontend-proto: SessionView.backfill must be a string (got ${typeof v})`);
+  }
+  const mapped = BACKFILL_STATE_BY_NAME[v];
+  if (mapped === undefined) {
+    throw new Error(`frontend-proto: SessionView.backfill has unrecognized value '${v}'`);
+  }
+  return mapped;
 }
 
 const PROGRESS_VIEW_KEYS = new Set([

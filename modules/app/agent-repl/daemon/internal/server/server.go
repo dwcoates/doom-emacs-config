@@ -1271,12 +1271,37 @@ func SessionViewFromRecord(rec registry.Record, pendingPermissions []string) *fr
 		// SessionView push (this is the single shaping) so account switching is
 		// webapp-initiated, daemon-executed, and reflected in pushed state.
 		ConfigDir: rec.ConfigDir,
+		// The never-blue backfill signal (F2), mapped off the durable record.
+		Backfill: backfillState(rec.BackfillState),
+	}
+}
+
+// backfillState maps the registry record's stored token onto the wire enum. An
+// unrecognized token is UNSPECIFIED and loud in the sense that it reads as
+// "nothing to backfill" rather than silently as DONE — the safe direction,
+// since UNSPECIFIED makes the switch-ensure retry rather than skip.
+func backfillState(s string) frontendv1.BackfillState {
+	switch s {
+	case sessiondrv.BackfillPending:
+		return frontendv1.BackfillState_BACKFILL_STATE_PENDING
+	case sessiondrv.BackfillDone:
+		return frontendv1.BackfillState_BACKFILL_STATE_DONE
+	case sessiondrv.BackfillFailed:
+		return frontendv1.BackfillState_BACKFILL_STATE_FAILED
+	default:
+		return frontendv1.BackfillState_BACKFILL_STATE_UNSPECIFIED
 	}
 }
 
 // pushSessionView pushes id's current SessionView to every connected frontend.
 // Nil-safe against a Server built without a registry or frontend server (unit
 // harnesses): the push is a best-effort delivery, not a precondition.
+// RepushSessionView re-pushes a session's SessionView to every connected
+// frontend. Exported for the late-bound registrar hook (F2), which writes a
+// record field and needs the change delivered without waiting for whatever
+// unrelated event would next push one.
+func (s *Server) RepushSessionView(id string) { s.pushSessionView(id) }
+
 func (s *Server) pushSessionView(id string) {
 	if s.registry == nil || s.frontend == nil {
 		return
