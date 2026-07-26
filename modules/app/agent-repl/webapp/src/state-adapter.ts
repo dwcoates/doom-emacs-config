@@ -37,7 +37,7 @@
  */
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
-import type { ContentBlock, ResultSubtype, Usage } from "./protocol.js";
+import type { ContentBlock, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import type {
   CompactBoundaryItem,
   ConversationItem,
@@ -204,6 +204,8 @@ export interface ProgressInput {
   authenticating: ProgressWindowInput | null;
   hook: ProgressWindowInput | null;
   rateLimited: RateLimitInput | null;
+  /** The session reporting it is parked on the user. NOT a phase. */
+  blocked: ProgressWindowInput | null;
   /** Persists until the next turn starts; "" = no error standing. */
   errorSummary: string;
   /** The feed item the error row scrolls to; "" = not addressable. */
@@ -456,6 +458,7 @@ export class StateAdapter {
         retrying: openWindow(pv.retrying),
         authenticating: openWindow(pv.authenticating),
         hook: openWindow(pv.hook),
+        blocked: openWindow(pv.blocked),
         rateLimited:
           pv.rateLimited !== undefined && pv.rateLimited.active
             ? {
@@ -852,9 +855,37 @@ function resultItemFrom(r: Obj): ResultItem {
     isError: pbool(r, "isError"),
     context: null,
   };
+  const models = modelUsageFrom(pobj(r, "modelUsage"));
+  if (models !== undefined) item.modelUsage = models;
   const resultText = pstr(r, "result");
   if (resultText !== "") item.resultText = resultText;
   return item;
+}
+
+/**
+ * A result's `model_usage` map: model id -> that model's whole-tree slice.
+ *
+ * Stays undefined for an absent map rather than becoming an empty object,
+ * because the two mean different things to the tokens overlay — absent is "the
+ * SDK did not itemize this result" (the standing map survives), empty is a
+ * result that genuinely itemized nothing.
+ */
+function modelUsageFrom(m: Obj | undefined): Record<string, ModelUsage> | undefined {
+  if (m === undefined) return undefined;
+  const out: Record<string, ModelUsage> = {};
+  for (const [model, raw] of Object.entries(m)) {
+    const u = ensureObj(raw);
+    out[model] = {
+      input_tokens: pnum(u, "inputTokens"),
+      output_tokens: pnum(u, "outputTokens"),
+      cache_creation_input_tokens: pnum(u, "cacheCreationInputTokens"),
+      cache_read_input_tokens: pnum(u, "cacheReadInputTokens"),
+      web_search_requests: pnum(u, "webSearchRequests"),
+      cost_usd: pnum(u, "costUsd"),
+      context_window: pnum(u, "contextWindow"),
+    };
+  }
+  return out;
 }
 
 /** "auto"/"manual" from either a proto enum name or a disk plain string. */

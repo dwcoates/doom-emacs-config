@@ -402,6 +402,68 @@ describe("toolUse / toolResult arms", () => {
   });
 });
 
+describe("result arm: the per-model usage map", () => {
+  /** A result frame carrying one model's whole-tree slice. */
+  function withModelUsage(models: Record<string, unknown>): ResultItem {
+    return itemsFrom({
+      uuid: "m1",
+      result: { subtype: "RESULT_SUBTYPE_SUCCESS", modelUsage: models },
+    })[0] as ResultItem;
+  }
+
+  it("snake-cases one model's slice off the wire", () => {
+    // Arrange / Act — the map has always ridden inside the typed ResultMessage.
+    const item = withModelUsage({
+      "claude-opus-4": {
+        inputTokens: "100",
+        outputTokens: "200",
+        cacheReadInputTokens: "300",
+        cacheCreationInputTokens: "40",
+        webSearchRequests: "2",
+        costUsd: 0.51,
+        contextWindow: "200000",
+      },
+    });
+    // Assert
+    expect(item.modelUsage).toEqual({
+      "claude-opus-4": {
+        input_tokens: 100,
+        output_tokens: 200,
+        cache_read_input_tokens: 300,
+        cache_creation_input_tokens: 40,
+        web_search_requests: 2,
+        cost_usd: 0.51,
+        context_window: 200000,
+      },
+    });
+  });
+
+  it("carries every model the map names", () => {
+    // Arrange / Act
+    const item = withModelUsage({ a: { inputTokens: "1" }, b: { inputTokens: "2" } });
+    // Assert
+    expect(Object.keys(item.modelUsage ?? {})).toEqual(["a", "b"]);
+  });
+
+  it("leaves the map ABSENT when the result carried none", () => {
+    // Arrange / Act — absent means "not itemized", which must not clobber the
+    // standing map in the store.
+    const item = itemsFrom({
+      uuid: "m1",
+      result: { subtype: "RESULT_SUBTYPE_SUCCESS" },
+    })[0] as ResultItem;
+    // Assert
+    expect(item.modelUsage).toBeUndefined();
+  });
+
+  it("keeps an EMPTY map distinct from an absent one", () => {
+    // Arrange / Act — a result that genuinely itemized nothing.
+    const item = withModelUsage({});
+    // Assert
+    expect(item.modelUsage).toEqual({});
+  });
+});
+
 describe("result arm", () => {
   it("maps a ResultMessage onto a ResultItem with snake-cased usage", () => {
     const items = itemsFrom({
@@ -730,6 +792,19 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     const got = progressOf(progressFrame());
     // Assert
     expect(got.compacting).toBeNull();
+  });
+
+  it("carries the blocked window, which is a window and NOT a phase", () => {
+    // Arrange / Act — `state` stays the SSM's verdict; this is separate signal.
+    const got = progressOf(
+      progressFrame({
+        state: "RENDER_STATE_THINKING",
+        blocked: { active: true, sinceMs: "5", detail: "waiting on you" },
+      }),
+    );
+    // Assert
+    expect(got.blocked).toEqual({ sinceMs: 5, detail: "waiting on you" });
+    expect(got.state).toBe("thinking");
   });
 
   it("carries the rate-limit window's structured detail", () => {

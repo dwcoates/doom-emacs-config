@@ -127,10 +127,16 @@ export interface Activity {
  * The single activity the detail cell shows, or null when nothing is live.
  *
  * PRECEDENCE, most-blocking first: an auth prompt and a rate limit are the
- * agent stopped dead, a retry is the agent stalled, a compaction and a hook are
- * the agent busy with something other than the answer, and a running tool is
- * ordinary work. Exactly one speaks, so the cell never stacks two accounts of
- * the same dead air — the whole point of consolidating the old tail rows.
+ * agent stopped dead, a session parked on the user is the agent waiting on
+ * YOU, a retry is the agent stalled, a compaction and a hook are the agent
+ * busy with something other than the answer, and a running tool is ordinary
+ * work. Exactly one speaks, so the cell never stacks two accounts of the same
+ * dead air — the whole point of consolidating the old tail rows.
+ *
+ * The `blocked` window sits above the retry/compaction/tool band because
+ * "nothing will happen until you act" outranks any account of the agent being
+ * busy. It sits BELOW auth and rate limits, which are the same statement with
+ * a specific remedy attached.
  */
 export function activityDetail(input: FooterInput, nowMs: number): Activity | null {
   const p = input.progress;
@@ -140,6 +146,9 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
   }
   if (p.rateLimited !== null) {
     return { text: rateLimitText(p.rateLimited), tone: "error" };
+  }
+  if (p.blocked !== null) {
+    return { text: p.blocked.detail, tone: "retry" };
   }
   if (p.retrying !== null) {
     return { text: `retrying · ${p.retrying.detail}`, tone: "retry" };
@@ -277,6 +286,7 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
     ["retrying", p.retrying],
     ["authenticating", p.authenticating],
     ["hook", p.hook],
+    ["blocked", p.blocked],
   ];
   for (const [name, w] of windows) {
     if (w === null) continue;
