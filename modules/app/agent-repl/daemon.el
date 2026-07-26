@@ -319,9 +319,12 @@ non-zero, so a build failure is never swallowed."
   "Return the argv list used to launch `claude-repld'.
 When the system `claude' binary resolves, it is handed to the daemon
 via -claude-bin so SDK sessions drive the SAME CLI version as vterm
-sessions (and accept its permission modes, e.g. `auto', which the
-SDK-bundled cli.js predates).  The same binary drives the headless
-\"session gone\" analyst the daemon dispatches from -remediation-dir.
+sessions.  The user upgrades `claude' independently of the shim's
+lockfile, so the system binary can lead the SDK's bundled one; since
+SDK 0.2.113 that bundle is a per-platform NATIVE Claude Code binary
+(0.3.220 ships 2.1.220), not the old JS `cli.js'.  The same binary
+drives the headless \"session gone\" analyst the daemon dispatches
+from -remediation-dir.
 
 The canonical account roster rides in via -accounts (see
 `agent-repl--frontend-accounts-flag'): the daemon serves it at

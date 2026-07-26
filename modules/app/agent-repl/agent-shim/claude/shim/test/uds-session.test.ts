@@ -21,6 +21,7 @@ import { AsyncQueue } from "../src/input-queue.js";
 import { UdsSession } from "../src/uds/uds-session.js";
 import type {
   CanUseToolLike,
+  InterruptReceipt,
   PermissionResultLike,
   QueryLike,
   SdkMessageLike,
@@ -50,6 +51,8 @@ class FakeQuery implements QueryLike {
   readonly prompts: SdkUserMessageLike[] = [];
   readonly canUseTool: CanUseToolLike;
   interruptCalls = 0;
+  /** The receipt `interrupt()` resolves; undefined models a pre-0.3.205 CLI. */
+  interruptReceipt: InterruptReceipt | undefined = undefined;
   private readonly outbox = new AsyncQueue<SdkMessageLike>();
 
   constructor(prompt: AsyncIterable<SdkUserMessageLike>, canUseTool: CanUseToolLike) {
@@ -72,9 +75,9 @@ class FakeQuery implements QueryLike {
   [Symbol.asyncIterator](): AsyncIterator<SdkMessageLike> {
     return this.outbox[Symbol.asyncIterator]();
   }
-  interrupt(): Promise<void> {
+  interrupt(): Promise<InterruptReceipt | undefined> {
     this.interruptCalls++;
-    return Promise.resolve();
+    return Promise.resolve(this.interruptReceipt);
   }
   setPermissionMode(): Promise<void> {
     return Promise.resolve();
@@ -338,6 +341,37 @@ describe("UdsSession permission round-trip", () => {
     await until(() => query.interruptCalls >= 1);
     const result = await decision;
     expect(result.behavior).toBe("deny");
+  });
+
+  it("an interrupt receipt reporting survivors reaches the daemon as DegradedState", async () => {
+    // Arrange: the SDK will answer interrupt() with work that outlived it.
+    const { query, daemon } = await rig();
+    query.interruptReceipt = { still_queued: ["u-1", "u-2"] };
+    // Act
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    await daemon.next(AckSchema);
+    // Assert: the survivors are surfaced, not swallowed into a log line.
+    const evt = await daemon.next(EventSchema);
+    expect(evt.payload.case).toBe("degradedState");
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-interrupt");
+    expect(evt.payload.value.reason).toContain("u-1,u-2");
+  });
+
+  it("an interrupt receipt with no survivors emits no DegradedState", async () => {
+    // Arrange: the ordinary case — nothing outlived the interrupt.
+    const { query, store, daemon } = await rig();
+    query.interruptReceipt = { still_queued: [] };
+    // Act
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    await daemon.next(AckSchema);
+    await until(() => query.interruptCalls >= 1);
+    // Assert: the FIRST Event to arrive is the store outage deliberately
+    // provoked afterwards, proving the quiet interrupt emitted none of its own.
+    store.close();
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
   });
 });
 

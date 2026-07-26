@@ -14,6 +14,7 @@ import { AsyncQueue } from "./input-queue.js";
 import { ModelInfo, PermissionMode, SlashCommand } from "./protocol.js";
 import {
   CanUseToolLike,
+  InterruptReceipt,
   QueryLike,
   SdkMessageLike,
   SdkUserMessageLike,
@@ -389,8 +390,11 @@ export function createFakeQuery(
   const iterator = out[Symbol.asyncIterator]();
   return {
     [Symbol.asyncIterator]: () => iterator,
-    interrupt: async (): Promise<void> => {
+    // The offline query has no CLI behind it to queue anything, so it models
+    // a pre-`interrupt_receipt_v1` CLI and resolves without a receipt.
+    interrupt: async (): Promise<InterruptReceipt | undefined> => {
       interrupted = true;
+      return undefined;
     },
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
       permissionMode = mode;

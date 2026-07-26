@@ -30,9 +30,26 @@ import {
 // SDK boundary types (structural, so tests can inject fakes)
 // ---------------------------------------------------------------------------
 
+/**
+ * The SDK's `interrupt()` receipt (SDK >= 0.3.205, gated on the CLI
+ * advertising `interrupt_receipt_v1` in system:init `capabilities`).
+ *
+ * `still_queued` names async user messages that SURVIVE the interrupt and
+ * will still run. Our daemon holds its own prompt queue rather than
+ * enqueuing into the CLI, so this is expected to be empty — a non-empty
+ * list means work outlived an interrupt the daemon believes it cancelled,
+ * which is exactly the kind of thing that must be loud, never swallowed.
+ * Older CLIs resolve `undefined`.
+ */
+export interface InterruptReceipt {
+  still_queued: string[];
+  /** Present only when the request set `cancel_queued`. */
+  cancelled?: string[];
+}
+
 /** Structural subset of the SDK `Query` interface the shim uses. */
 export interface QueryLike extends AsyncIterable<SdkMessageLike> {
-  interrupt(): Promise<void>;
+  interrupt(): Promise<InterruptReceipt | undefined>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
   supportedModels(): Promise<ModelInfo[]>;
@@ -216,9 +233,13 @@ export class ShimSession {
           this.interruptRequested = true;
         }
         this.cancelPendingPermissions();
-        void this.query!.interrupt().catch((err: unknown) => {
-          this.emitError("sdk_throw", `interrupt failed: ${errMessage(err)}`, cmd.request_id);
-        });
+        void this.query!.interrupt()
+          .then((receipt) => {
+            this.reportInterruptSurvivors(receipt, cmd.request_id);
+          })
+          .catch((err: unknown) => {
+            this.emitError("sdk_throw", `interrupt failed: ${errMessage(err)}`, cmd.request_id);
+          });
         break;
       case "set-permission-mode":
         this.ackOnSettled(cmd.type, cmd.request_id, this.query!.setPermissionMode(cmd.mode));
@@ -426,6 +447,27 @@ export class ShimSession {
       });
     });
   };
+
+  /**
+   * Surface an interrupt receipt that reports surviving work.
+   *
+   * An empty (or absent) receipt is the expected case and stays silent. A
+   * NON-empty `still_queued` contradicts the interrupt's whole contract, so
+   * it is reported as a command-scoped error rather than logged and dropped
+   * — the daemon must not believe it cancelled work that is still running.
+   */
+  private reportInterruptSurvivors(
+    receipt: InterruptReceipt | undefined,
+    requestId: RequestId,
+  ): void {
+    const survivors = receipt?.still_queued ?? [];
+    if (survivors.length === 0) return;
+    this.emitError(
+      "sdk_throw",
+      `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
+      requestId,
+    );
+  }
 
   /** Unblock any pending SDK permission waits (interrupt/shutdown). */
   private cancelPendingPermissions(): void {

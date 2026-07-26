@@ -140,9 +140,23 @@ export class UdsSession {
         // Interrupt cancels every blocked permission wait so no SDK callback
         // hangs, then forwards to the SDK (a no-op when idle).
         this.control.cancelAll("interrupt");
-        void this.query?.interrupt().catch((err: unknown) => {
-          shimLog(COMPONENT, { session: this.deps.sessionId }, `interrupt failed: ${errMsg(err)}`);
-        });
+        void this.query?.interrupt()
+          .then((receipt) => {
+            // SDK >= 0.3.205 answers with an interrupt receipt. `still_queued`
+            // names async messages that SURVIVE the interrupt. Our daemon holds
+            // its own queue rather than enqueuing into the CLI, so a non-empty
+            // list means work outlived an interrupt the daemon believes it
+            // cancelled — reported as honest downtime, never a swallowed log.
+            const survivors = receipt?.still_queued ?? [];
+            if (survivors.length === 0) return;
+            this.reportDegraded(
+              "claude-shim-interrupt",
+              `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
+            );
+          })
+          .catch((err: unknown) => {
+            this.reportDegraded("claude-shim-interrupt", `interrupt failed: ${errMsg(err)}`);
+          });
       },
     };
     this.control = new ControlDispatch(
@@ -292,6 +306,23 @@ export class UdsSession {
 
   private now(): number {
     return this.deps.nowMs !== undefined ? this.deps.nowMs() : Date.now();
+  }
+
+  /**
+   * Report an SDK-side failure to the daemon as honest downtime.
+   *
+   * The one channel this session has for "something the user asked for did
+   * not happen": a loud log PLUS a DegradedState the daemon can surface. A
+   * bare `shimLog` is not enough — nobody watching the UI ever sees it.
+   */
+  private reportDegraded(component: string, reason: string): void {
+    shimLog(COMPONENT, { session: this.deps.sessionId }, reason);
+    this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+      component,
+      reason,
+      droppedCount: 0n,
+      recovered: false,
+    })));
   }
 
   /** Wrap a DegradedState as a SYNTHETIC/EPHEMERAL Event for the daemon. */
