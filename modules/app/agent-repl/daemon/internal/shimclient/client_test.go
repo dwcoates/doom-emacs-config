@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -162,7 +163,15 @@ func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimH
 
 func startFakeShim(t *testing.T, handler func(conn net.Conn)) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "s")
+	// A SHORT temp dir, not t.TempDir(): macOS caps a unix socket path at 104
+	// bytes and t.TempDir() embeds the test name, so a descriptive name alone
+	// used to fail the bind with "invalid argument".
+	dir, err := os.MkdirTemp("/tmp", "sc")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "s")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen on %s: %v", path, err)

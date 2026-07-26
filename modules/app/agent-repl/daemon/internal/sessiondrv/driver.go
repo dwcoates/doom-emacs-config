@@ -87,6 +87,11 @@ type sessionClient interface {
 	AwaitReady(ctx context.Context) error
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
 	Interrupt(ctx context.Context, hard bool) error
+	// Replay asks the shim for a bounded slice of persisted history, streaming
+	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
+	// different type from live Events, which is what keeps replayed history
+	// out of the SSM/task/progress planes structurally (repull.go).
+	Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error)
 }
 
 // Config assembles a Manager. Every collaborator is injected so the driver is
@@ -132,17 +137,6 @@ type Config struct {
 	// listening socket and the listener routes each connection to the client
 	// that owns that session. Required.
 	Source shimclient.ConnSource
-
-	// History re-pulls conversation history older than the retained ring,
-	// straight from the event store on its own connection (repull.go). Nil
-	// means a below-floor resync fails LOUDLY with "no history source is
-	// wired" rather than answering with the silence that left a freshly-mounted
-	// GUI blank.
-	History HistorySource
-	// VendorSessionID resolves a daemon session id to the vendor session uuid
-	// the store keys events by. Required alongside History; a re-pull without
-	// it fails loudly (subscribing under the wrong id returns nothing at all).
-	VendorSessionID VendorSessionIDFunc
 
 	// newClient is injected only by tests; production uses a real shimclient.
 	newClient func(cfg shimclient.Config) sessionClient

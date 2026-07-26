@@ -218,6 +218,11 @@ type Client struct {
 
 	// reqCounter feeds request-id generation (control.go).
 	reqCounter atomic.Uint64
+
+	// replays tracks in-flight bounded history replays by request id
+	// (replay.go). Its own registry, not `pending`: a replay is a STREAM
+	// closed by a ReplayDone, not a one-shot Ack.
+	replays *replayRegistry
 }
 
 // activeConn is the mutable per-connection state.
@@ -257,7 +262,7 @@ func New(cfg Config) *Client {
 	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
 	// An OPEN latch: a freshly built client has no connection yet.
-	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{})}
+	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), replays: newReplayRegistry()}
 }
 
 // markReadyLocked publishes "the connection is usable". Caller holds c.mu.
@@ -420,6 +425,10 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	}
 	c.mu.Unlock()
 	ac.failPending(fmt.Errorf("shim connection closed: %w", retErr))
+	// An in-flight replay whose shim went away will never be completed by it.
+	// Telling the caller beats leaving it blocked on a ReplayDone that cannot
+	// come.
+	c.replays.failAll(fmt.Sprintf("shim connection closed: %v", retErr))
 	return retErr
 }
 
