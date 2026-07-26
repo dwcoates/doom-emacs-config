@@ -192,7 +192,11 @@ func apiErrorLine(uuid, message string, attempt, max int64) *datav1.TranscriptLi
 
 // --- ObserveWorkspaceState: the SSM seam ------------------------------------
 
-func TestObserveWorkspaceStateMirrorsPhase(t *testing.T) {
+// THE MIRROR IS GONE. This resolver keeps no copy of the SSM's verdict, so an
+// observed state leaves the pushed view's phase field untouched. The copy went
+// stale on exactly the schedule a second copy of an authoritative fact always
+// does, which is what put "starting" in the footer of an already-green tab.
+func TestObserveWorkspaceStateKeepsNoPhaseCopy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
@@ -203,8 +207,21 @@ func TestObserveWorkspaceStateMirrorsPhase(t *testing.T) {
 		t.Fatalf("ObserveWorkspaceState: %v", err)
 	}
 	// Assert
-	if got := h.last().GetState(); got != frontendv1.RenderState_RENDER_STATE_THINKING {
-		t.Fatalf("state = %v, want THINKING", got)
+	if got := h.last().GetState(); got != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+		t.Fatalf("state = %v, want UNSPECIFIED (the phase is the WorkspaceState's alone)", got)
+	}
+}
+
+// A workspace that acquires a progress fact before any state has been resolved
+// gets a view with NO phase, rather than the INIT seed that used to stick.
+func TestAFreshViewCarriesNoPhase(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — a progress fact with no workspace state anywhere near it.
+	h.m.SetCounts(testWS, 1, 0)
+	// Assert
+	if got := h.last().GetState(); got != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+		t.Fatalf("state = %v, want UNSPECIFIED (a blank view is blank about the phase)", got)
 	}
 }
 
@@ -1006,20 +1023,19 @@ func TestIdleClosesTheBlockedWindow(t *testing.T) {
 }
 
 func TestSessionStateNeverTouchesThePhase(t *testing.T) {
-	// Arrange — the SSM has resolved THINKING and remains the phase authority.
+	// Arrange — a workspace with a live progress view.
 	h := newHarness(t)
-	if err := h.m.ObserveWorkspaceState(&frontendv1.WorkspaceState{
-		Workspace: testWS, State: frontendv1.RenderState_RENDER_STATE_THINKING,
-	}); err != nil {
-		t.Fatalf("ObserveWorkspaceState: %v", err)
-	}
+	h.m.SetCounts(testWS, 1, 0)
 	h.drain()
-	// Act — the session reports itself idle, which is a DIFFERENT question.
+	// Act — the session reports itself idle, which is a DIFFERENT question
+	// from what phase the workspace is in.
 	h.apply(streamEvent(t, sessionState("idle")))
-	// Assert — two phase authorities is exactly the drift the SSM prevents.
+	// Assert — this resolver writes no phase at all, so the one authority stays
+	// the SSM's WorkspaceState. Two phase authorities is exactly the drift the
+	// SSM exists to prevent.
 	cur, _ := h.m.Current(testWS)
-	if cur.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING {
-		t.Fatalf("state = %v, want the SSM's THINKING untouched", cur.GetState())
+	if cur.GetState() != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+		t.Fatalf("state = %v, want UNSPECIFIED (this resolver writes no phase)", cur.GetState())
 	}
 }
 
