@@ -123,6 +123,43 @@ invariant, never a silent default dot."
   (dolist (entry agent-repl--frontend-render-state-map)
     (should (assq (cdr entry) agent-repl-ws-state-icons))))
 
+;;;; ---- One value, two surfaces -----------------------------------------
+;;
+;; The exhaustiveness checks above prove the rail and the tab bar share a
+;; VOCABULARY.  These prove they share a SOURCE: both read
+;; `agent-repl--ws-render-status', the pushed state, so there is no second
+;; value for them to disagree about.  A shared vocabulary read from two
+;; different places would still let a green tab sit beside a yellow dot.
+
+(ert-deftest agent-repl-test-colors-the-dot-and-the-tab-read-one-value ()
+  "The rail's dot and the tab bar's color both come from the pushed state.
+Stubbing that ONE reader moves both surfaces together, which is what
+makes their agreement structural rather than coincidental."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      (dolist (keyword '(:thinking :ready :idle-async :vendor-blocked :dead))
+        (agent-repl--ws-put "ws" :pushed-render-state keyword)
+        ;; The tab bar's key IS the pushed keyword.
+        (should (eq (agent-repl--ws-bracket-state "ws") keyword))
+        ;; The rail's wire string is that same keyword's row.
+        (should (equal (agent-repl--sidebar-wire-status "ws")
+                       (alist-get keyword agent-repl--sidebar-status-wire)))))))
+
+(ert-deftest agent-repl-test-colors-the-dot-and-the-tab-take-the-same-color ()
+  "For every state, the rail's dot and the tab bar resolve the same color.
+Each renderer keeps its own shade; what may never differ is WHICH of the
+five a state gets, and that is what the shared fixture pins."
+  ;; Act / Assert
+  (dolist (entry agent-repl--frontend-render-state-map)
+    (let* ((keyword (cdr entry))
+           (fixture-color (cdr (assoc (car entry) (agent-repl-test--fixture "render_states")))))
+      ;; The rail has a row for it, and the tab bar assigns it the fixture's
+      ;; color: one assignment, read by both.
+      (should (assq keyword agent-repl--sidebar-status-wire))
+      (should (equal (alist-get keyword agent-repl--state-color) fixture-color)))))
+
 ;;;; ---- Error classes ---------------------------------------------------
 
 (ert-deftest agent-repl-test-colors-every-error-class-has-a-fixture-row ()
