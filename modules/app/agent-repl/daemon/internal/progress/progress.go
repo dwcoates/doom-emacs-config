@@ -479,8 +479,9 @@ func (m *Manager) applyTranscriptLocked(workspace string, wp *workspaceProgress,
 //
 // A line with retries EXHAUSTED is the TERMINAL account of the failure, which
 // is this family's own job and which api_retry never reports: the window
-// closes and the error summary takes over, addressed to the line's own item so
-// the footer's error row can scroll the feed to it.
+// closes and the classified failure takes over, addressed to the failure
+// CARD (never the raw line, which renders nothing a user can act on) so the
+// footer's error row can scroll the feed to it.
 func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, uuid string, ae *datav1.ApiErrorLine, atMs int64) {
 	if errclass.Retrying(ae) {
 		if wp.retryDetailRich {
@@ -491,16 +492,11 @@ func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, u
 	}
 	m.setWindowLocked(workspace, wp, &wp.view.Retrying, false, atMs, "")
 	wp.retryDetailRich = false
-	summary := errorSummary(ae)
-	if wp.view.GetErrorSummary() == summary && wp.view.GetErrorItemUuid() == uuid {
+	failure := errclass.APIError(ae, frontend.FailureUUID(uuid))
+	if proto.Equal(wp.view.Failure, failure) {
 		return
 	}
-	wp.view.ErrorSummary = summary
-	wp.view.ErrorItemUuid = uuid
-	// The CLASSIFIED counterpart (F4). It addresses the failure CARD rather
-	// than the api_error item, because the card is what the footer's error row
-	// should scroll to — the raw line renders nothing a user can act on.
-	wp.view.Failure = errclass.APIError(ae, frontend.FailureUUID(uuid))
+	wp.view.Failure = failure
 	m.pushLocked(workspace, wp)
 }
 
@@ -558,10 +554,8 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	wp.view.InputTokens = 0
 	wp.view.ThinkingTokens = 0
 	wp.view.TtftMs = 0
-	// The error line persists until the NEXT turn starts (design decision), so
+	// The failure persists until the NEXT turn starts (design decision), so
 	// this is exactly where it clears.
-	wp.view.ErrorSummary = ""
-	wp.view.ErrorItemUuid = ""
 	wp.view.Failure = nil
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
@@ -577,17 +571,13 @@ func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded) {
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
 	if te.GetIsError() {
-		// A turn-end error carries no ApiErrorLine of its own, so the summary has
-		// no addressable feed item — the uuid stays empty rather than pointing at
-		// the previous error's item. An ApiErrorLine summary already standing is
-		// the more specific account and is left alone.
-		if wp.view.GetErrorSummary() == "" {
-			wp.view.ErrorSummary = turnErrorSummary(te)
-			wp.view.ErrorItemUuid = ""
-			// The classified counterpart (F4). TurnEnd returns nil for a
-			// conclusion the SSM does not treat as blocking, so the footer
-			// and the workspace color agree on what "the turn failed" means
-			// instead of each deciding for itself.
+		// A terminal ApiErrorLine earlier in the turn is the more specific
+		// account (it addresses its own card) and is left standing rather
+		// than overwritten by the generic turn-end account.
+		if wp.view.Failure == nil {
+			// TurnEnd returns nil for a conclusion the SSM does not treat as
+			// blocking, so the footer and the workspace color agree on what
+			// "the turn failed" means instead of each deciding for itself.
 			wp.view.Failure = errclass.TurnEnd(te)
 		}
 	}
@@ -875,31 +865,9 @@ func formatDelay(ms int64) string {
 	return fmt.Sprintf("%ds", (ms+999)/1000)
 }
 
-// errorSummary renders an exhausted-retry failure as the footer's error row.
-func errorSummary(ae *datav1.ApiErrorLine) string {
-	msg := errorText(ae)
-	if msg == "" {
-		msg = "api request failed"
-	}
-	if n := ae.GetMaxRetries(); n > 0 {
-		return fmt.Sprintf("%s (after %d attempts)", msg, n)
-	}
-	return msg
-}
-
 // errorText is the ApiErrorLine's own human account of the failure.
 func errorText(ae *datav1.ApiErrorLine) string {
 	return ae.GetError().GetMessage()
-}
-
-// turnErrorSummary is the footer's account of an errored turn end. TurnEnded
-// carries no message of its own, so the stop reason is the most specific thing
-// there is to say.
-func turnErrorSummary(te *corev1.TurnEnded) string {
-	if r := te.GetStopReason(); r != "" {
-		return "turn ended in error: " + r
-	}
-	return "turn ended in error"
 }
 
 // hookDetail names the running hook: its configured name, falling back to the

@@ -305,40 +305,6 @@ func TestTurnEndedStopsTheTurnClock(t *testing.T) {
 	}
 }
 
-func TestTurnEndedWithErrorSetsTheSummary(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.openTurn()
-	// Act
-	h.apply(&corev1.Event{
-		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{
-			IsError: true, StopReason: "max_tokens",
-		}},
-	})
-	// Assert
-	if got := h.last().GetErrorSummary(); got != "turn ended in error: max_tokens" {
-		t.Fatalf("errorSummary = %q, want the stop reason", got)
-	}
-}
-
-func TestTurnStartClearsThePreviousError(t *testing.T) {
-	// Arrange — an error from the turn that just failed.
-	h := newHarness(t)
-	h.openTurn()
-	h.apply(&corev1.Event{
-		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{IsError: true}},
-	})
-	h.drain()
-	// Act — the NEXT turn starting is what clears it (design: it persists until then).
-	h.m.NoteTurnAccepted(testWS, testSID)
-	// Assert
-	if got := h.last().GetErrorSummary(); got != "" {
-		t.Fatalf("errorSummary = %q, want cleared by the next turn start", got)
-	}
-}
-
 // --- the tickers ------------------------------------------------------------
 
 func TestThinkingTokensTicks(t *testing.T) {
@@ -690,39 +656,6 @@ func TestRetryableApiErrorOpensTheRetryingWindow(t *testing.T) {
 	}
 }
 
-func TestRetryableApiErrorReportsNoError(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	// Act — mid-backoff: the turn has not failed, so no error row.
-	h.apply(vendorEvent(t, apiErrorLine("e1", "overloaded", 3, 10)))
-	// Assert
-	if got := h.last().GetErrorSummary(); got != "" {
-		t.Fatalf("errorSummary = %q, want empty while retries remain", got)
-	}
-}
-
-func TestExhaustedApiErrorSetsTheErrorSummary(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	// Act
-	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded (529)", 10, 10)))
-	// Assert
-	if got := h.last().GetErrorSummary(); got != "overloaded (529) (after 10 attempts)" {
-		t.Fatalf("errorSummary = %q, want the exhausted-retry account", got)
-	}
-}
-
-func TestExhaustedApiErrorAddressesItsFeedItem(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	// Act
-	h.apply(vendorEvent(t, apiErrorLine("e9", "boom", 10, 10)))
-	// Assert — the footer's error row scrolls the feed to this uuid.
-	if got := h.last().GetErrorItemUuid(); got != "e9" {
-		t.Fatalf("errorItemUuid = %q, want the error line's own uuid", got)
-	}
-}
-
 func TestExhaustedApiErrorClosesTheRetryingWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -886,14 +819,14 @@ func TestApiRetryNamesTheErrorFamilyWhenThereWasNoResponse(t *testing.T) {
 	}
 }
 
-func TestApiRetryReportsNoError(t *testing.T) {
+func TestApiRetrySetsNoFailure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act — a retry in flight is not a failed turn.
 	h.apply(streamEvent(t, apiRetry(3, 10, 8000, 529, true, 0)))
 	// Assert
-	if got := h.last().GetErrorSummary(); got != "" {
-		t.Fatalf("errorSummary = %q, want empty while a retry is in flight", got)
+	if got := h.last().GetFailure(); got != nil {
+		t.Fatalf("failure = %v, want none while a retry is in flight", got)
 	}
 }
 
@@ -931,8 +864,8 @@ func TestTerminalApiErrorStillWinsOverAnOpenApiRetry(t *testing.T) {
 	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded (529)", 10, 10)))
 	// Assert
 	v := h.last()
-	if v.GetErrorSummary() == "" {
-		t.Fatal("wanted the terminal ApiErrorLine to set the error summary")
+	if v.GetFailure() == nil {
+		t.Fatal("wanted the terminal ApiErrorLine to set the classified failure")
 	}
 	if v.GetRetrying().GetActive() {
 		t.Fatalf("retrying window = %+v, want closed by the terminal error", v.GetRetrying())
