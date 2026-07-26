@@ -412,7 +412,7 @@ describe("topbarInfoHtml", () => {
 
   it("omits the time datapoint when the scope has no clock", () => {
     // Arrange + Act — the session passes null, its turn clock having moved to
-    // the live feed-tail row (see turnStatsRowHtml).
+    // the progress footer's clock cell (see progress-footer.ts).
     const html = strip({ timerLabel: null });
     // Assert
     expect(html).not.toContain("time:");
@@ -495,7 +495,7 @@ describe("sessionTopbarDatapoints", () => {
   it("carries no timer, its turn clock having moved to the feed-tail row", () => {
     // Arrange + Act + Assert — a null timerLabel makes the strip omit the
     // `time:` datapoint; the running clock lives beside the progress
-    // indicator now (see turnStatsRowHtml).
+    // indicator now (the progress footer).
     expect(sessionTopbarDatapoints(storeState(), null, []).timerLabel).toBeNull();
   });
 

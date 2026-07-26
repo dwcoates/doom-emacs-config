@@ -48,7 +48,7 @@ export interface TopbarDatapoints {
    * The scope's elapsed clock, pre-formatted (`5m 30s`, or `--` idle), or
    * null to render NO time datapoint at all. The session passes null — its
    * turn clock moved to the live feed-tail row beside the progress indicator
-   * (see `turnStatsRowHtml`) — while an agent bubble passes its own span.
+   * (see `progress-footer.ts`) — while an agent bubble passes its own span.
    */
   timerLabel: string | null;
   /**
@@ -98,7 +98,7 @@ export interface TopbarDisclosure {
  * TIMER-LABEL renders the `time:` datapoint only when non-null — an agent
  * bubble's own span, marked (`TIMER_SLOT`) so the bubble tick can repaint
  * that one value without rewriting the whole strip. The session passes null
- * (its turn clock moved to the live feed-tail row, see `turnStatsRowHtml`),
+ * (its turn clock moved into the progress footer's clock cell),
  * so the header strip omits `time:` entirely.
  *
  * The tokens datapoint splits by scope. With TOKEN-MENU set (the session)
@@ -135,7 +135,7 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
 /**
  * The session's datapoints for the header strip. The turn clock is NOT among
  * them: it moved to the live feed-tail row beside the progress indicator (see
- * `turnStatsRowHtml`), so the session passes `timerLabel: null` and the strip
+ * the progress footer), so the session passes `timerLabel: null` and the strip
  * omits the `time:` datapoint entirely. The idle-with-live-async signal is
  * not here either: it breathes as the sidebar's amber dot on the session's
  * own row (see `WorkspaceSidebar.setMonitoring`), not as strip text.

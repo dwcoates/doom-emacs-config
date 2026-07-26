@@ -185,12 +185,21 @@ export interface ErrorItem {
   code: string;
   message: string;
   recoverable: boolean;
+  /**
+   * The daemon's uuid for the line this came from. It is the ADDRESS the
+   * progress footer's error row scrolls to (`ProgressView.error_item_uuid`),
+   * which is the only way to find an error that has already scrolled off.
+   * Empty for an error the daemon reported without an addressable line.
+   */
+  uuid: string;
 }
 export interface RetryItem {
   kind: "retry";
   attempt: number;
   reason: string;
   fatal: boolean;
+  /** The daemon's uuid for the line this came from (see `ErrorItem.uuid`). */
+  uuid: string;
 }
 export interface SystemItem {
   kind: "system";
