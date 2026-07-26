@@ -190,6 +190,36 @@ func TestDataEventsReachTheProgressResolver(t *testing.T) {
 	}
 }
 
+func TestMessageLatencyReachesTheProgressResolver(t *testing.T) {
+	// Arrange
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	// Act — the ttft relay is a progress fact and nothing else.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m1", TtftMs: 865}},
+	})
+	// Assert
+	if len(prog.applied) != 1 {
+		t.Fatalf("progress applied %d events, want 1", len(prog.applied))
+	}
+}
+
+func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
+	// Arrange — it is footer input, not conversation content.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	// Act
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m1", TtftMs: 865}},
+	})
+	// Assert
+	if n := len(push.typing) + len(push.convo) + len(push.heartbeats); n != 0 {
+		t.Fatalf("frontend pushes = %d, want 0 for a latency relay", n)
+	}
+}
+
 func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	// Arrange — the resolver rejects everything.
 	prog := &fakeProgress{err: errors.New("boom")}

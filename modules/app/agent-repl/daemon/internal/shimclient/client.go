@@ -86,9 +86,9 @@ type StateSink interface {
 }
 
 // FrameSink consumes every non-lifecycle, non-degraded event: the data.v1
-// vendor payloads (via the Any), ContentDelta and HeartbeatProgress ephemerals,
-// and UnparsedEvent evidence. The stitch phase binds this to the frontend
-// translation layer.
+// vendor payloads (via the Any), the ContentDelta / HeartbeatProgress /
+// MessageLatency ephemerals, and UnparsedEvent evidence. The stitch phase binds
+// this to the frontend translation layer.
 type FrameSink interface {
 	// Consume feeds one event to the frontend translator. Called on the demux
 	// goroutine in strict arrival order.
