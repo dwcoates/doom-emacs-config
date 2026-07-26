@@ -195,11 +195,31 @@ message LineEnvelope {
   bool is_api_error_message = 27;
   string error = 28;                       // with is_api_error_message
   int64 api_error_status = 29;
-  google.protobuf.Struct error_details = 30;
+  // RETYPED IN PLACE (Struct -> string), field number 30 reused with the user's
+  // EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+  // field was provably NEVER populated: the disk carries a STRING (7/7 census
+  // records, assistant lines) so the Struct typing captured every value to
+  // extras instead. NOT parseable as JSON — the value is an HTTP status code
+  // followed by the raw error body, e.g. `429 {"type":"error",…}`.
+  string error_details = 30;
   ToolDenialKind tool_denial_kind = 31;
-  google.protobuf.Struct classifier_meta_lines = 32;
+  // RETYPED IN PLACE (Struct -> string), field number 32 reused with the user's
+  // EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+  // field was provably NEVER populated: the disk carries a STRING (365/365
+  // census records, user lines) so the Struct typing captured every value to
+  // extras instead. The name is literal — the value is newline-delimited JSON
+  // LINES as raw text, e.g. `{"meta":{"gitStatus":{"clean":true}}}\n`, so it is
+  // a string rather than one JSON object.
+  string classifier_meta_lines = 32;
   string interrupted_message_id = 33;
-  int64 queue_priority = 34;
+  // RETYPED IN PLACE (int64 -> string), field number 34 reused with the user's
+  // EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+  // field was provably NEVER populated: the disk carries a STRING (22/22 census
+  // records, user lines) so the int64 typing captured every value to extras
+  // instead. It is a named priority, not a rank — the only observed value is
+  // "later". Left a free string rather than an enum: one observed value is too
+  // thin a vocabulary to enumerate (cf. `permission_mode`, `effort`).
+  string queue_priority = 34;
   bool is_visible_in_transcript_only = 35;
   bool is_compact_summary = 36;
   string logical_parent_uuid = 37;         // compact_boundary lines
