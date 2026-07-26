@@ -1364,6 +1364,35 @@ describe("task_output arm", () => {
   });
 });
 
+describe("web_fetch arm", () => {
+  it("classifies a WebFetch result", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    expect(r.result.case).toBe("webFetch");
+  });
+
+  it("keeps the WebFetch HTTP code", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.code).toBe(302n);
+  });
+
+  it("keeps the WebFetch HTTP status text", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.codeText).toBe("Found");
+  });
+
+  it("does not mistake a WebFetch result for an Artifact (both carry a url)", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    expect(r.result.case).not.toBe("artifact");
+  });
+
+  it("leaves a bare {url,bytes} object unclassified (no HTTP status text)", () => {
+    const r = convertToolUseResult({ url: "https://x/y", bytes: 626 }, "s");
+    expect(r.result.case).toBe("unclassified");
+  });
+});
+
 describe("ToolReferenceBlock typing", () => {
   /** Walk user -> content_blocks -> tool_result -> content_blocks -> [0]. */
   function toolReferenceOf(toolName: string) {
