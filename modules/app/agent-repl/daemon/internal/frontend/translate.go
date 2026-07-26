@@ -120,6 +120,12 @@ func QueueViewFrame(q *frontendv1.QueueView) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Queue{Queue: q}}
 }
 
+// ProgressViewFrame wraps a ProgressView (F1): the consolidated progress
+// footer's whole input, resolved by internal/progress.
+func ProgressViewFrame(p *frontendv1.ProgressView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Progress{Progress: p}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 package sessiondrv
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -130,9 +131,81 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
+}
+
+// fakeProgress records what the consumer folds into the progress resolver.
+type fakeProgress struct {
+	applied    []*corev1.Event
+	workspaces []string
+	err        error
+}
+
+func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
+	p.workspaces = append(p.workspaces, workspace)
+	p.applied = append(p.applied, ev)
+	return p.err
+}
+func (p *fakeProgress) SetCounts(string, int64, int64)  {}
+func (p *fakeProgress) NoteTurnAccepted(string, string) {}
+
+func newProgressConsumer(prog ProgressResolver) *consumer {
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil)
+	c.now = func() int64 { return 1000 }
+	return c
+}
+
+func TestLifecycleEventsReachTheProgressResolver(t *testing.T) {
+	// Arrange
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	// Act — the lifecycle plane carries the turn boundaries the footer clocks.
+	c.Apply(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+	})
+	// Assert
+	if len(prog.applied) != 1 {
+		t.Fatalf("progress applied %d events, want 1", len(prog.applied))
+	}
+	if prog.workspaces[0] != "ws" {
+		t.Fatalf("progress workspace = %q, want %q", prog.workspaces[0], "ws")
+	}
+}
+
+func TestDataEventsReachTheProgressResolver(t *testing.T) {
+	// Arrange
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	// Act — the data plane carries the tickers and windows.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1"}},
+	})
+	// Assert
+	if len(prog.applied) != 1 {
+		t.Fatalf("progress applied %d events, want 1", len(prog.applied))
+	}
+}
+
+func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
+	// Arrange — the resolver rejects everything.
+	prog := &fakeProgress{err: errors.New("boom")}
+	push := &fakePusher{}
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil)
+	c.now = func() int64 { return 1000 }
+	// Act
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}}},
+	})
+	// Assert — the footer degrading is not a reason to stop delivering
+	// conversation, so the typing relay still went out.
+	if len(push.typing) != 1 {
+		t.Fatalf("typing pushes = %d, want 1 despite the progress fold failing", len(push.typing))
+	}
 }
 
 func TestConsumeContentDeltaPushesTyping(t *testing.T) {
@@ -319,7 +392,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})

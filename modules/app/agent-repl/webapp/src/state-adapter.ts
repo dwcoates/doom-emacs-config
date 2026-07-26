@@ -59,6 +59,8 @@ import {
   type DegradedNotice,
   type FrontendFrame,
   type HeartbeatView,
+  type ProgressView,
+  type ProgressWindow,
   type QueueEntry,
   type QueueView,
   type SessionInitView,
@@ -160,6 +162,57 @@ export interface QueueInput {
   entries: QueueEntry[];
 }
 
+/**
+ * One activity window on the progress footer, flattened from a
+ * `ProgressWindow`. `null` in a `ProgressInput` slot means the window is
+ * closed — the adapter never materializes an inactive placeholder, so a
+ * consumer's truthiness check IS the open/closed question.
+ */
+export interface ProgressWindowInput {
+  sinceMs: number;
+  detail: string;
+}
+
+/** The rate-limit window, which carries structured detail rather than a line. */
+export interface RateLimitInput {
+  /** Epoch SECONDS (the vendor event's own unit). */
+  resetsAt: number;
+  utilization: number;
+  status: string;
+}
+
+/**
+ * `ProgressView` → the consolidated progress footer's whole input (F1).
+ *
+ * The daemon resolved ALL of this; the adapter only maps the phase enum into
+ * the webapp's render-state keyword and flattens each window's open/closed
+ * question into a nullable slot. Nothing here is re-derived, and there is
+ * deliberately no output-token figure to carry.
+ */
+export interface ProgressInput {
+  workspace: string;
+  sessionId: string;
+  state: WebRenderState;
+  /** 0 = no turn in flight. */
+  turnStartedAtMs: number;
+  thinkingTokens: number;
+  /** THIS turn's cumulative cached + uncached input tokens. */
+  inputTokens: number;
+  ttftMs: number;
+  compacting: ProgressWindowInput | null;
+  retrying: ProgressWindowInput | null;
+  authenticating: ProgressWindowInput | null;
+  hook: ProgressWindowInput | null;
+  rateLimited: RateLimitInput | null;
+  /** Persists until the next turn starts; "" = no error standing. */
+  errorSummary: string;
+  /** The feed item the error row scrolls to; "" = not addressable. */
+  errorItemUuid: string;
+  pendingPermissions: number;
+  queueDepth: number;
+  liveTaskCount: number;
+}
+
 /** TaskCatalog → the async/task roster input (topbar counter vocabulary). */
 export interface TaskCatalogInput {
   workspace: string;
@@ -198,6 +251,7 @@ export type AdapterEffect =
   | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "queue"; value: QueueInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
+  | { kind: "progress"; value: ProgressInput }
   | { kind: "session-init"; value: SessionInitInput }
   | { kind: "degraded"; value: DegradedBanner }
   | { kind: "ignored"; shape: string };
@@ -233,6 +287,7 @@ export class StateAdapter {
           ...s.catalogs.map((tc) => this.catalogEffect(tc)),
           ...s.inits.map((si) => this.sessionInitEffect(si)),
           ...s.queues.map((q) => this.queueEffect(q)),
+          ...s.progress.map((p) => this.progressEffect(p)),
         ];
       }
       case "workspaceState":
@@ -247,6 +302,8 @@ export class StateAdapter {
         return [this.heartbeatEffect(frame.frame.value)];
       case "queue":
         return [this.queueEffect(frame.frame.value)];
+      case "progress":
+        return [this.progressEffect(frame.frame.value)];
       case "taskCatalog":
         return [this.catalogEffect(frame.frame.value)];
       case "sessionInit":
@@ -376,6 +433,43 @@ export class StateAdapter {
     return {
       kind: "queue",
       value: { workspace: qv.workspace, sessionId: qv.sessionId, entries: qv.entries },
+    };
+  }
+
+  /**
+   * The progress footer's input (F1). Everything here was resolved daemon-side,
+   * so this maps rather than derives: the phase enum becomes the webapp's
+   * render-state keyword and each window collapses to its open detail or null.
+   */
+  private progressEffect(pv: ProgressView): AdapterEffect {
+    return {
+      kind: "progress",
+      value: {
+        workspace: pv.workspace,
+        sessionId: pv.sessionId,
+        state: renderStateKeyword(pv.state),
+        turnStartedAtMs: pv.turnStartedAtMs,
+        thinkingTokens: pv.thinkingTokens,
+        inputTokens: pv.inputTokens,
+        ttftMs: pv.ttftMs,
+        compacting: openWindow(pv.compacting),
+        retrying: openWindow(pv.retrying),
+        authenticating: openWindow(pv.authenticating),
+        hook: openWindow(pv.hook),
+        rateLimited:
+          pv.rateLimited !== undefined && pv.rateLimited.active
+            ? {
+                resetsAt: pv.rateLimited.resetsAt,
+                utilization: pv.rateLimited.utilization,
+                status: pv.rateLimited.status,
+              }
+            : null,
+        errorSummary: pv.errorSummary,
+        errorItemUuid: pv.errorItemUuid,
+        pendingPermissions: pv.pendingPermissions,
+        queueDepth: pv.queueDepth,
+        liveTaskCount: pv.liveTaskCount,
+      },
     };
   }
 
@@ -537,7 +631,7 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
     case "compactBoundaryLine":
       return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
     case "apiError":
-      return { items: [apiErrorItem(frame.payload)], ignores: [] };
+      return { items: [apiErrorItem(frame.payload, frame.uuid)], ignores: [] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     default: {
@@ -789,7 +883,10 @@ function compactBoundaryLineItem(line: Obj): CompactBoundaryItem {
   };
 }
 
-function apiErrorItem(e: Obj): ErrorItem | RetryItem {
+// UUID is the item envelope's uuid, carried onto the store item so the
+// progress footer's error row can scroll the feed to the exact line the
+// daemon's error summary came from.
+function apiErrorItem(e: Obj, uuid: string): ErrorItem | RetryItem {
   const detail = pobj(e, "error") ?? {};
   const message = pstr(detail, "message");
   const retryAttempt = pnum(e, "retryAttempt");
@@ -801,9 +898,10 @@ function apiErrorItem(e: Obj): ErrorItem | RetryItem {
       attempt: retryAttempt,
       reason: message,
       fatal: pbool(detail, "isNetworkDown") || (maxRetries > 0 && retryAttempt >= maxRetries),
+      uuid,
     };
   }
-  return { kind: "error", code: "api_error", message, recoverable: false };
+  return { kind: "error", code: "api_error", message, recoverable: false, uuid };
 }
 
 /** core.v1.PermissionItem.Resolution (proto enum name) → the store shape. */
@@ -902,4 +1000,14 @@ function parr(o: Obj, key: string): unknown[] {
 
 function tsFromMs(ms: number): string {
   return ms > 0 ? new Date(ms).toISOString() : "";
+}
+
+/**
+ * A `ProgressWindow` as its open detail, or null when the window is closed.
+ * Absent and inactive collapse to the same answer on purpose: both mean the
+ * footer has nothing to say about that window.
+ */
+function openWindow(w: ProgressWindow | undefined): ProgressWindowInput | null {
+  if (w === undefined || !w.active) return null;
+  return { sinceMs: w.sinceMs, detail: w.detail };
 }

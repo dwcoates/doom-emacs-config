@@ -16,6 +16,7 @@
 import type { CounterEntry } from "./counter-menu.js";
 import type {
   AdapterEffect,
+  ProgressInput,
   QueueInput,
   SessionInitInput,
   SessionViewInput,
@@ -184,12 +185,21 @@ export interface ErrorItem {
   code: string;
   message: string;
   recoverable: boolean;
+  /**
+   * The daemon's uuid for the line this came from. It is the ADDRESS the
+   * progress footer's error row scrolls to (`ProgressView.error_item_uuid`),
+   * which is the only way to find an error that has already scrolled off.
+   * Empty for an error the daemon reported without an addressable line.
+   */
+  uuid: string;
 }
 export interface RetryItem {
   kind: "retry";
   attempt: number;
   reason: string;
   fatal: boolean;
+  /** The daemon's uuid for the line this came from (see `ErrorItem.uuid`). */
+  uuid: string;
 }
 export interface SystemItem {
   kind: "system";
@@ -476,6 +486,17 @@ export class ConversationStore {
   taskRoster: CounterEntry[] = [];
 
   /**
+   * The consolidated progress footer's input (F1), adopted wholesale from the
+   * daemon's `ProgressView`. `null` before the first one lands, which is the
+   * footer's own "nothing resolved yet" state rather than a fabricated blank.
+   *
+   * Kept beside `state` for the same reason `taskRoster` is: the render input's
+   * shape stays unchanged for its many consumers, and the footer is the only
+   * surface that reads this.
+   */
+  progress: ProgressInput | null = null;
+
+  /**
    * Diagnostic sink and clock. LOG surfaces ingestion anomalies (a typing
    * delta with nowhere to land); NOW stamps a turn's start (the effect carries
    * no timestamp). Both injected so the store stays transport- and clock-
@@ -493,6 +514,7 @@ export class ConversationStore {
   reset(): void {
     this.state = initialState();
     this.taskRoster = [];
+    this.progress = null;
   }
 
   /**
@@ -527,6 +549,9 @@ export class ConversationStore {
           this.taskRoster = effect.value.entries;
           changed = true;
           break;
+        case "progress":
+          changed = this.applyProgress(effect.value) || changed;
+          break;
         case "session-init":
           changed = this.applySessionInit(effect.value) || changed;
           break;
@@ -549,6 +574,26 @@ export class ConversationStore {
       s.turnStartedAt = new Date(this.now()).toISOString();
     } else if (!ws.turnActive) {
       s.turnStartedAt = null;
+    }
+    return true;
+  }
+
+  /**
+   * Adopt the daemon-resolved progress view (F1) wholesale, and take the two
+   * facts it resolves BETTER than the store could:
+   *
+   * - `compacting`, which had no source at all after the cutover (the store's
+   *   in-progress compaction indicator was a documented gap);
+   * - the turn's REAL start stamp, so a tab that joins mid-turn picks the
+   *   elapsed clock up where the turn actually is rather than restarting it
+   *   from the moment this tab noticed.
+   */
+  private applyProgress(p: ProgressInput): boolean {
+    this.progress = p;
+    const s = this.state;
+    s.compacting = p.compacting !== null;
+    if (p.turnStartedAtMs > 0) {
+      s.turnStartedAt = new Date(p.turnStartedAtMs).toISOString();
     }
     return true;
   }

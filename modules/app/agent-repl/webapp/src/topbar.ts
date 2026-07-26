@@ -27,7 +27,7 @@
  * - agents / tasks — the counter rosters, session-wide or filtered to the
  *   agent's DIRECT children (see `agents.ts` / `tasks.ts`).
  */
-import { agentSubagents, agentsMenuHtml, sessionSubagents, SUBAGENT_TOOLS } from "./agents.js";
+import { agentSubagents, agentsMenuHtml, SUBAGENT_TOOLS } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
@@ -48,7 +48,7 @@ export interface TopbarDatapoints {
    * The scope's elapsed clock, pre-formatted (`5m 30s`, or `--` idle), or
    * null to render NO time datapoint at all. The session passes null — its
    * turn clock moved to the live feed-tail row beside the progress indicator
-   * (see `turnStatsRowHtml`) — while an agent bubble passes its own span.
+   * (see `progress-footer.ts`) — while an agent bubble passes its own span.
    */
   timerLabel: string | null;
   /**
@@ -98,7 +98,7 @@ export interface TopbarDisclosure {
  * TIMER-LABEL renders the `time:` datapoint only when non-null — an agent
  * bubble's own span, marked (`TIMER_SLOT`) so the bubble tick can repaint
  * that one value without rewriting the whole strip. The session passes null
- * (its turn clock moved to the live feed-tail row, see `turnStatsRowHtml`),
+ * (its turn clock moved into the progress footer's clock cell),
  * so the header strip omits `time:` entirely.
  *
  * The tokens datapoint splits by scope. With TOKEN-MENU set (the session)
@@ -133,17 +133,23 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
 }
 
 /**
- * The session's datapoints for the header strip. The turn clock is NOT among
- * them: it moved to the live feed-tail row beside the progress indicator (see
- * `turnStatsRowHtml`), so the session passes `timerLabel: null` and the strip
- * omits the `time:` datapoint entirely. The idle-with-live-async signal is
- * not here either: it breathes as the sidebar's amber dot on the session's
- * own row (see `WorkspaceSidebar.setMonitoring`), not as strip text.
+ * The session's datapoints for the header strip: the parent workspace and the
+ * session-scoped tokens dropdown, and nothing else.
+ *
+ * Three datapoints deliberately are NOT here:
+ * - the turn clock, which moved into the progress footer's clock cell;
+ * - the idle-with-live-async signal, which breathes as the sidebar's amber dot
+ *   on the session's own row (see `WorkspaceSidebar.setMonitoring`);
+ * - the subagent and task ROSTERS, which relocated into the progress footer's
+ *   counters cluster. Tasks and subagents live and die within a session, so
+ *   they are ephemeral state and belong beside the rest of it; the topbar keeps
+ *   only the SESSION-scoped tokens figure. The AGENT-scoped strip
+ *   (`agentTopbarDatapoints`) still carries its own rosters — a bubble's
+ *   direct children are about that bubble, not about the session.
  */
 export function sessionTopbarDatapoints(
   state: StoreState,
   parentWs: string | null,
-  tasks: readonly CounterEntry[],
 ): TopbarDatapoints {
   return {
     parentWs,
@@ -158,11 +164,8 @@ export function sessionTopbarDatapoints(
       topLevel: topLevelUsage(state),
       models: state.modelUsage,
     },
-    agents: sessionSubagents(state.items),
-    // The session's task roster is the daemon-resolved `TaskCatalog`, ingested
-    // as `ConversationStore.taskRoster` and handed in here — the webapp no
-    // longer derives it from tool cards (design §11).
-    tasks,
+    agents: [],
+    tasks: [],
   };
 }
 
