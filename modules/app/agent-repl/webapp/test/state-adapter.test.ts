@@ -133,7 +133,11 @@ describe("SessionView mapping", () => {
 // --- TypingDelta → smooth.ts reveal feed -----------------------------------
 
 describe("TypingDelta mapping", () => {
-  it("derives a stable block id from the content delta's uuid + block index", () => {
+  it("carries the delta's identity through without deriving a block id of its own", () => {
+    // The adapter is a CARRIER of identity, not a second source of it: the
+    // message id was chosen at the shim and the block id is derived in exactly
+    // one place (streaming.ts). Re-deriving one here is what let the preview's
+    // key and the finished record's key drift apart.
     const effects = applyOne({
       typingDelta: { workspace: "ws", sessionId: "s1", delta: { uuid: "msg-7", blockIndex: 2, thinking: "..." } },
     });
@@ -143,11 +147,10 @@ describe("TypingDelta mapping", () => {
         value: {
           workspace: "ws",
           sessionId: "s1",
-          uuid: "msg-7",
+          messageId: "msg-7",
           blockIndex: 2,
           kind: "thinking",
           delta: "...",
-          blockId: "msg-7:2",
         },
       },
     ]);
