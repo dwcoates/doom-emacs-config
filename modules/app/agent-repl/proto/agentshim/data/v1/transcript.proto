@@ -412,7 +412,11 @@ message PrLinkLine {
 
 message FileHistorySnapshotLine {
   string message_id = 1;
-  google.protobuf.Struct snapshot = 2;  // {messageId, timestamp, trackedFileBackups}
+  // SHAPE (census, 2,815 lines): {messageId, timestamp, trackedFileBackups},
+  // where trackedFileBackups maps a path to a FileBackup. Left as a Struct for
+  // the same reason as ApiUsage.cache_creation (retyping a live field breaks
+  // every persisted event).
+  google.protobuf.Struct snapshot = 2;
   bool is_snapshot_update = 3;
 }
 
@@ -626,6 +630,8 @@ message QueuedCommandAttachment {
 }
 
 message ReadTruncationNoticeAttachment {
+  // SHAPE (census): {banner, toolUseID}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;  // shape sparse/variable in census
 }
 
@@ -635,18 +641,26 @@ message StructuredOutputAttachment {
 }
 
 message CompactFileReferenceAttachment {
+  // SHAPE (census): {filename, displayPath}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message ContextTipAttachment {
+  // SHAPE (census): {tip}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message DateChangeAttachment {
+  // SHAPE (census): {newDate}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message NestedMemoryAttachment {
+  // SHAPE (census): {path, content, displayPath}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
@@ -676,22 +690,32 @@ message FileAttachment {
 }
 
 message UltrathinkEffortAttachment {
+  // SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message DynamicSkillAttachment {
+  // SHAPE (census): {skillDir, skillNames, displayPath}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message UltraEffortEnterAttachment {
+  // SHAPE (census): {reminderType}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message UltraEffortExitAttachment {
+  // SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 
 message PlanModeExitAttachment {
+  // SHAPE (census): {planFilePath, planExists}. Kept a Struct: retyping a live field is
+  // wire-breaking for persisted events, and nothing is lost as a Struct.
   google.protobuf.Struct payload = 1;
 }
 

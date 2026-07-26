@@ -1428,7 +1428,10 @@ export type FileHistorySnapshotLine = Message<"agentshim.data.v1.FileHistorySnap
   messageId: string;
 
   /**
-   * {messageId, timestamp, trackedFileBackups}
+   * SHAPE (census, 2,815 lines): {messageId, timestamp, trackedFileBackups},
+   * where trackedFileBackups maps a path to a FileBackup. Left as a Struct for
+   * the same reason as ApiUsage.cache_creation (retyping a live field breaks
+   * every persisted event).
    *
    * @generated from field: google.protobuf.Struct snapshot = 2;
    */
@@ -2362,6 +2365,9 @@ export const QueuedCommandAttachmentSchema: GenMessage<QueuedCommandAttachment> 
  */
 export type ReadTruncationNoticeAttachment = Message<"agentshim.data.v1.ReadTruncationNoticeAttachment"> & {
   /**
+   * SHAPE (census): {banner, toolUseID}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * shape sparse/variable in census
    *
    * @generated from field: google.protobuf.Struct payload = 1;
@@ -2405,6 +2411,9 @@ export const StructuredOutputAttachmentSchema: GenMessage<StructuredOutputAttach
  */
 export type CompactFileReferenceAttachment = Message<"agentshim.data.v1.CompactFileReferenceAttachment"> & {
   /**
+   * SHAPE (census): {filename, displayPath}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2422,6 +2431,9 @@ export const CompactFileReferenceAttachmentSchema: GenMessage<CompactFileReferen
  */
 export type ContextTipAttachment = Message<"agentshim.data.v1.ContextTipAttachment"> & {
   /**
+   * SHAPE (census): {tip}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2439,6 +2451,9 @@ export const ContextTipAttachmentSchema: GenMessage<ContextTipAttachment> = /*@_
  */
 export type DateChangeAttachment = Message<"agentshim.data.v1.DateChangeAttachment"> & {
   /**
+   * SHAPE (census): {newDate}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2456,6 +2471,9 @@ export const DateChangeAttachmentSchema: GenMessage<DateChangeAttachment> = /*@_
  */
 export type NestedMemoryAttachment = Message<"agentshim.data.v1.NestedMemoryAttachment"> & {
   /**
+   * SHAPE (census): {path, content, displayPath}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2576,6 +2594,9 @@ export const FileAttachmentSchema: GenMessage<FileAttachment> = /*@__PURE__*/
  */
 export type UltrathinkEffortAttachment = Message<"agentshim.data.v1.UltrathinkEffortAttachment"> & {
   /**
+   * SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2593,6 +2614,9 @@ export const UltrathinkEffortAttachmentSchema: GenMessage<UltrathinkEffortAttach
  */
 export type DynamicSkillAttachment = Message<"agentshim.data.v1.DynamicSkillAttachment"> & {
   /**
+   * SHAPE (census): {skillDir, skillNames, displayPath}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2610,6 +2634,9 @@ export const DynamicSkillAttachmentSchema: GenMessage<DynamicSkillAttachment> = 
  */
 export type UltraEffortEnterAttachment = Message<"agentshim.data.v1.UltraEffortEnterAttachment"> & {
   /**
+   * SHAPE (census): {reminderType}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2627,6 +2654,9 @@ export const UltraEffortEnterAttachmentSchema: GenMessage<UltraEffortEnterAttach
  */
 export type UltraEffortExitAttachment = Message<"agentshim.data.v1.UltraEffortExitAttachment"> & {
   /**
+   * SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;
@@ -2644,6 +2674,9 @@ export const UltraEffortExitAttachmentSchema: GenMessage<UltraEffortExitAttachme
  */
 export type PlanModeExitAttachment = Message<"agentshim.data.v1.PlanModeExitAttachment"> & {
   /**
+   * SHAPE (census): {planFilePath, planExists}. Kept a Struct: retyping a live field is
+   * wire-breaking for persisted events, and nothing is lost as a Struct.
+   *
    * @generated from field: google.protobuf.Struct payload = 1;
    */
   payload?: JsonObject | undefined;

@@ -840,6 +840,9 @@ export type ApiAssistantMessage = Message<"agentshim.data.v1.ApiAssistantMessage
   stopSequence: string;
 
   /**
+   * SHAPE (census, 2 lines): {type, category, explanation}. Two observations
+   * is too thin to close the shape, so it stays genuinely schemaless.
+   *
    * @generated from field: google.protobuf.Struct stop_details = 6;
    */
   stopDetails?: JsonObject | undefined;
@@ -850,16 +853,23 @@ export type ApiAssistantMessage = Message<"agentshim.data.v1.ApiAssistantMessage
   usage?: ApiUsage | undefined;
 
   /**
+   * SHAPE (census, 1,813 lines): {cache_miss_reason} — a direct explanation for
+   * a slow turn.
+   *
    * @generated from field: google.protobuf.Struct diagnostics = 8;
    */
   diagnostics?: JsonObject | undefined;
 
   /**
+   * SHAPE (census, 23 lines): {applied_edits}. Thinly observed; schemaless.
+   *
    * @generated from field: google.protobuf.Struct context_management = 9;
    */
   contextManagement?: JsonObject | undefined;
 
   /**
+   * Shape never observed in the census; genuinely schemaless.
+   *
    * @generated from field: google.protobuf.Struct container = 10;
    */
   container?: JsonObject | undefined;
@@ -900,11 +910,19 @@ export type ApiUsage = Message<"agentshim.data.v1.ApiUsage"> & {
   cacheCreationInputTokens: bigint;
 
   /**
+   * SHAPE (census, 129,415 lines): {ephemeral_5m_input_tokens,
+   * ephemeral_1h_input_tokens}. Left as a Struct deliberately: retyping a live
+   * field is wire-breaking for every event already in the store, and no data is
+   * lost as a Struct. Documented so a consumer knows exactly what to read.
+   *
    * @generated from field: google.protobuf.Struct cache_creation = 5;
    */
   cacheCreation?: JsonObject | undefined;
 
   /**
+   * SHAPE (census, 103,749 lines): {web_search_requests, web_fetch_requests}.
+   * Same reasoning as cache_creation.
+   *
    * @generated from field: google.protobuf.Struct server_tool_use = 6;
    */
   serverToolUse?: JsonObject | undefined;
@@ -916,6 +934,9 @@ export type ApiUsage = Message<"agentshim.data.v1.ApiUsage"> & {
 
   /**
    * [corpus] observed on newer CC versions:
+   * SHAPE (census, 103,504 lines): per element {input_tokens, output_tokens,
+   * cache_read_input_tokens, cache_creation_input_tokens, cache_creation,
+   * type, model?}.
    *
    * per-model iteration breakdown
    *
