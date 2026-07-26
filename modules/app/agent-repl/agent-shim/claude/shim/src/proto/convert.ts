@@ -182,6 +182,10 @@ import {
   AskUserQuestionResultSchema,
   BashResultSchema,
   CallerSchema,
+  LocalAgentTaskSchema,
+  LocalBashTaskSchema,
+  RetrievalStatus,
+  TaskOutputResultSchema,
   CodeExecutionToolResultBlockSchema,
   ContainerUploadBlockSchema,
   ContentBlockSchema,
@@ -1654,6 +1658,35 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       command: strOf(o["command"]),
     }) };
   }
+  // TaskOutput MUST precede every `task`-keyed arm below: it also carries a
+  // `task` object, so without this it was classified as a TaskCreate result and
+  // silently MISTYPED (not merely left unclassified).
+  //
+  // The wire spelling is snake_case `retrieval_status`, which is unique to this
+  // result across the whole census. The arm ALSO requires its nested task to
+  // discriminate, because TaskOutputResult's oneof has only local_bash and
+  // local_agent: a task of any other type has nowhere to go and would be
+  // DROPPED by the typed arm, so an unresolved inner discriminator sends the
+  // whole object to `unclassified`, where it survives verbatim and is logged.
+  if (any("retrieval_status", "retrievalStatus")) {
+    const t = o["task"];
+    if (!isObject(t)) return null;
+    const retrievalStatus = retrievalStatusEnum(strOf(pick(o, "retrieval_status", "retrievalStatus")));
+    switch (strOf(pick(t, "task_type", "taskType"))) {
+      case "local_bash":
+        return { case: "taskOutput", value: create(TaskOutputResultSchema, {
+          retrievalStatus,
+          task: { case: "localBash", value: localBashTask(t) },
+        }) };
+      case "local_agent":
+        return { case: "taskOutput", value: create(TaskOutputResultSchema, {
+          retrievalStatus,
+          task: { case: "localAgent", value: localAgentTask(t) },
+        }) };
+      default:
+        return null;
+    }
+  }
   // TaskGet before TaskCreate: BOTH key on `task`, and only TaskGet's carries
   // the dependency lists. `task` is also NULLABLE here, and a null task is
   // still a TaskGet result rather than something unidentifiable.
@@ -1808,6 +1841,50 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
     }) };
   }
   return null;
+}
+
+/**
+ * TaskOutput's `local_bash` task record (corpus:
+ * tool-results/task_output.jsonl).
+ *
+ * `exitCode` is `number|null` on the wire — null while the task is still
+ * running — so the null is carried as `exit_code_set: false` rather than
+ * collapsing to a 0 that would read as a clean exit.
+ */
+function localBashTask(t: Record<string, unknown>) {
+  const exitCode = pick(t, "exit_code", "exitCode");
+  return create(LocalBashTaskSchema, {
+    taskId: strOf(pick(t, "task_id", "taskId")),
+    taskType: strOf(pick(t, "task_type", "taskType")),
+    status: rawTaskStatusEnum(strOf(pick(t, "status"))),
+    description: strOf(pick(t, "description")),
+    output: strOf(pick(t, "output")),
+    exitCode: numOf(exitCode),
+    exitCodeSet: exitCode !== undefined && exitCode !== null,
+  });
+}
+
+/**
+ * TaskOutput's `local_agent` task record (corpus:
+ * tool-results/task_output-local_agent.jsonl).
+ *
+ * `isRawTranscript` is ABSENT while the agent is still running, so its
+ * presence is tracked separately: an absent flag is "not known yet", which is
+ * not the same claim as "the output is not a raw transcript".
+ */
+function localAgentTask(t: Record<string, unknown>) {
+  const isRawTranscript = pick(t, "is_raw_transcript", "isRawTranscript");
+  return create(LocalAgentTaskSchema, {
+    taskId: strOf(pick(t, "task_id", "taskId")),
+    taskType: strOf(pick(t, "task_type", "taskType")),
+    status: rawTaskStatusEnum(strOf(pick(t, "status"))),
+    description: strOf(pick(t, "description")),
+    output: strOf(pick(t, "output")),
+    prompt: strOf(pick(t, "prompt")),
+    result: strOf(pick(t, "result")),
+    isRawTranscript: isRawTranscript === true,
+    isRawTranscriptSet: isRawTranscript !== undefined && isRawTranscript !== null,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2018,6 +2095,16 @@ function terminalStatusEnum(status: string): TerminalStatus {
     case "killed": return TerminalStatus.KILLED;
     case "stopped": return TerminalStatus.STOPPED;
     default: return TerminalStatus.UNSPECIFIED;
+  }
+}
+
+/** TaskOutput's `retrieval_status` vocabulary → RetrievalStatus. */
+function retrievalStatusEnum(s: string): RetrievalStatus {
+  switch (s) {
+    case "success": return RetrievalStatus.SUCCESS;
+    case "timeout": return RetrievalStatus.TIMEOUT;
+    case "not_ready": return RetrievalStatus.NOT_READY;
+    default: return RetrievalStatus.UNSPECIFIED;
   }
 }
 
